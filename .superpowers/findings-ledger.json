@@ -11237,7 +11237,7 @@
       "finder": "d11g",
       "fixedDate": "2026-09-28",
       "fix": {
-        "commit": "2c00e23f",
+        "commit": "1520bf579247a0a150210c789da14ba7a5cdb091",
         "test": "Server/service/moderation_timeout_seconds_test.go (TestTimeoutDurationFromSeconds_RejectsOverflow, TestTimeoutDurationFromSeconds_AcceptsTheWindow); Server/api/moderation_timeout_overflow_test.go (both entry points refused with 400)",
         "revertProof": "pass (stashing the fix reproduced the pre-fix acceptance: the direct route returned 201 and the act route 200 with duration_seconds=36028797018967568; with the fix both return 400)"
       },
@@ -11261,7 +11261,7 @@
       "finder": "d11g",
       "fixedDate": "2026-09-28",
       "fix": {
-        "commit": "2c00e23f",
+        "commit": "1520bf579247a0a150210c789da14ba7a5cdb091",
         "test": "Server/service/appeal_unban_broadcast_test.go (TestAppeal_OverturnBanRebroadcastsMemberUnban plus negative controls for an upheld ban, a superseded re-ban and a timeout overturn)",
         "revertProof": "pass (disabling the broadcastUnban call reproduced the miss: BroadcastMemberUnban calls = [], want [3]; restoring it is green)"
       },
