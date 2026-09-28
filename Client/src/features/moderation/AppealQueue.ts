@@ -22,7 +22,7 @@
  * appeal can still take it and the view is live.
  */
 
-import { ApiClientError, type ModerationAppealFilter } from "@lib/api";
+import { ApiClientError, serverErrorText, type ModerationAppealFilter } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { authStore } from "@stores/auth.store";
@@ -73,8 +73,9 @@ function errorText(w: AppealWrite, err: unknown): string {
   if (isStatus(err, 409, "REVERSAL_FAILED")) return t("appeal.reversalFailed");
   if (isStatus(err, 409))
     return t(w.kind === "assign" ? "appeal.conflict.assign" : "appeal.conflict.decide");
-  if (isStatus(err, 400) && (err as ApiClientError).message !== "") {
-    return t("appeal.invalid", { message: (err as ApiClientError).message });
+  if (isStatus(err, 400)) {
+    const message = err instanceof ApiClientError ? serverErrorText(err.code, err.message, "") : "";
+    if (message !== "") return t("appeal.invalid", { message });
   }
   // No answer, or an internal failure: the change may still have been recorded.
   return t("appeal.unknown");

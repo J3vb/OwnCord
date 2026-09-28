@@ -7,7 +7,7 @@ import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
-import { createApiClient, ApiClientError } from "@lib/api";
+import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
@@ -909,8 +909,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // credential read was still pending) must not paint an error over
         // the login that superseded it.
         if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-          const message =
-            err instanceof Error ? err.message : connectText("session.autoLoginFailed");
+          const message = errorText(err, connectText("session.autoLoginFailed"));
           log.warn("Auto-login failed", { host: profile.host, error: message });
           connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
         }

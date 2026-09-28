@@ -15,6 +15,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ChannelType } from "@lib/types";
 import { getKnownCategories, UNCATEGORIZED_VOICE_CATEGORY } from "@stores/channels.store";
@@ -196,7 +197,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
           });
         } catch (err) {
           errorEl.style.display = "block";
-          setText(errorEl, err instanceof Error ? err.message : shellText("channel.createFailed"));
+          setText(errorEl, errorText(err, shellText("channel.createFailed")));
           createBtn.removeAttribute("disabled");
           setText(createBtn, shellText("channel.create"));
         }

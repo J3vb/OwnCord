@@ -7,6 +7,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";
 
@@ -85,7 +86,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
           await onConfirm();
         } catch (err) {
           errorEl.style.display = "block";
-          setText(errorEl, err instanceof Error ? err.message : shellText("channel.deleteFailed"));
+          setText(errorEl, errorText(err, shellText("channel.deleteFailed")));
         } finally {
           // Re-arm the button whether the caller rejected or handled the
           // failure itself and resolved. A successful delete destroys the

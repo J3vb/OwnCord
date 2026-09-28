@@ -3726,7 +3726,7 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error FORBIDDEN to an in-app toast (OC-0064)", () => {
+  it("wires error FORBIDDEN to an in-app toast with its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "FORBIDDEN",
@@ -3734,7 +3734,7 @@ describe("WS Dispatcher", () => {
     });
     expectConsole("error", /\[dispatcher\] Server error/);
 
-    expect(mockShowToast).toHaveBeenCalledWith("Insufficient permissions", "error");
+    expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
 
@@ -3748,7 +3748,7 @@ describe("WS Dispatcher", () => {
 
   it("wires an unmapped error with an empty message to the generic fallback toast", () => {
     mockShowToast.mockClear();
-    mock.dispatch("error", { code: "FORBIDDEN", message: "" });
+    mock.dispatch("error", { code: "SOMETHING_ODD", message: "" });
     expectConsole("error", /\[dispatcher\] Server error/);
     expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
   });
@@ -5202,7 +5202,7 @@ describe("WS Dispatcher", () => {
       expect(mockRollbackPendingVideo).toHaveBeenCalledWith("vid-1");
       expect(mockDisableCamera).toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("no permission", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 
@@ -5227,7 +5227,7 @@ describe("WS Dispatcher", () => {
 
       expect(mockDisableCamera).not.toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("nope", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 

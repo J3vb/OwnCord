@@ -269,7 +269,7 @@ describe("filing an appeal", () => {
     primaryOf(pane).click();
     await flush();
     expect(errorOf(pane).textContent).toBe(
-      "Your appeal wasn't accepted: bad request: body is too long",
+      "Your appeal wasn't accepted: Bad request: body is too long",
     );
     expect(bodyOf(pane).getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(bodyOf(pane));

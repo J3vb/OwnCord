@@ -1366,14 +1366,64 @@ describe("errorText (B9-20, Q7)", () => {
     expect(errorText(err, "Failed to delete account.")).toBe("Failed to delete account.");
   });
 
-  it("shows the server's message only when its code has no mapping", () => {
+  it("shows the server's message only when its code has no mapping, capitalised", () => {
     const err = new ApiClientError(400, "INVALID_INPUT", "incorrect password");
-    expect(errorText(err, "Failed to delete account.")).toBe("incorrect password");
+    expect(errorText(err, "Failed to delete account.")).toBe("Incorrect password");
     expect(errorText(new ApiClientError(400, "INVALID_INPUT", ""), "Fallback")).toBe("Fallback");
   });
 
   it("keeps a non-server error's own message and falls back for a non-error", () => {
     expect(errorText(new Error("offline"), "Fallback")).toBe("offline");
     expect(errorText("nope", "Fallback")).toBe("Fallback");
+  });
+
+  it("maps auth, permission and capacity codes to plain capitalised copy", () => {
+    expect(
+      errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid or expired session"), "F"),
+    ).toBe("Your session has expired — sign in again.");
+    expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid credentials"), "F")).toBe(
+      "Incorrect username or password.",
+    );
+    expect(
+      errorText(
+        new ApiClientError(400, "INVALID_CREDENTIALS", "invalid invite or credentials"),
+        "F",
+      ),
+    ).toBe("Incorrect username or password.");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "missing CONNECT_VOICE permission"), "F"),
+    ).toBe("You don't have permission to do that.");
+    expect(errorText(new ApiClientError(404, "NOT_FOUND", "channel not found"), "F")).toBe(
+      "That item no longer exists.",
+    );
+    expect(
+      errorText(new ApiClientError(403, "BANNED", "your account has been suspended"), "F"),
+    ).toBe("Your account has been suspended.");
+    expect(
+      errorText(new ApiClientError(503, "SERVICE_UNAVAILABLE", "backend unavailable"), "F"),
+    ).toBe("The server is temporarily unavailable. Try again.");
+    expect(
+      errorText(
+        new ApiClientError(
+          507,
+          "STORAGE_QUOTA_EXCEEDED",
+          "upload rejected: your storage quota is full",
+        ),
+        "F",
+      ),
+    ).toBe("Your storage is full — delete files or ask a server admin.");
+    expect(
+      errorText(
+        new ApiClientError(400, "GIF_DISABLED", "GIF search is not configured on this server"),
+        "F",
+      ),
+    ).toBe("GIF search is not configured on this server.");
+  });
+
+  it("keeps the server's own message for an unmapped code, capitalising it", () => {
+    expect(errorText(new ApiClientError(400, "INVALID_INPUT", "name already exists"), "F")).toBe(
+      "Name already exists",
+    );
+    expect(errorText(new ApiClientError(400, "INVALID_INPUT", ""), "Fallback")).toBe("Fallback");
   });
 });

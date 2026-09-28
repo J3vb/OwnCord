@@ -4,6 +4,7 @@
 // owner-issued recovery credential; the server tells them apart by shape.
 
 import { createElement, setText, appendChildren, focusIsOurs } from "@lib/dom";
+import { errorText } from "@lib/api";
 import { connectText } from "../../i18n/connect";
 import { recoverText } from "../../i18n/recover";
 
@@ -167,7 +168,7 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
       ctx.usernameInput.value = user;
       ctx.onRecovered();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : recoverText("recover.failed");
+      const message = errorText(err, recoverText("recover.failed"));
       setText(error, message.length > 200 ? message.slice(0, 200) + "..." : message);
     } finally {
       submit.disabled = false;

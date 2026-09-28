@@ -110,7 +110,7 @@ test.describe("Authentication Flow", () => {
     // appears with the server's message, and the app layout is NOT reached.
     const errorBanner = nativePage.locator(".error-banner.visible");
     await expect(errorBanner).toBeVisible({ timeout: 10_000 });
-    await expect(errorBanner).toContainText(/invalid/i);
+    await expect(errorBanner).toContainText(/incorrect username or password/i);
     await expect(nativePage.locator("[data-testid='app-layout']")).not.toBeVisible();
   });
 

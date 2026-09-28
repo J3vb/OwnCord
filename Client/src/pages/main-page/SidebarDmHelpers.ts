@@ -3,7 +3,7 @@
  * embedded DM section (channels mode) and the full DM sidebar (dms mode).
  */
 
-import type { ApiClient } from "@lib/api";
+import { type ApiClient, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import type { DmConversation } from "@components/DmSidebar";
 import { setSidebarMode, setActiveDmUser } from "@stores/ui.store";
@@ -113,7 +113,7 @@ export async function handleCreateDm(
     selectDmConversation(dmChannel, deps);
     onReady?.(dmChannel);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : connectText("app.dmCreateFailed");
+    const msg = errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
   }
 }
@@ -134,7 +134,7 @@ export async function handleCreateGroupDm(
     addDmChannel(dmChannel);
     selectDmConversation(dmChannel, deps);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : connectText("app.dmCreateGroupFailed");
+    const msg = errorText(err, connectText("app.dmCreateGroupFailed"));
     deps.getToast()?.show(msg, "error");
   }
 }

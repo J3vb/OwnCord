@@ -74,19 +74,73 @@ export class ApiClientError extends Error {
 }
 
 /**
- * The text for a server error: catalog text when its code has a mapping, the
- * server's message only when it has none, and `fallback` for an empty message.
- * An internal failure maps to the caller's own `fallback`.
+ * The user-facing copy for a server error code that has one, or null when the
+ * code has none (the caller then shows the server's own message). Every string
+ * is plain, capitalised prose — never the raw lower-case server text.
+ *
+ * `message` disambiguates the one code the server overloads: UNAUTHORIZED is
+ * both "your session expired" and a refused sign-in ("invalid credentials"),
+ * and only the message tells them apart.
  */
-export function serverErrorText(code: string, message: string, fallback: string): string {
+export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
       return connectText("error.rateLimited");
+    case "UNAUTHORIZED":
+      return message === "invalid credentials" || message === "invalid invite or credentials"
+        ? connectText("error.invalidCredentials")
+        : connectText("error.unauthorized");
+    case "INVALID_CREDENTIALS":
+      return connectText("error.invalidCredentials");
+    case "FORBIDDEN":
+      return connectText("error.forbidden");
+    case "NOT_FOUND":
+      return connectText("error.notFound");
+    case "BANNED":
+      return connectText("error.banned");
+    case "SERVICE_UNAVAILABLE":
+    case "BAD_GATEWAY":
+      return connectText("error.unavailable");
+    case "STORAGE_QUOTA_EXCEEDED":
+      return connectText("error.storageQuota");
+    case "STORAGE_LOW_DISK":
+      return connectText("error.storageLowDisk");
+    case "STORAGE_ERROR":
+      return connectText("error.storageError");
+    case "GIF_DISABLED":
+      return connectText("error.gifDisabled");
+    case "PUSH_DISABLED":
+      return connectText("error.pushDisabled");
+    default:
+      return null;
+  }
+}
+
+/**
+ * Capitalise a server message's first letter, so an unmapped code's raw
+ * lower-case text ("name already exists") still reads as a sentence. The rest
+ * of the string is left alone — it may be a proper noun or an already-cased
+ * developer message.
+ */
+function capitalise(message: string): string {
+  return message.length === 0 ? message : message[0]!.toUpperCase() + message.slice(1);
+}
+
+/**
+ * The text for a server error: catalog copy when its code has a mapping, the
+ * server's message (capitalised) only when it has none, and `fallback` for an
+ * empty message. An internal failure maps to the caller's own `fallback`.
+ */
+export function serverErrorText(code: string, message: string, fallback: string): string {
+  switch (code) {
     case "INTERNAL":
     case "INTERNAL_ERROR":
       return fallback;
-    default:
-      return message || fallback;
+    default: {
+      const copy = serverErrorCopy(code, message);
+      if (copy !== null) return copy;
+      return message ? capitalise(message) : fallback;
+    }
   }
 }
 

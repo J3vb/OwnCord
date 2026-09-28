@@ -13,7 +13,13 @@
  *   section says so instead of offering a path that does not exist.
  */
 
-import { ApiClientError, type ApiClient, type MyAppeal, type OwnModerationAction } from "@lib/api";
+import {
+  ApiClientError,
+  serverErrorText,
+  type ApiClient,
+  type MyAppeal,
+  type OwnModerationAction,
+} from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { appealsText as at } from "../../i18n/appeals";
 import { formatWhen, safetyText as t } from "../../i18n/safety";
@@ -404,6 +410,9 @@ function fileError(err: unknown): string {
   if (err.code === "ALREADY_APPEALED") return at("form.alreadyAppealed");
   if (err.status === 429) return at("form.rateLimited");
   if (err.status === 404 || err.status === 403) return at("form.gone");
-  if (err.status === 400) return at("form.invalid", { message: err.message });
+  if (err.status === 400) {
+    const text = serverErrorText(err.code, err.message, "");
+    if (text !== "") return at("form.invalid", { message: text });
+  }
   return at("form.failed");
 }
