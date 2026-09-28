@@ -23,7 +23,7 @@ import (
 // resumeHint carries the client-supplied reconnect hints from the auth frame.
 // Both fields are UNTRUSTED attacker-controlled input: LastSeq only ever
 // narrows what replay will send, and ChannelID is checked against the allowed
-// set before it is honoured (see handleReconnect).
+// set before it is honoured (see handleReconnect and handleFreshConnect).
 type resumeHint struct {
 	LastSeq   uint64
 	ChannelID int64
