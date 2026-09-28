@@ -275,7 +275,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"plugin: some plugin directories failed to scan and were skipped":                                              "plugin_directories_scan_failed",
 	"port in use, retrying...":                                                                                     "port_in_use_retrying",
 	"pprof listener error":                                                                                         "pprof_listener_error",
-	"pre-migration backup written before applying migrations":                                                      "pre_migration_backup_written",
 	"pre-restore WAL checkpoint failed":                                                                            "pre_restore_wal_checkpoint_failed",
 	"pre-restore backup failed — aborting restore":                                                                 "restore_safety_backup_failed",
 	"ratelimit: failed to clean up expired persisted lockouts":                                                     "ratelimit_clean_up_expired_lockouts_failed",

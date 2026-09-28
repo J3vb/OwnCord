@@ -49,7 +49,7 @@ const I={
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
-  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditShowSignins:false,auditCache:[],settingsChanged:false,backupRunning:false,updateApplying:false,
+  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditShowSignins:false,auditCache:[],settingsChanged:false,backupRunning:false,archiveRunning:false,updateApplying:false,
   modalDirty:false,
   supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
@@ -143,7 +143,7 @@ const ACTION_LABEL={
   permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
-  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',
+  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_archive:'downloaded the full archive',
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
   api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
   plugin_install:'installed a plugin',plugin_uninstall:'uninstalled a plugin',

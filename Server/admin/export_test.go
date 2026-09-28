@@ -48,6 +48,15 @@ func SetSetupLimiterReapTiming(interval time.Duration) (restore func()) {
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }
 
+// SetArchiveBeforeSnapshotHook installs h to run synchronously between the
+// archive's first plan and its database snapshot, the window an upload that
+// the snapshot records can land in.
+func SetArchiveBeforeSnapshotHook(h func()) (restore func()) {
+	prev := archiveBeforeSnapshotHook
+	archiveBeforeSnapshotHook = h
+	return func() { archiveBeforeSnapshotHook = prev }
+}
+
 // SetPatchChannelPostCommitHook installs h to run synchronously right after
 // handlePatchChannel's AdminUpdateChannel commit, before the post-commit
 // re-read and hub fan-out — the only way to deterministically land a caller

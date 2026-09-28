@@ -290,8 +290,19 @@ func TestMaintainBackups_RemovesStaleBackupTemps(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	staleArchive := filepath.Join(dir, "owncord-archive-123")
+	freshArchive := filepath.Join(dir, "owncord-archive-456")
+	for _, d := range []string{staleArchive, freshArchive} {
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "snapshot.db"), []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	backdate(t, stale, 25*time.Hour)
 	backdate(t, staleJournal, 25*time.Hour)
+	backdate(t, staleArchive, 25*time.Hour)
 
 	if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database)); err != nil {
 		t.Fatalf("MaintainBackups: %v", err)
@@ -304,5 +315,11 @@ func TestMaintainBackups_RemovesStaleBackupTemps(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Fatalf("the tick removed a backup temp that may still be written: %v", err)
+	}
+	if _, err := os.Stat(staleArchive); !os.IsNotExist(err) {
+		t.Fatalf("a stale archive work dir survived the tick (stat err=%v)", err)
+	}
+	if _, err := os.Stat(freshArchive); err != nil {
+		t.Fatalf("the tick removed an archive work dir that may still be building: %v", err)
 	}
 }

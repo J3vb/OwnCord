@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
 )
 
@@ -88,6 +89,7 @@ func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv
 	}
 
 	srv.RegisterOnShutdown(api.CancelInFlightTransfers(srv))
+	srv.RegisterOnShutdown(admin.EndArchives(srv))
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}

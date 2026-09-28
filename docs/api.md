@@ -36,12 +36,13 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 167 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 168 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
+| GET     | `/admin/api/archive`                                                 |
 | GET     | `/admin/api/attention`                                               |
 | GET     | `/admin/api/audit-log`                                               |
 | POST    | `/admin/api/backup`                                                  |
@@ -3953,6 +3954,23 @@ itself.
   "backup": "chatserver_20260804_120000.db"
 }
 ```
+
+---
+
+### GET /admin/api/archive
+
+Download the full archive: a `VACUUM INTO` snapshot of the database, the data
+directory and `config.yaml` in one zip. What it carries and leaves out is in
+[deployment.md](deployment.md#the-full-archive).
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+`application/zip`, sent as `attachment; filename="owncord-archive.zip"`. The
+zip is built before the status is written, so a failed build is a JSON error:
+`507 STORAGE_LOW_DISK` when building it would leave the backup directory's
+volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
 
 ---
 
