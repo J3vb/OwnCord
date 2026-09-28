@@ -4,7 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { membersStore } from "@stores/members.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { EVERYONE_TOKEN, HERE_TOKEN } from "@lib/mentions";
@@ -20,9 +20,12 @@ export const MAX_MENTION_SUGGESTIONS = 10;
 export interface MentionSuggestion {
   /** Token inserted after the "@", e.g. "alice" or "everyone". */
   readonly token: string;
-  /** Row label. Equal to `token` for users. */
+  /** Row label: the member's display name when set, else the username. */
   readonly label: string;
-  /** Secondary line (role for users, meaning for @everyone/@here). */
+  /**
+   * Secondary line: the role for users (prefixed by @username when the label
+   * is a display name), the meaning for @everyone/@here.
+   */
   readonly detail: string;
   readonly kind: "user" | "broadcast";
   /** User id, or null for @everyone/@here. */
@@ -65,16 +68,25 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
     // etc. truncate the token on insert) -- picking one would insert a dead
     // token that resolves to no mention and notifies nobody.
     if (!/^[\p{L}\p{N}_.-]{1,64}$/u.test(member.username)) continue;
-    const lower = member.username.toLowerCase();
-    if (q !== "" && !lower.includes(q)) continue;
+    // Match on the display name too, so typing "@Ali" finds "Alice". The
+    // token inserted is still the username -- it is the unique handle the
+    // mention grammar resolves against.
+    const lowerUsername = member.username.toLowerCase();
+    const display = member.displayName;
+    const lowerDisplay = typeof display === "string" ? display.toLowerCase() : "";
+    if (q !== "" && !lowerUsername.includes(q) && !lowerDisplay.includes(q)) continue;
+    const label = memberDisplayName(member);
     const entry: MentionSuggestion = {
       token: member.username,
-      label: member.username,
-      detail: member.role,
+      label,
+      detail:
+        label === member.username
+          ? member.role
+          : messagingText("mention.userDetail", { username: member.username, role: member.role }),
       kind: "user",
       userId: member.id,
     };
-    if (q === "" || lower.startsWith(q)) {
+    if (q === "" || lowerUsername.startsWith(q) || lowerDisplay.startsWith(q)) {
       prefix.push(entry);
     } else {
       substring.push(entry);
@@ -108,10 +120,13 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
   return [...broadcasts, ...prefix, ...substring].slice(0, MAX_MENTION_SUGGESTIONS);
 }
 
-/** One mention row: `@label` plus a role / broadcast-meaning detail line. */
+/**
+ * One mention row: `@token`, or a display name whose @username leads the
+ * detail line, plus the role / broadcast-meaning detail.
+ */
 function renderMentionRow(s: MentionSuggestion): HTMLElement[] {
   const name = createElement("span", { class: "ma-name" });
-  setText(name, `@${s.label}`);
+  setText(name, s.label === s.token ? `@${s.token}` : s.label);
   const detail = createElement("span", { class: "ma-detail" });
   setText(detail, s.detail);
   return [name, detail];

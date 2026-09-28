@@ -440,6 +440,9 @@
   color: var(--text-normal);
   font-weight: 600;
 }
+.search-result-handle {
+  color: var(--text-muted);
+}
 .search-result-time {
   color: var(--text-micro);
   margin-left: auto;

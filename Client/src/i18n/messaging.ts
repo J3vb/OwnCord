@@ -66,6 +66,7 @@ export const messagingText = defineCatalog("messaging", {
 
   "mention.everyone": "Notify everyone in this channel",
   "mention.here": "Notify everyone who is online",
+  "mention.userDetail": "@{username} · {role}",
 
   "search.placeholder": "Search messages...",
   "search.label": "Search messages",
@@ -73,6 +74,7 @@ export const messagingText = defineCatalog("messaging", {
   "search.searching": "Searching...",
   "search.empty": "No results found",
   "search.failed": "Search failed",
+  "search.authorHandle": "@{username}",
 
   "pins.jump": "Jump to message",
   "pins.unpin": "Unpin message",
