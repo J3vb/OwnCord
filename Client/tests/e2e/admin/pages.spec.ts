@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { seededTest as test, expect, signInAsOwner } from "./fixtures";
 import { TEST_PASSWORD } from "../support/server";
+import { Q1, findUnnamedControls, textContrast } from "../support/b9-accessibility";
 
 // ARCH-10 stage 2: one real-server journey per regrouped admin page. The lone
 // journey in admin-panel.spec.ts covers setup, the dashboard, channel CRUD,
@@ -111,6 +112,17 @@ test("Retention: a server-wide window is previewed and applied", async ({
   await signInAsOwner(page, seededAdminServer);
   await navigate(page, "Message retention");
 
+  // The policy reads as a sentence; the number waits behind Change….
+  await expect(page.locator(".ret-policy-big")).toHaveText("Messages are kept forever");
+  await expect(page.locator("#retentionDays")).toBeHidden();
+  const change = page.getByRole("button", { name: "Change…" });
+  await change.click();
+  await expect(change).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator("#retentionDays")).toBeFocused();
+  await expect(page.locator(".ret-sweep")).toContainText(
+    "Nothing will be deleted on the next sweep",
+  );
+
   await page.locator("#retentionDays").fill("30");
   await page.getByRole("button", { name: "Preview change" }).click();
   await expect(
@@ -118,8 +130,42 @@ test("Retention: a server-wide window is previewed and applied", async ({
   ).toBeVisible();
   await page.locator(".modal-footer .btn-danger", { hasText: "Apply window" }).click();
 
+  await expect(page.locator(".ret-policy-big")).toHaveText("Messages are deleted after 30 days");
   await expect(page.locator("#retentionDays")).toHaveValue("30");
-  await expect(page.locator(".section-card", { hasText: "Currently:" })).toContainText("30 days");
+
+  // Only channels with their own rule are listed; none yet. The next-sweep
+  // count lives with the field behind Change….
+  await expect(page.locator(".empty-line")).toContainText("No channel has its own rule");
+  await expect(page.locator(".empty-line")).toContainText("open Show all");
+  await expect(page.locator(".ret-sweep")).toBeHidden();
+  expect(await findUnnamedControls(page.locator("#content"))).toEqual([]);
+  const { ratio } = await textContrast(page.locator(".ret-policy-sub"));
+  expect(ratio).toBeGreaterThanOrEqual(Q1.text);
+});
+
+test("Retention: a channel exception is added and listed on its own", async ({
+  page,
+  seededAdminServer,
+}) => {
+  await signInAsOwner(page, seededAdminServer);
+  await navigate(page, "Message retention");
+
+  await page.locator(".ret-all > summary").click();
+  const first = page.locator(".ret-all .ret-row").first();
+  const channel = await first.locator("strong").textContent();
+  await first.getByRole("button", { name: "Set exception" }).click();
+  await page.locator("#chRetDays").fill("7");
+  await page.getByRole("button", { name: "Preview override" }).click();
+  await expect(
+    page.locator("#modalInner h3", { hasText: "Confirm retention change" }),
+  ).toBeVisible();
+  await page.locator(".modal-footer .btn-danger", { hasText: "Apply window" }).click();
+
+  const row = page.locator("section[aria-labelledby='ret-exc-h'] > .ret-row");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText(channel ?? "");
+  await expect(row).toContainText("7 days");
+  await expect(page.locator(".ret-policy-sub")).toContainText("has its own rule");
 });
 
 test("Backups: a manual backup appears in the history", async ({ page, seededAdminServer }) => {

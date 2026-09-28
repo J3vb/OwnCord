@@ -97,7 +97,7 @@ function retentionLabel(days){return days>0?days+' day'+(days===1?'':'s'):'Kept 
 async function renderRetention(){
   let policy,preview;
   try{policy=await api('GET','/retention');preview=await api('GET','/retention/preview')}
-  catch(e){return'<div class="page-title">Message Retention</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  catch(e){return'<div class="page-title">Message retention</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   /* The channel list is MANAGE_CHANNELS while this page is MANAGE_SERVER, so
      a principal holding only the latter cannot read it. Degrade to the
      channels the policy and the preview already name rather than failing the
@@ -124,36 +124,50 @@ async function renderRetention(){
   });
   rows.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
 
-  let html='<div class="page-title">Message Retention</div><div class="page-desc">Messages older than the window are deleted permanently on every maintenance sweep. Pinned messages are exempt, and direct messages are never in scope.</div>';
+  const plural=(n,w)=>n.toLocaleString()+' '+w+(n===1?'':'s');
+  const excepted=rows.filter(r=>Object.prototype.hasOwnProperty.call(overrides,r.id));
+  const following=rows.length-excepted.length;
+  const own=plural(excepted.length,'channel')+(excepted.length===1?' has its own rule':' have their own rules');
+  const shown=channels?'Show all '+plural(rows.length,'channel'):'Show listed channels';
+  const sweep=!preview||!preview.length||totalDue===0
+    ?'Nothing will be deleted on the next sweep.'
+    :'The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> '+(totalDue===1?'message':'messages')+' across '+plural(preview.length,'channel')+'. This cannot be undone.';
+  const follow=!channels?(excepted.length?own+'; every other channel follows this.':'Every channel follows this.')
+    :!rows.length?'':excepted.length?plural(following,'channel')+(following===1?' follows':' follow')+' this; '+own+'.':(rows.length===1?'The one channel follows this.':'All '+rows.length+' channels follow this.');
 
-  html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="retentionDays">Keep messages for</label><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
-  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" data-action="openApplyRetention">Preview change</button></div></div>';
-  html+='<div style="color:var(--text-muted);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
-  html+='</div></div>';
+  let html='<div class="page-title">Message retention</div><div class="page-desc">How long messages are kept before they are deleted permanently. Pinned messages and direct messages are never deleted.</div>';
 
-  html+='<div class="section-card"><div class="section-card-header"><h3>Effect preview</h3><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Refresh</button></div><div class="section-card-body">';
-  if(!preview||!preview.length)html+='<div style="color:var(--text-muted);font-size:13px">No channel has a retention window, so the next sweep removes nothing.</div>';
-  else if(totalDue===0)html+='<div style="color:var(--text-muted);font-size:13px">A window applies to '+preview.length+' channel'+(preview.length===1?'':'s')+', but nothing is past it yet — the next sweep removes nothing.</div>';
-  else html+='<div style="color:var(--text-warning);font-size:13px">The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> message'+(totalDue===1?'':'s')+' across '+preview.length+' channel'+(preview.length===1?'':'s')+'. This cannot be undone.</div>';
-  html+='</div></div>';
+  /* The policy in words first; the number field waits behind Change…, with
+     the preview-then-confirm flow unchanged. */
+  html+='<section class="section-card" aria-labelledby="ret-policy-h"><div class="section-card-header"><h3 id="ret-policy-h">Server-wide policy</h3></div><div class="section-card-body">';
+  html+='<div class="ret-policy">'+statusIcon('ok')+'<div class="ret-policy-text"><div class="ret-policy-big">'+(serverDays>0?'Messages are deleted after '+esc(retentionLabel(serverDays)):'Messages are kept forever')+'</div>'
+    +(follow?'<div class="ret-policy-sub">'+follow+'</div>':'')+'</div>'
+    +'<button class="btn btn-outline" id="retentionChangeBtn" aria-expanded="false" aria-controls="retentionEdit" data-action="toggleRetentionEdit">Change…</button></div>';
+  html+='<div id="retentionEdit" class="ret-edit" hidden><div class="setting-row"><div class="setting-info"><label class="setting-name" for="retentionDays">Keep messages for (days)</label><div class="setting-desc">0 keeps everything forever, which is the default; otherwise between 1 and 3650 days. The next step shows what would be deleted before anything changes.</div></div>'
+    +'<div class="setting-ctrl ret-edit-ctrl"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" value="'+esc(serverDays)+'"><button class="btn btn-accent" data-action="openApplyRetention">Preview change</button></div></div>'
+    +'<p class="ret-sweep">'+(totalDue>0?statusIcon('warning'):'')+'<span>'+sweep+'</span></p></div>';
+  html+='</div></section>';
 
-  html+='<div class="section-card"><div class="section-card-header"><h3>Channels</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Window</th><th>Source</th><th>Next sweep removes</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!rows.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
-  rows.forEach(r=>{
-    const w=windows[r.id];
-    const has=Object.prototype.hasOwnProperty.call(overrides,r.id);
-    const days=has?overrides[r.id]:serverDays;
-    const due=w?(w.would_delete||0):0;
-    html+='<tr><td><strong>'+esc(r.name)+'</strong></td>';
-    html+='<td>'+esc(retentionLabel(days))+'</td>';
-    html+='<td>'+(has?'<span class="badge badge-yellow">channel</span>':'<span class="badge badge-muted">server</span>')+'</td>';
-    html+='<td'+(due?' style="color:var(--text-danger)"':' style="color:var(--text-muted)"')+'>'+due.toLocaleString()+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">'+(has?'Edit override':'Override')+'</button>';
-    if(has)html+='<button class="btn btn-ghost" data-action="clearChannelRetention" data-args="'+actArgs(r.id)+'">Use server policy</button>';
-    html+='</div></td></tr>';
+  /* Only channels with their own window are listed; the full list waits
+     behind a disclosure. */
+  html+='<section class="section-card" aria-labelledby="ret-exc-h"><div class="section-card-header"><h3 id="ret-exc-h">Channel exceptions</h3></div>';
+  if(!excepted.length)html+='<div class="empty-line">'+I.channels+'<span>No channel has its own rule.'+(rows.length?' To keep a channel\'s messages for a different time, open '+shown+' below.':'')+'</span></div>';
+  excepted.forEach(r=>{
+    html+='<div class="ret-row" data-channel="'+esc(r.id)+'">'+I.channels+'<strong>'+esc(r.name)+'</strong><span class="muted">'+esc(retentionLabel(overrides[r.id]))+'</span>'
+      +'<div class="act-group"><button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">Edit</button><button class="btn btn-ghost" data-action="clearChannelRetention" data-args="'+actArgs(r.id)+'">Use server policy</button></div></div>';
   });
-  html+='</tbody></table></div></div>';
+  if(rows.length){
+    let all='';
+    rows.forEach(r=>{
+      const has=Object.prototype.hasOwnProperty.call(overrides,r.id);
+      all+='<div class="ret-row" data-channel="'+esc(r.id)+'">'+I.channels+'<strong>'+esc(r.name)+'</strong>'
+        +(has?'<span class="badge badge-yellow">channel</span>':'<span class="badge badge-muted">server</span>')
+        +'<span class="muted">'+esc(retentionLabel(has?overrides[r.id]:serverDays))+'</span>'
+        +'<button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">'+(has?'Edit exception':'Set exception')+'</button></div>';
+    });
+    html+=disclosure(shown,all,false,'ret-all');
+  }
+  html+='</section>';
   return html;
 }
 
@@ -246,6 +260,15 @@ async function saveChannelRetention(id){
 
 async function clearChannelRetention(id){
   await previewRetentionChange({scope:'channel',channel_id:id,days:null});
+}
+
+/* Change… reveals the server-wide field in place and moves focus to it. */
+function toggleRetentionEdit(){
+  const panel=document.getElementById('retentionEdit'),btn=document.getElementById('retentionChangeBtn');
+  if(!panel||!btn)return;
+  const open=panel.hidden;
+  panel.hidden=!open;btn.setAttribute('aria-expanded',String(open));
+  if(open){const input=document.getElementById('retentionDays');if(input)input.focus()}
 }
 
 /* ═══ Restart wait ═══ */
@@ -457,7 +480,7 @@ async function confirmApplyUpdate(){
   }
 }
 
-Object.assign(ACTIONS,{applyRetention,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
+Object.assign(ACTIONS,{applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
   confirmDeleteBackup,confirmRestore,createBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,
