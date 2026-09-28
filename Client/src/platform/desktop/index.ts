@@ -21,6 +21,7 @@ import { nativeVoice } from "./nativeVoice";
 import { notifier } from "./notifications";
 import { pendingMessages } from "./pendingMessages";
 import { pushToTalk } from "./pushToTalk";
+import { globalShortcuts } from "./globalShortcuts";
 import { settings } from "./settings";
 import { socket } from "./socket";
 import { trayStatus } from "./trayStatus";
@@ -46,6 +47,7 @@ export const desktop: Platform = {
   notifier,
   pendingMessages,
   pushToTalk,
+  globalShortcuts,
   settings,
   socket,
   trayStatus,

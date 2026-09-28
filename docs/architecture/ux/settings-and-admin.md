@@ -231,8 +231,12 @@ The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
 **Show/Hide** toggles the main window, a **Status** submenu
 (Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
 the TS side applies through the same presence path as the user-bar picker
-(`lib/userStatus.ts` / `components/StatusPicker.ts`), and **Quit** exits the
-app.
+(`lib/userStatus.ts` / `components/StatusPicker.ts`), **Mute / Unmute** and
+**Deafen / Undeafen** emit the `voice-shortcut` event that the global
+Ctrl+Shift+M / Ctrl+Shift+D poller (`src-tauri/src/shortcuts.rs`) also emits,
+toggling the same controls as the in-app shortcuts (a no-op outside a voice
+channel), **Open Log Folder** opens the client log directory, and **Quit** exits
+the app.
 
 ---
 

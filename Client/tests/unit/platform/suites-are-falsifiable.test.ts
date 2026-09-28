@@ -62,6 +62,7 @@ import type { DevTools } from "../../../src/platform/contracts/devTools";
 import type { Notifier } from "../../../src/platform/contracts/notifications";
 import type { UrlOpener } from "../../../src/platform/contracts/opener";
 import type { TrayStatus } from "../../../src/platform/contracts/trayStatus";
+import type { GlobalShortcuts } from "../../../src/platform/contracts/globalShortcuts";
 import type { Autostart } from "../../../src/platform/contracts/updater";
 import type { WindowControl } from "../../../src/platform/contracts/window";
 import { describeAppMetadataSuite } from "./appMetadata.suite";
@@ -81,6 +82,8 @@ import type { NativeControl as NativeVoiceNativeControl } from "./nativeVoice.su
 import type { NativeVoice } from "../../../src/platform/contracts/nativeVoice";
 import { describeTrayStatusSuite } from "./trayStatus.suite";
 import type { NativeControl as TrayStatusNativeControl } from "./trayStatus.suite";
+import { describeGlobalShortcutsSuite } from "./globalShortcuts.suite";
+import type { NativeControl as GlobalShortcutsNativeControl } from "./globalShortcuts.suite";
 import { describeWindowControlSuite } from "./window.suite";
 import type { NativeControl as WindowControlNativeControl } from "./window.suite";
 
@@ -381,6 +384,20 @@ describeTrayStatusSuite(async () => {
   const subject = { onStatusChange: () => () => undefined } as unknown as TrayStatus;
   const native: TrayStatusNativeControl = {
     emits: async () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeGlobalShortcutsSuite(async () => {
+  const subject = {
+    start: async () => undefined,
+    supported: async () => true,
+    onShortcut: () => () => undefined,
+  } as unknown as GlobalShortcuts;
+  const native: GlobalShortcutsNativeControl = {
+    emits: async () => undefined,
+    commands: () => [],
+    supported: true,
   };
   return { subject, native };
 }, failEveryTest);

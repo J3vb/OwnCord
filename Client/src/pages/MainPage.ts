@@ -953,6 +953,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       }),
     );
 
+    // U6: Ctrl+Shift+M/Ctrl+Shift+D and the tray's Mute/Deafen items work
+    // while the app is unfocused. The native host polls the keys (Windows and
+    // X11 Linux) and the tray emits the same event; both run the same toggles
+    // as the in-app shortcuts, and like them no-op outside a voice channel.
+    unsubscribers.push(
+      desktop.globalShortcuts.onShortcut((action) => {
+        if (voiceStore.getState().currentChannelId === null) return;
+        if (action === "mute") voiceKeybindActions.onMuteToggle();
+        else voiceKeybindActions.onDeafenToggle();
+      }),
+    );
+    void desktop.globalShortcuts.start().catch(() => {
+      // Not a Tauri host, or the command was refused: the tray and the in-app
+      // shortcuts still work; the global key path simply is not live.
+    });
+
     // Toast container
     toast = createToastContainer();
     toast.mount(root);

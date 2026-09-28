@@ -172,6 +172,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
           return [];
         case "plugin:fs|exists":
         case "ptt_polling_supported":
+        case "voice_shortcuts_supported":
         case "plugin:autostart|is_enabled":
           return false;
         case "plugin:app|version":
@@ -185,6 +186,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "stop_livekit_proxy":
         case "ptt_set_key":
         case "ptt_stop":
+        case "voice_shortcuts_start":
         case "frontend_ready":
         case "plugin:window|set_title":
         case "plugin:window|is_maximized":

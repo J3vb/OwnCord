@@ -174,6 +174,27 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     ),
   );
 
+  // U6: the voice shortcuts also work while the app is unfocused — through the
+  // global key path on Windows/X11, and always through the tray's Mute/Deafen
+  // items. Where global key state is unavailable (macOS, or any Wayland session), say
+  // so instead of promising a shortcut that cannot fire.
+  const globalHint = createElement(
+    "div",
+    {
+      style: "font-size: 11px; color: var(--text-micro); margin: 2px 0 0 0; line-height: 1.4;",
+      "data-testid": "keybinds-global-hint",
+    },
+    t("keybinds.globalHint"),
+  );
+  section.appendChild(globalHint);
+  void desktop.globalShortcuts
+    .supported()
+    .catch(() => false)
+    .then((supported) => {
+      if (signal.aborted || supported) return;
+      setText(globalHint, t("keybinds.globalHintUnsupported"));
+    });
+
   // ── Messages section ───────────────────────────────────────
   section.appendChild(createElement("div", { class: "settings-separator" }));
 

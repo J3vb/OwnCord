@@ -26,6 +26,7 @@ pub mod native_voice;
 mod proxy_common;
 mod ptt;
 mod secret_store;
+mod shortcuts;
 mod text;
 mod tofu;
 mod tray;
@@ -179,6 +180,8 @@ pub fn run() {
             ptt::ptt_set_key,
             ptt::ptt_polling_supported,
             ptt::ptt_listen_for_key,
+            shortcuts::voice_shortcuts_start,
+            shortcuts::voice_shortcuts_supported,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,
             http_proxy::start_http_proxy,
@@ -254,6 +257,8 @@ pub fn run() {
                     // This ensures the AppHandle held inside the thread is released
                     // cleanly and the thread does not call app.emit on a dead runtime.
                     ptt::ptt_stop_internal();
+                    // Same for the global voice-shortcut poller.
+                    shortcuts::voice_shortcuts_stop_internal();
                 }
             });
         }
