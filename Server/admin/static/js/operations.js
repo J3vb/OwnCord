@@ -174,7 +174,7 @@ async function renderDashboard(){
     try{const a=renderAttention(await api('GET','/attention'));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
   }
-  if(u&&u.update_available)html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(u.latest)+' is available.</strong> <span class="muted">You are running '+esc(String(u.current||'').replace(/^v(?=\D)/,''))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button></div>';
+  if(u&&u.update_available)html+='<div class="update-strip">'+I.updates+'<span><strong>'+esc(verLabel(u.latest))+' is available.</strong> <span class="muted">You are running '+esc(verLabel(u.current))+'.</span></span><button class="btn btn-outline" data-action="navigateTo" data-args="'+actArgs('updates')+'">View update</button></div>';
   const stat=(label,value)=>'<div class="stat-card"><div class="stat-card-label">'+label+'</div><div class="stat-card-value">'+value+'</div></div>';
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;
@@ -513,10 +513,15 @@ async function renderTokens(){
   let tokens;
   try{tokens=await api('GET','/tokens')}catch(e){return'<div class="page-title">API Tokens</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   let html='<div class="page-title">API Tokens</div><div class="page-desc">Long-lived bearer tokens for bots, CI, and the introspection MCP tool. A token authenticates as its bound user. Owner only.</div>';
+  /* No tokens: say what one is for and offer the one action, instead of an
+     empty seven-column table. */
+  if(!tokens||!tokens.length){
+    return html+emptyState(I.lock,'No API tokens yet','A token lets a bot, a CI job or the introspection tool act as one of your members without a password. Each is shown once when created, and you can revoke it here at any time.',
+      '<button class="btn btn-accent" data-action="openCreateTokenModal">'+I.plus+' Create Token</button>');
+  }
   html+='<div style="margin-bottom:16px"><button class="btn btn-accent" data-action="openCreateTokenModal">'+I.plus+' Create Token</button></div>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Tokens</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Label</th><th>User</th><th>Created</th><th>Last Used</th><th>Expires</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!tokens||!tokens.length)html+='<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">No API tokens</td></tr>';
-  else tokens.forEach(t=>{
+  tokens.forEach(t=>{
     const revoked=!!t.revoked_at;
     html+='<tr><td>'+esc(t.label||'—')+'</td><td>'+esc(t.username)+'</td>';
     html+='<td>'+fmtLocal(t.created_at)+'</td>';
@@ -609,23 +614,26 @@ async function renderPlugins(){
   const disabled=state.pluginRuntime==='disabled';
   let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
 
+  const install='<div style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    '<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" data-change-action="pluginFileChosen">'+
+    '<button class="btn btn-accent" id="pluginInstallBtn" disabled data-action="installPlugin">'+I.upload+' Install</button></div>';
   if(disabled){
     html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--text-warning)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';
+    /* Runtime off and nothing installed: one line, no Refresh and no empty table. */
+    if(!rows.length)return html+'<section class="section-card" aria-labelledby="plugins-installed-h"><div class="section-card-header"><h3 id="plugins-installed-h">Installed</h3></div><div class="empty-line">'+I.plugins+'<span>No plugins installed.</span></div></section>';
+  }else if(!rows.length){
+    /* Nothing installed: say what a plugin is and offer the install, instead
+       of an install card over an empty table. */
+    return html+emptyState(I.plugins,'No plugins installed yet','A plugin is a packaged add-on that gives this server new commands, integrations or automations. Upload its .zip package (max 16 MB, with a plugin.json manifest at its root) to install it.',install);
   }else{
     html+='<div class="section-card"><div class="section-card-header"><h3>Install Plugin</h3></div><div class="section-card-body">';
     html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
-    html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
-    html+='<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" data-change-action="pluginFileChosen">';
-    html+='<button class="btn btn-accent" id="pluginInstallBtn" disabled data-action="installPlugin">'+I.upload+' Install</button>';
-    html+='</div></div></div>';
+    html+=install+'</div></div>';
   }
 
   html+='<div class="section-card"><div class="section-card-header"><h3>Installed</h3><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
   html+='<table class="tbl"><thead><tr><th>Plugin</th><th>Version</th><th>Status</th><th>Installed</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!rows.length){
-    const empty=disabled?'No plugins installed — and the runtime is off':'No plugins installed yet';
-    html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">'+empty+'</td></tr>';
-  }else rows.forEach(row=>{
+  rows.forEach(row=>{
     const id=row.id!==undefined?row.id:row.ID;
     const name=row.name||row.Name||'';
     const version=row.version||row.Version||'';

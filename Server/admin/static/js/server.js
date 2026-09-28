@@ -8,7 +8,11 @@ const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa'];
 function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):(v||'')}
 function settingsFormValues(keys){
   const out={};
-  keys.forEach(k=>{const el=document.getElementById('s-'+k);if(el)out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):el.value});
+  keys.forEach(k=>{
+    const el=document.getElementById('s-'+k);if(!el)return;
+    if(el instanceof HTMLFieldSetElement){const r=el.querySelector('input:checked');out[k]=r instanceof HTMLInputElement?r.value:'';return}
+    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):/** @type {HTMLInputElement} */(el).value;
+  });
   return out;
 }
 /* Only what actually changed. The server's require_2fa enrollment
@@ -39,8 +43,7 @@ async function renderSettings(){
   html+=settingsCard('General',
     settingsRow('server_name','Server name','Shown in the client and at the top of this panel','<input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" aria-describedby="s-server_name-desc" data-input-action="markSettingsChanged">')
     +settingsRow('motd','Message of the day','Shown to members when they connect','<input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" aria-describedby="s-motd-desc" data-input-action="markSettingsChanged">'));
-  html+=settingsCard('Access & registration',
-    settingsRow('registration_mode','Registration','Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Members until you approve them. Open: anyone can register.','<select class="filter-select" id="s-registration_mode" aria-describedby="s-registration_mode-desc" data-change-action="markSettingsChanged">'+regModeOptions(v('registration_mode')||'invite')+'</select>'));
+  html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
   /* Facts, not inputs: these take effect from config.yaml at start-up, so
@@ -56,6 +59,35 @@ async function renderSettings(){
   return html;
 }
 
+/* Registration as four radio cards, each with what it means for someone
+   trying to join; only the chosen one's line is at full contrast. A change
+   feeds the same markSettingsChanged tracking as every other field, so the
+   save bar, the nav's unsaved dot and B5's unload guard all see it. */
+const REG_MODE_EFFECT={
+  closed:'Nobody can create an account.',
+  invite:'People need a valid invite code to join.',
+  approval:'New accounts wait in Members until you approve them.',
+  open:'Anyone who can reach the server can join.',
+};
+function regModeCards(cur){
+  const cards=REG_MODES.map(([val,label])=>'<label class="radio-card"><input type="radio" name="registration_mode" value="'+val+'"'+(cur===val?' checked':'')+' data-change-action="markSettingsChanged">'
+    +'<span class="radio-card-text"><span class="radio-card-title">'+esc(label)+'</span><span class="radio-card-desc">'+esc(REG_MODE_EFFECT[val]||'')+'</span></span></label>').join('');
+  return'<fieldset class="radio-cards" id="s-registration_mode"'+(cur==='approval'?' aria-describedby="s-registration_mode-desc"':'')+'><legend class="setting-name">Who can join</legend>'
+    +'<div class="radio-card-grid">'+cards+'</div>'
+    +'<p class="setting-desc" id="s-registration_mode-desc"'+(cur==='approval'?'':' hidden')+'>Waiting accounts are under <button type="button" class="link-btn" data-action="showPendingMembers">Members › Pending</button>.</p></fieldset>';
+}
+function syncRegModeHint(){
+  const approval=!!document.querySelector('input[name="registration_mode"][value="approval"]:checked');
+  const hint=document.getElementById('s-registration_mode-desc');if(hint)hint.hidden=!approval;
+  const set=document.getElementById('s-registration_mode');
+  if(set){if(approval)set.setAttribute('aria-describedby','s-registration_mode-desc');else set.removeAttribute('aria-describedby')}
+}
+function showPendingMembers(){
+  const prev=state.membersTab;state.membersTab='pending';
+  navigateTo('users');
+  if(state.section!=='users')state.membersTab=prev;
+}
+
 function setSettingsChanged(changed){
   if(state.settingsChanged!==changed){state.settingsChanged=changed;renderNav()}
   const s=document.getElementById('settingsSaveState');if(s)s.textContent=changed?'Unsaved changes':'All changes saved';
@@ -64,6 +96,7 @@ function setSettingsChanged(changed){
 }
 
 function markSettingsChanged(){
+  syncRegModeHint();
   setSettingsChanged(Object.keys(settingsDiff(settingsFormValues(SETTINGS_KEYS))).length>0);
 }
 
@@ -311,6 +344,7 @@ async function renderBackups(){
   const v=k=>(state._settings||{})[k]||'';
   let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
     +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div>';
+  html+=backupStatusLine(backups||[],policyErr?'':(v('backup_schedule')||'off'),await backupSignal());
   let sched;
   if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
   else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
@@ -319,7 +353,7 @@ async function renderBackups(){
     +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
   html+=settingsCard('Schedule',sched);
   html+='<section class="section-card" aria-labelledby="sc-history"><div class="section-card-header"><h3 id="sc-history">Backup history</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>File</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No backups yet</td></tr>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet. Create one now, or turn on automatic backups above.</td></tr>';
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
@@ -327,6 +361,39 @@ async function renderBackups(){
   });
   html+='</tbody></table></div></section>';
   return html;
+}
+
+/* The answer first: when the last backup was taken and what happens next.
+   The server's own backup health signal (GET /attention, ADMINISTRATOR)
+   sets the icon when it is readable, so this line and the dashboard agree. */
+async function backupSignal(){
+  if(!can(PERM.ADMINISTRATOR))return null;
+  try{const rep=await api('GET','/attention');return((rep&&rep.signals)||[]).find(g=>g.id==='backup')||null}catch(e){return null}
+}
+function relTime(d){
+  const mins=Math.round((Date.now()-d.getTime())/60000);
+  if(mins<1)return'just now';
+  if(mins<60)return mins+' min ago';
+  const h=Math.round(mins/60);if(h<48)return h+' h ago';
+  return Math.round(h/24)+' days ago';
+}
+function backupStatusLine(backups,schedule,signal){
+  const dated=backups.filter(b=>b.date&&!isNaN(new Date(b.date).getTime())).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime());
+  const latest=dated[0];
+  const auto={daily:'Automatic backups run daily',weekly:'Automatic backups run weekly',off:'Automatic backups are off'}[schedule]||'';
+  if(signal&&schedule&&((signal.threshold||'').split(' ')[0]||'off')!==schedule)signal=null;
+  if(latest&&signal&&(!signal.value||new Date(signal.observed_at).getTime()<new Date(latest.date).getTime()))signal=null;
+  const alarm=!!signal&&(signal.status==='warning'||signal.status==='critical');
+  let tone,title;
+  if(latest){tone='ok';title='Last backup '+relTime(new Date(latest.date))}
+  else if(schedule&&schedule!=='off'&&!alarm){tone='unknown';title='No backup yet; the first automatic one is still to come'}
+  else{tone='warning';title='No backups yet'}
+  if(alarm)tone=signal.status;
+  const parts=[];
+  if(latest)parts.push(backups.length+(backups.length===1?' backup kept':' backups kept'));
+  if(auto)parts.push(auto);
+  if(alarm&&signal.detail)parts.push(signal.detail);
+  return'<div class="status-line" id="backupStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+esc(title)+'<span class="sr-only"> ('+esc(attnWord(tone))+')</span></div>'+(parts.length?'<div class="status-line-sub">'+esc(parts.join(' · '))+'</div>':'')+'</div></div>';
 }
 
 function markBackupPolicyChanged(){
@@ -339,7 +406,7 @@ async function saveBackupPolicy(){
   if(btn){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
   if(!Object.keys(body).length)return;
-  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved')}
+  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved');renderContent()}
   catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 
@@ -408,27 +475,32 @@ async function renderUpdates(){
   let info,checkError='';
   try{info=await api('GET','/updates')}catch(e){checkError=e.message||'Update check failed'}
   state.updateInfo=info||null;
-  let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
-  html+='<div class="update-grid">';
-  html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
-  if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(255,143,146,.15);color:var(--text-danger)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
-  else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent-text)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available. '+releaseNotesLink(info,'Release notes')+'</div></div></div>';
-  else html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
-  html+='</div>';
+  /* One line answers "am I current?": the running version, then what the
+     check found, with one primary action. */
+  const cur=info?verLabel(info.current):'an unknown version';
+  let tone,title,sub='';
+  if(checkError){tone='critical';title='Could not check for updates';sub=checkError}
+  else if(info&&info.update_available){tone='warning';title=esc(verLabel(info.latest))+' is available';sub='You are running '+esc(cur)+'.'+(releaseNotesLink(info,'Release notes')?' '+releaseNotesLink(info,'Release notes'):'')}
+  else{tone='ok';title='You are on the latest version';sub='Running '+esc(cur)+'.'}
+  let html='<div class="page-title">Updates</div><div class="page-desc">Which version this server runs, and whether a newer one is out.</div>';
+  html+='<div class="status-line" id="updateStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+(checkError?esc(title):title)+'</div><div class="status-line-sub">'+(checkError?esc(sub):sub)+'</div></div></div>';
   if(info&&info.update_available&&info.can_apply===false){
     /* Container deployments: the binary is image content, so in-place apply is
        refused server-side (503 CONTAINER_DEPLOYMENT) — say so instead of
        offering a button that can only fail. */
-    html+='<div class="update-card"><div class="update-info"><div class="update-notes">In-place update is unavailable in container deployments — upgrade by pulling the new image and recreating the container.</div></div></div>';
-    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
+    html+='<p class="card-note">In-place update is unavailable in container deployments. Upgrade by pulling the new image and recreating the container.</p>';
+    html+='<div class="btn-row"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else if(info&&info.update_available){
-    html+='<div class="btn-row"><button class="btn btn-accent" data-action="applyUpdate"'+(state.updateApplying?' disabled':'')+'>'+(state.updateApplying?'<span class="spinner" aria-hidden="true"></span> Updating…':'Update to '+esc(info.latest)+'…')+'</button>';
+    html+='<div class="btn-row"><button class="btn btn-accent" data-action="applyUpdate"'+(state.updateApplying?' disabled':'')+'>'+(state.updateApplying?'<span class="spinner" aria-hidden="true"></span> Updating…':'Update now…')+'</button>';
     html+='<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else{
-    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check for updates</button></div>';
+    html+='<div class="btn-row"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check for updates</button></div>';
   }
   return html;
 }
+/* A version as the top bar shows it: "v" only before a number, so a dev
+   build reads "dev", not "vdev". */
+function verLabel(v){const s=String(v||'').replace(/^v(?=\D)/,'');return/^\d/.test(s)?'v'+s:s}
 
 /* OP-11: an update migrates the database forward only, so the dialog leads
    with a backup (on by default), the release notes, and the latest backup. */
@@ -480,7 +552,7 @@ async function confirmApplyUpdate(){
   }
 }
 
-Object.assign(ACTIONS,{applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
+Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
   confirmDeleteBackup,confirmRestore,createBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,

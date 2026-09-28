@@ -248,7 +248,6 @@ input,select,textarea{font-family:inherit;border:none}
 .save-bar.dirty{position:sticky;bottom:0}
 .save-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:var(--radius-md);box-shadow:0 -8px 24px rgba(0,0,0,.45);z-index:5}
 .save-bar-status{margin-right:auto;font-size:13px;color:var(--text-muted)}
-.update-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 .callout-warning{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:12px;line-height:1.45}
 .check-row{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer}
@@ -261,7 +260,6 @@ input,select,textarea{font-family:inherit;border:none}
   .setting-row{flex-direction:column;align-items:stretch;gap:8px}
   .setting-ctrl{margin-left:0}
   .setting-ctrl .form-input,.setting-ctrl .filter-select{width:100%}
-  .update-grid{grid-template-columns:1fr}
   .fact-row{flex-direction:column;gap:4px}
   .fact-row dd{justify-content:flex-start}
 }
@@ -388,6 +386,33 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .empty-line{display:flex;align-items:center;gap:10px;padding:16px 20px;font-size:13px;color:var(--text-muted)}
 .empty-line>svg{width:16px;height:16px;flex-shrink:0}
 
+/* A page's one-line answer (Backups, Updates): icon, a sentence, detail. */
+.status-line{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;margin-bottom:20px;border-radius:var(--radius-md);background:var(--bg-card);border:1px solid var(--border)}
+.status-line>.st-ic{margin-top:2px}
+.status-line-title{font-size:15px;font-weight:700;color:var(--header-primary)}
+.status-line-sub{font-size:13px;color:var(--text-muted);margin-top:2px;line-height:1.45;overflow-wrap:anywhere}
+/* An empty section: what the thing is, and the action that starts it. */
+.empty-state{padding:32px 24px;text-align:center}
+.empty-state-icon{width:44px;height:44px;margin:0 auto 12px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;background:var(--bg-hover);color:var(--text-muted)}
+.empty-state-icon svg{width:22px;height:22px}
+.empty-state h3{font-size:15px;font-weight:700;color:var(--header-primary);margin-bottom:6px}
+.empty-state p{font-size:13px;color:var(--text-muted);max-width:56ch;margin:0 auto 16px;line-height:1.5}
+/* Radio cards (Settings › Registration): the chosen card is outlined and
+   checked, and only its consequence line is at full contrast. */
+.radio-cards{border:0;min-width:0}
+.radio-cards legend{margin-bottom:10px}
+.radio-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.radio-card{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-control);background:var(--bg-primary);cursor:pointer}
+.radio-card:hover{border-color:var(--border-strong)}
+.radio-card input{margin-top:3px;width:16px;height:16px;flex-shrink:0;accent-color:var(--accent)}
+.radio-card:has(input:checked){border-color:var(--accent-text);background:var(--accent-glow)}
+.radio-card:has(input:focus-visible){outline:2px solid var(--focus-ring);outline-offset:2px}
+.radio-card-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.radio-card-title{font-size:14px;font-weight:600;color:var(--header-primary)}
+.radio-card-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
+.radio-card:has(input:checked) .radio-card-desc{color:var(--text-normal)}
+.radio-cards>.setting-desc{margin-top:8px}
+
 /* Members (AO-4): tabs, the list, one Manage button plus an overflow menu per
    row. The menu is position:fixed (members.js places it) so the table's scroll
    wrapper cannot clip it. */
@@ -430,12 +455,6 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
   .member-btn{padding:6px 10px}
   .member-actions{gap:2px}
 }
-
-.update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
-.update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.update-icon svg{width:24px;height:24px}
-.update-info{flex:1}.update-ver{font-size:18px;font-weight:700;color:var(--header-primary)}
-.update-notes{font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5}
 
 .code-copy{display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
 .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}

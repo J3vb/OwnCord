@@ -39,7 +39,8 @@ window.__test = {
   renderUpdates: renderUpdates,
   applyUpdate: applyUpdate,
   syncUpdateConfirm: syncUpdateConfirm,
-  confirmApplyUpdate: confirmApplyUpdate
+  confirmApplyUpdate: confirmApplyUpdate,
+  renderPlugins: renderPlugins
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -53,7 +54,10 @@ interface FetchCall {
   body: unknown;
 }
 
-type Responder = (path: string, method: string) => { status?: number; json?: unknown };
+type Responder = (
+  path: string,
+  method: string,
+) => { status?: number; json?: unknown; headers?: Record<string, string> };
 
 function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
   return new JSDOM(ADMIN_HTML, {
@@ -78,7 +82,9 @@ function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
         return {
           ok: status >= 200 && status < 300,
           status,
+          headers: new Headers(r.headers),
           json: async () => r.json ?? {},
+          text: async () => JSON.stringify(r.json ?? {}),
         } as Response;
       }) as typeof fetch;
     },
@@ -103,6 +109,7 @@ interface Bridge {
   applyUpdate: () => Promise<void>;
   syncUpdateConfirm: () => void;
   confirmApplyUpdate: () => Promise<void>;
+  renderPlugins: () => Promise<string>;
 }
 
 async function boot(
@@ -242,13 +249,97 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     // The owner-only backup policy moved to Backups & restore.
     expect(content.querySelector("#s-backup_schedule")).toBeNull();
     expect(content.querySelector("#s-backup_retention")).toBeNull();
-    // Every control has an accessible name.
+    // Every control has an accessible name: a label pointing at it, or (the
+    // registration radio cards) a label wrapping it.
     for (const el of content.querySelectorAll("input, select")) {
-      expect(content.querySelector(`label[for="${el.id}"]`), el.id).not.toBeNull();
+      const named = el.id ? content.querySelector(`label[for="${el.id}"]`) : el.closest("label");
+      expect(named, el.id || (el as HTMLInputElement).value).not.toBeNull();
     }
     expect(content.querySelector("#s-require_2fa")?.getAttribute("aria-labelledby")).toBe(
       "s-require_2fa-name",
     );
+  });
+
+  // UX clarity: registration is four radio cards with what each means, fed
+  // into the same change tracking as every other field.
+  it("edits registration through radio cards that drive the save bar", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const group = document.getElementById("s-registration_mode")!;
+    expect(group.tagName).toBe("FIELDSET");
+    expect(group.querySelector("legend")?.textContent).toBe("Who can join");
+    const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map((r) => r.value)).toEqual(["closed", "invite", "approval", "open"]);
+    expect(radios.find((r) => r.checked)?.value).toBe("closed");
+    expect(radios[2]!.closest("label")?.textContent).toContain("wait in Members");
+
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    radios[3]!.checked = true;
+    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(save.disabled).toBe(false);
+    expect(booted.bridge.state.settingsChanged).toBe(true);
+    radios[0]!.checked = true;
+    radios[0]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(save.disabled).toBe(true);
+
+    radios[3]!.checked = true;
+    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      registration_mode: "open",
+    });
+  });
+
+  it("shows the Members › Pending link only while Approval is the checked mode", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const group = document.getElementById("s-registration_mode")!;
+    const hint = document.getElementById("s-registration_mode-desc")!;
+    const pick = (value: string) => {
+      const radio = group.querySelector<HTMLInputElement>(`input[value="${value}"]`)!;
+      radio.checked = true;
+      radio.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    };
+    expect(hint.hidden).toBe(true);
+    expect(group.hasAttribute("aria-describedby")).toBe(false);
+
+    pick("approval");
+    expect(hint.hidden).toBe(false);
+    expect(hint.querySelector("button")?.textContent).toBe("Members › Pending");
+    expect(group.getAttribute("aria-describedby")).toBe("s-registration_mode-desc");
+
+    await booted.bridge.saveSettings();
+    expect(hint.hidden).toBe(false);
+
+    pick("open");
+    expect(hint.hidden).toBe(true);
+    expect(group.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("keeps the Members tab when leaving for Members › Pending is cancelled", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "settings";
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const approval = document.querySelector<HTMLInputElement>(
+      '#s-registration_mode input[value="approval"]',
+    )!;
+    approval.checked = true;
+    approval.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    dom.window.confirm = () => false;
+
+    document.querySelector<HTMLButtonElement>("#s-registration_mode-desc button")!.click();
+    expect(booted.bridge.state.section).toBe("settings");
+    expect(booted.bridge.state.membersTab).toBe("all");
   });
 
   it("drives the save bar from the actual difference, so reverting an edit clears it", async () => {
@@ -350,6 +441,112 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
 
     const patch = fetchCalls.find((c) => c.method === "PATCH");
     expect(patch).toMatchObject({ path: "/settings", body: { backup_schedule: "weekly" } });
+  });
+
+  async function backupStatus(
+    backups: unknown[],
+    schedule: string,
+    signal: Record<string, unknown>,
+  ): Promise<{ title: string; sub: string }> {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /backups": { json: backups },
+        "GET /settings": { json: { ...LOADED_SETTINGS, backup_schedule: schedule } },
+        "GET /attention": { json: { signals: [{ id: "backup", ...signal }] } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderBackups);
+    return {
+      title: content.querySelector("#backupStatus .status-line-title")?.textContent ?? "",
+      sub: content.querySelector("#backupStatus .status-line-sub")?.textContent ?? "",
+    };
+  }
+
+  it("ignores a backup signal observed before the newest backup", async () => {
+    const status = await backupStatus(
+      [{ name: BACKUP, size: 1024, date: new Date().toISOString() }],
+      "off",
+      {
+        status: "warning",
+        detail: "no backup exists and scheduled backups are off",
+        observed_at: new Date(Date.now() - 30_000).toISOString(),
+      },
+    );
+    expect(status.title).toBe("Last backup just now (Healthy)");
+    expect(status.sub).toBe("1 backup kept · Automatic backups are off");
+  });
+
+  it("still warns from a backup signal observed after the newest backup", async () => {
+    const taken = new Date(Date.now() - 3 * 86_400_000);
+    const status = await backupStatus(
+      [{ name: BACKUP, size: 1024, date: taken.toISOString() }],
+      "daily",
+      {
+        status: "critical",
+        detail: "72h0m0s old",
+        value: taken.toISOString(),
+        threshold: "daily schedule: warn after 36h0m0s",
+        observed_at: new Date().toISOString(),
+      },
+    );
+    expect(status.title).toBe("Last backup 3 days ago (Critical)");
+    expect(status.sub).toBe("1 backup kept · Automatic backups run daily · 72h0m0s old");
+  });
+
+  it("does not promise a first automatic backup once the scheduled run has failed", async () => {
+    const status = await backupStatus([], "daily", {
+      status: "warning",
+      detail: "no successful backup yet",
+      threshold: "daily schedule: warn after 36h0m0s",
+      observed_at: new Date().toISOString(),
+    });
+    expect(status.title).toBe("No backups yet (Warning)");
+    expect(status.sub).toBe("Automatic backups run daily · no successful backup yet");
+  });
+
+  it("re-renders the status line from the schedule just saved, dropping a signal evaluated under the old one", async () => {
+    let schedule = "off";
+    const booted = await boot([], (p, method) => {
+      if (p === "/settings") {
+        if (method === "PATCH") schedule = "daily";
+        return { json: { ...LOADED_SETTINGS, backup_schedule: schedule } };
+      }
+      if (p === "/backups") return { json: [] };
+      if (p === "/attention")
+        return {
+          json: {
+            signals: [
+              {
+                id: "backup",
+                status: "warning",
+                detail: "no backup exists and scheduled backups are off",
+                observed_at: new Date().toISOString(),
+              },
+            ],
+          },
+        };
+      return respondWith()(p, method);
+    });
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "backups";
+    await render(booted.bridge, dom.window, booted.bridge.renderBackups);
+    const sub = () => document.querySelector("#backupStatus .status-line-sub")?.textContent;
+    expect(sub()).toBe(
+      "Automatic backups are off · no backup exists and scheduled backups are off",
+    );
+
+    (document.getElementById("s-backup_schedule") as HTMLSelectElement).value = "daily";
+    booted.bridge.markBackupPolicyChanged();
+    await booted.bridge.saveBackupPolicy();
+    await expect.poll(sub).toBe("Automatic backups run daily");
+    expect(document.querySelector("#backupStatus .status-line-title")?.textContent).toBe(
+      "No backup yet; the first automatic one is still to come (Unknown)",
+    );
   });
 
   it("restores only after the backup's name is typed, then waits for the restart", async () => {
@@ -544,5 +741,41 @@ describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
       "GET /updates": { json: { ...UPDATE, release_url: "javascript:alert(1)" } },
     });
     expect(document.getElementById("modalInner")?.querySelector("a")).toBeNull();
+  });
+});
+
+describe("Server/admin/static — Plugins empty state (A6)", () => {
+  let dom: JSDOM | undefined;
+  afterEach(() => dom?.window.close());
+
+  async function renderEmptyPlugins(runtime: string): Promise<Document> {
+    const booted = await boot([], (p) =>
+      p === "/api/v1/admin/plugins/"
+        ? { json: [], headers: { "X-Plugin-Runtime": runtime } }
+        : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    doc.body.innerHTML = await booted.bridge.renderPlugins();
+    return doc;
+  }
+
+  it("explains what a plugin is and offers the install when the runtime is on", async () => {
+    const doc = await renderEmptyPlugins("enabled");
+    expect(doc.querySelector(".empty-state h3")?.textContent).toBe("No plugins installed yet");
+    expect(doc.querySelector(".empty-state p")?.textContent).toMatch(/^A plugin is /);
+    expect(doc.querySelector(".empty-state #pluginFile")).not.toBeNull();
+    expect(doc.querySelector(".empty-state #pluginInstallBtn")).not.toBeNull();
+    expect(doc.querySelectorAll("#pluginFile")).toHaveLength(1);
+    expect(doc.querySelector(".tbl")).toBeNull();
+    expect(doc.querySelector(".empty-line")).toBeNull();
+  });
+
+  it("keeps one line and no install when the runtime is off", async () => {
+    const doc = await renderEmptyPlugins("disabled");
+    expect(doc.querySelector(".empty-line")?.textContent).toBe("No plugins installed.");
+    expect(doc.querySelector(".empty-state")).toBeNull();
+    expect(doc.querySelector("#pluginFile")).toBeNull();
+    expect(doc.querySelector(".tbl")).toBeNull();
   });
 });
