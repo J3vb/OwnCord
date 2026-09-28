@@ -51,8 +51,9 @@ async function renderSettings(){
      card shows the effective values an operator would otherwise read
      config.yaml for (SRE-07). Secrets only ever cross as a configured flag,
      and the server leaves out the host path and endpoints for a caller that
-     is not an administrator, so those rows drop out, as does any value left
-     empty in config.yaml. */
+     is not an administrator, so those rows drop out. A value left empty in
+     config.yaml reads "Not set", and a zero that switches a feature off reads
+     as what it means. */
   let factRows;
   if(facts)factRows=[
     ['Port',facts.server_port,'server.port'],
@@ -63,14 +64,14 @@ async function renderSettings(){
     ['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality'],
     ['Voice URL','voice_url' in facts?facts.voice_url||'Auto':undefined,'voice.livekit_url'],
     ['Max connections',facts.max_ws_connections||'Unlimited','server.max_ws_connections'],
-    ['Reserved disk headroom',facts.min_free_disk_mb+' MB','server.min_free_disk_mb'],
+    ['Reserved disk headroom',facts.min_free_disk_mb?facts.min_free_disk_mb+' MB':'Off','server.min_free_disk_mb'],
     ['Backup directory','backup_dir' in facts?facts.backup_dir:undefined,'backup.dir'],
     ['Log level',facts.logging_level,'logging.level'],
     ['GIF',facts.gif_configured?'Configured':'Not configured','gif.api_key'],
     ['GitHub updates',facts.github_configured?'Configured':'Not configured','github.token'],
-    ['Report retention',facts.moderation_report_retention_days+' days','moderation.report_retention_days'],
-    ['Action retention',facts.moderation_action_retention_days+' days','moderation.action_retention_days'],
-  ].filter(([,val])=>val!==undefined&&val!=='').map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(String(val))+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
+    ['Report retention',facts.moderation_report_retention_days?facts.moderation_report_retention_days+' days':'Never','moderation.report_retention_days'],
+    ['Action retention',facts.moderation_action_retention_days?facts.moderation_action_retention_days+' days':'Never','moderation.action_retention_days'],
+  ].filter(([,val])=>val!==undefined).map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val===''?'Not set':String(val))+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
   html+=settingsCard('Running configuration','<p class="setting-desc">The values this server started with. Change config.yaml and restart the server to change them; use the Logs page to raise the log level for a while.</p>'
     +(facts?'<dl class="fact-list">'+factRows+'</dl>':'<p class="setting-desc" style="margin-top:8px">The running configuration could not be read.</p>'));
   html+='<div class="save-bar" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">All changes saved</span>'

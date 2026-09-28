@@ -311,19 +311,37 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
   });
 
   // The default config has no TLS domain; an empty value is no row at all.
-  it("leaves out a row whose value is empty", async () => {
+  // An empty value reads "Not set", and a zero that switches a feature off
+  // reads as its meaning, never a blank or a bare "0".
+  it("shows what an empty or disabling value means", async () => {
     const booted = await boot(
       [],
       respondWith({
-        "GET /config": { json: { ...CONFIG_FACTS, tls_domain: "", logging_level: "" } },
+        "GET /config": {
+          json: {
+            ...CONFIG_FACTS,
+            tls_domain: "",
+            logging_level: "",
+            min_free_disk_mb: 0,
+            moderation_report_retention_days: 0,
+            moderation_action_retention_days: 0,
+          },
+        },
       }),
     );
     dom = booted.dom;
     const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
-    const facts = content.querySelector(".fact-list")?.textContent ?? "";
-    expect(facts).toContain("acme");
-    expect(facts).not.toContain("tls.domain");
-    expect(facts).not.toContain("logging.level");
+    const rows = Object.fromEntries(
+      [...content.querySelectorAll(".fact-row")].map((row) => [
+        row.querySelector("dt")?.textContent,
+        row.querySelector(".fact-value")?.textContent,
+      ]),
+    );
+    expect(rows["TLS domain"]).toBe("Not set");
+    expect(rows["Log level"]).toBe("Not set");
+    expect(rows["Reserved disk headroom"]).toBe("Off");
+    expect(rows["Report retention"]).toBe("Never");
+    expect(rows["Action retention"]).toBe("Never");
   });
 
   // UX clarity: registration is four radio cards with what each means, fed
