@@ -808,7 +808,7 @@ lk:              2.18.6
 load generators: k6 and lk, pinned to CPUs 2-3 with taskset
 ```
 
-Same shape as the block above, and the published delta is against it:
+Same shape as the block above; the delta against it follows the table:
 
 | Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
 | ----------------------------- | ------ | ------ | ------------------ | ---- |
@@ -829,6 +829,22 @@ acknowledged, 1,133,881 deliveries. Server CPU averaged 0.21 of 2, peaked 1.16,
 against 331 / 348 ms); the acknowledgement, delivery and voice-join rows are
 within a few ms of the `self_signed` leg, which is the point of publishing the
 pair as a delta rather than an absolute.
+
+TLS delta for this `dev` pair, `self_signed − off` (a positive number means the
+TLS leg was slower). This is the current delta; the 2026-09-23 table further
+down is historical.
+
+| Row                           | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99  |
+| ----------------------------- | --------------------- | ------------- | ---------------- |
+| REST login                    | 331 / 348 ms          | 302 / 308 ms  | **+29 / +40 ms** |
+| WebSocket open → `auth_ok`    | 15 / 20 ms            | 22 / 31 ms    | **−7 / −11 ms**  |
+| Send → sender acknowledgement | 40 / 64 ms            | 40 / 64 ms    | **0 / 0 ms**     |
+| Send → recipient delivery     | 42 / 68 ms            | 42 / 67 ms    | **0 / +1 ms**    |
+| Voice join (OwnCord half)     | 33 / 59 ms            | 26 / 41 ms    | **+7 / +18 ms**  |
+
+The two legs are still two matrix jobs on two runner VMs, so the reading is
+unchanged: the TLS cost of this profile is not distinguishable from runner
+noise at one run per mode.
 
 #### Operational, `tls.mode: self_signed` (2026-09-23, historical)
 
@@ -999,9 +1015,11 @@ Per-phase database waits on this leg, for comparison with the table above:
 | upload  | 3,766        | 75.2 s         | 45,414       | 15.5 s         |
 | run     | 8,257        | 137.0 s        | 100,112      | 35.8 s         |
 
-#### TLS delta, `self_signed − off`
+#### TLS delta, `self_signed − off` (2026-09-23 pair, historical)
 
-A positive number means the TLS leg was slower.
+The delta between the two 2026-09-23 blocks above, kept as provenance; the
+current delta is the `dev` pair's, published with the `dev` `tls.mode: off`
+block. A positive number means the TLS leg was slower.
 
 | Row                                 | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99   |
 | ----------------------------------- | --------------------- | ------------- | ----------------- |
