@@ -269,10 +269,9 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   await expectDecodedMedia(bob, true);
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
 
-  // A blip longer than the grace window does end the membership. The client's
-  // LiveKit room outlives the socket drop, so the resync must tear the orphaned
-  // session down (the ready payload no longer names us in voice), then a fresh
-  // authorized join and key exchange works as before.
+  // A blip longer than the grace window does end the membership: the expiry
+  // removes the SFU participant, which ends the client's LiveKit room, then a
+  // fresh authorized join and key exchange works as before.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
   await alice.waitForTimeout(16_000); // outlast the 15 s server grace window

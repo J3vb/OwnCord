@@ -138,8 +138,10 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// (c.getVoiceChID() != 0) — a reconnect that beat the drop teardown — and
 	// for a fresh connect (lastSeq == 0), which is a deliberate reload rather
 	// than a blip.
+	var inheritedVoiceChID int64
 	if c.lastSeq > 0 && c.getVoiceChID() == 0 {
 		if e := h.voiceGrace.take(c.userID); e != nil {
+			inheritedVoiceChID = e.channelID
 			c.setVoiceState(e.channelID, e.joinToken)
 			c.markVoiceJoinCompleteIfMatch(e.channelID, e.joinToken)
 			c.setE2EEPubKey(e.e2eeKey, e.e2eeSig)
@@ -213,6 +215,11 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	// ordering dependency on pub/sub subscriptions.
 	if replacedVoiceChID != 0 {
 		h.updateKeyHolder(replacedVoiceChID)
+	}
+	// RT-8: elections held while the membership was parked could not see it,
+	// so a grace inherit re-elects the same way.
+	if inheritedVoiceChID != 0 {
+		h.updateKeyHolder(inheritedVoiceChID)
 	}
 
 	// Re-sync this connection's local E2EE peer-key map now that it is

@@ -979,6 +979,31 @@ func TestVoiceMembership_GraceWindowIncompleteJoinsNotParked(t *testing.T) {
 	}
 }
 
+// TestVoiceMembership_GraceWindowResumeReelectsKeyHolder pins that a grace
+// resume restores the lowest-uid key holder: an election held while the
+// member was parked could not see them, and every client assumes the holder
+// is the lowest uid in the room.
+func TestVoiceMembership_GraceWindowResumeReelectsKeyHolder(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 3)
+	alice, bob, carol := h.members[0], h.members[1], h.members[2]
+	chA := h.chanOf("vm-grace-keyholder")
+	for _, m := range h.members {
+		h.connect(m)
+		h.join(m, chA)
+	}
+
+	h.disconnect(alice, true)
+	h.leave(carol) // an election inside the window, without alice
+	if !h.hub.IsVoiceKeyHolder(chA, bob.userID) {
+		t.Fatalf("precondition: the in-window election did not pick bob")
+	}
+	h.resume(alice)
+	if !h.hub.IsVoiceKeyHolder(chA, alice.userID) {
+		t.Fatalf("a grace resume did not restore the lowest-uid key holder")
+	}
+}
+
 // TestVoiceMembership_GraceWindowTerminalKickEjects pins that a kick which
 // refuses reconnection — a ban or a force-logout — ends the call at once
 // rather than parking it, whether the member is still connected or already

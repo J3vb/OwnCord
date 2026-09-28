@@ -64,12 +64,7 @@ vi.mock("@lib/livekitSession", () => ({
 // screenShare.ts's rollback correlation is exercised at the unit level in
 // screen-share-tracks.test.ts; here only the dispatcher's own reaction to it
 // is under test, so the lookup itself is mocked and controlled per test.
-// Spread the real module: the dispatcher's voice teardown loads the real
-// livekitSession in some cross-file runs, whose roomLifecycle imports several
-// other screenShare exports (bumpGeneration, stopManualCameraTrack, ...) — a
-// bare two-export mock makes those resolve as undefined.
-vi.mock("@lib/screenShare", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/screenShare")>()),
+vi.mock("@lib/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
@@ -3656,17 +3651,11 @@ describe("WS Dispatcher", () => {
       mock.dispatchState("reconnecting");
       await vi.runAllTimersAsync();
 
-      // No restart was announced, so no rejoin. The server no longer names us
-      // in voice here (a blip past the grace window), and RT-8's orphan teardown
-      // ends the surviving room rather than leaving it publishing.
       readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
-      expectConsole("warn", /\[dispatcher\] Live voice session not in the ready payload/);
 
       expect(mock.ws.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join" }),
       );
-      await vi.waitFor(() => expect(mockLeaveVoice).toHaveBeenCalledWith(false));
-      expect(voiceStore.getState().currentChannelId).toBeNull();
     });
   });
 
