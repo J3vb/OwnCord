@@ -165,9 +165,9 @@ test("installed Linux artifact joins voice by a non-loopback server address", as
     "RT-11 guards the Linux native voice join, whose SDK sends a bearer-only header",
   );
   // Resolve the address before starting the server, so a runner with only
-  // loopback skips without leaking a server and its LiveKit child.
+  // loopback fails without leaking a server and its LiveKit child.
   const host = nonLoopbackIPv4();
-  test.skip(host === null, "the runner has no non-loopback IPv4 to dial");
+  if (host === null) throw new Error("RT-11: the runner has no non-loopback IPv4 to dial");
   test.setTimeout(300_000);
   const server = await startTestServer({ tls: true, livekit: true });
   const remoteHost = `${host}:${server.port}`;
