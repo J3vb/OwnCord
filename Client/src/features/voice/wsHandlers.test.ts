@@ -23,7 +23,7 @@ vi.mock("../../lib/livekitSession", () => ({
   isVoiceSessionActive: vi.fn(() => false),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-import { setMuted, setDeafened, handleParticipantLeft } from "../../lib/livekitSession";
+import { setMuted, setDeafened, handleParticipantLeft, leaveVoice } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";
 
 function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> {
@@ -95,6 +95,42 @@ describe("snapshotReadyVoice", () => {
     apply(socketStub(), readyWith([voiceState({ server_muted: false })]));
 
     await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(false));
+  });
+
+  // RT-8: a network blip longer than the server's reconnect grace window ends
+  // the membership, but the LiveKit room survives the chat-socket drop (it is
+  // an independent media path). Before this branch, the resync's `ready` simply
+  // omitted self and left the orphaned media session live — the UI showed
+  // not-in-voice while the mic kept publishing. A live session whose channel
+  // the ready payload no longer names must be torn down.
+  it("tears down an orphaned live session when the ready payload no longer names us in voice", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([]));
+    expectConsole("warn", /\[dispatcher\] Live voice session not in the ready payload/);
+
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(socket.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "voice_leave", payload: {} }),
+    );
+  });
+
+  it("keeps an orphaned session when the ready payload names us elsewhere", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    const socket = socketStub();
+    const apply = snapshotReadyVoice();
+
+    apply(socket, readyWith([voiceState({ channel_id: 9 })]));
+
+    // The server still names us in voice (another channel); reconciliation,
+    // not teardown, owns that transition.
+    await Promise.resolve();
+    expect(leaveVoice).not.toHaveBeenCalled();
   });
 });
 

@@ -121,6 +121,7 @@ type Hub struct {
 	voiceReconcileInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
+	voiceGrace     voiceGraceState     // RT-8 grace window (voice_grace.go)
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -390,11 +391,4 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		// Stop the hub dispatch loop.
 		h.stopOnce.Do(func() { close(h.stop) })
 	})
-}
-
-// clientEvent is a register (add=true) or unregister (add=false) request.
-// Both kinds share one channel so per-connection ordering is preserved.
-type clientEvent struct {
-	c   *Client
-	add bool
 }

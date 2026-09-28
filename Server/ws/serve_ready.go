@@ -101,17 +101,6 @@ func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo) []db.DMChanne
 	return dmChannels
 }
 
-// connectedUserIDs snapshots the ids with a live WebSocket connection.
-func (h *Hub) connectedUserIDs() map[int64]bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	set := make(map[int64]bool, len(h.clients))
-	for uid := range h.clients {
-		set[uid] = true
-	}
-	return set
-}
-
 // channelRefs maps db channels to the checker's db-agnostic ChannelRef so
 // buildReady and computeAllowedChannels can share permissions.VisibleChannelIDs.
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
@@ -613,6 +602,18 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
+	// RT-8: a replay-failure fallback whose previous socket parked this
+	// membership in the grace window keeps the row for registerNow to inherit
+	// (deleting it would leave an inherited state with no row — the ghost
+	// OC-0270 closes for the still-registered case). Any other fresh connect or
+	// mismatched grace entry means the call is over: stop the window so its
+	// timer cannot later re-run finishVoiceLeave over a cleaned row.
+	if c.lastSeq > 0 && h.voiceGrace.has(c.userID, vs.ChannelID) {
+		slog.Info("ws fresh connect: keeping graced voice state",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		return
+	}
+	h.voiceGrace.cancel(c.userID)
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
 	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {

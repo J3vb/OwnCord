@@ -257,7 +257,17 @@ func (h *Hub) sweepStaleVoiceStates() {
 	}
 	h.mu.RUnlock()
 
+	// RT-8: a membership parked in the grace window has no live client, so the
+	// scan above classified it as stale — but it is deliberately held for a
+	// resuming socket. Skip exactly the parked (user, channel) pairs; the
+	// grace timer owns their teardown. Snapshot the pairs first so this holds
+	// no grace lock while deleting rows.
+	parked := h.voiceGrace.snapshot()
+
 	for _, s := range stale {
+		if parked[s.userID] == s.channelID {
+			continue
+		}
 		if sweepStaleVoiceJoinRaceHook != nil {
 			sweepStaleVoiceJoinRaceHook(s.userID, s.channelID, s.joinedAt)
 		}

@@ -125,13 +125,25 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       log.warn("Stale voice state detected in ready payload — sending voice_leave");
       ws.send({ type: "voice_leave", payload: {} });
       leaveVoiceChannel();
+    } else if (selfVoiceState === undefined && voiceSessionActive) {
+      // RT-8: a network blip longer than the server's reconnect grace window
+      // ends the membership, but the LiveKit room survives the chat-socket
+      // drop (it is an independent media path). Before this branch a `ready`
+      // that no longer named us simply left that orphaned session live — the
+      // widget showed not-in-voice while the mic kept publishing and E2EE keys
+      // stayed held. Local teardown only: the server has nothing left to
+      // release, so no voice_leave frame is sent.
+      log.warn("Live voice session not in the ready payload — tearing it down");
+      void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+      leaveVoiceChannel();
     } else if (selfVoiceState !== undefined) {
-      // A LiveKit session survived a WS drop that outlived it (nothing
-      // tears voice down on a socket drop alone) — OC-0014: this full
-      // resync is the only place a moderator mute/deafen issued while we
-      // were disconnected ever reaches us, since the mustFullResync tier
-      // that produced this `ready` never replays the voice_state that
-      // would otherwise have carried it.
+      // A LiveKit session survived a WS drop that outlived it — the client
+      // never tears voice down on a socket drop alone, and RT-8's server-side
+      // grace window now keeps the membership too. OC-0014: this full resync
+      // is the only place a moderator mute/deafen issued while we were
+      // disconnected ever reaches us, since the mustFullResync tier that
+      // produced this `ready` never replays the voice_state that would
+      // otherwise have carried it.
       enforceModeratorAudioState(
         selfVoiceState.server_muted === true,
         selfVoiceState.server_deafened === true,

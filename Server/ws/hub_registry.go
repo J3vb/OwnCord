@@ -126,6 +126,28 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	}
 	h.clients[c.userID] = c
 
+	// RT-8: a resuming socket (lastSeq > 0) inherits a voice membership its
+	// previous socket parked in the grace window when it dropped, so a short
+	// network blip keeps the call instead of ending it. The parked entry
+	// carries the completed join's token and E2EE key; re-stamping them here
+	// lets the subscribe block below restore the voice topic exactly as the
+	// still-registered-old-client transfer does. `take` stops the expiry
+	// timer, so inheriting and tearing down can never both run.
+	//
+	// Skipped when the old-client transfer above already supplied a session
+	// (c.getVoiceChID() != 0) — a reconnect that beat the drop teardown — and
+	// for a fresh connect (lastSeq == 0), which is a deliberate reload rather
+	// than a blip.
+	if c.lastSeq > 0 && c.getVoiceChID() == 0 {
+		if e := h.voiceGrace.take(c.userID); e != nil {
+			c.setVoiceState(e.channelID, e.joinToken)
+			c.markVoiceJoinCompleteIfMatch(e.channelID, e.joinToken)
+			c.setE2EEPubKey(e.e2eeKey, e.e2eeSig)
+			slog.Info("hub: resumed connection inherited the grace-window voice membership",
+				"user_id", c.userID, "channel_id", e.channelID)
+		}
+	}
+
 	// Subscribe the new client to its default pub/sub topics immediately
 	// after UnsubscribeAll(old) above, with nothing in between.
 	//
@@ -308,4 +330,11 @@ func (h *Hub) unregisterNow(c *Client) bool {
 // else's.
 func (h *Hub) shouldMarkOffline(c *Client, replaced bool) bool {
 	return !replaced && h.GetClient(c.userID) == nil
+}
+
+// clientEvent is a register (add=true) or unregister (add=false) request.
+// Both kinds share one channel so per-connection ordering is preserved.
+type clientEvent struct {
+	c   *Client
+	add bool
 }

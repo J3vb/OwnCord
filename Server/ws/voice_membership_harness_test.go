@@ -328,17 +328,56 @@ func (h *vmHarness) leave(m *vmMember) {
 // hub's teardown runs (which removes the SFU participant on a background
 // goroutine), then m has no live client. With teardown false the voice
 // teardown is missed, leaving the row and the SFU participant for the sweep.
+//
+// RT-8: the voice teardown now goes through leaveVoiceOnDisconnect, which
+// parks a COMPLETED membership in the grace window instead of removing it at
+// once. `disconnect` therefore no longer models the final state of a socket
+// drop for a graced member — use disconnectGraced and expireGrace to drive
+// that window explicitly.
 func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 	h.step++
 	h.t.Helper()
 	ctx := context.Background()
-	voiceChID := m.c.getVoiceChID()
+	voiceChID, token, completed := m.c.getVoiceStateCompleted()
 	replaced := h.hub.unregisterNow(m.c)
 	if teardown && voiceChID != 0 && !replaced {
-		h.hub.handleVoiceLeave(ctx, m.c, voiceLeaveReasonDisconnect)
+		h.hub.leaveVoiceOnDisconnect(ctx, m.c, voiceChID, token, completed)
 	}
 	m.c = nil
 	h.note("disconnect %s (was ch%d, teardown=%v)", m.name, voiceChID, teardown)
+	h.check()
+}
+
+// expireGrace force-expires m's parked grace window, running the deferred
+// teardown now instead of waiting the real 15 s.
+func (h *vmHarness) expireGrace(m *vmMember) {
+	h.step++
+	h.t.Helper()
+	h.hub.expireVoiceGraceNowForTest(m.userID)
+	h.note("expireGrace %s", m.name)
+	h.check()
+}
+
+// resume models a reconnecting socket arriving after the previous one is
+// fully gone (the RT-8 case: the close was observed before the new socket
+// registered, so there is no old *Client for registerNow to transfer from).
+// lastSeq > 0 makes it a resume, so it may inherit a parked grace membership.
+func (h *vmHarness) resume(m *vmMember) {
+	h.step++
+	h.t.Helper()
+	if m.c != nil {
+		h.failf("%s: resume with a live client", m.name)
+	}
+	c := NewTestClient(h.hub, m.userID, make(chan []byte, 512))
+	c.lastSeq = 1 // a resume, not a fresh connect
+	user, err := h.db.GetUserByID(context.Background(), m.userID)
+	if err != nil || user == nil {
+		h.t.Fatalf("GetUserByID(%d): %v", m.userID, err)
+	}
+	c.user = user
+	h.hub.registerNow(c, nil)
+	m.c = c
+	h.note("resume %s", m.name)
 	h.check()
 }
 
@@ -559,7 +598,8 @@ func (h *vmHarness) sweep() {
 }
 
 // ghostRow returns the first voice_states row naming a user with no live
-// client, or "" when none.
+// client and no parked grace entry, or "" when none. A parked entry (RT-8) is
+// deliberately a row with no live client, so it is not a ghost.
 func (h *vmHarness) ghostRow() string {
 	ctx := context.Background()
 	for _, m := range h.members {
@@ -570,7 +610,7 @@ func (h *vmHarness) ghostRow() string {
 		if err != nil {
 			h.failf("%s: GetVoiceState: %v", m.name, err)
 		}
-		if row != nil {
+		if row != nil && !h.hub.voiceGraceInheritedForTest(m.userID, row.ChannelID) {
 			return fmt.Sprintf("%s has a voice_states row for ch%d but no live client", m.name, row.ChannelID)
 		}
 	}
@@ -819,7 +859,123 @@ func TestVoiceMembership_DisconnectThenSweep(t *testing.T) {
 	h.join(bob, chA)
 	h.disconnect(alice, true)
 	h.disconnect(bob, false)
+	// RT-8: alice's completed drop parks in the grace window, so only an
+	// expired window leaves her for the sweep to reap; bob's missed teardown
+	// has no parked entry at all.
+	h.expireGrace(alice)
 	h.sweep()
+}
+
+// withGraceWindow shrinks the RT-8 grace window for a test and restores it.
+func withGraceWindow(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := voiceGraceWindow
+	voiceGraceWindow = d
+	t.Cleanup(func() { voiceGraceWindow = prev })
+}
+
+// TestVoiceMembership_GraceWindowReconnect pins RT-8's core: a completed
+// membership survives a socket drop inside the grace window, and a resuming
+// socket inherits the very same session — token, SFU participant and key —
+// with no voice_leave broadcast and no fresh join.
+func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
+	withGraceWindow(t, time.Minute) // long enough that only the test expires it
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-reconnect")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	_, token := alice.c.getVoiceState()
+	h.disconnect(alice, true)
+	if !h.hub.voiceGraceInheritedForTest(alice.userID, chA) {
+		t.Fatalf("a completed membership was not parked in the grace window")
+	}
+	// The parked row and SFU participant must still be exactly the join's.
+	row, err := h.db.GetVoiceState(context.Background(), alice.userID)
+	if err != nil || row == nil || row.ChannelID != chA || row.JoinedAt != token {
+		t.Fatalf("grace window changed the membership: row=%v err=%v", row, err)
+	}
+	if !h.sfu.has(RoomName(chA), participantIdentity(alice.userID, token)) {
+		t.Fatalf("grace window removed the SFU participant")
+	}
+
+	// A resuming socket inherits the parked session; the harness oracle then
+	// requires client, row and SFU to agree, which they now do with no rejoin.
+	h.resume(alice)
+	if gotCh, gotToken := alice.c.getVoiceState(); gotCh != chA || gotToken != token {
+		t.Fatalf("resume inherited %d/%s, want %d/%s", gotCh, gotToken, chA, token)
+	}
+	if h.hub.voiceGraceInheritedForTest(alice.userID, chA) {
+		t.Fatalf("the parked entry survived inheritance")
+	}
+	h.leave(alice)
+}
+
+// TestVoiceMembership_GraceWindowExpires pins the other half: a window that
+// elapses with no resuming socket tears the membership down through the same
+// teardown the immediate path used — row, SFU participant and key holder gone.
+func TestVoiceMembership_GraceWindowExpires(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-expire")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	h.disconnect(alice, true)
+	h.expireGrace(alice)
+	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row != nil {
+		t.Fatalf("expired grace window left a row: row=%v err=%v", row, err)
+	}
+	if h.hub.IsVoiceKeyHolder(chA, alice.userID) {
+		t.Fatalf("expired grace window left a phantom key holder")
+	}
+}
+
+// TestVoiceMembership_GraceWindowSweepSkipsParked pins that the stale sweep
+// does not reap a parked membership: the row has no live client during the
+// window, which is exactly the ghost shape the sweep exists to remove.
+func TestVoiceMembership_GraceWindowSweepSkipsParked(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-sweep")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	h.disconnect(alice, true)
+	h.sweep() // must NOT reap the parked row
+	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row == nil {
+		t.Fatalf("sweep reaped a parked membership: row=%v err=%v", row, err)
+	}
+	h.resume(alice) // and a resume still inherits it
+	h.leave(alice)
+}
+
+// TestVoiceMembership_GraceWindowIncompleteJoinsNotParked pins OC-0270's
+// boundary: only a COMPLETED join is parked. A join that committed its row but
+// never completed has no delivered membership to preserve, so the drop tears
+// it down at once rather than holding a half-session.
+func TestVoiceMembership_GraceWindowIncompleteJoinsNotParked(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-incomplete")
+
+	h.connect(alice)
+	if err := h.db.JoinVoiceChannel(context.Background(), alice.userID, chA); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	row, _ := h.db.GetVoiceState(context.Background(), alice.userID)
+	alice.c.setVoiceStateForHarness(chA, row.JoinedAt) // committed, not completed
+	h.disconnect(alice, true)
+	if h.hub.voiceGraceInheritedForTest(alice.userID, chA) {
+		t.Fatalf("an incomplete join was parked in the grace window")
+	}
+	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row != nil {
+		t.Fatalf("incomplete join left a row after drop: row=%v err=%v", row, err)
+	}
 }
 
 // TestVoiceMembership_RollbackLeavesNoGhost pins OC-0044/OC-0219/OC-0267's

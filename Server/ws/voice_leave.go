@@ -40,6 +40,9 @@ const (
 	// voiceLeaveReasonReconciled is RT-3's polling reconciler removing a
 	// membership whose SFU participant no longer exists (voice_reconcile.go).
 	voiceLeaveReasonReconciled = "reconciled"
+	// voiceLeaveReasonGraceExpired is RT-8's reconnect grace window elapsing
+	// before a replacement socket arrived (voice_grace.go).
+	voiceLeaveReasonGraceExpired = "grace_expired"
 )
 
 // clearVoiceAndUnsubscribe clears c's voice state and drops its voice-topic

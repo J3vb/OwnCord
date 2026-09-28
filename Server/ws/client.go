@@ -153,6 +153,15 @@ func (c *Client) getVoiceState() (int64, string) {
 	return c.voiceChID, c.voiceJoinToken
 }
 
+// getVoiceStateCompleted reports the client's voice channel, join token and
+// whether the join completed (see voiceJoinCompleted), read under one lock
+// acquisition so a concurrent clear cannot split the three views.
+func (c *Client) getVoiceStateCompleted() (int64, string, bool) {
+	c.voiceMu.Lock()
+	defer c.voiceMu.Unlock()
+	return c.voiceChID, c.voiceJoinToken, c.voiceJoinCompleted
+}
+
 func (c *Client) setVoiceState(chID int64, joinToken string) {
 	c.voiceMu.Lock()
 	defer c.voiceMu.Unlock()
