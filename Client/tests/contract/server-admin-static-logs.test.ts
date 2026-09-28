@@ -330,8 +330,7 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const patch = fetchCalls.find((c) => c.path === "/logs/level" && c.method === "PATCH");
     expect(patch).toBeTruthy();
-    expect(patch!.body).toMatchObject({ level: "debug" });
-    expect(patch!.body.duration_seconds).toBe(900);
+    expect(patch!.body).toMatchObject({ level: "debug", duration_seconds: 900 });
     expect(bridge.state.logLevel).toBe("debug");
     expect(adminToggle.getAttribute("aria-checked")).toBe("true");
   });
