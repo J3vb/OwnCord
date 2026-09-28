@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 	"testing/fstest"
 
@@ -187,6 +189,68 @@ func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
 
 	if err := db.CheckBackupIntegrity(context.Background(), filepath.Join(backupDir, "missing.db")); err == nil {
 		t.Fatal("CheckBackupIntegrity accepted a missing file")
+	}
+}
+
+// TestBackupChecks_URIMetacharactersInPath: the restore CLI verifies a file
+// the operator names, and SQLite reads its path as a URI. A '#', '?' or '%' in
+// the name must still check that very file — not open (and create) a
+// different one and report it "ok".
+func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	plain := filepath.Join(backupDir, "plain.db")
+	if err := database.BackupToSafe(context.Background(), plain, backupDir); err != nil {
+		t.Fatalf("BackupToSafe: %v", err)
+	}
+	wantAhead, err := db.CheckBackupSchemaAhead(context.Background(), plain)
+	if err != nil {
+		t.Fatalf("CheckBackupSchemaAhead on the plain name: %v", err)
+	}
+	data, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oddDir := filepath.Join(tmpDir, "odd")
+	if err := os.MkdirAll(oddDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "chat#2%41"
+	if runtime.GOOS != "windows" {
+		name += "?x"
+	}
+	good := filepath.Join(oddDir, name+".db")
+	bad := filepath.Join(oddDir, name+"-bad.db")
+	if err := os.WriteFile(good, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.CheckBackupIntegrity(context.Background(), good); err != nil {
+		t.Fatalf("CheckBackupIntegrity on %q: %v", good, err)
+	}
+	if err := db.CheckBackupIntegrity(context.Background(), bad); err == nil {
+		t.Fatalf("CheckBackupIntegrity accepted the garbage file %q", bad)
+	}
+	gotAhead, err := db.CheckBackupSchemaAhead(context.Background(), good)
+	if err != nil || !slices.Equal(gotAhead, wantAhead) {
+		t.Fatalf("CheckBackupSchemaAhead on %q = %v, %v; want %v", good, gotAhead, err, wantAhead)
+	}
+
+	entries, err := os.ReadDir(oddDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if n := e.Name(); n != filepath.Base(good) && n != filepath.Base(bad) {
+			t.Errorf("the checks created a stray file %q", n)
+		}
 	}
 }
 
