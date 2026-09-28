@@ -91,17 +91,18 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](repo-health-roadmap-2026-08-23.md)             |
 | Current measured baseline  | [b9-entry-baseline-2026-09-23](b9-entry-baseline-2026-09-23.md)                 |
 
-Current ledger summary (updated 2026-09-28): **474 fixed / 2 open / 7 declined / 1 duplicate = 484**
+Current ledger summary (updated 2026-09-28): **474 fixed / 1 open / 7 declined / 1 refuted / 1 duplicate = 484**
 (The B9 exit audit is filed as `OC-0460`–`OC-0479`: thirteen findings fixed by
 PRs [#1802](https://github.com/J3vb/OwnCord/pull/1802),
 [#1798](https://github.com/J3vb/OwnCord/pull/1798) and
 [#1800](https://github.com/J3vb/OwnCord/pull/1800), two declined as
 screen-reader-only work, `OC-0473` fixed by
 [#1858](https://github.com/J3vb/OwnCord/pull/1858), `OC-0474` fixed by
-[#1865](https://github.com/J3vb/OwnCord/pull/1865), and two left open for after the
-beta (`OC-0476`, `OC-0478`). `OC-0454` is declined by owner decision D-09
+[#1865](https://github.com/J3vb/OwnCord/pull/1865), and one left open for after the
+beta (`OC-0476`). `OC-0454` is declined by owner decision D-09
 (Q14), an accepted low with a reopen trigger; `OC-0479`, stale `.golangci.yml`
-comments, is fixed by #1800.
+comments, is fixed by #1800; `OC-0481` (a once-observed operational upload-phase
+ack p99) is refuted by the RE-05 `dev` re-measurement of 2026-09-28.
 OC-0455 to OC-0457, the product causes of the fullstack media e2e flakes, and
 OC-0458, the soak's single-read DOM node sample, are recorded and fixed;
 the fourth observed failure, CI run 35813785291 on PR #1719 (`long-session.spec.ts:176`, the

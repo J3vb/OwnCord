@@ -11137,12 +11137,14 @@
       "evidence": "Run 35856013841, job 107164548275 (operational, constrained, tls off; 2026-09-23, ubuntu-latest shared CI runner): per-phase send -> acknowledgement p95 / p99 ramp 35 / 151 ms, sustain 51 / 176 ms, upload 110 / 301 ms, storm window 102 / 271 ms; run-wide 85 / 266 ms. Published in docs/capacity.md, 'Operational, tls.mode: off'.",
       "suggestedFix": "Re-measure in RE-05 with the spread voice churn (PERF-02 / OC-0480) and file any repeat. Do not change the budget.",
       "confidence": "medium",
-      "status": "open",
+      "status": "refuted",
       "found": "2026-09-27",
       "hunt": "roadmap-next-plan-2026-09-26",
       "lens": "perf",
       "finder": "a8-ci-qa",
-      "note": "Observed once, on a busy shared CI runner; to be re-measured in RE-05. No budget changes."
+      "note": "Observed once, on a busy shared CI runner; re-measured in RE-05 on dev (run 36383239328) and not reproduced. No budget changes.",
+      "refutedDate": "2026-09-28",
+      "rationale": "RE-05's operational re-measurement on dev tip a989b8a8 (run 36383239328) measured the affected property true and the single 301 ms observation did not reproduce. The tls-off upload-phase acknowledgement p99 was 71 ms (per-phase p95 / p99 43 / 71 ms), the self_signed leg's was 65 ms (41 / 65 ms), and each leg's run-wide p99 was 64 ms, all against the unchanged 300 ms budget. With spread voice churn (OC-0480) in place, every operational phase on both TLS legs met every budget. The earlier 301 ms was a busy-runner tail, not a property violation, and no budget was loosened. Published in docs/capacity.md, the two 'Operational on dev' blocks."
     },
     {
       "id": "OC-0482",

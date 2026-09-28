@@ -30,11 +30,24 @@
 # machine budget; the packaging is qualified by B6-1's and B6-2's lifecycle
 # smokes (cmd/smoke, docker-smoke.sh).
 #
-# workflow_dispatch ONLY, and deliberately not part of the blocking CI matrix:
-# a perf run on shared runners is a flake source and a wall-clock tax the
-# pipeline doesn't need. Like the bench baseline, these numbers are recorded
-# and published, never gated. Re-run it deliberately before a release, or
-# after changes to the hub, the write path or the replay budget.
+# workflow_dispatch AND a weekly schedule, and deliberately not part of the
+# blocking CI matrix: a perf run on shared runners is a flake source and a
+# wall-clock tax the pipeline doesn't need. Like the bench baseline, these
+# numbers are recorded and published, never gated.
+#
+# The weekly schedule is RE-05's regression watch: it re-measures the
+# constrained profile once a week and uploads the artifacts, so a capacity
+# regression is visible in the Actions history instead of waiting for someone
+# to dispatch a run. It is inert until this file is carried to the default
+# branch (GitHub registers a `schedule:` only when the file exists on main, the
+# same rule nightly-docker-smoke.yml:14-15 states), and a scheduled run then
+# measures the workflow's own commit, so the wiring here and the harness it
+# drives are always the same revision. To measure dev, dispatch with
+# `--ref dev`. A scheduled run lands its checks on the DEFAULT branch, where no
+# context here is required.
+#
+# Re-run it deliberately before a release, or after changes to the hub, the
+# write path or the replay budget.
 #
 # FOUR PROFILES (B6-10), one cgroup recipe. `inputs.profile` selects the
 # scenario set inside Server/scripts/k6/ws-load.js; the legs and the extra
@@ -73,6 +86,11 @@
 name: Load Baseline
 
 on:
+  # RE-05's weekly regression watch. A schedule only ever runs from the default
+  # branch, so this file does nothing until it reaches main and then measures
+  # main's commit every week.
+  schedule:
+    - cron: "0 6 * * 0"
   workflow_dispatch:
     inputs:
       profile:
@@ -122,7 +140,10 @@ env:
 
 jobs:
   baseline:
-    name: ${{ inputs.profile }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
+    name: ${{ inputs.profile || 'capacity' }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
+    # A scheduled run has no inputs, so every `inputs.X` below carries the
+    # same default the dispatch input declares. `|| 'x'` is the whole of the
+    # scheduled-vs-dispatched logic.
     runs-on: ubuntu-latest
     # 45 min covers every profile whose k6 run is ~4.5 min (60 s ramp + 180 s
     # sustain + 20 s drain) on top of the build, boot and seeding. The ceiling
@@ -131,18 +152,19 @@ jobs:
     # bcrypt cost 12 on two cores (~0.5 s each, ~4 min at the 500 default)
     # before any of it starts — so it gets the headroom the plan's risk row
     # promised rather than a timeout in the middle of a probe.
-    timeout-minutes: ${{ inputs.profile == 'ceiling-search' && 75 || 45 }}
+    timeout-minutes: ${{ (inputs.profile || 'capacity') == 'ceiling-search' && 75 || 45 }}
     # Per-run parameters, so the profile logic is one derive step rather than
     # an `if:` on a dozen steps. These sit at job scope, not workflow scope:
     # `matrix` is not an available context in the workflow-level `env:` block.
     # TLS_MODE is `matrix.tls` (always self_signed outside the operational
     # profile) and drives both the URL scheme and the server's own tls.mode.
     env:
-      PROFILE: ${{ inputs.profile }}
+      PROFILE: ${{ inputs.profile || 'capacity' }}
       TLS_MODE: ${{ matrix.tls }}
-      CEILING_MAX: ${{ inputs.ceiling_max }}
-      SEED_USERS_INPUT: ${{ inputs.users }}
-      CONNECTIONS: ${{ inputs.connections }}
+      CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
+      SEED_USERS_INPUT: ${{ inputs.users || '250' }}
+      CONNECTIONS: ${{ inputs.connections || '100' }}
+      VOICE: ${{ inputs.voice || '25' }}
     strategy:
       fail-fast: false
       matrix:
@@ -155,12 +177,22 @@ jobs:
         # is pinned at self_signed — the shipped default — so the scheme
         # expressions below stay total. The ceiling leg runs only for capacity,
         # as before: it is a labelled headroom check, not a second measurement.
-        leg: ${{ fromJSON(inputs.profile == 'capacity' && '["constrained", "ceiling"]' || '["constrained"]') }}
-        tls: ${{ fromJSON(inputs.profile == 'operational' && '["self_signed", "off"]' || '["self_signed"]') }}
+        leg: ${{ fromJSON((inputs.profile || 'capacity') == 'capacity' && '["constrained", "ceiling"]' || '["constrained"]') }}
+        tls: ${{ fromJSON((inputs.profile || 'capacity') == 'operational' && '["self_signed", "off"]' || '["self_signed"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+
+      # So the log of every run states which commit was measured instead of
+      # leaving it to be re-derived from the trigger.
+      - name: Print checked-out revision
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          echo "event=$EVENT ref=$REF"
+          git rev-parse HEAD
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -548,10 +580,10 @@ jobs:
       # `docker run` text to drift from the line docs/capacity.md publishes.
       #
       # taskset keeps the generators on CPUs 2-3, off the server's cpuset.
-      - name: Run the ${{ inputs.profile }} profile
+      - name: Run the ${{ env.PROFILE }} profile
         id: profile
         env:
-          K6_PROFILE: ${{ inputs.profile }}
+          K6_PROFILE: ${{ env.PROFILE }}
           K6_WS_URL: ${{ env.SUT_WS_URL }}
           K6_HTTP_URL: ${{ env.SUT_HTTP_URL }}
           K6_CHANNEL_ID: ${{ env.CHANNEL_ID }}
@@ -559,16 +591,15 @@ jobs:
           # K6_VOICE_VUS to 0 and registers no voice threshold, so a disabled
           # leg neither fails nor passes vacuously.
           K6_VOICE_CHANNEL_ID: ${{ env.VOICE_LEG == '1' && env.VOICE_ID || '' }}
-          K6_VOICE_VUS: ${{ inputs.voice }}
-          K6_VOICE_CHURN_PHASE: ${{ inputs.churn_phase }}
-          K6_PEAK_VUS: ${{ inputs.connections }}
+          K6_VOICE_VUS: ${{ env.VOICE }}
+          K6_VOICE_CHURN_PHASE: ${{ inputs.churn_phase || 'spread' }}
+          K6_PEAK_VUS: ${{ env.CONNECTIONS }}
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
-          K6_CEILING_MAX: ${{ inputs.ceiling_max }}
+          K6_CEILING_MAX: ${{ env.CEILING_MAX }}
           K6_CEILING_CHANNELS: ${{ env.CEILING_CHANNEL_IDS }}
           K6_RESTART_AT: ${{ env.RESTART_AT }}
           K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
-          INPUTS_VOICE: ${{ inputs.voice }}
           MATRIX_LEG: ${{ matrix.leg }}
         run: |
           mkdir -p Server/scripts/k6/reports
@@ -597,7 +628,7 @@ jobs:
           # operational k6 voice churn, which is why it is not the gate here.
           voice_pid=""
           if [ "$PROFILE" = "capacity" ]; then
-            PUBLISHERS="${INPUTS_VOICE}" SUBSCRIBERS="${INPUTS_VOICE}" \
+            PUBLISHERS="${VOICE}" SUBSCRIBERS="${VOICE}" \
             DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
             LIVEKIT_URL=http://127.0.0.1:7880 \
             REPORT="$WORK/voice-load.txt" \
@@ -715,7 +746,7 @@ jobs:
       # the gate can no longer drift from what an operator sees. A missing or
       # unreadable snapshot fails the gate rather than passing it.
       - name: Assert the ceiling search never hit the topic limiter
-        if: always() && inputs.profile == 'ceiling-search' && matrix.leg == 'constrained'
+        if: always() && env.PROFILE == 'ceiling-search' && matrix.leg == 'constrained'
         run: |
           if ! shed=$(jq -er '.topic_sheds_total' "$WORK/metrics-after.json" 2>/dev/null); then
             echo "::error::metrics-after.json is missing or has no topic_sheds_total, so topic-limiter shedding cannot be checked"
@@ -733,7 +764,7 @@ jobs:
         with:
           # capacity keeps B6-9's exact artifact name, so the published runs
           # stay findable; the other profiles name themselves.
-          name: ${{ inputs.profile == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}', inputs.profile, matrix.leg, matrix.tls == 'off' && '-off' || '') }}
+          name: ${{ env.PROFILE == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}', env.PROFILE, matrix.leg, matrix.tls == 'off' && '-off' || '') }}
           path: |
             ${{ runner.temp }}/loadtest/k6-summary.json
             ${{ runner.temp }}/loadtest/voice-load.txt
