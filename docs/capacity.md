@@ -1079,22 +1079,34 @@ login budget (p95 737 ms against 600 ms) while the two message paths still hold
 (delivery 97 ms, ack 99 ms); step 500 breaks recipient delivery and sender
 acknowledgement together (p95 7.3 s against 200 ms and 150 ms).
 
-**The limiting resource is the single SQLite writer, not the 2 CPUs.** Every
+**Two resources limit the search, one per failing step.** Login breaks at 400
+with the server's CPU near saturation during that step's ramp; the message paths
+break at 500 on the single SQLite writer, with the CPU at its full budget. Every
 step held its population and the search never walked into the topic limiter, so
-the numbers are the server's own. The metric that moves super-linearly is writer
-contention, and nothing shows the box running out of CPU:
+the numbers are the server's own.
 
-- **Writer wait grows roughly two orders of magnitude across the search.** The
-  per-waiting-checkout cost is 0.8 ms at 100, 1.6 ms at 200, **2.0 ms at 300** —
-  then **14.9 ms at 400** and **78.9 ms at 500**. The step-500 window alone
-  records 18,587 writer waits totalling **1,466 s** of waiting, against 3,683
-  waits / 7.4 s at the last step that met every budget. The REST login's session
-  persist shares that one writer, and login is the first budget to break (at 400) while the two message paths still hold there.
-- **The cgroup never approached its CPU budget.** CPU was **0.72 of 2** at the
-  first failing step (400) and 1.11 of 2 averaged at 500 (peak 1.50), and
-  `nr_throttled` rose by just 11 over the whole 498 s run. A server at roughly a
-  third of its CPU at the step where a budget first breaks is queued on the
-  writer, not compute-bound.
+The table's CPU column covers each step's 60 s hold. `ws-load.js` times a VU's
+REST login when it starts, so each step's 100 logins fall in its 30 s ramp, and
+`cpu.stat.log` (5 s samples of `usage_usec`) shows the ramps running much hotter
+than the holds.
+
+- **Login breaks at 400 with the ramp CPU near saturation.** The step-400 ramp
+  averages **1.49 of 2** and peaks at **1.70**. That is the window in which its
+  logins are timed (p95 737 ms against 600 ms). The hold that follows sits at
+  0.72, so the CPU pressure is the login ramp itself, whose bcrypt checks are
+  CPU work. The writer also queues more at this step (per wait 2.0 ms at 300,
+  14.9 ms at 400), and the login's session persist shares it. This run does not
+  separate the two, so the login break is attributed to the ramp CPU and the
+  writer together, not to the writer alone. Both message paths still hold at
+  400 (delivery 97 ms, ack 99 ms).
+- **The message paths break at 500 on the SQLite writer.** The per-waiting
+  checkout cost is 0.8 ms at 100, 1.6 ms at 200, 2.0 ms at 300, 14.9 ms at 400,
+  and **78.9 ms at 500**. The step-500 window alone records 18,587 writer waits
+  totalling **1,466 s** of waiting, against 3,683 waits / 7.4 s at the last step
+  that met every budget. Delivery and ack p95 reach 7.3 s. The ramp CPU at 500
+  averages **1.85 of 2** and peaks at **2.02**, the full budget, and
+  `nr_throttled` goes from 0 to **11** in that ramp. So the writer queue that
+  breaks the message paths forms on a CPU that is also saturated.
 - **The reader pool never queued** — 1,565 reader waits / 5.4 s over the entire
   run — so the contention is the writer's, not the read side.
 - **Dispatch lag is not the limiter.** `ws_dispatch_lag_ms` over the run was p95
@@ -1102,20 +1114,18 @@ contention, and nothing shows the box running out of CPU:
   `hub_seqmu_max_hold_ms` 168.75 ms — the hub's own fan-out serialization stayed
   in the sub-200 ms range the whole run, consistent with OC-0454's finding that
   per-frame fan-out cost does not bind at these counts.
-- **The generator was not the first thing to saturate at the failing steps.** At
-  step 400 the host 4-CPU load average was 3.09 (peak 3.45) with k6 pinned to
-  two CPUs and the server using 0.72 of its two, so the server still had CPU
-  headroom when login first missed; at step 500 the host load average reached
-  3.72 while the server averaged 1.11 of 2. Both failing steps are
-  generator-_contended_ on the host, but the server side of the exchange — the
-  writer queue — is what moved first at 400.
+- **Both failing steps are generator-_contended_ on the host.** At step 400 the
+  host 4-CPU load average was 3.09 (peak 3.45) with k6 pinned to two CPUs; at
+  step 500 it reached 3.72. The server-side signals above (ramp CPU at 400, the
+  writer queue at 500) move with the failing budgets, so the steps are not
+  marked generator-limited.
 
-This is the same property the operational section names: the SQLite writer is
-one checkout at a time, so a per-message hop that is sub-millisecond idle
-becomes a queue once enough senders share it. The ceiling is a **writer-queue
-ceiling at 300 connections** on the 2-vCPU reference box, and the step beyond
-it degrades through that queue rather than through CPU exhaustion. Per PERF-05's
-trigger row, this is _not_ the fan-out CPU limit; it is the write path.
+The last all-budget step is **300 connections** on the 2-vCPU reference box.
+Beyond it, login is the first budget to fail (at 400, near-saturated ramp CPU)
+and the message paths follow at 500 through the writer queue — the operational
+section's property that the SQLite writer is one checkout at a time, so a
+per-message hop that is sub-millisecond idle becomes a queue once enough senders
+share it. Per PERF-05's trigger row, this is _not_ the fan-out CPU limit.
 
 The per-step figures are informational — nothing is gated on the search, and no
 new budget is set by it. The block below is the **superseded 2026-09-16
@@ -1208,7 +1218,7 @@ into the limiter:
 That correction was re-measured on 2026-09-28 (the multi-channel block at the
 top of this section): the corrected search holds every requested population up
 to 500, passes the zero-shedding gate, and locates the last all-budget step at
-**300**, with the **SQLite writer** as the limiting resource at the step beyond
-it. The 2026-09-16 table above remains historical single-channel evidence and is
+**300**. Login breaks first at 400, with near-saturated ramp CPU, and the
+message paths break at 500 on the **SQLite writer**. The 2026-09-16 table above remains historical single-channel evidence and is
 **not** comparable to the multi-channel shape — the new spread changes recipient
 fan-out at every step, including 100.
