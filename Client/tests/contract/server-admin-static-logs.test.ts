@@ -319,4 +319,41 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     search.dispatchEvent(new window.Event("input", { bubbles: true }));
     expect(doc.querySelectorAll("#logOutput .log-line")).toHaveLength(1);
   });
+
+  // Waiting is grey and never healthy: the dot turns live only once the
+  // stream opens, on first connect, after an error, and on resume.
+  it("shows a grey dot while connecting or reconnecting and a live dot only once open", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    const conn = () => [
+      doc.getElementById("logDot")!.className,
+      doc.getElementById("logStatusText")!.textContent,
+    ];
+    const tick = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(conn()).toEqual(["dot-wait", "Connecting..."]);
+    await tick();
+    await tick();
+    FakeEventSource.instances[0]!.onopen?.();
+    expect(conn()).toEqual(["dot-live", "Connected"]);
+
+    FakeEventSource.instances[0]!.onerror?.();
+    expect(conn()).toEqual(["dot-wait", "Reconnecting..."]);
+
+    const pause = doc.getElementById("pauseBtn")!;
+    pause.click();
+    expect(conn()).toEqual(["dot-off", "Paused"]);
+    pause.click();
+    expect(conn()).toEqual(["dot-wait", "Connecting..."]);
+    await tick();
+    await tick();
+    FakeEventSource.instances.at(-1)!.onopen?.();
+    expect(conn()).toEqual(["dot-live", "Connected"]);
+  });
 });

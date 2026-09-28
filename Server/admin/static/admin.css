@@ -517,6 +517,7 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .log-conn{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);min-width:96px}
 .log-conn .dot-live{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 .log-conn .dot-off{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.log-conn .dot-wait{width:8px;height:8px;border-radius:50%;background:var(--text-muted)}
 .level-toggle[aria-pressed="false"]{text-decoration:line-through;border-style:dashed}
 .log-chips{display:inline;white-space:normal}
 .log-chip{display:inline-block;margin:0 4px 0 0;padding:0 6px;border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-normal);font-size:11px;line-height:1.7;word-break:break-all}
