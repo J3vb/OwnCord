@@ -87,11 +87,11 @@ describe("Large Font raises the effective font size (OC-0319)", () => {
     const ac = new AbortController();
     container.appendChild(buildAccessibilityTab(ac.signal));
 
-    // Index 4 is the Large Font toggle (see accessibility-tab.test.ts).
-    (container.querySelectorAll(".toggle")[4] as HTMLElement).click();
+    const largeFont = container.querySelector<HTMLElement>('.toggle[aria-label="Large Font"]')!;
+    largeFont.click();
     expect(fontSize()).toBe("18px");
 
-    (container.querySelectorAll(".toggle")[4] as HTMLElement).click();
+    largeFont.click();
     expect(fontSize()).toBe("14px");
 
     ac.abort();

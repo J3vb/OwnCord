@@ -437,6 +437,36 @@ details.disclose > summary {
 .account-security {
   margin-top: var(--space-6);
 }
+.settings-content h3.setting-group-title {
+  margin: var(--space-5) 0 var(--space-1);
+  color: var(--text-muted);
+}
+.setting-group:first-child h3.setting-group-title {
+  margin-top: 0;
+}
+.setting-row.nested {
+  margin-left: var(--space-6);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border);
+}
+.setting-value {
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+}
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+/* Blocked by the OS: the switch dims, its words stay readable and say why. */
+.setting-row.blocked .toggle {
+  opacity: 0.5;
+}
+.setting-blocked-reason {
+  color: var(--text-warning);
+}
 details.danger-zone > summary {
   color: var(--text-danger);
 }

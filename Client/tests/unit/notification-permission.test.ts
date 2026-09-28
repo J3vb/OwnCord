@@ -55,13 +55,21 @@ function descText(el: HTMLDivElement): string {
   return el.querySelector(".setting-desc")!.textContent!;
 }
 
+/** The permission's status pill: its word and its icon's state class. */
+function pill(el: HTMLDivElement): { text: string; kind: string } {
+  const p = el.querySelector<HTMLElement>("[data-testid='notification-permission-status']")!;
+  const icon = p.querySelector(".st-ic")!;
+  const kind = ["ok", "warn", "crit", "pending"].find((k) => icon.classList.contains(`st-${k}`));
+  return { text: p.textContent!, kind: kind ?? "" };
+}
+
 describe("NotificationsTab — system notification permission", () => {
-  it("reports a granted permission and offers no Allow action", async () => {
+  it("reports a granted permission as an Allowed pill alone, with no Allow action", async () => {
     mockPermissionGranted.mockResolvedValue(true);
     const el = row();
-    await vi.waitFor(() => {
-      expect(descText(el)).toContain("Your system allows OwnCord");
-    });
+    await vi.waitFor(() => expect(pill(el)).toEqual({ text: "Allowed", kind: "ok" }));
+    // Nothing to fix, so no sentence under it.
+    expect(descText(el)).toBe("");
     const allow = el.querySelector("[data-testid='notification-permission-allow']") as HTMLElement;
     expect(allow.hidden).toBe(true);
   });
@@ -71,8 +79,9 @@ describe("NotificationsTab — system notification permission", () => {
     mockRequestPermission.mockResolvedValue(true);
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
+    expect(pill(el)).toEqual({ text: "Blocked", kind: "crit" });
 
     const allow = el.querySelector(
       "[data-testid='notification-permission-allow']",
@@ -80,9 +89,8 @@ describe("NotificationsTab — system notification permission", () => {
     expect(allow.hidden).toBe(false);
     allow.click();
 
-    await vi.waitFor(() => {
-      expect(descText(el)).toContain("Your system allows OwnCord");
-    });
+    await vi.waitFor(() => expect(pill(el)).toEqual({ text: "Allowed", kind: "ok" }));
+    expect(descText(el)).toBe("");
     expect(allow.hidden).toBe(true);
   });
 
@@ -91,12 +99,12 @@ describe("NotificationsTab — system notification permission", () => {
     mockRequestPermission.mockResolvedValue(false);
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
 
     (el.querySelector("[data-testid='notification-permission-allow']") as HTMLElement).click();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
   });
 
@@ -104,8 +112,9 @@ describe("NotificationsTab — system notification permission", () => {
     mockPermissionGranted.mockRejectedValue(new Error("no native notifier"));
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("no system notifier");
+      expect(descText(el)).toBe("This build has no system notifier.");
     });
+    expect(pill(el)).toEqual({ text: "Unavailable", kind: "pending" });
     // No Allow action: permission cannot be asked for where no notifier exists.
     const allow = el.querySelector("[data-testid='notification-permission-allow']") as HTMLElement;
     expect(allow.hidden).toBe(true);
@@ -119,9 +128,10 @@ describe("NotificationsTab — system notification permission", () => {
       const el = row();
       await vi.waitFor(() => {
         expect(descText(el)).toBe(
-          "OwnCord can't read your system notification setting. If notifications don't appear, check your system notification settings.",
+          "If notifications don't appear, check your system notification settings.",
         );
       });
+      expect(pill(el)).toEqual({ text: "Unknown", kind: "pending" });
       const allow = el.querySelector(
         "[data-testid='notification-permission-allow']",
       ) as HTMLElement;
@@ -134,7 +144,7 @@ describe("NotificationsTab — system notification permission", () => {
     mockRequestPermission.mockRejectedValue(new Error("no native notifier"));
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
 
     const allow = el.querySelector(
@@ -142,8 +152,25 @@ describe("NotificationsTab — system notification permission", () => {
     ) as HTMLButtonElement;
     allow.click();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("no system notifier");
+      expect(descText(el)).toBe("This build has no system notifier.");
     });
     expect(allow.hidden).toBe(true);
+  });
+
+  it("dims Desktop Notifications with a reason while blocked, and restores it once allowed", async () => {
+    mockPermissionGranted.mockResolvedValue(false);
+    mockRequestPermission.mockResolvedValue(true);
+    const el = row();
+    const desktopRow = container
+      .querySelector('.toggle[aria-label="Desktop Notifications"]')!
+      .closest<HTMLElement>(".setting-row")!;
+    await vi.waitFor(() => expect(desktopRow.classList.contains("blocked")).toBe(true));
+    const reason = desktopRow.querySelector<HTMLElement>(".setting-blocked-reason")!;
+    expect(reason.hidden).toBe(false);
+    expect(reason.textContent).toBe("Blocked by your system. Allow notifications above.");
+
+    (el.querySelector("[data-testid='notification-permission-allow']") as HTMLElement).click();
+    await vi.waitFor(() => expect(desktopRow.classList.contains("blocked")).toBe(false));
+    expect(reason.hidden).toBe(true);
   });
 });
