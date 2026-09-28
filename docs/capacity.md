@@ -369,6 +369,10 @@ generator saturation alongside it.
 - **If every step holds at `K6_CEILING_MAX`, the answer is "above 500"** and the
   search stops there. It is not chased further on a shared runner.
 
+The corrected search was run on 2026-09-28 (run 36360932108, on `dev`); its
+per-step table and the limiting resource it names are under "Ceiling search" in
+the measured section below.
+
 ### Voice control churn
 
 The voice connections stop joining once and sitting: every `K6_VOICE_CHURN_MS`
@@ -554,6 +558,14 @@ Every number below comes from the **constrained** leg and from nothing else.
 > (the comparison B10 item 8 asks for) is **pending at R6**; until it exists,
 > these branch runs are the only qualifying evidence, and they are published as
 > that. No unresolvable short SHA is presented as a release-revision citation.
+>
+> **Ceiling-search is now a `dev` run (2026-09-28).** The ceiling-search block
+> below was the first qualifying run on a `dev` ancestor — commit `8349ed2e`,
+> dispatched from `dev` itself rather than a measurement branch — so its
+> `commit:` line resolves in a checkout of `dev`. The capacity, operational and
+> restart blocks remain measurement-branch runs (restart's, below, is a
+> superseded one and is no longer published as a latency result). The workflow
+> run id stays the resolvable handle for every block.
 
 ```
 commit:          593c764b2d749a9415741211c01216d9d5da2153  (measurement branch feat/b6-9-published-capacity-profile; not on dev/main)
@@ -632,18 +644,27 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
 The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
 (run 35856013841, on branch `fm/oc-0445-fable`), after OC-0445 found that the
 2026-09-16 operational figures had measured a phase-locked load generator rather
-than the server — the `self_signed` block says how. The restart and
-ceiling-search blocks are still the 2026-09-16 runs from commit `e57335c7`, on
-the branch that added them. None of these SHAs is an ancestor of `dev`/`main`;
-the run id is the resolvable handle. Each block is filled from its own
-**constrained** leg and from nothing else, and the `tls off` block publishes as
-a delta against the `self_signed` one rather than on its own.
+than the server — the `self_signed` block says how. The ceiling-search block was
+re-made on 2026-09-28 from commit `8349ed2e`, dispatched from `dev` itself (run 36360932108) — the first qualifying block on a `dev` ancestor. The restart block
+is still the 2026-09-16 run from commit `e57335c7`, on the branch that added it,
+and its figures are **superseded** — a corrected-harness re-run was dispatched
+on 2026-09-28 but is invalid on its own replay-gap gate (see "Restart under
+load"), so its numbers are not published here and the block stands as historical
+evidence only. Every other block's SHA is a measurement branch, not an ancestor
+of `dev`/`main`, and there the run id is the only resolvable handle. Each block
+is filled from its own **constrained** leg and from nothing else, and the
+`tls off` block publishes as a delta against the `self_signed` one rather than
+on its own.
 
 The budget rows missed under the restart drill are published as missed and are
 findings-ledger entries (OC-0446, OC-0447); neither was re-run on a bigger
-machine and no budget was loosened. The operational profile's two misses were
-OC-0445, and the blocks below are its re-measurement, with the harness
-corrected and the server unchanged.
+machine and no budget was loosened. OC-0447's ceiling-search correction was
+re-measured on 2026-09-28 (run 36360932108) and passes its zero-shedding gate;
+OC-0446's restart correction was re-dispatched the same day but could not be
+published, because the corrected drill trips its own replay-gap validity gate
+(OC-0484). The operational profile's two misses were OC-0445, and the blocks
+below are its re-measurement, with the harness corrected and the server
+unchanged.
 
 #### Operational, `tls.mode: self_signed`
 
@@ -845,6 +866,61 @@ remains `self_signed`.
 
 #### Restart under load
 
+**Not re-measured: both corrected-harness dispatches are invalid on the drill's
+own replay-gap gate.** PERF-03's restart re-run was dispatched twice on `dev` —
+run **36360934015** (commit `8349ed2e`) and the prescribed one-shot rerun
+**36362588641** (commit `a04f8edd`) — and each failed its own
+`ws_replay_gap max==0` validity gate, so neither publishes a latency result:
+
+```
+commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev — ancestor of dev/main)
+date (UTC):      2026-09-28
+workflow run:    36360934015  (.github/workflows/load-baseline.yml, profile=restart)
+job:             108737859472  (restart, constrained, tls self_signed)
+replay gap:      max 9, p95 7, p99 8.01, avg 1.67, med 1, count 100; every resume tier none
+---
+commit:          a04f8edd0b356b6c7794d88bf8d646dc08eb49a4  (on dev — ancestor of dev/main)
+date (UTC):      2026-09-28
+workflow run:    36362588641  (.github/workflows/load-baseline.yml, profile=restart)
+job:             108742581478  (restart, constrained, tls self_signed)
+replay gap:      max 13, avg 1.87, med 0, count 100; every resume tier none
+```
+
+Both runs otherwise behaved: drain 6,165 ms and 6,124 ms with exit 0 (inside the
+30 s drill gate), all 100 `server_restart` frames received, 250/250 drain-window
+sends acknowledged with 0 errored, 0 unanswered and **0 lost**, every resume
+served tier `none` by design. Server loss counters were all zero on both
+(`topic_sheds_total`, `broadcast_drops`, `ws_conn_rejects`, every
+`backpressure_*`), so the non-zero gap is not shedding — it is the resume-window
+subscription gap below. **The corrected windows themselves measure cleanly and
+are what the re-run was for**: pre-restart delivery p95 **45 ms** / ack 44 ms
+over 371,133 delivery samples, post-restart delivery p95 **47 ms** / ack 46 ms
+over 371,250 — equal-length steady windows now, with the ~10× imbalance OC-0446
+described gone. But the replay-gap gate fails, and a latency figure is only
+published off a run whose own validity gates pass, so no per-side or settled
+p95 is published here.
+
+The gap is a real property of the post-restart resume, not a harness artifact
+(**OC-0484**): `active_channel_id` is honoured only inside `handleReconnect`,
+and only after its final `mustFullResync` check passes
+(`Server/ws/replay.go`). A restart renumbers the sequence space, so every
+post-restart resume is forced onto the full-resync path _before_ that check,
+and `handleFreshConnect` then registers the socket with `channelID` still 0 — it
+subscribes no `ChannelTopic`. Channel frames broadcast between `auth_ok` and the
+client's post-`auth_ok` `channel_focus` reach nobody on that socket, and the
+client tracks only `max(seq)`, so the hole is silent and permanent until the
+user re-mounts the channel. The 2026-09-16 run below measured gap 0 under the
+same harness logic; the corrected drill reconnects all 100 sockets at 135 s
+under full fan-out rather than 90 s, and the difference is not attributed beyond
+that — what is certain is that the code path above cannot restore the
+subscription either way, so the mitigation is a server change (honour
+`active_channel_id` on the full-ready path too). That belongs to the fix, not to
+a bigger machine or a re-run, and this document does not publish a number around
+it.
+
+The block below is the **superseded 2026-09-16 measurement**, kept as historical
+evidence for OC-0446 and not a current result:
+
 ```
 commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
 date (UTC):      2026-09-16
@@ -941,13 +1017,110 @@ it.** Three things changed, none of which re-measures anything published here:
   when a window did not carry the workload — a comparison between two windows
   is worthless if either was empty.
 
-The next restart run must validate these windows and publish the recovery and
-settled p95s with their counts; the harness correction alone establishes no
-new latency result. The
-34/51 ms and 393/452 ms above remain what that run measured, and remain not an
-equal-load comparison.
+The corrected drill was dispatched on 2026-09-28 (the two runs above) and its
+equal windows now measure cleanly, but its replay-gap gate fails on OC-0484, so
+it publishes no latency result. The 34/51 ms and 393/452 ms above remain what
+the 2026-09-16 run measured, and remain not an equal-load comparison. A restart
+latency figure is republished once the full-resync subscription gap is fixed and
+a fresh corrected-harness run passes its own gates.
 
 #### Ceiling search
+
+**The re-measured multi-channel search is published here.** This is the run
+PERF-03 exists for: the corrected harness (OC-0447), dispatched from `dev`
+itself, with the zero-shedding gate passing.
+
+```
+commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev — ancestor of dev/main)
+date (UTC):      2026-09-28
+workflow run:    36360932108  (.github/workflows/load-baseline.yml, profile=ceiling-search)
+job:             108737854635  (ceiling-search, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6, pinned to CPUs 2-3 with taskset (no voice leg on this profile)
+```
+
+501 users seeded (one per probe slot for the 500 step), `obs_ws_conn_rejects`
+**0** — so no figure below is a configuration cap — `login_giveups` 0 (one login
+was refused by the bcrypt admission budget and retried — `auth_admission_refused`
+1), and `topic_sheds_total` **0** with no `topic rate limit exceeded` line: every
+step was limited by the server, not by the topic limiter or a config default.
+The cohort is spread over 11 text channels (`CEILING_CHANNELS=11`) at the 2 s
+send interval, so the total offer is `N × 1000 / 2000` messages/s with no
+channel above its share of the 100/s limiter. Every requested population was
+held: `obs_connected_users` was exactly 100 / 200 / 300 / 400 / 500 at each
+step's hold, and each step's `ws_connections` arrivals were 100 (its own ramp).
+The observed total send-attempt rate matched the planned rate through step 400
+(50.0, 100.0, 150.0, 199.9/s against 50/100/150/200 planned); it read high at
+step 500 (281.7/s observed against 250 planned), which is the generator bunching
+frames as the server's ack path slows — generator-side evidence, not admission.
+
+| Step | Held (`obs_connected_users`) | Delivery p95 / p99    | Sender ack p95 / p99  | Login p95 / p99    | `auth_ok` p95 | Writer wait (step total; per wait) | Server CPU (avg / peak of 2) | Host loadavg (avg / peak) |
+| ---- | ---------------------------- | --------------------- | --------------------- | ------------------ | ------------- | ---------------------------------- | ---------------------------- | ------------------------- |
+| 100  | 100                          | **6 / 8 ms**          | **5 / 8 ms**          | 269 / 272 ms       | 3 ms          | 1.0 s; 0.8 ms                      | 0.12 / 0.26                  | 0.69 / 1.05               |
+| 200  | 200                          | **15 / 22 ms**        | **14 / 21 ms**        | 275 / 283 ms       | 8 ms          | 4.8 s; 1.6 ms                      | 0.25 / 0.26                  | 2.19 / 2.68               |
+| 300  | 300                          | **30 / 60 ms**        | **30 / 59 ms**        | **352 / 361 ms**   | 7 ms          | 7.4 s; 2.0 ms                      | 0.46 / 0.47                  | 2.23 / 2.69               |
+| 400  | 400                          | 97 / 286 ms           | 99 / 287 ms           | **737 / 1,362 ms** | 83 ms         | 80.7 s; 14.9 ms                    | 0.72 / 0.75                  | 3.09 / 3.45               |
+| 500  | 500                          | **7,331 / 11,618 ms** | **7,253 / 11,533 ms** | 2,573 / 2,866 ms   | 818 ms        | 1,466.2 s; 78.9 ms                 | 1.11 / 1.50                  | 3.58 / 3.72               |
+
+(Budgets, from the table at the top of this document: REST login 600 ms / 1 s;
+WebSocket open → `auth_ok` 200 / 500 ms; send → sender acknowledgement
+150 / 300 ms; send → recipient delivery 200 / 400 ms.)
+
+**The last step at which every budget held is 300.** Step 400 breaks the REST
+login budget (p95 737 ms against 600 ms) while the two message paths still hold
+(delivery 97 ms, ack 99 ms); step 500 breaks recipient delivery and sender
+acknowledgement together (p95 7.3 s against 200 ms and 150 ms).
+
+**The limiting resource is the single SQLite writer, not the 2 CPUs.** Every
+step held its population and the search never walked into the topic limiter, so
+the numbers are the server's own. The metric that moves super-linearly is writer
+contention, and nothing shows the box running out of CPU:
+
+- **Writer wait grows roughly two orders of magnitude across the search.** The
+  per-waiting-checkout cost is 0.8 ms at 100, 1.6 ms at 200, **2.0 ms at 300** —
+  then **14.9 ms at 400** and **78.9 ms at 500**. The step-500 window alone
+  records 18,587 writer waits totalling **1,466 s** of waiting, against 3,683
+  waits / 7.4 s at the last step that met every budget. The REST login's session
+  persist shares that one writer, and login is the first budget to break (at 400) while the two message paths still hold there.
+- **The cgroup never approached its CPU budget.** CPU was **0.72 of 2** at the
+  first failing step (400) and 1.11 of 2 averaged at 500 (peak 1.50), and
+  `nr_throttled` rose by just 11 over the whole 498 s run. A server at roughly a
+  third of its CPU at the step where a budget first breaks is queued on the
+  writer, not compute-bound.
+- **The reader pool never queued** — 1,565 reader waits / 5.4 s over the entire
+  run — so the contention is the writer's, not the read side.
+- **Dispatch lag is not the limiter.** `ws_dispatch_lag_ms` over the run was p95
+  2 ms / p99 10 ms / max 160 ms, `ws_broadcast_ms` the same shape, and
+  `hub_seqmu_max_hold_ms` 168.75 ms — the hub's own fan-out serialization stayed
+  in the sub-200 ms range the whole run, consistent with OC-0454's finding that
+  per-frame fan-out cost does not bind at these counts.
+- **The generator was not the first thing to saturate at the failing steps.** At
+  step 400 the host 4-CPU load average was 3.09 (peak 3.45) with k6 pinned to
+  two CPUs and the server using 0.72 of its two, so the server still had CPU
+  headroom when login first missed; at step 500 the host load average reached
+  3.72 while the server averaged 1.11 of 2. Both failing steps are
+  generator-_contended_ on the host, but the server side of the exchange — the
+  writer queue — is what moved first at 400.
+
+This is the same property the operational section names: the SQLite writer is
+one checkout at a time, so a per-message hop that is sub-millisecond idle
+becomes a queue once enough senders share it. The ceiling is a **writer-queue
+ceiling at 300 connections** on the 2-vCPU reference box, and the step beyond
+it degrades through that queue rather than through CPU exhaustion. Per PERF-05's
+trigger row, this is _not_ the fan-out CPU limit; it is the write path.
+
+The per-step figures are informational — nothing is gated on the search, and no
+new budget is set by it. The block below is the **superseded 2026-09-16
+single-channel run**, kept as historical evidence for OC-0447 and not a current
+result:
 
 ```
 commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
@@ -1011,8 +1184,8 @@ The rest of what the run says, for whoever re-runs it:
 - The per-step figures are informational. Nothing is gated on them and no new
   budget is set by them.
 
-**The harness has since been corrected (OC-0447), and the figures above predate
-it.** The search no longer walks into the limiter:
+**The harness has since been corrected (OC-0447).** The search no longer walks
+into the limiter:
 
 - **The cohort is spread across channels with enforced headroom.** The earlier
   correction seeded `ceil(ceiling_max / 150)` channels but allowed missing or
@@ -1032,9 +1205,10 @@ it.** The search no longer walks into the limiter:
   are **inconclusive rather than a ceiling**. `CEILING_CHANNELS` is printed in
   the failure so the fix is one input away.
 
-The table above remains historical evidence from the single-channel run.
-The new spread changes recipient fan-out at **every** step, including 100;
-none of the old latency figures qualifies this multi-channel shape. The next
-constrained run must hold each requested population, show the unchanged total
-send rate and per-channel headroom, and pass the zero-shedding log gate before
-publishing a new per-step budget table or a hardware-ceiling claim.
+That correction was re-measured on 2026-09-28 (the multi-channel block at the
+top of this section): the corrected search holds every requested population up
+to 500, passes the zero-shedding gate, and locates the last all-budget step at
+**300**, with the **SQLite writer** as the limiting resource at the step beyond
+it. The 2026-09-16 table above remains historical single-channel evidence and is
+**not** comparable to the multi-channel shape — the new spread changes recipient
+fan-out at every step, including 100.
