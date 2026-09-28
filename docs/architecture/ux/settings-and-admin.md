@@ -85,7 +85,7 @@ success message with a soft note, never a red error. (Server contract:
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
 
-**Recovery kit (B7-15b).** A section beside 2FA shows the kit status from
+**Recovery kit (B7-15b).** A row beside 2FA in the Security card shows the kit status from
 `GET /users/me/recovery-kit` — Enrolled, Used (spent by a recovery) or Not set
 up — and "Create"/"Replace recovery kit" behind a password confirm →
 `POST /users/me/recovery-kit`, which returns the server-generated secret once.

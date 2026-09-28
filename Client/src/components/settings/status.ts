@@ -41,8 +41,64 @@ export function createDisclosure(label: string): {
   const summary = createElement("summary", {});
   const count = createElement("span", { class: "disclose-count" });
   summary.appendChild(createIcon("chevron-right", 16));
-  // The space keeps the label and count apart in the accessible name.
-  summary.append(createElement("span", { class: "disclose-label" }, label), " ", count);
+  // One text block beside the chevron, so a narrow pane wraps words, not the
+  // icon; the space keeps label and count apart in the accessible name.
+  const text = createElement("span", {});
+  text.append(createElement("span", { class: "disclose-label" }, label), " ", count);
+  summary.appendChild(text);
   details.appendChild(summary);
   return { details, count };
+}
+
+/**
+ * A status row: icon, name and result on one line, then a full-width body.
+ * The caller paints the icon (`setStatusIcon`), fills the result and adds any
+ * action between result and body.
+ */
+export function createStatusRow(
+  name: string,
+  testId: string,
+): { row: HTMLLIElement; icon: HTMLSpanElement; result: HTMLSpanElement; body: HTMLDivElement } {
+  const row = createElement("li", { class: "status-item", "data-testid": testId });
+  const icon = statusIcon("pending");
+  const result = createElement("span", { class: "status-result" });
+  const body = createElement("div", { class: "status-body" });
+  row.append(icon, createElement("span", { class: "status-name" }, name), result, body);
+  return { row, icon, result, body };
+}
+
+let revealIds = 0;
+
+/**
+ * A secondary button that shows and hides `panel` (hidden to start), with
+ * aria-expanded and aria-controls kept in step.
+ */
+export function createRevealToggle(
+  label: string,
+  panel: HTMLElement,
+  signal: AbortSignal,
+  testId: string,
+): HTMLButtonElement {
+  if (panel.id === "") panel.id = `settings-reveal-${++revealIds}`;
+  panel.hidden = true;
+  const button = createElement(
+    "button",
+    {
+      class: "ac-btn secondary",
+      type: "button",
+      "aria-expanded": "false",
+      "aria-controls": panel.id,
+      "data-testid": testId,
+    },
+    label,
+  );
+  button.addEventListener(
+    "click",
+    () => {
+      panel.hidden = !panel.hidden;
+      button.setAttribute("aria-expanded", String(!panel.hidden));
+    },
+    { signal },
+  );
+  return button;
 }

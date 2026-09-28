@@ -44,6 +44,9 @@ export interface MemberListOptions {
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
   /** Start a DM with a user (wires the profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
+  /** Call a user: open (or create) the 1:1 DM with them and start a call in
+   *  it (wires the profile popup's Call button, BUG-05). */
+  readonly onCallUser?: (userId: number) => void;
   /** Report a user to this server's moderators (the profile popup's Report button, B9-10). */
   readonly onReportUser?: (userId: number, name: string) => void;
 }
@@ -284,6 +287,7 @@ function createMemberItem(
     const currentUserId = authStore.getState().user?.id ?? 0;
     const isSelf = member.id === currentUserId;
     const onMessageUser = opts.onMessageUser;
+    const onCallUser = opts.onCallUser;
     const onReportUser = opts.onReportUser;
     // `member` is the row's render-time snapshot; a presence-only update
     // (see patchPresence) recolors the dot in place without rebuilding the
@@ -312,6 +316,9 @@ function createMemberItem(
           ...(isSelf || onMessageUser === undefined
             ? {}
             : { onMessage: (userId: number) => onMessageUser(userId) }),
+          ...(isSelf || onCallUser === undefined
+            ? {}
+            : { onCall: (userId: number) => onCallUser(userId) }),
           ...(isSelf || onReportUser === undefined
             ? {}
             : { onReport: (userId: number) => onReportUser(userId, memberDisplayName(live)) }),

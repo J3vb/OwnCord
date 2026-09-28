@@ -19,6 +19,11 @@ import {
 } from "@lib/livekitSession";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
+import type { StreamInfo } from "./video-grid/stream-info";
+import type { StreamSample } from "../features/voice/remoteTracks";
+
+/** How often a watched stream's quality chip refreshes. */
+const STATS_POLL_MS = 2000;
 
 const log = createLogger("VideoGrid");
 
@@ -40,6 +45,18 @@ export interface TileConfig {
 export interface VideoGridCallbacks {
   /** Stop sharing, from the cover on your own screen-share preview. */
   readonly onStopSharing?: () => void;
+  /** Keep the app window's full-screen state in step with a tile's. In a
+   *  Tauri window, HTML full screen may fill only the webview (WebView2), so
+   *  the window itself goes full screen too. */
+  readonly setWindowFullscreen?: (on: boolean) => Promise<void>;
+  /** The call controls a full-screen tile keeps at hand. */
+  readonly callControls?: {
+    readonly onMuteToggle: () => void;
+    readonly onDeafenToggle: () => void;
+    readonly onLeave: () => void;
+  };
+  /** One receiver sample for a remote tile's quality chip, or null. */
+  readonly getStreamStats?: (tileId: number) => Promise<StreamSample | null>;
 }
 
 /** Someone in the call the host wants drawn as an avatar tile while they have
@@ -69,6 +86,8 @@ export interface VideoGridComponent extends MountableComponent {
   /** Ring the camera tiles of the users speaking now. */
   setSpeaking(userIds: ReadonlySet<number>): void;
   setCallbacks(callbacks: VideoGridCallbacks): void;
+  /** Your mute and deafen state, for a full-screen tile's call controls. */
+  setCallState(state: { readonly muted: boolean; readonly deafened: boolean }): void;
 }
 
 /** Create a fresh volume icon element. */
@@ -172,6 +191,29 @@ function tileButton(
   return btn;
 }
 
+/** A call control on a full-screen tile. */
+function callButton(
+  label: string,
+  icon: IconName,
+  id: string,
+  onClick: () => void,
+  cls = "",
+): HTMLButtonElement {
+  const btn = createElement("button", {
+    type: "button",
+    class: `video-fs-btn${cls}`,
+    "aria-label": label,
+    title: label,
+    "data-call-control": id,
+  });
+  btn.appendChild(createIcon(icon, 18));
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onClick();
+  });
+  return btn;
+}
+
 interface CellEntry {
   el: HTMLDivElement;
   config?: TileConfig;
@@ -182,6 +224,8 @@ interface CellEntry {
   name: string;
   /** Draw a volume set elsewhere (remote tiles only). */
   applyVolume?: (volume: number, muted: boolean) => void;
+  /** The previous receiver sample, for the frame rate. */
+  prevSample?: StreamSample;
 }
 
 /** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
@@ -286,6 +330,14 @@ function buildVolumeControls(config: TileConfig): {
   };
 }
 
+/** F without a modifier, and not typed into a text field. */
+function isFullscreenKey(e: KeyboardEvent): boolean {
+  const typing =
+    (e.target instanceof HTMLInputElement && e.target.type !== "range") ||
+    e.target instanceof HTMLTextAreaElement;
+  return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
   const cells = new Map<number, CellEntry>();
@@ -296,6 +348,14 @@ export function createVideoGrid(): VideoGridComponent {
   let resizeRafId = 0;
   let callbacks: VideoGridCallbacks = {};
   let speaking: ReadonlySet<number> = new Set();
+  /** The tile in HTML full screen, or in the theatre fallback. */
+  let fullscreenTile: number | null = null;
+  let theatreTile: number | null = null;
+  let callState = { muted: false, deafened: false };
+  let statsTimer: ReturnType<typeof setInterval> | null = null;
+  let statsTile: number | null = null;
+  /** Owns the grid's document listeners (full-screen changes, theatre keys). */
+  const gridListeners = new Disposable();
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
   function applyGridSizes(): void {
@@ -468,11 +528,9 @@ export function createVideoGrid(): VideoGridComponent {
     const savedFocus = captureFocusedControl();
     syncTileNav();
 
-    // Clear root children (we'll re-append in focus layout order)
-    while (root.firstChild) root.removeChild(root.firstChild);
-
     if (focusedTileId === null || cells.size === 0) {
       // No focus — use regular flex-wrap layout
+      while (root.firstChild) root.removeChild(root.firstChild);
       root.classList.remove("focus-mode");
       for (const el of allTiles()) {
         el.classList.remove("focused", "thumb");
@@ -492,15 +550,20 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     // Main area
-    const mainArea = createElement("div", { class: "video-focus-main" });
+    const mainArea =
+      root.querySelector<HTMLDivElement>(":scope > .video-focus-main") ??
+      createElement("div", { class: "video-focus-main" });
+    for (const child of Array.from(root.childNodes)) if (child !== mainArea) child.remove();
     // Strip area
     const stripArea = createElement("div", { class: "video-focus-strip" });
 
     const focusedEntry = cells.get(focusedTileId);
-    if (focusedEntry !== undefined) {
+    if (focusedEntry === undefined) {
+      mainArea.replaceChildren();
+    } else {
       focusedEntry.el.classList.add("focused");
       focusedEntry.el.classList.remove("thumb");
-      mainArea.appendChild(focusedEntry.el);
+      if (focusedEntry.el.parentNode !== mainArea) mainArea.replaceChildren(focusedEntry.el);
     }
 
     for (const [id, entry] of cells) {
@@ -515,7 +578,7 @@ export function createVideoGrid(): VideoGridComponent {
       stripArea.appendChild(el);
     }
 
-    root.appendChild(mainArea);
+    if (mainArea.parentNode !== root) root.appendChild(mainArea);
     // Only show strip if there are thumbnails
     if (stripArea.childElementCount > 0) {
       root.appendChild(stripArea);
@@ -525,8 +588,236 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function setFocusedTile(tileId: number | null): void {
+    const watching = fullscreenTile ?? theatreTile;
+    if (watching !== null && watching !== tileId) leaveFullscreen();
     focusedTileId = tileId;
     rebuildFocusLayout();
+    syncStatsPolling();
+  }
+
+  // --- Full screen -----------------------------------------------------------
+
+  function isFullscreen(tileId: number): boolean {
+    return fullscreenTile === tileId || theatreTile === tileId;
+  }
+
+  function toggleFullscreen(tileId: number): void {
+    const entry = cells.get(tileId);
+    if (entry === undefined) return;
+    if (isFullscreen(tileId)) {
+      leaveFullscreen();
+      return;
+    }
+    if (focusedTileId !== tileId) setFocusedTile(tileId);
+    const request = entry.el.requestFullscreen as (() => Promise<void>) | undefined;
+    if (typeof request !== "function") {
+      enterTheatre(tileId);
+      return;
+    }
+    // The fullscreenchange listener draws the result; a refusal falls back
+    // to a window-filling view.
+    request.call(entry.el).catch(() => enterTheatre(tileId));
+  }
+
+  function leaveFullscreen(): void {
+    if (theatreTile !== null) {
+      leaveTheatre();
+      return;
+    }
+    if (document.fullscreenElement !== null && document.fullscreenElement !== undefined) {
+      void document.exitFullscreen().catch((err: unknown) => {
+        log.debug("Exit full screen failed", { err });
+      });
+    }
+  }
+
+  function enterTheatre(tileId: number): void {
+    const entry = cells.get(tileId);
+    if (entry === undefined) return;
+    theatreTile = tileId;
+    entry.el.classList.add("video-cell--theatre");
+    syncFullscreenUi();
+    void callbacks.setWindowFullscreen?.(true).catch(() => {});
+  }
+
+  function leaveTheatre(): void {
+    const entry = theatreTile === null ? undefined : cells.get(theatreTile);
+    entry?.el.classList.remove("video-cell--theatre");
+    theatreTile = null;
+    syncFullscreenUi();
+    void callbacks.setWindowFullscreen?.(false).catch(() => {});
+  }
+
+  /** Escape or F leaves the theatre fallback wherever focus is: a click on the
+   *  video moves it to the grid, outside the tile (HTML full screen handles
+   *  its own Escape). A tile's F handler has already acted when it prevented
+   *  the default. */
+  function onTheatreKey(e: KeyboardEvent): void {
+    if (theatreTile === null || e.defaultPrevented) return;
+    if (e.key !== "Escape" && !isFullscreenKey(e)) return;
+    e.preventDefault();
+    leaveTheatre();
+  }
+
+  function onFullscreenChange(): void {
+    const el = document.fullscreenElement ?? null;
+    let next: number | null = null;
+    for (const [id, entry] of cells) if (entry.el === el) next = id;
+    const was = fullscreenTile;
+    fullscreenTile = next;
+    if (was === next) return;
+    syncFullscreenUi();
+    void callbacks.setWindowFullscreen?.(next !== null).catch(() => {});
+  }
+
+  /** Label the full-screen buttons and give a full-screen tile the call
+   *  controls, so you can mute or leave without leaving full screen. */
+  function syncFullscreenUi(): void {
+    for (const [id, entry] of cells) {
+      const on = isFullscreen(id);
+      const btn = entry.el.querySelector<HTMLButtonElement>("[data-tile-control='fullscreen']");
+      if (btn !== null) {
+        const text = on ? voiceText("tile.exitFullscreen") : voiceText("tile.fullscreen");
+        btn.setAttribute("aria-label", text);
+        btn.title = text;
+        btn.querySelector("svg")?.remove();
+        btn.appendChild(createIcon(on ? "minimize" : "maximize", 18));
+      }
+      const calls = entry.el.querySelector(".video-fs-calls");
+      if (on && calls === null && callbacks.callControls !== undefined) {
+        entry.el.appendChild(buildCallControls(callbacks.callControls));
+      } else if (!on) {
+        calls?.remove();
+      }
+    }
+    syncStatsPolling();
+  }
+
+  function buildCallControls(cc: NonNullable<VideoGridCallbacks["callControls"]>): HTMLElement {
+    const bar = createElement("div", {
+      class: "video-fs-calls",
+      role: "toolbar",
+      "aria-label": voiceText("tile.callControls"),
+    });
+    appendChildren(
+      bar,
+      callButton(voiceText("widget.control.mute"), "mic", "mute", cc.onMuteToggle),
+      callButton(voiceText("widget.control.deafen"), "headphones", "deafen", cc.onDeafenToggle),
+      callButton(
+        voiceText("tile.leaveCall"),
+        "phone-off",
+        "leave",
+        cc.onLeave,
+        " video-fs-btn--leave",
+      ),
+    );
+    drawCallState(bar);
+    return bar;
+  }
+
+  function drawCallState(bar: Element): void {
+    const mute = bar.querySelector<HTMLElement>("[data-call-control='mute']");
+    const deafen = bar.querySelector<HTMLElement>("[data-call-control='deafen']");
+    if (mute !== null) {
+      mute.setAttribute("aria-pressed", String(callState.muted));
+      mute.querySelector("svg")?.remove();
+      mute.appendChild(createIcon(callState.muted ? "mic-off" : "mic", 18));
+    }
+    if (deafen !== null) {
+      deafen.setAttribute("aria-pressed", String(callState.deafened));
+      deafen.querySelector("svg")?.remove();
+      deafen.appendChild(createIcon(callState.deafened ? "headphones-off" : "headphones", 18));
+    }
+  }
+
+  // --- Stream info -------------------------------------------------------------
+
+  /** Poll the stream you are watching (focused or full screen), and only it. */
+  function syncStatsPolling(): void {
+    const target = fullscreenTile ?? theatreTile ?? focusedTileId;
+    const entry = target === null ? undefined : cells.get(target);
+    const wanted =
+      entry !== undefined && entry.config !== undefined && !entry.config.isSelf ? target : null;
+    if (wanted === statsTile) return;
+    if (statsTimer !== null) {
+      clearInterval(statsTimer);
+      statsTimer = null;
+    }
+    statsTile = wanted;
+    if (wanted === null) return;
+    const poll = (): void => void pollStats(wanted);
+    poll();
+    statsTimer = setInterval(poll, STATS_POLL_MS);
+  }
+
+  async function pollStats(tileId: number): Promise<void> {
+    const entry = cells.get(tileId);
+    if (entry === undefined) return;
+    let sample: StreamSample | null = null;
+    try {
+      sample = (await callbacks.getStreamStats?.(tileId)) ?? null;
+    } catch (err) {
+      log.debug("Stream stats unavailable", { tileId, err });
+    }
+    // Loaded on first use: only a watched stream needs the readout.
+    infoModule ??= await import("./video-grid/stream-info");
+    const { chipText, renderStats, streamInfo } = infoModule;
+    if (statsTile !== tileId || cells.get(tileId) !== entry) return;
+    const video = entry.el.querySelector("video");
+    const info =
+      sample !== null
+        ? streamInfo(sample, entry.prevSample)
+        : { width: video?.videoWidth, height: video?.videoHeight };
+    if (sample !== null) entry.prevSample = sample;
+    const chip = entry.el.querySelector<HTMLButtonElement>(".video-quality");
+    const text = chipText(info);
+    if (chip !== null) {
+      chip.hidden = text === null;
+      if (text !== null) {
+        chip.textContent = text.text;
+        chip.setAttribute("aria-label", text.label);
+      }
+    }
+    const pop = entry.el.querySelector<HTMLElement>(".video-stats");
+    if (pop !== null) renderStats(pop, entry.name, info);
+    lastInfo.set(tileId, info);
+  }
+
+  const lastInfo = new Map<number, StreamInfo>();
+  /** The readout module, once a poll has loaded it (the chip shows only
+   *  after one has). */
+  let infoModule: typeof import("./video-grid/stream-info") | null = null;
+
+  function toggleStats(tileId: number, chip: HTMLButtonElement): void {
+    const entry = cells.get(tileId);
+    if (entry === undefined) return;
+    const open = entry.el.querySelector<HTMLElement>(".video-stats");
+    if (open !== null) {
+      open.remove();
+      chip.setAttribute("aria-expanded", "false");
+      return;
+    }
+    const pop = createElement("div", {
+      class: "video-stats",
+      role: "dialog",
+      "aria-label": voiceText("tile.stats"),
+      tabindex: "-1",
+    });
+    infoModule?.renderStats(pop, entry.name, lastInfo.get(tileId) ?? {});
+    pop.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        pop.remove();
+        chip.setAttribute("aria-expanded", "false");
+        chip.focus();
+      },
+      { signal: entry.listeners.signal },
+    );
+    entry.el.appendChild(pop);
+    chip.setAttribute("aria-expanded", "true");
+    pop.focus();
   }
 
   function getFocusedTileIdFn(): number | null {
@@ -577,8 +868,9 @@ export function createVideoGrid(): VideoGridComponent {
     if (settings.height !== undefined && settings.frameRate !== undefined) {
       parts.push(
         voiceText("tile.shareQuality", {
-          height: settings.height,
-          fps: Math.round(settings.frameRate),
+          // Plain strings: the catalog would group 1080 as "1,080".
+          height: String(settings.height),
+          fps: String(Math.round(settings.frameRate)),
         }),
       );
     }
@@ -678,13 +970,46 @@ export function createVideoGrid(): VideoGridComponent {
     if (config?.isScreenshare === true) {
       label.appendChild(createElement("span", { class: "video-live" }, voiceText("tile.live")));
     }
+    if (config !== undefined && !config.isSelf) {
+      // Filled by the stats poll while you watch this stream.
+      const chip = createElement("button", {
+        type: "button",
+        class: "video-quality",
+        "aria-expanded": "false",
+        "data-tile-control": "stats",
+      });
+      chip.hidden = true;
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleStats(userId, chip);
+      });
+      label.appendChild(chip);
+    }
 
     const nav = createElement("div", { class: "video-tile-nav" });
     const back = tileButton(voiceText("tile.backToGrid"), "layout-grid", "grid", () =>
       setFocusedTile(null),
     );
     back.hidden = true;
-    nav.appendChild(back);
+    // Pop out is the platform's picture-in-picture: no second window and no
+    // second subscription. Hidden where it is unavailable (WebKitGTK).
+    const pip = tileButton(voiceText("tile.popOut"), "picture-in-picture-2", "pip", () => {
+      if (document.pictureInPictureElement === video) {
+        void document.exitPictureInPicture().catch(() => {});
+        return;
+      }
+      video.requestPictureInPicture?.().catch((err: unknown) => {
+        log.debug("Pop out refused", { userId, err });
+      });
+    });
+    pip.hidden = !(
+      document.pictureInPictureEnabled === true &&
+      typeof video.requestPictureInPicture === "function"
+    );
+    const fullscreen = tileButton(voiceText("tile.fullscreen"), "maximize", "fullscreen", () =>
+      toggleFullscreen(userId),
+    );
+    appendChildren(nav, back, pip, fullscreen);
 
     appendChildren(cell, video, select, label, nav);
     // A click anywhere on a filmstrip thumb (not on one of its controls)
@@ -695,6 +1020,28 @@ export function createVideoGrid(): VideoGridComponent {
     });
 
     const entry: CellEntry = { el: cell, config, listeners: new Disposable(), name: "" };
+    // F toggles full screen from anywhere in the tile (not while typing), a
+    // double-click too. The theatre fallback's own keys are on the document
+    // (onTheatreKey).
+    cell.addEventListener(
+      "keydown",
+      (e) => {
+        if (isFullscreenKey(e)) {
+          e.preventDefault();
+          toggleFullscreen(userId);
+        }
+      },
+      { signal: entry.listeners.signal },
+    );
+    cell.addEventListener(
+      "dblclick",
+      (e) => {
+        const skip = "button:not(.video-cell-select), input, .context-menu";
+        if ((e.target as Element).closest(skip) !== null) return;
+        toggleFullscreen(userId);
+      },
+      { signal: entry.listeners.signal },
+    );
     // Remote tiles: volume, Stop watching and the tile menu.
     if (config !== undefined && !config.isSelf) {
       const volume = buildVolumeControls(config);
@@ -803,6 +1150,8 @@ export function createVideoGrid(): VideoGridComponent {
       entry.trackCleanup = undefined;
     }
     entry.listeners.destroy();
+    if (theatreTile === userId) leaveTheatre();
+    lastInfo.delete(userId);
 
     const video = entry.el.querySelector("video");
     if (video !== null) video.srcObject = null;
@@ -823,6 +1172,7 @@ export function createVideoGrid(): VideoGridComponent {
     } else {
       relayout();
     }
+    syncStatsPolling();
     restoreFocusedControl(savedFocus);
   }
 
@@ -866,6 +1216,10 @@ export function createVideoGrid(): VideoGridComponent {
       tabindex: "-1",
     });
     container.appendChild(root);
+    document.addEventListener("fullscreenchange", onFullscreenChange, {
+      signal: gridListeners.signal,
+    });
+    document.addEventListener("keydown", onTheatreKey, { signal: gridListeners.signal });
 
     // Observe container size changes to recalculate tile layout
     resizeObserver = new ResizeObserver(() => {
@@ -875,6 +1229,18 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function destroy(): void {
+    if (theatreTile !== null) leaveTheatre();
+    if (fullscreenTile !== null) {
+      fullscreenTile = null;
+      leaveFullscreen();
+      void callbacks.setWindowFullscreen?.(false).catch(() => {});
+    }
+    gridListeners.destroy();
+    if (statsTimer !== null) {
+      clearInterval(statsTimer);
+      statsTimer = null;
+    }
+    statsTile = null;
     if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
     resizeRafId = 0;
 
@@ -917,6 +1283,10 @@ export function createVideoGrid(): VideoGridComponent {
     setSpeaking,
     setCallbacks(next: VideoGridCallbacks): void {
       callbacks = next;
+    },
+    setCallState(next: { readonly muted: boolean; readonly deafened: boolean }): void {
+      callState = { muted: next.muted, deafened: next.deafened };
+      for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
     },
   };
 }

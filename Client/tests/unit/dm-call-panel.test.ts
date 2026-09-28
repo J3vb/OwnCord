@@ -553,6 +553,27 @@ describe("DmCallPanel — video in the call", () => {
     expect(document.activeElement).toBe(slider);
   });
 
+  it("never moves the video when someone joins or leaves, so a full-screen tile stays", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setVideoActive(true);
+    const el = panel!.videoElement()!;
+    const observer = new MutationObserver(() => {});
+    observer.observe(root, { childList: true, subtree: true });
+
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    setVoice(DM, [vu(SELF)]);
+
+    const removed = observer.takeRecords().flatMap((r) => [...r.removedNodes]);
+    observer.disconnect();
+    expect(removed).not.toContain(el);
+    expect(root.contains(el)).toBe(true);
+    // The call controls stay under the video.
+    expect(
+      el.compareDocumentPosition(q(root, "dcp-mute")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("gives the grid nobody once video goes off", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { opts, root } = mount();

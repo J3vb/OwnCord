@@ -11,6 +11,7 @@ import type { UserStatus } from "@lib/types";
 import { errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
@@ -42,6 +43,7 @@ import {
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
   enableCamera,
+  getRemoteVideoStats,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -672,6 +674,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
+      // The member list's profile popup Call action opens the DM then starts
+      // its call through this, the same startCall the DM header uses (BUG-05).
+      onStartCall: () => startCall(),
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
@@ -1206,10 +1211,23 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStopSharing: () => {
         if (voiceStore.getState().localScreenshare) voiceKeybindActions.onScreenshareToggle();
       },
+      // HTML full screen fills only the webview in WebView2: take the window
+      // along (a no-op where the webview already filled it).
+      setWindowFullscreen: (on) => desktop.window.setFullscreen(on),
+      callControls: {
+        onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
+        onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
+        onLeave: () => voiceKeybindActions.onDisconnect(),
+      },
+      getStreamStats: (tileId) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
+          : getRemoteVideoStats(tileId, "camera"),
     });
 
     let prevVideoSignature = "";
     let prevSpeaking = "";
+    let prevCallState = "";
     const prevTileLabels = new Map<number, string>();
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, remote-tile identity changes and who is speaking.
@@ -1229,6 +1247,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (speakingKey !== prevSpeaking) {
             prevSpeaking = speakingKey;
             videoGrid?.setSpeaking(talking);
+          }
+          const callKey = `${String(state.localMuted)}|${String(state.localDeafened)}`;
+          if (callKey !== prevCallState) {
+            prevCallState = callKey;
+            videoGrid?.setCallState({ muted: state.localMuted, deafened: state.localDeafened });
           }
 
           // Seed the signature with the channel id so ANY voice-channel

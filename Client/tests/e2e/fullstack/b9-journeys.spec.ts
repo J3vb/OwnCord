@@ -422,6 +422,7 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
     // bob erases his own account from the client (BPR-052 client half).
     await bob.getByRole("button", { name: "Settings", exact: true }).click();
     await bob.getByRole("tab", { name: "Account" }).click();
+    await bob.locator("summary", { hasText: "Delete account" }).click();
     await bob.locator("[data-testid='delete-account-trigger']").click();
     await bob.locator("[data-testid='delete-account-password']").fill(TEST_PASSWORD);
     await bob.locator("[data-testid='delete-account-confirm']").click();

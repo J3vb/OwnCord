@@ -873,6 +873,54 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
   });
 
+  it("wires the profile popup's Call action to onCallUser, but not for yourself (BUG-05)", async () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "alice" }),
+      makeMember({ id: 2, username: "me" }),
+    ]);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 2, username: "me", avatar: null, role: "member" },
+    }));
+    const onCallUser = vi.fn();
+    list = createMemberList({ ...opts, onCallUser });
+    list.mount(container);
+
+    // Another member: the Call action renders and reaches the handler.
+    const other = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    other.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    const callBtn = await vi.waitFor(() => {
+      const btn = document.querySelector<HTMLButtonElement>('[data-testid="upp-call-btn"]');
+      expect(btn).not.toBeNull();
+      return btn!;
+    });
+    callBtn.click();
+    expect(onCallUser).toHaveBeenCalledWith(1);
+    // Clicking an action closes the popup, like Message does.
+    expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
+
+    // Your own profile has no Call action — you are already in the call.
+    const self = container.querySelector<HTMLElement>('[data-testid="member-2"]')!;
+    self.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
+  });
+
+  it("omits the Call action when no onCallUser handler is wired (BUG-05)", async () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const row = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
+  });
+
   it("returns focus to the row that opened the profile after an earlier one closed (B9-10)", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice" }),

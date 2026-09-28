@@ -460,7 +460,7 @@ test.describe("B9-20 settings, account and voice text", () => {
     await openSettings(page);
 
     for (const [tab, english] of [
-      ["Account", "Edit User Profile"],
+      ["Account", "Edit profile"],
       ["Notifications", "Desktop Notifications"],
       ["Text & Images", "Link Preview"],
       ["Voice & Audio", "Input Device"],
@@ -505,7 +505,15 @@ test.describe("B9-20 settings, account and voice text", () => {
     await page.keyboard.press("Home");
     await expect(sidebar.locator("#settings-tab-account")).toBeFocused();
     await expect(sidebar.locator("#settings-tab-account")).toHaveAttribute("aria-selected", "true");
+    // Account deletion sits behind its own disclosure; open it by keyboard.
+    const danger = account.locator("details.danger-zone > summary");
+    await danger.focus();
+    await page.keyboard.press("Enter");
+    // So do the profile forms, behind Edit profile.
+    await account.getByTestId("profile-edit-toggle").focus();
+    await page.keyboard.press("Enter");
     for (const [el, english] of [
+      [danger.locator(".disclose-label"), "Delete account"],
       [account.locator(".account-field-label", { hasText: "Username" }), "Username"],
       [account.locator("[data-testid='profile-save-btn']"), "Save Profile"],
       [account.locator("[data-testid='delete-account-trigger']"), "Delete Account"],

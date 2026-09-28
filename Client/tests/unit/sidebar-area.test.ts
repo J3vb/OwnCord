@@ -2820,6 +2820,48 @@ describe("SidebarArea", () => {
 
       cleanup(result);
     });
+
+    it("starts a call in the existing 1:1 DM (BUG-05)", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+      const onStartCall = vi.fn();
+      const opts = defaultOpts();
+      const result = createSidebarArea({ ...opts, onStartCall });
+      container.appendChild(result.sidebarWrapper);
+
+      const calls = (createMemberList as MockedFn).mock.calls;
+      const lastCall = calls[calls.length - 1]![0];
+      lastCall.onCallUser(10);
+
+      // The known DM is selected (no REST create) and the call starts in it.
+      expect(opts.api.createDm).not.toHaveBeenCalled();
+      expect(onStartCall).toHaveBeenCalledTimes(1);
+      expect(channelsStore.getState().activeChannelId).toBe(100);
+
+      cleanup(result);
+    });
+
+    it("creates the 1:1 DM first, then starts the call in it (BUG-05)", async () => {
+      const onStartCall = vi.fn();
+      const opts = defaultOpts();
+      const result = createSidebarArea({ ...opts, onStartCall });
+      container.appendChild(result.sidebarWrapper);
+
+      const calls = (createMemberList as MockedFn).mock.calls;
+      const lastCall = calls[calls.length - 1]![0];
+      // The default api stub resolves a DM with channel_id 200.
+      lastCall.onCallUser(20);
+
+      await vi.waitFor(() => expect(onStartCall).toHaveBeenCalledTimes(1));
+      expect(opts.api.createDm).toHaveBeenCalledWith(20);
+      expect(channelsStore.getState().activeChannelId).toBe(200);
+
+      cleanup(result);
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -306,6 +306,7 @@ describeWindowControlSuite(async () => {
     outerPosition: async () => undefined,
     outerSize: async () => undefined,
     center: async () => undefined,
+    setFullscreen: async () => undefined,
   } as unknown as WindowControl;
   const native: WindowControlNativeControl = {
     maximized: () => undefined,
@@ -313,6 +314,7 @@ describeWindowControlSuite(async () => {
     monitorsFailWith: () => undefined,
     placedAt: () => undefined,
     centered: () => 0,
+    fullscreenCalls: () => [],
   };
   return { subject, native };
 }, failEveryTest);

@@ -67,8 +67,24 @@ export function selectDmConversation(dmChannel: DmChannel, deps: DmHelperDeps): 
 // handleCreateDm
 // ---------------------------------------------------------------------------
 
-/** Create a DM with a user via the API and switch to it. */
-export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): Promise<void> {
+/**
+ * The 1:1 DM this client already knows with `userId`, if any. A group that
+ * happens to include them is not it — a call is started in a 1:1.
+ */
+export function findDirectDm(userId: number): DmChannel | undefined {
+  return dmStore.getState().channels.find((c) => !c.isGroup && c.recipient.id === userId);
+}
+
+/**
+ * Create a DM with a user via the API and switch to it. `onReady` runs after
+ * the new conversation is selected, so a caller that needs to act on it (e.g.
+ * start a call, BUG-05) sees it as the active channel.
+ */
+export async function handleCreateDm(
+  recipientId: number,
+  deps: DmHelperDeps,
+  onReady?: (dm: DmChannel) => void,
+): Promise<void> {
   try {
     const result = await deps.api.createDm(recipientId);
     const member = membersStore.getState().members.get(recipientId);
@@ -95,6 +111,7 @@ export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): P
 
     addDmChannel(dmChannel);
     selectDmConversation(dmChannel, deps);
+    onReady?.(dmChannel);
   } catch (err) {
     const msg = err instanceof Error ? err.message : connectText("app.dmCreateFailed");
     deps.getToast()?.show(msg, "error");

@@ -90,6 +90,12 @@ describe("Tauri default capability — HTTP scope", () => {
     }
   });
 
+  it("grants core:window:allow-set-fullscreen (a full-screen video tile fills the monitor through the window)", () => {
+    // HTML full screen fills only the webview in WebView2, so a tile in full
+    // screen also puts the window in full screen.
+    expect(find("core:window:allow-set-fullscreen")).toBe("core:window:allow-set-fullscreen");
+  });
+
   it("grants core:window:allow-request-user-attention (the Flash Taskbar notification setting needs it)", () => {
     // core:window:default's implicit permission set is getters only — no
     // request-user-attention — so without this explicit grant, every
