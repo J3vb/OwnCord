@@ -15,27 +15,42 @@ async function renderChannels(){
   /* Categories are free text — a channel of any type may live under any one of
      them. Collect the ones already in use so the create/edit forms can offer
      them as a datalist instead of hardcoding names nobody has to use. */
-  const catSet={};
-  let html=rcHead('Channels',channels.length+' channel'+(channels.length===1?'':'s')+'. The lock opens who can see and use a channel.',
+  const catSet=new Set();
+  let html=rcHead('Channels',channels.length+' channel'+(channels.length===1?'':'s')+', grouped by category as members see them.',
     '<button class="btn btn-accent" data-action="openChannelModal" data-args="'+actArgs(null)+'">'+I.plus+' Create Channel</button>');
-  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Type</th><th>Category</th><th>Archived</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!channels.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
+  /* Grouped under their category like the client sidebar: an uncategorised
+     voice channel sits under Voice, and groups come in the order their first
+     channel does. The type is the row's icon (named for screen readers), and
+     Archived shows only on a channel that is. */
+  const groups=new Map();
   channels.forEach(ch=>{
-    const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
-    const cat=ch.category||ch.Category||'';const archived=ch.archived||ch.Archived||false;
-    html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-muted)">'+chIcon(type)+'</span><strong>'+esc(name)+'</strong></div></td>';
-    html+='<td><span class="badge '+(type==='voice'?'badge-yellow':type==='announcement'?'badge-accent':'badge-muted')+'">'+esc(type)+'</span></td>';
-    html+='<td style="font-size:12px;color:var(--text-muted)">'+esc(cat)+'</td>';
-    html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
-    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access" aria-label="Access for #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
-    state.channelCache[id]=ch;
-    if(cat)catSet[cat]=true;
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
+    const cat=ch.category||ch.Category||((ch.type||ch.Type)==='voice'?'Voice':'');
+    if(!groups.has(cat))groups.set(cat,[]);
+    groups.get(cat).push(ch);
   });
-  html+='</tbody></table></div></div>';
-  state.channelCategories=Object.keys(catSet).sort();
+  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl ch-tbl"><thead><tr><th>Channel</th><th style="text-align:right">Actions</th></tr></thead>';
+  if(!channels.length)html+='<tbody><tr><td colspan="2" class="tbl-empty">No channels yet. Create one to get started.</td></tr></tbody>';
+  groups.forEach((chs,cat)=>{
+    html+='<tbody>';
+    if(groups.size>1||cat)html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')+'</th></tr>';
+    chs.forEach(ch=>{
+      const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
+      const archived=ch.archived||ch.Archived||false;
+      html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
+        +(archived?'<span class="badge badge-muted">Archived</span>':'')+'</div></td>';
+      const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
+      state.channelCache[id]=ch;
+      if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
+      html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
+    });
+    html+='</tbody>';
+  });
+  html+='</table></div></div>';
+  state.channelCategories=[...catSet].sort();
   return html;
 }
+/* A channel type in words, beside its icon. */
+const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',dm:'Direct message'};
 
 /* <datalist> of the categories currently in use. Purely a suggestion list —
    typing a brand-new name is the supported way to create a category. */
