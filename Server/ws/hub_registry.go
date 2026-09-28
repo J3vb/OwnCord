@@ -324,3 +324,37 @@ type clientEvent struct {
 	c   *Client
 	add bool
 }
+
+// DisconnectUser forcibly disconnects the client identified by userID.
+// No-op if the user is not currently connected.
+func (h *Hub) DisconnectUser(userID int64) {
+	c := h.GetClient(userID)
+	if c == nil {
+		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		return
+	}
+	slog.Info("hub: disconnecting user", "user_id", userID)
+	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+	h.kickClientTerminal(c)
+}
+
+// DisconnectRevokedUser drops the live connection of a user whose sessions
+// were just revoked (sign-out-everywhere, B4-7): the socket authenticated on
+// a session that no longer exists, and the revoked-session sweep would only
+// notice on its next tick. No frame precedes the close — the same treatment
+// the sweep gives a revoked session — so the client's reconnect meets the
+// 401 that tells it to sign in again. No-op if the user is not connected.
+//
+// This inspects h.clients at one instant, so a revocation landing while a
+// connection's handshake is still in flight finds nothing to kick here. That
+// window is closed on the other side instead, by postRegisterSessionRecheck
+// (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
+func (h *Hub) DisconnectRevokedUser(userID int64) {
+	c := h.GetClient(userID)
+	if c == nil {
+		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		return
+	}
+	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
+	h.kickClientTerminal(c)
+}
