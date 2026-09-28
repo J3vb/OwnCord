@@ -29,6 +29,15 @@ vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
+const { mockGetVersion } = vi.hoisted(() => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockGetVersion: vi.fn<any>(),
+}));
+vi.mock("../../src/platform/desktop", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/platform/desktop")>();
+  return { desktop: { ...real.desktop, appMetadata: { getVersion: mockGetVersion } } };
+});
+
 const { mockExportSupportBundle } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mockExportSupportBundle: vi.fn<any>(),
@@ -68,6 +77,7 @@ describe("LogsTab", () => {
     mockGetLogBuffer.mockReturnValue([]);
     mockAddLogListener.mockReturnValue(() => {});
     mockGetLogLevel.mockReturnValue("info");
+    mockGetVersion.mockResolvedValue("1.0.0");
   });
 
   afterEach(() => {
@@ -619,6 +629,21 @@ describe("LogsTab", () => {
         /#[0-9a-f]{3,6}\b/i.test(n.getAttribute("style")!),
       );
       expect(hexStyles).toEqual([]);
+    });
+  });
+
+  describe("client version footer", () => {
+    it("shows the version the host reports", async () => {
+      mockGetVersion.mockResolvedValue("2.0.0");
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      await vi.waitFor(() => expect(el.textContent).toContain("Client version: v2.0.0"));
+    });
+
+    it("says unknown, never vnull, when the host reports no version", async () => {
+      mockGetVersion.mockResolvedValue(null);
+      const el = createLogsTab(() => "Logs" as TabName, controller.signal).build();
+      await vi.waitFor(() => expect(el.textContent).toContain("Client version: unknown"));
+      expect(el.textContent).not.toContain("vnull");
     });
   });
 });

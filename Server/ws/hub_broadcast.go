@@ -64,9 +64,7 @@ func (h *Hub) enqueue(bm broadcastMsg, kind string) {
 	select {
 	case h.broadcast <- bm:
 	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping "+kind,
-			"channel_id", bm.channelID, "msg_len", len(bm.msg))
+		h.recordQueueDrop(bm, kind)
 	}
 }
 
@@ -404,6 +402,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		start := time.Now()
 		defer h.seqMu.Unlock()
 		defer h.observeSeqMuHold(start)
+		defer h.applyQueueContentDrops()
 
 		// Channel-scoped sends consult the topic limiter BEFORE a seq is
 		// allocated: a shed frame that consumed a seq would sit in the replay

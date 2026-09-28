@@ -17,6 +17,15 @@ const DIAGNOSTIC_STATUS_KEYS = {
   failed: "diagnostics.status.failed",
 } as const satisfies Record<Exclude<DiagnosticStatus, "not-tested">, string>;
 
+const SHORT_LABEL_KEYS = {
+  connection: "diagnostics.short.connection",
+  authentication: "diagnostics.short.authentication",
+  websocket: "diagnostics.short.websocket",
+  microphone: "diagnostics.short.microphone",
+  signaling: "diagnostics.short.signaling",
+  media: "diagnostics.short.media",
+} as const satisfies Record<DiagnosticStage, string>;
+
 const STATUS_KIND: Readonly<Record<DiagnosticStatus, StatusKind>> = {
   running: "pending",
   passed: "ok",
@@ -90,9 +99,21 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
   summaryIcon.hidden = true;
   const summaryText = createElement("span", {}, t("diagnostics.ready"));
   const summaryCounts = createElement("span", { class: "disclose-count" });
-  summary.append(summaryIcon, summaryText, summaryCounts);
+  // Headline and counts flow as one text block beside the icon.
+  const summaryBody = createElement("span", {});
+  summaryBody.append(summaryText, summaryCounts);
+  summary.append(summaryIcon, summaryBody);
 
-  const results = createElement("ul", { class: "status-list", "aria-live": "polite" });
+  // Stages run left to right as a stepper. Each stage's whole sentence is in
+  // its list item for assistive technology; the line below shows one stage's
+  // detail for sighted readers (the failing one, or the one picked).
+  const results = createElement("ol", { class: "diag-stepper", "aria-live": "polite" });
+  const detail = createElement("p", {
+    class: "diag-step-detail",
+    "data-testid": "diagnostics-detail",
+    "aria-hidden": "true",
+  });
+  detail.hidden = true;
   const micLabel = createElement("label", { class: "form-check" });
   const microphone = createElement("input", { type: "checkbox" });
   microphone.checked = true;
@@ -101,13 +122,15 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
   limits.details.appendChild(
     createElement("p", { class: "setting-desc" }, t("diagnostics.limitation")),
   );
-  appendChildren(element, head, description, summary, results, micLabel, limits.details);
+  appendChildren(element, head, description, summary, results, detail, micLabel, limits.details);
 
   let attempt: AbortController | null = null;
   let detachSession: (() => void) | null = null;
   let alive = true;
   const rows = new Map<DiagnosticStage, HTMLLIElement>();
   const finalStatus = new Map<DiagnosticStage, DiagnosticStatus>();
+  const details = new Map<DiagnosticStage, string>();
+  let picked: DiagnosticStage | null = null;
 
   function showSummary(text: string, kind: StatusKind | null = null, counts = ""): void {
     summaryIcon.hidden = kind === null;
@@ -118,39 +141,97 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
     setText(summaryCounts, counts === "" ? "" : ` ${counts}`);
   }
 
+  /** The stage whose detail shows: the picked one, else the first failure, else the first untested. */
+  function shownStage(): DiagnosticStage | null {
+    if (picked !== null && finalStatus.has(picked)) return picked;
+    const stages = [...finalStatus.keys()];
+    return (
+      stages.find((st) => finalStatus.get(st) === "failed") ??
+      stages.find((st) => finalStatus.get(st) === "not-tested") ??
+      null
+    );
+  }
+
+  function paintSelection(): void {
+    const shown = shownStage();
+    for (const [stage, row] of rows) {
+      row.querySelector("button")!.setAttribute("aria-pressed", String(stage === shown));
+    }
+    detail.hidden = shown === null;
+    if (shown === null) return;
+    setText(
+      detail,
+      t("diagnostics.result", {
+        status: t("diagnostics.stepDetail", {
+          stage: diagnosticLabel(shown),
+          status: statusLabel(finalStatus.get(shown)!),
+        }),
+        detail: details.get(shown) ?? "",
+      }),
+    );
+  }
+
   function renderRow(result: DiagnosticResult): void {
     let row = rows.get(result.stage);
     if (!row) {
+      const stage = result.stage;
       row = createElement("li", {
-        class: "status-item",
-        "data-testid": `diagnostic-${result.stage}`,
+        class: "diag-step",
+        "data-testid": `diagnostic-${stage}`,
       });
-      rows.set(result.stage, row);
+      const sentence = createElement("span", {
+        class: "sr-only",
+        id: `diagnostic-${stage}-detail`,
+      });
+      const button = createElement("button", {
+        class: "diag-step-btn",
+        type: "button",
+        "aria-describedby": sentence.id,
+      });
+      button.append(
+        statusIcon(STATUS_KIND[result.status]),
+        createElement("span", { class: "diag-step-label" }, t(SHORT_LABEL_KEYS[stage])),
+      );
+      button.addEventListener(
+        "click",
+        () => {
+          picked = stage;
+          paintSelection();
+        },
+        { signal },
+      );
+      row.append(button, sentence);
+      rows.set(stage, row);
       results.appendChild(row);
     }
     row.dataset.status = result.status;
     finalStatus.set(result.stage, result.status);
-    // A passing stage needs no reading: its full sentence sits on a muted
-    // line below. Anything else says in words what happened and what to do next.
-    const passed = result.status === "passed";
-    row.replaceChildren(
-      statusIcon(STATUS_KIND[result.status]),
-      createElement("span", { class: "status-name" }, diagnosticLabel(result.stage)),
-      createElement(
-        "span",
-        { class: "status-result" },
-        passed
-          ? statusLabel(result.status)
-          : t("diagnostics.result", { status: statusLabel(result.status), detail: result.detail }),
-      ),
+    details.set(result.stage, result.detail);
+    const button = row.querySelector("button")!;
+    button.setAttribute(
+      "aria-label",
+      t("diagnostics.stepName", {
+        label: t(SHORT_LABEL_KEYS[result.stage]),
+        stage: diagnosticLabel(result.stage),
+        status: statusLabel(result.status),
+      }),
     );
-    if (passed) row.appendChild(createElement("span", { class: "status-detail" }, result.detail));
+    setStatusIcon(button.querySelector<HTMLElement>(".st-ic")!, STATUS_KIND[result.status]);
+    setText(row.querySelector(".sr-only")!, result.detail);
+    paintSelection();
   }
 
-  function reset(text: string): void {
+  function clearResults(): void {
     clearChildren(results);
     rows.clear();
     finalStatus.clear();
+    details.clear();
+    picked = null;
+    detail.hidden = true;
+  }
+
+  function reset(text: string): void {
+    clearResults();
     setText(start, t("diagnostics.start"));
     start.classList.remove("secondary");
     showSummary(text);
@@ -169,10 +250,8 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
       stop();
       const current = new AbortController();
       attempt = current;
-      clearChildren(results);
-      rows.clear();
+      clearResults();
       resetSelfTest();
-      finalStatus.clear();
       start.disabled = true;
       microphone.disabled = true;
       cancel.hidden = false;

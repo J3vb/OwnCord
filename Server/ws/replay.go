@@ -206,11 +206,11 @@ func (h *Hub) reconnectPrecheck(
 	// what lets a service-backed or instrumented reader actually intercept the
 	// two reads below — the same posture handleFreshConnect takes.
 	database := h.readers.Visibility
-	// Channel-visibility changes are delivered as targeted, unsequenced
-	// messages, so replay cannot bring a client that missed one back into a
-	// coherent state — force the full-ready path instead.
+	// Visibility changes are targeted and unsequenced, and a shed content
+	// frame (SRV-03) never got a seq, so replay cannot bring a client that
+	// missed one back into a coherent state — force the full-ready path.
 	if h.mustFullResync(lastSeq) {
-		slog.Info("ws replay skipped (visibility changed since last_seq), sending full ready",
+		slog.Info("ws replay skipped (resync watermark at or past last_seq), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
@@ -476,10 +476,10 @@ func (h *Hub) reconnectRegister(
 	// the fan-out can't reach an unregistered client, and the entry check has
 	// already passed, so nothing else catches it before this resume commits
 	// to permissions computed before the change (OC-0206).
-	if h.mustFullResync(lastSeq) {
+	if h.mustFullResyncAtRegister(lastSeq) {
 		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
-		slog.Warn("ws handleReconnect: visibility changed during handshake, forcing full ready",
+		slog.Warn("ws handleReconnect: resync watermark moved during handshake, forcing full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))

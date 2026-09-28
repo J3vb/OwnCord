@@ -36,6 +36,7 @@ import {
   handleCreateDm,
   handleCreateGroupDm,
   buildDmConversations,
+  findDirectDm,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
 import { createMemberPickerModal } from "./MemberPickerModal";
@@ -99,6 +100,9 @@ export interface SidebarAreaOptions {
   readonly destinations?: NavigationDestinations;
   /** Open a content view; `opener` gets focus back when it closes. */
   readonly onOpenView?: (id: ContentViewId, opener: HTMLElement) => void;
+  /** Start a call in the currently active DM (MainPage's `startCall`). Used by
+   *  the member list's profile popup Call action, which first opens the DM. */
+  readonly onStartCall?: () => void;
 }
 
 export interface SidebarAreaResult {
@@ -727,6 +731,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         getToast,
         onMessageUser: (userId) => {
           void handleCreateDm(userId, dmDeps);
+        },
+        onCallUser: (userId) => {
+          // A call lives in the DM's voice channel, so open the 1:1 first and
+          // start the call there (BUG-05). An existing DM is selected at once;
+          // a new one starts the call in `handleCreateDm`'s onReady, once it is
+          // the active channel `startCall` reads.
+          const existing = findDirectDm(userId);
+          if (existing !== undefined) {
+            selectDmConversation(existing, dmDeps);
+            opts.onStartCall?.();
+            return;
+          }
+          void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
         },
       });
       contentSlot.appendChild(memberSection.element);

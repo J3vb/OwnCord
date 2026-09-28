@@ -131,7 +131,16 @@ stream locally behind a **Watch stream** card (the track stays subscribed;
 opt-in watching is open question Q3). Your own screen share is covered by what
 is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. In a DM call, focus view stays inside the call panel and the
-chat remains visible below it.
+chat remains visible below it. **Full screen** (the button, F, or a
+double-click) puts the tile in HTML full screen and the window with it
+(`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
+WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
+theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
+is the platform's picture-in-picture, hidden where it is unavailable. The
+stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
+(resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
+the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
+stats, so it shows the resolution only.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
@@ -251,6 +260,11 @@ call):
 | Accept                     | Join the DM voice channel; ring clears. "Join with video" also turns the camera on once connected. Being in the room answers the ring however you got there: joining it another way clears the ring, and a `call_incoming` for the channel you are already in is ignored             |
 | Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops only when its own ringer declines or leaves (`call_declined` / `voice_leave` from the ringer)                                  |
 | Timeout / caller leaves    | Timeout: the callee's ring clears silently, and the caller's panel says "didn't answer" and stays in the call with Ring again / Leave call. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty              |
+
+Call is on the DM chat header and in another member's profile popup. The
+popup's Call opens the 1:1 DM with that member (creating it if needed) and then
+starts the call there through the same `startCall` (`onCallUser` in
+`pages/main-page/SidebarArea.ts`).
 
 The DM call panel (`components/DmCallPanel.ts`, between the chat header and the
 messages) shows while the open DM has a ring in flight, an outgoing ring, or

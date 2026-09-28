@@ -23,6 +23,7 @@ import {
   emitWsMessage,
   navigateToMainPage,
   waitForWsReady,
+  voiceWsHandlers,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -98,6 +99,10 @@ async function mockSession(page: Page): Promise<void> {
         { pattern: "/api/v1/dms", method: "POST", status: 200, body: CREATE_DM_RESPONSE },
       ],
       simulateWsFlow: true,
+      // The profile popup's Call action joins the DM's voice channel and rings
+      // (BUG-05); voiceWsHandlers answers voice_join with the self voice_state
+      // so the widget and call panel come up, exactly as dm-calls.spec.ts does.
+      wsHandlers: voiceWsHandlers(),
       readyOverrides: {
         members: READY_MEMBERS,
         dm_channels: DM_CHANNELS,
@@ -170,6 +175,47 @@ async function waitForFetch(
   let found: FetchCall | undefined;
   await expect(async () => {
     found = (await fetchCalls(page)).find(predicate);
+    expect(found).toBeDefined();
+  }).toPass({ timeout });
+  return found!;
+}
+
+interface SentFrame {
+  readonly type: string;
+  readonly payload?: Record<string, unknown>;
+}
+
+/** Every WS frame the client actually sent, from the mock's own IPC log. */
+async function sentFrames(page: Page): Promise<SentFrame[]> {
+  return page.evaluate(() => {
+    const log = (
+      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
+    ).__invokeLog;
+    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+    for (const entry of log) {
+      if (entry.cmd !== "ws_send") continue;
+      try {
+        frames.push(JSON.parse(entry.args?.message ?? "{}"));
+      } catch {
+        // Not a JSON client frame; skip.
+      }
+    }
+    return frames;
+  });
+}
+
+/** Poll until a frame of `type` carrying `channelId` has gone out. */
+async function waitForSent(
+  page: Page,
+  type: string,
+  channelId: number,
+  timeout = 5_000,
+): Promise<SentFrame> {
+  let found: SentFrame | undefined;
+  await expect(async () => {
+    found = (await sentFrames(page)).find(
+      (f) => f.type === type && f.payload?.channel_id === channelId,
+    );
     expect(found).toBeDefined();
   }).toPass({ timeout });
   return found!;
@@ -257,16 +303,57 @@ test.describe("User profile popup — member list", () => {
     await expect(popup(page)).toHaveCount(0);
   });
 
-  // BUG (OC new): the popup renders a "Call" action only when `onCall` is
-  // passed, and no caller ever passes it — `MemberList.ts` wires `onMessage`
-  // but not `onCall`. The component's own comment says Call was omitted "before
-  // DM calls exist"; they exist now (the DM chat header's call button, covered
-  // in dm-calls.spec.ts), so the profile popup's Call action is dead. Marked
-  // fixme rather than asserting a control the product does not render.
-  test.fixme("offers a Call action for another member", async ({ page }) => {
+  // BUG-05: the popup rendered a "Call" action only when `onCall` was passed,
+  // and no caller ever passed it — `MemberList.ts` wired `onMessage` but not
+  // `onCall`, so the Call button was dead. The popup's Call action now opens
+  // the 1:1 DM with that member and starts a call in it, the same DM call path
+  // the chat header uses (dm-calls.spec.ts).
+  test("offers a Call action that opens the DM and rings it (BUG-05)", async ({ page }) => {
     await page.locator("[data-testid='member-4']").click();
     await expect(popup(page)).toBeVisible();
     await expect(page.locator("[data-testid='upp-call-btn']")).toBeVisible();
+
+    await page.locator("[data-testid='upp-call-btn']").click();
+
+    // New member: the client first asks the server for the 1:1 DM...
+    const create = await waitForFetch(
+      page,
+      (c) => c.method === "POST" && c.url.includes("/api/v1/dms"),
+    );
+    expect(JSON.parse(decodeBody(create) ?? "{}")).toEqual({ recipient_id: NEW_ID });
+
+    // ...then joins that DM's voice channel and rings it. Joining is first:
+    // the caller must actually be in the room before the ring is truthful.
+    const join = await waitForSent(page, "voice_join", NEW_DM);
+    const ring = await waitForSent(page, "call_ring", NEW_DM);
+    expect(ring.payload).toEqual({ channel_id: NEW_DM });
+    const frames = await sentFrames(page);
+    expect(
+      frames.findIndex((f) => f.type === join.type && f.payload?.channel_id === NEW_DM),
+    ).toBeLessThan(
+      frames.findIndex((f) => f.type === ring.type && f.payload?.channel_id === NEW_DM),
+    );
+    // The popup closed and the chat switched to the new conversation.
+    await expect(popup(page)).toHaveCount(0);
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("newuser");
+  });
+
+  test("Call on a member you already have a DM with reuses it (BUG-05)", async ({ page }) => {
+    // otheruser already has a DM (channel 100) in the fixture.
+    await page.locator("[data-testid='member-2']").click();
+    await expect(popup(page)).toBeVisible();
+
+    const createsBefore = (await fetchCalls(page)).filter((c) => c.method === "POST").length;
+    await page.locator("[data-testid='upp-call-btn']").click();
+
+    const join = await waitForSent(page, "voice_join", OTHER_DM);
+    const ring = await waitForSent(page, "call_ring", OTHER_DM);
+    expect(ring.payload).toEqual({ channel_id: OTHER_DM });
+    expect(join.type).toBe("voice_join");
+    // No new DM was created for an existing conversation.
+    expect((await fetchCalls(page)).filter((c) => c.method === "POST").length).toBe(createsBefore);
+    // The DM header renders the nickname, so the reused conversation opened.
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("Otto");
   });
 });
 

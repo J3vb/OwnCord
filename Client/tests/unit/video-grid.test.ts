@@ -1319,4 +1319,348 @@ describe("VideoGrid", () => {
       menu.remove();
     });
   });
+
+  describe("full screen, pop-out and stream info (PR 4)", () => {
+    const SCREEN = 2 + 1_000_000;
+    const screenCfg: TileConfig = {
+      isSelf: false,
+      audioUserId: 2,
+      isScreenshare: true,
+      name: "Otto",
+    };
+    const cell = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const control = (id: number, name: string) =>
+      cell(id).querySelector<HTMLButtonElement>(`[data-tile-control='${name}']`)!;
+
+    let fullscreenElement: Element | null = null;
+    let requestFullscreen: ReturnType<typeof vi.fn>;
+    let exitFullscreen: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      // Attached, as in the app: the theatre view's keys are document-level.
+      document.body.appendChild(container);
+      fullscreenElement = null;
+      const enter = (el: Element): void => {
+        fullscreenElement = el;
+      };
+      requestFullscreen = vi.fn(function (this: Element) {
+        enter(this);
+        document.dispatchEvent(new Event("fullscreenchange"));
+        return Promise.resolve();
+      });
+      exitFullscreen = vi.fn(() => {
+        fullscreenElement = null;
+        document.dispatchEvent(new Event("fullscreenchange"));
+        return Promise.resolve();
+      });
+      Object.defineProperty(document, "fullscreenElement", {
+        configurable: true,
+        get: () => fullscreenElement,
+      });
+      Object.defineProperty(document, "exitFullscreen", {
+        configurable: true,
+        value: exitFullscreen,
+      });
+      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+        configurable: true,
+        value: requestFullscreen,
+      });
+    });
+
+    afterEach(() => {
+      container.remove();
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { exitFullscreen?: unknown }).exitFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      delete (document as { pictureInPictureEnabled?: unknown }).pictureInPictureEnabled;
+      vi.useRealTimers();
+    });
+
+    it("puts the tile in full screen and back, and keeps the window full screen with it", async () => {
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+
+      const fs = control(SCREEN, "fullscreen");
+      expect(fs.getAttribute("aria-label")).toBe("Full screen");
+      fs.click();
+      await Promise.resolve();
+
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      expect(requestFullscreen.mock.contexts[0]).toBe(cell(SCREEN));
+      expect(control(SCREEN, "fullscreen").getAttribute("aria-label")).toBe("Exit full screen");
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(true);
+
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(control(SCREEN, "fullscreen").getAttribute("aria-label")).toBe("Full screen");
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("toggles full screen with F from inside the tile, and with a double-click", async () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "select").dispatchEvent(
+        new KeyboardEvent("keydown", { key: "f", bubbles: true }),
+      );
+      await Promise.resolve();
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+
+      cell(SCREEN).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      await Promise.resolve();
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to a window-filling theatre view when the full-screen API is refused", async () => {
+      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+
+      control(SCREEN, "fullscreen").click();
+      await vi.waitFor(() =>
+        expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(true),
+      );
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(true);
+
+      cell(SCREEN).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(false);
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("leaves the theatre view with Escape or F after focus has left the tile", async () => {
+      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const root = container.querySelector<HTMLElement>("[data-testid='video-grid']")!;
+
+      for (const key of ["Escape", "f"]) {
+        control(SCREEN, "fullscreen").click();
+        await vi.waitFor(() =>
+          expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(true),
+        );
+        // A click on the video moves focus to the grid, outside the tile.
+        root.focus();
+        root.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+        expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(false);
+      }
+    });
+
+    it("keeps the call controls at hand in full screen", async () => {
+      const onMuteToggle = vi.fn();
+      const onLeave = vi.fn();
+      grid.setCallbacks({ callControls: { onMuteToggle, onDeafenToggle: vi.fn(), onLeave } });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+
+      const calls = cell(SCREEN).querySelector<HTMLElement>(".video-fs-calls")!;
+      expect(calls).not.toBeNull();
+      const mute = calls.querySelector<HTMLButtonElement>("[data-call-control='mute']")!;
+      mute.click();
+      expect(onMuteToggle).toHaveBeenCalledTimes(1);
+      grid.setCallState({ muted: true, deafened: false });
+      expect(mute.getAttribute("aria-pressed")).toBe("true");
+      calls.querySelector<HTMLButtonElement>("[data-call-control='leave']")!.click();
+      expect(onLeave).toHaveBeenCalledTimes(1);
+
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+      expect(cell(SCREEN).querySelector(".video-fs-calls")).toBeNull();
+    });
+
+    /** Nodes taken out of the tree since `observer` started: removing a
+     *  full-screen element (or an ancestor) ends full screen in a browser. */
+    const removedNodes = (observer: MutationObserver): Node[] =>
+      observer.takeRecords().flatMap((r) => [...r.removedNodes]);
+
+    it("never takes a full-screen tile out of the page while others come and go", async () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      grid.addStream(7, "Ada", fakeStream(), makeTileConfig({ audioUserId: 7 }));
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+      const fsCell = cell(SCREEN);
+      expect(fullscreenElement).toBe(fsCell);
+      expect(grid.getFocusedTileId()).toBe(SCREEN);
+      expect(control(SCREEN, "select").hidden).toBe(true);
+
+      const observer = new MutationObserver(() => {});
+      observer.observe(container, { childList: true, subtree: true });
+      grid.addStream(8, "Bea", fakeStream(), makeTileConfig({ audioUserId: 8 }));
+      grid.setPeople([{ userId: 9, label: "Cy", content: document.createElement("div") }]);
+      grid.removeStream(7);
+      grid.setFocusedTile(SCREEN);
+      // The first click of a double-click lands on the video, not a focus swap.
+      fsCell.querySelector("video")!.click();
+
+      expect(removedNodes(observer).some((n) => n.contains(fsCell))).toBe(false);
+      observer.disconnect();
+      expect(grid.getFocusedTileId()).toBe(SCREEN);
+      expect(exitFullscreen).not.toHaveBeenCalled();
+    });
+
+    it("leaves full screen when Back to grid moves focus off the tile", async () => {
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+
+      control(SCREEN, "grid").click();
+      await Promise.resolve();
+
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("takes the window out of full screen when the grid goes away mid-stream", async () => {
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+      setWindowFullscreen.mockClear();
+
+      grid.destroy?.();
+
+      expect(exitFullscreen).toHaveBeenCalledTimes(1);
+      expect(setWindowFullscreen).toHaveBeenCalledWith(false);
+    });
+
+    it("takes the window out of the theatre view when the grid goes away", async () => {
+      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
+      grid.setCallbacks({ setWindowFullscreen });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "fullscreen").click();
+      await vi.waitFor(() => expect(setWindowFullscreen).toHaveBeenLastCalledWith(true));
+
+      grid.destroy?.();
+
+      expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("opens the tile menu inside the full-screen tile, where it can be seen", async () => {
+      document.body.appendChild(container);
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "fullscreen").click();
+      await Promise.resolve();
+
+      cell(SCREEN).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 }),
+      );
+
+      await vi.waitFor(() => expect(document.querySelector(".video-tile-menu")).not.toBeNull());
+      expect(cell(SCREEN).contains(document.querySelector(".video-tile-menu"))).toBe(true);
+      container.remove();
+    });
+
+    it("writes the self-share quality as 1080p, not 1,080p", () => {
+      const track = {
+        id: "t",
+        kind: "video",
+        muted: false,
+        getSettings: () => ({ height: 1080, frameRate: 30 }),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      };
+      const stream = {
+        getTracks: () => [track],
+        getVideoTracks: () => [track],
+        getAudioTracks: () => [],
+      } as unknown as MediaStream;
+      grid.addStream(1 + 1_000_000, "Your Screen", stream, {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: true,
+      });
+      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toContain(
+        "1080p · 30 fps",
+      );
+    });
+
+    it("offers Pop out only where picture-in-picture works", async () => {
+      Object.defineProperty(document, "pictureInPictureEnabled", {
+        configurable: true,
+        value: false,
+      });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      expect(control(SCREEN, "pip").hidden).toBe(true);
+
+      grid.removeStream(SCREEN);
+      Object.defineProperty(document, "pictureInPictureEnabled", {
+        configurable: true,
+        value: true,
+      });
+      const requestPip = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
+        configurable: true,
+        value: requestPip,
+      });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const pip = control(SCREEN, "pip");
+      expect(pip.hidden).toBe(false);
+      expect(pip.getAttribute("aria-label")).toBe("Pop out");
+      pip.click();
+      expect(requestPip).toHaveBeenCalledTimes(1);
+      delete (HTMLVideoElement.prototype as { requestPictureInPicture?: unknown })
+        .requestPictureInPicture;
+    });
+
+    it("shows resolution and frame rate on the focused stream, with a stats popover", async () => {
+      // Focus needs a connected tree.
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      let frames = 0;
+      let ts = 0;
+      const getStreamStats = vi.fn(async () => {
+        const sample = {
+          frameWidth: 1920,
+          frameHeight: 1080,
+          framesDecoded: frames,
+          timestamp: ts,
+          bitrate: 5_800_000,
+          codec: "video/VP8",
+          packetsLost: 1,
+          packetsReceived: 999,
+        };
+        frames += 60;
+        ts += 2000;
+        return sample;
+      });
+      grid.setCallbacks({ getStreamStats });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      expect(getStreamStats).not.toHaveBeenCalled();
+
+      grid.setFocusedTile(SCREEN);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getStreamStats).toHaveBeenCalledWith(SCREEN);
+
+      const chip = cell(SCREEN).querySelector<HTMLButtonElement>(".video-quality")!;
+      expect(chip.textContent).toBe("1080p · 30 fps");
+      expect(chip.getAttribute("aria-label")).toBe("Stream info: 1080p, 30 frames per second");
+      expect(chip.getAttribute("aria-expanded")).toBe("false");
+
+      chip.click();
+      const pop = cell(SCREEN).querySelector<HTMLElement>(".video-stats")!;
+      expect(pop.getAttribute("role")).toBe("dialog");
+      expect(chip.getAttribute("aria-expanded")).toBe("true");
+      const text = pop.textContent ?? "";
+      for (const part of ["1920×1080", "30 fps", "5.8 Mbps", "VP8", "0.1 %"]) {
+        expect(text).toContain(part);
+      }
+      pop.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(cell(SCREEN).querySelector(".video-stats")).toBeNull();
+      expect(document.activeElement).toBe(chip);
+
+      // Leaving focus view stops polling.
+      grid.setFocusedTile(null);
+      const calls = getStreamStats.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(getStreamStats.mock.calls.length).toBe(calls);
+      container.remove();
+    });
+  });
 });

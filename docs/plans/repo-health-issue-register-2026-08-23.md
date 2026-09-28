@@ -79,11 +79,11 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     472 |
+| Fixed     |     473 |
 | Open      |       2 |
 | Declined  |       7 |
 | Duplicate |       1 |
-| **Total** | **482** |
+| **Total** | **483** |
 
 As of 2026-09-27 the two open findings are `OC-0476` and `OC-0481` (both low,
 none B9-tagged); `OC-0478` (the single-writer lint blind spot) was fixed by
