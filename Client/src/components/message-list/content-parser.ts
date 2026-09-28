@@ -440,11 +440,6 @@ function appendBlocks(parent: HTMLElement, text: string, info?: MentionInfo, dep
 }
 
 // -- Code fences --------------------------------------------------------------
-// splitCodeFences moved to @lib/markdown (pure, and needed by the plain-text
-// serializer for notifications); re-exported here so this renderer's public
-// surface is unchanged for its callers.
-
-export { splitCodeFences } from "@lib/markdown";
 
 /** A code block: language label, highlighted body, copy button. */
 function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {

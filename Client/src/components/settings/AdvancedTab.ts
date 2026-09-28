@@ -371,7 +371,8 @@ async function clearImageCache(): Promise<void> {
 
 /**
  * Clear localStorage but preserve user-critical data: server profiles,
- * saved credentials, active theme selection, and custom themes.
+ * saved credentials, active theme selection, custom themes, and the
+ * notification levels.
  */
 function clearLocalStoragePreservingUserData(): void {
   const PRESERVE_PREFIXES = [
@@ -379,6 +380,7 @@ function clearLocalStoragePreservingUserData(): void {
     "owncord:credential:",
     "owncord:theme:active",
     "owncord:theme:custom:",
+    "owncord:settings:notificationLevel",
   ];
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {

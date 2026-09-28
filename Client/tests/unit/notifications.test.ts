@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  notifyIncomingMessage,
-  cleanupNotificationAudio,
-  resetNotificationCoalescing,
-} from "../../src/lib/notifications";
+import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
+import { cleanupNotificationAudio } from "../../src/lib/notificationSound";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";

@@ -11,7 +11,8 @@ import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { cleanupNotificationAudio, resetNotificationCoalescing } from "@lib/notifications";
+import { resetNotificationCoalescing } from "@lib/notifications";
+import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";

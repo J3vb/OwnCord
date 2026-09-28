@@ -22,16 +22,6 @@ import { connectText } from "../i18n/connect";
 
 const log = createLogger("notifications");
 
-// The chimes live in `notificationSound.ts` so `pages/MainPage.ts` can ring a
-// call without pulling this module (level gate, markdown body, dispatcher) into
-// its chunk; re-exported here so existing importers of this module keep working.
-export {
-  cleanupNotificationAudio,
-  startRingChime,
-  stopRingChime,
-  playNotificationSound,
-} from "./notificationSound";
-
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {
   return document.hasFocus();

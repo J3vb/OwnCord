@@ -131,6 +131,13 @@ vi.stubGlobal("indexedDB", {
 });
 
 import { buildAdvancedTab } from "@components/settings/AdvancedTab";
+import { setChannelMutesHost } from "@lib/channel-mutes";
+import {
+  getGlobalNotificationLevel,
+  getServerNotificationLevel,
+  setServerNotificationLevel,
+  settleNotificationLevelDefault,
+} from "@lib/notificationLevel";
 
 describe("AdvancedTab — Clear All Cache", () => {
   let container: HTMLDivElement;
@@ -243,6 +250,24 @@ describe("AdvancedTab — Clear All Cache", () => {
     expect(localStorage.getItem("owncord:theme:active")).toBe("custom-sunrise");
     expect(localStorage.getItem("owncord:theme:custom:custom-sunrise")).not.toBeNull();
     expect(localStorage.getItem("owncord:settings:accentColor")).toBeNull();
+  });
+
+  it("keeps the notification level across Clear All so the next launch does not reset it to All", async () => {
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+    setChannelMutesHost("a.example");
+    setServerNotificationLevel("nothing");
+    localStorage.setItem("owncord:theme:active", "neon-glow");
+
+    const btn = getClearAllBtn();
+    btn.click();
+    btn.click();
+    await flush();
+
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+    expect(getServerNotificationLevel()).toBe("nothing");
+    setChannelMutesHost(null);
   });
 
   it("renders two-step confirmation for Clear All", () => {
