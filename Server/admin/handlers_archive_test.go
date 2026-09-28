@@ -299,6 +299,37 @@ func TestHandleArchive_StoresUploadsUncompressed(t *testing.T) {
 	}
 }
 
+// TestHandleArchive_RefusesBelowFreeDiskFloor: a build that would take the
+// backup volume below server.min_free_disk_mb is refused up front with a 507
+// the panel shows, and leaves no work dir behind.
+func TestHandleArchive_RefusesBelowFreeDiskFloor(t *testing.T) {
+	var backups string
+	f := newArchiveFixture(t, func(_ string, cfg *config.Config) {
+		cfg.Server.MinFreeDiskMB = 1 << 40
+		backups = cfg.Backup.Dir
+	})
+	w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
+	if w.Code != http.StatusInsufficientStorage {
+		t.Fatalf("GET /archive below the free-disk floor = %d, want 507; body: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body is not JSON: %s", w.Body.String())
+	}
+	if !strings.Contains(body["message"], "min_free_disk_mb") {
+		t.Errorf("message = %q, want it to name server.min_free_disk_mb", body["message"])
+	}
+	left, err := os.ReadDir(backups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range left {
+		if strings.HasPrefix(e.Name(), "owncord-archive-") {
+			t.Errorf("refused build left its work dir %s behind", e.Name())
+		}
+	}
+}
+
 // TestHandleArchive_NoRunningConfigIs500: without the running config there is
 // no data dir to archive, so the handler refuses rather than guessing one.
 func TestHandleArchive_NoRunningConfigIs500(t *testing.T) {

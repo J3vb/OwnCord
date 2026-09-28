@@ -647,8 +647,18 @@ returns one zip with all of it — the database as a `VACUUM INTO` snapshot, the
 whole data directory (uploads, `totp.key`, `erasure.key`,
 `erasure/markers.sqlite`, `push_vapid.key`, TLS material), and `config.yaml`.
 An `upload.storage_dir` outside the data directory is archived as
-`data/uploads/`. Stored backups (`backup.dir`) are left out, and the archive
-is built inside `backup.dir`, so that directory needs room for it. It is Owner-only, because the archive holds password hashes and the key files.
+`data/uploads/`. Stored backups (`backup.dir`) are left out. The archive is
+built inside `backup.dir` before it is sent, so that volume needs room for
+about the size of the data directory plus the database again; when building
+it would leave less free than `server.min_free_disk_mb`, the panel refuses
+with an error instead of filling the disk. It is Owner-only, because the
+archive holds password hashes and the key files.
+
+The panel holds the whole download in the browser before saving it, so the
+in-browser archive suits installs up to a few GB. For a larger install, use
+the manual procedure in
+[Before upgrading: take the archive](#before-upgrading-take-the-archive):
+stop the server and copy the data directory and `config.yaml`.
 
 The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
 even while the server runs. The archive is still taken with WAL-mode writes in

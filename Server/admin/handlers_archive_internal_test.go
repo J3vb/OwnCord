@@ -126,8 +126,8 @@ func TestArchiveDeadline_ShutdownCancelsBuild(t *testing.T) {
 func TestArchiveTree_VanishedEntryIsSkipped(t *testing.T) {
 	root := t.TempDir()
 	listed := filepath.Join(root, "listed.bin")
-	statted := filepath.Join(root, "statted.bin")
-	for _, p := range []string{listed, statted} {
+	planned := filepath.Join(root, "planned.bin")
+	for _, p := range []string{listed, planned} {
 		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -136,31 +136,25 @@ func TestArchiveTree_VanishedEntryIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	info, err := os.Lstat(statted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range []string{listed, statted} {
-		if err := os.Remove(p); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	var buf bytes.Buffer
-	tree := archiveTree{ctx: t.Context(), zw: zip.NewWriter(&buf), db: filepath.Join(root, "chatserver.db")}
 	var listedEntry fs.DirEntry
 	for _, e := range entries {
 		if e.Name() == "listed.bin" {
 			listedEntry = e
 		}
 	}
-	// Gone before its lstat, gone before its open, and gone before WalkDir
-	// could read it: each is skipped.
+	tree := archiveTree{ctx: t.Context(), db: filepath.Join(root, "chatserver.db")}
+	if err := tree.visit(root, "data", planned, entries[1], nil); err != nil {
+		t.Fatalf("planning %s: %v", planned, err)
+	}
+	for _, p := range []string{listed, planned} {
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Gone before its lstat, or before WalkDir could read it: never planned.
 	if err := tree.visit(root, "data", listed, listedEntry, nil); err != nil {
 		t.Errorf("entry removed before its stat: %v", err)
-	}
-	if err := tree.visit(root, "data", statted, fs.FileInfoToDirEntry(info), nil); err != nil {
-		t.Errorf("entry removed before its open: %v", err)
 	}
 	if err := tree.visit(root, "data", listed, nil, fs.ErrNotExist); err != nil {
 		t.Errorf("walk error for a removed entry: %v", err)
@@ -168,7 +162,18 @@ func TestArchiveTree_VanishedEntryIsSkipped(t *testing.T) {
 	if err := tree.visit(root, "data", root, nil, fs.ErrNotExist); err == nil {
 		t.Error("a missing walk root was skipped; it must fail the archive")
 	}
-	if err := tree.zw.Close(); err != nil {
+	if len(tree.entries) != 1 {
+		t.Fatalf("planned %d entries, want only %s", len(tree.entries), planned)
+	}
+
+	// Planned, then gone before its open: skipped while writing.
+	tree.snapshotAdded = true
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if err := tree.write(zw); err != nil {
+		t.Errorf("entry removed before its open: %v", err)
+	}
+	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
 	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
