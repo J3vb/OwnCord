@@ -22,7 +22,10 @@ export interface MentionSuggestion {
   readonly token: string;
   /** Row label: the member's display name when set, else the username. */
   readonly label: string;
-  /** Secondary line (role for users, meaning for @everyone/@here). */
+  /**
+   * Secondary line: the role for users (prefixed by @username when the label
+   * is a display name), the meaning for @everyone/@here.
+   */
   readonly detail: string;
   readonly kind: "user" | "broadcast";
   /** User id, or null for @everyone/@here. */
@@ -72,10 +75,14 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
     const display = member.displayName;
     const lowerDisplay = typeof display === "string" ? display.toLowerCase() : "";
     if (q !== "" && !lowerUsername.includes(q) && !lowerDisplay.includes(q)) continue;
+    const label = memberDisplayName(member);
     const entry: MentionSuggestion = {
       token: member.username,
-      label: memberDisplayName(member),
-      detail: member.role,
+      label,
+      detail:
+        label === member.username
+          ? member.role
+          : messagingText("mention.userDetail", { username: member.username, role: member.role }),
       kind: "user",
       userId: member.id,
     };
@@ -113,10 +120,13 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
   return [...broadcasts, ...prefix, ...substring].slice(0, MAX_MENTION_SUGGESTIONS);
 }
 
-/** One mention row: `@label` plus a role / broadcast-meaning detail line. */
+/**
+ * One mention row: `@token`, or a display name whose @username leads the
+ * detail line, plus the role / broadcast-meaning detail.
+ */
 function renderMentionRow(s: MentionSuggestion): HTMLElement[] {
   const name = createElement("span", { class: "ma-name" });
-  setText(name, `@${s.label}`);
+  setText(name, s.label === s.token ? `@${s.token}` : s.label);
   const detail = createElement("span", { class: "ma-detail" });
   setText(detail, s.detail);
   return [name, detail];

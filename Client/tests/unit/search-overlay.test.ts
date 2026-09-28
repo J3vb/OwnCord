@@ -249,6 +249,7 @@ describe("createSearchOverlay", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(container.querySelector(".search-result-author")!.textContent).toBe("Alice");
+    expect(container.querySelector(".search-result-handle")!.textContent).toBe("@alice_w");
 
     overlay.destroy?.();
   });
@@ -266,6 +267,7 @@ describe("createSearchOverlay", () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(container.querySelector(".search-result-author")!.textContent).toBe("alice");
+    expect(container.querySelector(".search-result-handle")).toBeNull();
 
     overlay.destroy?.();
   });
