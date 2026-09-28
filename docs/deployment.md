@@ -655,15 +655,18 @@ An `upload.storage_dir` outside the data directory is archived as
 `data/uploads/`. Stored backups (`backup.dir`) are left out. The archive is
 built inside `backup.dir` before it is sent, so that volume needs room for
 about the size of the data directory plus the database again; when building
-it would leave less free than `server.min_free_disk_mb`, the panel refuses
-with an error instead of filling the disk. It is Owner-only, because the
-archive holds password hashes and the key files.
+it would leave less free than `server.min_free_disk_mb`, the server refuses
+the download instead of filling the disk. It is Owner-only, because the
+archive holds password hashes and the key files. Only one archive is built at
+a time; a second request while one is being prepared is refused.
 
 The panel asks the server for a short-lived single-use link and opens it as a
 plain download, so the browser streams the archive straight to disk — there is
 no size that has to fit in the page's memory, and no documented ceiling. The
 link token is random, single-use, Owner-bound and expires within a minute;
-nothing else can use it.
+nothing else can use it. The build starts when the browser opens the link, so
+a refusal from the free-space check arrives as a failed download in the
+browser rather than as a panel message.
 
 The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
 even while the server runs. The archive is still taken with WAL-mode writes in

@@ -317,7 +317,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/archive/link" && method === "POST")
-        return { json: { token: "TOK-1", path: "/admin/api/archive/download?token=TOK-1" } };
+        return { json: { path: "/admin/api/archive/download?token=TOK-1" } };
       return { json: {} };
     };
     const booted = await boot(calls, respond);

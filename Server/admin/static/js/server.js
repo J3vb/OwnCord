@@ -448,15 +448,13 @@ async function downloadArchive(){
   const token=state.token;state.archiveRunning=true;renderContent();
   try{
     const r=await api('POST','/archive/link',{});
-    const url=r&&r.path?r.path:'/admin/api/archive/download?token='+(r&&r.token||'');
-    if(!url.includes('token='))throw new Error('Could not create the download link');
-    const a=document.createElement('a');a.href=url;a.download='owncord-archive.zip';document.body.appendChild(a);a.click();a.remove();
-    showToast('Archive download started');
+    const a=document.createElement('a');a.href=r.path;a.download='owncord-archive.zip';document.body.appendChild(a);a.click();a.remove();
+    showToast('Preparing the archive. The download starts when it is ready; this can take a few minutes for large servers.');
   }catch(e){
-    /* The link endpoint is JSON. A pre-build failure (no running config, low
-       disk) answers there as an error status; the actual build happens when
-       the browser opens the link, so a build failure surfaces as a failed
-       download rather than a toast. */
+    /* The link endpoint answers only for the link itself (and refuses while
+       another archive is being prepared). The build, and its free-space and
+       configuration checks, run when the browser opens the link, so their
+       failures surface as a failed download rather than a toast. */
     if(state.token===token)showToast(e.message,'error')
   }
   finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}

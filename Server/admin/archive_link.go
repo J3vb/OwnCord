@@ -5,36 +5,26 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
-	"sync/atomic"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // archiveLinkTTL is how long a single-use archive link stays valid. It is
 // short by design: the owner asks for it and the browser opens it immediately,
 // so a minute is generous and a leaked link is near-useless.
-const archiveLinkTTL = 60 * time.Second
+var archiveLinkTTL = 60 * time.Second
 
-// archiveLinkTTLOverride, when non-zero, replaces archiveLinkTTL. Test-only.
-var archiveLinkTTLOverride atomic.Int64
-
-// SetArchiveLinkTTLForTest overrides the link lifetime; 0 restores the
-// production default. Exported for the external test package only.
-func SetArchiveLinkTTLForTest(d time.Duration) { archiveLinkTTLOverride.Store(int64(d)) }
-
-func archiveLinkLifetime() time.Duration {
-	if d := archiveLinkTTLOverride.Load(); d > 0 {
-		return time.Duration(d)
-	}
-	return archiveLinkTTL
-}
-
-// archiveLink is one issued, not-yet-used link token.
+// archiveLink is one issued, not-yet-used link token. tokenHash is the hash
+// of the bearer credential that asked for it, re-resolved on redemption so a
+// revoked session, a ban or a lost Owner role voids the link.
 type archiveLink struct {
-	actorID int64
-	expires time.Time
+	actorID   int64
+	tokenHash string
+	expires   time.Time
 }
 
 // archiveLinks holds the outstanding single-use tokens. It is process-local:
@@ -46,9 +36,9 @@ type archiveLinks struct {
 
 var linkStore = &archiveLinks{tokens: make(map[string]archiveLink)}
 
-// issue mints a random single-use token bound to actorID and expiring after
-// archiveLinkLifetime. The token is never logged.
-func (s *archiveLinks) issue(actorID int64) (string, time.Time, error) {
+// issue mints a random single-use token bound to actorID and the credential
+// hash, expiring after archiveLinkTTL. The token is never logged.
+func (s *archiveLinks) issue(actorID int64, tokenHash string) (string, time.Time, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", time.Time{}, err
@@ -63,25 +53,25 @@ func (s *archiveLinks) issue(actorID int64) (string, time.Time, error) {
 			delete(s.tokens, k)
 		}
 	}
-	expires := now.Add(archiveLinkLifetime())
-	s.tokens[token] = archiveLink{actorID: actorID, expires: expires}
+	expires := now.Add(archiveLinkTTL)
+	s.tokens[token] = archiveLink{actorID: actorID, tokenHash: tokenHash, expires: expires}
 	return token, expires, nil
 }
 
-// redeem consumes a token, returning the bound actor and whether it was valid
-// and unexpired. A token is deleted on first use, so it can never work twice.
-func (s *archiveLinks) redeem(token string) (int64, bool) {
+// redeem consumes a token, returning its link and whether it was valid and
+// unexpired. A token is deleted on first use, so it can never work twice.
+func (s *archiveLinks) redeem(token string) (archiveLink, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v, ok := s.tokens[token]
 	if !ok {
-		return 0, false
+		return archiveLink{}, false
 	}
 	delete(s.tokens, token) // single-use: consumed even when expired
 	if time.Now().After(v.expires) {
-		return 0, false
+		return archiveLink{}, false
 	}
-	return v.actorID, true
+	return v, true
 }
 
 // handleArchiveLink issues POST /admin/api/archive/link: a short-lived
@@ -90,8 +80,19 @@ func (s *archiveLinks) redeem(token string) (int64, bool) {
 // Owner-only (the archive holds password hashes and the key files).
 func handleArchiveLink() http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hash, ok := r.Context().Value(adminTokenHashKey).(string)
+		if !ok || hash == "" {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+			return
+		}
+		// Refused here too, so the panel can show why instead of the browser
+		// reporting a bare failed download.
+		if archiveBusy.Load() {
+			writeArchiveBusy(w)
+			return
+		}
 		actor := actorFromContext(r)
-		token, expires, err := linkStore.issue(actor)
+		token, expires, err := linkStore.issue(actor, hash)
 		if err != nil {
 			slog.Error("failed to issue archive link", "err", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not create the download link")
@@ -100,25 +101,29 @@ func handleArchiveLink() http.HandlerFunc {
 		// The token is never logged — only that one was issued and for whom.
 		slog.Info("archive download link issued", "actor_id", actor, "expires_at", expires.UTC())
 		writeJSON(w, http.StatusOK, map[string]string{
-			"token": token,
-			"path":  "/admin/api/archive/download?token=" + token,
+			"path": "/admin/api/archive/download?token=" + token,
 		})
 	})
 }
 
 // handleArchiveDownload serves GET /admin/api/archive/download?token=…: the
 // single-use link's redemption. It carries no Authorization header (a plain
-// <a href> cannot send one), so the token IS the authorisation — random,
-// bound to the issuing owner, single-use and short-lived. Any failure to
-// redeem is a uniform 403, so a probe cannot tell unknown from expired from
-// consumed.
+// <a href> cannot send one), so the token stands in for it: random,
+// single-use and short-lived, and the credential that asked for it must
+// still resolve to a non-banned Owner. Any failure to redeem is a uniform
+// 403, so a probe cannot tell unknown from expired from consumed from revoked.
 func handleArchiveDownload(database *db.DB, opts SetupOptions) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		actor, ok := linkStore.redeem(r.URL.Query().Get("token"))
+		link, ok := linkStore.redeem(r.URL.Query().Get("token"))
+		if ok {
+			user, role, _, err := auth.ResolveTokenHash(r.Context(), database, link.tokenHash)
+			ok = err == nil && user != nil && role != nil && !auth.IsEffectivelyBanned(user) &&
+				permissions.IsOwner(role.ID, role.Position)
+		}
 		if !ok {
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "this download link is no longer valid")
 			return
 		}
-		serveArchive(w, r, database, opts, actor)
+		serveArchive(w, r, database, opts, link.actorID)
 	})
 }

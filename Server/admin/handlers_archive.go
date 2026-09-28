@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
@@ -43,6 +44,13 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 	})
 }
 
+// archiveBusy is set while an archive is being built or sent.
+var archiveBusy atomic.Bool
+
+func writeArchiveBusy(w http.ResponseWriter) {
+	writeErr(w, http.StatusConflict, "ARCHIVE_IN_PROGRESS", "An archive is already being prepared. Try again when it finishes.")
+}
+
 // serveArchive builds and streams the archive. actor is who the download is
 // attributed to in the audit log; the caller has already authorised the
 // request (the owner-only route, or a redeemed single-use link).
@@ -51,6 +59,13 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
 		return
 	}
+	// One archive at a time, for the whole build and transfer: two builds
+	// would each pass the free-space check before the other wrote anything.
+	if !archiveBusy.CompareAndSwap(false, true) {
+		writeArchiveBusy(w)
+		return
+	}
+	defer archiveBusy.Store(false)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	deadline := startArchive(w, r, cancel, archiveProgressTimeout, archiveMaxLifetime)

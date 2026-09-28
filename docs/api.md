@@ -4014,6 +4014,7 @@ callers that send the `Authorization` header themselves.
 zip is built before the status is written, so a failed build is a JSON error:
 `507 STORAGE_LOW_DISK` when building it would leave the backup directory's
 volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
+`409 ARCHIVE_IN_PROGRESS` while another archive is being built or sent.
 
 ---
 
@@ -4028,13 +4029,13 @@ open as a plain browser download.
 
 ```json
 {
-  "token": "…",
   "path": "/admin/api/archive/download?token=…"
 }
 ```
 
 The token is random, bound to the requesting owner, valid for about a minute
-and consumable once. It is never logged.
+and consumable once. It is never logged. `409 ARCHIVE_IN_PROGRESS` while
+another archive is being built or sent.
 
 ---
 
@@ -4042,8 +4043,11 @@ and consumable once. It is never logged.
 
 Redeem a single-use archive link. **Auth:** the `token` query parameter (a
 browser download cannot send an `Authorization` header); the token IS the
-authorisation. `200 application/zip` on success, `403 FORBIDDEN` for an
-unknown, expired or already-used token.
+authorisation, and the credential that asked for it must still be a signed-in,
+non-banned Owner. `200 application/zip` on success, `403 FORBIDDEN` for an
+unknown, expired or already-used token or a principal that no longer
+qualifies, `409 ARCHIVE_IN_PROGRESS` while another archive is being built or
+sent.
 
 ---
 
