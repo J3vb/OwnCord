@@ -40,12 +40,13 @@ Each item links to the guidance that owns it.
 
 ## Operating limits
 
-- **Owner lockout has no self-service fix.** An owner cannot issue their own
-  recovery, the setup wizard does not hand out a recovery kit, and
-  `chatserver token create` cannot reset a password. For beta the answer is:
-  restore `data/` from your archive and re-run setup, or recover through a
-  configured recovery kit — see [Backup Strategy](deployment.md#backup-strategy)
-  and [Restore](deployment.md#restore). A setup-time recovery kit is post-beta.
+- **Owner lockout has no self-service fix after setup.** An owner cannot issue
+  their own recovery, and `chatserver token create` cannot reset a password.
+  The setup wizard offers to generate a recovery kit for the owner at first
+  run, and one can be enrolled any time from the desktop client; without a kit,
+  the answer is: restore `data/` from your archive and re-run setup — see
+  [Backup Strategy](deployment.md#backup-strategy) and
+  [Restore](deployment.md#restore).
 - **Restore needs a running server or the CLI.** `POST /admin/api/backups/{name}/restore`
   is the in-product path and needs the server (and the admin panel) to be up.
   When the server will not boot, `chatserver restore [--force] <file>` puts a

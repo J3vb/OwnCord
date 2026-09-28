@@ -40,6 +40,11 @@
         <dd><div class="code-copy"><code id="certFingerprint"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;certFingerprint&quot;]" aria-label="Copy certificate fingerprint">Copy</button></div>
           <p class="wiz-hint">Publish it out of band (another platform, a call). Members compare it with the prompt their desktop app shows before they accept the connection: a mismatch is the one warning that means an interception attempt.</p></dd>
       </div>
+      <div class="setup-fact hidden" id="setupRecoveryKit">
+        <dt>Recovery kit</dt>
+        <dd><div class="code-copy"><code id="recoveryKitSecret"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;recoveryKitSecret&quot;]" aria-label="Copy recovery kit">Copy</button></div>
+          <p class="wiz-hint">Save this somewhere safe now — it is shown once and never again. If you lose your password and your authenticator, this kit is the only way back into your owner account. It works once; enrolling a new one replaces it.</p></dd>
+      </div>
     </dl>
     <p class="wiz-hint hidden" id="setupFingerprintLater">The certificate fingerprint appears on the Dashboard once the server serves its new certificate. Publish it before members connect.</p>
     <div id="setupWarnings"></div>

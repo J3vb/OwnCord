@@ -466,3 +466,73 @@ func TestSetupWizard_ForeignOriginBlocked(t *testing.T) {
 		t.Error("config file written from a cross-origin request")
 	}
 }
+
+// TestSetupWizard_RecoveryKit is B11-8: when the wizard asks for a recovery
+// kit, the finish response carries it once and the server stores only its
+// verifier, so the owner has a way back in if they lose their password and
+// second factor.
+func TestSetupWizard_RecoveryKit(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	handler := wizardHandler(t, database, cfgPath, make(chan string, 1))
+
+	rr := doRequest(t, handler, "POST", "/setup", "", map[string]any{
+		"username": "owner",
+		"password": "SecurePass123!",
+		"wizard":   map[string]any{"recovery_kit": true},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		UserID            int64  `json:"user_id"`
+		RecoveryKitSecret string `json:"recovery_kit_secret"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.RecoveryKitSecret == "" {
+		t.Fatal("recovery_kit_secret missing from the setup response")
+	}
+	kit, err := database.GetRecoveryKit(context.Background(), resp.UserID)
+	if err != nil || kit == nil {
+		t.Fatalf("GetRecoveryKit: %v (kit %v)", err, kit)
+	}
+	if kit.Verifier == resp.RecoveryKitSecret {
+		t.Error("the stored verifier is the plaintext secret")
+	}
+}
+
+// TestSetupWizard_NoRecoveryKitByDefault: the field is opt-in, so a wizard run
+// without it stores no kit and returns no secret.
+func TestSetupWizard_NoRecoveryKitByDefault(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	handler := wizardHandler(t, database, cfgPath, make(chan string, 1))
+
+	rr := doRequest(t, handler, "POST", "/setup", "", map[string]any{
+		"username": "owner",
+		"password": "SecurePass123!",
+		"wizard":   map[string]any{"server_name": "Plain"},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		UserID            int64  `json:"user_id"`
+		RecoveryKitSecret string `json:"recovery_kit_secret"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.RecoveryKitSecret != "" {
+		t.Errorf("a kit was issued without being requested: %q", resp.RecoveryKitSecret)
+	}
+	kit, err := database.GetRecoveryKit(context.Background(), resp.UserID)
+	if err != nil {
+		t.Fatalf("GetRecoveryKit: %v", err)
+	}
+	if kit != nil {
+		t.Error("a recovery kit row exists though the wizard did not ask for one")
+	}
+}

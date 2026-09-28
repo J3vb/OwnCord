@@ -3163,7 +3163,8 @@ a missing or different value is `403 FORBIDDEN`. The server makes a fresh token 
     "tls_domain": "",
     "upload_max_size_mb": 100,
     "voice_quality": "medium",
-    "voice_auto_download": true
+    "voice_auto_download": true,
+    "recovery_kit": true
   }
 }
 ```
@@ -3171,7 +3172,9 @@ a missing or different value is `403 FORBIDDEN`. The server makes a fresh token 
 All `wizard` fields are optional; `server_name`, `motd` and
 `registration_mode` (`closed` / `invite` / `approval` / `open`, default
 `invite`) are stored in the settings table (live), the rest are written back
-to `config.yaml` (consumed at startup).
+to `config.yaml` (consumed at startup). `recovery_kit` asks the server to
+generate the owner's recovery kit during the first run (B11-8); the secret is
+returned once as `recovery_kit_secret` and only its verifier is stored.
 
 #### Response 200 OK
 
@@ -3184,7 +3187,8 @@ to `config.yaml` (consumed at startup).
   "restart_required": false,
   "restart_url": "",
   "warnings": [],
-  "certificate_fingerprint": "3f:a1:...:9c"
+  "certificate_fingerprint": "3f:a1:...:9c",
+  "recovery_kit_secret": "ABCD-EFGH-IJKL-MNOP"
 }
 ```
 
@@ -3195,7 +3199,9 @@ afterwards. `warnings` lists non-fatal problems (e.g. `config.yaml` not
 writable) — the account exists whenever this response is returned.
 `certificate_fingerprint` is as in [`GET /admin/api/stats`](#get-adminapistats),
 and is also omitted when `wizard.tls_mode` differs from the running mode —
-the restarted server serves a different certificate.
+the restarted server serves a different certificate. `recovery_kit_secret` is
+present only when `wizard.recovery_kit` was true and the kit was issued: it is
+shown once and can never be retrieved again.
 
 ---
 

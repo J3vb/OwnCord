@@ -56,6 +56,10 @@ type setupWizardRequest struct {
 	// VoiceAutoDownload toggles voice.auto_download_livekit — download and
 	// run livekit-server automatically so voice works with zero setup.
 	VoiceAutoDownload *bool `json:"voice_auto_download"`
+	// RecoveryKit asks the server to generate the owner's recovery kit as
+	// part of the first run (B11-8). The kit secret is returned once on the
+	// finish step; only its verifier is stored.
+	RecoveryKit *bool `json:"recovery_kit"`
 }
 
 // setupDefaults is the prefill data the wizard shows. Exposed only while

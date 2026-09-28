@@ -28,7 +28,8 @@ function wizInit(defaults){
     tls_domain:d.tls_domain||'',
     upload_max_size_mb:d.upload_max_size_mb||100,
     voice_quality:d.voice_quality||'medium',
-    voice_auto_download:d.voice_auto_download!==undefined?!!d.voice_auto_download:true};
+    voice_auto_download:d.voice_auto_download!==undefined?!!d.voice_auto_download:true,
+    recovery_kit:true};
   renderWizard();
 }
 
@@ -113,11 +114,12 @@ function renderWizard(){
         +wizField('wizReg','Registration','<select class="form-input" id="wizReg">'+regModeOptions(d.registration_mode)+'</select>',
           'Who can create an account. Invite-only is the default; approval holds new accounts until you approve them in Members.')
         +wizField('wizMotd','Welcome message','<input class="form-input" id="wizMotd" maxlength="500" value="'+esc(d.motd)+'">','Shown to members when they connect.')
+        +'<div class="wiz-toggle-row"><div><div class="lbl" id="wizRecovery-name">Recovery kit</div><p class="wiz-hint" id="wizRecovery-hint">Generates a one-time recovery kit for your owner account now, shown on the next step. Keep it somewhere safe: it is the only way back in if you lose your password and second factor, and it works once.</p></div><button type="button" class="toggle'+(d.recovery_kit?' on':'')+'" id="wizRecovery" role="switch" aria-checked="'+(d.recovery_kit?'true':'false')+'" aria-labelledby="wizRecovery-name" aria-describedby="wizRecovery-hint" data-action="toggleSwitch"></button></div>'
         +err+nav('Next');
       break;
     case 5:{
       const secLabel=d.tls_mode==='acme'?'Let’s Encrypt ('+esc(d.tls_domain)+')':esc(TLS_LABELS[d.tls_mode]||d.tls_mode);
-      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(VOICE_QUALITY_LABELS[d.voice_quality]||d.voice_quality)],['Registration',esc(regModeLabel(d.registration_mode))],['Welcome message',esc(d.motd)||'&mdash;']];
+      const rows=[['Username',esc(d.username)],['Server name',esc(d.server_name)],['Port',esc(d.port)],['Security',secLabel],['Max upload',esc(d.upload_max_size_mb)+' MB'],['Voice chat',d.voice_auto_download?'Automatic (LiveKit downloaded for you)':'Self-managed / off'],['Voice quality',esc(VOICE_QUALITY_LABELS[d.voice_quality]||d.voice_quality)],['Registration',esc(regModeLabel(d.registration_mode))],['Welcome message',esc(d.motd)||'&mdash;'],['Recovery kit',d.recovery_kit?'Yes — shown once on the next step':'No']];
       h+=title('Review &amp; finish')+'<p class="wiz-sub">Everything look right? You can change any of this later in the admin panel.</p><dl class="wiz-review">';
       rows.forEach(r=>{h+='<div class="wiz-review-row"><dt>'+r[0]+'</dt><dd>'+r[1]+'</dd></div>'});
       h+='</dl>';
@@ -152,7 +154,7 @@ function wizCollect(){
     case 1:d.setup_token=(g('wizToken')||'').trim();d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
     case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
     case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
-    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_mode=t.value;d.motd=(g('wizMotd')||'').trim();break}
+    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_mode=t.value;d.motd=(g('wizMotd')||'').trim();const rk=document.getElementById('wizRecovery');if(rk)d.recovery_kit=rk.classList.contains('on');break}
   }
 }
 
@@ -228,7 +230,7 @@ async function wizFinish(){
   if(!wiz.skip){
     body.wizard={server_name:d.server_name,motd:d.motd,registration_mode:d.registration_mode||'invite',
       port:Number(d.port),tls_mode:d.tls_mode,upload_max_size_mb:Number(d.upload_max_size_mb),
-      voice_quality:d.voice_quality,voice_auto_download:!!d.voice_auto_download};
+      voice_quality:d.voice_quality,voice_auto_download:!!d.voice_auto_download,recovery_kit:!!d.recovery_kit};
     if(d.tls_mode==='acme')body.wizard.tls_domain=d.tls_domain;
   }
   try{
@@ -261,6 +263,10 @@ function renderSetupSuccess(resp){
   if(fp)document.getElementById('certFingerprint').textContent=resp.certificate_fingerprint;
   document.getElementById('setupFingerprint').classList.toggle('hidden',!fp);
   document.getElementById('setupFingerprintLater').classList.toggle('hidden',fp||mode==='off'||mode==='acme');
+  /* The recovery kit is shown once, here, and never returned again. */
+  const rk=!!resp.recovery_kit_secret;
+  if(rk)document.getElementById('recoveryKitSecret').textContent=resp.recovery_kit_secret;
+  document.getElementById('setupRecoveryKit').classList.toggle('hidden',!rk);
 }
 
 /* Poll until the restarted server answers, then follow it. no-cors: an opaque

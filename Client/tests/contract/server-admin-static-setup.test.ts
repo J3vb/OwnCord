@@ -236,6 +236,32 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     expect(doc.activeElement).toBe(doc.getElementById("setupTitle"));
   });
 
+  it("asks for a recovery kit by default and shows the secret once on the finish step", async () => {
+    const booted = await boot({
+      json: { token: "T", invite_code: "INV-1", recovery_kit_secret: "ABCD-EFGH-IJKL-MNOP" },
+    });
+    dom = booted.dom;
+    const { doc, calls } = booted;
+    await submit(dom);
+    await fillAccount(dom);
+    for (let i = 0; i < 5; i++) await submit(dom);
+
+    const setup = calls.find((c) => c.path === "/setup" && c.method === "POST");
+    expect(setup?.body).toMatchObject({ wizard: { recovery_kit: true } });
+    expect(doc.getElementById("setupRecoveryKit")!.classList.contains("hidden")).toBe(false);
+    expect(doc.getElementById("recoveryKitSecret")!.textContent).toBe("ABCD-EFGH-IJKL-MNOP");
+  });
+
+  it("hides the recovery kit block when the server did not issue one", async () => {
+    const booted = await boot({ json: { token: "T", invite_code: "INV-1" } });
+    dom = booted.dom;
+    const { doc } = booted;
+    await submit(dom);
+    await fillAccount(dom);
+    for (let i = 0; i < 5; i++) await submit(dom);
+    expect(doc.getElementById("setupRecoveryKit")!.classList.contains("hidden")).toBe(true);
+  });
+
   it("points at the restarted address when the wizard moved the port", async () => {
     const booted = await boot({
       json: {

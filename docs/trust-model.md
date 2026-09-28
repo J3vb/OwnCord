@@ -404,7 +404,9 @@ does not claim").
   bytes the account holder keeps offline. The server stores an argon2id
   verifier of it in `recovery_kits` (`Server/db/recovery_kit.go`) and nothing
   else: it cannot show the secret again, and a database or backup holds no
-  usable kit.
+  usable kit. The setup wizard can mint the owner's kit at first run — it,
+  too, stores only the verifier and returns the secret once on the finish
+  step — so a fresh install starts with a way back in.
 - Redemption (`POST /api/v1/auth/recover`) replaces the password, revokes
   every session, spends the kit and writes the audit row in one transaction
   (`DB.RedeemRecoveryKit`), then issues a session **without** the second
