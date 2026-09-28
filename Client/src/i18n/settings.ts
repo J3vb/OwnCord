@@ -77,6 +77,11 @@ export const settingsText = defineCatalog("settings", {
   "notifications.suppress.desc": "Mute @everyone and @here — messages that name you still notify",
   "notifications.sounds.label": "Notification Sounds",
   "notifications.sounds.desc": "Play sounds for notifications",
+  "notifications.level.label": "Notification Level",
+  "notifications.level.desc": "How much this server may interrupt you",
+  "notifications.level.all": "All",
+  "notifications.level.mentions": "Mentions only",
+  "notifications.level.nothing": "Nothing",
   "notifications.muted.title": "Muted Channels",
   "notifications.muted.desc":
     "Muted channels never notify you, but messages that mention you still do.",

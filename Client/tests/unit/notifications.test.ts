@@ -111,6 +111,11 @@ describe("notifyIncomingMessage", () => {
   beforeEach(() => {
     testPrefs.clear();
 
+    // These cases describe the pre-level behaviour (every non-active message
+    // notifies), i.e. the "All" level. The level's own default and gate are
+    // covered by notification-level.test.ts and the level cases below.
+    testPrefs.set("notificationLevel", "all");
+
     // Set up auth store with a different user
     authStore.setState(() => ({
       token: "test",
@@ -1329,6 +1334,78 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("userStatus", "idle");
 
       notifyIncomingMessage(makePayload());
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("notification level (U1b)", () => {
+    it("Nothing silences the popup, the chime and the taskbar flash even for a mention", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+
+      notifyIncomingMessage(
+        makePayload({ content: "hey @Me", mentions: [1], mentions_everyone: false }),
+      );
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    it("Mentions only suppresses a plain message but not one that names you", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "mentions");
+
+      notifyIncomingMessage(makePayload({ content: "just chatter", mentions: [] }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+
+      notifyIncomingMessage(
+        makePayload({ content: "hey @Me", mentions: [1], mentions_everyone: false }),
+      );
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+
+    it("treats a DM as addressed to you at Mentions only", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "mentions");
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+
+      notifyIncomingMessage(
+        makePayload({
+          channel_id: 55,
+          content: "hey",
+          user: { id: 2, username: "bob", avatar: null },
+        }),
+      );
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();

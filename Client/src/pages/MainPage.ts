@@ -61,6 +61,7 @@ import {
 } from "@components/message-list/reaction-tooltip";
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
+import { setNotificationLevelHost } from "@lib/notificationLevel";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
@@ -204,6 +205,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // stores to the connected host — including the null case, so a disconnect
   // cannot leave the previous server's scope armed for the next connection.
   setChannelMutesHost(apiConfig.host ?? null);
+  setNotificationLevelHost(apiConfig.host ?? null);
   setAudioVolumeHost(apiConfig.host ?? null);
   // Server images are cached per account, not per host: two accounts on one
   // server see different channels. Expired the moment auth clears, so a

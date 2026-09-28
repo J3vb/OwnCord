@@ -5,6 +5,7 @@
 
 import { loadPref } from "./preferences";
 import { notificationAllowed } from "./channel-mutes";
+import { effectiveNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
@@ -94,6 +95,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const mentioned = directMention || everyoneMention;
 
+  // How much this server may interrupt (U1b): All / Mentions only / Nothing,
+  // a global preference with a per-server override. This is the first gate
+  // because `nothing` must silence the popup, the chime AND the taskbar flash —
+  // unlike a channel mute, which deliberately lets a direct mention through.
+  const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
+  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm })) return;
+
   // A muted channel stops making noise entirely — popup, chime AND taskbar
   // flash, because a flashing taskbar is exactly the interruption the mute was
   // asked for. The unread badge is untouched (it is drawn from the store, not
@@ -106,7 +114,6 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
 
-  const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
   const channelLabel = isDm ? channelName : `#${channelName}`;
 
   // The name to show for the author, resolved the same way the message list

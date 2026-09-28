@@ -124,6 +124,9 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", false);
     testPrefs.set("notificationSounds", false);
+    // The body-serializer case is about content, not the level gate; use All so
+    // this non-mention message still fires.
+    testPrefs.set("notificationLevel", "all");
 
     notifyIncomingMessage({
       id: 1,
