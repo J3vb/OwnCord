@@ -552,7 +552,7 @@ describe("TOTP Settings", () => {
         // The error element in the confirm area also has data-testid="totp-error"
         const errorEls = container.querySelectorAll("[data-testid='totp-error']");
         const confirmError = Array.from(errorEls).find(
-          (el) => el.textContent === "Failed to enable 2FA.",
+          (el) => el.textContent === "Could not turn on two-factor authentication. Try again.",
         );
         expect(confirmError).not.toBeUndefined();
       });

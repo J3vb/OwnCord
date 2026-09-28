@@ -15,7 +15,7 @@ import { getRoleIdByName } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
-import type { ApiClient } from "@lib/api";
+import { type ApiClient, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
@@ -274,7 +274,7 @@ export function createSidebarMemberSection(
       // the REST call can succeed while the socket is down.
       await refreshBanned();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : shellText("members.unbanFailed");
+      const msg = errorText(err, shellText("members.unbanFailed"));
       getToast()?.show(msg, "error");
     }
   }
@@ -302,7 +302,7 @@ export function createSidebarMemberSection(
         await api.adminKickMember(userId);
         getToast()?.show(shellText("members.forcedLogout", { username }), "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : shellText("members.forceLogoutFailed");
+        const msg = errorText(err, shellText("members.forceLogoutFailed"));
         getToast()?.show(msg, "error");
       }
     },
@@ -319,7 +319,7 @@ export function createSidebarMemberSection(
         // somewhere or it cannot be undone from here.
         await refreshBanned();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : shellText("members.banFailed");
+        const msg = errorText(err, shellText("members.banFailed"));
         getToast()?.show(msg, "error");
       }
     },
@@ -337,7 +337,7 @@ export function createSidebarMemberSection(
         );
       } catch (err) {
         const fallback = shellText(block ? "members.blockFailed" : "members.unblockFailed");
-        const msg = err instanceof Error ? err.message : fallback;
+        const msg = errorText(err, fallback);
         getToast()?.show(msg, "error");
       }
     },
@@ -352,7 +352,7 @@ export function createSidebarMemberSection(
         await api.adminChangeRole(userId, roleId);
         getToast()?.show(shellText("members.roleChanged", { username, role: newRole }), "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : shellText("members.roleChangeFailed");
+        const msg = errorText(err, shellText("members.roleChangeFailed"));
         getToast()?.show(msg, "error");
       }
     },

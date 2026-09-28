@@ -164,8 +164,10 @@ and drives the ring state machine in `lib/call-ring.ts` and its answer surfaces
 One canonical reaction per failure class, applied everywhere. Today the
 reaction is per-call-site (`doFetch()` in `lib/api.ts` centralizes only 401);
 only the displayed text is shared: `serverErrorText()`/`errorText()` in
-`lib/api.ts` map a server error code to catalog text and show the server
-message only when the code has no mapping. This matrix is the target contract.
+`lib/api.ts` map a server error code (disambiguated by its message where the
+server overloads it — see `serverErrorCopy()`) to catalog text and show the
+server message, capitalised, only when there is no mapping. This matrix is the
+target contract.
 
 | Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

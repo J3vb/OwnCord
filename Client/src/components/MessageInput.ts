@@ -6,6 +6,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { createGifPicker } from "@components/GifPicker";
@@ -785,7 +786,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       if (uploadOwner.signal.aborted) return;
       // Upload failed — remove preview and show error
       removePreviewItem(item);
-      const errMsg = err instanceof Error ? err.message : messagingText("error.uploadFailed");
+      const errMsg = errorText(err, messagingText("error.uploadFailed"));
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
     }
   }
