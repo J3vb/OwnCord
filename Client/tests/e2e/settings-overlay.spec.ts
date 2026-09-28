@@ -6,6 +6,7 @@ import {
   switchSettingsTab,
 } from "./helpers";
 import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
+import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/b9-zoom";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure
@@ -292,7 +293,9 @@ test.describe("Settings — Diagnostics & logs Tab", () => {
     const failures: string[] = [];
     for (const selector of [
       ".summary-line .disclose-count",
-      ".status-result",
+      ".diag-step-btn[aria-pressed='true'] .diag-step-label",
+      ".diag-step-btn[aria-pressed='false'] .diag-step-label",
+      ".diag-step-detail",
       "summary .disclose-count",
     ]) {
       const { ratio } = await textContrast(pane.locator(selector).first());
@@ -309,6 +312,42 @@ test.describe("Settings — Diagnostics & logs Tab", () => {
     expect((await focusIndicator(page)).problems).toEqual([]);
     await page.keyboard.press("Enter");
     await expect(page.locator(".log-viewer")).toBeVisible();
+  });
+
+  test("steps through the connection stages by keyboard and reflows at 200 % zoom", async ({
+    page,
+  }, testInfo) => {
+    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+    await pane
+      .getByRole("checkbox", { name: "Include a brief microphone permission check" })
+      .uncheck();
+    await page.getByTestId("diagnostics-start").click();
+    await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
+      timeout: 15_000,
+    });
+    const stages = pane.locator("ol.diag-stepper > li");
+    await expect(stages).toHaveCount(6);
+
+    const server = pane.getByRole("button", { name: /^Server — Server connection, / });
+    await server.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(server).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(server).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("diagnostics-detail")).toContainText("Server connection");
+
+    await page.setViewportSize(ZOOM_VIEWPORT);
+    await expectScreenReflows(
+      page,
+      {
+        name: "diagnostics-stepper-640x400.png",
+        root: page.locator("[data-testid='settings-overlay'] .settings-content"),
+        actions: [stages.last().locator("button")],
+      },
+      testInfo,
+    );
   });
 
   test("shows log viewer once the client logs disclosure is opened", async ({ page }) => {

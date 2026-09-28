@@ -205,6 +205,14 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleReadme":
     "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nPasswords, session tokens, recovery kits, recovery codes and 2FA secrets are\nnever read into this bundle: settings are copied from a fixed allowlist and the\nOS keychain is not touched. The log files are NOT redacted: they are exported\nexactly as written. Read them before sharing this bundle, and share it only\nwith someone you trust.\n",
 
+  "diagnostics.short.connection": "Server",
+  "diagnostics.short.authentication": "Sign-in",
+  "diagnostics.short.websocket": "Messages",
+  "diagnostics.short.microphone": "Microphone",
+  "diagnostics.short.signaling": "Voice",
+  "diagnostics.short.media": "Media",
+  "diagnostics.stepName": "{label} — {stage}, {status}",
+  "diagnostics.stepDetail": "{stage}: {status}",
   "diagnostics.stage.connection": "Server connection",
   "diagnostics.stage.authentication": "Signed-in access",
   "diagnostics.stage.websocket": "Live message connection",
