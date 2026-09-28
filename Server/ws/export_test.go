@@ -581,3 +581,13 @@ func (rb *EventRingBuffer) AllFramesForTest() [][]byte {
 
 // CurrentSeqForTest returns the hub's sequence counter.
 func (h *Hub) CurrentSeqForTest() uint64 { return atomic.LoadUint64(&h.seq) }
+
+// DropSocketForTest runs readPump's teardown for c after its socket drops:
+// unregister, then the voice step, which parks a completed membership in the
+// RT-8 grace window.
+func (h *Hub) DropSocketForTest(c *Client) {
+	chID := c.getVoiceChID()
+	if !h.unregisterNow(c) && chID != 0 {
+		h.leaveVoiceOnDisconnect(context.Background(), c, voiceLeaveReasonDisconnect)
+	}
+}
