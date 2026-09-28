@@ -43,7 +43,7 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
      level: info
    ```
 
-3. **In `config.yaml`** (copied from `config.yaml.example`), set `voice.livekit_url` to `ws://livekit:7880` (Docker DNS) and `voice.auto_download_livekit` to `false`, and leave `voice.livekit_binary` unset — see [Deployment — config.yaml for Docker](deployment.md#configyaml-for-docker).
+3. **In `config.yaml`** (copied from `config.yaml.example`), no voice edit is needed: the compose file already points the server at `ws://livekit:7880` and turns auto-download off. Leave `voice.livekit_binary` unset — see [Deployment — config.yaml for Docker](deployment.md#configyaml-for-docker).
 
 4. **Open firewall ports** on your host:
 
@@ -106,7 +106,7 @@ voice:
 | `livekit_binary`        | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed               | `""`                                    |
 | `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty   | `true` in generated config              |
 | `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.7"`)                                          | `""` (built-in pin)                     |
-| `node_ip`               | Public IP for WebRTC ICE candidates (remote users behind NAT)                                        | `""` (auto-detect)                      |
+| `node_ip`               | Public IP for WebRTC ICE candidates; pin only when auto-detection cannot work                        | `""` (auto-detect)                      |
 | `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false`                                 |
 | `quality`               | Default voice quality preset                                                                         | `"medium"`                              |
 

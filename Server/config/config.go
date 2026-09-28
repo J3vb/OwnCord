@@ -206,8 +206,9 @@ type VoiceConfig struct {
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
-	// in addition to the external node_ip mapping, so clients on the local
-	// network can connect while remote clients use the public IP.
+	// in addition to the detected public address, so clients on the local
+	// network can connect while remote clients use the public IP. It keeps
+	// use_external_ip on in the generated livekit.yaml, so NodeIP is ignored.
 	AdvertiseInternalIP bool   `yaml:"advertise_internal_ip"`
 	Quality             string `yaml:"quality"` // low | medium | high
 }
