@@ -227,10 +227,12 @@ assertions offline, with no SFU and no `lk` binary.
 - **Nothing in CI gates these numbers.** Like the benchmark baseline, they are
   recorded and published. `load-baseline.yml` is `workflow_dispatch` plus a
   weekly `schedule:` on dev, never part of the blocking CI matrix, because a
-  perf run on shared runners is a flake source. The schedule re-measures the
-  constrained profile each week and uploads its artifacts, so a regression is
-  visible in the Actions history without anyone dispatching a run; it does not
-  gate anything.
+  perf run on shared runners is a flake source. GitHub runs a `schedule:` only
+  from the default branch, so the schedule begins once this workflow reaches
+  `main`; from then it re-measures the constrained profile each week, prints
+  the `dev` commit it checked out, and uploads its artifacts, so a regression
+  is visible in the Actions history without anyone dispatching a run. It does
+  not gate anything.
 - **The operational profiles below are per-phase, not per-run.** That section's
   database figures are deltas between phases of one run, so they answer "which
   scenario did the writer queue behind" and not "how long did the run wait".
@@ -556,7 +558,7 @@ does not compete with the server it measures.
 
 Every number below comes from the **constrained** leg and from nothing else.
 
-> **Provenance note (2026-09-25).** These qualifying runs were dispatched from
+> **Provenance note (2026-09-25, superseded by the RE-05 note below).** These qualifying runs were dispatched from
 > measurement branches, not from `dev` or `main`: the `commit:` line in each
 > block is that branch's head, which is **not** an ancestor of `dev`/`main` and
 > so does not resolve in a checkout of either. The **workflow run id** in each
@@ -577,12 +579,12 @@ Every number below comes from the **constrained** leg and from nothing else.
 > **RE-05 is met: capacity and operational are now `dev` runs (2026-09-28).**
 > The capacity block below was re-made on the `dev` tip `a989b8a8` (run 36383236783) and the operational pair on the same commit (run 36383239328),
 > after the k6 harness and server fixes the older blocks predate. Both runs'
-> `commit:` lines resolve in a checkout of `dev` and `main`, which is exactly
-> the B10 item-8 comparison RE-05 owed. Every block now cites a resolvable
+> `commit:` lines resolve in a checkout of `dev`, which is exactly the B10
+> item-8 comparison RE-05 owed. Every block now cites a resolvable
 > `dev` revision; no measurement-branch run remains as a qualifying figure,
-> and the operational re-measurement resolves OC-0481 (see that section). The
-> weekly `schedule:` the workflow now carries keeps a fresh `dev` run in the
-> Actions history without anyone dispatching one.
+> and the operational re-measurement resolves OC-0481 (see that section). Once
+> this workflow reaches `main` (the next release), its weekly `schedule:` keeps
+> a fresh `dev` run in the Actions history without anyone dispatching one.
 
 ### The profile on `dev` (RE-05, 2026-09-28)
 

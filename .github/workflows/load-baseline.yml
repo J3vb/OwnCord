@@ -148,7 +148,7 @@ jobs:
     # inert on dispatch: a fork dispatching this file is spending its own
     # minutes on its own copy, which is its choice, but a fork's weekly cron
     # is not.
-    if: github.repository == 'J3vb/OwnCord'
+    if: github.event_name != 'schedule' || github.repository == 'J3vb/OwnCord'
     runs-on: ubuntu-latest
     # 45 min covers every profile whose k6 run is ~4.5 min (60 s ramp + 180 s
     # sustain + 20 s drain) on top of the build, boot and seeding. The ceiling
@@ -169,6 +169,7 @@ jobs:
       CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
       SEED_USERS_INPUT: ${{ inputs.users || '250' }}
       CONNECTIONS: ${{ inputs.connections || '100' }}
+      VOICE: ${{ inputs.voice || '25' }}
     strategy:
       fail-fast: false
       matrix:
@@ -193,6 +194,16 @@ jobs:
           # started on.
           ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
           persist-credentials: false
+
+      # So the log of a scheduled run states which dev commit was measured
+      # instead of leaving it to be re-derived from the trigger.
+      - name: Print checked-out revision
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          echo "event=$EVENT ref=$REF"
+          git rev-parse HEAD
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -591,16 +602,15 @@ jobs:
           # K6_VOICE_VUS to 0 and registers no voice threshold, so a disabled
           # leg neither fails nor passes vacuously.
           K6_VOICE_CHANNEL_ID: ${{ env.VOICE_LEG == '1' && env.VOICE_ID || '' }}
-          K6_VOICE_VUS: ${{ inputs.voice || '25' }}
+          K6_VOICE_VUS: ${{ env.VOICE }}
           K6_VOICE_CHURN_PHASE: ${{ inputs.churn_phase || 'spread' }}
-          K6_PEAK_VUS: ${{ inputs.connections || '100' }}
+          K6_PEAK_VUS: ${{ env.CONNECTIONS }}
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
-          K6_CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
+          K6_CEILING_MAX: ${{ env.CEILING_MAX }}
           K6_CEILING_CHANNELS: ${{ env.CEILING_CHANNEL_IDS }}
           K6_RESTART_AT: ${{ env.RESTART_AT }}
           K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
-          INPUTS_VOICE: ${{ inputs.voice || '25' }}
           MATRIX_LEG: ${{ matrix.leg }}
         run: |
           mkdir -p Server/scripts/k6/reports
@@ -629,7 +639,7 @@ jobs:
           # operational k6 voice churn, which is why it is not the gate here.
           voice_pid=""
           if [ "$PROFILE" = "capacity" ]; then
-            PUBLISHERS="${INPUTS_VOICE}" SUBSCRIBERS="${INPUTS_VOICE}" \
+            PUBLISHERS="${VOICE}" SUBSCRIBERS="${VOICE}" \
             DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
             LIVEKIT_URL=http://127.0.0.1:7880 \
             REPORT="$WORK/voice-load.txt" \

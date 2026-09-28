@@ -124,7 +124,7 @@ export function render(ledger) {
       `**Fixed:** \`${r.fix.commit}\` · test \`${r.fix.test}\` · revert-proof ${r.fix.revertProof}`,
   );
   section("Declined", declined, (r) => `**Declined:** ${r.rationale}`);
-  section("Refuted", refuted);
+  section("Refuted", refuted, (r) => r.rationale && `**Refuted:** ${r.rationale}`);
   section("Duplicate", dup, (r) => `**Duplicate of** ${r.duplicateOf}`);
   return lines.join("\n");
 }
