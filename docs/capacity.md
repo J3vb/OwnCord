@@ -119,10 +119,13 @@ For the **steady** profile these budgets were tightened from a measured p99
 with at least twice it as headroom, so a busier runner does not turn a published
 promise into a flake. That headroom is a property of the steady shape:
 the operational profile runs a storm, a 25-way voice churn and upload pressure
-alongside the same fan-out, and there the acknowledgement p99 has been measured
-_at or over_ its budget (ramp p99 299 ms, and tls-off upload p99 301 ms against
-300, filed as OC-0481).
-The budgets do not move for that — a busy-runner tail is a finding, not a
+alongside the same fan-out, and there the acknowledgement p99 was once measured
+_at_ its budget (ramp p99 299 ms on 2026-09-23) and once over it (tls-off upload
+p99 301 ms against 300, filed as OC-0481). Both were busy-runner tails on the
+2026-09-23 pair: the `dev` re-measurement of 2026-09-28 puts the operational
+upload-phase p99 at 71 ms (tls-off) and 65 ms (`self_signed`), and the run-wide
+p99 at 64 ms on both, so OC-0481 is resolved with no budget change.
+The budgets do not move for a busy-runner tail — it is a finding, not a
 number to loosen (see the operational section). `auth_time` is the one steady
 row with the least room on purpose: its floor is bcrypt at cost 12, roughly a
 quarter-second of one core, and that is a deliberate security cost rather than
@@ -222,8 +225,12 @@ assertions offline, with no SFU and no `lk` binary.
   to 100 recipients. That is a stress shape, not typical chat traffic; it is the
   fan-out the recipient-delivery budget is measured against.
 - **Nothing in CI gates these numbers.** Like the benchmark baseline, they are
-  recorded and published. `load-baseline.yml` is `workflow_dispatch` only,
-  because a perf run on shared runners is a flake source.
+  recorded and published. `load-baseline.yml` is `workflow_dispatch` plus a
+  weekly `schedule:` on dev, never part of the blocking CI matrix, because a
+  perf run on shared runners is a flake source. The schedule re-measures the
+  constrained profile each week and uploads its artifacts, so a regression is
+  visible in the Actions history without anyone dispatching a run; it does not
+  gate anything.
 - **The operational profiles below are per-phase, not per-run.** That section's
   database figures are deltas between phases of one run, so they answer "which
   scenario did the writer queue behind" and not "how long did the run wait".
@@ -566,6 +573,70 @@ Every number below comes from the **constrained** leg and from nothing else.
 > block was re-made the same day on a later `dev` commit `8e9e8443` (run 36372371602) and also resolves in a checkout of `dev`. The capacity and
 > operational blocks remain measurement-branch runs. The workflow run id stays
 > the resolvable handle for every block.
+>
+> **RE-05 is met: capacity and operational are now `dev` runs (2026-09-28).**
+> The capacity block below was re-made on the `dev` tip `a989b8a8` (run 36383236783) and the operational pair on the same commit (run 36383239328),
+> after the k6 harness and server fixes the older blocks predate. Both runs'
+> `commit:` lines resolve in a checkout of `dev` and `main`, which is exactly
+> the B10 item-8 comparison RE-05 owed. Every block now cites a resolvable
+> `dev` revision; no measurement-branch run remains as a qualifying figure,
+> and the operational re-measurement resolves OC-0481 (see that section). The
+> weekly `schedule:` the workflow now carries keeps a fresh `dev` run in the
+> Actions history without anyone dispatching one.
+
+### The profile on `dev` (RE-05, 2026-09-28)
+
+This is the B10 item-8 comparison RE-05 asked for: the same constrained profile
+re-measured on a `dev` ancestor with the corrected k6 harness (OC-0445) and the
+server changes the 2026-09-12 block predates. It is the current reference figure
+for the profile; the historical block below it is kept as provenance.
+
+```
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev)
+date (UTC):      2026-09-28
+workflow run:    36383236783  (.github/workflows/load-baseline.yml, profile=capacity)
+job:             108803153693  (capacity, constrained)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+| Profile target                       | Achieved                                                   | Met? |
+| ------------------------------------ | ---------------------------------------------------------- | ---- |
+| 250 registered users                 | 250 seeded, all registrations accepted                     | Yes  |
+| 100 simultaneous connections (180 s) | 100 authenticated and ready, `vus_max` 100 for the sustain | Yes  |
+| 25 concurrent voice participants     | 625/625 tracks at 0% packet loss, 0 errors                 | Yes  |
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 264 ms | 271 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 17 ms  | 23 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 35 ms  | 77 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 36 ms  | 82 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 4 ms   | 5 ms   | 250 ms / 500 ms    | Yes  |
+
+Every budget is met with room. 12,139 messages sent, 12,131 acknowledged,
+**1,139,557 cross-connection deliveries**, 25 voice tokens, **0 WebSocket
+errors**, 100/100 sockets authenticated and ready. Server CPU inside the cgroup
+averaged 0.28 of its 2 CPUs, peaked at 0.91, and `nr_throttled` did not move:
+the two CPUs were not the constraint. The ceiling leg of the same run (the whole
+4-CPU runner) measured recipient delivery p95 / p99 34 / 55 ms against the
+constrained leg's 36 / 82 ms, so the reference cgroup is still not the limiting
+factor at this profile.
+
+### The profile as first published (2026-09-12, historical)
+
+The block below is the run the tightened budgets were originally set from. Its
+commit is a measurement branch, so only its run id resolves; it is kept for the
+budget-tightening provenance and is superseded as the current figure by the
+`dev` block above.
 
 ```
 commit:          593c764b2d749a9415741211c01216d9d5da2153  (measurement branch feat/b6-9-published-capacity-profile; not on dev/main)
@@ -644,17 +715,20 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
 The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
 (run 35856013841, on branch `fm/oc-0445-fable`), after OC-0445 found that the
 2026-09-16 operational figures had measured a phase-locked load generator rather
-than the server — the `self_signed` block says how. The ceiling-search and
-restart blocks were re-made on 2026-09-28, both dispatched from `dev` itself —
-ceiling-search from commit `8349ed2e` (run 36360932108) and restart from commit
-`8e9e8443` (run 36372371602) — so their `commit:` lines resolve in a checkout of
-`dev`. The restart block replaces the **superseded** 2026-09-16 run from commit
-`e57335c7`, which predates the OC-0446 harness correction and the OC-0484 fix
-and is kept below as historical evidence only. Every other block's SHA is a
-measurement branch, not an ancestor of `dev`/`main`, and there the run id is the
-only resolvable handle. Each block is filled from its own **constrained** leg
-and from nothing else, and the `tls off` block publishes as a delta against the
-`self_signed` one rather than on its own.
+than the server — the `self_signed` block says how. **They were re-made again on
+the `dev` tip `a989b8a8` (run 36383239328) on 2026-09-28**, so every operational
+figure now resolves in a checkout of `dev`; the two `dev` blocks below are the
+current figures and the 2026-09-23 pair is kept as the intermediate provenance.
+The ceiling-search and restart blocks were re-made on 2026-09-28, both dispatched
+from `dev` itself — ceiling-search from commit `8349ed2e` (run 36360932108) and
+restart from commit `8e9e8443` (run 36372371602) — so their `commit:` lines
+resolve in a checkout of `dev`. The restart block replaces the **superseded**
+2026-09-16 run from commit `e57335c7`, which predates the OC-0446 harness
+correction and the OC-0484 fix and is kept below as historical evidence only.
+Every other historical block's SHA is a measurement branch, not an ancestor of
+`dev`/`main`, and there the run id is the only resolvable handle. Each block is
+filled from its own **constrained** leg and from nothing else, and the `tls off`
+block publishes as a delta against the `self_signed` one rather than on its own.
 
 The budget rows missed under the 2026-09-16 restart drill are published as
 missed and are findings-ledger entries (OC-0446, OC-0447); neither was re-run on
@@ -667,7 +741,94 @@ validity gate. The operational profile's two misses were OC-0445, and the blocks
 below are its re-measurement, with the harness corrected and the server
 unchanged.
 
-#### Operational, `tls.mode: self_signed`
+**OC-0481 is resolved by the `dev` re-measurement.** That finding recorded a
+single tls-off upload-phase acknowledgement p99 of 301 ms against the 300 ms
+budget on a busy shared runner (2026-09-23). The same profile on `dev` measured
+the upload-phase p99 at **71 ms** on the tls-off leg and 65 ms on the
+`self_signed` leg, and the run-wide p99 at 64 ms on both — the earlier 301 ms
+was a busy-runner tail, and no budget was loosened to accommodate it. The full
+per-phase series is in each `dev` block below.
+
+#### Operational on `dev`, `tls.mode: self_signed` (2026-09-28)
+
+```
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev)
+date (UTC):      2026-09-28
+workflow run:    36383239328  (.github/workflows/load-baseline.yml, profile=operational)
+job:             108803160564  (operational, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 331 ms | 348 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 15 ms  | 20 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 40 ms  | 64 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 42 ms  | 68 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 33 ms  | 59 ms  | 250 ms / 500 ms    | Yes  |
+
+Per phase, send → acknowledgement p95 / p99: ramp 27 / 44 ms, sustain
+43 / 73 ms, upload 41 / 65 ms, storm window 39 / 61 ms; delivery 30 / 47,
+44 / 76, 42 / 68 and 40 / 66 ms. The spread voice churn (PERF-02 / OC-0480,
+the default since) keeps the voice-join p95 at 33 ms instead of the old aligned
+25-way rejoin's 157 ms. 100 of 100 storm sockets resumed from the in-memory
+buffer (`ws_replay_source{tier:buffer}` 100, `db` 0, `none` 0), `ws_replay_gap`
+max 0, all three `backpressure_*` deltas 0, 300 upload admits / 995 quota
+refuses / 300 downloads, 0 `STORAGE_LOW_DISK`, 0 oversize, 0 WebSocket errors.
+12,089 sends, 12,074 acknowledged, 1,134,078 deliveries. Server CPU averaged
+0.23 of its 2 CPUs, peaked at 1.22, `nr_throttled` did not move.
+
+#### Operational on `dev`, `tls.mode: off` (2026-09-28)
+
+```
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev)
+date (UTC):      2026-09-28
+workflow run:    36383239328  (.github/workflows/load-baseline.yml, profile=operational)
+job:             108803160609  (operational, constrained, tls off)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+Same shape as the block above, and the published delta is against it:
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 302 ms | 308 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 22 ms  | 31 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 40 ms  | 64 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 42 ms  | 67 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 26 ms  | 41 ms  | 250 ms / 500 ms    | Yes  |
+
+Per phase, send → acknowledgement p95 / p99: ramp 28 / 41 ms, sustain
+39 / 54 ms, **upload 43 / 71 ms**, storm 38 / 53 ms; delivery 32 / 49,
+40 / 56, 44 / 74 and 40 / 56 ms. The upload-phase p99 that OC-0481 recorded at
+301 ms is 71 ms here. 100 of 100 storm resumes from the buffer, `ws_replay_gap`
+max 0, 0 backpressure deltas, 300 admits / 995 quota refuses / 300 downloads, 0
+`STORAGE_LOW_DISK`, 0 oversize, 0 WebSocket errors, 12,085 sends, 12,073
+acknowledged, 1,133,881 deliveries. Server CPU averaged 0.21 of 2, peaked 1.16,
+`nr_throttled` did not move. TLS off is cheaper on login here (302 / 308 ms
+against 331 / 348 ms); the acknowledgement, delivery and voice-join rows are
+within a few ms of the `self_signed` leg, which is the point of publishing the
+pair as a delta rather than an absolute.
+
+#### Operational, `tls.mode: self_signed` (2026-09-23, historical)
 
 ```
 commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
@@ -782,7 +943,7 @@ Server CPU inside the cgroup, from `cpu.stat.log` (5 s samples of
 uploads cohort's login ramp. **The two CPUs were not the constraint on this
 run.**
 
-#### Operational, `tls.mode: off`
+#### Operational, `tls.mode: off` (2026-09-23, historical)
 
 ```
 commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
