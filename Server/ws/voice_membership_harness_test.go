@@ -353,7 +353,7 @@ func (h *vmHarness) disconnect(m *vmMember, teardown bool) {
 func (h *vmHarness) expireGrace(m *vmMember) {
 	h.step++
 	h.t.Helper()
-	h.hub.expireVoiceGraceNowForTest(m.userID)
+	h.hub.leaveParkedVoice(context.Background(), h.hub.voiceGrace.take(m.userID), voiceLeaveReasonGraceExpired)
 	h.note("expireGrace %s", m.name)
 	h.check()
 }
@@ -375,6 +375,7 @@ func (h *vmHarness) resume(m *vmMember) {
 		h.t.Fatalf("GetUserByID(%d): %v", m.userID, err)
 	}
 	c.user = user
+	h.hub.dropOrphanVoiceGrace(context.Background(), m.userID)
 	h.hub.registerNow(c, nil)
 	m.c = c
 	h.note("resume %s", m.name)
@@ -610,7 +611,7 @@ func (h *vmHarness) ghostRow() string {
 		if err != nil {
 			h.failf("%s: GetVoiceState: %v", m.name, err)
 		}
-		if row != nil && !h.hub.voiceGraceInheritedForTest(m.userID, row.ChannelID) {
+		if row != nil && !h.hub.voiceGrace.has(m.userID, row.ChannelID) {
 			return fmt.Sprintf("%s has a voice_states row for ch%d but no live client", m.name, row.ChannelID)
 		}
 	}
@@ -888,7 +889,7 @@ func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
 	h.join(alice, chA)
 	_, token := alice.c.getVoiceState()
 	h.disconnect(alice, true)
-	if !h.hub.voiceGraceInheritedForTest(alice.userID, chA) {
+	if !h.hub.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("a completed membership was not parked in the grace window")
 	}
 	// The parked row and SFU participant must still be exactly the join's.
@@ -906,7 +907,7 @@ func TestVoiceMembership_GraceWindowReconnect(t *testing.T) {
 	if gotCh, gotToken := alice.c.getVoiceState(); gotCh != chA || gotToken != token {
 		t.Fatalf("resume inherited %d/%s, want %d/%s", gotCh, gotToken, chA, token)
 	}
-	if h.hub.voiceGraceInheritedForTest(alice.userID, chA) {
+	if h.hub.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("the parked entry survived inheritance")
 	}
 	h.leave(alice)
@@ -970,11 +971,149 @@ func TestVoiceMembership_GraceWindowIncompleteJoinsNotParked(t *testing.T) {
 	row, _ := h.db.GetVoiceState(context.Background(), alice.userID)
 	alice.c.setVoiceStateForHarness(chA, row.JoinedAt) // committed, not completed
 	h.disconnect(alice, true)
-	if h.hub.voiceGraceInheritedForTest(alice.userID, chA) {
+	if h.hub.voiceGrace.has(alice.userID, chA) {
 		t.Fatalf("an incomplete join was parked in the grace window")
 	}
 	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row != nil {
 		t.Fatalf("incomplete join left a row after drop: row=%v err=%v", row, err)
+	}
+}
+
+// TestVoiceMembership_GraceWindowTerminalKickEjects pins that a kick which
+// refuses reconnection — a ban or a force-logout — ends the call at once
+// rather than parking it, whether the member is still connected or already
+// parked, while an ordinary drop still parks.
+func TestVoiceMembership_GraceWindowTerminalKickEjects(t *testing.T) {
+	for name, kick := range map[string]func(*Hub, int64){
+		"ban":          (*Hub).DisconnectUser,
+		"force-logout": (*Hub).DisconnectRevokedUser,
+	} {
+		t.Run(name, func(t *testing.T) {
+			withGraceWindow(t, time.Minute)
+			h := newVMHarness(t, 3)
+			alice, bob, carol := h.members[0], h.members[1], h.members[2]
+			chA := h.chanOf("vm-grace-terminal-" + name)
+			for _, m := range h.members {
+				h.connect(m)
+				h.join(m, chA)
+			}
+
+			kick(h.hub, alice.userID)
+			h.disconnect(alice, true) // the kicked socket's read-loop teardown
+			h.disconnect(bob, true)   // an ordinary drop
+			kick(h.hub, bob.userID)   // then the kick lands on the parked member
+			h.disconnect(carol, true) // an ordinary drop that nobody kicks
+			h.check()
+
+			for _, m := range []*vmMember{alice, bob} {
+				if h.hub.voiceGrace.has(m.userID, chA) {
+					t.Fatalf("%s: a terminal kick parked the membership", m.name)
+				}
+				if row, err := h.db.GetVoiceState(context.Background(), m.userID); err != nil || row != nil {
+					t.Fatalf("%s: a terminal kick left a row: row=%v err=%v", m.name, row, err)
+				}
+			}
+			if !h.hub.voiceGrace.has(carol.userID, chA) {
+				t.Fatalf("an ordinary drop was not parked")
+			}
+		})
+	}
+}
+
+// TestVoiceMembership_GraceWindowModeratorKickWhileParked pins that a
+// moderator kick reaches a parked member: the eviction reports success, tears
+// the membership down, and a later resume inherits nothing.
+func TestVoiceMembership_GraceWindowModeratorKickWhileParked(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-modkick")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	h.disconnect(alice, true)
+	if !h.hub.DisconnectFromVoiceInChannel(context.Background(), alice.userID, chA, voiceLeaveReasonModerator) {
+		t.Fatalf("moderator kick missed a parked member")
+	}
+	h.check()
+	if row, err := h.db.GetVoiceState(context.Background(), alice.userID); err != nil || row != nil {
+		t.Fatalf("moderator kick left a parked row: row=%v err=%v", row, err)
+	}
+	h.resume(alice)
+	if ch := alice.c.getVoiceChID(); ch != 0 {
+		t.Fatalf("resume after a moderator kick inherited ch%d", ch)
+	}
+}
+
+// TestVoiceMembership_GraceWindowRelaunchWithinWindow pins the relaunch
+// sequence: the app quits in voice (the SFU's participant_left deletes the
+// row), relaunches inside the window and rejoins. No parked window may
+// survive to tear the new call down.
+func TestVoiceMembership_GraceWindowRelaunchWithinWindow(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-relaunch")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	_, token := alice.c.getVoiceState()
+	h.disconnect(alice, true)
+	h.sfu.remove(RoomName(chA), participantIdentity(alice.userID, token))
+	h.hub.HandleWebhookParticipantLeftWithContextForTest(context.Background(), alice.userID, chA, token)
+	if h.hub.voiceGrace.has(alice.userID, chA) {
+		t.Fatalf("participant_left kept a parked window over a deleted row")
+	}
+	h.check()
+
+	h.connect(alice)
+	if !h.join(alice, chA) {
+		t.Fatalf("rejoin after relaunch did not complete")
+	}
+	if h.hub.voiceGrace.get(alice.userID) != nil {
+		t.Fatalf("a parked window survived the relaunch")
+	}
+	h.leave(alice)
+}
+
+// TestVoiceMembership_GraceWindowFreshConnectCancels pins that a fresh
+// connect (lastSeq 0) ends a parked window even when nothing else did, so its
+// timer can never later broadcast a voice_leave over the new session.
+func TestVoiceMembership_GraceWindowFreshConnectCancels(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-fresh")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	h.disconnect(alice, true)
+	h.connect(alice)
+	if h.hub.voiceGrace.get(alice.userID) != nil {
+		t.Fatalf("a fresh connect left the parked window running")
+	}
+}
+
+// TestVoiceMembership_GraceWindowResumeNeedsRow pins that a resume inherits a
+// parked membership only while its row still exists: inheriting one whose row
+// is gone is the memory-without-row ghost no sweep can heal.
+func TestVoiceMembership_GraceWindowResumeNeedsRow(t *testing.T) {
+	withGraceWindow(t, time.Minute)
+	h := newVMHarness(t, 1)
+	alice := h.members[0]
+	chA := h.chanOf("vm-grace-resume-row")
+
+	h.connect(alice)
+	h.join(alice, chA)
+	_, token := alice.c.getVoiceState()
+	h.disconnect(alice, true)
+	h.sfu.remove(RoomName(chA), participantIdentity(alice.userID, token))
+	if _, err := h.db.LeaveVoiceChannelIfMatch(context.Background(), alice.userID, chA, token); err != nil {
+		t.Fatalf("LeaveVoiceChannelIfMatch: %v", err)
+	}
+	h.resume(alice)
+	if ch := alice.c.getVoiceChID(); ch != 0 {
+		t.Fatalf("resume inherited ch%d whose row is gone", ch)
 	}
 }
 

@@ -146,6 +146,8 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 			slog.Info("hub: resumed connection inherited the grace-window voice membership",
 				"user_id", c.userID, "channel_id", e.channelID)
 		}
+	} else if c.lastSeq == 0 {
+		h.voiceGrace.take(c.userID)
 	}
 
 	// Subscribe the new client to its default pub/sub topics immediately

@@ -114,6 +114,10 @@ func (h *Hub) handleReconnect(
 		}
 	}
 
+	// RT-8: registerNow inherits a parked grace membership; drop it first
+	// if its row is gone. Outside h.seqMu, like every DB read here.
+	h.dropOrphanVoiceGrace(ctx, c.userID)
+
 	events, ok = h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
 	if !ok {
 		return false, false

@@ -66,6 +66,17 @@ func (h *Hub) kickClient(c *Client) {
 	h.pubsub.UnsubscribeAll(c)
 }
 
+// kickClientTerminal is kickClient for a disconnect that refuses
+// reconnection (ban, revoked or expired session): it marks c first, so the
+// read-loop teardown ends a voice call at once instead of parking it in the
+// grace window for a resume that can never come.
+func (h *Hub) kickClientTerminal(c *Client) {
+	c.mu.Lock()
+	c.terminalKick = true
+	c.mu.Unlock()
+	h.kickClient(c)
+}
+
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
 // blocks on the DB-heavy periodic sweeps (they already lock correctly for
 // concurrent execution with the hub). inFlight guarantees a sweep never runs
@@ -146,12 +157,12 @@ func (h *Hub) sweepRevokedSessions() {
 		case service.SessionRevoked:
 			slog.Info("session sweep: revoked/expired session, disconnecting",
 				"user_id", c.userID)
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 		case service.SessionBanned:
 			slog.Info("session sweep: banned user, disconnecting",
 				"user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 		case service.SessionLive:
 		}
 	}
@@ -399,6 +410,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn /
 		// clearVoiceStateIfMatch and the LiveKit webhook's inline
 		// compare-and-clear.
+		h.voiceGrace.takeJoin(vs.UserID, channelID, "")
 		h.mu.RLock()
 		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()

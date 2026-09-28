@@ -614,7 +614,7 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	c := h.GetClient(userID)
 	if c == nil {
-		return false
+		return h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonModerator)
 	}
 	h.handleVoiceLeave(ctx, c, voiceLeaveReasonModerator)
 	return true
@@ -632,7 +632,7 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
 	c := h.GetClient(userID)
 	if c == nil {
-		return false
+		return h.leaveParkedVoice(ctx, h.voiceGrace.takeJoin(userID, channelID, ""), reason)
 	}
 	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID, reason)
 }

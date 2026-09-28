@@ -57,29 +57,47 @@ type voiceGraceState struct {
 	entries map[int64]*voiceGraceEntry
 }
 
-func (s *voiceGraceState) put(userID int64, e *voiceGraceEntry) {
+// put parks e for userID and starts its expiry timer under the lock, so no
+// reader ever sees the entry without its timer.
+func (s *voiceGraceState) put(userID int64, e *voiceGraceEntry, expire func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.entries == nil {
 		s.entries = map[int64]*voiceGraceEntry{}
 	}
-	if old := s.entries[userID]; old != nil && old.timer != nil {
+	if old := s.entries[userID]; old != nil {
 		old.timer.Stop()
 	}
+	e.timer = time.AfterFunc(voiceGraceWindow, expire)
 	s.entries[userID] = e
+}
+
+// get returns userID's parked entry, or nil. Its channelID and joinToken are
+// immutable once parked, so the caller may read them without the lock.
+func (s *voiceGraceState) get(userID int64) *voiceGraceEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.entries[userID]
 }
 
 // take removes and returns the parked entry for userID, or nil. It stops the
 // entry's timer, so a resuming socket that inherits the membership does not
 // also get the expiry teardown.
 func (s *voiceGraceState) take(userID int64) *voiceGraceEntry {
+	return s.takeJoin(userID, 0, "")
+}
+
+// takeJoin is take limited to an entry parking a join in channelID with
+// joinToken; a zero channelID or an empty joinToken matches any.
+func (s *voiceGraceState) takeJoin(userID, channelID int64, joinToken string) *voiceGraceEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e := s.entries[userID]
-	delete(s.entries, userID)
-	if e != nil && e.timer != nil {
-		e.timer.Stop()
+	if e == nil || (channelID != 0 && e.channelID != channelID) || (joinToken != "" && e.joinToken != joinToken) {
+		return nil
 	}
+	delete(s.entries, userID)
+	e.timer.Stop()
 	return e
 }
 
@@ -92,19 +110,8 @@ func (s *voiceGraceState) takeIfSame(userID int64, e *voiceGraceEntry) bool {
 		return false
 	}
 	delete(s.entries, userID)
+	e.timer.Stop()
 	return true
-}
-
-// cancel stops and drops any parked entry for userID.
-func (s *voiceGraceState) cancel(userID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if e := s.entries[userID]; e != nil {
-		if e.timer != nil {
-			e.timer.Stop()
-		}
-		delete(s.entries, userID)
-	}
 }
 
 // has reports whether userID has a parked membership for channelID.
@@ -129,9 +136,9 @@ func (s *voiceGraceState) snapshot() map[int64]int64 {
 
 // leaveVoiceOnDisconnect is the readPump-teardown voice step. A completed
 // membership is parked in the grace window; anything else (disabled window, a
-// failed/half join) leaves immediately.
+// failed/half join, a kick that refuses reconnection) leaves immediately.
 func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, chID int64, joinToken string, completed bool) {
-	if !completed || voiceGraceWindow <= 0 {
+	if !completed || voiceGraceWindow <= 0 || c.isTerminallyKicked() {
 		h.handleVoiceLeave(ctx, c, voiceLeaveReasonDisconnect)
 		return
 	}
@@ -144,8 +151,7 @@ func (h *Hub) leaveVoiceOnDisconnect(ctx context.Context, c *Client, chID int64,
 		e2eeKey:   key,
 		e2eeSig:   sig,
 	}
-	h.voiceGrace.put(c.userID, entry)
-	entry.timer = time.AfterFunc(voiceGraceWindow, func() {
+	h.voiceGrace.put(c.userID, entry, func() {
 		h.expireVoiceGrace(c.userID, entry)
 	})
 	slog.Info("voice leave deferred (grace window)",
@@ -160,29 +166,33 @@ func (h *Hub) expireVoiceGrace(userID int64, entry *voiceGraceEntry) {
 	if !h.voiceGrace.takeIfSame(userID, entry) {
 		return
 	}
-	h.finishVoiceLeave(context.Background(), entry.client, entry.channelID, entry.joinToken, voiceLeaveReasonGraceExpired)
+	h.leaveParkedVoice(context.Background(), entry, voiceLeaveReasonGraceExpired)
 }
 
-// expireVoiceGraceNowForTest force-expires a parked window so a test does not
-// wait the real 15 s. Test-only.
-func (h *Hub) expireVoiceGraceNowForTest(userID int64) {
-	e := h.voiceGrace.take(userID)
+// leaveParkedVoice runs the full voice teardown for a parked membership
+// already taken from the grace window, reporting false for a nil entry.
+func (h *Hub) leaveParkedVoice(ctx context.Context, e *voiceGraceEntry, reason string) bool {
+	if e == nil {
+		return false
+	}
+	h.finishVoiceLeave(ctx, e.client, e.channelID, e.joinToken, reason)
+	return true
+}
+
+// dropOrphanVoiceGrace drops userID's parked membership when its exact
+// voice_states row (channel and joined_at) is gone, so a resume never
+// inherits a membership with no row. A failed read keeps the entry.
+func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
+	e := h.voiceGrace.get(userID)
 	if e == nil {
 		return
 	}
-	if e.timer != nil {
-		e.timer.Stop()
+	row, err := h.voice.State(ctx, userID)
+	if err != nil || (row != nil && row.ChannelID == e.channelID && row.JoinedAt == e.joinToken) {
+		return
 	}
-	h.finishVoiceLeave(context.Background(), e.client, e.channelID, e.joinToken, voiceLeaveReasonGraceExpired)
-}
-
-// voiceGraceInheritedForTest reports whether userID holds a parked entry for
-// channelID. Test-only.
-func (h *Hub) voiceGraceInheritedForTest(userID, channelID int64) bool {
-	for uid, ch := range h.voiceGrace.snapshot() {
-		if uid == userID && ch == channelID {
-			return true
-		}
+	if h.voiceGrace.takeIfSame(userID, e) {
+		slog.Info("voice grace dropped: its voice state row is gone",
+			"user_id", userID, "channel_id", e.channelID)
 	}
-	return false
 }

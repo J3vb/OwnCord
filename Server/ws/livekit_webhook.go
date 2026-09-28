@@ -265,6 +265,8 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	} else if h.voice != nil {
 		// Client already disconnected from WS — use channel-conditional delete
 		// to avoid wiping a newer row if the user reconnected and rejoined.
+		// A grace-window entry parking this exact join dies with its row.
+		h.voiceGrace.takeJoin(userID, channelID, joinToken)
 		deleted, dbErr := h.voice.LeaveIfMatch(ctx, userID, channelID, joinToken)
 		if dbErr != nil {
 			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",

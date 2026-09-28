@@ -252,11 +252,12 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 func (h *Hub) DisconnectUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {
+		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
 		return
 	}
 	slog.Info("hub: disconnecting user", "user_id", userID)
 	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-	h.kickClient(c)
+	h.kickClientTerminal(c)
 }
 
 // DisconnectRevokedUser drops the live connection of a user whose sessions
@@ -273,10 +274,11 @@ func (h *Hub) DisconnectUser(userID int64) {
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {
+		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
 		return
 	}
 	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
-	h.kickClient(c)
+	h.kickClientTerminal(c)
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients

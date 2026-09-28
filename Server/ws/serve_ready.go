@@ -483,6 +483,14 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
 	// own read through the voice service.
 	database := h.readers.Ready
+	// RT-8: a fresh connect ends any parked grace window (registerNow drops
+	// it); a replay-failure fallback may inherit one only while its row
+	// still exists.
+	if c.lastSeq == 0 {
+		h.voiceGrace.take(c.userID)
+	} else {
+		h.dropOrphanVoiceGrace(ctx, c.userID)
+	}
 	// Clean stale voice state BEFORE building ready and registering.
 	// When a user F5-reloads while in voice, the DB row from the previous
 	// session must be removed so the ready payload doesn't include it and
@@ -613,7 +621,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
-	h.voiceGrace.cancel(c.userID)
+	h.voiceGrace.take(c.userID)
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
 	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
