@@ -79,6 +79,7 @@ export const shards = {
     "src/lib/appearance.ts",
     "src/lib/autoIdle.ts",
     "src/lib/avatar.ts",
+    "src/components/message-list/avatar.ts",
     "src/lib/call-ring.ts",
     "src/lib/channel-mutes.ts",
     "src/lib/channel-navigation.ts",
