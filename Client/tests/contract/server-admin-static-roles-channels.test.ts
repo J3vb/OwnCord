@@ -377,8 +377,10 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
         ? [
             { id: 1, name: "rules", type: "announcement", category: "Info" },
             { id: 2, name: "lobby", type: "text", category: "" },
-            { id: 3, name: "hangout", type: "voice", category: "Voice", archived: true },
-            { id: 4, name: "faq", type: "text", category: "Info", topic: "Read me" },
+            { id: 3, name: "hangout", type: "voice", category: "", archived: true },
+            { id: 4, name: "faq", type: "text", category: "Info" },
+            { id: 5, name: "stage", type: "voice", category: "Voice" },
+            { id: 6, name: "offtopic", type: "text", category: "" },
           ]
         : {},
     );
@@ -392,14 +394,18 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
         ? `[${r.textContent}]`
         : r.querySelector("strong")?.textContent,
     );
+    // The client's getChannelsByCategory: an uncategorised voice channel joins
+    // the Voice group, and groups follow their first channel's order.
     expect(rows).toEqual([
-      "[No category]",
-      "lobby",
       "[Info]",
       "rules",
       "faq",
+      "[No category]",
+      "lobby",
+      "offtopic",
       "[Voice]",
       "hangout",
+      "stage",
     ]);
 
     const row = (id: number) => host.querySelector(`tr[data-channel="${id}"]`)!;
@@ -407,10 +413,12 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(row(1).querySelector(".ch-type .sr-only")?.textContent).toBe("Announcement channel");
     expect(row(3).querySelector(".badge")?.textContent).toBe("Archived");
     expect(row(2).querySelector(".badge")).toBeNull();
-    expect(row(4).querySelector(".ch-topic")?.textContent).toBe("Read me");
     expect(
       row(2).querySelector('[data-action="openChannelPermsModal"]')?.getAttribute("aria-label"),
     ).toBe("Who can see #lobby");
-    expect(host.querySelector("thead")?.textContent).not.toContain("Archived");
+    expect([...host.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual([
+      "Channel",
+      "Actions",
+    ]);
   });
 });
