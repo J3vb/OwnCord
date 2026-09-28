@@ -51,37 +51,9 @@ func runRestoreCLI(cfgPath string, args []string) int {
 		dbPath = filepath.Join("data", "chatserver.db")
 	}
 
-	// SQLite verifies a database with its -wal applied, but only the main file
-	// is copied, so a source with committed frames still in its WAL would be
-	// checked as one database and restored as another.
-	if walInfo, err := os.Stat(source + "-wal"); err == nil && walInfo.Size() > 0 {
-		fmt.Fprintf(os.Stderr, "error: %s still has transactions in %s-wal that a restore would drop; checkpoint it first (sqlite3 %s 'PRAGMA wal_checkpoint(TRUNCATE)') or restore from a backup this server wrote\n", source, source, source)
+	if err := checkRestoreSource(source, dbPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
-	}
-
-	// Verify the source before touching anything. A truncated or non-database
-	// file must be refused up front, not copied over the live database.
-	if err := db.CheckBackupIntegrity(context.Background(), source); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s is not a readable database backup: %v\n", source, err)
-		return 1
-	}
-	// A backup a newer server wrote would leave this binary refusing to boot
-	// on a schema it has never seen (REL-02), exactly as the admin path refuses.
-	ahead, err := db.CheckBackupSchemaAhead(context.Background(), source)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: could not read the schema version of %s: %v\n", source, err)
-		return 1
-	}
-	if len(ahead) > 0 {
-		fmt.Fprintf(os.Stderr, "error: %s was written by a newer server version (unknown migrations: %s); upgrade this server before restoring it\n", source, strings.Join(ahead, ", "))
-		return 1
-	}
-	// Copying the live database over itself truncates it to zero bytes.
-	if srcInfo, err := os.Stat(source); err == nil {
-		if liveInfo, err := os.Stat(dbPath); err == nil && os.SameFile(srcInfo, liveInfo) {
-			fmt.Fprintf(os.Stderr, "error: %s is the live database itself; restore from a copy kept elsewhere\n", source)
-			return 1
-		}
 	}
 
 	if !*force {
@@ -113,6 +85,13 @@ first), or copy the file in by hand if that is what you meant to do.
 		return 1
 	}
 
+	return replaceLiveDatabase(source, dbPath, backupDir)
+}
+
+// replaceLiveDatabase takes the pre-restore safety copy (or moves an unreadable
+// live database aside) and copies source over dbPath. The caller holds the
+// process lock and has already verified source.
+func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	// A pre-restore safety copy of the CURRENT database, so the overwrite is
 	// reversible. It is skipped only when the live database is missing or
 	// unreadable (the usual reason for restoring): there is nothing to copy,
@@ -179,6 +158,39 @@ first), or copy the file in by hand if that is what you meant to do.
 	}
 	fmt.Println("start the server to load the restored data")
 	return 0
+}
+
+// checkRestoreSource refuses a source that is not safe to copy over dbPath.
+// It runs before the --force gate, so a refusal never touches the live files.
+func checkRestoreSource(source, dbPath string) error {
+	// SQLite verifies a database with its -wal applied, but only the main file
+	// is copied, so a source with committed frames still in its WAL would be
+	// checked as one database and restored as another.
+	if walInfo, err := os.Stat(source + "-wal"); err == nil && walInfo.Size() > 0 {
+		return fmt.Errorf("%s still has transactions in %s-wal that a restore would drop; checkpoint it first (sqlite3 %s 'PRAGMA wal_checkpoint(TRUNCATE)') or restore from a backup this server wrote", source, source, source)
+	}
+
+	// Verify the source before touching anything. A truncated or non-database
+	// file must be refused up front, not copied over the live database.
+	if err := db.CheckBackupIntegrity(context.Background(), source); err != nil {
+		return fmt.Errorf("%s is not a readable database backup: %w", source, err)
+	}
+	// A backup a newer server wrote would leave this binary refusing to boot
+	// on a schema it has never seen (REL-02), exactly as the admin path refuses.
+	ahead, err := db.CheckBackupSchemaAhead(context.Background(), source)
+	if err != nil {
+		return fmt.Errorf("could not read the schema version of %s: %w", source, err)
+	}
+	if len(ahead) > 0 {
+		return fmt.Errorf("%s was written by a newer server version (unknown migrations: %s); upgrade this server before restoring it", source, strings.Join(ahead, ", "))
+	}
+	// Copying the live database over itself truncates it to zero bytes.
+	if srcInfo, err := os.Stat(source); err == nil {
+		if liveInfo, err := os.Stat(dbPath); err == nil && os.SameFile(srcInfo, liveInfo) {
+			return fmt.Errorf("%s is the live database itself; restore from a copy kept elsewhere", source)
+		}
+	}
+	return nil
 }
 
 // safetyCopy VACUUMs the current database to a timestamped pre_restore_ file
