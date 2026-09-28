@@ -16,8 +16,14 @@ import {
 import { nativeAudioDevices } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
+import { setStatusIcon, statusIcon } from "../../features/settings/status";
 
 const log = createLogger("VoiceAudioTab");
+
+/** Meter RMS above which the mic status pill counts the mic as picking you up. */
+const MIC_NOISE_FLOOR = 0.02;
+/** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
+const MIC_HEARD_HOLD_MS = 1000;
 
 export interface VoiceAudioTabHandle {
   /**
@@ -111,8 +117,43 @@ function buildVoiceAudioTabInner(
   // the engine's playout mixer applies it with each user's volume.
   const nativeAudio = isLinuxDesktop();
 
+  // Four cards: what you speak into, what you hear, what you show, and how
+  // your voice is processed.
+  const card = (title: string): HTMLElement => {
+    const el = createElement("section", { class: "settings-card" });
+    const head = createElement("div", { class: "settings-card-head" });
+    head.appendChild(createElement("h3", {}, title));
+    el.appendChild(head);
+    section.appendChild(el);
+    return el;
+  };
+  const micCard = card(t("voiceAudio.card.microphone"));
+  const speakersCard = card(t("voiceAudio.card.speakers"));
+  const cameraCard = card(t("voiceAudio.card.camera"));
+  const processingCard = card(t("voiceAudio.card.processing"));
+
+  // The microphone's state at a glance, from the live meter below.
+  const micStatus = createElement("span", { class: "status-pill", "data-testid": "mic-status" });
+  const micStatusIcon = statusIcon("pending");
+  const micStatusWord = createElement("span", {});
+  micStatus.append(micStatusIcon, micStatusWord);
+  micStatus.hidden = true;
+  micCard.querySelector(".settings-card-head")!.appendChild(micStatus);
+  let micHeard: boolean | null = null;
+  function showMicState(heard: boolean): void {
+    if (heard === micHeard) return;
+    micHeard = heard;
+    micStatus.hidden = false;
+    setStatusIcon(micStatusIcon, heard ? "ok" : "pending");
+    setText(micStatusWord, heard ? t("voiceAudio.mic.hearing") : t("voiceAudio.mic.noInput"));
+  }
+
   // Input device selector
-  const inputHeader = createElement("h3", {}, t("voiceAudio.inputDevice"));
+  const inputHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.inputDevice"),
+  );
   const inputSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:12px",
@@ -120,12 +161,16 @@ function buildVoiceAudioTabInner(
   });
   const defaultInputOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   inputSelect.appendChild(defaultInputOpt);
-  section.appendChild(inputHeader);
-  section.appendChild(inputSelect);
+  micCard.appendChild(inputHeader);
+  micCard.appendChild(inputSelect);
 
   // Input Volume slider
-  const inputVolumeHeader = createElement("h3", {}, t("voiceAudio.inputVolume"));
-  section.appendChild(inputVolumeHeader);
+  const inputVolumeHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.inputVolume"),
+  );
+  micCard.appendChild(inputVolumeHeader);
   const inputVolumeRow = createElement("div", { class: "slider-row" });
   const savedInputVolume = loadPref<number>("inputVolume", 100);
   const inputVolumeSlider = createElement("input", {
@@ -148,11 +193,15 @@ function buildVoiceAudioTabInner(
     { signal },
   );
   appendChildren(inputVolumeRow, inputVolumeSlider, inputVolumeLabel);
-  section.appendChild(inputVolumeRow);
+  micCard.appendChild(inputVolumeRow);
 
   // ── Mic level meter with draggable sensitivity threshold ────────
-  const sensitivityHeader = createElement("h3", {}, t("voiceAudio.inputSensitivity"));
-  section.appendChild(sensitivityHeader);
+  const sensitivityHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.inputSensitivity"),
+  );
+  micCard.appendChild(sensitivityHeader);
 
   // Real-time mic level bar with embedded draggable threshold handle
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
@@ -170,8 +219,13 @@ function buildVoiceAudioTabInner(
   });
   meterBar.appendChild(meterLevel);
   meterBar.appendChild(meterThreshold);
-  meterWrap.appendChild(meterBar);
-  section.appendChild(meterWrap);
+  // The value in words beside the meter, not only as the handle's position.
+  const sensitivityValue = createElement("span", {
+    class: "slider-val",
+    "data-testid": "sensitivity-value",
+  });
+  meterWrap.append(meterBar, sensitivityValue);
+  micCard.appendChild(meterWrap);
 
   let currentSensitivity = loadPref<number>("voiceSensitivity", 50);
 
@@ -185,6 +239,7 @@ function buildVoiceAudioTabInner(
       "aria-valuetext",
       t("voiceAudio.sensitivityValue", { value: sensitivity }),
     );
+    setText(sensitivityValue, `${sensitivity}%`);
   }
   updateThresholdIndicator(currentSensitivity);
 
@@ -269,7 +324,11 @@ function buildVoiceAudioTabInner(
   );
 
   // Output device selector
-  const outputHeader = createElement("h3", {}, t("voiceAudio.outputDevice"));
+  const outputHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.outputDevice"),
+  );
   const outputSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:12px",
@@ -277,12 +336,16 @@ function buildVoiceAudioTabInner(
   });
   const defaultOutputOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   outputSelect.appendChild(defaultOutputOpt);
-  section.appendChild(outputHeader);
-  section.appendChild(outputSelect);
+  speakersCard.appendChild(outputHeader);
+  speakersCard.appendChild(outputSelect);
 
   // Output Volume slider
-  const outputVolumeHeader = createElement("h3", {}, t("voiceAudio.outputVolume"));
-  section.appendChild(outputVolumeHeader);
+  const outputVolumeHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.outputVolume"),
+  );
+  speakersCard.appendChild(outputVolumeHeader);
   const outputVolumeRow = createElement("div", { class: "slider-row" });
   const savedOutputVolume = loadPref<number>("outputVolume", 100);
   const outputVolumeSlider = createElement("input", {
@@ -305,15 +368,17 @@ function buildVoiceAudioTabInner(
     { signal },
   );
   appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
-  section.appendChild(outputVolumeRow);
+  speakersCard.appendChild(outputVolumeRow);
 
   // Stream quality selector
-  const qualityHeader = createElement("h3", {}, t("voiceAudio.streamQuality"));
+  const qualityHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.streamQuality"),
+  );
   const qualityDesc = createElement(
     "p",
-    {
-      style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
-    },
+    { class: "setting-desc" },
     t("voiceAudio.streamQualityDesc"),
   );
   const qualitySelect = createElement("select", {
@@ -341,19 +406,15 @@ function buildVoiceAudioTabInner(
     },
     { signal },
   );
-  section.appendChild(qualityHeader);
-  section.appendChild(qualityDesc);
-  section.appendChild(qualitySelect);
+  const qualityGroup = [qualityHeader, qualityDesc, qualitySelect];
 
   // Screen share FPS selector
-  const fpsHeader = createElement("h3", {}, t("voiceAudio.screenFps"));
-  const fpsDesc = createElement(
-    "p",
-    {
-      style: "color:var(--text-muted);font-size:12px;margin:0 0 8px",
-    },
-    t("voiceAudio.screenFpsDesc"),
+  const fpsHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.screenFps"),
   );
+  const fpsDesc = createElement("p", { class: "setting-desc" }, t("voiceAudio.screenFpsDesc"));
   const fpsSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:16px",
@@ -379,12 +440,14 @@ function buildVoiceAudioTabInner(
     },
     { signal },
   );
-  section.appendChild(fpsHeader);
-  section.appendChild(fpsDesc);
-  section.appendChild(fpsSelect);
+  const fpsGroup = [fpsHeader, fpsDesc, fpsSelect];
 
   // Video device selector
-  const videoHeader = createElement("h3", {}, t("voiceAudio.videoDevice"));
+  const videoHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("voiceAudio.videoDevice"),
+  );
   const videoSelect = createElement("select", {
     class: "form-input",
     style: "width:100%;margin-bottom:12px",
@@ -392,23 +455,23 @@ function buildVoiceAudioTabInner(
   });
   const defaultVideoOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   videoSelect.appendChild(defaultVideoOpt);
-  section.appendChild(videoHeader);
-  section.appendChild(videoSelect);
+  cameraCard.append(videoHeader, videoSelect);
 
   // Camera preview
-  const previewWrap = createElement("div", {
-    style:
-      "margin-bottom:16px;border-radius:8px;overflow:hidden;background:#1e1f22;aspect-ratio:16/9;max-width:320px",
-  });
+  const previewWrap = createElement("div", { class: "camera-preview" });
+  // Said in words, so an empty box is not a mystery.
+  const previewLabel = createElement(
+    "div",
+    { class: "camera-preview-label" },
+    t("voiceAudio.previewOff"),
+  );
   const previewVideo = document.createElement("video");
   previewVideo.autoplay = true;
   previewVideo.muted = true;
   previewVideo.playsInline = true;
-  previewVideo.style.width = "100%";
-  previewVideo.style.height = "100%";
-  previewVideo.style.objectFit = "cover";
-  previewWrap.appendChild(previewVideo);
-  section.appendChild(previewWrap);
+  previewWrap.append(previewVideo, previewLabel);
+  cameraCard.appendChild(previewWrap);
+  cameraCard.append(...qualityGroup, ...fpsGroup);
 
   /**
    * (Re)fill the three device dropdowns from the current device list.
@@ -513,20 +576,12 @@ function buildVoiceAudioTabInner(
     cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
-  }
-
-  let previewErrorEl: HTMLDivElement | null = null;
-
-  function clearPreviewError(): void {
-    if (previewErrorEl !== null) {
-      previewErrorEl.remove();
-      previewErrorEl = null;
-    }
+    setText(previewLabel, t("voiceAudio.previewOff"));
+    previewLabel.hidden = false;
   }
 
   function startCameraPreview(deviceId: string): void {
     stopCameraPreview();
-    clearPreviewError();
     const thisRequest = ++cameraRequestId;
     void (async () => {
       try {
@@ -544,11 +599,12 @@ function buildVoiceAudioTabInner(
         }
         registerCamera(stream);
         previewVideo.srcObject = stream;
+        previewLabel.hidden = true;
       } catch (err) {
         if (signal.aborted || thisRequest !== cameraRequestId) return;
-        const msg = err instanceof Error ? err.message : t("voiceAudio.cameraUnavailable");
-        previewErrorEl = createElement("div", { class: "setting-desc" }, msg);
-        previewWrap.appendChild(previewErrorEl);
+        const msg =
+          err instanceof Error && err.message ? err.message : t("voiceAudio.cameraUnavailable");
+        setText(previewLabel, msg);
       }
     })();
   }
@@ -604,7 +660,8 @@ function buildVoiceAudioTabInner(
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         let latestFrame = 0;
-        function updateMeter(): void {
+        let lastHeardAt = Number.NEGATIVE_INFINITY;
+        function updateMeter(now: number): void {
           if (signal.aborted) return;
           analyser.getByteFrequencyData(dataArray);
           // Compute RMS normalized to 0-1
@@ -620,11 +677,11 @@ function buildVoiceAudioTabInner(
 
           // Color: green if above threshold, yellow/red if below
           const threshold = ((100 - currentSensitivity) / 100) * 0.15;
-          if (rms >= threshold) {
-            meterLevel.style.background = "#43b581"; // green — voice detected
-          } else {
-            meterLevel.style.background = "#faa61a"; // yellow — below threshold
-          }
+          meterLevel.style.background = rms >= threshold ? "var(--green)" : "var(--yellow)";
+          // The pill says whether the mic picks anything up, whatever the
+          // sensitivity, and holds between syllables so it does not flicker.
+          if (rms >= MIC_NOISE_FLOOR) lastHeardAt = now;
+          showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
 
           latestFrame = requestAnimationFrame(updateMeter);
           registerMic(stream, audioCtx, latestFrame);
@@ -633,6 +690,9 @@ function buildVoiceAudioTabInner(
         registerMic(stream, audioCtx, latestFrame);
       } catch (err) {
         log.warn("Mic access denied or unavailable — meter stays empty", err);
+        micStatus.hidden = false;
+        setStatusIcon(micStatusIcon, "warn");
+        setText(micStatusWord, t("voiceAudio.mic.noAccess"));
       }
     })();
 
@@ -656,16 +716,16 @@ function buildVoiceAudioTabInner(
       fallback: true,
     },
     {
-      key: "autoGainControl",
-      label: t("voiceAudio.agc.label"),
-      desc: t("voiceAudio.agc.desc"),
-      fallback: true,
-    },
-    {
       key: "enhancedNoiseSuppression",
       label: t("voiceAudio.enhanced.label"),
       desc: t("voiceAudio.enhanced.desc"),
       fallback: false,
+    },
+    {
+      key: "autoGainControl",
+      label: t("voiceAudio.agc.label"),
+      desc: t("voiceAudio.agc.desc"),
+      fallback: true,
     },
   ];
 
@@ -690,7 +750,9 @@ function buildVoiceAudioTabInner(
     });
 
     appendChildren(row, info, toggle);
-    section.appendChild(row);
+    // Enhanced noise suppression builds on noise suppression: nest it.
+    if (item.key === "enhancedNoiseSuppression") row.classList.add("nested");
+    processingCard.appendChild(row);
   }
 
   if (nativeAudio) {

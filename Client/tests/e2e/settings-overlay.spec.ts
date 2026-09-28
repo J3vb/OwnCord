@@ -221,12 +221,29 @@ test.describe("Settings — Voice & Audio Tab", () => {
     // input and output device pickers.
     const pane = page.locator(".settings-pane", { hasText: "Input Device" });
     await expect(pane).toBeVisible();
-    await expect(page.locator("h3", { hasText: "Output Device" })).toBeVisible();
+    await expect(page.locator(".settings-field-label", { hasText: "Output Device" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Output Device" })).toBeVisible();
 
     const selects = page.locator("select.form-input");
     await expect(selects.first()).toBeVisible();
     // Each selector has at least a Default option to choose.
     await expect(selects.first().locator("option", { hasText: "Default" })).toHaveCount(1);
+  });
+
+  test("names every control and keeps the card text readable", async ({ page }) => {
+    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+    expect(await findUnnamedControls(pane)).toEqual([]);
+    const failures: string[] = [];
+    for (const selector of [
+      ".settings-card-head h3",
+      ".settings-field-label",
+      "[data-testid='sensitivity-value']",
+      ".camera-preview-label",
+    ]) {
+      const { ratio } = await textContrast(pane.locator(selector).first());
+      if (ratio < Q1.text) failures.push(`${selector} ${ratio.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
   });
 
   test("shows voice sensitivity slider", async ({ page }) => {

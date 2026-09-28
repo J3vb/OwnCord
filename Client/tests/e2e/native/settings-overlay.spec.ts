@@ -102,13 +102,11 @@ test.describe("Settings Overlay", () => {
     await expect(voiceTab).toHaveClass(/active/);
 
     // Behaviour, not mere existence: the active pane must be the Voice & Audio
-    // pane, with its input-device selector and live mic meter mounted.
+    // pane, with its Microphone card, input-device selector and live mic meter
+    // mounted.
     const pane = nativePage.locator(".settings-content .settings-pane.active");
-    await expect(pane.getByRole("heading", { name: "Input Device" })).toBeVisible();
-    // The pane has several device selects (input, output, quality, ...); the
-    // Input Device heading above scoped the section, so assert the first
-    // select rather than a bare `select.form-input` that matches all of them.
-    await expect(pane.locator("select.form-input").first()).toBeVisible();
+    await expect(pane.getByRole("heading", { name: "Microphone", exact: true })).toBeVisible();
+    await expect(pane.getByRole("combobox", { name: "Input Device" })).toBeVisible();
     await expect(pane.locator(".mic-meter-wrap .mic-meter-bar")).toBeVisible();
   });
 
