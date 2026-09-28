@@ -520,11 +520,9 @@ export function createVideoGrid(): VideoGridComponent {
     const savedFocus = captureFocusedControl();
     syncTileNav();
 
-    // Clear root children (we'll re-append in focus layout order)
-    while (root.firstChild) root.removeChild(root.firstChild);
-
     if (focusedTileId === null || cells.size === 0) {
       // No focus — use regular flex-wrap layout
+      while (root.firstChild) root.removeChild(root.firstChild);
       root.classList.remove("focus-mode");
       for (const el of allTiles()) {
         el.classList.remove("focused", "thumb");
@@ -544,15 +542,20 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     // Main area
-    const mainArea = createElement("div", { class: "video-focus-main" });
+    const mainArea =
+      root.querySelector<HTMLDivElement>(":scope > .video-focus-main") ??
+      createElement("div", { class: "video-focus-main" });
+    for (const child of Array.from(root.childNodes)) if (child !== mainArea) child.remove();
     // Strip area
     const stripArea = createElement("div", { class: "video-focus-strip" });
 
     const focusedEntry = cells.get(focusedTileId);
-    if (focusedEntry !== undefined) {
+    if (focusedEntry === undefined) {
+      mainArea.replaceChildren();
+    } else {
       focusedEntry.el.classList.add("focused");
       focusedEntry.el.classList.remove("thumb");
-      mainArea.appendChild(focusedEntry.el);
+      if (focusedEntry.el.parentNode !== mainArea) mainArea.replaceChildren(focusedEntry.el);
     }
 
     for (const [id, entry] of cells) {
@@ -567,7 +570,7 @@ export function createVideoGrid(): VideoGridComponent {
       stripArea.appendChild(el);
     }
 
-    root.appendChild(mainArea);
+    if (mainArea.parentNode !== root) root.appendChild(mainArea);
     // Only show strip if there are thumbnails
     if (stripArea.childElementCount > 0) {
       root.appendChild(stripArea);
@@ -577,6 +580,8 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function setFocusedTile(tileId: number | null): void {
+    const watching = fullscreenTile ?? theatreTile;
+    if (watching !== null && watching !== tileId) leaveFullscreen();
     focusedTileId = tileId;
     rebuildFocusLayout();
     syncStatsPolling();
@@ -595,6 +600,7 @@ export function createVideoGrid(): VideoGridComponent {
       leaveFullscreen();
       return;
     }
+    if (focusedTileId !== tileId) setFocusedTile(tileId);
     const request = entry.el.requestFullscreen as (() => Promise<void>) | undefined;
     if (typeof request !== "function") {
       enterTheatre(tileId);
@@ -1015,7 +1021,8 @@ export function createVideoGrid(): VideoGridComponent {
     cell.addEventListener(
       "dblclick",
       (e) => {
-        if ((e.target as Element).closest("button:not(.video-cell-select), input") !== null) return;
+        const skip = "button:not(.video-cell-select), input, .context-menu";
+        if ((e.target as Element).closest(skip) !== null) return;
         toggleFullscreen(userId);
       },
       { signal: entry.listeners.signal },
@@ -1206,6 +1213,12 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function destroy(): void {
+    if (theatreTile !== null) leaveTheatre();
+    if (fullscreenTile !== null) {
+      fullscreenTile = null;
+      leaveFullscreen();
+      void callbacks.setWindowFullscreen?.(false).catch(() => {});
+    }
     gridListeners.destroy();
     if (statsTimer !== null) {
       clearInterval(statsTimer);

@@ -8,6 +8,7 @@ import {
   getLocalScreenshareStream as doGetLocalScreenshareStream,
   getRemoteVideoStream as doGetRemoteVideoStream,
 } from "../../lib/screenShare";
+import { parseUserId } from "./sessionState";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 
 /** One receiver sample of a remote video track (getReceiverStats plus
@@ -86,9 +87,7 @@ export class RemoteTracks {
     const source = type === "screenshare" ? "screen_share" : "camera";
     let track: StatsTrack | undefined;
     for (const participant of room.remoteParticipants.values()) {
-      // Identity may carry a ":token" suffix (see screenShare.ts).
-      const match = participant.identity.match(/^user-(\d+)(?::|$)/);
-      if (match === null || parseInt(match[1]!, 10) !== userId) continue;
+      if (parseUserId(participant.identity) !== userId) continue;
       track = participant.getTrackPublication(source as never)?.track;
       break;
     }

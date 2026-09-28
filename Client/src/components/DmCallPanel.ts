@@ -485,6 +485,18 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return videoEl;
   }
 
+  /** Append `nodes` to the body in order, around a videoEl already there
+   *  rather than moving it. */
+  function fill(...nodes: HTMLElement[]): void {
+    const at = nodes.indexOf(videoEl);
+    if (at < 0 || videoEl.parentNode !== body) {
+      appendChildren(body, ...nodes);
+      return;
+    }
+    videoEl.before(...nodes.slice(0, at));
+    videoEl.after(...nodes.slice(at + 1));
+  }
+
   // --- Per-state renders ----------------------------------------------------
 
   function renderIncoming(v: Extract<DmCallView, { kind: "incoming" }>): void {
@@ -572,8 +584,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       stage.appendChild(person(me, v.dm));
       for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
     }
-    appendChildren(
-      body,
+    fill(
       topBar(d("calling"), "warn", true, true),
       stage,
       ...caption(d("callingName", { name: callName(v.dm, currentUserId()) }), d("ringingHint")),
@@ -601,8 +612,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       textButton(d("leave"), "btn-ghost dcp-pill", "dcp-leave-call", options.onLeave),
     );
     const declined = v.reason === "declined";
-    appendChildren(
-      body,
+    fill(
       topBar(declined ? d("declinedStatus", { name }) : d("noAnswerStatus"), "bad", true),
       stage,
       ...caption(
@@ -627,7 +637,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       stage = createElement("div", { class: "dcp-stage" });
       for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
     }
-    appendChildren(body, topBar(status, "", true, true), stage, callControls(false));
+    fill(topBar(status, "", true, true), stage, callControls(false));
   }
 
   function renderCollapsed(dm: DmChannel, ids: readonly number[], status: string): void {
@@ -656,7 +666,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const hadFocus = active instanceof HTMLElement && root.contains(active);
     const focusId = hadFocus ? (active.dataset.testid ?? "") : "";
 
-    clearChildren(body);
+    for (const child of Array.from(body.childNodes)) if (child !== videoEl) child.remove();
     avatars = new Map();
     people = [];
     controls = { mute: null, deafen: null, camera: null, share: null };
@@ -690,6 +700,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         renderConnected(view);
         break;
     }
+    if (!root.classList.contains("dm-call-panel--video")) videoEl.remove();
     if (people.length > 0 || peopleGiven) {
       options.videoGrid?.setPeople(people);
       peopleGiven = people.length > 0;
