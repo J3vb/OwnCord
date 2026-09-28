@@ -176,7 +176,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
 
   // U6: the voice shortcuts also work while the app is unfocused — through the
   // global key path on Windows/X11, and always through the tray's Mute/Deafen
-  // items. Where global key state is unavailable (a pure-Wayland session), say
+  // items. Where global key state is unavailable (macOS, or any Wayland session), say
   // so instead of promising a shortcut that cannot fire.
   const globalHint = createElement(
     "div",

@@ -227,13 +227,6 @@ pub fn run() {
             #[cfg(feature = "devtools")]
             commands::open_devtools,
         ])
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Focused(focused) = event {
-                if window.label() == "main" {
-                    shortcuts::set_main_focused(*focused);
-                }
-            }
-        })
         .setup(|app| {
             // Rust logging is initialized by tauri_plugin_log (registered above).
             // Record the version and PID first: paired with the "[update]

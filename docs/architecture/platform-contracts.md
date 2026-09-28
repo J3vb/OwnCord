@@ -172,8 +172,8 @@ to desktop/browser branching.
 ## Proposed contracts
 
 Eighteen capability clusters (the seventeenth, external content, added by
-B7-16; the eighteenth, global shortcuts, added with U6). Each becomes one file under `contracts/` (a few
-split across two or three), with matching implementations under `desktop/` and
+B7-16; the eighteenth, global shortcuts, added with U6). Each becomes one file
+under `contracts/` (a few split across two or three), with matching implementations under `desktop/` and
 `browser/`. Since B7-5 the "Files today" column names the app-side callers; the
 native surface itself lives only in `platform/desktop/`.
 
@@ -193,6 +193,7 @@ native surface itself lives only in `platform/desktop/`.
 | Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                               | `plugin-opener`                                                                                        | `window.open`                                               |
 | File save / pick  | `message-list/attachments.ts`                                                 | `plugin-dialog`, `plugin-fs`                                                                           | `<a download>` / File System Access API                     |
 | Input / PTT       | `lib/ptt.ts`                                                                  | `api/core`, `api/event`; 5 invokes                                                                     | ⚠ see hard cases                                            |
+| Global shortcuts  | `pages/MainPage.ts`, `settings/KeybindsTab.ts`                                | `api/core`, `api/event`; 2 invokes, 1 event listen                                                     | unsupported — a page cannot observe keys outside itself     |
 | Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                                                                     | URL routing                                                 |
 | App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                                                                              | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                                                                           | unsupported — the browser has its own devtools already      |

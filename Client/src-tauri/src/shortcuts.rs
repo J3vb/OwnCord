@@ -1,16 +1,18 @@
 //! Global voice shortcuts (U6): Ctrl+Shift+M mute and Ctrl+Shift+D deafen that
-//! fire while OwnCord is not focused.
+//! fire whether or not OwnCord is focused. The in-app keydown handler does not
+//! claim these combinations, so there is no double toggle to guard against.
 //!
 //! Reuses the same global key-state machinery as push-to-talk (`ptt.rs`'s
 //! `is_key_down`): a 20 ms polling loop that OBSERVES the combination without
 //! consuming it, so other applications still receive the keystroke normally.
 //! Emits `voice-shortcut` ("mute"/"deafen") once per press edge.
 //!
-//! Platform coverage mirrors PTT: Windows (`GetAsyncKeyState`) and X11/XWayland
-//! Linux (`device_query`). A pure-Wayland session has no reachable display, so
-//! `device_query` returns None and `voice_shortcuts_supported` reports false —
-//! the global path there needs the xdg-desktop-portal GlobalShortcuts API,
-//! which is not wired yet (see the Settings disclosure). The tray's Mute and
+//! Platform coverage: Windows (`GetAsyncKeyState`) and X11 Linux
+//! (`device_query`). Any Wayland session reports unsupported, XWayland
+//! included: XQueryKeymap there only sees keys while an X11 window has focus,
+//! so a native Wayland app in front hides the combination. The global path
+//! there needs the xdg-desktop-portal GlobalShortcuts API, which is not wired
+//! yet (see the Settings disclosure). The tray's Mute and
 //! Deafen items cover every platform regardless.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,23 +33,6 @@ const DEAFEN_KEY_VK: i32 = 0x44; // D
 static SHORTCUT_THREAD: Mutex<Option<(Arc<AtomicBool>, std::thread::JoinHandle<()>)>> =
     Mutex::new(None);
 
-/// Whether the main window has focus, fed by `WindowEvent::Focused` in
-/// `lib.rs`. The poller reads this flag rather than asking the window: that
-/// getter round-trips through the event loop and blocks forever once the loop
-/// has stopped, which would hang the Exit handler's join.
-static MAIN_FOCUSED: AtomicBool = AtomicBool::new(false);
-
-/// Record the main window's focus (called from the window-event handler).
-pub fn set_main_focused(focused: bool) {
-    MAIN_FOCUSED.store(focused, Ordering::SeqCst);
-}
-
-/// A combination only counts while the window is unfocused: focused, the
-/// renderer's own keydown handler owns the voice shortcuts.
-fn pressed_when_unfocused(focused: bool, combo_down: bool) -> bool {
-    !focused && combo_down
-}
-
 /// One shortcut's edge decision: true when the combination has just been
 /// pressed. A held combination fires once — the caller toggles on the rising
 /// edge only, so leaning on the combination cannot machine-gun the mute.
@@ -61,11 +46,22 @@ fn combo_matches(mods: Modifiers, key_down: bool) -> bool {
     key_down && mods.ctrl && mods.shift && !mods.alt && !mods.meta
 }
 
-/// Whether this platform can observe global key state (mirrors
-/// `ptt_polling_supported`). False on macOS and on a pure-Wayland session.
+/// Whether the session is Wayland, from `WAYLAND_DISPLAY` and
+/// `XDG_SESSION_TYPE`.
+fn is_wayland_session(wayland_display: Option<&str>, session_type: Option<&str>) -> bool {
+    wayland_display.is_some_and(|d| !d.is_empty())
+        || session_type.is_some_and(|t| t.eq_ignore_ascii_case("wayland"))
+}
+
+/// Whether this platform can observe global key state while another app is in
+/// front. False on macOS and on any Wayland session.
 #[tauri::command]
 pub fn voice_shortcuts_supported() -> bool {
-    crate::ptt::ptt_polling_supported()
+    let wayland = is_wayland_session(
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+    );
+    !wayland && crate::ptt::ptt_polling_supported()
 }
 
 /// Start the global voice-shortcut polling loop. Emits `voice-shortcut` with
@@ -85,20 +81,15 @@ pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
             let mut mute_was_down = false;
             let mut deafen_was_down = false;
             while !thread_shutdown.load(Ordering::SeqCst) {
-                let focused = MAIN_FOCUSED.load(Ordering::SeqCst);
                 let mods = modifiers_down();
 
-                let mute_down =
-                    pressed_when_unfocused(focused, combo_matches(mods, is_key_down(MUTE_KEY_VK)));
+                let mute_down = combo_matches(mods, is_key_down(MUTE_KEY_VK));
                 if shortcut_pressed(mute_down, mute_was_down) {
                     let _ = app.emit("voice-shortcut", "mute");
                 }
                 mute_was_down = mute_down;
 
-                let deafen_down = pressed_when_unfocused(
-                    focused,
-                    combo_matches(mods, is_key_down(DEAFEN_KEY_VK)),
-                );
+                let deafen_down = combo_matches(mods, is_key_down(DEAFEN_KEY_VK));
                 if shortcut_pressed(deafen_down, deafen_was_down) {
                     let _ = app.emit("voice-shortcut", "deafen");
                 }
@@ -157,13 +148,26 @@ mod tests {
     }
 
     #[test]
-    fn focused_window_suppresses_the_global_combo() {
-        // Focused, the renderer's own keydown handler owns the combo.
-        assert!(!pressed_when_unfocused(true, true));
-        assert!(!pressed_when_unfocused(true, false));
-        // Unfocused, the global poller owns it.
-        assert!(pressed_when_unfocused(false, true));
-        assert!(!pressed_when_unfocused(false, false));
+    fn a_held_press_toggles_exactly_once() {
+        let mut was_down = false;
+        let mut fired = 0;
+        for down in [false, true, true, true, true, false, false] {
+            if shortcut_pressed(down, was_down) {
+                fired += 1;
+            }
+            was_down = down;
+        }
+        assert_eq!(fired, 1);
+    }
+
+    #[test]
+    fn any_wayland_session_is_detected() {
+        assert!(is_wayland_session(Some("wayland-0"), None));
+        assert!(is_wayland_session(None, Some("wayland")));
+        assert!(is_wayland_session(Some("wayland-0"), Some("wayland")));
+        assert!(!is_wayland_session(None, Some("x11")));
+        assert!(!is_wayland_session(None, None));
+        assert!(!is_wayland_session(Some(""), Some("x11")));
     }
 
     #[test]
@@ -199,14 +203,6 @@ mod tests {
             !combo_matches(mods(true, false, true, false), true),
             "Ctrl+Alt"
         );
-    }
-
-    #[test]
-    fn focus_flag_tracks_the_window_event() {
-        set_main_focused(true);
-        assert!(MAIN_FOCUSED.load(Ordering::SeqCst));
-        set_main_focused(false);
-        assert!(!MAIN_FOCUSED.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -9,7 +9,7 @@
  * the actions to the renderer, which toggles the same controls the in-app
  * shortcuts do.
  *
- * `supported()` is false on macOS and on a pure-Wayland Linux session, where
+ * `supported()` is false on macOS and on any Wayland Linux session, where
  * global key state is not observable without the xdg-desktop-portal
  * GlobalShortcuts API. The tray items work regardless; Settings discloses the
  * gap.

@@ -359,6 +359,8 @@ describe("KeybindsTab", () => {
     mockSupported.mockResolvedValue(true);
     const el = buildKeybindsTab(new AbortController().signal);
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
+    await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hint.textContent).toBe(
       "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu.",
     );
