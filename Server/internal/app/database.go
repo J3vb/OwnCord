@@ -49,7 +49,7 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 	// admin request can ever hit the unwired default hook.
 	admin.SetRestartHandoff(rc.Request)
 
-	if err := backupBeforePendingMigrations(log, cfg, database); err != nil {
+	if err := backupBeforePendingMigrations(log, database); err != nil {
 		return err
 	}
 
@@ -73,11 +73,6 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 	return nil
 }
 
-// preMigrateBackupPrefix names the boot-time safety copy taken before a
-// pending migration moves the schema. It is distinct from the admin panel's
-// pre_restore_ copies, and like them it is never a retention candidate.
-const preMigrateBackupPrefix = "pre_migrate_"
-
 // backupBeforePendingMigrations writes a verified copy of the live database
 // before initDatabase lets a pending migration move the schema (O3). Compose
 // tracks :latest, so a routine `docker compose pull` upgrades the schema with
@@ -92,10 +87,10 @@ const preMigrateBackupPrefix = "pre_migrate_"
 // It runs after admin.SetBackupDir so the copy lands beside the operator's
 // manual backups, before db.Migrate so the copy predates the schema move, and
 // before any goroutine serves — there is no context to inherit.
-func backupBeforePendingMigrations(log *slog.Logger, cfg *config.Config, database *db.DB) error {
+func backupBeforePendingMigrations(log *slog.Logger, database *db.DB) error {
 	// In-memory databases (tests, tooling) have no file to copy, and a fresh
 	// database has no pending migrations — PendingMigrations returns nil for
-	// both, but a file check keeps BackupToSafe out of the in-memory path.
+	// both, which is the only thing keeping BackupToSafe off those paths.
 	pending, err := db.PendingMigrations(database)
 	if err != nil {
 		return fmt.Errorf("checking for pending migrations: %w", err)
@@ -104,10 +99,7 @@ func backupBeforePendingMigrations(log *slog.Logger, cfg *config.Config, databas
 		return nil
 	}
 
-	backupDir := cfg.Backup.Dir
-	if backupDir == "" {
-		backupDir = filepath.Join("data", "backups")
-	}
+	backupDir := admin.BackupDir()
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
 		return fmt.Errorf("pre-migration backup: creating %s: %w", backupDir, err)
 	}
@@ -117,7 +109,7 @@ func backupBeforePendingMigrations(log *slog.Logger, cfg *config.Config, databas
 	// predate a rollback and hold none of the data written since, so every
 	// boot takes a fresh copy under the first free _N suffix and never
 	// touches an earlier one.
-	name := preMigrateBackupPrefix + strings.TrimSuffix(filepath.Base(pending[0]), ".sql")
+	name := admin.PreMigrateBackupPrefix + strings.TrimSuffix(filepath.Base(pending[0]), ".sql")
 	path := filepath.Join(backupDir, name+".db")
 	for n := 2; ; n++ {
 		if _, statErr := os.Stat(path); statErr != nil {

@@ -40,6 +40,9 @@ func SetBackupDir(dir string) {
 	backupBaseDir = absOrRaw(dir)
 }
 
+// BackupDir is the resolved backup directory SetBackupDir configured.
+func BackupDir() string { return backupBaseDir }
+
 func absOrRaw(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		return abs

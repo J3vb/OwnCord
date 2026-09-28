@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -40,10 +41,6 @@ func migrationsUpTo(t *testing.T, cutoff string) fstest.MapFS {
 	}
 	return out
 }
-
-// preMigratePrefix names the boot-time safety copy initDatabase writes before
-// it lets a pending migration move the schema (O3).
-const preMigratePrefix = "pre_migrate_"
 
 // onlyBackup returns the single pre-migration backup in dir, failing when
 // there is not exactly one.
@@ -110,8 +107,8 @@ func TestInitDatabase_BacksUpBeforeApplyingPendingMigrations(t *testing.T) {
 	}
 
 	backup := onlyBackup(t, backupDir)
-	if base := filepath.Base(backup); len(base) < len(preMigratePrefix) || base[:len(preMigratePrefix)] != preMigratePrefix {
-		t.Fatalf("backup %q does not carry the %q prefix", base, preMigratePrefix)
+	if base := filepath.Base(backup); !strings.HasPrefix(base, admin.PreMigrateBackupPrefix) {
+		t.Fatalf("backup %q does not carry the %q prefix", base, admin.PreMigrateBackupPrefix)
 	}
 	if err := db.CheckBackupIntegrity(context.Background(), backup); err != nil {
 		t.Fatalf("pre-migration backup failed integrity_check: %v", err)
