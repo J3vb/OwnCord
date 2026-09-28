@@ -585,12 +585,13 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 
 ### Admin Backup Endpoint
 
-| Endpoint                            | Method | Description                                                               |
-| ----------------------------------- | ------ | ------------------------------------------------------------------------- |
-| `/admin/api/backup`                 | POST   | Create a new backup (owner-only)                                          |
-| `/admin/api/backups`                | GET    | List all backups (newest first)                                           |
-| `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                              |
-| `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first) |
+| Endpoint                            | Method | Description                                                                         |
+| ----------------------------------- | ------ | ----------------------------------------------------------------------------------- |
+| `/admin/api/backup`                 | POST   | Create a new backup (owner-only)                                                    |
+| `/admin/api/backups`                | GET    | List all backups (newest first)                                                     |
+| `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                                        |
+| `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first)           |
+| `/admin/api/archive`                | GET    | Download the full archive (owner-only; database snapshot + `data/` + `config.yaml`) |
 
 Backups are stored in the configured backup directory (default
 `data/backups/`) with timestamps. Point it somewhere safer than the data
@@ -636,6 +637,22 @@ change them, and that page is the Owner's alone:
   backups older than that, but always keeps the newest one, so a stale
   schedule can never delete your last copy, and it never removes the
   `pre_restore_*` or `pre_migrate_*` safety copies — delete those by hand.
+
+### The full archive
+
+A database backup is not a complete restore: it does not carry uploads, the
+key files or `config.yaml` ([Backup Strategy](#backup-strategy) lists what
+each omission costs). **Download full archive** on the Backups & restore page
+returns one zip with all of it — the database as a `VACUUM INTO` snapshot, the
+whole data directory (uploads, `totp.key`, `erasure.key`,
+`erasure/markers.sqlite`, `push_vapid.key`, TLS material), and `config.yaml`.
+It is Owner-only, because the archive holds password hashes and the key files.
+
+The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
+even while the server runs. The archive is still taken with WAL-mode writes in
+flight, so prefer the manual stop-the-server procedure in
+[Before upgrading: take the archive](#before-upgrading-take-the-archive) when
+you can, and keep the download off the host either way.
 
 ### Backups taken automatically before an upgrade
 
