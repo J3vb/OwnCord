@@ -40,7 +40,7 @@
 # regression is visible in the Actions history instead of waiting for someone
 # to dispatch a run. It is inert until this file is carried to the default
 # branch (GitHub registers a `schedule:` only when the file exists on main, the
-# same rule nightly-docker-smoke.yml:18-25 states), and a scheduled run then
+# same rule nightly-docker-smoke.yml:14-15 states), and a scheduled run then
 # measures the workflow's own commit, so the wiring here and the harness it
 # drives are always the same revision. To measure dev, dispatch with
 # `--ref dev`. A scheduled run lands its checks on the DEFAULT branch, where no
