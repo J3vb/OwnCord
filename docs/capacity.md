@@ -370,7 +370,7 @@ generator saturation alongside it.
   search stops there. It is not chased further on a shared runner.
 
 The corrected search was run on 2026-09-28 (run 36360932108, on `dev`); its
-per-step table and the limiting resource it names are under "Ceiling search" in
+per-step table and the limiting resources it names are under "Ceiling search" in
 the measured section below.
 
 ### Voice control churn
