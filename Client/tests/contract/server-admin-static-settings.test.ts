@@ -323,6 +323,25 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(group.hasAttribute("aria-describedby")).toBe(false);
   });
 
+  it("keeps the Members tab when leaving for Members › Pending is cancelled", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "settings";
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const approval = document.querySelector<HTMLInputElement>(
+      '#s-registration_mode input[value="approval"]',
+    )!;
+    approval.checked = true;
+    approval.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    dom.window.confirm = () => false;
+
+    document.querySelector<HTMLButtonElement>("#s-registration_mode-desc button")!.click();
+    expect(booted.bridge.state.section).toBe("settings");
+    expect(booted.bridge.state.membersTab).toBe("all");
+  });
+
   it("drives the save bar from the actual difference, so reverting an edit clears it", async () => {
     const booted = await boot([], respondWith());
     dom = booted.dom;
@@ -469,6 +488,7 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
         status: "critical",
         detail: "72h0m0s old",
         value: taken.toISOString(),
+        threshold: "daily schedule: warn after 36h0m0s",
         observed_at: new Date().toISOString(),
       },
     );
@@ -480,10 +500,53 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
     const status = await backupStatus([], "daily", {
       status: "warning",
       detail: "no successful backup yet",
+      threshold: "daily schedule: warn after 36h0m0s",
       observed_at: new Date().toISOString(),
     });
     expect(status.title).toBe("No backups yet (Warning)");
     expect(status.sub).toBe("Automatic backups run daily · no successful backup yet");
+  });
+
+  it("re-renders the status line from the schedule just saved, dropping a signal evaluated under the old one", async () => {
+    let schedule = "off";
+    const booted = await boot([], (p, method) => {
+      if (p === "/settings") {
+        if (method === "PATCH") schedule = "daily";
+        return { json: { ...LOADED_SETTINGS, backup_schedule: schedule } };
+      }
+      if (p === "/backups") return { json: [] };
+      if (p === "/attention")
+        return {
+          json: {
+            signals: [
+              {
+                id: "backup",
+                status: "warning",
+                detail: "no backup exists and scheduled backups are off",
+                observed_at: new Date().toISOString(),
+              },
+            ],
+          },
+        };
+      return respondWith()(p, method);
+    });
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "backups";
+    await render(booted.bridge, dom.window, booted.bridge.renderBackups);
+    const sub = () => document.querySelector("#backupStatus .status-line-sub")?.textContent;
+    expect(sub()).toBe(
+      "Automatic backups are off · no backup exists and scheduled backups are off",
+    );
+
+    (document.getElementById("s-backup_schedule") as HTMLSelectElement).value = "daily";
+    booted.bridge.markBackupPolicyChanged();
+    await booted.bridge.saveBackupPolicy();
+    await expect.poll(sub).toBe("Automatic backups run daily");
+    expect(document.querySelector("#backupStatus .status-line-title")?.textContent).toBe(
+      "No backup yet; the first automatic one is still to come (Unknown)",
+    );
   });
 
   it("restores only after the backup's name is typed, then waits for the restart", async () => {

@@ -82,7 +82,11 @@ function syncRegModeHint(){
   const set=document.getElementById('s-registration_mode');
   if(set){if(approval)set.setAttribute('aria-describedby','s-registration_mode-desc');else set.removeAttribute('aria-describedby')}
 }
-function openPendingMembers(){state.membersTab='pending';navigateTo('users')}
+function openPendingMembers(){
+  const prev=state.membersTab;state.membersTab='pending';
+  navigateTo('users');
+  if(state.section!=='users')state.membersTab=prev;
+}
 
 function setSettingsChanged(changed){
   if(state.settingsChanged!==changed){state.settingsChanged=changed;renderNav()}
@@ -377,6 +381,7 @@ function backupStatusLine(backups,schedule,signal){
   const dated=backups.filter(b=>b.date&&!isNaN(new Date(b.date).getTime())).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime());
   const latest=dated[0];
   const auto={daily:'Automatic backups run daily',weekly:'Automatic backups run weekly',off:'Automatic backups are off'}[schedule]||'';
+  if(signal&&schedule&&((signal.threshold||'').split(' ')[0]||'off')!==schedule)signal=null;
   if(latest&&signal&&(!signal.value||new Date(signal.observed_at).getTime()<new Date(latest.date).getTime()))signal=null;
   const alarm=!!signal&&(signal.status==='warning'||signal.status==='critical');
   let tone,title;
@@ -401,7 +406,7 @@ async function saveBackupPolicy(){
   if(btn){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
   if(!Object.keys(body).length)return;
-  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved')}
+  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved');renderContent()}
   catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 
