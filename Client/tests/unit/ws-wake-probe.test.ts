@@ -129,6 +129,33 @@ describe("wake probe (U7d)", () => {
     expect(states).toContain("reconnecting");
   });
 
+  it("treats a throttled ~60 s heartbeat gap as no wake", async () => {
+    await connectAndAuth();
+    const states: ConnectionState[] = [];
+    client.onStateChange((s) => states.push(s));
+
+    // A long-hidden page's intensive throttling fires the tick ~60 s late.
+    vi.setSystemTime(Date.now() + 31_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(states).not.toContain("reconnecting");
+  });
+
+  it("never pushes back a sooner deadline or an older unanswered ping", async () => {
+    await connectAndAuth();
+    const states: ConnectionState[] = [];
+    client.onStateChange((s) => states.push(s));
+
+    // The heartbeat ping at 30 s goes unanswered; the silence deadline is 60 s.
+    await vi.advanceTimersByTimeAsync(55_000);
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expectConsole("warn", /\[ws\] No inbound frame within the liveness deadline/);
+    expect(states).toContain("reconnecting");
+  });
+
   it("keeps the 60 s silence deadline for an on-time heartbeat", async () => {
     await connectAndAuth();
     const states: ConnectionState[] = [];
