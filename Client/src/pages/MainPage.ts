@@ -58,7 +58,7 @@ import { forgetAdmittedItems } from "../features/content-consent/external";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
-} from "@components/message-list/reaction-tooltip";
+} from "../features/messaging/reactionUsers";
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";

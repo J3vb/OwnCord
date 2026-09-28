@@ -53,7 +53,8 @@ export { setServerHost } from "./attachments";
 
 import { formatTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
-import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
+import { createAvatarElement } from "./avatar";
+import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";

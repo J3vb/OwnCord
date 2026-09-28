@@ -15,7 +15,11 @@ import { formatMessageTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
-import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
+import {
+  avatarInitial,
+  isRenderableAvatar,
+  resolveDisplayName,
+} from "@components/message-list/avatar";
 import {
   fetchImageAsDataUrl,
   recoverEvictedImage,

@@ -191,8 +191,9 @@ _"alice, bob, carol and 4 others reacted with 👍"_. The debounce mirrors
 `lib/streamPreview.ts` so a pointer crossing a row of pills fires no requests.
 The list comes from `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`
 (oldest first, capped at 100 server-side) and is cached per message+emoji in
-`message-list/reaction-tooltip.ts`; a `reaction_update` for that message evicts
-every one of its lists, since the event names only the emoji that changed.
+`features/messaging/reactionUsers.ts` (the tooltip component renders it); a
+`reaction_update` for that message evicts every one of its lists, since the
+event names only the emoji that changed.
 Usernames are inserted as text nodes — never markup.
 
 ---

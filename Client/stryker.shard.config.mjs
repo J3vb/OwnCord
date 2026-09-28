@@ -70,6 +70,7 @@ export const shards = {
     "src/features/direct-messages/wsHandlers.ts",
     "src/features/channels/wsHandlers.ts",
     "src/features/messaging/wsHandlers.ts",
+    "src/features/messaging/reactionUsers.ts",
     "src/features/voice/wsHandlers.ts",
   ], // 3103 mutants
   "lib-rest": [

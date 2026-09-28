@@ -38,7 +38,7 @@ import {
   getCachedReactionUsers,
   loadReactionUsers,
   setReactionUsersFetcher,
-} from "../../src/components/message-list/reaction-tooltip";
+} from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage, MessageResponse } from "../../src/lib/types";

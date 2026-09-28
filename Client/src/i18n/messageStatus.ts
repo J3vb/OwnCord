@@ -5,8 +5,8 @@ import { defineCatalog } from "./format";
  * stamps, the attachment download labels and the who-reacted tooltip. These
  * modules are statically reachable from the entry — `lib/formatting.ts`
  * and `message-list/attachments.ts` through their many callers, and
- * `message-list/reaction-tooltip.ts` through the dispatcher's reaction_update
- * handler — so their copy lives here rather than in the main-page catalog
+ * `message-list/reaction-tooltip.ts` through the message-list renderers — so
+ * their copy lives here rather than in the main-page catalog
  * `messaging.ts`, the same way B9-9 split `mediaControls.ts` from `content.ts`.
  */
 export const messageStatusText = defineCatalog("messageStatus", {

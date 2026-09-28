@@ -25,7 +25,7 @@ import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
-} from "../../src/components/message-list/reaction-tooltip";
+} from "../../src/features/messaging/reactionUsers";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
 import {
