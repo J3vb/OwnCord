@@ -42,13 +42,16 @@ func serveProgressing(t *testing.T, fixedWindow, lifetime time.Duration, onServe
 	want = chunk * chunks
 	var srv *httptest.Server
 	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		d, _ := startArchive(w, r, fixedWindow, lifetime)
+		d := startArchive(w, r, func() {}, fixedWindow, lifetime)
 		defer d.release()
 		d.touch()
 		if onServe != nil {
 			onServe(srv.Config)
 		}
+		// Send the headers before the slow body, so every run reaches the
+		// client as a response however few chunks land before a cutoff.
 		w.Header().Set("Content-Length", strconv.Itoa(want))
+		_ = http.NewResponseController(w).Flush()
 		_, _ = io.Copy(d, &slowSource{size: chunk, n: chunks, gap: gap})
 	}))
 	srv.Config.WriteTimeout = fixedWindow
@@ -100,8 +103,14 @@ func TestArchiveDeadline_ShutdownCancelsBuild(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/archive", nil)
 		return r.WithContext(context.WithValue(r.Context(), http.ServerContextKey, srv))
 	}
-	running, runningCtx := startArchive(httptest.NewRecorder(), newRequest(), time.Minute, time.Hour)
-	defer running.release()
+	start := func() context.Context {
+		r := newRequest()
+		ctx, cancel := context.WithCancel(r.Context())
+		t.Cleanup(cancel)
+		t.Cleanup(startArchive(httptest.NewRecorder(), r, cancel, time.Minute, time.Hour).release)
+		return ctx
+	}
+	runningCtx := start()
 
 	shutdownArchives(srv, 10*time.Millisecond)()
 	t.Cleanup(func() {
@@ -109,8 +118,7 @@ func TestArchiveDeadline_ShutdownCancelsBuild(t *testing.T) {
 		delete(archivesInFlight.closing, srv)
 		archivesInFlight.mu.Unlock()
 	})
-	late, lateCtx := startArchive(httptest.NewRecorder(), newRequest(), time.Minute, time.Hour)
-	defer late.release()
+	lateCtx := start()
 
 	for name, ctx := range map[string]context.Context{"running": runningCtx, "late": lateCtx} {
 		select {

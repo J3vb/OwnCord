@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -43,7 +44,9 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
 			return
 		}
-		deadline, ctx := startArchive(w, r, archiveProgressTimeout, archiveMaxLifetime)
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		deadline := startArchive(w, r, cancel, archiveProgressTimeout, archiveMaxLifetime)
 		defer deadline.release()
 
 		// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
@@ -194,10 +197,7 @@ var errArchiveNoSpace = errors.New("not enough free disk space in the backup dir
 // treated as full.
 func checkArchiveSpace(dir string, need, floor uint64) error {
 	free, err := diskutil.FreeBytes(dir)
-	if err != nil {
-		return nil
-	}
-	if free < need || free-need < floor {
+	if err == nil && (free < need || free-need < floor) {
 		return fmt.Errorf("%w: it needs about %d MB, %d MB is free, and %d MB is kept in reserve (server.min_free_disk_mb)",
 			errArchiveNoSpace, need>>20, free>>20, floor>>20)
 	}
@@ -354,10 +354,8 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 		if rel == "." {
 			return nil
 		}
-		for _, skip := range t.skip {
-			if path == skip {
-				return filepath.SkipDir
-			}
+		if slices.Contains(t.skip, path) {
+			return filepath.SkipDir
 		}
 		t.entries = append(t.entries, archiveEntry{name: name, info: info})
 		return nil
@@ -422,8 +420,8 @@ func addConfig(zw *zip.Writer, configPath string) error {
 		return nil
 	}
 	info, err := os.Stat(configPath)
-	if err != nil {
-		return nil
+	if err == nil {
+		return addFile(zw, "config.yaml", configPath, info, zip.Deflate)
 	}
-	return addFile(zw, "config.yaml", configPath, info, zip.Deflate)
+	return nil
 }

@@ -71,13 +71,12 @@ type archiveDeadline struct {
 	until time.Time
 }
 
-// startArchive starts an archive request's deadlines and returns the context
-// the build runs under. Nothing is written while the archive builds, so the
-// connection starts at the lifetime bound; each written chunk re-arms it. The
-// handler must defer release.
-func startArchive(w http.ResponseWriter, r *http.Request, idle, lifetime time.Duration) (*archiveDeadline, context.Context) {
+// startArchive starts an archive request's deadlines; cancel ends the context
+// the build runs under, and is called at the lifetime bound. Nothing is
+// written while the archive builds, so the connection starts at the lifetime
+// bound; each written chunk re-arms it. The handler must defer release.
+func startArchive(w http.ResponseWriter, r *http.Request, cancel context.CancelFunc, idle, lifetime time.Duration) *archiveDeadline {
 	srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
-	ctx, cancel := context.WithCancel(r.Context())
 	d := &archiveDeadline{
 		w:     w,
 		ctl:   http.NewResponseController(w),
@@ -96,7 +95,7 @@ func startArchive(w http.ResponseWriter, r *http.Request, idle, lifetime time.Du
 	}
 	archivesInFlight.set[d] = struct{}{}
 	archivesInFlight.mu.Unlock()
-	return d, ctx
+	return d
 }
 
 // release drops the request from the in-flight set once the handler is done.
