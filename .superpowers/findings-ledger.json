@@ -1,5 +1,5 @@
 {
-  "nextId": 483,
+  "nextId": 485,
   "findings": [
     {
       "id": "OC-0001",
@@ -11190,6 +11190,24 @@
         "revertProof": "self-reported"
       },
       "note": "Phase B lane B6 item BUG-05. The un-fixme'd e2e asserts the Call action opens the DM and rings its voice channel; two unit tests cover the MemberList onCall wiring (incl. no button for yourself) and the SidebarArea open-or-create flow."
+    },
+    {
+      "id": "OC-0484",
+      "title": "A post-restart (full-resync) resume never restores its channel subscription from active_channel_id, so channel frames broadcast during the resume handshake are silently skipped",
+      "file": "Server/ws/replay.go",
+      "line": 212,
+      "severity": "medium",
+      "why": "active_channel_id is honoured only inside handleReconnect, and only after reconnectPrecheck's final mustFullResync check passes (replay.go:212 promotes c.authChannelID at :106-115, but the mustFullResync early-return at :212 fires first). After a restart every resume is tier none (the per-boot seq floor renumbers the space), so mustFullResync is true and handleReconnect returns false before the promotion; handleFreshConnect then runs with c.channelID still 0, so registerNow (serve_ready.go:562) subscribes TopicGlobal and UserTopic but no ChannelTopic. Channel-scoped frames broadcast between auth_ok and the client's post-auth_ok channel_focus receive a seq that the resuming socket never sees, and since the client tracks only max(seq) the hole is silent and permanent until the user re-mounts the channel.",
+      "repro": "gh workflow run load-baseline.yml -f profile=restart --ref dev, then read ws_replay_gap from the constrained leg's k6-summary.json. The restart drill reconnects all 100 sockets; each is served tier:none (full re-sync) and the sockets record small gaps (max 9 and 13 on the two runs), failing the drill's own ws_replay_gap max==0 validity gate.",
+      "evidence": "Two dev runs fail the same gate: 36360934015 (dev 8349ed2e) ws_replay_gap max 9, avg 1.67, count 100, every resume tier none; 36362588641 (dev a04f8edd, the prescribed one-shot rerun) max 13, avg 1.87, med 0, count 100, tier none 100. Server-side loss counters are all zero on both (topic_sheds_total 0, broadcast_drops 0, ws_conn_rejects 0, backpressure_* 0), so the missed frames are the resume-window subscription gap, not shedding. Both runs' server.log shows the full-resync reason ('ws replay skipped (resync watermark at or past last_seq), sending full ready'). The 2026-09-16 run 35113950011 measured gap 0 under the same harness gap logic, but its corrected-drill replacement reconnects all 100 sockets at 135 s under full fan-out instead of 90 s; the difference is not attributed beyond noting that the code path above cannot restore the subscription either way. The corrected windows themselves measure cleanly (equal delivery counts, 371133 / 371250), so OC-0446's ~10x window imbalance is gone, but because the replay-gap gate fails docs/capacity.md publishes no restart latency figure from these runs.",
+      "suggestedFix": "Honour active_channel_id on the full-ready path too: in handleFreshConnect, when c.lastSeq > 0 and c.authChannelID is READ-visible per the recomputed allowed set, set c.channelID before registerNow (the same gate the replay path already applies, so an unreadable id still leaves it 0). Do not re-order handleReconnect's mustFullResync check merely to reach the promotion: the full-resync path must stay subscribed for the whole auth_ok+ready handshake, which is what the pre-subscribe is for.",
+      "confidence": "medium",
+      "status": "open",
+      "found": "2026-09-28",
+      "hunt": "phase-b-b7-perf-2026-09-28",
+      "lens": "realtime",
+      "finder": "b7-perf",
+      "note": "Found while re-running the corrected restart profile for PERF-03. Harness/server fix is out of that lane's scope (docs-only), so this is filed open rather than fixed. The ceiling-search half of PERF-03 is unaffected (run 36360932108 is green and published)."
     }
   ]
 }

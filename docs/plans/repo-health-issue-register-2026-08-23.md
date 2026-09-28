@@ -80,14 +80,14 @@ baselines and scorecards.
 | Status    |   Count |
 | --------- | ------: |
 | Fixed     |     473 |
-| Open      |       2 |
+| Open      |       3 |
 | Declined  |       7 |
 | Duplicate |       1 |
-| **Total** | **483** |
+| **Total** | **484** |
 
-As of 2026-09-27 the two open findings are `OC-0476` and `OC-0481` (both low,
-none B9-tagged); `OC-0478` (the single-writer lint blind spot) was fixed by
-extending the rule and its canary; `OC-0473` is fixed by #1858 and `OC-0474` by #1865; `OC-0454` is declined by owner decision
+As of 2026-09-28 the three open findings are `OC-0476`, `OC-0481` and `OC-0484`
+(all low/medium, none B9-tagged); `OC-0478` (the single-writer lint blind spot)
+was fixed by extending the rule and its canary; `OC-0473` is fixed by #1858 and `OC-0474` by #1865; `OC-0454` is declined by owner decision
 D-09 (Q14, an accepted low with a reopen trigger — see `.superpowers/findings-ledger.json`),
 and `OC-0479` (stale `.golangci.yml` comments) is fixed by #1800.
 
