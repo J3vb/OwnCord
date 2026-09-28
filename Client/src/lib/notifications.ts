@@ -13,6 +13,7 @@ import { isWindowDetached } from "@stores/messages.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
 import { createLogger } from "./logger";
+import { markdownToPlainText } from "./markdown";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
@@ -128,7 +129,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
       : connectText("notifications.inChannel", { author: authorName, channel: channelLabel }),
     80,
   );
-  const body = sanitizeNotif(payload.content, 100);
+  // The body is the message's visible words: markdown flattened and a spoiler
+  // replaced by its label rather than its hidden text, which would otherwise
+  // land verbatim on a lock screen before anyone clicked to reveal it.
+  const body = sanitizeNotif(
+    markdownToPlainText(payload.content, connectText("notifications.spoiler")),
+    100,
+  );
 
   // Desktop notification
   if (!dnd && loadPref<boolean>("desktopNotifications", true)) {

@@ -27,10 +27,11 @@ import { messagingText } from "../../i18n/messaging";
 import {
   parseInline,
   parseBlocks,
+  splitCodeFences,
   type BlockNode,
   type InlineNode,
   type InlineStyle,
-} from "./markdown";
+} from "@lib/markdown";
 import { highlightCode, resolveLanguage } from "./syntax-highlight";
 
 // -- Regex constants ----------------------------------------------------------
@@ -439,45 +440,11 @@ function appendBlocks(parent: HTMLElement, text: string, info?: MentionInfo, dep
 }
 
 // -- Code fences --------------------------------------------------------------
+// splitCodeFences moved to @lib/markdown (pure, and needed by the plain-text
+// serializer for notifications); re-exported here so this renderer's public
+// surface is unchanged for its callers.
 
-interface Segment {
-  readonly kind: "prose" | "code";
-  readonly text: string;
-  /** Raw fence tag, e.g. "ts" — present only on code segments that had one. */
-  readonly lang: string | null;
-}
-
-const FENCE = "```";
-const LANG_TAG_REGEX = /^[A-Za-z][\w+#-]{0,19}$/;
-
-/** Split a message into prose and fenced-code segments. */
-export function splitCodeFences(content: string): Segment[] {
-  const segments: Segment[] = [];
-  let i = 0;
-  while (i < content.length) {
-    const open = content.indexOf(FENCE, i);
-    const close = open < 0 ? -1 : content.indexOf(FENCE, open + FENCE.length);
-    if (open < 0 || close < 0) break;
-
-    if (open > i) segments.push({ kind: "prose", text: content.slice(i, open), lang: null });
-
-    const inner = content.slice(open + FENCE.length, close);
-    const newline = inner.indexOf("\n");
-    const tag = newline > 0 ? inner.slice(0, newline).trim() : "";
-    if (tag.length > 0 && LANG_TAG_REGEX.test(tag)) {
-      segments.push({
-        kind: "code",
-        text: inner.slice(newline + 1).replace(/\s+$/, ""),
-        lang: tag,
-      });
-    } else {
-      segments.push({ kind: "code", text: inner.trim(), lang: null });
-    }
-    i = close + FENCE.length;
-  }
-  if (i < content.length) segments.push({ kind: "prose", text: content.slice(i), lang: null });
-  return segments;
-}
+export { splitCodeFences } from "@lib/markdown";
 
 /** A code block: language label, highlighted body, copy button. */
 function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {

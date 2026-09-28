@@ -21,7 +21,7 @@ import {
   renderMessageContent,
   splitCodeFences,
 } from "../../src/components/message-list/content-parser";
-import { parseInline, parseBlocks } from "../../src/components/message-list/markdown";
+import { parseInline, parseBlocks } from "../../src/lib/markdown";
 import { highlightCode, resolveLanguage } from "../../src/components/message-list/syntax-highlight";
 import { extractUrls } from "../../src/components/message-list/media";
 import { membersStore } from "../../src/stores/members.store";

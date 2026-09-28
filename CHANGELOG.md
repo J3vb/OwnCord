@@ -157,6 +157,7 @@ and only when it changes something a contributor or fork holder must do
 - Settings › Safety opens with your standing ("Your account is in good standing" or "1 active restriction"), keeps every section heading at one level (My reports no longer looks like a separate page), folds the appeal rules into "How appeals work", and shows an empty history as one line.
 - Settings › Voice & Audio is four cards: Microphone (with a Hearing you / No input pill and the sensitivity value in numbers), Speakers, Camera & screen share (the preview says Camera off instead of showing an empty box), and Voice processing, with Enhanced Noise Suppression nested under Noise Suppression.
 - **On Windows, the update banner now warns before Update Now that SmartScreen will show "Windows protected your PC".** The installer is not code-signed, so the prompt came as a surprise; the banner now says it is expected and to choose **More info**, then **Run anyway**.
+- **Desktop notifications no longer show raw markdown or spoilered text.** The popup body used to be the message verbatim, so `**bold**`, `> quotes`, code fences and — worse — hidden `||spoiler||` text appeared as-is, including on a lock screen. The body is now the message's visible words, with a spoiler shown as the word "Spoiler" until you open it.
 
 ### Under the hood
 
