@@ -150,6 +150,13 @@ describe("Account tab: security summary", () => {
     expect(accentIn(card())).toEqual(["Enable 2FA"]);
   });
 
+  it("moves the accent to the recovery kit once two-factor is on and no kit exists", async () => {
+    mockAuthState.user.totp_enabled = true;
+    mount();
+    await vi.waitFor(() => expect(pill().textContent).toBe("1 recommended step"));
+    expect(accentIn(card())).toEqual(["Create recovery kit"]);
+  });
+
   it("rests destructive actions quietly and fills them only once armed", async () => {
     mockAuthState.user.totp_enabled = true;
     mount(

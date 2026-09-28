@@ -119,7 +119,7 @@ function buildPasswordConfirm(
   const element = createElement("div", {});
   const trigger = createElement(
     "button",
-    // Secondary: in the Security card, turning on two-factor is the one accent step.
+    // Secondary: the Security card gives the accent to its next recommended step.
     { class: "ac-btn secondary", "data-testid": `${opts.testIdPrefix}-btn` },
     opts.triggerLabel,
   );

@@ -1277,9 +1277,18 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
     pill,
   );
 
+  const list = createElement("ul", { class: "status-list" });
+
   // Two-factor and the recovery kit are the recommended steps; the pill
-  // counts the ones still open.
+  // counts the ones still open. The next open step holds the card's accent:
+  // Enable 2FA while two-factor is off, then the recovery-kit trigger.
   const states = new Map<string, StatusKind>();
+  const paintNextStep = (): void => {
+    const kitIsNext = states.get("totp") === "ok" && states.get("recovery") === "warn";
+    list
+      .querySelector("[data-testid='recovery-kit-btn']")
+      ?.classList.toggle("secondary", !kitIsNext);
+  };
   const report =
     (key: string) =>
     (state: StatusKind): void => {
@@ -1289,9 +1298,9 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
       pill.hidden = open === 0 && !known;
       setStatusIcon(pillIcon, open > 0 ? "warn" : "ok");
       setText(pillText, open > 0 ? t("security.steps", { count: open }) : t("security.allSet"));
+      paintNextStep();
     };
 
-  const list = createElement("ul", { class: "status-list" });
   appendChildren(
     list,
     buildTotpSection(options, signal, report("totp")),
@@ -1299,6 +1308,7 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
     buildPasswordSection(options, signal),
     buildSessionsSection(options, signal),
   );
+  paintNextStep();
   appendChildren(card, head, list);
   return card;
 }
