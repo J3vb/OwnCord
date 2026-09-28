@@ -41,7 +41,9 @@ It works behind CGNAT and strict home routers, so setup is usually faster than m
 - **Set `voice.node_ip` to the server's Tailscale address** (`100.x.y.z`; on the
   Docker stack, `rtc.node_ip` in `livekit.yaml` in place of `use_external_ip`). It is
   the address LiveKit advertises in its ICE candidates, and OwnCord's generated
-  `livekit.yaml` writes it in place of `use_external_ip`. Without it, LiveKit
+  `livekit.yaml` writes it in place of `use_external_ip` (leave
+  `voice.advertise_internal_ip` off: it keeps discovery on and the pin is
+  ignored). Without it, LiveKit
   detects a public address over STUN — never the `100.x` address your peers
   route to — so the call connects and then nobody hears anything. The server warns at start-up whenever `node_ip` is not
   a public address; on a tailnet that warning is expected and the `100.x`

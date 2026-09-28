@@ -600,6 +600,36 @@ func TestWarnOnServerConfig_NodeIPSilentWhenVoiceIsOff(t *testing.T) {
 	}
 }
 
+// TestWarnOnServerConfig_NodeIPIgnoredWithAdvertiseInternalIP — the generated
+// livekit.yaml keeps use_external_ip on whenever advertise_internal_ip is set,
+// and LiveKit then overwrites node_ip with its STUN result. The owner is told
+// the pin has no effect rather than left to find out from a silent call.
+func TestWarnOnServerConfig_NodeIPIgnoredWithAdvertiseInternalIP(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		advertise bool
+		wantWarn  bool
+	}{
+		{"pin with advertise_internal_ip", true, true},
+		{"pin alone", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			api.WarnOnServerConfigForTest(&config.Config{
+				Voice: config.VoiceConfig{LiveKitURL: "ws://localhost:7880", NodeIP: "93.184.216.34", AdvertiseInternalIP: tc.advertise},
+			})
+
+			if got := strings.Contains(buf.String(), "is ignored"); got != tc.wantWarn {
+				t.Errorf("warned = %v, want %v; log:\n%s", got, tc.wantWarn, buf.String())
+			}
+		})
+	}
+}
+
 // TestReachabilityWarningsAreNotGatedByTheFlag pins how far
 // server.reachability_report_enabled reaches.
 //

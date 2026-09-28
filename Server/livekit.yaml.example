@@ -24,6 +24,7 @@ rtc:
   # uncomment this so LiveKit also advertises the internal address — clients on
   # the local network then connect via LAN while remote clients use the public
   # address.
+  # It only works alongside use_external_ip, which overwrites node_ip.
   # advertise_internal_ip: true
 
 keys:

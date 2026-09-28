@@ -817,21 +817,24 @@ func TestGenerateConfig_NodeIPReplacesExternalIP(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name          string
-		nodeIP        string
-		wantExternal  bool
-		wantNodeIPSet string
+		name              string
+		nodeIP            string
+		advertiseInternal bool
+		wantExternal      bool
+		wantNodeIPSet     string
 	}{
 		{name: "empty node_ip auto-detects", nodeIP: "", wantExternal: true, wantNodeIPSet: ""},
 		{name: "pinned node_ip is honoured", nodeIP: "100.64.0.7", wantExternal: false, wantNodeIPSet: "100.64.0.7"},
+		{name: "advertise_internal_ip keeps discovery on", nodeIP: "203.0.113.10", advertiseInternal: true, wantExternal: true, wantNodeIPSet: "203.0.113.10"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := &config.VoiceConfig{
-				LiveKitAPIKey:    "key1",
-				LiveKitAPISecret: "secret1",
-				LiveKitURL:       "ws://localhost:7880",
-				NodeIP:           tc.nodeIP,
+				LiveKitAPIKey:       "key1",
+				LiveKitAPISecret:    "secret1",
+				LiveKitURL:          "ws://localhost:7880",
+				NodeIP:              tc.nodeIP,
+				AdvertiseInternalIP: tc.advertiseInternal,
 			}
 			proc := ws.NewLiveKitProcess(cfg, &config.TLSConfig{}, t.TempDir())
 			cfgPath, err := proc.GenerateConfigForTest()

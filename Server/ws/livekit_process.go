@@ -113,9 +113,11 @@ func (p *LiveKitProcess) generateConfig() (string, error) {
 		}
 	}
 	// A pinned node_ip replaces use_external_ip: LiveKit overwrites node_ip
-	// with its STUN result whenever use_external_ip is on.
+	// with its STUN result whenever use_external_ip is on. advertise_internal_ip
+	// only takes effect alongside use_external_ip, so it keeps discovery on and
+	// the pin is ignored (the server warns at start-up).
 	// Validate: must be a plain IP address (no YAML-breaking chars).
-	addrLine := "\n  use_external_ip: true"
+	addrLine := ""
 	if p.cfg.NodeIP != "" {
 		for _, ch := range p.cfg.NodeIP {
 			if ch == '"' || ch == '\\' || ch == '\n' || ch == '\r' || ch == '#' || ch == '{' || ch == '}' {
@@ -123,6 +125,9 @@ func (p *LiveKitProcess) generateConfig() (string, error) {
 			}
 		}
 		addrLine = fmt.Sprintf("\n  node_ip: %q", p.cfg.NodeIP)
+	}
+	if p.cfg.NodeIP == "" || p.cfg.AdvertiseInternalIP {
+		addrLine = "\n  use_external_ip: true" + addrLine
 	}
 	// Advertise LAN host candidates alongside the external mapping so clients
 	// on the local network can reach a dual-homed (LAN + public IP) server.

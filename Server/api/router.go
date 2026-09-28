@@ -76,6 +76,11 @@ func warnOnServerConfig(cfg *config.Config) {
 			"the key has no effect yet: no route is mounted and no asset is served")
 	}
 	warnOnVoiceNodeIP(cfg)
+	if cfg.Voice.LiveKitURL != "" && cfg.Voice.NodeIP != "" && cfg.Voice.AdvertiseInternalIP {
+		slog.Warn("voice.node_ip is ignored while voice.advertise_internal_ip is on — LiveKit detects its public address over STUN instead",
+			"node_ip", cfg.Voice.NodeIP,
+			"fix", "clear voice.node_ip, or turn voice.advertise_internal_ip off if the pinned address must be advertised")
+	}
 	warnOnAdminPeerAddress(cfg)
 }
 
