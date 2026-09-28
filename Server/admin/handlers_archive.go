@@ -40,6 +40,10 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 		// mid-build must be a clean 500 rather than a half-written zip the
 		// browser saves as corrupt; only after the build succeeds do we write
 		// a status.
+		if opts.RunningCfg == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
+			return
+		}
 		work, err := os.MkdirTemp("", "owncord-archive-")
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
@@ -91,9 +95,10 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 // buildArchive writes the archive to work/owncord-archive.zip and returns its
 // path. It snapshots the live database with VACUUM INTO and walks the data
 // directory wholesale (docs/deployment.md's rule: copy data/, never a hand
-// list), replacing the live database file with the snapshot.
+// list), replacing the live database file with the snapshot and leaving out
+// the backup directory.
 func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work string) (string, error) {
-	dataDir := dataDirFor(opts, database)
+	cfg := opts.RunningCfg
 	snapshot := filepath.Join(work, "snapshot.db")
 	if err := database.BackupToSafe(ctx, snapshot, work); err != nil {
 		return "", fmt.Errorf("snapshotting database: %w", err)
@@ -107,7 +112,7 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	defer out.Close() //nolint:errcheck
 	zw := zip.NewWriter(out)
 
-	if err := walkDataDir(zw, dataDir, snapshot, database); err != nil {
+	if err := walkDataDir(zw, cfg.Server.DataDir, cfg.Backup.Dir, snapshot); err != nil {
 		_ = zw.Close()
 		return "", err
 	}
@@ -124,30 +129,22 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	return outPath, nil
 }
 
-// dataDirFor resolves the directory to archive: the configured data dir, or
-// the live database file's directory when the config is unavailable (the
-// legacy construction path, or an in-memory test).
-func dataDirFor(opts SetupOptions, database *db.DB) string {
-	if opts.RunningCfg != nil && opts.RunningCfg.Server.DataDir != "" {
-		return opts.RunningCfg.Server.DataDir
-	}
-	if database != nil {
-		if dir := filepath.Dir(dbFilePath); dir != "" && dir != "." {
-			return dir
-		}
-	}
-	return filepath.Join("data")
-}
-
 // walkDataDir adds every regular file under dataDir to the archive as
 // "data/<relative>", replacing the live database file with the snapshot and
-// skipping the database's WAL sidecars (the snapshot supersedes them).
-func walkDataDir(zw *zip.Writer, dataDir, snapshot string, database *db.DB) error {
+// skipping the database's WAL sidecars (the snapshot supersedes them), the
+// backup directory and any in-progress *.tmp file.
+func walkDataDir(zw *zip.Writer, dataDir, backupDir, snapshot string) error {
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
 		return fmt.Errorf("resolving data dir: %w", err)
 	}
 	absDB, _ := filepath.Abs(dbFilePath)
+	absBackup := ""
+	if backupDir != "" {
+		if absBackup, err = filepath.Abs(backupDir); err != nil {
+			return fmt.Errorf("resolving backup dir: %w", err)
+		}
+	}
 
 	snapshotAdded := false
 	err = filepath.WalkDir(absData, func(path string, d os.DirEntry, walkErr error) error {
@@ -161,6 +158,9 @@ func walkDataDir(zw *zip.Writer, dataDir, snapshot string, database *db.DB) erro
 		name := filepath.ToSlash(filepath.Join("data", rel))
 
 		if d.IsDir() {
+			if path == absBackup {
+				return filepath.SkipDir
+			}
 			if rel == "." {
 				return nil
 			}
@@ -180,8 +180,8 @@ func walkDataDir(zw *zip.Writer, dataDir, snapshot string, database *db.DB) erro
 			snapshotAdded = true
 			return nil
 		}
-		if strings.HasPrefix(abs, absDB+"-") {
-			return nil // -wal / -shm
+		if strings.HasPrefix(abs, absDB+"-") || strings.HasSuffix(abs, ".tmp") {
+			return nil // -wal / -shm, and in-progress writes
 		}
 		return addFile(zw, name, abs)
 	})

@@ -45,11 +45,16 @@ func newArchiveFixture(t *testing.T) archiveFixture {
 	if err := os.WriteFile(configPath, []byte("server:\n  port: 8443\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// A backup inside the data dir must not be mistaken for the live database.
-	if err := os.MkdirAll(filepath.Join(dataDir, "backups"), 0o750); err != nil {
+	// The backup dir and in-progress *.tmp files sit inside the data dir but
+	// are not part of the archive.
+	backups := filepath.Join(dataDir, "backups")
+	if err := os.MkdirAll(backups, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dataDir, "backups", "old.db"), []byte("old"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(backups, "old.db"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "snapshot.db.tmp"), []byte("partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,7 +63,11 @@ func newArchiveFixture(t *testing.T) archiveFixture {
 	admin.SetDatabasePath(dbPath)
 	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 
-	cfg := &config.Config{Server: config.ServerConfig{DataDir: dataDir}, Upload: config.UploadConfig{StorageDir: uploads}}
+	cfg := &config.Config{
+		Server: config.ServerConfig{DataDir: dataDir},
+		Upload: config.UploadConfig{StorageDir: uploads},
+		Backup: config.BackupConfig{Dir: backups},
+	}
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{ConfigPath: configPath, RunningCfg: cfg})
 	token := createAdminUser(t, database)
@@ -112,6 +121,11 @@ func TestHandleArchive_Success(t *testing.T) {
 	}
 	if got := string(entries["data/uploads/hello.bin"]); got != "attachment bytes" {
 		t.Errorf("uploads entry = %q, want the attachment bytes", got)
+	}
+	for _, unwanted := range []string{"data/backups/", "data/backups/old.db", "data/snapshot.db.tmp"} {
+		if _, ok := entries[unwanted]; ok {
+			t.Errorf("archive carries %q; got %v", unwanted, archiveNames(entries))
+		}
 	}
 
 	// The database entry must be a consistent, readable snapshot — a raw copy
@@ -180,6 +194,19 @@ func TestHandleArchive_BadDataDirIs500(t *testing.T) {
 	var body map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Errorf("error body is not JSON: %s", w.Body.String())
+	}
+}
+
+// TestHandleArchive_NoRunningConfigIs500: without the running config there is
+// no data dir to archive, so the handler refuses rather than guessing one.
+func TestHandleArchive_NoRunningConfigIs500(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{})
+	token := createAdminUser(t, database)
+
+	if w := doRequest(t, handler, http.MethodGet, "/archive", token, nil); w.Code != http.StatusInternalServerError {
+		t.Errorf("GET /archive without a running config = %d, want 500", w.Code)
 	}
 }
 
