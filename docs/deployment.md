@@ -232,17 +232,20 @@ When `chatserver.exe` starts for the first time:
 6. **Setup wizard** -- Navigate to `https://localhost:8443/admin` to run the first-time setup wizard. It asks for the setup token printed in the start-up output (the terminal, `docker compose logs owncord`, or the service's log). The token is regenerated at every start and is printed only while setup is open; restart the server to get a fresh one — including after re-opening setup ([security.md](security.md#first-run-setup)).
 
 The setup wizard creates the Owner account and walks through the basics (server
-name, port, TLS mode, upload limit, voice, registration and welcome
-message). Choices are saved for you: live settings go to the database, and
+name, port, TLS mode, upload limit, voice, registration, welcome message and
+the owner's recovery kit). Choices are saved for you: live settings go to the database, and
 startup settings are written into `config.yaml` — comments and any hand edits
 in the file are preserved. The wizard also persists the generated LiveKit
 credentials so voice keeps working across restarts. If the port or TLS mode
 changed, the server restarts itself once and the wizard shows the new address.
 The finish screen shows the address members enter in the desktop app (with TLS
 off, it points them to your HTTPS reverse proxy's address instead), the invite
-code and, for a certificate the server already serves, its fingerprint.
-"Skip" runs the legacy minimal flow: just the Owner account, everything else
-on defaults.
+code, for a certificate the server already serves, its fingerprint, and the
+owner's recovery kit — shown once, only its verifier is stored
+([security.md](security.md#account-recovery)). While the kit is on screen the
+page does not follow a restart on its own; save the kit, then open the link.
+"Skip" runs the legacy minimal flow: just the Owner account and its recovery
+kit, everything else on defaults.
 
 Voice works out of the box: with `voice.auto_download_livekit` enabled (the
 default in a freshly generated `config.yaml`, and a toggle in the wizard), the

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -215,5 +216,60 @@ func TestSetupService_FailsLoudBeforeTheAccountExists(t *testing.T) {
 	}
 	if err := svc.ApplyWizardSettings(ctx, map[string]string{"motd": "x"}); !errors.Is(err, ErrInternal) {
 		t.Errorf("ApplyWizardSettings on a closed database: err = %v, want ErrInternal", err)
+	}
+}
+
+// TestSetupService_BootstrapIssuesARecoveryKit is B11-8's server half: the
+// first run can mint the owner's recovery kit, storing only its verifier and
+// returning the secret once. A lockout with no kit is the one failure an owner
+// cannot fix from inside the server, so the wizard offers it at setup.
+func TestSetupService_BootstrapIssuesARecoveryKit(t *testing.T) {
+	svc, database, ctx := setupFixture(t)
+
+	res, err := svc.Bootstrap(ctx, BootstrapInput{
+		Username: "owner", Password: "a-good-password-here", RecoveryKit: true,
+	})
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if res.RecoveryKitSecret == "" {
+		t.Fatal("RecoveryKit: true produced no kit secret")
+	}
+
+	// Only the verifier is stored, and it verifies the returned secret.
+	kit, err := database.GetRecoveryKit(ctx, res.OwnerID)
+	if err != nil || kit == nil {
+		t.Fatalf("GetRecoveryKit: %v (kit %v)", err, kit)
+	}
+	if kit.Verifier == res.RecoveryKitSecret || strings.Contains(kit.Verifier, res.RecoveryKitSecret) {
+		t.Fatal("the stored verifier contains the kit secret")
+	}
+	canonical, ok := auth.NormalizeRecoveryKitSecret(res.RecoveryKitSecret)
+	if !ok {
+		t.Fatalf("the returned secret does not normalise: %q", res.RecoveryKitSecret)
+	}
+	if !auth.VerifyRecoveryKitSecret(kit.Verifier, canonical) {
+		t.Error("the stored verifier does not verify the returned secret")
+	}
+}
+
+// TestSetupService_BootstrapWithoutRecoveryKitStoresNone: the kit is opt-in, so
+// a run that does not ask for one leaves no row.
+func TestSetupService_BootstrapWithoutRecoveryKitStoresNone(t *testing.T) {
+	svc, database, ctx := setupFixture(t)
+
+	res, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "a-good-password-here"})
+	if err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if res.RecoveryKitSecret != "" {
+		t.Errorf("a kit was issued without being asked for: %q", res.RecoveryKitSecret)
+	}
+	kit, err := database.GetRecoveryKit(ctx, res.OwnerID)
+	if err != nil {
+		t.Fatalf("GetRecoveryKit: %v", err)
+	}
+	if kit != nil {
+		t.Error("a recovery kit row exists though the run did not ask for one")
 	}
 }

@@ -77,7 +77,10 @@ OwnCord supports TOTP-based 2FA:
 ## Account Recovery
 
 The recovery kit (B4-5) is a secret the account holder keeps offline; the
-server stores only an argon2id verifier of it. Redeeming the kit replaces the
+server stores only an argon2id verifier of it. The setup wizard offers to
+generate the owner's kit at first run — shown once on the finish step, with
+only its verifier stored — and any account can enrol or rotate one from the
+desktop client while signed in. Redeeming the kit replaces the
 password, revokes every session, spends the kit and writes a content-free
 audit row in one transaction, then signs the holder in without the second
 factor — it exists for the case where the devices are gone. A spent or lost

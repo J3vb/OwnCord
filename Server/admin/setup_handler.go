@@ -62,6 +62,10 @@ type setupResponse struct {
 	// handshake), and when the wizard changed tls.mode: the restart will serve
 	// a different certificate, which the dashboard shows once it is back.
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
+	// RecoveryKitSecret is the owner's recovery kit, present unless the
+	// wizard turned it off or it could not be issued. Shown once, on the finish step;
+	// the server stores only its verifier (B11-8).
+	RecoveryKitSecret string `json:"recovery_kit_secret,omitempty"`
 }
 
 // handleSetupStatus returns whether initial setup is needed (no users exist).
@@ -146,10 +150,11 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		}
 
 		boot, err := setup.Bootstrap(r.Context(), service.BootstrapInput{
-			Username: req.Username,
-			Password: req.Password,
-			Device:   r.Header.Get("User-Agent"),
-			Host:     host,
+			Username:    req.Username,
+			Password:    req.Password,
+			Device:      r.Header.Get("User-Agent"),
+			Host:        host,
+			RecoveryKit: req.Wizard == nil || req.Wizard.RecoveryKit == nil || *req.Wizard.RecoveryKit,
 		})
 		switch {
 		case errors.Is(err, service.ErrSetupAlreadyDone):
@@ -186,6 +191,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 			RestartURL:             restartURL,
 			Warnings:               warnings,
 			CertificateFingerprint: fingerprint,
+			RecoveryKitSecret:      boot.RecoveryKitSecret,
 		})
 
 		if restartRequired {

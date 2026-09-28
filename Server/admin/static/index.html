@@ -40,13 +40,18 @@
         <dd><div class="code-copy"><code id="certFingerprint"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;certFingerprint&quot;]" aria-label="Copy certificate fingerprint">Copy</button></div>
           <p class="wiz-hint">Publish it out of band (another platform, a call). Members compare it with the prompt their desktop app shows before they accept the connection: a mismatch is the one warning that means an interception attempt.</p></dd>
       </div>
+      <div class="setup-fact hidden" id="setupRecoveryKit">
+        <dt>Recovery kit</dt>
+        <dd><div class="code-copy"><code id="recoveryKitSecret"></code><button type="button" class="btn btn-ghost" data-action="copyCode" data-args="[&quot;recoveryKitSecret&quot;]" aria-label="Copy recovery kit">Copy</button></div>
+          <p class="wiz-hint">Save this somewhere safe now — it is shown once and never again. If you lose your password and your authenticator, this kit is the only way back into your owner account. It works once; enrolling a new one replaces it.</p></dd>
+      </div>
     </dl>
     <p class="wiz-hint hidden" id="setupFingerprintLater">The certificate fingerprint appears on the Dashboard once the server serves its new certificate. Publish it before members connect.</p>
     <div id="setupWarnings"></div>
     <div class="setup-restart hidden" id="setupRestart" role="status">
-      <p class="auth-sub"><span class="spinner" aria-hidden="true"></span>Applying your settings — the server is restarting…</p>
+      <p class="auth-sub" id="restartStatus"><span class="spinner" aria-hidden="true"></span>Applying your settings — the server is restarting…</p>
       <p class="setup-restart-link">When it's back, open: <a id="restartLink" href="#"></a></p>
-      <p class="wiz-hint" id="restartHint">This can take a few seconds. If the page doesn't redirect on its own, open the link above. You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
+      <p class="wiz-hint" id="restartHint"><span id="restartNext">This can take a few seconds. If the page doesn't redirect on its own, open the link above.</span> You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
     </div>
     <button type="button" class="btn btn-accent auth-submit" id="setupContinueBtn">Continue to Admin Panel</button>
   </div>
