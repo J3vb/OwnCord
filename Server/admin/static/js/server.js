@@ -74,7 +74,7 @@ function regModeCards(cur){
     +'<span class="radio-card-text"><span class="radio-card-title">'+esc(label)+'</span><span class="radio-card-desc">'+esc(REG_MODE_EFFECT[val]||'')+'</span></span></label>').join('');
   return'<fieldset class="radio-cards" id="s-registration_mode"'+(cur==='approval'?' aria-describedby="s-registration_mode-desc"':'')+'><legend class="setting-name">Who can join</legend>'
     +'<div class="radio-card-grid">'+cards+'</div>'
-    +'<p class="setting-desc" id="s-registration_mode-desc"'+(cur==='approval'?'':' hidden')+'>Waiting accounts are under <button type="button" class="link-btn" data-action="openPendingMembers">Members › Pending</button>.</p></fieldset>';
+    +'<p class="setting-desc" id="s-registration_mode-desc"'+(cur==='approval'?'':' hidden')+'>Waiting accounts are under <button type="button" class="link-btn" data-action="showPendingMembers">Members › Pending</button>.</p></fieldset>';
 }
 function syncRegModeHint(){
   const approval=!!document.querySelector('input[name="registration_mode"][value="approval"]:checked');
@@ -82,7 +82,7 @@ function syncRegModeHint(){
   const set=document.getElementById('s-registration_mode');
   if(set){if(approval)set.setAttribute('aria-describedby','s-registration_mode-desc');else set.removeAttribute('aria-describedby')}
 }
-function openPendingMembers(){
+function showPendingMembers(){
   const prev=state.membersTab;state.membersTab='pending';
   navigateTo('users');
   if(state.section!=='users')state.membersTab=prev;
@@ -552,7 +552,7 @@ async function confirmApplyUpdate(){
   }
 }
 
-Object.assign(ACTIONS,{openPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
+Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
   confirmDeleteBackup,confirmRestore,createBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,
