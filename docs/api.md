@@ -3172,9 +3172,11 @@ a missing or different value is `403 FORBIDDEN`. The server makes a fresh token 
 All `wizard` fields are optional; `server_name`, `motd` and
 `registration_mode` (`closed` / `invite` / `approval` / `open`, default
 `invite`) are stored in the settings table (live), the rest are written back
-to `config.yaml` (consumed at startup). `recovery_kit` asks the server to
-generate the owner's recovery kit during the first run (B11-8); the secret is
-returned once as `recovery_kit_secret` and only its verifier is stored.
+to `config.yaml` (consumed at startup). `recovery_kit` (default `true`, also
+when `wizard` is absent) asks the server to generate the owner's recovery kit
+during the first run (B11-8); the secret is returned once as
+`recovery_kit_secret` and only its verifier is stored. Pass
+`"recovery_kit": false` to skip it.
 
 #### Response 200 OK
 
@@ -3200,8 +3202,8 @@ writable) — the account exists whenever this response is returned.
 `certificate_fingerprint` is as in [`GET /admin/api/stats`](#get-adminapistats),
 and is also omitted when `wizard.tls_mode` differs from the running mode —
 the restarted server serves a different certificate. `recovery_kit_secret` is
-present only when `wizard.recovery_kit` was true and the kit was issued: it is
-shown once and can never be retrieved again.
+present unless `wizard.recovery_kit` was false or the kit could not be issued:
+it is shown once and can never be retrieved again.
 
 ---
 

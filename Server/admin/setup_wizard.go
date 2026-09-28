@@ -57,8 +57,9 @@ type setupWizardRequest struct {
 	// run livekit-server automatically so voice works with zero setup.
 	VoiceAutoDownload *bool `json:"voice_auto_download"`
 	// RecoveryKit asks the server to generate the owner's recovery kit as
-	// part of the first run (B11-8). The kit secret is returned once on the
-	// finish step; only its verifier is stored.
+	// part of the first run (B11-8). On unless explicitly false — an absent
+	// field or wizard object still gets one. The kit secret is returned once
+	// on the finish step; only its verifier is stored.
 	RecoveryKit *bool `json:"recovery_kit"`
 }
 

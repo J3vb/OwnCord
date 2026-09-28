@@ -240,7 +240,7 @@ async function wizFinish(){
     renderSetupSuccess(resp);
     showOverlay('setupSuccessOverlay');
     document.getElementById('setupTitle').focus();
-    if(resp.restart_required&&resp.restart_url)beginRestartWait(resp.restart_url);
+    if(resp.restart_required&&resp.restart_url)beginRestartWait(resp.restart_url,!resp.recovery_kit_secret);
   }catch(e){
     wizFail(e.message);
     const b=document.getElementById('wizNextBtn');if(b){b.disabled=false;b.textContent=wiz.step===1?'Create Owner Account':'Finish Setup'}
@@ -273,11 +273,13 @@ function renderSetupSuccess(resp){
    response resolving means "up" even across a port change; rejection means
    still down. A self-signed cert the browser hasn't accepted yet keeps the
    poll failing — the visible link is the primary path, this redirect is
-   best-effort sugar. */
-function beginRestartWait(url){
+   best-effort sugar. autoFollow is false while a one-time recovery kit is on
+   screen: navigating away would destroy the only copy of it. */
+function beginRestartWait(url,autoFollow){
   document.getElementById('setupContinueBtn').classList.add('hidden');
   document.getElementById('setupRestart').classList.remove('hidden');
   const link=document.getElementById('restartLink');link.href=url;link.textContent=url;
+  if(!autoFollow)return;
   let elapsed=0;
   setTimeout(function poll(){
     fetch(url+'/api/setup/status',{mode:'no-cors',cache:'no-store'})

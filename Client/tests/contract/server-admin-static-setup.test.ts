@@ -11,6 +11,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { adminPanelHtml } from "../helpers/admin-panel";
+import { expectConsole } from "../helpers/console";
 
 const ADMIN_HTML = adminPanelHtml();
 
@@ -260,6 +261,60 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     await fillAccount(dom);
     for (let i = 0; i < 5; i++) await submit(dom);
     expect(doc.getElementById("setupRecoveryKit")!.classList.contains("hidden")).toBe(true);
+  });
+
+  it("shows the recovery kit on the quick path too", async () => {
+    const booted = await boot({
+      json: { token: "T", invite_code: "INV-1", recovery_kit_secret: "ABCD-EFGH-IJKL-MNOP" },
+    });
+    dom = booted.dom;
+    const { doc } = booted;
+    (doc.querySelector('#wizardBox [data-action="wizSkip"]') as HTMLButtonElement).click();
+    await fillAccount(dom);
+    await submit(dom);
+
+    expect(doc.getElementById("setupRecoveryKit")!.classList.contains("hidden")).toBe(false);
+    expect(doc.getElementById("recoveryKitSecret")!.textContent).toBe("ABCD-EFGH-IJKL-MNOP");
+  });
+
+  // The restart poll runs 4 s after finish and navigates to the restarted
+  // server on its first answer; collapse its delays so the test sees it. jsdom
+  // reports that navigation as a "Not implemented" console error, which the
+  // console guard fails any test on unless it is claimed.
+  async function finishWithRestart(json: Record<string, unknown>) {
+    const booted = await boot({
+      json: { token: "T", invite_code: "INV-1", restart_required: true, ...json },
+    });
+    dom = booted.dom;
+    const win = dom.window;
+    const realSetTimeout = win.setTimeout.bind(win);
+    win.setTimeout = ((fn: () => void) => realSetTimeout(fn, 0)) as typeof win.setTimeout;
+    await submit(dom);
+    await fillAccount(dom);
+    for (let i = 0; i < 5; i++) await submit(dom);
+    await settle(dom);
+    return booted;
+  }
+
+  it("follows the restarted server once it answers", async () => {
+    const { calls } = await finishWithRestart({ restart_url: "https://chat.lan:9443/admin" });
+    expect(calls.some((c) => c.path === "https://chat.lan:9443/admin/api/setup/status")).toBe(true);
+    expectConsole("error", "Not implemented: navigation");
+  });
+
+  it("does not navigate away from a one-time recovery kit after a restart", async () => {
+    const { doc, calls } = await finishWithRestart({
+      restart_url: "https://chat.lan:9443/admin",
+      recovery_kit_secret: "ABCD-EFGH-IJKL-MNOP",
+    });
+    expect(calls.some((c) => c.path === "https://chat.lan:9443/admin/api/setup/status")).toBe(
+      false,
+    );
+    expect(doc.getElementById("recoveryKitSecret")!.textContent).toBe("ABCD-EFGH-IJKL-MNOP");
+    expect((doc.getElementById("restartLink") as HTMLAnchorElement).href).toBe(
+      "https://chat.lan:9443/admin",
+    );
+    expect(doc.getElementById("setupRestart")!.classList.contains("hidden")).toBe(false);
   });
 
   it("points at the restarted address when the wizard moved the port", async () => {

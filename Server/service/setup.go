@@ -71,7 +71,7 @@ type BootstrapInput struct {
 // both are reported in Warnings rather than as errors, because the account
 // exists either way and the caller must not retry.
 //
-// RecoveryKitSecret is the owner's recovery kit, present only when the wizard
+// RecoveryKitSecret is the owner's recovery kit, present only when the input
 // asked for one and it was issued. It is shown once, on the finish step: the
 // server stores only the verifier (B4-5, B11-8).
 type BootstrapResult struct {
