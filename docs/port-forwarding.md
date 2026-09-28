@@ -83,7 +83,7 @@ Two things are needed together:
 1. Forward `50000-60000/UDP` (and `7881/TCP`) to the server.
 2. Give LiveKit a routable media address. OwnCord's generated `livekit.yaml`
    sets `use_external_ip: true`, so with `voice.node_ip` **left empty** LiveKit
-   detects the public address itself on every start — the right choice on a
+   detects the public address itself when it starts — the right choice on a
    dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). On the Docker
    stack LiveKit reads your own `livekit.yaml` instead: keep the example's
    `rtc.use_external_ip: true` there. Set `voice.node_ip` (Docker: `rtc.node_ip`)
@@ -164,7 +164,9 @@ the address clients type, and the media address LiveKit advertises.
 - **Clients:** use dynamic DNS and share a hostname rather than an IP literal.
 - **Media (`voice.node_ip`):** leave it **empty** on a dynamic address. OwnCord's
   auto-generated `livekit.yaml` sets `use_external_ip: true`, so LiveKit detects
-  its public address itself on every start. A pinned `voice.node_ip` goes stale
+  its public address itself — but only when it starts. After an IP change,
+  restart the OwnCord server so LiveKit picks up the new address; until then
+  it keeps advertising the old one. A pinned `voice.node_ip` goes stale
   silently when the address changes: the call connects — signalling still works
   — and then nobody hears anything, because the ICE candidate names an address
   no longer yours. If you did pin it, clear it (or update it) after an IP
@@ -174,8 +176,9 @@ the address clients type, and the media address LiveKit advertises.
   example's default) rather than a pinned `rtc.node_ip`, then
   `docker compose restart livekit` after an IP change.
 - **The server cannot detect this for you.** It never learns its public address,
-  so it cannot notice the address changing; the fix above is what makes the
-  address changing harmless.
+  so it cannot notice the address changing and will not restart LiveKit for
+  you. The restart above is what makes an address change recoverable without
+  editing any config.
 
 ### Firewalls
 

@@ -190,8 +190,9 @@ func undeterminable(p Params) []Unknown {
 			Fact: "Whether your public IP address changes",
 			Why:  "This server never learns its public address, so it cannot notice the address changing.",
 			HowToCheck: "Most residential connections get a new address periodically. Use dynamic DNS " +
-				"and share a hostname rather than an IP literal, and leave voice.node_ip empty so LiveKit " +
-				"detects the new address itself — see docs/port-forwarding.md.",
+				"and share a hostname rather than an IP literal. Leave voice.node_ip empty so LiveKit " +
+				"detects the address when it starts, and restart the server after the address changes " +
+				"— see docs/port-forwarding.md.",
 		},
 	}
 

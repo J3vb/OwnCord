@@ -9,8 +9,9 @@ rtc:
   port_range_start: 50000
   port_range_end: 60000
 
-  # LiveKit detects your public IP itself (over STUN) on every start, so a
-  # dynamic residential address keeps working after it changes. Pin node_ip
+  # LiveKit detects your public IP itself (over STUN) when it starts, so after a
+  # dynamic address changes, `docker compose restart livekit` picks up the new
+  # one with no edit here. Pin node_ip
   # instead only when detection cannot work — a tailnet-only host (use its
   # 100.x address) or a network that blocks the lookup. A pinned public IP goes
   # stale silently when the address changes: calls connect and carry no audio.

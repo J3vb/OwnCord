@@ -143,8 +143,8 @@ unreachable from your laptop until you either tunnel to it —
 The shipped compose file injects the LiveKit key and secret from `.env`, and
 it also sets `voice.livekit_url` to `ws://livekit:7880` and
 `voice.auto_download_livekit` to `false` as environment variables, so those two
-keys **must not** be set in `config.yaml`: the environment value wins, and
-leaving them out keeps the mounted file free of Docker-specific values. Leave
+keys need not be set in `config.yaml`: the environment value wins over
+anything the file says, so the copied example's values are harmless. Leave
 `voice.livekit_binary` unset, and do not set `voice.livekit_api_key` /
 `voice.livekit_api_secret` in the file either (compose injects them from `.env`,
 and keeping secrets out of `config.yaml` is the point of `.env`). Set everything
@@ -1272,7 +1272,7 @@ Three named refusals, each with the one thing to do:
 
 The UDP media range (`50000-60000`) is not forwarded, or a pinned
 `voice.node_ip` is not your current public address (leave it empty so LiveKit
-detects it) — the one
+detects it, and restart after the address changes) — the one
 failure the server cannot see, because the media never reaches it. The
 check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
 

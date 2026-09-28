@@ -56,7 +56,7 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    opened: OwnCord proxies signalling to clients through `/livekit` on its own
    `8443` port.
 
-> **LiveKit needs a routable media address** for remote clients. Without `use_external_ip: true` or a `node_ip`, it advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. Prefer `use_external_ip: true`: it re-detects the public address on every start, so a dynamic IP keeps working. Pin `node_ip` only where detection cannot work (a tailnet-only host, set to its `100.x` address) — a pinned public IP goes stale silently when the address changes.
+> **LiveKit needs a routable media address** for remote clients. Without `use_external_ip: true` or a `node_ip`, it advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. Prefer `use_external_ip: true`: it detects the public address when LiveKit starts, so after a dynamic IP changes, `docker compose restart livekit` picks up the new one with no config edit. Pin `node_ip` only where detection cannot work (a tailnet-only host, set to its `100.x` address) — a pinned public IP goes stale silently when the address changes.
 
 ---
 
