@@ -20,6 +20,11 @@ import { setStatusIcon, statusIcon } from "../../features/settings/status";
 
 const log = createLogger("VoiceAudioTab");
 
+/** Meter RMS above which the mic status pill counts the mic as picking you up. */
+const MIC_NOISE_FLOOR = 0.02;
+/** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
+const MIC_HEARD_HOLD_MS = 1000;
+
 export interface VoiceAudioTabHandle {
   /**
    * Build the pane's DOM. `signal` scopes this build's own element
@@ -571,21 +576,12 @@ function buildVoiceAudioTabInner(
     cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
+    setText(previewLabel, t("voiceAudio.previewOff"));
     previewLabel.hidden = false;
-  }
-
-  let previewErrorEl: HTMLDivElement | null = null;
-
-  function clearPreviewError(): void {
-    if (previewErrorEl !== null) {
-      previewErrorEl.remove();
-      previewErrorEl = null;
-    }
   }
 
   function startCameraPreview(deviceId: string): void {
     stopCameraPreview();
-    clearPreviewError();
     const thisRequest = ++cameraRequestId;
     void (async () => {
       try {
@@ -607,9 +603,7 @@ function buildVoiceAudioTabInner(
       } catch (err) {
         if (signal.aborted || thisRequest !== cameraRequestId) return;
         const msg = err instanceof Error ? err.message : t("voiceAudio.cameraUnavailable");
-        previewErrorEl = createElement("div", { class: "setting-desc" }, msg);
-        previewLabel.hidden = true;
-        previewWrap.appendChild(previewErrorEl);
+        setText(previewLabel, msg);
       }
     })();
   }
@@ -665,7 +659,8 @@ function buildVoiceAudioTabInner(
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
         let latestFrame = 0;
-        function updateMeter(): void {
+        let lastHeardAt = Number.NEGATIVE_INFINITY;
+        function updateMeter(now: number): void {
           if (signal.aborted) return;
           analyser.getByteFrequencyData(dataArray);
           // Compute RMS normalized to 0-1
@@ -681,9 +676,11 @@ function buildVoiceAudioTabInner(
 
           // Color: green if above threshold, yellow/red if below
           const threshold = ((100 - currentSensitivity) / 100) * 0.15;
-          const heard = rms >= threshold;
-          meterLevel.style.background = heard ? "var(--green)" : "var(--yellow)";
-          showMicState(heard);
+          meterLevel.style.background = rms >= threshold ? "var(--green)" : "var(--yellow)";
+          // The pill says whether the mic picks anything up, whatever the
+          // sensitivity, and holds between syllables so it does not flicker.
+          if (rms >= MIC_NOISE_FLOOR) lastHeardAt = now;
+          showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
 
           latestFrame = requestAnimationFrame(updateMeter);
           registerMic(stream, audioCtx, latestFrame);

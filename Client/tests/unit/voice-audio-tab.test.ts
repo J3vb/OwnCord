@@ -626,6 +626,83 @@ describe("VoiceAudioTab UI structure", () => {
       expect(pill.querySelector(".st-ic.st-pending")).not.toBeNull();
       ac.abort();
     });
+
+    describe("mic pill against a fixed noise floor", () => {
+      /** Every frequency bin reads this byte, so the meter's RMS is level / 255. */
+      let level = 0;
+      let frames: FrameRequestCallback[] = [];
+
+      beforeEach(() => {
+        level = 0;
+        frames = [];
+        vi.stubGlobal(
+          "AudioContext",
+          class {
+            createAnalyser() {
+              return {
+                fftSize: 0,
+                smoothingTimeConstant: 0,
+                frequencyBinCount: 32,
+                getByteFrequencyData: (arr: Uint8Array) => arr.fill(level),
+              };
+            }
+            createMediaStreamSource() {
+              return { connect: vi.fn() };
+            }
+            close() {
+              return Promise.resolve();
+            }
+          },
+        );
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        vi.stubGlobal("cancelAnimationFrame", vi.fn());
+      });
+
+      async function frameAt(now: number, byte: number): Promise<void> {
+        await vi.waitFor(() => expect(frames.length).toBeGreaterThan(0));
+        level = byte;
+        const pending = frames;
+        frames = [];
+        for (const cb of pending) cb(now);
+      }
+
+      const pillOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>("[data-testid='mic-status']")!;
+
+      it("says No input for a silent mic even at sensitivity 100", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "100");
+        const { el, ac } = build();
+        await frameAt(0, 0);
+        await frameAt(2000, 0);
+        expect(pillOf(el).textContent).toBe("No input");
+        ac.abort();
+      });
+
+      it("says Hearing you for speech below a low sensitivity's gate, while the meter stays yellow", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "0");
+        const { el, ac } = build();
+        // RMS 0.1: above the noise floor, below the 0.15 gate at sensitivity 0.
+        await frameAt(0, 26);
+        expect(pillOf(el).textContent).toBe("Hearing you");
+        expect(pillOf(el).querySelector(".st-ic.st-ok")).not.toBeNull();
+        expect(el.querySelector<HTMLElement>(".mic-meter-level")!.style.background).toBe(
+          "var(--yellow)",
+        );
+        ac.abort();
+      });
+
+      it("holds Hearing you through a short pause, then says No input", async () => {
+        const { el, ac } = build();
+        await frameAt(0, 60);
+        await frameAt(500, 0);
+        expect(pillOf(el).textContent).toBe("Hearing you");
+        await frameAt(999, 0);
+        expect(pillOf(el).textContent).toBe("Hearing you");
+        await frameAt(1000, 0);
+        expect(pillOf(el).textContent).toBe("No input");
+        ac.abort();
+      });
+    });
   });
 
   it("contains audio processing toggles", () => {
@@ -803,11 +880,9 @@ describe("VoiceAudioTab UI structure", () => {
     const el = tab.build();
     document.body.appendChild(el);
 
-    await vi.waitFor(() => {
-      const errorEl = el.querySelector(".setting-desc");
-      expect(errorEl).not.toBeNull();
-      expect(errorEl!.textContent).toBe("Camera access denied");
-    });
+    const label = el.querySelector<HTMLElement>(".camera-preview-label")!;
+    await vi.waitFor(() => expect(label.textContent).toBe("Camera access denied"));
+    expect(label.hidden).toBe(false);
 
     ac.abort();
   });
