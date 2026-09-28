@@ -36,6 +36,15 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: vi.fn(),
 }));
 
+// The native path shows a message notification through the host's
+// `notify_message` command (so a click can open it); this records the args.
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
+
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: vi.fn().mockReturnValue({ requestUserAttention: vi.fn() }),
 }));
@@ -119,8 +128,7 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
   });
 
   it("strips spoilers and markdown from the body", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    (invokeMock as ReturnType<typeof vi.fn>).mockClear();
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", false);
     testPrefs.set("notificationSounds", false);
@@ -139,7 +147,7 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
     });
 
     await vi.waitFor(() => {
-      const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      const call = invokeMock.mock.calls.find((c) => c[0] === "notify_message")![1] as {
         body: string;
       };
       expect(call.body).toBe("hi Spoiler there");

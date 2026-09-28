@@ -120,6 +120,11 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
+# Message notifications that open their message on click (message_notification.rs).
+# The notification plugin's desktop backend drops the click/action callback, so
+# this calls notify-rust — already in the tree as the plugin's own desktop
+# backend — directly to wait for the activation.
+notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse"] }

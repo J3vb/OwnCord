@@ -9,6 +9,8 @@ import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setMessageJumpHandler } from "../../src/lib/message-navigation";
 
 // The three tests that assert on the logger's debug lines raise the level the
 // global setup lowered (C-04) for themselves; this puts it back.
@@ -44,6 +46,13 @@ const { shouldTauriNotifThrow } = vi.hoisted(() => ({
   shouldTauriNotifThrow: { value: false },
 }));
 
+// The shared notification mock. The native path now shows a *message*
+// notification through the host's `notify_message` command (so a click can
+// open the message), and the plugin's `sendNotification` is only reached when
+// that command is unavailable — so the mocked invoker forwards to it, and the
+// existing title/body assertions keep observing the same call.
+const { sendNotificationMock } = vi.hoisted(() => ({ sendNotificationMock: vi.fn() }));
+
 // Mock Tauri notification plugin (not available in test env)
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(() => {
@@ -51,7 +60,22 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
     return Promise.resolve(true);
   }),
   requestPermission: vi.fn().mockResolvedValue("granted"),
-  sendNotification: vi.fn(),
+  sendNotification: sendNotificationMock,
+}));
+
+// Mock the Tauri core invoker: `notify_message` records the same title/body a
+// `sendNotification` call used to.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn((cmd: string, args: { title: string; body: string }) => {
+    if (cmd === "notify_message") sendNotificationMock({ title: args.title, body: args.body });
+    return Promise.resolve();
+  }),
+}));
+
+// Mock the Tauri event API: no native host in the test env, so a subscription
+// simply never delivers.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
 // Mock Tauri window API
@@ -1792,5 +1816,71 @@ describe("notifyIncomingMessage", () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
     });
+  });
+
+  describe("click-to-open (U1d)", () => {
+    it("shows the message notification with the channel and message it points at", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      (invoke as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          "notify_message",
+          expect.objectContaining({ channelId: 7, messageId: 42 }),
+        );
+      });
+    });
+
+    it.each([
+      ["opens the message", "a.example", [[7, 42]]],
+      ["ignores a click once signed into another server", "b.example", []],
+    ])(
+      "falls back to the Web Notification API, whose click %s",
+      async (_name, hostAtClick, expectedJumps) => {
+        const { invoke } = await import("@tauri-apps/api/core");
+        (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("no native host"));
+        const shown: EventTarget[] = [];
+        const mockWebNotification = vi.fn(function () {
+          const popup = new EventTarget();
+          shown.push(popup);
+          return popup;
+        });
+        const originalNotification = globalThis.Notification;
+        (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
+          permission: "granted",
+          requestPermission: vi.fn(),
+        });
+        const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+        const jump = vi.fn();
+        const unregister = setMessageJumpHandler(jump);
+        setChannelMutesHost("a.example");
+        testPrefs.set("desktopNotifications", true);
+        testPrefs.set("flashTaskbar", false);
+        testPrefs.set("notificationSounds", false);
+
+        try {
+          notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+
+          await vi.waitFor(() => {
+            expect(shown).toHaveLength(1);
+          });
+          setChannelMutesHost(hostAtClick);
+          shown[0]!.dispatchEvent(new Event("click"));
+
+          expect(focus).toHaveBeenCalledOnce();
+          expect(jump.mock.calls).toEqual(expectedJumps);
+        } finally {
+          focus.mockRestore();
+          unregister();
+          setChannelMutesHost(null);
+          (globalThis as Record<string, unknown>).Notification = originalNotification;
+        }
+      },
+    );
   });
 });

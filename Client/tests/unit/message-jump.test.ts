@@ -38,12 +38,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 import { createMessageJumper } from "../../src/pages/main-page/MessageJump";
+import { createMessageController } from "../../src/pages/main-page/MessageController";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import { renderMentionSegment } from "../../src/components/message-list/content-parser";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
-import { messagesStore, setAroundMessages } from "@stores/messages.store";
+import { messagesStore, setAroundMessages, setMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
@@ -148,6 +149,7 @@ beforeEach(() => {
 
 describe("createMessageJumper", () => {
   it("scrolls without fetching when the message is already loaded", async () => {
+    setMessages(1, [response(42)], false);
     const { ctrl, scrollToMessage } = fakeCtrl(1);
     const getMessagesAround = vi.fn();
     const jumper = createMessageJumper({
@@ -163,7 +165,9 @@ describe("createMessageJumper", () => {
   });
 
   it("fetches the around-window when the message is not loaded, then scrolls", async () => {
-    // First scroll attempt misses (not loaded), second lands after the fetch.
+    // The channel's tail is loaded, but the target is outside it: the first
+    // scroll attempt misses, the second lands after the fetch.
+    setMessages(1, [response(90)], false);
     const scrollToMessage = vi.fn().mockReturnValueOnce(false).mockReturnValue(true);
     const ctrl = {
       currentChannelId: 1,
@@ -194,6 +198,7 @@ describe("createMessageJumper", () => {
   });
 
   it("opens the channel first when the target lives elsewhere", async () => {
+    setMessages(2, [{ ...response(7), channel_id: 2 }], false);
     const scrollToMessage = vi.fn().mockReturnValue(true);
     const ctrl = {
       currentChannelId: 1,
@@ -381,6 +386,42 @@ describe("createMessageJumper", () => {
         .messagesByChannel.get(1)
         ?.map((m) => m.id),
     ).toEqual([20]);
+  });
+
+  it("a target shown by live rows survives the channel's history load landing after the jump", async () => {
+    // A freshly opened channel already renders the target from live rows,
+    // but its mount-time tail fetch is still in flight.
+    const { ctrl } = fakeCtrl(1);
+    let resolveTail: (v: unknown) => void = () => {};
+    const api = {
+      getMessages: vi.fn(() => new Promise((resolve) => (resolveTail = resolve))),
+      getMessagesAround: vi.fn().mockResolvedValue({
+        messages: [response(40), response(41), response(42)],
+        has_more_before: true,
+        has_more_after: true,
+      }),
+    } as unknown as ApiClient;
+    const load = createMessageController({ api, showError: vi.fn() }).loadMessages(
+      1,
+      new AbortController().signal,
+    );
+    const jumper = createMessageJumper({
+      api,
+      getChannelCtrl: () => ctrl,
+      nextFrame: immediateFrame,
+    });
+
+    await expect(jumper.jumpTo(1, 42)).resolves.toBe(true);
+    // The tail (the latest messages, not the target) lands afterwards.
+    resolveTail({ messages: [response(100), response(99), response(98)], has_more: true });
+    await load;
+
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.map((m) => m.id),
+    ).toEqual([40, 41, 42]);
   });
 });
 

@@ -15,6 +15,11 @@ mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
+// Message notifications that open their message on click (the plugin's desktop
+// backend drops clicks). Desktop-only: the plugin's mobile backend has its own
+// action callback.
+#[cfg(desktop)]
+mod message_notification;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
 #[cfg(target_os = "linux")]
 pub mod native_voice;
@@ -61,9 +66,6 @@ fn native_voice_state() -> NoNativeVoice {
     NoNativeVoice
 }
 
-// Used by the single-instance closure and the startup log below.
-use tauri::Manager;
-
 /// Whether a forwarded single-instance launch should restore the main window.
 ///
 /// Once an installer is launching the old process must not take handoffs: the
@@ -93,11 +95,7 @@ pub fn run() {
             update_commands::update_in_progress()
         );
         if should_restore_on_second_launch(launching) {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            message_notification::focus_main_window(app);
         }
     }));
 
@@ -156,6 +154,8 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::get_cert_fingerprint,
+            #[cfg(desktop)]
+            message_notification::notify_message,
             commands::store_identity_pin,
             commands::get_identity_pin,
             ws_proxy::ws_connect,

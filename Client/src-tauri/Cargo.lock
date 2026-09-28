@@ -3807,6 +3807,7 @@ dependencies = [
  "livekit",
  "log",
  "nnnoiseless",
+ "notify-rust",
  "png 0.18.1",
  "reqwest 0.12.28",
  "rfd",
