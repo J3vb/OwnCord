@@ -559,14 +559,12 @@ Every number below comes from the **constrained** leg and from nothing else.
 > these branch runs are the only qualifying evidence, and they are published as
 > that. No unresolvable short SHA is presented as a release-revision citation.
 >
-> **Ceiling-search is now a `dev` run (2026-09-28).** The ceiling-search block
-> below was the first qualifying run on a `dev` ancestor — commit `8349ed2e`,
-> dispatched from `dev` itself rather than a measurement branch — so its
-> `commit:` line resolves in a checkout of `dev`. The capacity, operational and
-> restart blocks remain measurement-branch runs (restart's, below, is a
-> superseded one and is no longer published as a latency result); the two
-> 2026-09-28 restart dispatches (runs 36360934015 and 36362588641) are on `dev`
-> but publish no latency, see "Restart under load". The workflow run id stays
+> **Ceiling-search and restart are now `dev` runs (2026-09-28).** The
+> ceiling-search block below was the first qualifying run on a `dev` ancestor —
+> commit `8349ed2e`, dispatched from `dev` itself rather than a measurement
+> branch — so its `commit:` line resolves in a checkout of `dev`. The restart
+> block was re-made the same day on a later `dev` commit `8e9e8443` (run 36372371602) and also resolves in a checkout of `dev`. The capacity and
+> operational blocks remain measurement-branch runs. The workflow run id stays
 > the resolvable handle for every block.
 
 ```
@@ -646,27 +644,26 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
 The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
 (run 35856013841, on branch `fm/oc-0445-fable`), after OC-0445 found that the
 2026-09-16 operational figures had measured a phase-locked load generator rather
-than the server — the `self_signed` block says how. The ceiling-search block was
-re-made on 2026-09-28 from commit `8349ed2e`, dispatched from `dev` itself (run 36360932108) — the first qualifying block on a `dev` ancestor. The restart block
-is still the 2026-09-16 run from commit `e57335c7`, on the branch that added it,
-and its figures are **superseded** — a corrected-harness re-run was dispatched
-on 2026-09-28 but is invalid on its own replay-gap gate (see "Restart under
-load"), so its numbers are not published here and the block stands as historical
-evidence only. Every other block's SHA is a measurement branch, not an ancestor
-of `dev`/`main`, and there the run id is the only resolvable handle; the two
-2026-09-28 restart dispatches (runs 36360934015 and 36362588641) are on `dev`
-but publish no latency, see "Restart under load". Each block
-is filled from its own **constrained** leg and from nothing else, and the
-`tls off` block publishes as a delta against the `self_signed` one rather than
-on its own.
+than the server — the `self_signed` block says how. The ceiling-search and
+restart blocks were re-made on 2026-09-28, both dispatched from `dev` itself —
+ceiling-search from commit `8349ed2e` (run 36360932108) and restart from commit
+`8e9e8443` (run 36372371602) — so their `commit:` lines resolve in a checkout of
+`dev`. The restart block replaces the **superseded** 2026-09-16 run from commit
+`e57335c7`, which predates the OC-0446 harness correction and the OC-0484 fix
+and is kept below as historical evidence only. Every other block's SHA is a
+measurement branch, not an ancestor of `dev`/`main`, and there the run id is the
+only resolvable handle. Each block is filled from its own **constrained** leg
+and from nothing else, and the `tls off` block publishes as a delta against the
+`self_signed` one rather than on its own.
 
-The budget rows missed under the restart drill are published as missed and are
-findings-ledger entries (OC-0446, OC-0447); neither was re-run on a bigger
-machine and no budget was loosened. OC-0447's ceiling-search correction was
-re-measured on 2026-09-28 (run 36360932108) and passes its zero-shedding gate;
-OC-0446's restart correction was re-dispatched the same day but could not be
-published, because the corrected drill trips its own replay-gap validity gate
-(OC-0484). The operational profile's two misses were OC-0445, and the blocks
+The budget rows missed under the 2026-09-16 restart drill are published as
+missed and are findings-ledger entries (OC-0446, OC-0447); neither was re-run on
+a bigger machine and no budget was loosened. OC-0447's ceiling-search correction
+was re-measured on 2026-09-28 (run 36360932108) and passes its zero-shedding
+gate; OC-0446's restart correction was re-measured the same day (run 36372371602)
+after OC-0484's full-resync subscription gap was fixed by
+[#1940](https://github.com/J3vb/OwnCord/pull/1940), and that run passes every
+validity gate. The operational profile's two misses were OC-0445, and the blocks
 below are its re-measurement, with the harness corrected and the server
 unchanged.
 
@@ -870,60 +867,87 @@ remains `self_signed`.
 
 #### Restart under load
 
-**Not re-measured: both corrected-harness dispatches are invalid on the drill's
-own replay-gap gate.** PERF-03's restart re-run was dispatched twice on `dev` —
-run **36360934015** (commit `8349ed2e`) and the prescribed one-shot rerun
-**36362588641** (commit `a04f8edd`) — and each failed its own
-`ws_replay_gap max==0` validity gate, so neither publishes a latency result:
+**Measured on `dev` (2026-09-28).** The corrected drill (OC-0446) was
+re-dispatched on `dev` after the full-resync subscription gap (**OC-0484**) was
+fixed by [#1940](https://github.com/J3vb/OwnCord/pull/1940), and this run passes
+every validity gate — including `ws_replay_gap max==0`, which both pre-fix
+`dev` dispatches failed (max 9 and 13), and `sends_lost count==0`. The profile
+is published below. A same-day intermediate re-dispatch (run 36371370515,
+commit `8e9e8443`) failed only on `sends_lost=3` (248 drain sends: 244 acked,
+4 unanswered, 3 absent from history) with every other gate passing, including
+`ws_replay_gap max==0`; recorded as an observed stop-boundary flake, not a
+result. OC-0484 is resolved by #1940, and its ledger entry records both invalid
+`dev` runs and this flake.
 
 ```
-commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev; not yet on main)
+commit:          8e9e8443f423f30dbb603f376edf052c0bab180b  (on dev; not yet on main)
 date (UTC):      2026-09-28
-workflow run:    36360934015  (.github/workflows/load-baseline.yml, profile=restart)
-job:             108737859472  (restart, constrained, tls self_signed)
-replay gap:      max 9, p95 7, p99 8.01, avg 1.67, med 1, count 100; every resume tier none
----
-commit:          a04f8edd0b356b6c7794d88bf8d646dc08eb49a4  (on dev; not yet on main)
-date (UTC):      2026-09-28
-workflow run:    36362588641  (.github/workflows/load-baseline.yml, profile=restart)
-job:             108742581478  (restart, constrained, tls self_signed)
-replay gap:      max 13, avg 1.87, med 0, count 100; every resume tier none
+workflow run:    36372371602  (.github/workflows/load-baseline.yml, profile=restart)
+job:             108771187580  (restart, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6, pinned to CPUs 2-3 with taskset (no voice leg on this profile)
 ```
 
-Both runs otherwise behaved: drain 6,165 ms and 6,124 ms with exit 0 (inside the
-30 s drill gate), all 100 `server_restart` frames received, 250/250 drain-window
-sends acknowledged with 0 errored, 0 unanswered and **0 lost**, every resume
-served tier `none` by design. Server loss counters were all zero on both
-(`topic_sheds_total`, `broadcast_drops`, `ws_conn_rejects`, every
-`backpressure_*`), so the non-zero gap is not shedding — it is the resume-window
-subscription gap below. **The corrected windows themselves measure cleanly and
-are what the re-run was for**: pre-restart delivery p95 **45 ms** / ack 44 ms
-over 371,133 delivery samples, post-restart delivery p95 **47 ms** / ack 46 ms
-over 371,250 — equal-length steady windows now, with the ~10× imbalance OC-0446
-described gone. But the replay-gap gate fails, and a latency figure is only
-published off a run whose own validity gates pass, so no per-side or settled
-p95 is published here.
+The stop is scheduled at T+135 s — 60 s of ramp, then a 75 s `pre-restart`
+window at full fan-out, so both steady windows are the same length (OC-0446).
 
-The gap is a real property of the post-restart resume, not a harness artifact
-(**OC-0484**): `active_channel_id` is honoured only inside `handleReconnect`,
-and only after its final `mustFullResync` check passes
-(`Server/ws/replay.go`). A restart renumbers the sequence space, so every
-post-restart resume is forced onto the full-resync path _before_ that check,
-and `handleFreshConnect` then registers the socket with `channelID` still 0 — it
-subscribes no `ChannelTopic`. Channel frames broadcast between `auth_ok` and the
-client's post-`auth_ok` `channel_focus` reach nobody on that socket, and the
-client tracks only `max(seq)`, so the hole is silent and permanent until the
-user re-mounts the channel. The 2026-09-16 run below measured gap 0 under the
-same harness logic; the corrected drill reconnects all 100 sockets at 135 s
-under full fan-out rather than 90 s, and the difference is not attributed beyond
-that — what is certain is that the code path above cannot restore the
-subscription either way, so the mitigation is a server change (honour
-`active_channel_id` on the full-ready path too). That belongs to the fix, not to
-a bigger machine or a re-run, and this document does not publish a number around
-it.
+| Drill figure                       | Measured                                    | Gate                    | Met? |
+| ---------------------------------- | ------------------------------------------- | ----------------------- | ---- |
+| Drain wall clock (`docker stop`)   | **6,122 ms**                                | inside 30 s             | Yes  |
+| Server exit code                   | **0**                                       | 0                       | Yes  |
+| `server_restart` frames received   | **100 of 100**                              | 100                     | Yes  |
+| Lead, frame arrival → socket close | p95 5,004 ms, max 5,005 ms                  | ≥ `delay_seconds` (5 s) | Yes  |
+| Sends attempted during the drain   | **250: 250 acked, 0 errored, 0 unanswered** | —                       | —    |
+| Sends lost across the restart      | **0**                                       | 0                       | Yes  |
+| Replay gap across the restart      | max 0                                       | 0                       | Yes  |
+| Resume tier after the second boot  | 100 of 100 `none`                           | `none` by design        | Yes  |
+| Resume time after the second boot  | p95 71 ms, p99 81 ms, max 86 ms             | no budget               | —    |
+
+The budget rows, and the two sides of the stop:
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 216 ms | 231 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 6 ms   | 10 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 20 ms  | 35 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 20 ms  | 36 ms  | 200 ms / 400 ms    | Yes  |
+
+| Side           | Recipient delivery p95 / p99 | Sender ack p95 / p99 | Deliveries |
+| -------------- | ---------------------------- | -------------------- | ---------- |
+| `pre-restart`  | **20 / 31 ms**               | 21 / 32 ms           | 371,143    |
+| `post-restart` | **21 / 39 ms**               | 20 / 37 ms           | 370,990    |
+
+Every threshold was met. The equal-length windows now measure within a
+millisecond of each other — delivery p95 20 vs 21 ms, ack p95 21 vs 20 ms over
+371,143 and 370,990 deliveries — so the ~10× imbalance OC-0446 described is
+gone and the stop costs no steady-state latency. The `recovery` window (stop,
+drain, outage, reconnects) measured delivery p95 22 ms / p99 49 ms over 143,167
+samples and is not a budget row.
+
+**No resource in the reference box limits this profile.** Server CPU inside the
+cgroup (`cpu.stat.log`, 5 s samples of `usage_usec`) averaged **0.27 of 2 CPUs**
+over the first boot and **0.16 of 2** over the second, peaking at **0.50 of 2**;
+`nr_throttled` stayed **0** across the whole run. The single SQLite writer —
+whose queue is what the ceiling search names as the limiter above 400
+connections — queued 1,837 waits for **3.7 s** total, split across the phases
+(533 waits / 0.8 s pre-restart, 280 / 1.4 s in recovery, 612 / 0.8 s
+post-restart), and the reader pool never queued outside recovery (3,254 waits /
+13.8 s, all in the stop window). With 100 connections and full fan-out on both
+sides of the stop, CPU sat at a quarter of its two-CPU budget and the writer
+queue stayed sub-second per steady phase, so the profile is met with room — the
+same conclusion the steady block reached, against the same cgroup.
 
 The block below is the **superseded 2026-09-16 measurement**, kept as historical
-evidence for OC-0446 and not a current result:
+evidence for OC-0446 and not a current result. It also predates the OC-0484 fix
+below, and its `post-restart` window is the pre-correction one:
 
 ```
 commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
@@ -1021,12 +1045,22 @@ it.** Three things changed, none of which re-measures anything published here:
   when a window did not carry the workload — a comparison between two windows
   is worthless if either was empty.
 
-The corrected drill was dispatched on 2026-09-28 (the two runs above) and its
-equal windows now measure cleanly, but its replay-gap gate fails on OC-0484, so
-it publishes no latency result. The 34/51 ms and 393/452 ms above remain what
-the 2026-09-16 run measured, and remain not an equal-load comparison. A restart
-latency figure is republished once the full-resync subscription gap is fixed and
-a fresh corrected-harness run passes its own gates.
+The corrected drill was dispatched on 2026-09-28. Its first `dev` dispatches
+failed the drill's own `ws_replay_gap max==0` validity gate (max 9 on
+`8349ed2e`, max 13 on `a04f8edd`), so they published no latency result. The gap
+was a real property of the post-restart resume, not a harness artifact
+(**OC-0484**): `active_channel_id` was honoured only inside `handleReconnect`,
+and only after its final `mustFullResync` check passed (`Server/ws/replay.go`).
+A restart renumbers the sequence space, so every post-restart resume is forced
+onto the full-resync path _before_ that check, and `handleFreshConnect` then
+registered the socket with `channelID` still 0 — it subscribed no `ChannelTopic`.
+Channel frames broadcast between `auth_ok` and the client's post-`auth_ok`
+`channel_focus` reached nobody on that socket, and the client tracks only
+`max(seq)`, so the hole was silent and permanent until the user re-mounted the
+channel. [#1940](https://github.com/J3vb/OwnCord/pull/1940) honours
+`active_channel_id` on the full-ready path too; the `dev` run at the top of this
+section passes the gate at `max 0`. The 34/51 ms and 393/452 ms above remain
+what the 2026-09-16 run measured, and remain not an equal-load comparison.
 
 #### Ceiling search
 

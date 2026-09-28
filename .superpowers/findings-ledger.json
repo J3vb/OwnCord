@@ -11202,12 +11202,20 @@
       "evidence": "Two dev runs fail the same gate: 36360934015 (dev 8349ed2e) ws_replay_gap max 9, avg 1.67, count 100, every resume tier none; 36362588641 (dev a04f8edd, the prescribed one-shot rerun) max 13, avg 1.87, med 0, count 100, tier none 100. Server-side loss counters are all zero on both (topic_sheds_total 0, broadcast_drops 0, ws_conn_rejects 0, backpressure_* 0), so the missed frames are the resume-window subscription gap, not shedding. Both runs' server.log shows the full-resync reason ('ws replay skipped (resync watermark at or past last_seq), sending full ready'). The 2026-09-16 run 35113950011 measured gap 0 under the same harness gap logic, but its corrected-drill replacement reconnects all 100 sockets at 135 s under full fan-out instead of 90 s; the difference is not attributed beyond noting that the code path above cannot restore the subscription either way. The corrected windows themselves measure cleanly (equal delivery counts, 371133 / 371250), so OC-0446's ~10x window imbalance is gone, but because the replay-gap gate fails docs/capacity.md publishes no restart latency figure from these runs.",
       "suggestedFix": "Honour active_channel_id on the full-ready path too: in handleFreshConnect, when c.lastSeq > 0 and c.authChannelID is READ-visible per the recomputed allowed set, set c.channelID before registerNow (the same gate the replay path already applies, so an unreadable id still leaves it 0). Do not re-order handleReconnect's mustFullResync check merely to reach the promotion: the full-resync path must stay subscribed for the whole auth_ok+ready handshake, which is what the pre-subscribe is for.",
       "confidence": "medium",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-28",
       "hunt": "phase-b-b7-perf-2026-09-28",
       "lens": "realtime",
       "finder": "b7-perf",
-      "note": "Found while re-running the corrected restart profile for PERF-03. Harness/server fix is out of that lane's scope (docs-only), so this is filed open rather than fixed. The ceiling-search half of PERF-03 is unaffected (run 36360932108 is green and published)."
+      "fixedDate": "2026-09-28",
+      "fix": {
+        "commit": "8e9e8443f423f30dbb603f376edf052c0bab180b",
+        "pr": "https://github.com/J3vb/OwnCord/pull/1940",
+        "test": "Server/ws/restart_resync_active_channel_test.go (TestFullResyncAfterRestartHonorsActiveChannelID, TestFullResyncAfterRestartActiveChannelIsReadGated, TestFreshConnectIgnoresActiveChannelID)",
+        "revertProof": "self-reported",
+        "notes": "Fixed by #1940: handleFreshConnect now promotes active_channel_id to c.channelID via (*Hub).gateResumeChannel, gated on c.lastSeq > 0 and on the channel being READ-visible, before registerNow. Verified by a fresh corrected-drill run on dev 8e9e8443 (run 36372371602): ws_replay_gap max 0 across all 100 resumes (the gate was max 9 and 13 on the two pre-fix dev runs), every other drill gate green, and the equal pre/post-restart steady windows publish in docs/capacity.md. A same-day intermediate re-dispatch (run 36371370515, dev 8e9e8443) also measured ws_replay_gap max 0 but failed only the sends_lost==0 gate (3 of 248 drain sends absent from history); that run is an observed stop-boundary flake with the identical code and the next dispatch passed, not a regression of this fix."
+      },
+      "note": "Found while re-running the corrected restart profile for PERF-03. The ceiling-search half of PERF-03 is unaffected (run 36360932108 is green and published). The restart half is now published from run 36372371602 after this fix."
     }
   ]
 }
