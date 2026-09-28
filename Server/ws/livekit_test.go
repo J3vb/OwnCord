@@ -19,6 +19,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
+	"go.yaml.in/yaml/v3"
 )
 
 // ---------------------------------------------------------------------------
@@ -805,6 +806,56 @@ func TestGenerateConfig_WithNodeIP(t *testing.T) {
 	got := string(content)
 	if !strings.Contains(got, `node_ip: "203.0.113.10"`) {
 		t.Errorf("expected node_ip in config.\nGot:\n%s", got)
+	}
+}
+
+// TestGenerateConfig_NodeIPReplacesExternalIP — LiveKit re-resolves node_ip
+// over STUN whenever use_external_ip is on, so a pinned node_ip (a tailnet
+// 100.x address, say) only takes effect when the generated file leaves
+// use_external_ip out.
+func TestGenerateConfig_NodeIPReplacesExternalIP(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		nodeIP        string
+		wantExternal  bool
+		wantNodeIPSet string
+	}{
+		{name: "empty node_ip auto-detects", nodeIP: "", wantExternal: true, wantNodeIPSet: ""},
+		{name: "pinned node_ip is honoured", nodeIP: "100.64.0.7", wantExternal: false, wantNodeIPSet: "100.64.0.7"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := &config.VoiceConfig{
+				LiveKitAPIKey:    "key1",
+				LiveKitAPISecret: "secret1",
+				LiveKitURL:       "ws://localhost:7880",
+				NodeIP:           tc.nodeIP,
+			}
+			proc := ws.NewLiveKitProcess(cfg, &config.TLSConfig{}, t.TempDir())
+			cfgPath, err := proc.GenerateConfigForTest()
+			if err != nil {
+				t.Fatalf("generateConfig: %v", err)
+			}
+			content, err := os.ReadFile(cfgPath)
+			if err != nil {
+				t.Fatalf("reading config file: %v", err)
+			}
+			var parsed struct {
+				RTC struct {
+					UseExternalIP bool   `yaml:"use_external_ip"`
+					NodeIP        string `yaml:"node_ip"`
+				} `yaml:"rtc"`
+			}
+			if err := yaml.Unmarshal(content, &parsed); err != nil {
+				t.Fatalf("generated livekit.yaml does not parse: %v\n%s", err, content)
+			}
+			if parsed.RTC.UseExternalIP != tc.wantExternal || parsed.RTC.NodeIP != tc.wantNodeIPSet {
+				t.Errorf("rtc = {use_external_ip: %v, node_ip: %q}, want {%v, %q}",
+					parsed.RTC.UseExternalIP, parsed.RTC.NodeIP, tc.wantExternal, tc.wantNodeIPSet)
+			}
+		})
 	}
 }
 

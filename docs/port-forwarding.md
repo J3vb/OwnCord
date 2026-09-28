@@ -81,13 +81,14 @@ nobody hears anything, because the media never arrives.
 Two things are needed together:
 
 1. Forward `50000-60000/UDP` (and `7881/TCP`) to the server.
-2. Give LiveKit a routable media address. OwnCord's generated `livekit.yaml`
-   sets `use_external_ip: true`, so with `voice.node_ip` **left empty** LiveKit
+2. Give LiveKit a routable media address. With `voice.node_ip` **left empty**,
+   OwnCord's generated `livekit.yaml` sets `use_external_ip: true` and LiveKit
    detects the public address itself when it starts — the right choice on a
    dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). On the Docker
    stack LiveKit reads your own `livekit.yaml` instead: keep the example's
-   `rtc.use_external_ip: true` there. Set `voice.node_ip` (Docker: `rtc.node_ip`)
-   only when auto-detection cannot work (a tailnet-only host, or a NAT where
+   `rtc.use_external_ip: true` there. Set `voice.node_ip` (Docker: replace
+   `rtc.use_external_ip` with `rtc.node_ip`, since LiveKit overwrites a
+   `node_ip` while detection is on) only when auto-detection cannot work (a tailnet-only host, or a NAT where
    LiveKit's lookup is blocked): it is the address LiveKit advertises in its
    ICE candidates, so a private value hands remote clients something they
    cannot route to. The server warns at start-up if it is not a public address.
@@ -163,7 +164,7 @@ the address clients type, and the media address LiveKit advertises.
 
 - **Clients:** use dynamic DNS and share a hostname rather than an IP literal.
 - **Media (`voice.node_ip`):** leave it **empty** on a dynamic address. OwnCord's
-  auto-generated `livekit.yaml` sets `use_external_ip: true`, so LiveKit detects
+  auto-generated `livekit.yaml` then sets `use_external_ip: true`, so LiveKit detects
   its public address itself — but only when it starts. After an IP change,
   restart the OwnCord server so LiveKit picks up the new address; until then
   it keeps advertising the old one. A pinned `voice.node_ip` goes stale

@@ -112,16 +112,17 @@ func (p *LiveKitProcess) generateConfig() (string, error) {
 			return "", fmt.Errorf(`%s contains a character that cannot be safely written to livekit.yaml (one of : # { } " \ CR LF)`, cred.field)
 		}
 	}
-	// Build node_ip line only when configured (required for remote users behind NAT).
+	// A pinned node_ip replaces use_external_ip: LiveKit overwrites node_ip
+	// with its STUN result whenever use_external_ip is on.
 	// Validate: must be a plain IP address (no YAML-breaking chars).
-	nodeIPLine := ""
+	addrLine := "\n  use_external_ip: true"
 	if p.cfg.NodeIP != "" {
 		for _, ch := range p.cfg.NodeIP {
 			if ch == '"' || ch == '\\' || ch == '\n' || ch == '\r' || ch == '#' || ch == '{' || ch == '}' {
 				return "", fmt.Errorf("node_ip contains unsafe character %q", string(ch))
 			}
 		}
-		nodeIPLine = fmt.Sprintf("\n  node_ip: %q", p.cfg.NodeIP)
+		addrLine = fmt.Sprintf("\n  node_ip: %q", p.cfg.NodeIP)
 	}
 	// Advertise LAN host candidates alongside the external mapping so clients
 	// on the local network can reach a dual-homed (LAN + public IP) server.
@@ -139,8 +140,7 @@ port: 7880
 
 rtc:
   port_range_start: 50000
-  port_range_end: 60000
-  use_external_ip: true%s%s
+  port_range_end: 60000%s%s
   pli_throttle:
     low_quality: 500ms
     mid_quality: 1s
@@ -151,7 +151,7 @@ keys:
 
 logging:
   level: info
-`, nodeIPLine, advertiseInternalLine, p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
+`, addrLine, advertiseInternalLine, p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
 
 	if err := os.MkdirAll(p.dataDir, 0o750); err != nil {
 		return "", fmt.Errorf("creating data dir: %w", err)

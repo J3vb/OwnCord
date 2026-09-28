@@ -110,7 +110,7 @@ cp .env.example .env
 # 2. Create your LiveKit config
 cp livekit.yaml.example livekit.yaml
 # Edit livekit.yaml — paste the same key/secret (use_external_ip detects the
-# public IP; pin node_ip only on a tailnet-only host)
+# public IP; only on a tailnet-only host, replace it with node_ip)
 
 # 3. Create config.yaml from the shipped example
 cp config.yaml.example config.yaml
@@ -1532,7 +1532,7 @@ choose one: [TLS Setup](#tls-setup).
 - [ ] **Set `trusted_proxies`** -- only if behind a reverse proxy, list the proxy's own addresses so client IPs come from `X-Forwarded-For`
 - [ ] **Leave `allowed_origins` empty unless you know why** -- empty denies cross-origin WebSocket connections, which is what a desktop-only deployment wants; set it only to admit browser clients from your own domain
 - [ ] **Set stable voice credentials** -- set `livekit_api_key` and `livekit_api_secret` to avoid token breakage on restart
-- [ ] **Check the voice media address** -- leave `voice.node_ip` empty so LiveKit detects the public address (Docker: `use_external_ip: true` in `livekit.yaml`); pin it only when detection cannot work, such as a tailnet-only host ([Port Forwarding](port-forwarding.md#dynamic-public-ip))
+- [ ] **Check the voice media address** -- leave `voice.node_ip` empty so LiveKit detects the public address (Docker: `use_external_ip: true` in `livekit.yaml`, replaced by `node_ip` when pinned); pin it only when detection cannot work, such as a tailnet-only host ([Port Forwarding](port-forwarding.md#dynamic-public-ip))
 - [ ] **Review upload limits** -- adjust `upload.max_size_mb` for your use case
 - [ ] **Configure GitHub token** -- optional, for reliable update checks
 - [ ] **Schedule backups** -- use the built-in schedule on the admin panel's Backups & restore page, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))
