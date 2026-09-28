@@ -108,8 +108,8 @@ of band and have the user compare it before accepting —
 [Clients see a certificate mismatch](deployment.md#clients-see-a-certificate-mismatch).
 
 **Voice joins but nobody hears anything.**
-The UDP media range is not forwarded, or `voice.node_ip` is not your public
-address. Both checks are in the
+The UDP media range is not forwarded, or a pinned `voice.node_ip` is not your
+current public address (leave it empty so LiveKit detects it). Both checks are in the
 [Port Forwarding Guide](port-forwarding.md); the server cannot see this
 failure because the media never reaches it.
 

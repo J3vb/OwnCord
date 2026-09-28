@@ -1,7 +1,7 @@
 # OwnCord server stack — chat server + LiveKit voice/video
 #
 # Quick start:
-#   1. cp .env.example .env  && edit .env (set secrets + public IP)
+#   1. cp .env.example .env  && edit .env (set secrets)
 #   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
 #   3. cp config.yaml.example config.yaml  && edit as needed
 #   4. docker compose up -d

@@ -150,7 +150,7 @@ client can detect a rotation and re-subscribe.
 | `voice.livekit_binary`        | string | `""`                                                | Path to an existing `livekit-server` binary; set to skip auto-download and run your own build                                                                                                                      |
 | `voice.auto_download_livekit` | bool   | `false` (compiled) / `true` in the generated config | When no `livekit_binary` is set, download a pinned `livekit-server` release from the official LiveKit GitHub releases (verified against the release `checksums.txt`) into `data/livekit/` and run it automatically |
 | `voice.livekit_version`       | string | `""`                                                | Override the pinned `livekit-server` version used by auto-download (e.g. `"1.13.7"`); empty = built-in pin                                                                                                         |
-| `voice.node_ip`               | string | `""`                                                | Public IP for WebRTC ICE candidates; empty = auto-detect. Required for remote users behind NAT.                                                                                                                    |
+| `voice.node_ip`               | string | `""`                                                | Public IP for WebRTC ICE candidates; empty = auto-detect (recommended). Pin it only when detection cannot work, such as a tailnet-only host.                                                                       |
 | `voice.advertise_internal_ip` | bool   | `false`                                             | Also advertise internal (LAN) IPs as ICE candidates. Enable when the server is reachable via both a LAN IP and a public IP so local-network clients can connect to voice.                                          |
 | `voice.quality`               | string | `"medium"`                                          | Voice quality preset: `low`, `medium`, `high`                                                                                                                                                                      |
 
@@ -158,7 +158,7 @@ client can detect a rotation and re-subscribe.
 
 #### Server with both a LAN and a public IP
 
-If your server is dual-homed (e.g. `192.168.1.10` on the LAN and `47.x.x.x` public), set `voice.node_ip` to the public IP **and** `voice.advertise_internal_ip: true`. LiveKit then advertises the LAN address in addition to the public one, so clients on the local network connect directly while remote clients use the public IP.
+If your server is dual-homed (e.g. `192.168.1.10` on the LAN and `47.x.x.x` public), leave `voice.node_ip` empty (auto-detect) and set `voice.advertise_internal_ip: true`. LiveKit then advertises the LAN address in addition to the detected public one, so clients on the local network connect directly while remote clients use the public IP.
 
 For LiveKit options OwnCord does not model, you can take ownership of the auto-started server's config: edit `data/livekit.yaml` and delete the header line containing the auto-generated marker — OwnCord will stop regenerating the file on startup (your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`).
 

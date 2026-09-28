@@ -1270,7 +1270,9 @@ Three named refusals, each with the one thing to do:
 
 ### Voice joins but nobody hears anything
 
-The UDP media range (`50000-60000`) or `voice.node_ip` is wrong — the one
+The UDP media range (`50000-60000`) is not forwarded, or a pinned
+`voice.node_ip` is not your current public address (leave it empty so LiveKit
+detects it) — the one
 failure the server cannot see, because the media never reaches it. The
 check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
 

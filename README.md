@@ -81,8 +81,7 @@ cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml before starting (public IP and matching LiveKit
-# key/secret). The compose file wires voice.livekit_url to the LiveKit service
+# Edit .env and livekit.yaml before starting (matching LiveKit key/secret). The compose file wires voice.livekit_url to the LiveKit service
 # and turns auto-download off, so config.yaml needs no voice edit.
 docker compose up -d
 ```

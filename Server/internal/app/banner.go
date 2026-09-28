@@ -170,20 +170,16 @@ func pickBannerAddr(addrs []netip.Addr) (string, netclass.Kind) {
 // has none. It ignores reachability ranking: the point is precisely that the
 // most widely reachable address can be outside the default admin perimeter.
 func pickBannerLANAddr(addrs []netip.Addr) string {
-	best := ""
-	bestRank := -1
-	bestIsV4 := false
+	var lan []netip.Addr
 	for _, a := range addrs {
-		k := netclass.Classify(a)
-		if k != netclass.KindPrivate && k != netclass.KindUniqueLocal {
-			continue
-		}
-		rank := netclass.Rank(k)
-		isV4 := a.Unmap().Is4()
-		if rank > bestRank || (rank == bestRank && isV4 && !bestIsV4) {
-			best, bestRank, bestIsV4 = a.String(), rank, isV4
+		if k := netclass.Classify(a); k == netclass.KindPrivate || k == netclass.KindUniqueLocal {
+			lan = append(lan, a)
 		}
 	}
+	if len(lan) == 0 {
+		return ""
+	}
+	best, _ := pickBannerAddr(lan)
 	return best
 }
 

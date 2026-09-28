@@ -19,7 +19,8 @@ rtc:
 
   # If the server is reachable via both a LAN IP and a public IP (dual-homed),
   # uncomment this so LiveKit also advertises the internal address — clients on
-  # the local network then connect via LAN while remote clients use node_ip.
+  # the local network then connect via LAN while remote clients use the public
+  # address.
   # advertise_internal_ip: true
 
 keys:

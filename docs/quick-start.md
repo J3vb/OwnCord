@@ -62,8 +62,7 @@ cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml before start (set your public IP and matching
-# LiveKit key/secret). The compose file already points the server at the
+# Edit .env and livekit.yaml before start (matching LiveKit key/secret). The compose file already points the server at the
 # `ws://livekit:7880` service and keeps its own auto-download off, so
 # config.yaml needs no voice edit for the Docker stack.
 docker compose up -d
