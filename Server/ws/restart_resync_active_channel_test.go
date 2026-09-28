@@ -166,7 +166,7 @@ func TestFullResyncAfterRestartHonorsActiveChannelID(t *testing.T) {
 
 	probeDeadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(probeDeadline) {
-		frameCtx, frameCancel := context.WithTimeout(ctx, probeDeadline.Sub(time.Now()))
+		frameCtx, frameCancel := context.WithTimeout(ctx, time.Until(probeDeadline))
 		_, frame, frameErr := conn.Read(frameCtx)
 		frameCancel()
 		if frameErr != nil {

@@ -527,54 +527,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// the write window are queued in the client's send buffer instead of
 	// being lost (BUG-123). writePump hasn't started yet, so queued messages
 	// will be drained once the pumps begin.
-	//
-	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
-	// from the previous connection, so that is the only case where registerNow
-	// needs the read-permission set. Fail closed on error: nil denies the
-	// inherited voice-channel subscription.
-	var allowedChannelIDs map[int64]bool
-	if c.lastSeq > 0 {
-		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
-		if allowedErr != nil {
-			slog.Warn("ws handleFreshConnect: computeAllowedChannels failed, skipping voice channel subscription",
-				"user_id", c.userID, "err", allowedErr)
-		} else {
-			allowedChannelIDs = allowed
-		}
-	}
-	// The auth frame's active_channel_id was honoured only along
-	// handleReconnect's replay-capable path. On a full resync (last_seq > 0
-	// but replay forced "none" — every post-restart resume, since the fresh
-	// per-boot seq floor renumbers the space and the boot bumps the
-	// visibility watermark) registerNow copies the subscription from the OLD
-	// client entry, which readPump's unregister has normally already deleted.
-	// Without this promotion the socket holds no ChannelTopic subscription
-	// until its post-ready channel_focus round trip lands, and every channel
-	// frame broadcast in that window (auth_ok + ready write, pump startup,
-	// one RTT) is delivered to nobody and can never be re-requested, because
-	// the client only reports max(seq). Honoured only when READ-visible, the
-	// same fail-closed gate handleReconnect applies, and only on a resume
-	// (last_seq > 0), as docs/protocol.md specifies; the re-gate below stays
-	// as defence for the abort-path promotion it already documents.
-	if c.lastSeq > 0 && c.authChannelID != 0 && allowedChannelIDs[c.authChannelID] {
-		c.mu.Lock()
-		c.channelID = c.authChannelID
-		c.mu.Unlock()
-	}
-	// handleReconnect may have promoted an auth-frame active_channel_id into
-	// c.channelID (serve.go, honoured only when it was READ-visible at that
-	// moment) and then aborted on one of its own re-checks — most notably the
-	// final mustFullResync check, tripped by a permission revocation that
-	// landed mid-handshake. None of those abort paths undo the c.channelID
-	// write. registerNow subscribes c.channelID's ChannelTopic
-	// unconditionally, so re-gate it here against the freshly recomputed
-	// permission set before registering. Fail closed: a nil allowedChannelIDs
-	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
-	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
-		c.mu.Lock()
-		c.channelID = 0
-		c.mu.Unlock()
-	}
+	allowedChannelIDs := h.gateResumeChannel(ctx, database, c)
 	if freshConnectPreRegisterRaceHook != nil {
 		freshConnectPreRegisterRaceHook()
 	}
@@ -687,4 +640,58 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// stale participant — the identity includes joinedAt, so a quick rejoin's
 	// new session has a different identity and won't be removed.
 	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
+}
+
+// gateResumeChannel resolves the read-permission set a resume fallback
+// (lastSeq > 0) registers with and settles c.channelID against it before
+// registerNow subscribes it. It returns nil for a pure fresh connect.
+func (h *Hub) gateResumeChannel(ctx context.Context, database ReadySnapshotReader, c *Client) map[int64]bool {
+	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
+	// from the previous connection, so that is the only case where registerNow
+	// needs the read-permission set. Fail closed on error: nil denies the
+	// inherited voice-channel subscription.
+	var allowedChannelIDs map[int64]bool
+	if c.lastSeq > 0 {
+		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
+		if allowedErr != nil {
+			slog.Warn("ws handleFreshConnect: computeAllowedChannels failed, skipping voice channel subscription",
+				"user_id", c.userID, "err", allowedErr)
+		} else {
+			allowedChannelIDs = allowed
+		}
+	}
+	// The auth frame's active_channel_id was honoured only along
+	// handleReconnect's replay-capable path. On a full resync (last_seq > 0
+	// but replay forced "none" — every post-restart resume, since the fresh
+	// per-boot seq floor renumbers the space and the boot bumps the
+	// visibility watermark) registerNow copies the subscription from the OLD
+	// client entry, which readPump's unregister has normally already deleted.
+	// Without this promotion the socket holds no ChannelTopic subscription
+	// until its post-ready channel_focus round trip lands, and every channel
+	// frame broadcast in that window (auth_ok + ready write, pump startup,
+	// one RTT) is delivered to nobody and can never be re-requested, because
+	// the client only reports max(seq). Honoured only when READ-visible, the
+	// same fail-closed gate handleReconnect applies, and only on a resume
+	// (last_seq > 0), as docs/protocol.md specifies; the re-gate below stays
+	// as defence for the abort-path promotion it already documents.
+	if c.lastSeq > 0 && c.authChannelID != 0 && allowedChannelIDs[c.authChannelID] {
+		c.mu.Lock()
+		c.channelID = c.authChannelID
+		c.mu.Unlock()
+	}
+	// handleReconnect may have promoted an auth-frame active_channel_id into
+	// c.channelID (serve.go, honoured only when it was READ-visible at that
+	// moment) and then aborted on one of its own re-checks — most notably the
+	// final mustFullResync check, tripped by a permission revocation that
+	// landed mid-handshake. None of those abort paths undo the c.channelID
+	// write. registerNow subscribes c.channelID's ChannelTopic
+	// unconditionally, so re-gate it here against the freshly recomputed
+	// permission set before registering. Fail closed: a nil allowedChannelIDs
+	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
+	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
+		c.mu.Lock()
+		c.channelID = 0
+		c.mu.Unlock()
+	}
+	return allowedChannelIDs
 }
