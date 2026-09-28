@@ -11,6 +11,7 @@ import type {
 } from "../platform/contracts/socket";
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
+import { Disposable } from "./disposable";
 
 const log = createLogger("ws");
 
@@ -111,6 +112,10 @@ const SERVER_SILENCE_RECONNECT_MS = 60_000;
 // minimised webview throttles the heartbeat setInterval, so a quiet socket may
 // simply not have been asked for a pong yet.
 const PONG_GRACE_MS = 15_000;
+// U7d: a heartbeat tick that lands this long after the previous one means the
+// process was frozen (sleep, suspend) in between: Chromium's intensive
+// throttling of a long-hidden page spaces ticks ~60 s apart, well under this.
+const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -201,6 +206,10 @@ export function createWsClient({
   // CLI-01: fires when no inbound frame has arrived for
   // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
+  let livenessDueAt = 0;
+  // U7d: owns the visibilitychange / online wake-probe listeners.
+  // Armed on auth_ok and released on close or disconnect().
+  let wakeOwner: Disposable | null = null;
   // When the oldest heartbeat ping sent since the last inbound frame went out.
   let unansweredPingAt: number | null = null;
   let intentionalClose = false;
@@ -267,8 +276,14 @@ export function createWsClient({
 
   function startHeartbeat(): void {
     stopHeartbeat();
+    let lastBeatAt = Date.now();
     heartbeatTimer = setInterval(() => {
-      if (proxyOpen) {
+      const now = Date.now();
+      const woke = now - lastBeatAt > WAKE_GAP_MS;
+      lastBeatAt = now;
+      if (woke) {
+        onWake();
+      } else if (proxyOpen) {
         try {
           sendRaw(JSON.stringify({ type: "ping", payload: {} }));
           unansweredPingAt ??= Date.now();
@@ -289,23 +304,63 @@ export function createWsClient({
   // CLI-01: re-arm the silence deadline. Called after auth_ok and on every
   // inbound frame, so any traffic — pong, chat, presence — proves the socket
   // is still delivering bytes. A half-open socket delivers nothing, so the
-  // timer survives to fire.
+  // timer survives to fire. The wake probe arms the same timer with a shorter
+  // deadline once the process may have been suspended.
   function armLiveness(): void {
-    if (livenessTimer !== null) clearTimeout(livenessTimer);
     unansweredPingAt = null;
-    livenessTimer = setTimeout(onLivenessDeadline, SERVER_SILENCE_RECONNECT_MS);
+    setLivenessTimer(SERVER_SILENCE_RECONNECT_MS);
   }
 
-  function onLivenessDeadline(): void {
+  function setLivenessTimer(deadlineMs: number): void {
+    if (livenessTimer !== null) clearTimeout(livenessTimer);
+    livenessDueAt = Date.now() + deadlineMs;
+    livenessTimer = setTimeout(() => onLivenessDeadline(deadlineMs), deadlineMs);
+  }
+
+  // U7d: a heartbeat wall-clock gap, the screen coming back or the network
+  // returning is the earliest evidence the process may have been frozen, so
+  // ping now and arm the pong grace as the deadline: an awake server answers
+  // within seconds, while a socket that died over the suspend is redialled in
+  // 15 s rather than the 60 s silence deadline. An older unanswered ping and a
+  // sooner deadline both stand.
+  function onWake(): void {
+    if (state !== "connected" || !proxyOpen) return;
+    sendRaw(JSON.stringify({ type: "ping", payload: {} }));
+    unansweredPingAt ??= Date.now();
+    setLivenessTimer(Math.max(0, Math.min(PONG_GRACE_MS, livenessDueAt - Date.now())));
+  }
+
+  // Armed on auth_ok and released on close or disconnect(); the next auth_ok
+  // re-arms them. A signal owns each listener so the lifecycle inventory sees
+  // them as owned.
+  function armWakeListeners(): void {
+    if (wakeOwner !== null) return;
+    const owner = new Disposable();
+    window.addEventListener("online", onWake, { signal: owner.signal });
+    document.addEventListener(
+      "visibilitychange",
+      () => document.visibilityState === "visible" && onWake(),
+      { signal: owner.signal },
+    );
+    wakeOwner = owner;
+  }
+
+  function stopWakeListeners(): void {
+    wakeOwner?.destroy();
+    wakeOwner = null;
+  }
+
+  function onLivenessDeadline(deadlineMs: number): void {
     livenessTimer = null;
     if (intentionalClose || !proxyOpen || state !== "connected") return;
     const pingAgeMs = unansweredPingAt === null ? 0 : Date.now() - unansweredPingAt;
     if (pingAgeMs < PONG_GRACE_MS) {
-      livenessTimer = setTimeout(onLivenessDeadline, PONG_GRACE_MS - pingAgeMs);
+      setLivenessTimer(PONG_GRACE_MS - pingAgeMs);
       return;
     }
     log.warn("No inbound frame within the liveness deadline; forcing reconnect", {
-      silenceMs: SERVER_SILENCE_RECONNECT_MS,
+      deadlineMs,
+      pingAgeMs,
       host: config?.host ?? "unknown",
     });
     // Tear down like an observed close: the next connect's ws_connect drops
@@ -441,6 +496,10 @@ export function createWsClient({
       reconnectAttempt = 0;
       startHeartbeat();
       armLiveness();
+      // U7d: only an authenticated session needs the wake probe, and arming it
+      // here keeps the listeners off the connect page (and off tests that
+      // never authenticate). disconnect() releases them.
+      armWakeListeners();
     }
 
     dispatch(msg);
@@ -541,6 +600,7 @@ export function createWsClient({
       });
       stopHeartbeat();
       stopLiveness();
+      stopWakeListeners();
       if (!intentionalClose) {
         scheduleReconnect(retryHint?.retryAfterMs);
       } else {
@@ -659,6 +719,7 @@ export function createWsClient({
     cancelReconnect();
     stopHeartbeat();
     stopLiveness();
+    stopWakeListeners();
     proxyOpen = false;
     void disconnectProxy();
     setState("disconnected");
