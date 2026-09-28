@@ -92,7 +92,7 @@ pub(crate) fn is_key_down(vk: i32) -> bool {
 }
 
 // The shared per-thread X11 key-state handle. Hoisted to module scope so both
-// `is_key_down` and `ctrl_down` read the same cached DeviceState. Cache per
+// `is_key_down` and `modifiers_down` read the same cached DeviceState. Cache per
 // thread — creating it on every call would open/close /dev/input/ file
 // descriptors every 20ms in a polling loop. checked_new() returns None when no
 // X11 display is reachable (e.g. a pure-Wayland session without XWayland), so
@@ -114,32 +114,52 @@ pub(crate) fn is_key_down(_vk: i32) -> bool {
     false
 }
 
-/// Whether Ctrl is held right now. Needed by U6's global Ctrl+M/Ctrl+D, whose
-/// Ctrl half `is_key_down(0x11)` cannot answer on Linux: the modifier VKs are
-/// deliberately absent from `linux::vk_to_keycode` (LShift/RShift and
-/// LControl/RControl each collapse to one VK, which a single (vk, Keycode)
-/// pair cannot represent), so `is_key_down` returns false for them there.
-/// `device_query` does expose the modifiers as distinct Keycodes, so this reads
-/// them directly.
+/// Which modifiers are held right now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Modifiers {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+/// The held modifiers, needed by U6's global Ctrl+Shift+M/Ctrl+Shift+D, which
+/// `is_key_down` cannot answer on Linux: the modifier VKs are deliberately
+/// absent from `linux::vk_to_keycode` (LShift/RShift and LControl/RControl
+/// each collapse to one VK, which a single (vk, Keycode) pair cannot
+/// represent), so `is_key_down` returns false for them there. `device_query`
+/// does expose the modifiers as distinct Keycodes, so this reads them directly.
 #[cfg(windows)]
-pub(crate) fn ctrl_down() -> bool {
-    is_key_down(0x11)
+pub(crate) fn modifiers_down() -> Modifiers {
+    Modifiers {
+        ctrl: is_key_down(0x11),
+        shift: is_key_down(0x10),
+        alt: is_key_down(0x12),
+        meta: is_key_down(0x5B) || is_key_down(0x5C),
+    }
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn ctrl_down() -> bool {
+pub(crate) fn modifiers_down() -> Modifiers {
     use device_query::{DeviceQuery, Keycode};
     DEVICE_STATE.with(|ds| {
-        ds.as_ref().is_some_and(|ds| {
-            let keys = ds.get_keys();
-            keys.contains(&Keycode::LControl) || keys.contains(&Keycode::RControl)
-        })
+        let Some(ds) = ds.as_ref() else {
+            return Modifiers::default();
+        };
+        let keys = ds.get_keys();
+        let any = |a: Keycode, b: Keycode| keys.contains(&a) || keys.contains(&b);
+        Modifiers {
+            ctrl: any(Keycode::LControl, Keycode::RControl),
+            shift: any(Keycode::LShift, Keycode::RShift),
+            alt: any(Keycode::LAlt, Keycode::RAlt),
+            meta: any(Keycode::LMeta, Keycode::RMeta),
+        }
     })
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn ctrl_down() -> bool {
-    false
+pub(crate) fn modifiers_down() -> Modifiers {
+    Modifiers::default()
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,11 @@
 /**
- * Global voice shortcuts (U6): Ctrl+M mute and Ctrl+D deafen that fire while
- * the app is unfocused, plus the tray's Mute/Deafen items.
+ * Global voice shortcuts (U6): Ctrl+Shift+M mute and Ctrl+Shift+D deafen that
+ * fire while the app is unfocused, plus the tray's Mute/Deafen items.
  *
  * The native host owns the polling (a 20 ms key-state loop that observes the
  * combination without consuming it) and emits one `voice-shortcut` event per
- * press edge; the tray emits the same event. This contract only starts/stops
- * that loop, reports whether the platform can observe global keys, and hands
+ * press edge; the tray emits the same event. This contract only starts that
+ * loop, reports whether the platform can observe global keys, and hands
  * the actions to the renderer, which toggles the same controls the in-app
  * shortcuts do.
  *
@@ -17,8 +17,6 @@
 export interface GlobalShortcuts {
   /** Start the native polling loop. Idempotent on the host side. */
   start(): Promise<void>;
-  /** Stop the native polling loop. */
-  stop(): Promise<void>;
   /** Whether this platform can observe global key state. */
   supported(): Promise<boolean>;
   /** Subscribe to a mute/deafen action from the global key or the tray. */

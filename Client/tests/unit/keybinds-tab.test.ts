@@ -19,7 +19,6 @@ vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
   globalShortcuts: {
     supported: () => mockSupported(),
     start: vi.fn(async () => {}),
-    stop: vi.fn(async () => {}),
     onShortcut: vi.fn(() => () => {}),
   },
 }));
@@ -361,7 +360,7 @@ describe("KeybindsTab", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
     expect(hint.textContent).toBe(
-      "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + M / Ctrl + D, or the tray menu.",
+      "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu.",
     );
   });
 
@@ -371,7 +370,7 @@ describe("KeybindsTab", () => {
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
     await vi.waitFor(() => {
       expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + M / Ctrl + D shortcuts.",
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + Shift + M / Ctrl + Shift + D shortcuts.",
       );
     });
   });

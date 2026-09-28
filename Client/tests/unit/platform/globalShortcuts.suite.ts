@@ -58,11 +58,9 @@ export function describeGlobalShortcutsSuite(
       expect(handler.mock.calls).toEqual([["mute"]]);
     });
 
-    check("starts and stops the native poller through distinct commands", async () => {
+    check("starts the native poller", async () => {
       await ctx.subject.start();
-      await ctx.subject.stop();
       expect(ctx.native.commands()).toContain("voice_shortcuts_start");
-      expect(ctx.native.commands()).toContain("voice_shortcuts_stop");
     });
   });
 }

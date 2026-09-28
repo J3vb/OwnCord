@@ -12,10 +12,6 @@ export const globalShortcuts: GlobalShortcuts = {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("voice_shortcuts_start");
   },
-  async stop() {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("voice_shortcuts_stop");
-  },
   async supported() {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<boolean>("voice_shortcuts_supported");

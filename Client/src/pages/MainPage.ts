@@ -953,13 +953,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       }),
     );
 
-    // U6: Ctrl+M/Ctrl+D and the tray's Mute/Deafen items work while the app is
-    // unfocused. The native host polls the keys (Windows and X11 Linux) and the
-    // tray emits the same event; both run the same toggles as the in-app
-    // shortcuts, but without the voice-channel guard — a global toggle outside
-    // a call is a harmless no-op there.
+    // U6: Ctrl+Shift+M/Ctrl+Shift+D and the tray's Mute/Deafen items work
+    // while the app is unfocused. The native host polls the keys (Windows and
+    // X11 Linux) and the tray emits the same event; both run the same toggles
+    // as the in-app shortcuts, and like them no-op outside a voice channel.
     unsubscribers.push(
       desktop.globalShortcuts.onShortcut((action) => {
+        if (voiceStore.getState().currentChannelId === null) return;
         if (action === "mute") voiceKeybindActions.onMuteToggle();
         else voiceKeybindActions.onDeafenToggle();
       }),

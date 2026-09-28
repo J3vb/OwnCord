@@ -391,7 +391,6 @@ describeTrayStatusSuite(async () => {
 describeGlobalShortcutsSuite(async () => {
   const subject = {
     start: async () => undefined,
-    stop: async () => undefined,
     supported: async () => true,
     onShortcut: () => () => undefined,
   } as unknown as GlobalShortcuts;

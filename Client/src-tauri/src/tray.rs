@@ -26,7 +26,7 @@ struct TrayMenu {
     status: &'static str,
     statuses: [Item; 4],
     /// U6: toggle the microphone and the call audio without focusing the app.
-    /// Every platform gets these; the global Ctrl+M/Ctrl+D path is a separate,
+    /// Every platform gets these; the global Ctrl+Shift+M/Ctrl+Shift+D path is a separate,
     /// display-server-dependent extra.
     voice: [Item; 2],
     open_logs: Item,
@@ -162,7 +162,7 @@ fn emit_status_change<R: Runtime>(app: &tauri::AppHandle<R>, status: &str) {
 }
 
 /// U6: a tray Mute/Deafen pick. The renderer toggles the matching control; it
-/// is the same event the global Ctrl+M/Ctrl+D poller emits, so both paths run
+/// is the same event the global Ctrl+Shift+M/Ctrl+Shift+D poller emits, so both paths run
 /// one handler.
 fn emit_voice_shortcut<R: Runtime>(app: &tauri::AppHandle<R>, action: &str) {
     let _ = app.emit("voice-shortcut", action);

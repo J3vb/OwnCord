@@ -1124,6 +1124,39 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     start.mockRestore();
   });
 
+  it("ignores a global shortcut outside a voice channel (U6)", async () => {
+    const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
+    const onShortcut = vi
+      .spyOn(desktop.globalShortcuts, "onShortcut")
+      .mockImplementation((handler) => {
+        shortcutHandlers.add(handler);
+        return () => shortcutHandlers.delete(handler);
+      });
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: null,
+      localMuted: false,
+      localDeafened: false,
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    for (const handler of shortcutHandlers) {
+      handler("mute");
+      handler("deafen");
+    }
+
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
+    expect(voiceStore.getState().localMuted).toBe(false);
+    expect(voiceStore.getState().localDeafened).toBe(false);
+
+    onShortcut.mockRestore();
+    start.mockRestore();
+  });
+
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
     const { disableScreenshare } = await import("@lib/livekitSession");
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
