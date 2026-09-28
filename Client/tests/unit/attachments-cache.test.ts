@@ -108,7 +108,7 @@ import {
   setServerHost,
   pruneAttachmentCacheScope,
 } from "../../src/components/message-list/attachments";
-import { createAvatarElement } from "../../src/lib/avatar";
+import { createAvatarElement } from "../../src/components/message-list/avatar";
 
 function imageResponse() {
   return {

@@ -14,7 +14,8 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
-import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
+import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { isRenderableAvatar } from "./message-list/avatar";
 import {
   fetchImageAsDataUrl,
   recoverEvictedImage,

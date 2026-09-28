@@ -8,9 +8,10 @@
 //
 // The check is lexical: an `import type` has no runtime edge, and a dynamic
 // `import()` is the sanctioned lazy seam (a feature may lazily land a modal's
-// UI), so neither is a violation. A remaining static value import is listed
-// below with its reason, and the list is exact and shrink-only: a stale entry
-// fails.
+// UI), so neither is a violation. A static value import that must stay is
+// listed below with its reason; the list is exact and shrink-only, so a stale
+// entry fails. It is empty now — the avatar and reaction-tooltip edges were the
+// last two and both were moved below the UI.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -38,22 +39,9 @@ interface AllowedEdge {
 }
 
 // Static value imports of a UI module from a lower layer that survive
-// ARCH-06's three moves (preferences, formatting, the DM mutator) and are
-// deliberate. Exact and shrink-only: a stale entry fails.
-const ALLOWED: readonly AllowedEdge[] = [
-  {
-    from: "lib/avatar.ts",
-    to: "components/message-list/attachments",
-    reason:
-      "attachments.ts is the leaf every renderer imports; it owns the authenticated image fetch (fetchImageAsDataUrl), resolveServerUrl and isSafeUrl that avatar needs. Breaking this edge is the eager notifications->avatar->attachments startup chain PERF-07 cuts, not a layering fix ARCH-06 owns.",
-  },
-  {
-    from: "features/messaging/wsHandlers.ts",
-    to: "components/message-list/reaction-tooltip",
-    reason:
-      "invalidateReactionUsers is the reaction-tooltip's cache invalidator; the messaging WS handler calls it on reaction_update. Moving it down is a messaging-component extraction, out of ARCH-06's scope.",
-  },
-];
+// ARCH-06's moves and are deliberate. Exact and shrink-only: a stale entry
+// fails. Empty: every lower-layer edge now points below the UI layer.
+const ALLOWED: readonly AllowedEdge[] = [];
 
 /** Every static value import of `file`: `import … from "m"` and
  *  `export … from "m"` (a re-export is still a runtime edge), where the
