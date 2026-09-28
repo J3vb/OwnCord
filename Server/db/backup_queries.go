@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
@@ -31,6 +33,23 @@ import (
 // delays a write at the SQLite lock level is covered separately by
 // TestBackupToSafe_ConcurrentWriteIsNotDelayed.
 var BackupVACUUMPreExecHook func()
+
+// backupPublishMu serializes the final "destination still free? → rename" step
+// across every BackupToSafe call in the process. The rename itself is atomic,
+// but the pre-check and the rename are not one operation: two backups started
+// in the same second derive the same final name, both pass the check, and both
+// call os.Rename onto that one path. On Linux the second silently replaces the
+// first; on Windows os.Rename is MoveFileEx(REPLACE_EXISTING), which returns
+// "Access is denied" when two renames share a destination — the losing backup
+// then failed on a rename error instead of the "already exists" it should
+// report. The VACUUM still runs concurrently outside the lock; only the
+// publish needs serializing, and the re-check inside it keeps the second caller
+// reporting the collision rather than overwriting.
+//
+// ponytail: process-global rather than keyed by destination; a stat+rename is
+// microseconds and backups are ~daily, so use a per-file lock only if publish
+// contention ever shows up.
+var backupPublishMu syncutil.Mutex
 
 // BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
 // The destination path must not already exist.
@@ -133,12 +152,33 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}
 
-	if err := os.Rename(absTemp, absClean); err != nil {
+	// Publish under a lock with the destination re-check: a same-name backup
+	// that reached its VACUUM after this call's pre-check must be told the
+	// destination exists, not overwrite it (Linux) or fail the rename with
+	// "Access is denied" (Windows).
+	if err := publishBackup(absTemp, absClean); err != nil {
 		_ = os.Remove(absTemp)
-		return fmt.Errorf("BackupToSafe: publishing backup: %w", err)
+		return err
 	}
 
 	slog.Info("database backup written", "path", filepath.Base(absClean), "duration_ms", time.Since(started).Milliseconds())
+	return nil
+}
+
+// publishBackup renames the finished temp onto absClean under backupPublishMu,
+// re-checking that absClean is still free first. The caller removes absTemp on
+// any error.
+func publishBackup(absTemp, absClean string) error {
+	backupPublishMu.Lock()
+	defer backupPublishMu.Unlock()
+	if _, statErr := os.Stat(absClean); statErr == nil {
+		return fmt.Errorf("BackupToSafe: destination %q already exists", absClean)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("BackupToSafe: checking destination %q: %w", absClean, statErr)
+	}
+	if err := os.Rename(absTemp, absClean); err != nil {
+		return fmt.Errorf("BackupToSafe: publishing backup: %w", err)
+	}
 	return nil
 }
 
