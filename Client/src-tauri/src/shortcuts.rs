@@ -53,6 +53,12 @@ fn is_wayland_session(wayland_display: Option<&str>, session_type: Option<&str>)
         || session_type.is_some_and(|t| t.eq_ignore_ascii_case("wayland"))
 }
 
+/// Whether global key state is observable while another app is in front: not
+/// on a Wayland session, and only where key polling works at all.
+fn global_keys_observable(wayland: bool, polling_supported: bool) -> bool {
+    !wayland && polling_supported
+}
+
 /// Whether this platform can observe global key state while another app is in
 /// front. False on macOS and on any Wayland session.
 #[tauri::command]
@@ -61,13 +67,17 @@ pub fn voice_shortcuts_supported() -> bool {
         std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
         std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
     );
-    !wayland && crate::ptt::ptt_polling_supported()
+    global_keys_observable(wayland, crate::ptt::ptt_polling_supported())
 }
 
 /// Start the global voice-shortcut polling loop. Emits `voice-shortcut` with
-/// "mute" or "deafen" on each press edge.
+/// "mute" or "deafen" on each press edge. A no-op where
+/// `voice_shortcuts_supported` is false; the tray items still work there.
 #[tauri::command]
 pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
+    if !voice_shortcuts_supported() {
+        return;
+    }
     let mut guard = SHORTCUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() {
         return; // thread already alive — Mutex is the authoritative check
@@ -168,6 +178,17 @@ mod tests {
         assert!(!is_wayland_session(None, Some("x11")));
         assert!(!is_wayland_session(None, None));
         assert!(!is_wayland_session(Some(""), Some("x11")));
+    }
+
+    #[test]
+    fn poller_runs_only_where_global_keys_are_observable() {
+        assert!(global_keys_observable(false, true), "X11 or Windows");
+        assert!(!global_keys_observable(true, true), "Wayland with XWayland");
+        assert!(
+            !global_keys_observable(true, false),
+            "Wayland without XWayland"
+        );
+        assert!(!global_keys_observable(false, false), "macOS");
     }
 
     #[test]

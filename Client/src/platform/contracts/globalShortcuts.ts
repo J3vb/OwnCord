@@ -15,7 +15,7 @@
  * gap.
  */
 export interface GlobalShortcuts {
-  /** Start the native polling loop. Idempotent on the host side. */
+  /** Start the native polling loop where `supported()` is true. Idempotent on the host side. */
   start(): Promise<void>;
   /** Whether this platform can observe global key state. */
   supported(): Promise<boolean>;
