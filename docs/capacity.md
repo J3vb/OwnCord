@@ -36,7 +36,6 @@ docker run -d --name owncord-sut \
   -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
   -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
   -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
-  -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
   -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
   debian:bookworm-slim /app/chatserver
 ```
@@ -62,13 +61,12 @@ Why each part of that is load-bearing:
   machine budget; the packaging is qualified separately by the artifact and
   container lifecycle smokes (`Server/cmd/smoke`,
   `Server/scripts/docker-smoke.sh`).
-- **`node_ip=127.0.0.1` with `advertise_internal_ip`.** OwnCord's generated
-  `livekit.yaml` sets `use_external_ip: true`; without a `node_ip` the SFU
-  discovers the machine's public address by STUN and advertises ICE candidates
-  no same-machine client can reach — voice connects and carries no media. These
-  two knobs are a property of measuring on one machine, not of the product. The
-  server logs its "node_ip is not a public address" warning, which is correct
-  here and must not be copied into a real deployment.
+- **`advertise_internal_ip`.** OwnCord's generated `livekit.yaml` sets
+  `use_external_ip: true`; on its own the SFU then advertises only the
+  machine's STUN-discovered public address, which no same-machine client can
+  reach — voice connects and carries no media. `advertise_internal_ip` keeps
+  the host candidates alongside it. This knob is a property of measuring on one
+  machine, not a deployment recommendation.
 - **The load generators are outside that budget**, pinned with
   `taskset -c 2,3`. A generator sharing the server's cores measures the
   generator.
@@ -86,12 +84,12 @@ Why each part of that is load-bearing:
 
 Everything else is the shipped default. The non-defaults are:
 
-| Key                                             | Value       | Why                                                                                                                |
-| ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| `security.auth_rate_limit_multiplier`           | `100`       | Every connection logs in from 127.0.0.1, and the per-IP auth limits assume roughly one person per address          |
-| `voice.livekit_api_key` / `livekit_api_secret`  | per run     | The shipped dev credentials are blanked at load and disable voice entirely, so a run on them would measure nothing |
-| `voice.livekit_binary`                          | mounted SFU | Pins the SFU version and removes the container's need for egress and a CA bundle                                   |
-| `voice.node_ip` / `voice.advertise_internal_ip` | loopback    | See above — single-machine ICE, not a deployment setting                                                           |
+| Key                                            | Value       | Why                                                                                                                |
+| ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `security.auth_rate_limit_multiplier`          | `100`       | Every connection logs in from 127.0.0.1, and the per-IP auth limits assume roughly one person per address          |
+| `voice.livekit_api_key` / `livekit_api_secret` | per run     | The shipped dev credentials are blanked at load and disable voice entirely, so a run on them would measure nothing |
+| `voice.livekit_binary`                         | mounted SFU | Pins the SFU version and removes the container's need for egress and a CA bundle                                   |
+| `voice.advertise_internal_ip`                  | `true`      | See above — single-machine ICE, not a deployment setting                                                           |
 
 The SFU is **livekit-server 1.13.7**, the release the server itself downloads
 (`ws.DefaultLiveKitVersion`). Measuring a different SFU release than the product
