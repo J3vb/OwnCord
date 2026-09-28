@@ -101,7 +101,7 @@ Routes are registered in the `Mount*Routes` function of the owning `Server/api/*
 
 - channels, overrides, access preview → `MANAGE_CHANNELS`; roles → `MANAGE_ROLES`; settings, config facts (`GET /config`), registrations, retention → `MANAGE_SERVER`; audit log → `VIEW_AUDIT_LOG`; force-logout → `KICK_MEMBERS`.
 - `PATCH /users/{id}` → the perimeter only, with a ban or role change re-checked in `ModerationService` (`BAN_MEMBERS`/`MANAGE_ROLES` plus role hierarchy).
-- logs ticket, support bundles, attention, account erasure → `ADMINISTRATOR`, which bypasses every bit check.
+- logs ticket and log level, support bundles, attention, account erasure → `ADMINISTRATOR`, which bypasses every bit check.
 - tokens, backups, updates, recovery credentials → **Owner role only**; `ADMINISTRATOR` does not bypass this.
 - `POST /admin/api/setup` and `GET /admin/api/setup/status` are unauthenticated (setup additionally requires the one-time token printed at start-up); `/logs/stream` takes a single-use ticket.
 

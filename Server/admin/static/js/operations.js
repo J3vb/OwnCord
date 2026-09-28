@@ -372,17 +372,66 @@ function renderLogs(){
   html+='<button class="btn btn-ghost" data-action="copyAllLogs" title="Copy the lines the filters show">'+OPS_ICON.copy+'Copy</button>';
   html+='<button class="btn btn-ghost" data-action="clearLogs" title="Clear the lines on screen">'+I.trash+'Clear</button>';
   html+='</div></div>';
+  /* The timed log-level toggle (SRE-07): raise the server's level to debug
+     for a bounded window and it reverts on its own. The chips above only
+     filter what the client shows; this changes what the server logs.
+     Admin-gated server-side, so a non-admin sees the control disabled with
+     the reason rather than a silent 403. */
+  const canLevel=can(PERM.ADMINISTRATOR);
+  html+='<div class="log-level-bar"><span class="setting-name" id="logLevelName">Server log level</span>'
+    +'<span class="setting-desc" id="logLevelDesc">'+(canLevel?'Temporarily raise what the server logs, then it reverts on its own':'Requires an administrator account')+'</span>'
+    +'<span class="log-level-status" id="logLevelStatus" role="status"></span>'
+    +'<button class="toggle '+(state.logLevel==='debug'?'on':'')+'" id="logLevelToggle" role="switch" aria-checked="'+(state.logLevel==='debug')+'" aria-labelledby="logLevelName" aria-describedby="logLevelDesc"'
+    +' data-action="toggleServerLogLevel"'+(canLevel?'':' disabled')+'></button></div>';
   // A focusable region, so the log scrolls from the keyboard. Not role=log:
   // that is a live region, and a streaming log would talk over everything.
   html+='<div class="log-output" id="logOutput" role="region" aria-label="Log lines" tabindex="0"></div>';
   html+='<div class="log-status"><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
-  setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream()},0);
+  setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream();if(canLevel)loadLogLevel()},0);
   return html;
 }
 
 function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.querySelectorAll('.level-toggle[data-level="'+l+'"]').forEach(b=>b.setAttribute('aria-pressed',String(state.logLevels[l])));renderLogLines()}
 
 function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll))}
+
+/* The timed server log-level toggle (SRE-07). Raising the level is a PATCH
+   the server reverts on its own. The switch mirrors the server's own answer
+   (level, the base it reverts to, and when), and asks again once the window
+   closes rather than guessing what the server went back to. */
+const LOG_LEVEL_MINUTES=15;
+function clearLogLevelTimer(){if(state.logLevelTimer){clearInterval(state.logLevelTimer);state.logLevelTimer=null}}
+
+function paintLogLevel(){
+  const on=state.logLevel==='debug';
+  const fromConfig=state.logLevelBase==='debug';
+  const toggle=/** @type {HTMLButtonElement|null} */(document.getElementById('logLevelToggle'));
+  if(toggle){toggle.classList.toggle('on',on);toggle.setAttribute('aria-checked',String(on));if(fromConfig)toggle.disabled=true}
+  const status=document.getElementById('logLevelStatus');
+  const left=state.logLevelUntil-Date.now();
+  if(status)status.textContent=!on?'':fromConfig?'Debug, set in config.yaml':left>0?'Debug for '+Math.ceil(left/60000)+' more min':'Debug until it reverts';
+}
+
+function applyLogLevel(res){
+  clearLogLevelTimer();
+  state.logLevel=res.level;state.logLevelBase=res.base_level;
+  state.logLevelUntil=res.reverts_at&&res.level!==res.base_level?new Date(res.reverts_at).getTime():0;
+  if(state.logLevelUntil&&state.section==='logs'&&state.token)state.logLevelTimer=setInterval(()=>{
+    if(state.section!=='logs'||!state.token){clearLogLevelTimer();return}
+    if(Date.now()>=state.logLevelUntil){clearLogLevelTimer();loadLogLevel()}else paintLogLevel();
+  },1000);
+  paintLogLevel();
+}
+
+async function loadLogLevel(){try{applyLogLevel(await api('GET','/logs/level'))}catch(e){showToast(e.message,'error')}}
+
+async function toggleServerLogLevel(){
+  const on=state.logLevel==='debug';
+  try{
+    applyLogLevel(on?await api('DELETE','/logs/level'):await api('PATCH','/logs/level',{level:'debug',duration_seconds:LOG_LEVEL_MINUTES*60}));
+    showToast(on?'Log level set back to '+state.logLevelBase:'Debug logging on for '+LOG_LEVEL_MINUTES+' minutes','success');
+  }catch(e){showToast(e.message,'error')}
+}
 
 function toggleLogPause(){
   state.logPaused=!state.logPaused;
@@ -711,6 +760,7 @@ async function uninstallPlugin(id){
 Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,copyToken,createToken,
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,reloadAudit,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
+  toggleServerLogLevel,
   turnAuditPage(delta){reloadAudit(Math.max(1,state.auditPage+delta))},
   setAuditSearch(){
     state.auditSearch=this.value;clearTimeout(auditSearchTimer);

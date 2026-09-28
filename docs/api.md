@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 168 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 171 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -63,6 +63,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | GET     | `/admin/api/config`                                                  |
+| DELETE  | `/admin/api/logs/level`                                              |
+| GET     | `/admin/api/logs/level`                                              |
+| PATCH   | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/stream`                                             |
 | POST    | `/admin/api/logs/ticket`                                             |
 | GET     | `/admin/api/me`                                                      |
@@ -3063,6 +3066,7 @@ Authorization is two-layered:
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                        | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
 | `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
@@ -3812,12 +3816,33 @@ user has TOTP enabled.
 The config.yaml values the admin panel's Settings page shows as read-only
 facts, taken from the configuration the server booted with — so an edit to
 config.yaml shows here only after a restart, which is also when it takes
-effect.
+effect. Secrets appear only as `gif_configured` / `github_configured`
+booleans. `tls_domain`, `voice_url` and `backup_dir` are included only when
+the caller holds `ADMINISTRATOR` or is the owner. `logging_level` is the
+level the server booted at, normalised (an unrecognised value reads `info`,
+an unset one `""`); a debug boost in force shows in
+`GET /admin/api/logs/level`, not here.
 
 #### Response 200 OK
 
 ```json
-{ "upload_max_size_mb": 100, "voice_quality": "medium" }
+{
+  "upload_max_size_mb": 100,
+  "voice_quality": "medium",
+  "server_port": 8443,
+  "min_free_disk_mb": 256,
+  "max_ws_connections": 1000,
+  "tls_mode": "acme",
+  "tls_domain": "chat.example.com",
+  "user_quota_mb": 0,
+  "backup_dir": "data/backups",
+  "logging_level": "info",
+  "voice_url": "ws://localhost:7880",
+  "moderation_report_retention_days": 30,
+  "moderation_action_retention_days": 90,
+  "gif_configured": true,
+  "github_configured": false
+}
 ```
 
 #### Errors
@@ -4090,6 +4115,73 @@ Each event's data is one JSON record:
 ```json
 { "ts": "2026-08-04T12:00:00Z", "level": "INFO", "msg": "…", "source": "…", "attrs": "…" }
 ```
+
+---
+
+### GET /admin/api/logs/level
+
+The log level the server is running at, the level it started with (and
+reverts to), and when a debug boost reverts.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{ "level": "debug", "base_level": "info", "reverts_at": "2026-09-28T12:15:00Z" }
+```
+
+`reverts_at` is absent when no boost is pending.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
+
+---
+
+### PATCH /admin/api/logs/level
+
+Raise the server's log level to `debug` for 15 minutes. The server reverts to
+`base_level` on its own when the window ends; a second PATCH restarts the
+window. Recorded in the audit log as `log_level_debug_on`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Request
+
+```json
+{ "level": "debug", "duration_seconds": 900 }
+```
+
+Both fields are required and only these values are accepted.
+
+#### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 400    | `BAD_REQUEST`        | Invalid body, or any level or window other than above    |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
+
+---
+
+### DELETE /admin/api/logs/level
+
+Revert to `base_level` at once and cancel a pending boost. Recorded in the
+audit log as `log_level_reverted`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
 
 ---
 

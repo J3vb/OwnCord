@@ -31,6 +31,12 @@ type Deps struct {
 	Log     *slog.Logger
 	LogBuf  *admin.RingBuffer
 	Restart *RestartCoordinator
+	// LogLevelVar is the *slog.LevelVar main's log sinks read. app.New wraps
+	// it in the admin API's log-level controller (SRE-07), with LogBaseLevel
+	// as the level a timed debug boost reverts to. Nil in tests that build an
+	// App without main's wiring; the endpoints then report 503.
+	LogLevelVar  *slog.LevelVar
+	LogBaseLevel slog.Level
 }
 
 // closeStep is one teardown step: the stage that registered it, how that

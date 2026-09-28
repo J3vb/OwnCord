@@ -187,7 +187,28 @@ describe("Server/admin/static — Settings save (OC-0422)", () => {
   });
 });
 
-const CONFIG_FACTS = { upload_max_size_mb: 100, voice_quality: "medium" };
+const CONFIG_FACTS = {
+  upload_max_size_mb: 100,
+  voice_quality: "medium",
+  server_port: 8443,
+  min_free_disk_mb: 256,
+  max_ws_connections: 1000,
+  tls_mode: "acme",
+  tls_domain: "chat.example",
+  user_quota_mb: 50,
+  backup_dir: "/var/backups",
+  logging_level: "warn",
+  voice_url: "wss://voice.example",
+  moderation_report_retention_days: 30,
+  moderation_action_retention_days: 90,
+  gif_configured: true,
+  github_configured: false,
+  // A field the card does not know must not be rendered: were the server
+  // ever to send a secret, the card still would not show it.
+  gif_api_key: "klipy-secret",
+  github_token: "ghp_secret",
+};
+const LOG_LEVEL = { level: "warn", base_level: "warn" };
 const BACKUP = "chatserver_20260926_055335.db";
 
 function respondWith(
@@ -199,6 +220,7 @@ function respondWith(
     if (p === "/setup/status") return { json: { needs_setup: false } };
     if (p === "/settings") return { json: LOADED_SETTINGS };
     if (p === "/config") return { json: CONFIG_FACTS };
+    if (p === "/logs/level") return { json: LOG_LEVEL };
     if (p === "/backups")
       return { json: [{ name: BACKUP, size: 1024, date: "2026-09-26T05:53:35Z" }] };
     return { json: {} };
@@ -236,7 +258,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "General",
       "Access & registration",
       "Security",
-      "Set in config.yaml",
+      "Running configuration",
     ]);
     // Config-file values are facts from GET /config, not inputs that do nothing.
     for (const id of ["s-max_upload_bytes", "s-voice_quality", "s-server_icon"]) {
@@ -246,6 +268,15 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(facts).toContain("100 MB");
     expect(facts).toContain("upload.max_size_mb");
     expect(facts).toContain("Medium");
+    // The running-config card shows the effective server config (SRE-07).
+    expect(facts).toContain("8443");
+    expect(facts).toContain("acme");
+    expect(facts).toContain("chat.example");
+    expect(facts).toContain("/var/backups");
+    // Secrets cross the boundary as booleans only.
+    expect(facts).toContain("configured");
+    expect(facts).not.toContain("klipy-secret");
+    expect(facts).not.toContain("ghp_secret");
     // The owner-only backup policy moved to Backups & restore.
     expect(content.querySelector("#s-backup_schedule")).toBeNull();
     expect(content.querySelector("#s-backup_retention")).toBeNull();
@@ -258,6 +289,58 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(content.querySelector("#s-require_2fa")?.getAttribute("aria-labelledby")).toBe(
       "s-require_2fa-name",
     );
+  });
+
+  // A MANAGE_SERVER-only caller gets GET /config without the host path and
+  // endpoints; the card drops those rows instead of printing "undefined".
+  it("leaves out the admin-only rows when GET /config omits them", async () => {
+    const managerFacts = Object.fromEntries(
+      Object.entries(CONFIG_FACTS).filter(
+        ([k]) => !["tls_domain", "voice_url", "backup_dir"].includes(k),
+      ),
+    );
+    const booted = await boot([], respondWith({ "GET /config": { json: managerFacts } }));
+    dom = booted.dom;
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const facts = content.querySelector(".fact-list")?.textContent ?? "";
+    expect(facts).toContain("8443");
+    expect(facts).toContain("acme");
+    for (const hidden of ["tls.domain", "voice.livekit_url", "backup.dir", "undefined"]) {
+      expect(facts).not.toContain(hidden);
+    }
+  });
+
+  // An empty value reads "Not set", and a zero that switches a feature off
+  // reads as its meaning, never a blank or a bare "0".
+  it("shows what an empty or disabling value means", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /config": {
+          json: {
+            ...CONFIG_FACTS,
+            tls_domain: "",
+            logging_level: "",
+            min_free_disk_mb: 0,
+            moderation_report_retention_days: 0,
+            moderation_action_retention_days: 0,
+          },
+        },
+      }),
+    );
+    dom = booted.dom;
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const rows = Object.fromEntries(
+      [...content.querySelectorAll(".fact-row")].map((row) => [
+        row.querySelector("dt")?.textContent,
+        row.querySelector(".fact-value")?.textContent,
+      ]),
+    );
+    expect(rows["TLS domain"]).toBe("Not set");
+    expect(rows["Log level"]).toBe("Not set");
+    expect(rows["Reserved disk headroom"]).toBe("Off");
+    expect(rows["Report retention"]).toBe("Never");
+    expect(rows["Action retention"]).toBe("Never");
   });
 
   // UX clarity: registration is four radio cards with what each means, fed

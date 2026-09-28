@@ -85,6 +85,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/handlers_channels.go":      {Disposition: "adapter", Note: "db.Channel in the resolver and response shapes; the service owns the calls"},
 	"admin/handlers_users.go":         {Disposition: "adapter", Note: "UserWithRole/User/Role types in the panel response shapes; UserService owns the reads"},
 	"admin/helpers.go":                {Disposition: "adapter", Note: "Role/User types in response helpers"},
+	"admin/loglevel.go":               {Disposition: "boundary", Note: "audits the log-level boost and revert with WriteAudit; no other calls"},
 	"admin/logstream.go":              {Disposition: "boundary", Note: "handle threaded to the SSE stream's auth check; no calls of its own", Hands: calls{"auth.ResolveTokenHash": 2}},
 	"admin/middleware.go":             {Disposition: "adapter", Note: "Role/User/Session types in the request context; SessionService resolves the bearer token"},
 	"admin/types.go":                  {Disposition: "adapter", Note: "response DTOs only — its GetRoleByID went with the user family"},

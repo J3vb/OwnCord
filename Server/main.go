@@ -136,11 +136,14 @@ func main() {
 // and run until it stops and has closed every stage it started. Split out of
 // main() only so the restart handoff above runs on every return path.
 func runServer(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc *app.RestartCoordinator) error {
-	cfg, err := app.LoadConfig(log, levelVar, rc)
+	cfg, baseLevel, err := app.LoadConfig(log, levelVar, rc)
 	if err != nil {
 		return err
 	}
-	a, err := app.New(cfg, app.Deps{Version: version, Log: log, LogBuf: logBuf, Restart: rc})
+	a, err := app.New(cfg, app.Deps{
+		Version: version, Log: log, LogBuf: logBuf, Restart: rc,
+		LogLevelVar: levelVar, LogBaseLevel: baseLevel,
+	})
 	if err != nil {
 		return err
 	}
