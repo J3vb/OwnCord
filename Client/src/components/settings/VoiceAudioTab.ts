@@ -602,7 +602,8 @@ function buildVoiceAudioTabInner(
         previewLabel.hidden = true;
       } catch (err) {
         if (signal.aborted || thisRequest !== cameraRequestId) return;
-        const msg = err instanceof Error ? err.message : t("voiceAudio.cameraUnavailable");
+        const msg =
+          err instanceof Error && err.message ? err.message : t("voiceAudio.cameraUnavailable");
         setText(previewLabel, msg);
       }
     })();

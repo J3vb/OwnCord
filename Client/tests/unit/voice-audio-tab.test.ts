@@ -887,6 +887,37 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("camera preview falls back to Camera unavailable when the error has no message", async () => {
+    // An unplugged saved camera rejects with OverconstrainedError, whose message is "".
+    localStorage.setItem("owncord:settings:videoInputDevice", '"gone-camera-id"');
+    const audioStream = {
+      getTracks: () => [{ stop: vi.fn() }],
+    } as unknown as MediaStream;
+
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
+          if (constraints.video && constraints.audio === false) {
+            return Promise.reject(Object.assign(new Error(""), { name: "OverconstrainedError" }));
+          }
+          return Promise.resolve(audioStream);
+        }),
+      },
+    });
+
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const label = el.querySelector<HTMLElement>(".camera-preview-label")!;
+    await vi.waitFor(() => expect(label.textContent).toBe("Camera unavailable"));
+    expect(label.hidden).toBe(false);
+
+    ac.abort();
+  });
+
   it("sensitivity threshold handle is positioned based on saved sensitivity", () => {
     localStorage.setItem("owncord:settings:voiceSensitivity", "75");
     stubNavigator();
