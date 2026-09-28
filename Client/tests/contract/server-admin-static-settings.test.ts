@@ -39,7 +39,8 @@ window.__test = {
   renderUpdates: renderUpdates,
   applyUpdate: applyUpdate,
   syncUpdateConfirm: syncUpdateConfirm,
-  confirmApplyUpdate: confirmApplyUpdate
+  confirmApplyUpdate: confirmApplyUpdate,
+  renderPlugins: renderPlugins
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -53,7 +54,10 @@ interface FetchCall {
   body: unknown;
 }
 
-type Responder = (path: string, method: string) => { status?: number; json?: unknown };
+type Responder = (
+  path: string,
+  method: string,
+) => { status?: number; json?: unknown; headers?: Record<string, string> };
 
 function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
   return new JSDOM(ADMIN_HTML, {
@@ -78,7 +82,9 @@ function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
         return {
           ok: status >= 200 && status < 300,
           status,
+          headers: new Headers(r.headers),
           json: async () => r.json ?? {},
+          text: async () => JSON.stringify(r.json ?? {}),
         } as Response;
       }) as typeof fetch;
     },
@@ -103,6 +109,7 @@ interface Bridge {
   applyUpdate: () => Promise<void>;
   syncUpdateConfirm: () => void;
   confirmApplyUpdate: () => Promise<void>;
+  renderPlugins: () => Promise<string>;
 }
 
 async function boot(
@@ -581,5 +588,41 @@ describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
       "GET /updates": { json: { ...UPDATE, release_url: "javascript:alert(1)" } },
     });
     expect(document.getElementById("modalInner")?.querySelector("a")).toBeNull();
+  });
+});
+
+describe("Server/admin/static — Plugins empty state (A6)", () => {
+  let dom: JSDOM | undefined;
+  afterEach(() => dom?.window.close());
+
+  async function renderEmptyPlugins(runtime: string): Promise<Document> {
+    const booted = await boot([], (p) =>
+      p === "/api/v1/admin/plugins/"
+        ? { json: [], headers: { "X-Plugin-Runtime": runtime } }
+        : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    doc.body.innerHTML = await booted.bridge.renderPlugins();
+    return doc;
+  }
+
+  it("explains what a plugin is and offers the install when the runtime is on", async () => {
+    const doc = await renderEmptyPlugins("enabled");
+    expect(doc.querySelector(".empty-state h3")?.textContent).toBe("No plugins installed yet");
+    expect(doc.querySelector(".empty-state p")?.textContent).toMatch(/^A plugin is /);
+    expect(doc.querySelector(".empty-state #pluginFile")).not.toBeNull();
+    expect(doc.querySelector(".empty-state #pluginInstallBtn")).not.toBeNull();
+    expect(doc.querySelectorAll("#pluginFile")).toHaveLength(1);
+    expect(doc.querySelector(".tbl")).toBeNull();
+    expect(doc.querySelector(".empty-line")).toBeNull();
+  });
+
+  it("keeps one line and no install when the runtime is off", async () => {
+    const doc = await renderEmptyPlugins("disabled");
+    expect(doc.querySelector(".empty-line")?.textContent).toBe("No plugins installed.");
+    expect(doc.querySelector(".empty-state")).toBeNull();
+    expect(doc.querySelector("#pluginFile")).toBeNull();
+    expect(doc.querySelector(".tbl")).toBeNull();
   });
 });

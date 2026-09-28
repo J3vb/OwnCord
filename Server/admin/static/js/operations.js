@@ -614,21 +614,23 @@ async function renderPlugins(){
   const disabled=state.pluginRuntime==='disabled';
   let html='<div class="page-title">Plugins</div><div class="page-desc">Install and manage server plugins</div>';
 
+  const install='<div style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    '<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" data-change-action="pluginFileChosen">'+
+    '<button class="btn btn-accent" id="pluginInstallBtn" disabled data-action="installPlugin">'+I.upload+' Install</button></div>';
   if(disabled){
     html+='<div class="section-card" style="border-color:var(--yellow)"><div class="section-card-body"><strong style="color:var(--text-warning)">Plugin runtime is disabled on this server.</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px">Installed plugins are listed below but cannot be installed, enabled, or removed until the runtime is turned on in the server configuration.</div></div></div>';
+    /* Runtime off and nothing installed: one line, no Refresh and no empty table. */
+    if(!rows.length)return html+'<section class="section-card" aria-labelledby="plugins-installed-h"><div class="section-card-header"><h3 id="plugins-installed-h">Installed</h3></div><div class="empty-line">'+I.plugins+'<span>No plugins installed.</span></div></section>';
+  }else if(!rows.length){
+    /* Nothing installed: say what a plugin is and offer the install, instead
+       of an install card over an empty table. */
+    return html+emptyState(I.plugins,'No plugins installed yet','A plugin is a packaged add-on that gives this server new commands, integrations or automations. Upload its .zip package (max 16 MB, with a plugin.json manifest at its root) to install it.',install);
   }else{
     html+='<div class="section-card"><div class="section-card-header"><h3>Install Plugin</h3></div><div class="section-card-body">';
     html+='<div style="color:var(--text-muted);font-size:13px;margin-bottom:10px">Upload a plugin package (.zip, max 16 MB) containing a plugin.json manifest at its root.</div>';
-    html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
-    html+='<input type="file" id="pluginFile" aria-label="Plugin package (.zip)" accept=".zip,application/zip" class="form-input" style="max-width:320px;padding:8px" data-change-action="pluginFileChosen">';
-    html+='<button class="btn btn-accent" id="pluginInstallBtn" disabled data-action="installPlugin">'+I.upload+' Install</button>';
-    html+='</div></div></div>';
+    html+=install+'</div></div>';
   }
 
-  /* Nothing installed: one line, no Refresh and no empty table. */
-  if(!rows.length){
-    return html+'<section class="section-card" aria-labelledby="plugins-installed-h"><div class="section-card-header"><h3 id="plugins-installed-h">Installed</h3></div><div class="empty-line">'+I.plugins+'<span>No plugins installed'+(disabled?'.':' yet. Install one above.')+'</span></div></section>';
-  }
   html+='<div class="section-card"><div class="section-card-header"><h3>Installed</h3><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
   html+='<table class="tbl"><thead><tr><th>Plugin</th><th>Version</th><th>Status</th><th>Installed</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
   rows.forEach(row=>{
