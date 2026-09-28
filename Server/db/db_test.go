@@ -274,6 +274,28 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 	}
 }
 
+func TestMigrateCreatesAuditActionIndex(t *testing.T) {
+	database := openMemory(t)
+
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("Migrate() error: %v", err)
+	}
+
+	// The Dashboard's action filter runs SELECT DISTINCT action FROM audit_log,
+	// and the log grows without bound (one ws_connect row per handshake). The
+	// action index lets that read serve from the index instead of scanning the
+	// whole table.
+	var name string
+	err := database.QueryRowContext(context.Background(),
+		"SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='audit_log' AND name='idx_audit_log_action'",
+	).Scan(&name)
+	if err == sql.ErrNoRows {
+		t.Fatal("idx_audit_log_action not found on audit_log after migration")
+	} else if err != nil {
+		t.Fatalf("query error for idx_audit_log_action: %v", err)
+	}
+}
+
 func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {
 	database := openMemory(t)
 
