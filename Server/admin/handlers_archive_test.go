@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -27,7 +28,9 @@ type archiveFixture struct {
 	token    string
 }
 
-func newArchiveFixture(t *testing.T) archiveFixture {
+// newArchiveFixture builds the fixture; configure, when given, adjusts the
+// running config before the handler is built.
+func newArchiveFixture(t *testing.T, configure ...func(dir string, cfg *config.Config)) archiveFixture {
 	t.Helper()
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
@@ -68,14 +71,17 @@ func newArchiveFixture(t *testing.T) archiveFixture {
 		Upload: config.UploadConfig{StorageDir: uploads},
 		Backup: config.BackupConfig{Dir: backups},
 	}
+	for _, c := range configure {
+		c(dir, cfg)
+	}
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{ConfigPath: configPath, RunningCfg: cfg})
 	token := createAdminUser(t, database)
 	return archiveFixture{dir: dir, dataDir: dataDir, config: configPath, handler: handler, database: database, token: token}
 }
 
-// archiveEntries fetches GET /archive and returns the zip's members by name.
-func archiveEntries(t *testing.T, f archiveFixture) map[string][]byte {
+// archiveZip fetches GET /archive and opens the returned zip.
+func archiveZip(t *testing.T, f archiveFixture) *zip.Reader {
 	t.Helper()
 	w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
 	if w.Code != http.StatusOK {
@@ -91,6 +97,13 @@ func archiveEntries(t *testing.T, f archiveFixture) map[string][]byte {
 	if err != nil {
 		t.Fatalf("zip.NewReader: %v", err)
 	}
+	return zr
+}
+
+// archiveEntries fetches GET /archive and returns the zip's members by name.
+func archiveEntries(t *testing.T, f archiveFixture) map[string][]byte {
+	t.Helper()
+	zr := archiveZip(t, f)
 	out := map[string][]byte{}
 	for _, zf := range zr.File {
 		rc, err := zf.Open()
@@ -182,7 +195,10 @@ func TestHandleArchive_BadDataDirIs500(t *testing.T) {
 	database := openAdminTestDB(t)
 	admin.SetDatabasePath(filepath.Join(dir, "chatserver.db"))
 	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
-	cfg := &config.Config{Server: config.ServerConfig{DataDir: filepath.Join(blocker, "nope")}}
+	cfg := &config.Config{
+		Server: config.ServerConfig{DataDir: filepath.Join(blocker, "nope")},
+		Backup: config.BackupConfig{Dir: filepath.Join(dir, "backups")},
+	}
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{ConfigPath: filepath.Join(dir, "config.yaml"), RunningCfg: cfg})
 	token := createAdminUser(t, database)
@@ -194,6 +210,59 @@ func TestHandleArchive_BadDataDirIs500(t *testing.T) {
 	var body map[string]string
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Errorf("error body is not JSON: %s", w.Body.String())
+	}
+}
+
+// TestHandleArchive_UploadsOutsideDataDir: upload.storage_dir moved off the
+// data dir is still part of a complete restore, archived as data/uploads/.
+func TestHandleArchive_UploadsOutsideDataDir(t *testing.T) {
+	f := newArchiveFixture(t, func(dir string, cfg *config.Config) {
+		ext := filepath.Join(dir, "big", "uploads")
+		if err := os.MkdirAll(filepath.Join(ext, "ab"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ext, "ab", "far.bin"), []byte("far away"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg.Upload.StorageDir = ext
+	})
+	entries := archiveEntries(t, f)
+	if got := string(entries["data/uploads/ab/far.bin"]); got != "far away" {
+		t.Errorf("external upload entry = %q, want the upload bytes; got %v", got, archiveNames(entries))
+	}
+}
+
+// TestHandleArchive_BackupDirIsDataDir: backup.dir set to the data dir itself
+// must not drop the whole data dir from the archive.
+func TestHandleArchive_BackupDirIsDataDir(t *testing.T) {
+	f := newArchiveFixture(t, func(_ string, cfg *config.Config) {
+		cfg.Backup.Dir = cfg.Server.DataDir
+	})
+	entries := archiveEntries(t, f)
+	for _, want := range []string{"data/chatserver.db", "data/uploads/hello.bin", "data/totp.key"} {
+		if _, ok := entries[want]; !ok {
+			t.Errorf("archive is missing %q; got %v", want, archiveNames(entries))
+		}
+	}
+	for name := range entries {
+		if strings.Contains(name, "owncord-archive") {
+			t.Errorf("archive carries its own work dir entry %q", name)
+		}
+	}
+}
+
+// TestHandleArchive_KeepsFileModes: an extracted key file must come back
+// 0600, not world-readable.
+func TestHandleArchive_KeepsFileModes(t *testing.T) {
+	f := newArchiveFixture(t)
+	modes := map[string]os.FileMode{}
+	for _, zf := range archiveZip(t, f).File {
+		modes[zf.Name] = zf.Mode().Perm()
+	}
+	for _, name := range []string{"data/totp.key", "data/chatserver.db", "config.yaml"} {
+		if got := modes[name]; got != 0o600 {
+			t.Errorf("%s mode = %o, want 600", name, got)
+		}
 	}
 }
 

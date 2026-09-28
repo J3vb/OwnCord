@@ -646,7 +646,9 @@ each omission costs). **Download full archive** on the Backups & restore page
 returns one zip with all of it — the database as a `VACUUM INTO` snapshot, the
 whole data directory (uploads, `totp.key`, `erasure.key`,
 `erasure/markers.sqlite`, `push_vapid.key`, TLS material), and `config.yaml`.
-Stored backups (`backup.dir`) are left out. It is Owner-only, because the archive holds password hashes and the key files.
+An `upload.storage_dir` outside the data directory is archived as
+`data/uploads/`. Stored backups (`backup.dir`) are left out, and the archive
+is built inside `backup.dir`, so that directory needs room for it. It is Owner-only, because the archive holds password hashes and the key files.
 
 The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
 even while the server runs. The archive is still taken with WAL-mode writes in

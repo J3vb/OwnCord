@@ -17,7 +17,7 @@ import (
 
 // archiveWriteWindow bounds one archive download's write deadline. The
 // server's global WriteTimeout is 30 s, which a multi-gigabyte archive cannot
-// finish in; this is set once on the underlying connection before the copy,
+// be built and sent in; this is set once, before the build,
 // mirroring the bounded window the transfer routes use, so a stalled client is
 // still abandoned rather than holding the handler forever.
 const archiveWriteWindow = 10 * time.Minute
@@ -44,7 +44,19 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
 			return
 		}
-		work, err := os.MkdirTemp("", "owncord-archive-")
+		// The archive can outlive the global write deadline; give this
+		// connection its own bounded window covering the build and the copy
+		// (a stalled client still times out).
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(archiveWriteWindow))
+
+		// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
+		// target, and that directory is already the one backups write to.
+		backupDir := opts.RunningCfg.Backup.Dir
+		if err := os.MkdirAll(backupDir, 0o750); err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
+			return
+		}
+		work, err := os.MkdirTemp(backupDir, "owncord-archive-")
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
 			return
@@ -75,9 +87,6 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// The archive can outlive the global write deadline; give this
-		// connection its own bounded window (a stalled client still times out).
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(archiveWriteWindow))
 
 		actor := actorFromContext(r)
 		slog.Warn("backup archive downloaded", "actor_id", actor, "bytes", info.Size())
@@ -103,6 +112,9 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	if err := database.BackupToSafe(ctx, snapshot, work); err != nil {
 		return "", fmt.Errorf("snapshotting database: %w", err)
 	}
+	if err := os.Chmod(snapshot, 0o600); err != nil {
+		return "", fmt.Errorf("restricting snapshot: %w", err)
+	}
 
 	outPath := filepath.Join(work, archiveName)
 	out, err := os.Create(outPath) //nolint:gosec // G304: our own temp path
@@ -112,7 +124,7 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	defer out.Close() //nolint:errcheck
 	zw := zip.NewWriter(out)
 
-	if err := walkDataDir(zw, cfg.Server.DataDir, cfg.Backup.Dir, snapshot); err != nil {
+	if err := addTrees(zw, cfg.Server.DataDir, cfg.Upload.StorageDir, cfg.Backup.Dir, work, snapshot); err != nil {
 		_ = zw.Close()
 		return "", err
 	}
@@ -129,84 +141,161 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	return outPath, nil
 }
 
-// walkDataDir adds every regular file under dataDir to the archive as
-// "data/<relative>", replacing the live database file with the snapshot and
-// skipping the database's WAL sidecars (the snapshot supersedes them), the
-// backup directory and any in-progress *.tmp file.
-func walkDataDir(zw *zip.Writer, dataDir, backupDir, snapshot string) error {
+// resolvePath returns p as an absolute path with symlinks resolved, or just
+// absolute when it does not exist yet.
+func resolvePath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real, nil
+	}
+	return abs, nil
+}
+
+// isWithin reports whether path is root or lies below it.
+func isWithin(path, root string) bool {
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
+// addTrees adds the data directory as "data/..." and, when upload.storage_dir
+// lives outside it, the uploads as "data/uploads/...". The live database file
+// is replaced by the snapshot, and the backup and work directories, the
+// database's WAL sidecars and any in-progress *.tmp file are left out.
+func addTrees(zw *zip.Writer, dataDir, uploadsDir, backupDir, work, snapshot string) error {
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
 		return fmt.Errorf("resolving data dir: %w", err)
 	}
-	absDB, _ := filepath.Abs(dbFilePath)
-	absBackup := ""
-	if backupDir != "" {
-		if absBackup, err = filepath.Abs(backupDir); err != nil {
-			return fmt.Errorf("resolving backup dir: %w", err)
+	realData, err := filepath.EvalSymlinks(absData)
+	if err != nil {
+		return fmt.Errorf("resolving data dir: %w", err)
+	}
+	t := archiveTree{zw: zw, snapshot: snapshot}
+	if t.db, err = resolvePath(dbFilePath); err != nil {
+		return fmt.Errorf("resolving database path: %w", err)
+	}
+	for _, dir := range []string{backupDir, work} {
+		abs, err := resolvePath(dir)
+		if err != nil {
+			return fmt.Errorf("resolving %s: %w", dir, err)
 		}
+		t.skip = append(t.skip, abs)
 	}
 
-	snapshotAdded := false
-	err = filepath.WalkDir(absData, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(absData, path)
-		if err != nil {
-			return err
-		}
-		name := filepath.ToSlash(filepath.Join("data", rel))
-
-		if d.IsDir() {
-			if path == absBackup {
-				return filepath.SkipDir
-			}
-			if rel == "." {
-				return nil
-			}
-			_, err := zw.Create(name + "/")
-			return err
-		}
-		if !d.Type().IsRegular() {
-			return nil // symlinks, sockets and devices are not backed up
-		}
-		abs := path
-		// The live database is replaced by the snapshot; its WAL sidecars are
-		// superseded by it. The WAL belongs to dbFilePath, not this walk.
-		if abs == absDB {
-			if err := addFile(zw, name, snapshot); err != nil {
-				return err
-			}
-			snapshotAdded = true
-			return nil
-		}
-		if strings.HasPrefix(abs, absDB+"-") || strings.HasSuffix(abs, ".tmp") {
-			return nil // -wal / -shm, and in-progress writes
-		}
-		return addFile(zw, name, abs)
-	})
-	if err != nil {
+	if err := t.walk(realData, "data"); err != nil {
 		return fmt.Errorf("archiving data dir: %w", err)
+	}
+	realUploads, err := resolvePath(uploadsDir)
+	if err != nil {
+		return fmt.Errorf("resolving uploads dir: %w", err)
+	}
+	if !isWithin(realUploads, realData) {
+		if _, err := os.Stat(realUploads); err == nil {
+			if err := t.walk(realUploads, "data/uploads"); err != nil {
+				return fmt.Errorf("archiving uploads dir: %w", err)
+			}
+		}
 	}
 	// A configured database outside the data dir is still part of "everything
 	// a restore needs" — put it at the conventional path so the restore steps
 	// in the docs still find it.
-	if !snapshotAdded && absDB != "" {
-		if err := addFile(zw, "data/chatserver.db", snapshot); err != nil {
+	if !t.snapshotAdded {
+		info, err := os.Stat(snapshot)
+		if err != nil {
+			return err
+		}
+		if err := addFile(zw, "data/chatserver.db", snapshot, info); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// addFile copies src into the zip under name.
-func addFile(zw *zip.Writer, name, src string) error {
+// archiveTree walks directories into one zip, sharing the exclusions and
+// the live-database substitution across every walked root.
+type archiveTree struct {
+	zw            *zip.Writer
+	db            string
+	snapshot      string
+	skip          []string
+	snapshotAdded bool
+}
+
+// walk adds every regular file under root to the zip as "prefix/<relative>".
+// root itself is never skipped, even when it is a skipped directory.
+func (t *archiveTree) walk(root, prefix string) error {
+	return filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(filepath.Join(prefix, rel))
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		if d.IsDir() {
+			if rel == "." {
+				return nil
+			}
+			for _, skip := range t.skip {
+				if path == skip {
+					return filepath.SkipDir
+				}
+			}
+			return addDir(t.zw, name, info)
+		}
+		if !d.Type().IsRegular() {
+			return nil // symlinks, sockets and devices are not backed up
+		}
+		// The live database is replaced by the snapshot; its WAL sidecars are
+		// superseded by it. The WAL belongs to dbFilePath, not this walk.
+		if path == t.db {
+			if err := addFile(t.zw, name, t.snapshot, info); err != nil {
+				return err
+			}
+			t.snapshotAdded = true
+			return nil
+		}
+		if strings.HasPrefix(path, t.db+"-") || strings.HasSuffix(path, ".tmp") {
+			return nil // -wal / -shm, and in-progress writes
+		}
+		return addFile(t.zw, name, path, info)
+	})
+}
+
+// addDir adds a directory entry carrying info's mode and mtime.
+func addDir(zw *zip.Writer, name string, info os.FileInfo) error {
+	hdr, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	hdr.Name = name + "/"
+	_, err = zw.CreateHeader(hdr)
+	return err
+}
+
+// addFile copies src into the zip under name, carrying info's mode and mtime
+// so an extracted key file keeps its 0600.
+func addFile(zw *zip.Writer, name, src string, info os.FileInfo) error {
 	in, err := os.Open(src) //nolint:gosec // G304: path from our own walk
 	if err != nil {
 		return err
 	}
 	defer in.Close() //nolint:errcheck
-	w, err := zw.Create(name)
+	hdr, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	hdr.Name = name
+	hdr.Method = zip.Deflate
+	w, err := zw.CreateHeader(hdr)
 	if err != nil {
 		return err
 	}
@@ -222,8 +311,9 @@ func addConfig(zw *zip.Writer, configPath string) error {
 	if configPath == "" {
 		return nil
 	}
-	if _, err := os.Stat(configPath); err != nil {
+	info, err := os.Stat(configPath)
+	if err != nil {
 		return nil
 	}
-	return addFile(zw, "config.yaml", configPath)
+	return addFile(zw, "config.yaml", configPath, info)
 }
