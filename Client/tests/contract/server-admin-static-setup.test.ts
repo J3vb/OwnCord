@@ -230,6 +230,11 @@ describe("Server/admin/static — setup wizard and sign-in", () => {
     // A loopback address is not what members on other machines type.
     expect(doc.getElementById("setupAddressHint")!.textContent).toMatch(/other machines/);
     expect(doc.getElementById("inviteCode")!.textContent).toBe("INV-1");
+    // The admin panel has no invite page; invites live in the desktop client
+    // only. Point owners there rather than at a panel section that does not
+    // exist.
+    expect(doc.getElementById("inviteHint")!.textContent).toMatch(/desktop client/i);
+    expect(doc.getElementById("inviteHint")!.textContent).not.toMatch(/admin panel/i);
     expect(doc.getElementById("certFingerprint")!.textContent).toBe("AA:BB:CC");
     expect(doc.getElementById("setupFingerprint")!.classList.contains("hidden")).toBe(false);
     expect(doc.getElementById("setupFingerprintLater")!.classList.contains("hidden")).toBe(true);

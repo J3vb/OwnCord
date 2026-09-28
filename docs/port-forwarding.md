@@ -81,10 +81,14 @@ nobody hears anything, because the media never arrives.
 Two things are needed together:
 
 1. Forward `50000-60000/UDP` (and `7881/TCP`) to the server.
-2. Set `voice.node_ip` to your **public** address. It is the address LiveKit
-   advertises in its ICE candidates, so a private value hands remote clients
-   something they cannot route to. The server warns at start-up if it is not a
-   public address.
+2. Give LiveKit a routable media address. OwnCord's generated `livekit.yaml`
+   sets `use_external_ip: true`, so with `voice.node_ip` **left empty** LiveKit
+   detects the public address itself on every start — the right choice on a
+   dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). Set `voice.node_ip`
+   only when auto-detection cannot work (a tailnet-only host, or a NAT where
+   LiveKit's lookup is blocked): it is the address LiveKit advertises in its
+   ICE candidates, so a private value hands remote clients something they
+   cannot route to. The server warns at start-up if it is not a public address.
 
 A reverse proxy cannot carry the UDP range. No HTTP proxy can.
 
@@ -152,12 +156,20 @@ address. The router will not route a packet back into the network it came from.
 ### Dynamic public IP
 
 Most residential connections get a new public address periodically — after a
-reboot, an outage, or on the ISP's own schedule. Every client that saved the old
-address stops connecting, all at once, for no visible reason.
+reboot, an outage, or on the ISP's own schedule. Two things can break at once:
+the address clients type, and the media address LiveKit advertises.
 
-- **Fix:** use dynamic DNS and share a hostname rather than an IP literal.
+- **Clients:** use dynamic DNS and share a hostname rather than an IP literal.
+- **Media (`voice.node_ip`):** leave it **empty** on a dynamic address. OwnCord's
+  auto-generated `livekit.yaml` sets `use_external_ip: true`, so LiveKit detects
+  its public address itself on every start. A pinned `voice.node_ip` goes stale
+  silently when the address changes: the call connects — signalling still works
+  — and then nobody hears anything, because the ICE candidate names an address
+  no longer yours. If you did pin it, clear it (or update it) after an IP
+  change and restart the server so `livekit.yaml` is rewritten.
 - **The server cannot detect this for you.** It never learns its public address,
-  so it cannot notice the address changing.
+  so it cannot notice the address changing; the fix above is what makes the
+  address changing harmless.
 
 ### Firewalls
 

@@ -91,24 +91,24 @@ LiveKit settings live in the `voice:` section of `config.yaml`:
 
 ```yaml
 voice:
-  livekit_api_key: "devkey"
-  livekit_api_secret: "owncord-dev-secret-key-min-32chars"
+  livekit_api_key: "my-unique-key"
+  livekit_api_secret: "my-secret-at-least-32-characters-long"
   livekit_url: "ws://localhost:7880"
   livekit_binary: "C:/livekit/livekit-server.exe"
   quality: "medium"
 ```
 
-| Field                   | Purpose                                                                                              | Default                                |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `livekit_api_key`       | Shared API key between OwnCord and LiveKit                                                           | `"devkey"`                             |
-| `livekit_api_secret`    | Shared secret for JWT signing (min 32 chars)                                                         | `"owncord-dev-secret-key-min-32chars"` |
-| `livekit_url`           | LiveKit WebSocket URL                                                                                | `ws://localhost:7880`                  |
-| `livekit_binary`        | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed               | `""`                                   |
-| `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty   | `true` in generated config             |
-| `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.7"`)                                          | `""` (built-in pin)                    |
-| `node_ip`               | Public IP for WebRTC ICE candidates (remote users behind NAT)                                        | `""` (auto-detect)                     |
-| `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false`                                |
-| `quality`               | Default voice quality preset                                                                         | `"medium"`                             |
+| Field                   | Purpose                                                                                              | Default                                 |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `livekit_api_key`       | Shared API key between OwnCord and LiveKit                                                           | `""` (random key generated if unset)    |
+| `livekit_api_secret`    | Shared secret for JWT signing (min 32 chars)                                                         | `""` (random secret generated if unset) |
+| `livekit_url`           | LiveKit WebSocket URL                                                                                | `ws://localhost:7880`                   |
+| `livekit_binary`        | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed               | `""`                                    |
+| `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty   | `true` in generated config              |
+| `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.7"`)                                          | `""` (built-in pin)                     |
+| `node_ip`               | Public IP for WebRTC ICE candidates (remote users behind NAT)                                        | `""` (auto-detect)                      |
+| `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false`                                 |
+| `quality`               | Default voice quality preset                                                                         | `"medium"`                              |
 
 Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT_API_KEY`, `OWNCORD_VOICE_LIVEKIT_API_SECRET`, etc.
 
@@ -215,8 +215,9 @@ you configure LiveKit to post webhooks to `POST /api/v1/livekit/webhook`
 
 ## 8. Production Checklist
 
-- [ ] Change `livekit_api_key` from `"devkey"` to a random string
-- [ ] Change `livekit_api_secret` to a random 32+ character string
+- [ ] Set `livekit_api_key` and `livekit_api_secret` to your own random values
+      (the setup wizard generates them, but a random key regenerated at every
+      start is only a dev convenience; a fixed key/secret keeps voice tokens valid)
 - [ ] Open firewall ports: 7881/TCP, 50000-60000/UDP
 - [ ] If using ACME/manual TLS, ensure LiveKit proxy at `/livekit` is working
 - [ ] Test voice by joining a voice channel from two clients

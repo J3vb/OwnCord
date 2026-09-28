@@ -18,18 +18,19 @@ Production deployment guide for OwnCord server on Windows and Linux.
 
 ```bash
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=dev" .
 ```
 
 **Linux:**
 
 ```bash
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=dev" .
 ```
 
 - `-s -w` strips debug info (smaller binary)
-- `-X main.version=...` embeds the version string
+- `-X main.version=...` embeds the version string; a source build reports `dev`
+  unless you set it to the tag you built from
 - `CGO_ENABLED=0` produces a fully static binary on Linux
 
 Alternatively, download a pre-built binary from GitHub Releases:
@@ -112,14 +113,12 @@ cp livekit.yaml.example livekit.yaml
 
 # 3. Create config.yaml from the shipped example
 cp config.yaml.example config.yaml
-# Edit it: set voice.livekit_url to "ws://livekit:7880" (the compose service
-# address). The copied default is ws://localhost:7880, which is the server
-# container itself — voice would never reach the LiveKit container.
-# Set voice.auto_download_livekit to false (the copied default is true), or the
-# server downloads and runs a second LiveKit inside its own container.
-# Leave voice.livekit_api_key, voice.livekit_api_secret and voice.livekit_binary
-# unset: compose injects the key and secret from .env, and LiveKit runs as its
-# own container.
+# Edit it for non-secret settings (server name, TLS, etc.). The compose file
+# already points the server at the LiveKit service (voice.livekit_url =
+# "ws://livekit:7880") and turns auto-download off, so no voice edit is needed
+# here. Leave voice.livekit_api_key, voice.livekit_api_secret and
+# voice.livekit_binary unset: compose injects the key and secret from .env, and
+# LiveKit runs as its own container.
 
 # 4. Start
 docker compose up -d
@@ -140,16 +139,15 @@ unreachable from your laptop until you either tunnel to it —
 
 ### config.yaml for Docker
 
-The shipped compose file injects **only the LiveKit key and secret** as
-environment variables from `.env`. It does not set `voice.livekit_url`, so that
-key **must** be set in `config.yaml` — and it must point at the LiveKit
-container, `ws://livekit:7880`, not the copied default `ws://localhost:7880`
-(which is the server container itself). Set `voice.auto_download_livekit` to
-`false` (the copied default is `true`, which would download and run a second
-LiveKit inside the server container), leave `voice.livekit_binary` unset, and
-do not set `voice.livekit_api_key` / `voice.livekit_api_secret` in the file
-(the environment values win, and keeping secrets out of `config.yaml` is the
-point of `.env`). Set everything else as normal:
+The shipped compose file injects the LiveKit key and secret from `.env`, and
+it also sets `voice.livekit_url` to `ws://livekit:7880` and
+`voice.auto_download_livekit` to `false` as environment variables, so those two
+keys **must not** be set in `config.yaml`: the environment value wins, and
+leaving them out keeps the mounted file free of Docker-specific values. Leave
+`voice.livekit_binary` unset, and do not set `voice.livekit_api_key` /
+`voice.livekit_api_secret` in the file either (compose injects them from `.env`,
+and keeping secrets out of `config.yaml` is the point of `.env`). Set everything
+else as normal:
 
 ```yaml
 server:
@@ -157,8 +155,6 @@ server:
   port: 8443
 
 voice:
-  livekit_url: "ws://livekit:7880" # Docker service DNS — do not change
-  auto_download_livekit: false # LiveKit runs as its own container
   quality: "medium"
 
 tls:

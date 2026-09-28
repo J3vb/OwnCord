@@ -26,10 +26,18 @@ func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 		scheme = "https"
 	}
 
-	localIP, addrKind := getOutboundIP()
+	addrs := netclass.LocalAddrs()
+	localIP, addrKind := pickBannerAddr(addrs)
 	port := cfg.Server.Port
 	baseURL := scheme + "://" + net.JoinHostPort(localIP, strconv.Itoa(port))
 	adminURL := baseURL + "/admin"
+
+	// O1: the address above is the most widely reachable one, which on a
+	// dual-stack host can be a global IPv6. The default admin allowlist admits
+	// only loopback, private and unique-local addresses, so that admin URL
+	// answers 403 even from the host itself. When a LAN address exists and is
+	// not the one already printed, offer it too.
+	lanLine := bannerLANAdminLine(scheme, pickBannerLANAddr(addrs), localIP, port)
 
 	tlsStatus := "disabled"
 	if tls {
@@ -60,14 +68,14 @@ func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
     API      %s/api/v1/info
     WebSocket   %s/api/v1/ws
     Admin    %s
-    Health   %s/health
+    Health   %s/health%s
    ─────────────────────────────────────────────
     Address  %s
    ─────────────────────────────────────────────
     Press Ctrl+C to stop the server.
 
 `, cfg.Server.Name, ver, tlsStatus, runtime.GOOS, runtime.GOARCH, fpLine,
-		baseURL, wsURL(scheme, localIP, port), adminURL, baseURL,
+		baseURL, wsURL(scheme, localIP, port), adminURL, baseURL, lanLine,
 		bannerQualifier(addrKind, localIP, port))
 
 	_, _ = fmt.Fprint(os.Stderr, banner)
@@ -124,20 +132,9 @@ func warnLowDisk(log *slog.Logger, label, path string, critical uint64) {
 	}
 }
 
-// getOutboundIP returns an address this machine can be reached at, for the
-// startup banner only, together with how far that address actually reaches.
-// It reads the interface table and never opens a socket — the previous UDP
-// "dial" of an external address sent no packet, but a network capture still
-// saw a connect() to it at every start, which is exactly what BPR-055's proof
-// must not contain.
-func getOutboundIP() (string, netclass.Kind) {
-	return pickBannerAddr(netclass.LocalAddrs())
-}
-
-// pickBannerAddr chooses the most widely reachable address in addrs, and is
-// the whole of getOutboundIP's decision so it can be tested against injected
-// topologies — CI has whatever interfaces the runner has, which is not a
-// property worth asserting on.
+// pickBannerAddr chooses the most widely reachable address in addrs, so it can
+// be tested against injected topologies — CI has whatever interfaces the
+// runner has, which is not a property worth asserting on.
 //
 // B6-6: this used to be "the first global-unicast IPv4", and net.IP's
 // IsGlobalUnicast is true for RFC1918. On a home server that printed the LAN
@@ -166,6 +163,39 @@ func pickBannerAddr(addrs []netip.Addr) (string, netclass.Kind) {
 		return "localhost", netclass.KindLoopback
 	}
 	return best, bestKind
+}
+
+// pickBannerLANAddr returns the address the admin allowlist is most likely to
+// admit — a private (RFC1918) or unique-local address — or "" when the host
+// has none. It ignores reachability ranking: the point is precisely that the
+// most widely reachable address can be outside the default admin perimeter.
+func pickBannerLANAddr(addrs []netip.Addr) string {
+	best := ""
+	bestRank := -1
+	bestIsV4 := false
+	for _, a := range addrs {
+		k := netclass.Classify(a)
+		if k != netclass.KindPrivate && k != netclass.KindUniqueLocal {
+			continue
+		}
+		rank := netclass.Rank(k)
+		isV4 := a.Unmap().Is4()
+		if rank > bestRank || (rank == bestRank && isV4 && !bestIsV4) {
+			best, bestRank, bestIsV4 = a.String(), rank, isV4
+		}
+	}
+	return best
+}
+
+// bannerLANAdminLine builds the extra "Admin (LAN)" line, or "" when the
+// primary admin URL already is the LAN address (or there is no LAN address to
+// print). Keeping the decision here makes it testable without capturing the
+// whole banner.
+func bannerLANAdminLine(scheme, lanIP, primaryIP string, port int) string {
+	if lanIP == "" || lanIP == primaryIP {
+		return ""
+	}
+	return "\n    Admin (LAN) " + scheme + "://" + net.JoinHostPort(lanIP, strconv.Itoa(port)) + "/admin"
 }
 
 // bannerQualifier is the one line B6-6 adds to the banner: what kind of

@@ -36,16 +36,19 @@ asset table in [Deployment](deployment.md#building-from-source) for filenames.
 2. Start the server:
    - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
    - Linux: `./chatserver`, from the `amd64` or `arm64` archive
-3. Open `https://localhost:8443/admin`.
+3. Open `https://localhost:8443/admin`. The server ships a self-signed
+   certificate, so your browser shows a one-time security warning — choose
+   **Advanced → Continue** to reach the wizard.
 4. Complete the setup wizard, entering the setup token the server printed in
    its start-up output: it creates the Owner account and configures the
    basics (server name, port, security, uploads, voice). Your choices are
    written to `config.yaml` automatically — no manual editing needed.
-5. Create invite codes and share them. A new server is **invite only** — the
-   admin panel offers four choices under Settings: `closed` (nobody may
-   register), `invite` (an invite code is required, the default), `approval`
-   (anyone may apply, an admin approves each one) and `open` (anyone may
-   register). Changing the mode is recorded in the audit log.
+5. Create invite codes in the OwnCord desktop client ("Invite people" in the
+   server sidebar) and share them. A new server is **invite only** — the admin
+   panel offers four choices under Settings: `closed` (nobody may register),
+   `invite` (an invite code is required, the default), `approval` (anyone may
+   apply, an admin approves each one) and `open` (anyone may register).
+   Changing the mode is recorded in the audit log.
 
 ## Option B: Docker (Linux server)
 
@@ -60,9 +63,9 @@ cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
 # Edit .env and livekit.yaml before start (set your public IP and matching
-# LiveKit key/secret). In config.yaml, set voice.livekit_url to the compose
-# service address `ws://livekit:7880` — the copied default is localhost —
-# and voice.auto_download_livekit to false: LiveKit runs as its own container.
+# LiveKit key/secret). The compose file already points the server at the
+# `ws://livekit:7880` service and keeps its own auto-download off, so
+# config.yaml needs no voice edit for the Docker stack.
 docker compose up -d
 ```
 
@@ -98,17 +101,20 @@ public address and is refused with `403` naming that setting. Two fixes:
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=dev" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=dev" .
 
 # Client
 cd Client
 npm install
 npm run tauri build
 ```
+
+A source build reports `dev` unless you set `-X main.version=` to the tag you
+built from; release binaries embed their real version.
 
 ## What Happens on First Server Start
 
