@@ -148,14 +148,14 @@ func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
 		}
 		if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("ws session expired, closing connection", "user_id", c.userID)
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 			return true
 		}
 		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
 		if auth.IsEffectivelyBanned(tempUser) {
 			slog.Info("ws user banned, closing connection", "user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 			return true
 		}
 	}

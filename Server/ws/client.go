@@ -87,6 +87,7 @@ type Client struct {
 	invalidCount  int            // consecutive invalid messages; reset on valid parse
 	lastActivity  time.Time      // last message received from this client; guarded by mu
 	sendClosed    bool           // true after all send channels have been closed
+	terminalKick  bool           // set by markTerminalKick: the server ended this session for good; guarded by mu
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
 	sendLow       chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
@@ -374,6 +375,21 @@ func (c *Client) closeSend() {
 }
 
 // isSendClosed reports whether the client's send channels have been closed.
+// markTerminalKick records that the server ended c's session for good, so its
+// teardown ends a voice call at once instead of parking it.
+func (c *Client) markTerminalKick() {
+	c.mu.Lock()
+	c.terminalKick = true
+	c.mu.Unlock()
+}
+
+// isTerminallyKicked reports whether c was marked by markTerminalKick.
+func (c *Client) isTerminallyKicked() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.terminalKick
+}
+
 func (c *Client) isSendClosed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

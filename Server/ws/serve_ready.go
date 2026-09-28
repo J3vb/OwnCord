@@ -101,17 +101,6 @@ func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo) []db.DMChanne
 	return dmChannels
 }
 
-// connectedUserIDs snapshots the ids with a live WebSocket connection.
-func (h *Hub) connectedUserIDs() map[int64]bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	set := make(map[int64]bool, len(h.clients))
-	for uid := range h.clients {
-		set[uid] = true
-	}
-	return set
-}
-
 // channelRefs maps db channels to the checker's db-agnostic ChannelRef so
 // buildReady and computeAllowedChannels can share permissions.VisibleChannelIDs.
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
@@ -494,6 +483,14 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
 	// own read through the voice service.
 	database := h.readers.Ready
+	// RT-8: a fresh connect ends any parked grace window (registerNow drops
+	// it); a replay-failure fallback may inherit one only while its row
+	// still exists.
+	if c.lastSeq == 0 {
+		h.voiceGrace.take(c.userID)
+	} else {
+		h.dropOrphanVoiceGrace(ctx, c.userID)
+	}
 	// Clean stale voice state BEFORE building ready and registering.
 	// When a user F5-reloads while in voice, the DB row from the previous
 	// session must be removed so the ready payload doesn't include it and
@@ -613,6 +610,18 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
+	// RT-8: a replay-failure fallback whose previous socket parked this
+	// membership in the grace window keeps the row for registerNow to inherit
+	// (deleting it would leave an inherited state with no row — the ghost
+	// OC-0270 closes for the still-registered case). Any other fresh connect or
+	// mismatched grace entry means the call is over: stop the window so its
+	// timer cannot later re-run finishVoiceLeave over a cleaned row.
+	if c.lastSeq > 0 && h.voiceGrace.has(c.userID, vs.ChannelID) {
+		slog.Info("ws fresh connect: keeping graced voice state",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		return
+	}
+	h.voiceGrace.take(c.userID)
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
 	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
@@ -640,58 +649,4 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// stale participant — the identity includes joinedAt, so a quick rejoin's
 	// new session has a different identity and won't be removed.
 	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
-}
-
-// gateResumeChannel resolves the read-permission set a resume fallback
-// (lastSeq > 0) registers with and settles c.channelID against it before
-// registerNow subscribes it. It returns nil for a pure fresh connect.
-func (h *Hub) gateResumeChannel(ctx context.Context, database ReadySnapshotReader, c *Client) map[int64]bool {
-	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
-	// from the previous connection, so that is the only case where registerNow
-	// needs the read-permission set. Fail closed on error: nil denies the
-	// inherited voice-channel subscription.
-	var allowedChannelIDs map[int64]bool
-	if c.lastSeq > 0 {
-		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
-		if allowedErr != nil {
-			slog.Warn("ws handleFreshConnect: computeAllowedChannels failed, skipping voice channel subscription",
-				"user_id", c.userID, "err", allowedErr)
-		} else {
-			allowedChannelIDs = allowed
-		}
-	}
-	// The auth frame's active_channel_id was honoured only along
-	// handleReconnect's replay-capable path. On a full resync (last_seq > 0
-	// but replay forced "none" — every post-restart resume, since the fresh
-	// per-boot seq floor renumbers the space and the boot bumps the
-	// visibility watermark) registerNow copies the subscription from the OLD
-	// client entry, which readPump's unregister has normally already deleted.
-	// Without this promotion the socket holds no ChannelTopic subscription
-	// until its post-ready channel_focus round trip lands, and every channel
-	// frame broadcast in that window (auth_ok + ready write, pump startup,
-	// one RTT) is delivered to nobody and can never be re-requested, because
-	// the client only reports max(seq). Honoured only when READ-visible, the
-	// same fail-closed gate handleReconnect applies, and only on a resume
-	// (last_seq > 0), as docs/protocol.md specifies; the re-gate below stays
-	// as defence for the abort-path promotion it already documents.
-	if c.lastSeq > 0 && c.authChannelID != 0 && allowedChannelIDs[c.authChannelID] {
-		c.mu.Lock()
-		c.channelID = c.authChannelID
-		c.mu.Unlock()
-	}
-	// handleReconnect may have promoted an auth-frame active_channel_id into
-	// c.channelID (serve.go, honoured only when it was READ-visible at that
-	// moment) and then aborted on one of its own re-checks — most notably the
-	// final mustFullResync check, tripped by a permission revocation that
-	// landed mid-handshake. None of those abort paths undo the c.channelID
-	// write. registerNow subscribes c.channelID's ChannelTopic
-	// unconditionally, so re-gate it here against the freshly recomputed
-	// permission set before registering. Fail closed: a nil allowedChannelIDs
-	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
-	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
-		c.mu.Lock()
-		c.channelID = 0
-		c.mu.Unlock()
-	}
-	return allowedChannelIDs
 }

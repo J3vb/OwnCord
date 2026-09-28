@@ -213,8 +213,13 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			// difference — the transfer keeps the same joined_at — so
 			// cleaning here would delete the replacement's DB row whenever
 			// teardown snapshots voiceChID before the transfer zeroes it.
+			//
+			// RT-8: a completed membership is parked in the grace window
+			// (voice_grace.go) instead of torn down at once, so a resuming
+			// socket can inherit the call. leaveVoiceOnDisconnect runs the
+			// immediate teardown for an incomplete join or a disabled window.
 			if voiceChID != 0 && !replaced {
-				hub.handleVoiceLeave(cleanupCtx, c, voiceLeaveReasonDisconnect)
+				hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
 			}
 			c.mu.Lock()
 			received := c.msgsReceived
