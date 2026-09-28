@@ -106,8 +106,8 @@ test.describe("Authentication Flow", () => {
     await fillLogin(nativePage, "nonexistent_user_e2e_test", "wrong_password_e2e_test");
     await submitLogin(nativePage);
 
-    // The real server returns 400 INVALID_CREDENTIALS — the error banner
-    // appears with the server's message, and the app layout is NOT reached.
+    // The real server returns 401 UNAUTHORIZED "invalid credentials" — the
+    // error banner shows its plain copy, and the app layout is NOT reached.
     const errorBanner = nativePage.locator(".error-banner.visible");
     await expect(errorBanner).toBeVisible({ timeout: 10_000 });
     await expect(errorBanner).toContainText(/incorrect username or password/i);

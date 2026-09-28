@@ -117,9 +117,8 @@ interface ReportsView {
 function removalRefusal(code: string, message: string): string {
   if (message === "forbidden: channel is archived") return t("act.refusedArchived");
   if (message === "forbidden: cannot delete this message") return t("act.refusedRemoval");
-  // A known code (FORBIDDEN above all) reads as its catalog copy; an unmapped
-  // one keeps the server's own words, capitalised.
-  return serverErrorText(code, message, t("act.unknown"));
+  const text = serverErrorText(code, message, "");
+  return text === "" ? t("act.unknown") : t("act.invalid", { message: text });
 }
 
 const TABS = ["reports", "appeals"] as const;

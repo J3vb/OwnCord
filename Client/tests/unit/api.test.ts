@@ -1384,12 +1384,9 @@ describe("errorText (B9-20, Q7)", () => {
     expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid credentials"), "F")).toBe(
       "Incorrect username or password.",
     );
-    expect(
-      errorText(
-        new ApiClientError(400, "INVALID_CREDENTIALS", "invalid invite or credentials"),
-        "F",
-      ),
-    ).toBe("Incorrect username or password.");
+    expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "not authenticated"), "F")).toBe(
+      "Your session has expired — sign in again.",
+    );
     expect(
       errorText(new ApiClientError(403, "FORBIDDEN", "missing CONNECT_VOICE permission"), "F"),
     ).toBe("You don't have permission to do that.");
@@ -1418,6 +1415,33 @@ describe("errorText (B9-20, Q7)", () => {
         "F",
       ),
     ).toBe("GIF search is not configured on this server.");
+  });
+
+  it("keeps the server's own sentence for an auth refusal that is not a session or permission", () => {
+    expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid two-factor code"), "F")).toBe(
+      "Invalid two-factor code",
+    );
+    expect(
+      errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid username or recovery kit"), "F"),
+    ).toBe("Invalid username or recovery kit");
+    expect(
+      errorText(
+        new ApiClientError(400, "INVALID_CREDENTIALS", "invalid invite or credentials"),
+        "F",
+      ),
+    ).toBe("Invalid invite or credentials");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "your account has been suspended"), "F"),
+    ).toBe("Your account has been suspended.");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "account is awaiting approval"), "F"),
+    ).toBe("Account is awaiting approval");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "cannot delete the last admin account"), "F"),
+    ).toBe("Cannot delete the last admin account");
+    expect(errorText(new ApiClientError(403, "FORBIDDEN", "insufficient permissions"), "F")).toBe(
+      "You don't have permission to do that.",
+    );
   });
 
   it("keeps the server's own message for an unmapped code, capitalising it", () => {

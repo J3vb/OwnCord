@@ -275,7 +275,7 @@ describe("the server decides", () => {
       "forbidden: channel is archived",
       "The server refused to remove this message: its channel is archived.",
     ],
-    ["forbidden: blocked", "You don't have permission to do that."],
+    ["forbidden: blocked", "The server didn't accept this: Forbidden: blocked"],
   ])("shows a removal refused with %j as that refusal", async (message, shown) => {
     roleBits(ALL);
     const root = await opened(held("r1"));

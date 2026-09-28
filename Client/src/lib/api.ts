@@ -73,27 +73,38 @@ export class ApiClientError extends Error {
   }
 }
 
+const SESSION_EXPIRED_MESSAGES = new Set([
+  "session has expired",
+  "invalid or expired session",
+  "missing or invalid authorization header",
+  "not authenticated",
+]);
+
+const PERMISSION_REFUSAL = /\bpermissions?\b|role required$|^access denied$/;
+
 /**
  * The user-facing copy for a server error code that has one, or null when the
  * code has none (the caller then shows the server's own message). Every string
  * is plain, capitalised prose — never the raw lower-case server text.
  *
- * `message` disambiguates the one code the server overloads: UNAUTHORIZED is
- * both "your session expired" and a refused sign-in ("invalid credentials"),
- * and only the message tells them apart.
+ * `message` disambiguates the codes the server overloads. UNAUTHORIZED is an
+ * expired session, a refused sign-in ("invalid credentials"), or a wrong
+ * two-factor code or recovery kit; FORBIDDEN is a missing permission, a
+ * suspended account, or an account-state refusal ("account is awaiting
+ * approval"). Only a refused sign-in, session, suspension or permission has
+ * fixed copy — the rest keep the server's own sentence, which says what went
+ * wrong.
  */
 export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
       return connectText("error.rateLimited");
     case "UNAUTHORIZED":
-      return message === "invalid credentials" || message === "invalid invite or credentials"
-        ? connectText("error.invalidCredentials")
-        : connectText("error.unauthorized");
-    case "INVALID_CREDENTIALS":
-      return connectText("error.invalidCredentials");
+      if (message === "invalid credentials") return connectText("error.invalidCredentials");
+      return SESSION_EXPIRED_MESSAGES.has(message) ? connectText("error.unauthorized") : null;
     case "FORBIDDEN":
-      return connectText("error.forbidden");
+      if (message === "your account has been suspended") return connectText("error.banned");
+      return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
     case "NOT_FOUND":
       return connectText("error.notFound");
     case "BANNED":

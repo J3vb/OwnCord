@@ -128,10 +128,8 @@ test.describe("Saved-password login", () => {
 
     // A relayed error must surface, not strand the form loading.
     await expect(page.locator(".login-message, .error-banner").first()).toContainText(
-      /incorrect username or password/i,
-      {
-        timeout: 10000,
-      },
+      /invalid username or password/i,
+      { timeout: 10000 },
     );
   });
 

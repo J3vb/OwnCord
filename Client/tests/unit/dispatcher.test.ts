@@ -5227,7 +5227,7 @@ describe("WS Dispatcher", () => {
 
       expect(mockDisableCamera).not.toHaveBeenCalled();
       expect(mockDisableScreenshare).not.toHaveBeenCalled();
-      expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
+      expect(mockShowToast).toHaveBeenCalledWith("Nope", "error");
       expect(uiStore.getState().transientError).toBeNull();
     });
 
