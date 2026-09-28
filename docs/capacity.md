@@ -1080,11 +1080,10 @@ login budget (p95 737 ms against 600 ms) while the two message paths still hold
 acknowledgement together (p95 7.3 s against 200 ms and 150 ms), along with
 `auth_ok` (p95 818 ms against 200 ms) and the still-broken login (p95 2,573 ms).
 
-**Two resources limit the search, one per failing step.** Login breaks at 400
-with the server's CPU near saturation during that step's ramp; the message paths
-break at 500 on the single SQLite writer, with the CPU at its full budget. Every
-step held its population and the search never walked into the topic limiter, so
-the numbers are the server's own.
+**Login breaks first, at 400, under near-saturated ramp CPU with the writer
+also queueing; the message paths break at 500 on the single SQLite writer, with
+the CPU at its full budget.** Every step held its population and the search
+never walked into the topic limiter, so the numbers are the server's own.
 
 The table's CPU column covers each step's 60 s hold. `ws-load.js` times a VU's
 REST login when it starts, so each step's 100 logins fall in its 30 s ramp, and
@@ -1122,8 +1121,9 @@ than the holds.
   marked generator-limited.
 
 The last all-budget step is **300 connections** on the 2-vCPU reference box.
-Beyond it, login is the first budget to fail (at 400, near-saturated ramp CPU)
-and the message paths follow at 500 through the writer queue — the operational
+Beyond it, login is the first budget to fail (at 400, near-saturated ramp CPU
+with the writer also queueing) and the message paths follow at 500 through the
+writer queue — the operational
 section's property that the SQLite writer is one checkout at a time, so a
 per-message hop that is sub-millisecond idle becomes a queue once enough senders
 share it. This is _not_ the fan-out CPU limit: dispatch lag and the `seqMu` hold
@@ -1220,7 +1220,7 @@ into the limiter:
 That correction was re-measured on 2026-09-28 (the multi-channel block at the
 top of this section): the corrected search holds every requested population up
 to 500, passes the zero-shedding gate, and locates the last all-budget step at
-**300**. Login breaks first at 400, with near-saturated ramp CPU, and the
-message paths break at 500 on the **SQLite writer**. The 2026-09-16 table above remains historical single-channel evidence and is
+**300**. Login breaks first at 400, with near-saturated ramp CPU and the writer
+also queueing, and the message paths break at 500 on the **SQLite writer**. The 2026-09-16 table above remains historical single-channel evidence and is
 **not** comparable to the multi-channel shape — the new spread changes recipient
 fan-out at every step, including 100.
