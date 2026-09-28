@@ -132,16 +132,6 @@ on:
 permissions:
   contents: read
 
-# One weekly run at a time, and never cancel an in-flight one: a superseded
-# measurement is wall-clock the pipeline already paid for, and the artifacts it
-# would have uploaded are the only record of that week. A manual dispatch is
-# NOT collapsed into the schedule's group, because a deliberate re-measure must
-# run even on a week the cron already fired. The group is per-ref so a
-# branch-dispatch run and the schedule's dev run do not collide.
-concurrency:
-  group: load-baseline-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   # The livekit-server release OwnCord itself downloads
   # (ws.DefaultLiveKitVersion). Measuring a different SFU release than the

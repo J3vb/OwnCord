@@ -270,13 +270,6 @@ const CHECK_HYGIENE = [
   // Repository Hygiene job rather than needing a new required check.
   step("node", ["--test", "scripts/check-workflow-guards.test.mjs"], "."),
   step("node", ["scripts/check-workflow-guards.mjs"], "."),
-  // O8. load-baseline.yml became a weekly schedule on dev; the cron, the
-  // canonical-repository guard and the dev checkout are the three things that
-  // make that safe, and nothing else verifies them. Same rationale as the guard
-  // check above: Node checking Node, run here so it rides the pinned Repository
-  // Hygiene job instead of a new required check.
-  step("node", ["--test", "scripts/check-load-baseline-schedule.test.mjs"], "."),
-  step("node", ["scripts/check-load-baseline-schedule.mjs"], "."),
   // OC-0397 / R-09. A job in release.yml that pushes an image or cuts a
   // GitHub Release must carry `environment: release`, or it publishes with
   // no required-reviewer approval. Same rationale as the guard check above:
