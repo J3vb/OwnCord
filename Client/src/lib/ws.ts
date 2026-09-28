@@ -112,6 +112,9 @@ const SERVER_SILENCE_RECONNECT_MS = 60_000;
 // minimised webview throttles the heartbeat setInterval, so a quiet socket may
 // simply not have been asked for a pong yet.
 const PONG_GRACE_MS = 15_000;
+// U7d: a heartbeat tick that lands this long after the previous one means the
+// process was frozen (sleep, suspend) in between, not merely throttled.
+const WAKE_GAP_MS = 2 * HEARTBEAT_INTERVAL_MS;
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -202,7 +205,7 @@ export function createWsClient({
   // CLI-01: fires when no inbound frame has arrived for
   // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
-  // U7d: owns the focus / visibilitychange / online wake-probe listeners.
+  // U7d: owns the visibilitychange / online wake-probe listeners.
   // Armed on auth_ok and released on close or disconnect().
   let wakeOwner: Disposable | null = null;
   // When the oldest heartbeat ping sent since the last inbound frame went out.
@@ -271,8 +274,14 @@ export function createWsClient({
 
   function startHeartbeat(): void {
     stopHeartbeat();
+    let lastBeatAt = Date.now();
     heartbeatTimer = setInterval(() => {
-      if (proxyOpen) {
+      const now = Date.now();
+      const woke = now - lastBeatAt > WAKE_GAP_MS;
+      lastBeatAt = now;
+      if (woke) {
+        onWake();
+      } else if (proxyOpen) {
         try {
           sendRaw(JSON.stringify({ type: "ping", payload: {} }));
           unansweredPingAt ??= Date.now();
@@ -301,11 +310,11 @@ export function createWsClient({
     livenessTimer = setTimeout(onLivenessDeadline, deadlineMs);
   }
 
-  // U7d: a focus/visibility/network-return is the earliest evidence the
-  // process may have been frozen, so ping now instead of waiting on the
-  // throttled heartbeat, and arm the pong grace as the deadline: an awake
-  // server answers within seconds, while a socket that died over the suspend
-  // is redialled in 15 s rather than the 60 s silence deadline.
+  // U7d: a heartbeat wall-clock gap, the screen coming back or the network
+  // returning is the earliest evidence the process may have been frozen, so
+  // ping now and arm the pong grace as the deadline: an awake server answers
+  // within seconds, while a socket that died over the suspend is redialled in
+  // 15 s rather than the 60 s silence deadline.
   function onWake(): void {
     if (state !== "connected" || !proxyOpen) return;
     sendRaw(JSON.stringify({ type: "ping", payload: {} }));
@@ -319,7 +328,6 @@ export function createWsClient({
   function armWakeListeners(): void {
     if (wakeOwner !== null) return;
     const owner = new Disposable();
-    window.addEventListener("focus", onWake, { signal: owner.signal });
     window.addEventListener("online", onWake, { signal: owner.signal });
     document.addEventListener(
       "visibilitychange",

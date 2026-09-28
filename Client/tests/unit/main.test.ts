@@ -242,7 +242,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // ws.ts arms its app-lifetime wake-probe listeners (window focus/online,
+  // ws.ts arms its app-lifetime wake-probe listeners (window online,
   // document visibilitychange) at construction, and releases them on
   // disconnect(). clearAuth() drives main.ts's isAuthenticated subscriber,
   // which calls ws.disconnect(); the advance flushes the microtask-deferred

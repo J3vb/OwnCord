@@ -56,22 +56,13 @@ describe("wake probe (U7d)", () => {
     emitTauriEvent("ws-message", AUTH_OK);
   }
 
-  it("sends a ping when the window regains focus after a wake", async () => {
-    await connectAndAuth();
-    mockInvoke.mockClear();
-
-    window.dispatchEvent(new Event("focus"));
-
-    expect(pingSends().length).toBeGreaterThanOrEqual(1);
-  });
-
   it("reconnects when the wake probe's pong never arrives", async () => {
     await connectAndAuth();
     const states: ConnectionState[] = [];
     client.onStateChange((s) => states.push(s));
     mockInvoke.mockClear();
 
-    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
 
     await vi.advanceTimersByTimeAsync(15_000);
     expectConsole("warn", /\[ws\] No inbound frame within the liveness deadline/);
@@ -88,7 +79,7 @@ describe("wake probe (U7d)", () => {
     client.onStateChange((s) => states.push(s));
     mockInvoke.mockClear();
 
-    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
     await vi.advanceTimersByTimeAsync(1_000);
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
 
@@ -121,10 +112,36 @@ describe("wake probe (U7d)", () => {
     expect(pingSends().length).toBeGreaterThanOrEqual(1);
   });
 
+  it("probes on the first heartbeat after the wall clock jumped over a sleep", async () => {
+    await connectAndAuth();
+    const states: ConnectionState[] = [];
+    client.onStateChange((s) => states.push(s));
+    mockInvoke.mockClear();
+
+    // The suspend moves the wall clock without running any timer.
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(pingSends()).toHaveLength(1);
+
+    // The 15 s pong grace, not the 60 s silence deadline, decides the redial.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expectConsole("warn", /\[ws\] No inbound frame within the liveness deadline/);
+    expect(states).toContain("reconnecting");
+  });
+
+  it("keeps the 60 s silence deadline for an on-time heartbeat", async () => {
+    await connectAndAuth();
+    const states: ConnectionState[] = [];
+    client.onStateChange((s) => states.push(s));
+
+    await vi.advanceTimersByTimeAsync(45_000);
+
+    expect(states).not.toContain("reconnecting");
+  });
+
   it("does not probe while disconnected", async () => {
     mockInvoke.mockClear();
 
-    window.dispatchEvent(new Event("focus"));
     window.dispatchEvent(new Event("online"));
     document.dispatchEvent(new Event("visibilitychange"));
 
@@ -136,7 +153,8 @@ describe("wake probe (U7d)", () => {
     client.disconnect();
     mockInvoke.mockClear();
 
-    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
 
     expect(pingSends()).toHaveLength(0);
   });
