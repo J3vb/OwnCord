@@ -224,12 +224,12 @@ test.describe("Settings > Account — profile edit", () => {
     await page.locator("[data-testid='profile-save-btn']").focus();
     await page.keyboard.press("Enter");
 
-    await expect(page.locator("[data-testid='profile-error']")).toHaveText("display_name too long");
+    await expect(page.locator("[data-testid='profile-error']")).toHaveText("Display_name too long");
     await expect(page.locator("[data-testid='profile-save-btn']")).toBeFocused();
     await expect(page.locator("[data-testid='display-name-input']")).toHaveValue("Ada");
     await expect(page.locator(".account-header-name")).toHaveText("testuser");
     await expect(
-      page.locator("[data-testid='toast']", { hasText: "display_name too long" }),
+      page.locator("[data-testid='toast']", { hasText: "Display_name too long" }),
     ).toBeVisible();
   });
 
@@ -320,7 +320,7 @@ test.describe("Settings > Account — avatar upload", () => {
       .setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: PNG_1X1 });
 
     await expect(page.locator("[data-testid='avatar-error']")).toHaveText(
-      "avatar must be a PNG, JPEG or WebP image",
+      "Avatar must be a PNG, JPEG or WebP image",
     );
     // The letter fallback is still what the avatar shows.
     await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toHaveCount(0);
