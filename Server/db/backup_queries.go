@@ -14,8 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
@@ -48,7 +49,7 @@ var BackupVACUUMPreExecHook func()
 // ponytail: process-global rather than keyed by destination; a stat+rename is
 // microseconds and backups are ~daily, so use a per-file lock only if publish
 // contention ever shows up.
-var backupPublishMu sync.Mutex
+var backupPublishMu syncutil.Mutex
 
 // BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
 // The destination path must not already exist.
@@ -155,24 +156,29 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 	// that reached its VACUUM after this call's pre-check must be told the
 	// destination exists, not overwrite it (Linux) or fail the rename with
 	// "Access is denied" (Windows).
-	backupPublishMu.Lock()
-	if _, statErr := os.Stat(absClean); statErr == nil {
-		backupPublishMu.Unlock()
+	if err := publishBackup(absTemp, absClean); err != nil {
 		_ = os.Remove(absTemp)
+		return err
+	}
+
+	slog.Info("database backup written", "path", filepath.Base(absClean), "duration_ms", time.Since(started).Milliseconds())
+	return nil
+}
+
+// publishBackup renames the finished temp onto absClean under backupPublishMu,
+// re-checking that absClean is still free first. The caller removes absTemp on
+// any error.
+func publishBackup(absTemp, absClean string) error {
+	backupPublishMu.Lock()
+	defer backupPublishMu.Unlock()
+	if _, statErr := os.Stat(absClean); statErr == nil {
 		return fmt.Errorf("BackupToSafe: destination %q already exists", absClean)
 	} else if !errors.Is(statErr, os.ErrNotExist) {
-		backupPublishMu.Unlock()
-		_ = os.Remove(absTemp)
 		return fmt.Errorf("BackupToSafe: checking destination %q: %w", absClean, statErr)
 	}
 	if err := os.Rename(absTemp, absClean); err != nil {
-		backupPublishMu.Unlock()
-		_ = os.Remove(absTemp)
 		return fmt.Errorf("BackupToSafe: publishing backup: %w", err)
 	}
-	backupPublishMu.Unlock()
-
-	slog.Info("database backup written", "path", filepath.Base(absClean), "duration_ms", time.Since(started).Milliseconds())
 	return nil
 }
 
