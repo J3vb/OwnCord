@@ -125,14 +125,6 @@ type AppealQueueBroadcaster interface {
 	BroadcastAppealQueue(ctx context.Context, appealID int64, state string)
 }
 
-// AppealUnbanBroadcaster re-adds a lifted user to every connected roster.
-// *ws.Hub implements it (BroadcastMemberUnban); the admin unban path already
-// depends on the same method. Optional: a nil broadcaster is a no-op, so a
-// test fixture without a hub still exercises the decision path.
-type AppealUnbanBroadcaster interface {
-	BroadcastMemberUnban(userID int64)
-}
-
 // NewAppealService creates an AppealService.
 func NewAppealService(st Store, perms *PermissionService, moderation *ModerationService, limiter *auth.RateLimiter) *AppealService {
 	return &AppealService{st: st, perms: perms, moderation: moderation, limiter: limiter, locks: newAppealLocker()}
@@ -143,9 +135,6 @@ func (s *AppealService) SetNotifier(n AppealStatusNotifier) { s.notifier = n }
 
 // SetQueueBroadcaster installs the live mod_queue broadcaster.
 func (s *AppealService) SetQueueBroadcaster(b AppealQueueBroadcaster) { s.queue = b }
-
-// SetUnbanBroadcaster installs the member-unban broadcaster.
-func (s *AppealService) SetUnbanBroadcaster(b AppealUnbanBroadcaster) { s.unban = b }
 
 func (s *AppealService) notify(userID int64, publicID, state string, decisionNote *string) {
 	if s.notifier != nil {
@@ -678,14 +667,6 @@ func (s *AppealService) applyOverturnReversalEffects(ctx context.Context, appeal
 	}
 	if outcome == "overturned" && action.Kind == "timeout" {
 		s.moderation.FinalizeTimeoutLift(ctx, action.TargetID, []int64{action.ID}, 0)
-	}
-}
-
-// broadcastUnban re-adds a lifted user to every connected roster via the
-// installed broadcaster (nil-safe).
-func (s *AppealService) broadcastUnban(userID int64) {
-	if s.unban != nil {
-		s.unban.BroadcastMemberUnban(userID)
 	}
 }
 
