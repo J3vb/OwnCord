@@ -1222,6 +1222,32 @@ descriptions):
 ### LiveKit Health
 
 `GET /api/v1/livekit/health` -- checks LiveKit companion process reachability.
+It is gated by `server.livekit_webhook_allowed_cidrs` (loopback and private
+networks by default), so an off-host monitor needs that allowlist widened or
+the request must come from the host.
+
+### Monitor voice as well as liveness
+
+`/health` checks the hub, database and disk, but **not voice**. A green
+`/health` therefore does not mean voice works: LiveKit can be down while
+`/health` says `ok`, and the failure that follows — a call that connects and
+then carries no audio — is invisible from the server, which never probes the
+media path. To catch a voice outage, poll both endpoints:
+
+- **Server liveness:** `GET /health` (public, no allowlist entry). Any `503`
+  is actionable; `reason` names the subsystem (`hub`, `database`, `disk`).
+- **Voice reachability:** `GET /api/v1/livekit/health` — `{"status": "ok"}`
+  means LiveKit answered, a `503` with `"livekit_reachable": false` means it did
+  not. It is behind the LiveKit allowlist, so an external monitor needs
+  `server.livekit_webhook_allowed_cidrs` to include the monitor's own address —
+  add only that address, never `0.0.0.0/0`.
+
+There is no watchdog in the server itself. The systemd unit and the compose
+file both leave "restart a hung process" to the supervisor, and for Docker to
+an external watchdog (see the compose file's `healthcheck` note). The binary
+does not implement `sd_notify`, so `WatchdogSec=` will not work with a plain
+`Type=simple` unit — a cron job or uptime service that probes the two endpoints
+above and restarts the service after repeated failures is the portable recipe.
 
 ### Diagnostics
 
