@@ -1232,7 +1232,12 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 20, not 15. The full production run now takes 12-15 minutes and was racing
+    # the old 15-minute cap: a normal-length run was SIGKILLed at exactly 15m
+    # and reported `cancelled` rather than a verdict, which parks every PR until
+    # the job is rerun by hand. This bound is a real ceiling, not a retry — a
+    # genuinely hung run still dies here.
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: Client/
