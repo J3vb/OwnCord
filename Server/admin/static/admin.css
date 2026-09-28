@@ -516,6 +516,10 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .level-toggle[aria-pressed="true"].lvl-warn{background:rgba(242,184,75,.15);border-color:rgba(242,184,75,.5);color:var(--text-warning)}
 .level-toggle[aria-pressed="true"].lvl-error{background:rgba(255,143,146,.15);border-color:rgba(255,143,146,.5);color:var(--text-danger)}
 .log-toolbar .log-filter{flex:1;min-width:180px}
+.log-level-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.log-level-status{color:var(--text-muted);font-size:12px}
+.log-level-window{display:inline-flex;gap:6px;align-items:center;color:var(--text-muted);font-size:12px}
+.log-level-window select{min-height:28px}
 .log-actions{display:flex;gap:6px;flex-wrap:wrap}
 .log-actions .btn[aria-pressed="true"]{background:var(--accent-glow);color:var(--accent-text)}
 .log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 300px);min-height:240px;white-space:pre-wrap;word-break:break-all}

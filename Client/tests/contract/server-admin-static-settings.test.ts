@@ -187,7 +187,24 @@ describe("Server/admin/static — Settings save (OC-0422)", () => {
   });
 });
 
-const CONFIG_FACTS = { upload_max_size_mb: 100, voice_quality: "medium" };
+const CONFIG_FACTS = {
+  upload_max_size_mb: 100,
+  voice_quality: "medium",
+  server_port: 8443,
+  min_free_disk_mb: 256,
+  max_ws_connections: 1000,
+  tls_mode: "acme",
+  tls_domain: "chat.example",
+  user_quota_mb: 50,
+  backup_dir: "/var/backups",
+  logging_level: "warn",
+  voice_url: "wss://voice.example",
+  moderation_report_retention_days: 30,
+  moderation_action_retention_days: 90,
+  gif_configured: true,
+  github_configured: false,
+};
+const LOG_LEVEL = { level: "warn" };
 const BACKUP = "chatserver_20260926_055335.db";
 
 function respondWith(
@@ -199,6 +216,7 @@ function respondWith(
     if (p === "/setup/status") return { json: { needs_setup: false } };
     if (p === "/settings") return { json: LOADED_SETTINGS };
     if (p === "/config") return { json: CONFIG_FACTS };
+    if (p === "/logs/level") return { json: LOG_LEVEL };
     if (p === "/backups")
       return { json: [{ name: BACKUP, size: 1024, date: "2026-09-26T05:53:35Z" }] };
     return { json: {} };
@@ -236,7 +254,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "General",
       "Access & registration",
       "Security",
-      "Set in config.yaml",
+      "Running configuration",
     ]);
     // Config-file values are facts from GET /config, not inputs that do nothing.
     for (const id of ["s-max_upload_bytes", "s-voice_quality", "s-server_icon"]) {
@@ -246,6 +264,15 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(facts).toContain("100 MB");
     expect(facts).toContain("upload.max_size_mb");
     expect(facts).toContain("Medium");
+    // The running-config card shows the effective server config (SRE-07).
+    expect(facts).toContain("8443");
+    expect(facts).toContain("acme");
+    expect(facts).toContain("chat.example");
+    expect(facts).toContain("/var/backups");
+    // Secrets cross the boundary as booleans only.
+    expect(facts).toContain("configured");
+    expect(facts).not.toContain("klipy-secret");
+    expect(facts).not.toContain("ghp_secret");
     // The owner-only backup policy moved to Backups & restore.
     expect(content.querySelector("#s-backup_schedule")).toBeNull();
     expect(content.querySelector("#s-backup_retention")).toBeNull();

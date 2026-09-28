@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 168 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 170 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -63,6 +63,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | GET     | `/admin/api/config`                                                  |
+| GET     | `/admin/api/logs/level`                                              |
+| PATCH   | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/stream`                                             |
 | POST    | `/admin/api/logs/ticket`                                             |
 | GET     | `/admin/api/me`                                                      |
@@ -3063,6 +3065,7 @@ Authorization is two-layered:
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
+| `GET/PATCH /admin/api/logs/level`                                                                               | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
 | `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |

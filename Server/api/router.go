@@ -57,6 +57,9 @@ type Runtime struct {
 	// SetupToken is required on the first-run setup request when non-empty
 	// (admin.SetupOptions.SetupToken). The app generates it per start.
 	SetupToken string
+	// LogLevel backs the admin panel's runtime log-level card (SRE-07). Built
+	// by internal/app around the same *slog.LevelVar main's log sinks use.
+	LogLevel *admin.LogLevelController
 }
 
 // warnOnServerConfig logs the settings that are legal but rarely what an
@@ -259,7 +262,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// Restrict /admin to configured CIDRs (default: private networks only).
 	u := updater.NewUpdater(ver, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo)
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken})
+		admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: cfg, SetupToken: rt.SetupToken, LogLevel: rt.LogLevel})
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

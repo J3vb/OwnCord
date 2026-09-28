@@ -47,11 +47,27 @@ async function renderSettings(){
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
   /* Facts, not inputs: these take effect from config.yaml at start-up, so
-     an editable-looking field here would change nothing. */
+     an editable-looking field here would change nothing. The running-config
+     card shows the effective values an operator would otherwise read
+     config.yaml for (SRE-07). Secrets only ever cross as a configured flag. */
   let factRows;
-  if(facts)factRows=[['Max upload size',facts.upload_max_size_mb+' MB','upload.max_size_mb'],['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality']]
-    .map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val)+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
-  html+=settingsCard('Set in config.yaml','<p class="setting-desc">These values come from the server\'s config file. Change them there and restart the server.</p>'
+  if(facts)factRows=[
+    ['Port',facts.server_port,'server.port'],
+    ['TLS',facts.tls_mode+' · '+facts.tls_domain,'tls.mode · tls.domain'],
+    ['Max upload size',facts.upload_max_size_mb+' MB','upload.max_size_mb'],
+    ['Per-user quota',facts.user_quota_mb?facts.user_quota_mb+' MB':'Unlimited','upload.user_quota_mb'],
+    ['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality'],
+    ['Voice URL',facts.voice_url||'Auto','voice.livekit_url'],
+    ['Max connections',facts.max_ws_connections||'Unlimited','server.max_ws_connections'],
+    ['Reserved disk headroom',facts.min_free_disk_mb+' MB','server.min_free_disk_mb'],
+    ['Backup directory',facts.backup_dir,'backup.dir'],
+    ['Log level',facts.logging_level,'logging.level'],
+    ['GIF',facts.gif_configured?'Configured':'Not configured','gif.api_key'],
+    ['GitHub updates',facts.github_configured?'Configured':'Not configured','github.token'],
+    ['Report retention',facts.moderation_report_retention_days+' days','moderation.report_retention_days'],
+    ['Action retention',facts.moderation_action_retention_days+' days','moderation.action_retention_days'],
+  ].map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(String(val))+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
+  html+=settingsCard('Running configuration','<p class="setting-desc">The values this server started with. Change config.yaml and restart the server to change them; use the Logs page to raise the log level for a while.</p>'
     +(facts?'<dl class="fact-list">'+factRows+'</dl>':'<p class="setting-desc" style="margin-top:8px">The running configuration could not be read.</p>'));
   html+='<div class="save-bar" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">All changes saved</span>'
     +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings" disabled>Discard</button>'

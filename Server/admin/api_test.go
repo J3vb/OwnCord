@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -930,6 +931,50 @@ func TestAdminAPI_GetConfigFacts_ReportsRunningConfig(t *testing.T) {
 	}
 }
 
+// The running-config card (SRE-07) shows the effective settings an operator
+// otherwise has to read config.yaml for — and never a secret. The GIF API key
+// and GitHub token must be a boolean "configured", not their value.
+func TestAdminAPI_GetConfigFacts_EffectiveConfigMasksSecrets(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfg := &config.Config{
+		Server:     config.ServerConfig{Port: 8443, MinFreeDiskMB: 256, MaxWSConnections: 1000},
+		Upload:     config.UploadConfig{MaxSizeMB: 100, UserQuotaMB: 50},
+		Voice:      config.VoiceConfig{Quality: "medium", LiveKitURL: "wss://voice.example", LiveKitAPIKey: "key", LiveKitAPISecret: "secret"},
+		TLS:        config.TLSConfig{Mode: "acme", Domain: "chat.example"},
+		Backup:     config.BackupConfig{Dir: "/var/backups"},
+		Logging:    config.LoggingConfig{Level: "warn"},
+		GIF:        config.GIFConfig{APIKey: "klipy-secret"},
+		GitHub:     config.GitHubConfig{Token: "ghp_secret"},
+		Moderation: config.ModerationConfig{ReportRetentionDays: 30, ActionRetentionDays: 90},
+	}
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{RunningCfg: cfg})
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/config", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, secret := range []string{"klipy-secret", "ghp_secret", "secret", `"key"`} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("config facts leak %q: %s", secret, body)
+		}
+	}
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["server_port"] != float64(8443) || got["tls_mode"] != "acme" || got["tls_domain"] != "chat.example" {
+		t.Errorf("config facts = %v", got)
+	}
+	if got["gif_configured"] != true || got["github_configured"] != true {
+		t.Errorf("configured flags = gif:%v github:%v, want both true", got["gif_configured"], got["github_configured"])
+	}
+	if got["logging_level"] != "warn" || got["voice_url"] != "wss://voice.example" {
+		t.Errorf("config facts = %v", got)
+	}
+}
+
 func TestAdminAPI_GetConfigFacts_WithoutRunningConfig(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
@@ -937,6 +982,94 @@ func TestAdminAPI_GetConfigFacts_WithoutRunningConfig(t *testing.T) {
 
 	if w := doRequest(t, handler, http.MethodGet, "/config", token, nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// ─── GET/PATCH /admin/api/logs/level ─────────────────────────────────────────
+
+// The runtime log-level card (SRE-07): reading reports the level in force, and
+// a PATCH applies a timed boost the controller itself reverts. The handler is
+// only a thin adapter — the revert timing is the controller's own test.
+func TestAdminAPI_LogLevel_ReadAndSet(t *testing.T) {
+	database := openAdminTestDB(t)
+	var lv slog.LevelVar
+	lv.Set(slog.LevelInfo)
+	lvl := admin.NewLogLevelController(&lv, slog.LevelInfo)
+	t.Cleanup(lvl.Close)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{LogLevel: lvl})
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/logs/level", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["level"] != "info" {
+		t.Errorf("GET level = %v, want info", got["level"])
+	}
+	if _, ok := got["reverts_at"]; ok {
+		t.Errorf("GET reverts_at present with no boost: %v", got["reverts_at"])
+	}
+
+	w = doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 300})
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if lv.Level() != slog.LevelDebug {
+		t.Fatalf("level = %v after PATCH, want debug", lv.Level())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["level"] != "debug" || got["reverts_at"] == "" {
+		t.Errorf("PATCH response = %v, want debug with reverts_at", got)
+	}
+}
+
+func TestAdminAPI_LogLevel_RefusesBadRequests(t *testing.T) {
+	database := openAdminTestDB(t)
+	var lv slog.LevelVar
+	lv.Set(slog.LevelInfo)
+	lvl := admin.NewLogLevelController(&lv, slog.LevelInfo)
+	t.Cleanup(lvl.Close)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{LogLevel: lvl})
+	token := createAdminUser(t, database)
+
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"unknown level", map[string]any{"level": "loud", "duration_seconds": 60}},
+		{"zero window", map[string]any{"level": "debug", "duration_seconds": 0}},
+		{"window too long", map[string]any{"level": "debug", "duration_seconds": 200000}},
+		{"missing level", map[string]any{"duration_seconds": 60}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if w := doRequest(t, handler, http.MethodPatch, "/logs/level", token, tc.body); w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400; body: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+	if lv.Level() != slog.LevelInfo {
+		t.Fatalf("level = %v after refusals, want info unchanged", lv.Level())
+	}
+}
+
+func TestAdminAPI_LogLevel_WithoutController(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	if w := doRequest(t, handler, http.MethodGet, "/logs/level", token, nil); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("GET status = %d, want 503", w.Code)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 60}); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("PATCH status = %d, want 503", w.Code)
 	}
 }
 

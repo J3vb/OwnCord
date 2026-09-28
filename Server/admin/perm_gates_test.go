@@ -168,6 +168,8 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 		{http.MethodPatch, "/settings"},
 		{http.MethodGet, "/config"},
 		{http.MethodPost, "/logs/ticket"},
+		{http.MethodGet, "/logs/level"},
+		{http.MethodPatch, "/logs/level"},
 	} {
 		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {
 			t.Errorf("%s %s = %d, want 403; body: %s", tc.method, tc.path, w.Code, w.Body.String())

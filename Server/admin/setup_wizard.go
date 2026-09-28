@@ -33,6 +33,11 @@ type SetupOptions struct {
 	// not just an address inside admin_allowed_cidrs. Empty = not required
 	// (the direct-construction test path).
 	SetupToken string
+	// LogLevel, when non-nil, backs GET/PATCH /logs/level (SRE-07): the
+	// running log level and a timed debug boost that reverts on its own. Nil
+	// leaves the endpoints answering 503, which is the direct-construction
+	// test path and the one place no *slog.LevelVar exists to retune.
+	LogLevel *LogLevelController
 }
 
 // ─── Wizard payload ──────────────────────────────────────────────────────────

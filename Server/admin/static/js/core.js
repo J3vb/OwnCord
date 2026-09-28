@@ -54,6 +54,7 @@ const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
+  logLevel:'',logLevelWindow:15,logLevelTimer:null,
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
 
 /* ═══ API ═══ */

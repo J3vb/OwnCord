@@ -19,11 +19,11 @@ import (
 // package-level entry point, because that is now exactly what the process
 // does.
 func runApp(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc *RestartCoordinator) error {
-	cfg, err := LoadConfig(log, levelVar, rc)
+	cfg, baseLevel, err := LoadConfig(log, levelVar, rc)
 	if err != nil {
 		return err
 	}
-	a, err := New(cfg, Deps{Version: "test", Log: log, LogBuf: logBuf, Restart: rc})
+	a, err := New(cfg, Deps{Version: "test", Log: log, LogBuf: logBuf, Restart: rc, LogLevelVar: levelVar, LogBaseLevel: baseLevel})
 	if err != nil {
 		return err
 	}
@@ -48,11 +48,11 @@ func bootTestApp(t *testing.T, port, failStage string) *App {
 	log := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: levelVar}))
 	rc := NewRestartCoordinator(time.Hour, nil)
 
-	cfg, err := LoadConfig(log, levelVar, rc)
+	cfg, baseLevel, err := LoadConfig(log, levelVar, rc)
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	a, err := New(cfg, Deps{Version: "test", Log: log, LogBuf: admin.NewRingBuffer(64), Restart: rc})
+	a, err := New(cfg, Deps{Version: "test", Log: log, LogBuf: admin.NewRingBuffer(64), Restart: rc, LogLevelVar: levelVar, LogBaseLevel: baseLevel})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

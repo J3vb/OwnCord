@@ -237,6 +237,11 @@ ring buffer that backs the admin panel's live log view.
 | --------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `logging.level` | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
 
+An administrator can raise the running level for a bounded window from the
+admin panel's Logs page (SRE-07) without editing this file or restarting: the
+level reverts to the configured one when the window elapses. This does not
+change `config.yaml`, so a restart returns to `logging.level`.
+
 ### Moderation (`moderation`)
 
 The report queue's content retention window (B5-8). The `reports` row itself
