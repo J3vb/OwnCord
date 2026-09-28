@@ -14,6 +14,8 @@ export interface NativeControl {
   placedAt(position: { x: number; y: number }, size: { width: number; height: number }): void;
   /** How many times the window was centered. */
   centered(): number;
+  /** Every full-screen state the window was set to, in order. */
+  fullscreenCalls(): readonly boolean[];
 }
 
 export interface WindowControlSubject {
@@ -60,6 +62,12 @@ export function describeWindowControlSuite(
     check("centers the window", async () => {
       await ctx.subject.center();
       expect(ctx.native.centered()).toBe(1);
+    });
+
+    check("puts the window in full screen and back", async () => {
+      await ctx.subject.setFullscreen(true);
+      await ctx.subject.setFullscreen(false);
+      expect(ctx.native.fullscreenCalls()).toEqual([true, false]);
     });
   });
 }

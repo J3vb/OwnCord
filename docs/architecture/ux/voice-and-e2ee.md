@@ -131,7 +131,16 @@ stream locally behind a **Watch stream** card (the track stays subscribed;
 opt-in watching is open question Q3). Your own screen share is covered by what
 is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. In a DM call, focus view stays inside the call panel and the
-chat remains visible below it.
+chat remains visible below it. **Full screen** (the button, F, or a
+double-click) puts the tile in HTML full screen and the window with it
+(`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
+WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
+theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
+is the platform's picture-in-picture, hidden where it is unavailable. The
+stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
+(resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
+the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
+stats, so it shows the resolution only.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /

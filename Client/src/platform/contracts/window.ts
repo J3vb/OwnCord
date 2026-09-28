@@ -22,4 +22,7 @@ export interface WindowControl {
   outerPosition(): Promise<{ readonly x: number; readonly y: number }>;
   outerSize(): Promise<{ readonly width: number; readonly height: number }>;
   center(): Promise<void>;
+  /** Put the window in full screen, or take it out. A full-screen video tile
+   *  uses it: HTML full screen fills only the webview in WebView2. */
+  setFullscreen(on: boolean): Promise<void>;
 }
