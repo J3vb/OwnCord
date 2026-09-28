@@ -3,7 +3,7 @@
 //! claim these combinations, so there is no double toggle to guard against.
 //!
 //! Reuses the same global key-state machinery as push-to-talk (`ptt.rs`'s
-//! `is_key_down`): a 20 ms polling loop that OBSERVES the combination without
+//! `combo_state`): a 20 ms polling loop that OBSERVES the combination without
 //! consuming it, so other applications still receive the keystroke normally.
 //! Emits `voice-shortcut` ("mute"/"deafen") once per press edge.
 //!
@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 
-use crate::ptt::{is_key_down, modifiers_down, Modifiers};
+use crate::ptt::{combo_state, Modifiers};
 
 /// Windows Virtual-Key codes for the fixed combinations.
 const MUTE_KEY_VK: i32 = 0x4D; // M
@@ -81,15 +81,15 @@ pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
             let mut mute_was_down = false;
             let mut deafen_was_down = false;
             while !thread_shutdown.load(Ordering::SeqCst) {
-                let mods = modifiers_down();
+                let (mods, [mute_key, deafen_key]) = combo_state([MUTE_KEY_VK, DEAFEN_KEY_VK]);
 
-                let mute_down = combo_matches(mods, is_key_down(MUTE_KEY_VK));
+                let mute_down = combo_matches(mods, mute_key);
                 if shortcut_pressed(mute_down, mute_was_down) {
                     let _ = app.emit("voice-shortcut", "mute");
                 }
                 mute_was_down = mute_down;
 
-                let deafen_down = combo_matches(mods, is_key_down(DEAFEN_KEY_VK));
+                let deafen_down = combo_matches(mods, deafen_key);
                 if shortcut_pressed(deafen_down, deafen_was_down) {
                     let _ = app.emit("voice-shortcut", "deafen");
                 }

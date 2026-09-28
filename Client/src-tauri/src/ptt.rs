@@ -68,7 +68,7 @@ fn is_allowed_ptt_capture_vk(vk: i32) -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
-pub(crate) fn is_key_down(vk: i32) -> bool {
+fn is_key_down(vk: i32) -> bool {
     // VK codes 1-254 are valid; 0 and 255 are reserved/undefined
     if !(1..=254).contains(&vk) {
         return false;
@@ -80,19 +80,22 @@ pub(crate) fn is_key_down(vk: i32) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn is_key_down(vk: i32) -> bool {
-    use device_query::DeviceQuery;
+fn is_key_down(vk: i32) -> bool {
     let Some(keycode) = linux::vk_to_keycode(vk) else {
         return false;
     };
-    DEVICE_STATE.with(|ds| {
-        ds.as_ref()
-            .is_some_and(|ds| ds.get_keys().contains(&keycode))
-    })
+    held_keys().contains(&keycode)
+}
+
+/// One XQueryKeymap snapshot of every held key (empty with no X display).
+#[cfg(target_os = "linux")]
+fn held_keys() -> Vec<device_query::Keycode> {
+    use device_query::DeviceQuery;
+    DEVICE_STATE.with(|ds| ds.as_ref().map(|ds| ds.get_keys()).unwrap_or_default())
 }
 
 // The shared per-thread X11 key-state handle. Hoisted to module scope so both
-// `is_key_down` and `modifiers_down` read the same cached DeviceState. Cache per
+// `is_key_down` and `combo_state` read the same cached DeviceState. Cache per
 // thread — creating it on every call would open/close /dev/input/ file
 // descriptors every 20ms in a polling loop. checked_new() returns None when no
 // X11 display is reachable (e.g. a pure-Wayland session without XWayland), so
@@ -110,7 +113,7 @@ thread_local! {
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn is_key_down(_vk: i32) -> bool {
+fn is_key_down(_vk: i32) -> bool {
     false
 }
 
@@ -123,43 +126,48 @@ pub(crate) struct Modifiers {
     pub meta: bool,
 }
 
-/// The held modifiers, needed by U6's global Ctrl+Shift+M/Ctrl+Shift+D, which
-/// `is_key_down` cannot answer on Linux: the modifier VKs are deliberately
-/// absent from `linux::vk_to_keycode` (LShift/RShift and LControl/RControl
-/// each collapse to one VK, which a single (vk, Keycode) pair cannot
-/// represent), so `is_key_down` returns false for them there. `device_query`
-/// does expose the modifiers as distinct Keycodes, so this reads them directly.
+/// The held modifiers plus whether each of `vks` is down, for U6's global
+/// Ctrl+Shift+M/Ctrl+Shift+D. The modifiers cannot come from `is_key_down` on
+/// Linux: the modifier VKs are deliberately absent from `linux::vk_to_keycode`
+/// (LShift/RShift and LControl/RControl each collapse to one VK, which a single
+/// (vk, Keycode) pair cannot represent). `device_query` does expose them as
+/// distinct Keycodes, so Linux reads them from the same single key snapshot.
 #[cfg(windows)]
-pub(crate) fn modifiers_down() -> Modifiers {
-    Modifiers {
+pub(crate) fn combo_state<const N: usize>(vks: [i32; N]) -> (Modifiers, [bool; N]) {
+    let mods = Modifiers {
         ctrl: is_key_down(0x11),
         shift: is_key_down(0x10),
         alt: is_key_down(0x12),
         meta: is_key_down(0x5B) || is_key_down(0x5C),
-    }
+    };
+    (mods, vks.map(is_key_down))
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn modifiers_down() -> Modifiers {
-    use device_query::{DeviceQuery, Keycode};
-    DEVICE_STATE.with(|ds| {
-        let Some(ds) = ds.as_ref() else {
-            return Modifiers::default();
-        };
-        let keys = ds.get_keys();
-        let any = |a: Keycode, b: Keycode| keys.contains(&a) || keys.contains(&b);
-        Modifiers {
-            ctrl: any(Keycode::LControl, Keycode::RControl),
-            shift: any(Keycode::LShift, Keycode::RShift),
-            alt: any(Keycode::LAlt, Keycode::RAlt),
-            meta: any(Keycode::LMeta, Keycode::RMeta),
-        }
-    })
+pub(crate) fn combo_state<const N: usize>(vks: [i32; N]) -> (Modifiers, [bool; N]) {
+    combo_state_from(&held_keys(), vks)
+}
+
+#[cfg(target_os = "linux")]
+fn combo_state_from<const N: usize>(
+    keys: &[device_query::Keycode],
+    vks: [i32; N],
+) -> (Modifiers, [bool; N]) {
+    use device_query::Keycode;
+    let any = |a: Keycode, b: Keycode| keys.contains(&a) || keys.contains(&b);
+    let mods = Modifiers {
+        ctrl: any(Keycode::LControl, Keycode::RControl),
+        shift: any(Keycode::LShift, Keycode::RShift),
+        alt: any(Keycode::LAlt, Keycode::RAlt),
+        meta: any(Keycode::LMeta, Keycode::RMeta),
+    };
+    let down = vks.map(|vk| linux::vk_to_keycode(vk).is_some_and(|k| keys.contains(&k)));
+    (mods, down)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-pub(crate) fn modifiers_down() -> Modifiers {
-    Modifiers::default()
+pub(crate) fn combo_state<const N: usize>(_vks: [i32; N]) -> (Modifiers, [bool; N]) {
+    (Modifiers::default(), [false; N])
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +523,39 @@ pub async fn ptt_listen_for_key() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn combo_state_reads_modifiers_and_keys_from_one_snapshot() {
+        use device_query::Keycode;
+        let (mods, down) = combo_state_from(
+            &[Keycode::RControl, Keycode::LShift, Keycode::M],
+            [0x4D, 0x44],
+        );
+        assert_eq!(
+            mods,
+            Modifiers {
+                ctrl: true,
+                shift: true,
+                alt: false,
+                meta: false
+            }
+        );
+        assert_eq!(down, [true, false]);
+
+        let (mods, down) =
+            combo_state_from(&[Keycode::LAlt, Keycode::RMeta, Keycode::D], [0x4D, 0x44]);
+        assert_eq!(
+            mods,
+            Modifiers {
+                ctrl: false,
+                shift: false,
+                alt: true,
+                meta: true
+            }
+        );
+        assert_eq!(down, [false, true]);
+    }
 
     // PTT_VKEY is a process-global AtomicI32 and cargo runs tests on parallel
     // threads, so every mutating assertion lives in this ONE test — splitting

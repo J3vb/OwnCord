@@ -362,7 +362,7 @@ describe("KeybindsTab", () => {
     await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hint.textContent).toBe(
-      "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu.",
+      "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
     );
   });
 

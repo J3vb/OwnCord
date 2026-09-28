@@ -115,7 +115,7 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.messages": "Messages",
   "keybinds.voiceHint": "Voice shortcuts apply while you are connected to a voice channel.",
   "keybinds.globalHint":
-    "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu.",
+    "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":
     "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + Shift + M / Ctrl + Shift + D shortcuts.",
   "keybinds.formatHint":
