@@ -61,8 +61,16 @@ func newArchiveFixture(t *testing.T, configure ...func(dir string, cfg *config.C
 		t.Fatal(err)
 	}
 
-	database := openAdminTestDB(t)
+	// The live database file and its WAL sidecars: junk, so only the
+	// snapshot substitution can make the archived entry a valid database.
 	dbPath := filepath.Join(dataDir, "chatserver.db")
+	for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm"} {
+		if err := os.WriteFile(p, []byte("not a database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	database := openAdminTestDB(t)
 	admin.SetDatabasePath(dbPath)
 	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 
@@ -74,6 +82,8 @@ func newArchiveFixture(t *testing.T, configure ...func(dir string, cfg *config.C
 	for _, c := range configure {
 		c(dir, cfg)
 	}
+	admin.SetBackupBaseDir(cfg.Backup.Dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{ConfigPath: configPath, RunningCfg: cfg})
 	token := createAdminUser(t, database)
@@ -135,7 +145,10 @@ func TestHandleArchive_Success(t *testing.T) {
 	if got := string(entries["data/uploads/hello.bin"]); got != "attachment bytes" {
 		t.Errorf("uploads entry = %q, want the attachment bytes", got)
 	}
-	for _, unwanted := range []string{"data/backups/", "data/backups/old.db", "data/snapshot.db.tmp"} {
+	for _, unwanted := range []string{
+		"data/backups/", "data/backups/old.db", "data/snapshot.db.tmp",
+		"data/chatserver.db-wal", "data/chatserver.db-shm",
+	} {
 		if _, ok := entries[unwanted]; ok {
 			t.Errorf("archive carries %q; got %v", unwanted, archiveNames(entries))
 		}
@@ -195,10 +208,9 @@ func TestHandleArchive_BadDataDirIs500(t *testing.T) {
 	database := openAdminTestDB(t)
 	admin.SetDatabasePath(filepath.Join(dir, "chatserver.db"))
 	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
-	cfg := &config.Config{
-		Server: config.ServerConfig{DataDir: filepath.Join(blocker, "nope")},
-		Backup: config.BackupConfig{Dir: filepath.Join(dir, "backups")},
-	}
+	cfg := &config.Config{Server: config.ServerConfig{DataDir: filepath.Join(blocker, "nope")}}
+	admin.SetBackupBaseDir(filepath.Join(dir, "backups"))
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
 		admin.SetupOptions{ConfigPath: filepath.Join(dir, "config.yaml"), RunningCfg: cfg})
 	token := createAdminUser(t, database)

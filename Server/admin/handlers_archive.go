@@ -27,6 +27,10 @@ const archiveWriteWindow = 10 * time.Minute
 // with each other's confusing name.
 const archiveName = "owncord-archive.zip"
 
+// archiveWorkPrefix names each build's work dir under the backup dir, so the
+// backup maintenance sweep can reclaim one a killed process left behind.
+const archiveWorkPrefix = "owncord-archive-"
+
 // handleArchive serves GET /admin/api/archive: one zip carrying everything a
 // restore needs that a database backup does not — the whole data directory
 // (uploads, the key files, erasure markers, TLS material) and config.yaml
@@ -51,12 +55,11 @@ func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 
 		// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
 		// target, and that directory is already the one backups write to.
-		backupDir := opts.RunningCfg.Backup.Dir
-		if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		if err := os.MkdirAll(backupBaseDir, 0o750); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
 			return
 		}
-		work, err := os.MkdirTemp(backupDir, "owncord-archive-")
+		work, err := os.MkdirTemp(backupBaseDir, archiveWorkPrefix)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
 			return
@@ -124,7 +127,7 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	defer out.Close() //nolint:errcheck
 	zw := zip.NewWriter(out)
 
-	if err := addTrees(zw, cfg.Server.DataDir, cfg.Upload.StorageDir, cfg.Backup.Dir, work, snapshot); err != nil {
+	if err := addTrees(zw, cfg.Server.DataDir, cfg.Upload.StorageDir, backupBaseDir, work, snapshot); err != nil {
 		_ = zw.Close()
 		return "", err
 	}

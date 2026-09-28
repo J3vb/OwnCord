@@ -63,7 +63,8 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 const staleBackupTempAge = 24 * time.Hour
 
 // pruneStaleBackupTemps removes the ".tmp" files killed backups left behind,
-// along with SQLite's ".tmp-journal" sidecar VACUUM INTO writes beside each.
+// along with SQLite's ".tmp-journal" sidecar VACUUM INTO writes beside each,
+// and the work dirs of archive builds a killed process never cleaned up.
 // BackupToSafe removes its temp on every error it returns, so only a process
 // that died mid-VACUUM leaves one, and no *.db scan would ever reclaim it.
 func pruneStaleBackupTemps() {
@@ -74,7 +75,9 @@ func pruneStaleBackupTemps() {
 	cutoff := time.Now().Add(-staleBackupTempAge)
 	removed := 0
 	for _, e := range entries {
-		if ext := filepath.Ext(e.Name()); e.IsDir() || (ext != ".tmp" && ext != ".tmp-journal") {
+		ext := filepath.Ext(e.Name())
+		archiveWork := e.IsDir() && strings.HasPrefix(e.Name(), archiveWorkPrefix)
+		if !archiveWork && (e.IsDir() || (ext != ".tmp" && ext != ".tmp-journal")) {
 			continue
 		}
 		info, infoErr := e.Info()
@@ -82,7 +85,7 @@ func pruneStaleBackupTemps() {
 			continue
 		}
 		path := filepath.Join(backupBaseDir, e.Name())
-		if rmErr := os.Remove(path); rmErr != nil {
+		if rmErr := os.RemoveAll(path); rmErr != nil {
 			slog.Warn("backup maintenance: failed to remove stale backup temp", "path", path, "error", rmErr)
 			continue
 		}
