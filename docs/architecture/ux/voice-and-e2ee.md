@@ -261,6 +261,11 @@ call):
 | Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops only when its own ringer declines or leaves (`call_declined` / `voice_leave` from the ringer)                                  |
 | Timeout / caller leaves    | Timeout: the callee's ring clears silently, and the caller's panel says "didn't answer" and stays in the call with Ring again / Leave call. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty              |
 
+Call is on the DM chat header and in another member's profile popup. The
+popup's Call opens the 1:1 DM with that member (creating it if needed) and then
+starts the call there through the same `startCall` (`onCallUser` in
+`pages/main-page/SidebarArea.ts`).
+
 The DM call panel (`components/DmCallPanel.ts`, between the chat header and the
 messages) shows while the open DM has a ring in flight, an outgoing ring, or
 anyone in its voice channel: outgoing, declined/no answer, incoming, a "Join

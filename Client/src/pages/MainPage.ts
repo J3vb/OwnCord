@@ -674,6 +674,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
+      // The member list's profile popup Call action opens the DM then starts
+      // its call through this, the same startCall the DM header uses (BUG-05).
+      onStartCall: () => startCall(),
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
