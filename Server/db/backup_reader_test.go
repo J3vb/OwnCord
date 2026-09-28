@@ -69,18 +69,23 @@ func TestBackupToSafe_RunsWhileTheWriterIsBusy(t *testing.T) {
 	}
 }
 
-// TestBackupToSafe_ConcurrentWriteIsNotDelayed is PERF-10's isolating
-// measurement and SRV-02's acceptance: a concurrent INSERT is not delayed by a
-// running backup.
+// TestBackupToSafe_ConcurrentWriteIsNotDelayed is PERF-10's isolating proof at
+// the db layer and SRV-02's acceptance: a concurrent INSERT is not blocked
+// behind a running backup.
 //
-// A 500k-row database makes the backup take hundreds of milliseconds, so a
-// single INSERT issued right after the backup starts is issued during it with
-// negligible race. The assertion compares the INSERT's latency against the
-// backup's own duration, not a fixed threshold: on the reader pool the INSERT
-// is microseconds against a backup of hundreds of milliseconds, while on the
-// old writer-based VACUUM the single writer connection is held for the backup's
-// whole duration, so the INSERT queues and its latency is the backup duration.
-// Comparing the two measurements keeps the test robust on a slow or fast box.
+// Deterministic, no seed, no sleep and no wall-clock ratio:
+// db.BackupVACUUMPreExecHook parks the backup after it has checked out the
+// connection its VACUUM will run on, while it provably holds that connection,
+// until this test releases it. The INSERT must complete during that hold. On
+// the reader pool the VACUUM holds no writer connection, so the INSERT runs;
+// take the pinned VACUUM connection from the single writer instead and the
+// hook is holding that writer, so the INSERT blocks here and the test fails.
+// This replaces the old "INSERT latency against a quarter of the backup's
+// duration" comparison, which broke under parallel package load. The caveat is
+// the same as the service-level twin (TestReserve_NotBlockedByAConcurrentBackup):
+// the guard binds while the hook sits between the pinned Conn checkout and the
+// Exec on that same conn. A revert to an unpinned writer Exec with the hook
+// before it would not be caught; that refactor is not the shape the code has.
 func TestBackupToSafe_ConcurrentWriteIsNotDelayed(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 	ctx := context.Background()
@@ -89,59 +94,64 @@ func TestBackupToSafe_ConcurrentWriteIsNotDelayed(t *testing.T) {
 		`INSERT INTO roles (name, permissions, position, is_default) VALUES ('writer', 0, 0, 0)`); err != nil {
 		t.Fatalf("seed role: %v", err)
 	}
-	// messages carries foreign keys, so the seed rows need an owner and a
-	// channel first.
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO users (id, username, password, role_id) VALUES (1, 'bench', '', 4)`); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO channels (id, name, type) VALUES (1, 'bench', 'text')`); err != nil {
-		t.Fatalf("seed channel: %v", err)
-	}
-	// Make the database large enough that the backup is clearly the longer
-	// operation. Seeded in one statement so the test setup is not the timing.
-	if _, err := database.ExecContext(ctx,
-		`WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 400000)
-		 INSERT INTO messages (channel_id, user_id, content)
-		 SELECT 1, 1, 'seed ' || i || ' xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' FROM seq`); err != nil {
-		t.Fatalf("seed rows: %v", err)
-	}
 
 	backupDir := filepath.Join(tmpDir, "backups")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	backupStart := time.Now()
+	// The seam the backup parks on: it signals reached once it holds the
+	// connection its VACUUM will use, then blocks until the test releases it.
+	parked := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseBackup := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(func() {
+		releaseBackup()
+		db.BackupVACUUMPreExecHook = nil
+	})
+	db.BackupVACUUMPreExecHook = func() {
+		close(parked)
+		<-release
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		done <- database.BackupToSafe(ctx, filepath.Join(backupDir, "during-writes.db"), backupDir)
 	}()
-	// Give the backup a moment to reach its VACUUM, so the INSERT below lands
-	// inside it rather than racing its start.
-	time.Sleep(50 * time.Millisecond)
 
-	insertStart := time.Now()
-	if _, err := database.ExecContext(ctx,
-		`INSERT INTO roles (name, permissions, position, is_default) VALUES ('during', 0, 0, 0)`); err != nil {
-		t.Fatalf("INSERT during backup: %v", err)
+	select {
+	case <-parked:
+	case err := <-done:
+		t.Fatalf("BackupToSafe returned before reaching its VACUUM: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("backup never reached its VACUUM; the test exercised nothing")
 	}
-	insertLatency := time.Since(insertStart)
 
-	backupErr := <-done
-	backupDuration := time.Since(backupStart)
-	if backupErr != nil {
+	// The INSERT must complete while the backup is provably parked at its
+	// VACUUM, holding the connection the VACUUM runs on.
+	insertDone := make(chan error, 1)
+	go func() {
+		_, err := database.ExecContext(ctx,
+			`INSERT INTO roles (name, permissions, position, is_default) VALUES ('during', 0, 0, 0)`)
+		insertDone <- err
+	}()
+
+	select {
+	case err := <-insertDone:
+		if err != nil {
+			t.Fatalf("INSERT during backup: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("INSERT did not complete while the backup was held at its VACUUM; writers are queuing behind the backup")
+	}
+
+	releaseBackup()
+	if backupErr := <-done; backupErr != nil {
 		t.Fatalf("BackupToSafe: %v", backupErr)
 	}
-
-	// The backup must be the long pole; if it were not, the comparison below
-	// would be too close to distinguish and the test would be measuring noise.
-	if backupDuration < 100*time.Millisecond {
-		t.Skipf("backup too fast (%v) to measure contention on this box", backupDuration)
-	}
-	if insertLatency > backupDuration/4 {
-		t.Fatalf("INSERT during backup took %v against a backup of %v; writers are queuing behind the backup", insertLatency, backupDuration)
+	if err := db.CheckBackupIntegrity(ctx, filepath.Join(backupDir, "during-writes.db")); err != nil {
+		t.Fatalf("the backup taken during the write is not restorable: %v", err)
 	}
 }
 

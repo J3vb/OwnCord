@@ -21,17 +21,17 @@ import (
 
 // BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
 // has checked out the connection the VACUUM runs on and before the VACUUM
-// executes. Test-only (always nil in production; exported because the
-// service-level proof that Reserve is not blocked by a backup, SRV-02/PERF-10,
-// drives this through UploadService.Reserve rather than calling
-// db.BackupToSafe directly): it parks the backup at a known point while it
-// provably owns its pool's connection, so a test can assert Reserve completes
-// without a timing-ratio sleep. It guards the writer only while it sits between
+// executes. Test-only (always nil in production; exported so both proofs that
+// a write is not blocked by a backup, SRV-02/PERF-10 — the db-level
+// TestBackupToSafe_ConcurrentWriteIsNotDelayed and the service-level
+// TestReserve_NotBlockedByAConcurrentBackup — park the backup on it rather
+// than sleeping): it parks the backup at a known point while it provably owns
+// its pool's connection, so a test can assert a concurrent write completes
+// without a wall-clock ratio. It guards the writer only while it sits between
 // the pinned Conn checkout and the Exec on that same conn: moving that pinned
-// conn to the writer makes Reserve block here, but an unpinned
-// d.writer.ExecContext after the hook would not. Whether a running VACUUM
-// delays a write at the SQLite lock level is covered separately by
-// TestBackupToSafe_ConcurrentWriteIsNotDelayed.
+// conn to the writer makes the write block here, but an unpinned
+// d.writer.ExecContext after the hook would not. Neither test overlaps a write
+// with a running VACUUM; both prove the backup does not hold the writer.
 var BackupVACUUMPreExecHook func()
 
 // backupPublishMu serializes the final "destination still free? → rename" step
