@@ -79,14 +79,16 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     473 |
-| Open      |       3 |
+| Fixed     |     474 |
+| Open      |       2 |
 | Declined  |       7 |
 | Duplicate |       1 |
 | **Total** | **484** |
 
-As of 2026-09-28 the three open findings are `OC-0476`, `OC-0481` and `OC-0484`
-(all low/medium, none B9-tagged); `OC-0478` (the single-writer lint blind spot)
+As of 2026-09-28 the two open findings are `OC-0476` and `OC-0481`
+(both low, neither B9-tagged); `OC-0484` (the post-restart full-resync
+subscription gap) is fixed by [#1940](https://github.com/J3vb/OwnCord/pull/1940);
+`OC-0478` (the single-writer lint blind spot)
 was fixed by extending the rule and its canary; `OC-0473` is fixed by #1858 and `OC-0474` by #1865; `OC-0454` is declined by owner decision
 D-09 (Q14, an accepted low with a reopen trigger — see `.superpowers/findings-ledger.json`),
 and `OC-0479` (stale `.golangci.yml` comments) is fixed by #1800.
