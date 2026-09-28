@@ -768,9 +768,30 @@ Measured, because both halves are easy to assume the wrong way round
 ### Restoring without a running server
 
 The restore endpoint above needs a running server. When the server will not
-boot — a failed migration, a corrupt database, a lost key file — the admin API
-is unreachable, and the beta has no `chatserver restore <file>` command. The
-offline procedure is the archive rollback: put the whole pre-failure state back,
+boot — a failed migration, a corrupt database — the admin API is unreachable.
+Two offline paths cover it: `chatserver restore` puts a database backup back,
+and the archive rollback restores the whole pre-failure state.
+
+**A database backup, with `chatserver restore`.** The CLI does what the admin
+endpoint does, without the panel:
+
+```bash
+# Stop the server first — it holds the database's process lock, and the
+# command refuses while it is running.
+sudo systemctl stop owncord          # or: docker compose down
+
+# Without --force it changes nothing and explains itself; with it, the live
+# database is replaced after a pre_restore_* safety copy is taken.
+./chatserver restore --force /path/to/chatserver_20260101_030000.db
+```
+
+It verifies the file is a readable database before touching the live one,
+takes a `pre_restore_*` safety copy, preserves the message-retry cutoff, and
+uses the same `database.path` and `backup.dir` from `config.yaml` the server
+does. This restores the database alone — a full archive below is still the
+supported path when uploads, the key files or `config.yaml` changed too.
+
+**The whole state, from an archive.** Put the whole pre-failure state back,
 then start the same version that wrote it.
 
 1. Stop the server if it is still running (`sudo systemctl stop owncord`, or
