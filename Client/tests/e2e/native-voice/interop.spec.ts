@@ -443,6 +443,12 @@ test("native and browser peers decode each other's video with the same key", asy
   await expect
     .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
     .toBe(true);
+  // Same reason as the screen-share test below: `videoSubscribed` fires on the
+  // first publish, before the five camera stop/start cycles land, so measure
+  // from the peer's settled `camera-after` phase, not from subscription.
+  await expect
+    .poll(() => threads.some((t) => t.phase === "camera-after"), { timeout: 30_000 })
+    .toBe(true);
   await page.waitForTimeout(4_000);
   await resetBrowserMeters(page);
   const settledAt = Date.now();
@@ -574,6 +580,14 @@ test("a native screen share decodes in the browser with the same key", async ({ 
     .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
       timeout: 60_000,
     })
+    .toBe(true);
+  // `videoSubscribed` turns true on the first publish, which precedes the five
+  // stop/start cycles. Measuring from there could land the window inside the
+  // churn (observed: "0 frames in 5 s at 0x0", passing on retry). The peer
+  // emits `screen-after` once the last capture is live and settled, so wait for
+  // it and measure only the steady state the test is about.
+  await expect
+    .poll(() => threads.some((t) => t.phase === "screen-after"), { timeout: 30_000 })
     .toBe(true);
   await page.waitForTimeout(4_000);
   await resetBrowserMeters(page);
