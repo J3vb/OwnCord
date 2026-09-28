@@ -335,6 +335,13 @@ gone unanswered for at least 15 seconds. That rule keeps a minimised window,
 whose throttled heartbeat timer may not have sent a ping yet, from
 reconnecting for no reason.
 
+When the client may have just woken from a suspend — a heartbeat tick that
+lands more than three heartbeat intervals (90 seconds) after the previous one,
+the window becoming visible again, or the network coming back online — it
+sends a ping at once and shortens the deadline to 15 seconds (never extending
+one already due sooner). A socket that died during the suspend is redialled
+within about 15 seconds instead of staying Connected for up to a minute.
+
 ### Desktop Transport Liveness
 
 The desktop client's Rust WebSocket proxy (`Client/src-tauri/src/ws_proxy.rs`)
