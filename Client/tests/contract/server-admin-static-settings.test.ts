@@ -203,6 +203,10 @@ const CONFIG_FACTS = {
   moderation_action_retention_days: 90,
   gif_configured: true,
   github_configured: false,
+  // A field the card does not know must not be rendered: were the server
+  // ever to send a secret, the card still would not show it.
+  gif_api_key: "klipy-secret",
+  github_token: "ghp_secret",
 };
 const LOG_LEVEL = { level: "warn", base_level: "warn" };
 const BACKUP = "chatserver_20260926_055335.db";
@@ -304,6 +308,22 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     for (const hidden of ["tls.domain", "voice.livekit_url", "backup.dir", "undefined"]) {
       expect(facts).not.toContain(hidden);
     }
+  });
+
+  // The default config has no TLS domain; an empty value is no row at all.
+  it("leaves out a row whose value is empty", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /config": { json: { ...CONFIG_FACTS, tls_domain: "", logging_level: "" } },
+      }),
+    );
+    dom = booted.dom;
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const facts = content.querySelector(".fact-list")?.textContent ?? "";
+    expect(facts).toContain("acme");
+    expect(facts).not.toContain("tls.domain");
+    expect(facts).not.toContain("logging.level");
   });
 
   // UX clarity: registration is four radio cards with what each means, fed

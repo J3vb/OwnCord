@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 170 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 171 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -63,6 +63,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | GET     | `/admin/api/config`                                                  |
+| DELETE  | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/level`                                              |
 | PATCH   | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/stream`                                             |
@@ -3065,7 +3066,7 @@ Authorization is two-layered:
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
-| `GET/PATCH /admin/api/logs/level`                                                                               | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                        | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
 | `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
@@ -4103,6 +4104,73 @@ Each event's data is one JSON record:
 ```json
 { "ts": "2026-08-04T12:00:00Z", "level": "INFO", "msg": "…", "source": "…", "attrs": "…" }
 ```
+
+---
+
+### GET /admin/api/logs/level
+
+The log level the server is running at, the level it started with (and
+reverts to), and when a debug boost reverts.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{ "level": "debug", "base_level": "info", "reverts_at": "2026-09-28T12:15:00Z" }
+```
+
+`reverts_at` is absent when no boost is pending.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
+
+---
+
+### PATCH /admin/api/logs/level
+
+Raise the server's log level to `debug` for 15 minutes. The server reverts to
+`base_level` on its own when the window ends; a second PATCH restarts the
+window. Recorded in the audit log as `log_level_debug_on`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Request
+
+```json
+{ "level": "debug", "duration_seconds": 900 }
+```
+
+Both fields are required and only these values are accepted.
+
+#### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 400    | `BAD_REQUEST`        | Invalid body, or any level or window other than above    |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
+
+---
+
+### DELETE /admin/api/logs/level
+
+Revert to `base_level` at once and cancel a pending boost. Recorded in the
+audit log as `log_level_reverted`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
 
 ---
 

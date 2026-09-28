@@ -145,6 +145,7 @@ const ACTION_LABEL={
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
   backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_archive:'downloaded the full archive',
+  log_level_debug_on:'turned on debug logging for 15 minutes',log_level_reverted:'turned debug logging off',
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
   api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
   plugin_install:'installed a plugin',plugin_uninstall:'uninstalled a plugin',

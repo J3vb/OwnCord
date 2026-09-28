@@ -259,7 +259,8 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`,
-  `update_apply`, `update_applied`, `update_failed`, `ws_connect`
+  `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
+  `update_failed`, `ws_connect`
 
 Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,

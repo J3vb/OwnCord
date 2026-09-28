@@ -93,6 +93,10 @@ function loadAdminPanel(
             logLevel.level = body.level;
             logLevel.reverts_at = new Date(Date.now() + body.duration_seconds * 1000).toISOString();
           }
+          if (method === "DELETE") {
+            logLevel.level = logLevel.base_level;
+            delete logLevel.reverts_at;
+          }
           const snapshot = { ...logLevel };
           return { ok: true, status: 200, json: async () => snapshot } as Response;
         }
@@ -362,8 +366,8 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     toggle.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const patch = fetchCalls.find((c) => c.path === "/logs/level" && c.method === "PATCH");
-    expect(patch!.body).toMatchObject({ level: "warn" });
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "DELETE")).toBe(true);
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "PATCH")).toBe(false);
     expect(bridge.state.logLevel).toBe("warn");
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     expect(doc.getElementById("logLevelStatus")!.textContent).toBe("");

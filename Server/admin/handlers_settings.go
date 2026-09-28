@@ -89,7 +89,7 @@ func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 			GitHubConfigured: cfg.GitHub.Token != "",
 		}
 		if role := actorRoleFromContext(r); role != nil &&
-			(permissions.HasAdmin(role.Permissions) || permissions.IsOwner(role.ID, role.Position)) {
+			(permissions.HasServerPerm(role.Permissions, permissions.Administrator) || isOwnerFromContext(r)) {
 			resp.TLSDomain = &cfg.TLS.Domain
 			resp.BackupDir = &cfg.Backup.Dir
 			resp.VoiceURL = &cfg.Voice.LiveKitURL

@@ -1,15 +1,15 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // LogLevelController owns the runtime log-level override for a bounded window
@@ -25,8 +25,8 @@ type LogLevelController struct {
 	mu       sync.Mutex
 	timer    *time.Timer
 	deadline time.Time
-	// gen identifies the latest Set, so a revert whose timer fired while a
-	// newer Set held mu cannot undo that newer window.
+	// gen identifies the latest Boost, so a revert whose timer fired while a
+	// newer Boost or Revert held mu cannot undo it.
 	gen uint64
 }
 
@@ -34,13 +34,9 @@ func NewLogLevelController(level *slog.LevelVar, base slog.Level) *LogLevelContr
 	return &LogLevelController{level: level, base: base}
 }
 
-// Set applies name for the given window and returns the deadline it reverts
-// at. Every override is timed: a non-positive window is refused.
-func (c *LogLevelController) Set(name string, window time.Duration) (time.Time, error) {
-	level, ok := config.ParseLevel(name)
-	if !ok {
-		return time.Time{}, fmt.Errorf("unknown log level %q", name)
-	}
+// Boost raises the level to debug for window and returns the deadline it
+// reverts at. Every boost is timed: a non-positive window is refused.
+func (c *LogLevelController) Boost(window time.Duration) (time.Time, error) {
 	if window <= 0 {
 		return time.Time{}, fmt.Errorf("log level window must be positive, got %s", window)
 	}
@@ -51,12 +47,20 @@ func (c *LogLevelController) Set(name string, window time.Duration) (time.Time, 
 		c.timer.Stop()
 		c.timer = nil
 	}
-	c.level.Set(level)
+	c.level.Set(slog.LevelDebug)
 	c.gen++
 	gen := c.gen
 	c.deadline = time.Now().Add(window)
 	c.timer = time.AfterFunc(window, func() { c.revert(gen) })
 	return c.deadline, nil
+}
+
+// Revert restores the base level at once and cancels a pending timed revert.
+func (c *LogLevelController) Revert() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.gen++
+	c.resetLocked()
 }
 
 // revert restores the base level when window gen elapses. A stale gen is a
@@ -67,7 +71,16 @@ func (c *LogLevelController) revert(gen uint64) {
 	if gen != c.gen {
 		return
 	}
-	c.timer = nil
+	// Logged before the level drops, so the line survives a warn or error base.
+	slog.Info("server log level window elapsed, reverting", "level", levelName(c.base))
+	c.resetLocked()
+}
+
+func (c *LogLevelController) resetLocked() {
+	if c.timer != nil {
+		c.timer.Stop()
+		c.timer = nil
+	}
 	c.deadline = time.Time{}
 	c.level.Set(c.base)
 }
@@ -110,18 +123,17 @@ func levelName(level slog.Level) string {
 	}
 }
 
-// logLevelRequest is PATCH /logs/level's body: a level name and a window in
-// seconds. Both are required — a window-less override is the restart-only
-// behaviour SRE-07 exists to replace.
+// logLevelRequest is PATCH /logs/level's body. The only boost on offer is
+// debug for logLevelBoostWindow; both fields are required and must match, so
+// the endpoint cannot quieten the server or pin a level for longer.
 type logLevelRequest struct {
 	Level           string `json:"level"`
 	DurationSeconds int    `json:"duration_seconds"`
 }
 
-// maxLogLevelWindow bounds a boost so one request cannot pin debug for days.
-const maxLogLevelWindow = 24 * time.Hour
+const logLevelBoostWindow = 15 * time.Minute
 
-// logLevelResponse is GET/PATCH /logs/level: the level in force, the base
+// logLevelResponse is GET/PATCH/DELETE /logs/level: the level in force, the base
 // level it reverts to, and, for a timed boost, when it reverts (empty for a
 // level with no pending revert).
 type logLevelResponse struct {
@@ -149,7 +161,7 @@ func handleGetLogLevel(c *LogLevelController) http.HandlerFunc {
 	}
 }
 
-func handleSetLogLevel(c *LogLevelController) http.HandlerFunc {
+func handleSetLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if c == nil {
 			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
@@ -160,19 +172,35 @@ func handleSetLogLevel(c *LogLevelController) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}
-		req.Level = strings.TrimSpace(req.Level)
-		if req.Level == "" {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "level is required")
+		if req.Level != "debug" || req.DurationSeconds != int(logLevelBoostWindow/time.Second) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", `only {"level":"debug","duration_seconds":900} is accepted`)
 			return
 		}
-		if req.DurationSeconds < 1 || time.Duration(req.DurationSeconds)*time.Second > maxLogLevelWindow {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "duration_seconds must be between 1 and 86400")
-			return
-		}
-		if _, err := c.Set(req.Level, time.Duration(req.DurationSeconds)*time.Second); err != nil {
+		if _, err := c.Boost(logLevelBoostWindow); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
+		actor := actorFromContext(r)
+		slog.Info("server log level raised to debug", "actor_id", actor, "window", logLevelBoostWindow.String())
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "log_level_debug_on", "server", 0,
+			"debug logging on for 15 minutes")
+		writeLogLevel(w, c)
+	}
+}
+
+func handleRevertLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c == nil {
+			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			return
+		}
+		actor := actorFromContext(r)
+		base := levelName(c.base)
+		// Logged before the revert, so the line survives a warn or error base.
+		slog.Info("server log level reverted", "actor_id", actor, "level", base)
+		c.Revert()
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "log_level_reverted", "server", 0,
+			"log level reverted to "+base)
 		writeLogLevel(w, c)
 	}
 }

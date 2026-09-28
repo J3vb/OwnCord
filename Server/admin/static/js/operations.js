@@ -425,7 +425,7 @@ async function loadLogLevel(){try{applyLogLevel(await api('GET','/logs/level'))}
 async function toggleServerLogLevel(){
   const on=state.logLevel==='debug';
   try{
-    applyLogLevel(await api('PATCH','/logs/level',on?{level:state.logLevelBase,duration_seconds:1}:{level:'debug',duration_seconds:LOG_LEVEL_MINUTES*60}));
+    applyLogLevel(on?await api('DELETE','/logs/level'):await api('PATCH','/logs/level',{level:'debug',duration_seconds:LOG_LEVEL_MINUTES*60}));
     showToast(on?'Log level set back to '+state.logLevelBase:'Debug logging on for '+LOG_LEVEL_MINUTES+' minutes','success');
   }catch(e){showToast(e.message,'error')}
 }

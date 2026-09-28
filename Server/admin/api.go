@@ -233,11 +233,12 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.With(requirePerm(permissions.Administrator)).
 			Post("/logs/ticket", handleLogTicket(database))
 
-		// Runtime log level (SRE-07): read the level in force and set a timed
-		// debug boost that reverts on its own. ADMINISTRATOR like the log
-		// stream it tunes.
+		// Runtime log level (SRE-07): read the level in force, set a timed
+		// debug boost that reverts on its own, or revert it at once.
+		// ADMINISTRATOR like the log stream it tunes.
 		r.With(requirePerm(permissions.Administrator)).Get("/logs/level", handleGetLogLevel(setupOpts.LogLevel))
-		r.With(requirePerm(permissions.Administrator)).Patch("/logs/level", handleSetLogLevel(setupOpts.LogLevel))
+		r.With(requirePerm(permissions.Administrator)).Patch("/logs/level", handleSetLogLevel(database, setupOpts.LogLevel))
+		r.With(requirePerm(permissions.Administrator)).Delete("/logs/level", handleRevertLogLevel(database, setupOpts.LogLevel))
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe(settings, version))

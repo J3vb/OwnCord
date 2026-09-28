@@ -1062,7 +1062,7 @@ func TestAdminAPI_LogLevel_ReadAndSet(t *testing.T) {
 		t.Errorf("GET reverts_at present with no boost: %v", got["reverts_at"])
 	}
 
-	w = doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 300})
+	w = doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 900})
 	if w.Code != http.StatusOK {
 		t.Fatalf("PATCH status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
@@ -1091,10 +1091,13 @@ func TestAdminAPI_LogLevel_RefusesBadRequests(t *testing.T) {
 		name string
 		body map[string]any
 	}{
-		{"unknown level", map[string]any{"level": "loud", "duration_seconds": 60}},
+		{"unknown level", map[string]any{"level": "loud", "duration_seconds": 900}},
+		{"quieter level", map[string]any{"level": "error", "duration_seconds": 900}},
 		{"zero window", map[string]any{"level": "debug", "duration_seconds": 0}},
-		{"window too long", map[string]any{"level": "debug", "duration_seconds": 200000}},
-		{"missing level", map[string]any{"duration_seconds": 60}},
+		{"other window", map[string]any{"level": "debug", "duration_seconds": 60}},
+		{"window too long", map[string]any{"level": "debug", "duration_seconds": 86400}},
+		{"overflowing window", map[string]any{"level": "debug", "duration_seconds": 900 + (1 << 55)}},
+		{"missing level", map[string]any{"duration_seconds": 900}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if w := doRequest(t, handler, http.MethodPatch, "/logs/level", token, tc.body); w.Code != http.StatusBadRequest {
@@ -1107,6 +1110,39 @@ func TestAdminAPI_LogLevel_RefusesBadRequests(t *testing.T) {
 	}
 }
 
+// DELETE reverts a boost to the base level at once.
+func TestAdminAPI_LogLevel_DeleteRevertsToBase(t *testing.T) {
+	database := openAdminTestDB(t)
+	var lv slog.LevelVar
+	lv.Set(slog.LevelWarn)
+	lvl := admin.NewLogLevelController(&lv, slog.LevelWarn)
+	t.Cleanup(lvl.Close)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{LogLevel: lvl})
+	token := createAdminUser(t, database)
+
+	if w := doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 900}); w.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d; body: %s", w.Code, w.Body.String())
+	}
+	w := doRequest(t, handler, http.MethodDelete, "/logs/level", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if lv.Level() != slog.LevelWarn {
+		t.Fatalf("level = %v after DELETE, want the base warn", lv.Level())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["level"] != "warn" || got["base_level"] != "warn" {
+		t.Errorf("DELETE response = %v, want level and base_level warn", got)
+	}
+	if _, ok := got["reverts_at"]; ok {
+		t.Errorf("DELETE response has reverts_at after a revert: %v", got)
+	}
+}
+
 func TestAdminAPI_LogLevel_WithoutController(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
@@ -1115,8 +1151,11 @@ func TestAdminAPI_LogLevel_WithoutController(t *testing.T) {
 	if w := doRequest(t, handler, http.MethodGet, "/logs/level", token, nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("GET status = %d, want 503", w.Code)
 	}
-	if w := doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 60}); w.Code != http.StatusServiceUnavailable {
+	if w := doRequest(t, handler, http.MethodPatch, "/logs/level", token, map[string]any{"level": "debug", "duration_seconds": 900}); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("PATCH status = %d, want 503", w.Code)
+	}
+	if w := doRequest(t, handler, http.MethodDelete, "/logs/level", token, nil); w.Code != http.StatusServiceUnavailable {
+		t.Errorf("DELETE status = %d, want 503", w.Code)
 	}
 }
 
