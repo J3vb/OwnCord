@@ -564,8 +564,10 @@ Every number below comes from the **constrained** leg and from nothing else.
 > dispatched from `dev` itself rather than a measurement branch — so its
 > `commit:` line resolves in a checkout of `dev`. The capacity, operational and
 > restart blocks remain measurement-branch runs (restart's, below, is a
-> superseded one and is no longer published as a latency result). The workflow
-> run id stays the resolvable handle for every block.
+> superseded one and is no longer published as a latency result); the two
+> 2026-09-28 restart dispatches (runs 36360934015 and 36362588641) are on `dev`
+> but publish no latency, see "Restart under load". The workflow run id stays
+> the resolvable handle for every block.
 
 ```
 commit:          593c764b2d749a9415741211c01216d9d5da2153  (measurement branch feat/b6-9-published-capacity-profile; not on dev/main)
@@ -651,7 +653,9 @@ and its figures are **superseded** — a corrected-harness re-run was dispatched
 on 2026-09-28 but is invalid on its own replay-gap gate (see "Restart under
 load"), so its numbers are not published here and the block stands as historical
 evidence only. Every other block's SHA is a measurement branch, not an ancestor
-of `dev`/`main`, and there the run id is the only resolvable handle. Each block
+of `dev`/`main`, and there the run id is the only resolvable handle; the two
+2026-09-28 restart dispatches (runs 36360934015 and 36362588641) are on `dev`
+but publish no latency, see "Restart under load". Each block
 is filled from its own **constrained** leg and from nothing else, and the
 `tls off` block publishes as a delta against the `self_signed` one rather than
 on its own.
