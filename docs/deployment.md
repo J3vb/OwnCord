@@ -1119,7 +1119,8 @@ naming the subsystem (`hub`, `database`, or `disk` — no further detail, since
 the endpoint is unauthenticated). Checks are cached for a few seconds, so
 polling it aggressively does not multiply database load. Point your uptime
 monitor or container healthcheck at this endpoint and treat any 503 as
-actionable.
+actionable. It does not cover voice — see
+[Monitor voice as well as liveness](#monitor-voice-as-well-as-liveness).
 
 The server version is deliberately not exposed on this unauthenticated
 endpoint (anti-fingerprinting hardening).
@@ -1587,7 +1588,7 @@ choose one: [TLS Setup](#tls-setup).
 - [ ] **Review upload limits** -- adjust `upload.max_size_mb` for your use case
 - [ ] **Configure GitHub token** -- optional, for reliable update checks
 - [ ] **Schedule backups** -- use the built-in schedule on the admin panel's Backups & restore page, or the endpoint from your own cron ([Scheduled Backups](#scheduled-backups))
-- [ ] **Monitor health** -- poll `/health` for uptime monitoring; it is poll-only, the server does not push alerts
+- [ ] **Monitor health** -- poll `/health` and `/api/v1/livekit/health` for uptime monitoring ([Monitor voice as well as liveness](#monitor-voice-as-well-as-liveness)); both are poll-only, the server does not push alerts
 
 ## Background Maintenance
 

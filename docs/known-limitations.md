@@ -53,8 +53,9 @@ Each item links to the guidance that owns it.
   A `chatserver restore <file>` command is post-beta.
 - **Health is poll-only.** `/health` answers, but the server never pushes an
   alert and Docker only _surfaces_ `unhealthy` rather than restarting on it.
-  Point an uptime monitor at `/health` yourself — see
-  [Health Endpoint](deployment.md#health-endpoint).
+  Point an uptime monitor at `/health` and, for voice,
+  `/api/v1/livekit/health` yourself — see
+  [Monitor voice as well as liveness](deployment.md#monitor-voice-as-well-as-liveness).
 - **ARM64 server upgrades are not rehearsed.** ARM64 assets are
   lifecycle-checked (boot, migrate, drain, restart) but there is no published
   ARM64 alpha to upgrade _from_ yet — see
