@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -162,8 +163,14 @@ func TestArchiveTree_VanishedEntryIsSkipped(t *testing.T) {
 	if err := tree.visit(root, "data", root, nil, fs.ErrNotExist); err == nil {
 		t.Error("a missing walk root was skipped; it must fail the archive")
 	}
-	if len(tree.entries) != 1 {
-		t.Fatalf("planned %d entries, want only %s", len(tree.entries), planned)
+	// On Windows, DirEntry.Info comes from the directory read and cannot see
+	// the removal, so listed.bin is planned and dropped by the write below.
+	want := 1
+	if runtime.GOOS == "windows" {
+		want = 2
+	}
+	if len(tree.entries) != want {
+		t.Fatalf("planned %d entries, want %d", len(tree.entries), want)
 	}
 
 	// Planned, then gone before its open: skipped while writing.

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -266,6 +267,9 @@ func TestHandleArchive_BackupDirIsDataDir(t *testing.T) {
 // TestHandleArchive_KeepsFileModes: an extracted key file must come back
 // 0600, not world-readable.
 func TestHandleArchive_KeepsFileModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no POSIX permission bits; every file reads back 0666. Covered on the Linux runner")
+	}
 	f := newArchiveFixture(t)
 	modes := map[string]os.FileMode{}
 	for _, zf := range archiveZip(t, f).File {
