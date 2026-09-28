@@ -285,8 +285,7 @@ export function createUserProfilePopup(
     const divider = createElement("div", { class: "upp-divider" });
 
     // Actions — only render buttons that are actually wired up, so the popup
-    // never shows a dead control (e.g. Call before DM calls exist, or Message
-    // on your own profile).
+    // never shows a dead control (e.g. Call or Message on your own profile).
     const actions = createElement("div", { class: "upp-actions" });
 
     if (options.onMessage !== undefined) {
