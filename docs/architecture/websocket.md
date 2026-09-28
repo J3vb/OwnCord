@@ -111,8 +111,10 @@ into a typed `Command`, dispatches to a single V2 handler, and the handler's
 `Result` is applied by one applier. There is no second (V1) generation, no
 lenient parser, and no second registry. Handlers stay effect-light — the two
 hub-coupled voice routines (`handleVoiceJoin`/`handleVoiceLeave`, also called
-un-throttled on disconnect and channel switch) are triggered from the applier via
-`Result.JoinVoice` / `Result.LeaveVoice` rather than re-expressed as pure events.
+un-throttled on channel switch and on disconnect — a completed call is first
+held for 15 s so a resuming socket inherits it, `voice_grace.go`) are triggered
+from the applier via `Result.JoinVoice` / `Result.LeaveVoice` rather than
+re-expressed as pure events.
 
 The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold; each
 connection's protocol Ping every 25s refreshes activity and closes a peer that

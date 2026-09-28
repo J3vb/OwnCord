@@ -177,11 +177,11 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// A connection that inherited a transferred voice session (the
 		// replay-failure fallback in handleFreshConnect deliberately keeps
 		// the voice_states row and registerNow transfers it onto c) must have
-		// that session torn down here too, or the row, the LiveKit
-		// participant, and a stale E2EE key-holder entry all survive this
-		// connection's death until the next sweep (up to 60s).
+		// that session parked (RT-8) or torn down here too, or the row, the
+		// LiveKit participant, and a stale E2EE key-holder entry all survive
+		// this connection's death until the next sweep (up to 60s).
 		if voiceChID != 0 {
-			h.handleVoiceLeave(cleanupCtx, c, voiceLeaveReasonHandshake)
+			h.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonHandshake)
 		}
 	}
 	// shouldMarkOffline re-checks h.clients rather than trusting the

@@ -25,7 +25,7 @@ import { setTyping } from "../../stores/members.store";
 import { dmStore, updateDmLastMessage, updateDmLastMessagePreview } from "../../stores/dm.store";
 import { setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
-import { invalidateReactionUsers } from "../../components/message-list/reaction-tooltip";
+import { invalidateReactionUsers } from "./reactionUsers";
 import { parseTimestamp } from "@lib/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";

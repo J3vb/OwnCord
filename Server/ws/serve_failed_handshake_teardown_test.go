@@ -94,8 +94,14 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 		t.Fatal("precondition: the transferred session must hold the E2EE key")
 	}
 
-	// B's auth_ok/ready write fails; the handshake failure path runs.
+	// B's auth_ok/ready write fails; the handshake failure path runs. RT-8
+	// parks the completed session for a redial, so the teardown below is the
+	// one the grace window's expiry runs.
 	h.unregisterFailedHandshake(ctx, newClient)
+	if !h.voiceGrace.has(userID, vcID) {
+		t.Fatal("a failed handshake did not park the transferred session in the grace window")
+	}
+	h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonGraceExpired)
 
 	if after, err := database.GetVoiceState(ctx, userID); err != nil {
 		t.Fatalf("GetVoiceState after teardown: %v", err)

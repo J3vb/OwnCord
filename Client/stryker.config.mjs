@@ -22,6 +22,7 @@ const config = {
     "src/lib/**/*.ts",
     "src/stores/**/*.ts",
     "src/features/**/*.ts",
+    "src/components/message-list/avatar.ts",
     "!src/lib/types.ts",
     "!src/**/*.d.ts",
     "!src/**/*.test.ts",

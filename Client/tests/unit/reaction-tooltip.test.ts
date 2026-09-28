@@ -12,13 +12,15 @@ import {
   REACTION_TOOLTIP_DEBOUNCE_MS,
   attachReactionTooltip,
   buildReactionTooltip,
-  clearReactionUsersCache,
   formatReactorNames,
+} from "../../src/components/message-list/reaction-tooltip";
+import {
+  clearReactionUsersCache,
   getCachedReactionUsers,
   invalidateReactionUsers,
   loadReactionUsers,
   setReactionUsersFetcher,
-} from "../../src/components/message-list/reaction-tooltip";
+} from "../../src/features/messaging/reactionUsers";
 import { membersStore } from "@stores/members.store";
 import type { ReactionUser } from "@lib/types";
 

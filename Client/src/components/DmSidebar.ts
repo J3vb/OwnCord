@@ -19,7 +19,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
 import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
-import { isRenderableAvatar } from "@lib/avatar";
+import { isRenderableAvatar } from "./message-list/avatar";
 import {
   fetchImageAsDataUrl,
   recoverEvictedImage,
