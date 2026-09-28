@@ -36,15 +36,16 @@
 # numbers are recorded and published, never gated.
 #
 # The weekly schedule is RE-05's regression watch: it re-measures the
-# constrained profile on dev once a week and uploads the artifacts, so a
-# capacity regression is visible in the Actions history instead of waiting for
-# someone to dispatch a run. It is inert on dev until this file is carried to
-# the default branch (GitHub registers a `schedule:` only when the file exists
-# on main, the same rule nightly-docker-smoke.yml:18-25 states) and, once it
-# fires, it checks out dev itself rather than the default branch's tip. A
-# scheduled run lands its checks on the DEFAULT branch, where no context here
-# is required, and the job is guarded to the canonical repository so a fork
-# mirroring this file spends nothing.
+# constrained profile once a week and uploads the artifacts, so a capacity
+# regression is visible in the Actions history instead of waiting for someone
+# to dispatch a run. It is inert until this file is carried to the default
+# branch (GitHub registers a `schedule:` only when the file exists on main, the
+# same rule nightly-docker-smoke.yml:18-25 states), and a scheduled run then
+# measures the workflow's own commit, so the wiring here and the harness it
+# drives are always the same revision. To measure dev, dispatch with
+# `--ref dev`. A scheduled run lands its checks on the DEFAULT branch, where no
+# context here is required, and the job is guarded to the canonical repository
+# so a fork mirroring this file spends nothing.
 #
 # Re-run it deliberately before a release, or after changes to the hub, the
 # write path or the replay budget.
@@ -87,9 +88,9 @@ name: Load Baseline
 
 on:
   # RE-05's weekly regression watch. A schedule only ever runs from the default
-  # branch, and the checkout below pins dev once it fires, so this file does
-  # nothing until it reaches main and then measures dev every week. The job's
-  # canonical-repository guard keeps a fork from spending on its own copy.
+  # branch, so this file does nothing until it reaches main and then measures
+  # main's commit every week. The job's canonical-repository guard keeps a fork
+  # from spending on its own copy.
   schedule:
     - cron: "0 6 * * 0"
   workflow_dispatch:
@@ -187,16 +188,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          # A schedule can only run from the default branch; dev is where a
-          # server or harness regression lands first, so the weekly run
-          # measures dev — the same choice, and the same reason, as
-          # nightly-docker-smoke.yml. Every other trigger takes the ref it was
-          # started on.
-          ref: ${{ github.event_name == 'schedule' && 'dev' || '' }}
           persist-credentials: false
 
-      # So the log of a scheduled run states which dev commit was measured
-      # instead of leaving it to be re-derived from the trigger.
+      # So the log of every run states which commit was measured instead of
+      # leaving it to be re-derived from the trigger.
       - name: Print checked-out revision
         env:
           EVENT: ${{ github.event_name }}

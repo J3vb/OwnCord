@@ -226,13 +226,14 @@ assertions offline, with no SFU and no `lk` binary.
   fan-out the recipient-delivery budget is measured against.
 - **Nothing in CI gates these numbers.** Like the benchmark baseline, they are
   recorded and published. `load-baseline.yml` is `workflow_dispatch` plus a
-  weekly `schedule:` on dev, never part of the blocking CI matrix, because a
-  perf run on shared runners is a flake source. GitHub runs a `schedule:` only
-  from the default branch, so the schedule begins once this workflow reaches
-  `main`; from then it re-measures the constrained profile each week, prints
-  the `dev` commit it checked out, and uploads its artifacts, so a regression
-  is visible in the Actions history without anyone dispatching a run. It does
-  not gate anything.
+  weekly `schedule:`, never part of the blocking CI matrix, because a perf run
+  on shared runners is a flake source. GitHub runs a `schedule:` only from the
+  default branch, so the schedule begins once this workflow reaches `main`;
+  from then it re-measures the constrained profile on `main`'s commit each
+  week (the workflow and the harness it drives are always the same revision),
+  prints the commit it measured, and uploads its artifacts, so a regression is
+  visible in the Actions history without anyone dispatching a run. A `dev`
+  measurement is a dispatch with `--ref dev`. It does not gate anything.
 - **The operational profiles below are per-phase, not per-run.** That section's
   database figures are deltas between phases of one run, so they answer "which
   scenario did the writer queue behind" and not "how long did the run wait".
@@ -584,7 +585,8 @@ Every number below comes from the **constrained** leg and from nothing else.
 > `dev` revision; no measurement-branch run remains as a qualifying figure,
 > and the operational re-measurement resolves OC-0481 (see that section). Once
 > this workflow reaches `main` (the next release), its weekly `schedule:` keeps
-> a fresh `dev` run in the Actions history without anyone dispatching one.
+> a fresh run of `main`'s commit in the Actions history without anyone
+> dispatching one.
 
 ### The profile on `dev` (RE-05, 2026-09-28)
 
