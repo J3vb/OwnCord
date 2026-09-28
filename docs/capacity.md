@@ -873,13 +873,13 @@ run **36360934015** (commit `8349ed2e`) and the prescribed one-shot rerun
 `ws_replay_gap max==0` validity gate, so neither publishes a latency result:
 
 ```
-commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev — ancestor of dev/main)
+commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev; not yet on main)
 date (UTC):      2026-09-28
 workflow run:    36360934015  (.github/workflows/load-baseline.yml, profile=restart)
 job:             108737859472  (restart, constrained, tls self_signed)
 replay gap:      max 9, p95 7, p99 8.01, avg 1.67, med 1, count 100; every resume tier none
 ---
-commit:          a04f8edd0b356b6c7794d88bf8d646dc08eb49a4  (on dev — ancestor of dev/main)
+commit:          a04f8edd0b356b6c7794d88bf8d646dc08eb49a4  (on dev; not yet on main)
 date (UTC):      2026-09-28
 workflow run:    36362588641  (.github/workflows/load-baseline.yml, profile=restart)
 job:             108742581478  (restart, constrained, tls self_signed)
@@ -1031,7 +1031,7 @@ PERF-03 exists for: the corrected harness (OC-0447), dispatched from `dev`
 itself, with the zero-shedding gate passing.
 
 ```
-commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev — ancestor of dev/main)
+commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev; not yet on main)
 date (UTC):      2026-09-28
 workflow run:    36360932108  (.github/workflows/load-baseline.yml, profile=ceiling-search)
 job:             108737854635  (ceiling-search, constrained, tls self_signed)
@@ -1077,7 +1077,8 @@ WebSocket open → `auth_ok` 200 / 500 ms; send → sender acknowledgement
 **The last step at which every budget held is 300.** Step 400 breaks the REST
 login budget (p95 737 ms against 600 ms) while the two message paths still hold
 (delivery 97 ms, ack 99 ms); step 500 breaks recipient delivery and sender
-acknowledgement together (p95 7.3 s against 200 ms and 150 ms).
+acknowledgement together (p95 7.3 s against 200 ms and 150 ms), along with
+`auth_ok` (p95 818 ms against 200 ms) and the still-broken login (p95 2,573 ms).
 
 **Two resources limit the search, one per failing step.** Login breaks at 400
 with the server's CPU near saturation during that step's ramp; the message paths
@@ -1125,7 +1126,8 @@ Beyond it, login is the first budget to fail (at 400, near-saturated ramp CPU)
 and the message paths follow at 500 through the writer queue — the operational
 section's property that the SQLite writer is one checkout at a time, so a
 per-message hop that is sub-millisecond idle becomes a queue once enough senders
-share it. Per PERF-05's trigger row, this is _not_ the fan-out CPU limit.
+share it. This is _not_ the fan-out CPU limit: dispatch lag and the `seqMu` hold
+stayed sub-200 ms throughout.
 
 The per-step figures are informational — nothing is gated on the search, and no
 new budget is set by it. The block below is the **superseded 2026-09-16
