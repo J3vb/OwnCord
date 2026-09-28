@@ -221,6 +221,9 @@ stateDiagram-v2
     Reconnecting --> Connect: auth_error (fatal) → transient-error
     Connected --> SignedInElsewhere: SESSION_REPLACED (no reconnect)
     SignedInElsewhere --> Reconnecting: Use here
+    Connected --> SuspendWake: woke from a suspend (no reconnect)
+    Reconnecting --> SuspendWake: woke from a suspend (no reconnect)
+    SuspendWake --> Reconnecting: Reconnect here
     Connected --> Restarting: server_restart{delay}
     Restarting --> Reconnecting: server drops us
 ```
@@ -233,6 +236,7 @@ stateDiagram-v2
 | `server_restart`               | `ServerBanner.showRestart(delay_seconds)` with a live countdown (`showRestart()`, `components/ServerBanner.ts`)                                                                                                                                                                                                                                                                                                                                                                             |
 | fatal (`auth_error`)           | `intentionalClose`, transient-error store → connect page                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | displaced (`SESSION_REPLACED`) | No reconnect; stay signed in with the "Signed in elsewhere" banner and its "Use here" action ([settings-and-admin.md](settings-and-admin.md) §2.4)                                                                                                                                                                                                                                                                                                                                          |
+| woke from a suspend            | No reconnect: a gap over 180 s since the client last saw its clock running (`SUSPEND_GATE_MS`, `lib/ws.ts`) means the device slept, and dialing on its own could displace the account's live socket on another device. `ServerBanner.showSuspendReconnect()` shows "Woke from sleep" with a "Reconnect here" action; the prompt clears once connected. A shorter sleep still reconnects on its own                                                                                          |
 
 **Target rule:** reconnection is invisible on the happy path and honest on the
 sad path. The user should never wonder whether the app is live — the banner and
