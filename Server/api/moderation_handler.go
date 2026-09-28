@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -148,8 +147,13 @@ func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
 			return
 		}
+		duration, err := service.TimeoutDurationFromSeconds(req.DurationSeconds)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
 		result, err := svc.Moderation.Timeout(r.Context(), actorID, targetID, req.Reason,
-			time.Duration(req.DurationSeconds)*time.Second, nil)
+			duration, nil)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
