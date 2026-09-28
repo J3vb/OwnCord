@@ -22,10 +22,12 @@ import (
 // Deterministic, no sleep and no wall-clock ratio: db.BackupVACUUMPreExecHook
 // parks the backup at its VACUUM, while it provably holds the connection the
 // VACUUM runs on, until this test releases it. Reserve and Release must
-// complete during that hold. If a refactor ever moved the VACUUM back to the
-// single writer, the hook would be holding that writer and Reserve would block
-// here — a clean assertion instead of the old "Reserve+Release took a quarter
-// of the backup's time" comparison, which broke under parallel package load.
+// complete during that hold. If the pinned VACUUM connection were taken from
+// the single writer, the hook would be holding that writer and Reserve would
+// block here. This replaces the old "Reserve+Release took a quarter of the
+// backup's time" comparison, which broke under parallel package load. It does
+// not overlap Reserve with a running VACUUM; that lock-level property is
+// covered by db's TestBackupToSafe_ConcurrentWriteIsNotDelayed.
 func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "quota.db"))
@@ -70,6 +72,8 @@ func TestReserve_NotBlockedByAConcurrentBackup(t *testing.T) {
 
 	select {
 	case <-parked:
+	case err := <-done:
+		t.Fatalf("BackupToSafe returned before reaching its VACUUM: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("backup never reached its VACUUM; the test exercised nothing")
 	}

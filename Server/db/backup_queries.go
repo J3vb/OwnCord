@@ -24,9 +24,12 @@ import (
 // drives this through UploadService.Reserve rather than calling
 // db.BackupToSafe directly): it parks the backup at a known point while it
 // provably owns its pool's connection, so a test can assert Reserve completes
-// without a timing-ratio sleep. If a future refactor moved the VACUUM back to
-// the single writer connection, this hook would hold that writer and Reserve
-// would block on it — which is exactly what the test guards against.
+// without a timing-ratio sleep. It guards the writer only while it sits between
+// the pinned Conn checkout and the Exec on that same conn: moving that pinned
+// conn to the writer makes Reserve block here, but an unpinned
+// d.writer.ExecContext after the hook would not. Whether a running VACUUM
+// delays a write at the SQLite lock level is covered separately by
+// TestBackupToSafe_ConcurrentWriteIsNotDelayed.
 var BackupVACUUMPreExecHook func()
 
 // BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
@@ -111,8 +114,7 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 	// the VACUUM's whole duration no longer queues behind — or blocks — the
 	// single writer. Pin one reader connection for the whole call so the
 	// test hook below (BackupVACUUMPreExecHook) can hold the very connection
-	// the VACUUM uses: it then proves Reserve proceeds without racing the
-	// VACUUM's own timing rather than merely favouring one ordering.
+	// the VACUUM uses.
 	conn, err := d.reader.Conn(ctx)
 	if err != nil {
 		_ = os.Remove(absTemp)
