@@ -75,8 +75,8 @@ type Client struct {
 	// unrecoverable afterwards, because the client only ever reports max(seq).
 	//
 	// UNTRUSTED — it is attacker-controlled like any other auth-frame field.
-	// handleReconnect promotes it to channelID only after checking it against
-	// the freshly computed allowed-channel set, and never on a fresh connect.
+	// handleReconnect and handleFreshConnect promote it to channelID only after
+	// checking it against the freshly computed allowed-channel set.
 	authChannelID int64
 	connectedAt   time.Time      // when the WS connection was established
 	remoteAddr    string         // client IP resolved through trusted_proxies (clientip.Resolve), no port

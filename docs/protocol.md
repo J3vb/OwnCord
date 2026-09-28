@@ -151,6 +151,13 @@ resumed socket holds no channel subscription until its post-`auth_ok`
 in the meantime reaches nobody on that connection and can never be re-requested,
 since the client only ever reports `max(seq)`.
 
+The hint is honoured on both resume paths: a replay-capable resume (ring or
+cold tier) and the full re-sync the hub sends when replay cannot converge — for
+instance after a server restart, when the fresh per-boot sequence floor makes
+every in-memory gap unreplayable. The full re-sync also holds no channel
+subscription until `channel_focus` otherwise, so omitting the hint there loses
+the same frames.
+
 Clients should still send `channel_focus` after `auth_ok` — it remains the
 fallback for servers that predate this field, and it is idempotent.
 
