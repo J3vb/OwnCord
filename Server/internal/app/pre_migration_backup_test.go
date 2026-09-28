@@ -218,6 +218,59 @@ func TestInitDatabase_UpgradeAfterRollbackTakesFreshBackup(t *testing.T) {
 	}
 }
 
+// TestInitDatabase_CrashLoopReusesPreMigrationBackup: a migration that fails
+// on every boot, under a supervisor that restarts forever, must not write a
+// new full copy per boot — nothing changed since the first one, so the boots
+// reuse it and the backup directory stays at one file.
+func TestInitDatabase_CrashLoopReusesPreMigrationBackup(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "chatserver.db")
+	backupDir := filepath.Join(dir, "backups")
+	t.Cleanup(func() { admin.SetBackupDir(filepath.Join("data", "backups")) })
+
+	seed, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open seed: %v", err)
+	}
+	if err := db.MigrateFS(seed, migrationsUpTo(t, "021_")); err != nil {
+		t.Fatalf("MigrateFS(<021): %v", err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatalf("Close seed: %v", err)
+	}
+	// Migration 021 alters this table, so it now fails on every boot.
+	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+	if err != nil {
+		t.Fatalf("open %s: %v", dbPath, err)
+	}
+	if _, err := conn.Exec(`DROP TABLE voice_states`); err != nil {
+		t.Fatalf("DROP TABLE: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close %s: %v", dbPath, err)
+	}
+
+	cfg := &config.Config{
+		Database: config.DatabaseConfig{Path: dbPath},
+		Backup:   config.BackupConfig{Dir: backupDir},
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for i := range 3 {
+		database, err := db.Open(dbPath)
+		if err != nil {
+			t.Fatalf("boot %d: Open: %v", i, err)
+		}
+		if err := initDatabase(log, cfg, database, NewRestartCoordinator(time.Hour, nil)); err == nil {
+			t.Fatalf("boot %d: initDatabase succeeded; migration 021 was meant to fail", i)
+		}
+		if err := database.Close(); err != nil {
+			t.Fatalf("boot %d: Close: %v", i, err)
+		}
+	}
+
+	onlyBackup(t, backupDir)
+}
+
 func copyFile(t *testing.T, src, dst string) {
 	t.Helper()
 	data, err := os.ReadFile(src)

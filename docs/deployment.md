@@ -650,7 +650,10 @@ lands in the configured backup directory as
 is already taken, so an earlier copy is never overwritten), is verified with
 `integrity_check`, and is
 kept out of retention pruning like the `pre_restore_*` copies. A boot that
-cannot write it refuses to start rather than migrate without it.
+cannot write it refuses to start rather than migrate without it. If the
+database has not changed since the newest copy for that migration — a
+migration that fails on every boot, say — the boot reuses that copy instead of
+writing another.
 
 This protects the schema, not your uploads or keys: it is a database copy, so
 pair it with the full [archive](#before-upgrading-take-the-archive) for a

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
@@ -49,12 +50,18 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 	// admin request can ever hit the unwired default hook.
 	admin.SetRestartHandoff(rc.Request)
 
-	if err := backupBeforePendingMigrations(log, database); err != nil {
+	backup, err := backupBeforePendingMigrations(log, database, cfg.Database.Path)
+	if err != nil {
 		return err
 	}
 
 	if err := db.Migrate(database); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
+	}
+	if backup != "" {
+		// Actor 0 = system, the same convention the scheduled backup uses.
+		db.WriteAudit(context.Background(), database, 0, "backup_create", "server", 0,
+			"pre-migration backup saved: "+backup)
 	}
 
 	// Clear stale state from a previous run or crash. Startup work — nothing
@@ -87,50 +94,73 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 // It runs after admin.SetBackupDir so the copy lands beside the operator's
 // manual backups, before db.Migrate so the copy predates the schema move, and
 // before any goroutine serves — there is no context to inherit.
-func backupBeforePendingMigrations(log *slog.Logger, database *db.DB) error {
+//
+// It returns the backup's file name, or "" when nothing was pending.
+func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath string) (string, error) {
 	// In-memory databases (tests, tooling) have no file to copy, and a fresh
 	// database has no pending migrations — PendingMigrations returns nil for
 	// both, which is the only thing keeping BackupToSafe off those paths.
 	pending, err := db.PendingMigrations(database)
 	if err != nil {
-		return fmt.Errorf("checking for pending migrations: %w", err)
+		return "", fmt.Errorf("checking for pending migrations: %w", err)
 	}
 	if len(pending) == 0 {
-		return nil
+		return "", nil
 	}
 
 	backupDir := admin.BackupDir()
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		return fmt.Errorf("pre-migration backup: creating %s: %w", backupDir, err)
+		return "", fmt.Errorf("pre-migration backup: creating %s: %w", backupDir, err)
 	}
 
 	// Name the copy for the first migration it precedes, so an operator can
 	// see at a glance which schema move this protects. A same-name copy may
-	// predate a rollback and hold none of the data written since, so every
-	// boot takes a fresh copy under the first free _N suffix and never
-	// touches an earlier one.
+	// predate a rollback and hold none of the data written since, so a new
+	// copy goes under the first free _N suffix whenever the database changed
+	// after the newest one; an earlier copy is never touched. A boot loop on a
+	// migration that keeps failing changes nothing, so it reuses the newest
+	// copy instead of filling the disk.
 	name := admin.PreMigrateBackupPrefix + strings.TrimSuffix(filepath.Base(pending[0]), ".sql")
 	path := filepath.Join(backupDir, name+".db")
+	newest := ""
+	var newestTime time.Time
 	for n := 2; ; n++ {
-		if _, statErr := os.Stat(path); statErr != nil {
+		fi, statErr := os.Stat(path)
+		if statErr != nil {
 			break
 		}
+		newest, newestTime = path, fi.ModTime()
 		path = filepath.Join(backupDir, fmt.Sprintf("%s_%d.db", name, n))
 	}
 
 	ctx := context.Background()
+	if newest != "" && !changedSince(dbPath, newestTime) && db.CheckBackupIntegrity(ctx, newest) == nil {
+		log.Info("pre-migration backup is current; reusing it",
+			"path", filepath.Base(newest), "migrations", len(pending))
+		return filepath.Base(newest), nil
+	}
+
 	if err := database.BackupToSafe(ctx, path, backupDir); err != nil {
-		return fmt.Errorf("pre-migration backup: %w", err)
+		return "", fmt.Errorf("pre-migration backup: %w", err)
 	}
 	if err := db.CheckBackupIntegrity(ctx, path); err != nil {
 		_ = os.Remove(path)
-		return fmt.Errorf("pre-migration backup failed verification: %w", err)
+		return "", fmt.Errorf("pre-migration backup failed verification: %w", err)
 	}
 
 	log.Warn("pre-migration backup written before applying migrations",
 		"path", filepath.Base(path), "migrations", len(pending))
-	// Actor 0 = system, the same convention the scheduled backup uses.
-	db.WriteAudit(ctx, database, 0, "backup_create", "server", 0,
-		fmt.Sprintf("pre-migration backup saved: %s (%d migration(s) pending)", filepath.Base(path), len(pending)))
-	return nil
+	return filepath.Base(path), nil
+}
+
+// changedSince reports whether the SQLite database at dbPath may hold writes
+// newer than t: its main file, or a non-empty WAL, was modified after t. An
+// unreadable main file counts as changed.
+func changedSince(dbPath string, t time.Time) bool {
+	fi, err := os.Stat(dbPath)
+	if err != nil || fi.ModTime().After(t) {
+		return true
+	}
+	wal, err := os.Stat(dbPath + "-wal")
+	return err == nil && wal.Size() > 0 && wal.ModTime().After(t)
 }
