@@ -49,9 +49,9 @@
     <p class="wiz-hint hidden" id="setupFingerprintLater">The certificate fingerprint appears on the Dashboard once the server serves its new certificate. Publish it before members connect.</p>
     <div id="setupWarnings"></div>
     <div class="setup-restart hidden" id="setupRestart" role="status">
-      <p class="auth-sub"><span class="spinner" aria-hidden="true"></span>Applying your settings — the server is restarting…</p>
+      <p class="auth-sub" id="restartStatus"><span class="spinner" aria-hidden="true"></span>Applying your settings — the server is restarting…</p>
       <p class="setup-restart-link">When it's back, open: <a id="restartLink" href="#"></a></p>
-      <p class="wiz-hint" id="restartHint">This can take a few seconds. If the page doesn't redirect on its own, open the link above. You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
+      <p class="wiz-hint" id="restartHint"><span id="restartNext">This can take a few seconds. If the page doesn't redirect on its own, open the link above.</span> You may need to sign in again, and with a self-signed certificate your browser may show a one-time security warning — choose Advanced &rarr; Continue.</p>
     </div>
     <button type="button" class="btn btn-accent auth-submit" id="setupContinueBtn">Continue to Admin Panel</button>
   </div>

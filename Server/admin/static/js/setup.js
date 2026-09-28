@@ -279,7 +279,11 @@ function beginRestartWait(url,autoFollow){
   document.getElementById('setupContinueBtn').classList.add('hidden');
   document.getElementById('setupRestart').classList.remove('hidden');
   const link=document.getElementById('restartLink');link.href=url;link.textContent=url;
-  if(!autoFollow)return;
+  if(!autoFollow){
+    document.getElementById('restartStatus').textContent='The server restarts to apply your settings.';
+    document.getElementById('restartNext').textContent='Save your recovery kit, then open the link above.';
+    return;
+  }
   let elapsed=0;
   setTimeout(function poll(){
     fetch(url+'/api/setup/status',{mode:'no-cors',cache:'no-store'})
