@@ -79,7 +79,7 @@ describe("NotificationsTab — system notification permission", () => {
     mockRequestPermission.mockResolvedValue(true);
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
     expect(pill(el)).toEqual({ text: "Blocked", kind: "crit" });
 
@@ -99,12 +99,12 @@ describe("NotificationsTab — system notification permission", () => {
     mockRequestPermission.mockResolvedValue(false);
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
 
     (el.querySelector("[data-testid='notification-permission-allow']") as HTMLElement).click();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
   });
 
@@ -112,7 +112,7 @@ describe("NotificationsTab — system notification permission", () => {
     mockPermissionGranted.mockRejectedValue(new Error("no native notifier"));
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("no system notifier");
+      expect(descText(el)).toBe("This build has no system notifier.");
     });
     expect(pill(el)).toEqual({ text: "Unavailable", kind: "pending" });
     // No Allow action: permission cannot be asked for where no notifier exists.
@@ -128,7 +128,7 @@ describe("NotificationsTab — system notification permission", () => {
       const el = row();
       await vi.waitFor(() => {
         expect(descText(el)).toBe(
-          "OwnCord can't read your system notification setting. If notifications don't appear, check your system notification settings.",
+          "If notifications don't appear, check your system notification settings.",
         );
       });
       expect(pill(el)).toEqual({ text: "Unknown", kind: "pending" });
@@ -144,7 +144,7 @@ describe("NotificationsTab — system notification permission", () => {
     mockRequestPermission.mockRejectedValue(new Error("no native notifier"));
     const el = row();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("blocked notifications from OwnCord");
+      expect(descText(el)).toBe("Ask again, or allow OwnCord in your system settings.");
     });
 
     const allow = el.querySelector(
@@ -152,7 +152,7 @@ describe("NotificationsTab — system notification permission", () => {
     ) as HTMLButtonElement;
     allow.click();
     await vi.waitFor(() => {
-      expect(descText(el)).toContain("no system notifier");
+      expect(descText(el)).toBe("This build has no system notifier.");
     });
     expect(allow.hidden).toBe(true);
   });

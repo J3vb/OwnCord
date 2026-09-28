@@ -66,13 +66,11 @@ export const settingsText = defineCatalog("settings", {
   "notifications.permission.unknownState": "Unknown",
   "notifications.permission.unavailableState": "Unavailable",
   "notifications.blockedReason": "Blocked by your system. Allow notifications above.",
-  "notifications.permission.denied":
-    "Your system has blocked notifications from OwnCord, so the toggles below cannot deliver them. Allow notifications to change this.",
+  "notifications.permission.denied": "Ask again, or allow OwnCord in your system settings.",
   "notifications.permission.allow": "Allow notifications",
   "notifications.permission.unknown":
-    "OwnCord can't read your system notification setting. If notifications don't appear, check your system notification settings.",
-  "notifications.permission.unavailable":
-    "This build has no system notifier, so it cannot show desktop notifications or ask for permission.",
+    "If notifications don't appear, check your system notification settings.",
+  "notifications.permission.unavailable": "This build has no system notifier.",
   "notifications.flash.label": "Flash Taskbar",
   "notifications.flash.desc": "Flash taskbar on new messages",
   "notifications.suppress.label": "Suppress @everyone",
