@@ -148,6 +148,49 @@ describe("Server/admin/static — Members (AO-4)", () => {
     );
   });
 
+  it("asks for confirmation before denying an application, and can cancel", async () => {
+    const calls: string[] = [];
+    const { doc, settle, show } = await boot(calls, (p) => {
+      if (p === "/registrations")
+        return [{ id: 9, username: "applicant", created_at: "2026-09-01 10:00:00" }];
+      if (p === "/roles") return ROLES;
+      if (p.startsWith("/users?")) return [];
+      return {};
+    });
+    await show({ id: 1, permissions: ADMINISTRATOR, role_position: 100, is_owner: true });
+    (doc.getElementById("membersTab-pending") as HTMLElement).click();
+    await settle();
+
+    // Deny opens a confirmation naming the applicant; no request is sent yet.
+    (
+      doc.querySelector(
+        '[data-action="decideRegistration"][data-args=\'[9,"deny"]\']',
+      ) as HTMLElement
+    ).click();
+    await settle();
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(true);
+    expect(doc.getElementById("modalInner")!.textContent).toContain("applicant");
+    expect(calls).not.toContain("POST /registrations/9/deny");
+
+    // Cancel closes it and still sends nothing.
+    (doc.querySelector('#modalInner [data-action="closeModal"]') as HTMLElement).click();
+    await settle();
+    expect(calls).not.toContain("POST /registrations/9/deny");
+
+    // Reopening and confirming sends exactly the deny.
+    (
+      doc.querySelector(
+        '[data-action="decideRegistration"][data-args=\'[9,"deny"]\']',
+      ) as HTMLElement
+    ).click();
+    await settle();
+    (
+      doc.querySelector('#modalInner [data-action="confirmDenyRegistration"]') as HTMLElement
+    ).click();
+    await settle();
+    expect(calls).toContain("POST /registrations/9/deny");
+  });
+
   it("hides the Pending tab from a principal who cannot decide registrations", async () => {
     const calls: string[] = [];
     const { doc, show } = await boot(calls, (p) => (p.startsWith("/users?") ? [] : {}));

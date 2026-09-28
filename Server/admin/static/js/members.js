@@ -8,7 +8,26 @@ const REG_MODES=[['closed','Closed'],['invite','Invite-only'],['approval','Appro
 function regModeLabel(m){const f=REG_MODES.find(x=>x[0]===m);return f?f[1]:'Invite-only'}
 function regModeOptions(cur){return REG_MODES.map(([v,l])=>'<option value="'+v+'"'+(cur===v?' selected':'')+'>'+l+'</option>').join('')}
 async function decideRegistration(id,action){
-  try{await api('POST','/registrations/'+id+'/'+action);showToast(action==='approve'?'Registration approved':'Registration denied');renderContent()}
+  if(action==='deny')return openDenyRegistration(id);
+  try{await api('POST','/registrations/'+id+'/approve');showToast('Registration approved');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
+
+/* Denial is permanent: the row is anonymised and locked for good and the
+   username released, so unlike Approve it asks first. The confirmation names
+   the applicant from the pending row, then confirmDenyRegistration sends the
+   same request decideRegistration used to. */
+function openDenyRegistration(id){
+  const p=(state.pendingRegistrations||[]).find(x=>x.id===id)||{};
+  const name=p.username||('applicant #'+id);
+  openModal('<div class="modal-header"><h3>Deny registration</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
+    +'<div class="modal-body"><p style="color:var(--text-muted)">Deny the registration of <strong style="color:var(--text-normal)">'+esc(name)+'</strong>?</p>'
+    +'<p style="color:var(--text-muted);margin-top:10px"><strong style="color:var(--text-danger)">This is permanent.</strong> The application is denied for good and the username is released — the person can apply again with a new username, and there is no way to approve this application afterwards.</p></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmDenyRegistration" data-args="'+actArgs(id)+'">Deny registration</button></div>');
+}
+
+async function confirmDenyRegistration(id){
+  try{await api('POST','/registrations/'+id+'/deny');closeModal();showToast('Registration denied');renderContent()}
   catch(e){showToast(e.message,'error')}
 }
 /* AO-4: the Members page. Three tabs (All, Pending, Banned); search, the role
@@ -59,6 +78,9 @@ async function renderUsers(){
      MANAGE_SERVER decides. The fetch also keeps the nav badge current. */
   let pending=[];
   if(pendingAllowed){try{pending=await api('GET','/registrations')||[]}catch(e){pending=[]}}
+  /* Cached so the Deny confirmation can name the applicant without a second
+     fetch from the dialog's click handler. */
+  state.pendingRegistrations=pending;
   const tab=state.membersTab;
   let html='<div class="page-title">Members</div><div class="page-desc">Search, review and moderate the people on this server</div>';
   html+='<div class="member-tabs" role="tablist" aria-label="Member lists">'+MEMBER_TABS.filter(t=>t[0]!=='pending'||pendingAllowed).map(([id,label])=>{
@@ -346,7 +368,7 @@ async function confirmForceLogout(uid){
   try{await api('DELETE','/users/'+uid+'/sessions');closeModal();showToast('Forced logout: all sessions terminated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
-Object.assign(ACTIONS,{confirmBan,confirmEraseUser,confirmForceLogout,confirmIssueRecovery,decideRegistration,
-  forceLogout,openBanUser,openEditUser,openEraseUser,openIssueRecovery,saveUserRole,unbanUser,
+Object.assign(ACTIONS,{confirmBan,confirmDenyRegistration,confirmEraseUser,confirmForceLogout,confirmIssueRecovery,decideRegistration,
+  forceLogout,openBanUser,openDenyRegistration,openEditUser,openEraseUser,openIssueRecovery,saveUserRole,unbanUser,
   setMembersTab,toggleMemberMenu,searchMembers,filterMembersRole,
   turnUsersPage(delta){state.usersPage+=delta;renderContent()}});
