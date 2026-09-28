@@ -14,6 +14,10 @@ export interface UpdateNotifierOptions {
   readonly serverUrl: string;
 }
 
+export function isWindows(): boolean {
+  return typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
+}
+
 /**
  * Human-readable download status. Shows a percentage when the total size is
  * known, otherwise the bytes received so the banner never looks hung.
@@ -125,6 +129,18 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
     });
 
     appendChildren(banner, text, updateBtn, laterBtn);
+    if (isWindows()) {
+      // The Windows installer is unsigned, so SmartScreen warns when the
+      // updater launches it. Say so before the click, not as a surprise.
+      banner.appendChild(
+        createElement(
+          "span",
+          { class: "update-banner-warning", id: "update-banner-warning" },
+          connectText("update.smartScreen"),
+        ),
+      );
+      updateBtn.setAttribute("aria-describedby", "update-banner-warning");
+    }
     container.prepend(banner);
     announce(connectText("update.available", { version }));
   }

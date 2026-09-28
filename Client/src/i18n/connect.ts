@@ -27,6 +27,8 @@ export const connectText = defineCatalog("connect", {
   "update.available": "Update v{version} available",
   "update.now": "Update Now",
   "update.later": "Later",
+  "update.smartScreen":
+    "Windows will show “Windows protected your PC” because this installer is not signed. Choose More info, then Run anyway to continue.",
   "update.installedRestarting": "Update installed. Restarting…",
   "update.installedRestart": "Update installed. Please restart OwnCord to finish.",
   "update.failed": "Update failed. Please try again later.",
