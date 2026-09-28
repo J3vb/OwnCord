@@ -156,9 +156,10 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
 
-  // A burst of channel messages is one alert, not twenty (U1c). A mention or a
-  // DM is always announced, and both are what the reader might otherwise miss.
-  if (shouldCoalesce(payload.channel_id, mentioned || isDm, Date.now())) return;
+  // A burst of messages in one channel is one alert, not twenty (U1c); a DM is
+  // a channel like any other. A mention is always announced — it is what the
+  // reader might otherwise miss.
+  if (shouldCoalesce(payload.channel_id, mentioned, Date.now())) return;
 
   const channelLabel = isDm ? channelName : `#${channelName}`;
 

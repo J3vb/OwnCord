@@ -12,6 +12,7 @@ import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { cleanupNotificationAudio, resetNotificationCoalescing } from "@lib/notifications";
+import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
@@ -60,6 +61,10 @@ import { getActivePresenceSender } from "@lib/presence";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
+
+// First, while storage still holds only what earlier sessions wrote: that is
+// how an install from before the notification level is told from a new one.
+settleNotificationLevelDefault();
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not

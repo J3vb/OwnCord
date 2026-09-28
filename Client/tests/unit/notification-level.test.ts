@@ -21,6 +21,7 @@ import {
   setGlobalNotificationLevel,
   setServerNotificationLevel,
   clearServerNotificationLevel,
+  settleNotificationLevelDefault,
   shouldNotifyForLevel,
 } from "../../src/lib/notificationLevel";
 
@@ -36,11 +37,27 @@ describe("notification level storage", () => {
     expect(getGlobalNotificationLevel()).toBe("mentions");
   });
 
-  it("grandfathers a pre-level install to All so it is not silently quieted", () => {
-    // Any notification toggle written by an older client marks this install as
-    // already configured; the level migration records All rather than Mentions.
-    localStorage.setItem("owncord:settings:desktopNotifications", "false");
+  it("records Mentions only for a new install, and keeps it once state exists", () => {
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+
+    localStorage.setItem("owncord:settings:lastChannel:a.example", "3");
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+  });
+
+  it("keeps All for an existing install that never touched a notification toggle", () => {
+    localStorage.setItem("owncord:settings:lastChannel:a.example", "3");
+    localStorage.setItem("owncord:theme:active", "neon-glow");
+    settleNotificationLevelDefault();
     expect(getGlobalNotificationLevel()).toBe("all");
+  });
+
+  it("never overwrites a level the user chose", () => {
+    setGlobalNotificationLevel("nothing");
+    localStorage.setItem("owncord:settings:lastChannel:a.example", "3");
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("nothing");
   });
 
   it("offers exactly all, mentions and nothing", () => {

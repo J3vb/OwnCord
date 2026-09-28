@@ -1480,6 +1480,43 @@ describe("notifyIncomingMessage", () => {
       now.mockRestore();
     });
 
+    it("collapses a burst of direct messages like any channel", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      const dm = (id: number) =>
+        makePayload({ id, channel_id: 55, user: { id: 2, username: "bob", avatar: null } });
+
+      notifyIncomingMessage(dm(1));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(dm(2));
+      now.mockReturnValue(1_000_200);
+      notifyIncomingMessage(dm(3));
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+      now.mockRestore();
+    });
+
     it("coalesces per channel, not globally", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();

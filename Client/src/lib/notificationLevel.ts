@@ -8,6 +8,7 @@
  * The default is `mentions` (owner question Q8: "Mentions-only for new
  * installs"), because "every message pings you" is the pain this level exists
  * to answer — an install that has never been configured should not start loud.
+ * An install from before the level keeps All (settleNotificationLevelDefault).
  *
  * The level is a device preference, not an account one, for the same reason
  * `channel-mutes.ts`, `desktopNotifications` and `notificationSounds` are: the
@@ -23,7 +24,7 @@
  * is applied before the mute gate in `notifications.ts`.
  */
 
-import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
+import { loadPref, savePref } from "./preferences";
 import { getChannelMutesHost } from "./channel-mutes";
 
 export const DEFAULT_NOTIFICATION_LEVEL = "mentions" as const;
@@ -58,41 +59,32 @@ function readLevel(key: string): NotificationLevel | null {
   return asLevel(loadPref<unknown>(key, NO_LEVEL));
 }
 
-/**
- * Notification toggles that predate the level. They are written only when the
- * user changes them (never at startup), so any of them present means this
- * install already ran with the old default (All) and had the chance to be
- * configured. See the migration in getGlobalNotificationLevel.
- */
-const PRE_LEVEL_KEYS = [
-  "desktopNotifications",
-  "flashTaskbar",
-  "notificationSounds",
-  "suppressEveryone",
-] as const;
-
-function isPreLevelInstall(): boolean {
-  return PRE_LEVEL_KEYS.some((key) => localStorage.getItem(STORAGE_PREFIX + key) !== null);
+/** The global level, or the default when unset or corrupt. */
+export function getGlobalNotificationLevel(): NotificationLevel {
+  return readLevel(GLOBAL_KEY) ?? DEFAULT_NOTIFICATION_LEVEL;
 }
 
 /**
- * The global level, or the default when unset or corrupt.
- *
- * A new install gets `mentions` (owner Q8: "Mentions-only for new installs").
- * An install that predates the level already lived with All and may have
- * tuned the individual toggles around it, so we record `all` for it on first
- * read instead of silently quieting channel notifications it used to receive;
- * the user can change it. The record is a real save, so the migration runs
- * once.
+ * Records the global level once, at startup, before this session writes any
+ * storage. A new install gets `mentions` (owner Q8: "Mentions-only for new
+ * installs"). Any `owncord:` key already present — a last channel, a status,
+ * a theme, a toggle — means the install predates the level and lived with
+ * All, so it keeps `all` instead of silently losing channel notifications it
+ * used to receive; the user can change it. Recording the new-install default
+ * too is what stops a later launch, which will find this session's keys,
+ * from mistaking it for an old install.
  */
-export function getGlobalNotificationLevel(): NotificationLevel {
-  const stored = readLevel(GLOBAL_KEY);
-  if (stored !== null) return stored;
-  if (isPreLevelInstall()) {
-    savePref(GLOBAL_KEY, "all");
-    return "all";
+export function settleNotificationLevelDefault(): void {
+  if (readLevel(GLOBAL_KEY) !== null) return;
+  savePref(GLOBAL_KEY, hasOwnCordState() ? "all" : DEFAULT_NOTIFICATION_LEVEL);
+}
+
+function hasOwnCordState(): boolean {
+  try {
+    return Object.keys(localStorage).some((key) => key.startsWith("owncord:"));
+  } catch {
+    return false;
   }
-  return DEFAULT_NOTIFICATION_LEVEL;
 }
 
 export function setGlobalNotificationLevel(level: NotificationLevel): void {

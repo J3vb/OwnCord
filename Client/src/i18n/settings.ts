@@ -78,7 +78,7 @@ export const settingsText = defineCatalog("settings", {
   "notifications.sounds.label": "Notification Sounds",
   "notifications.sounds.desc": "Play sounds for notifications",
   "notifications.level.label": "Notification Level",
-  "notifications.level.desc": "How much this server may interrupt you",
+  "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All",
   "notifications.level.mentions": "Mentions only",
   "notifications.level.nothing": "Nothing",

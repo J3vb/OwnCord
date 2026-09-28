@@ -64,7 +64,7 @@ vi.mock("@lib/livekitSession", () => ({
   getRemoteVideoStats: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock("@lib/notifications", () => ({
+vi.mock("@lib/notificationSound", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
@@ -282,7 +282,7 @@ import { desktop } from "../../src/platform/desktop";
 import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
-import { startRingChime } from "../../src/lib/notifications";
+import { startRingChime } from "../../src/lib/notificationSound";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
