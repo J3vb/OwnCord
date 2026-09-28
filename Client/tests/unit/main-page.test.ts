@@ -1686,6 +1686,52 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
   });
 
+  it("drops the suspend prompt once Use here takes the connection back (U4)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    // The overdue heartbeat noticed the suspend first; the server's
+    // SESSION_REPLACED arrived once the network came back.
+    ws.emitSuspendWake();
+    uiStore.setState((prev) => ({
+      ...prev,
+      sessionReplaced: true,
+      connectionStatus: "disconnected",
+    }));
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toBe("Signed in elsewhere Use here");
+    });
+    banner.querySelector("button")!.click();
+
+    expect(banner.textContent).not.toContain("Woke from sleep");
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    await vi.waitFor(() => {
+      expect(banner.classList.contains("visible")).toBe(false);
+    });
+  });
+
+  it("drops the suspend prompt when the connection comes back by any path (U4)", async () => {
+    const ws = fakeWs();
+    authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    ws.emitSuspendWake();
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    await vi.waitFor(() => {
+      expect(banner.textContent).toContain("Woke from sleep");
+    });
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    await vi.waitFor(() => {
+      expect(banner.classList.contains("visible")).toBe(false);
+    });
+  });
+
   it("keeps Reconnecting... until a dial fails, then offers Retry (B9-25)", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));

@@ -546,6 +546,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const useHere = (): void => {
       const token = authStore.getState().token;
       if (token === null) return;
+      suspendWake = false;
       setSessionReplaced(false);
       ws.connect({ host: api.getConfig().host, token });
     };
@@ -634,6 +635,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (status) => {
           try {
             if (status === "connected") {
+              suspendWake = false;
               restoreSavedPresence();
               pollSessions();
             }
