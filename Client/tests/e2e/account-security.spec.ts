@@ -150,6 +150,11 @@ async function bootAccountSettings(page: Page, extraRoutes: HttpRoute[]): Promis
   await openSettings(page);
 }
 
+/** The profile forms sit behind the card's Edit profile action. */
+async function openProfileEditor(page: Page): Promise<void> {
+  await page.locator(".settings-pane.active [data-testid='profile-edit-toggle']").click();
+}
+
 /**
  * The delete-dialog disclosure. B7-15c (PR #1671) rewrites the exact sentence
  * to "Deletion is immediate and permanent: …" from "This action is permanent
@@ -178,6 +183,7 @@ test.describe("Settings > Account — profile edit", () => {
       { pattern: "/api/v1/users/me", method: "PATCH", status: 200, body: profile },
     ]);
 
+    await openProfileEditor(page);
     // Pre-filled from the signed-in user, who has neither field set.
     await expect(page.locator("[data-testid='display-name-input']")).toHaveValue("");
     await expect(page.locator("[data-testid='about-input']")).toHaveValue("");
@@ -213,6 +219,7 @@ test.describe("Settings > Account — profile edit", () => {
       },
     ]);
 
+    await openProfileEditor(page);
     await page.locator("[data-testid='display-name-input']").fill("Ada");
     await page.locator("[data-testid='profile-save-btn']").focus();
     await page.keyboard.press("Enter");
@@ -237,6 +244,7 @@ test.describe("Settings > Account — profile edit", () => {
       },
     ]);
 
+    await openProfileEditor(page);
     await page.locator(".settings-pane.active .account-field-edit").click();
     const row = page.locator(".settings-pane.active .setting-row", {
       has: page.locator("[data-testid='username-edit-input']"),

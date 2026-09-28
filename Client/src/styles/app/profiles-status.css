@@ -73,7 +73,7 @@
   border-color: var(--focus-ring);
 }
 
-/* Account tab: the avatar uploader sits under the profile card. */
+/* Account tab: the avatar uploader opens first in the profile editor. */
 .account-avatar-upload {
   margin: 12px 0 4px;
 }

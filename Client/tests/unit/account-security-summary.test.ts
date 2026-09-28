@@ -53,6 +53,25 @@ function options(overrides: Record<string, unknown> = {}) {
   } as unknown as Parameters<typeof buildAccountTab>[0];
 }
 
+/** Only what is on screen: a form not yet opened is hidden or display:none. */
+function shown(el: HTMLElement | null): boolean {
+  for (let n = el; n !== null; n = n.parentElement) {
+    if (n.hidden || n.style.display === "none") return false;
+  }
+  return true;
+}
+
+/** The accent-filled actions on screen under `root`. */
+function accentIn(root: HTMLElement): (string | null)[] {
+  return [...root.querySelectorAll<HTMLButtonElement>("button.ac-btn")]
+    .filter((b) => !b.classList.contains("secondary") && shown(b))
+    .map((b) => b.textContent);
+}
+
+function sessions(count: number) {
+  return Array.from({ length: count }, (_, i) => session(i + 1, i === 0));
+}
+
 describe("Account tab: security summary", () => {
   let ac: AbortController;
   let pane: HTMLDivElement;
@@ -118,19 +137,53 @@ describe("Account tab: security summary", () => {
   });
 
   it("gives the Security card one accent action: turning on two-factor", async () => {
-    mount();
+    mount(options({ onListSessions: vi.fn().mockResolvedValue(sessions(4)) }));
     await vi.waitFor(() => expect(row("recovery-kit-section").textContent).toContain("Not set up"));
-    // Only what is on screen: a form not yet opened is hidden or display:none.
-    const shown = (el: HTMLElement | null): boolean => {
-      for (let n = el; n !== null; n = n.parentElement) {
-        if (n.hidden || n.style.display === "none") return false;
-      }
-      return true;
-    };
-    const accent = [...card().querySelectorAll<HTMLButtonElement>("button.ac-btn")].filter(
-      (b) => !b.classList.contains("secondary") && shown(b),
+    expect(accentIn(card())).toEqual(["Enable 2FA"]);
+    // Still one with the device list open: each device's sign out is secondary.
+    await vi.waitFor(() =>
+      expect(card().querySelectorAll("[data-testid='session-revoke']")).toHaveLength(3),
     );
-    expect(accent.map((b) => b.textContent)).toEqual(["Enable 2FA"]);
+    row("sessions-section")
+      .querySelector<HTMLButtonElement>("[data-testid='sessions-manage']")!
+      .click();
+    expect(accentIn(card())).toEqual(["Enable 2FA"]);
+  });
+
+  it("rests destructive actions quietly and fills them only once armed", async () => {
+    mockAuthState.user.totp_enabled = true;
+    mount(
+      options({
+        onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: true, used_at: null }),
+        onListSessions: vi.fn().mockResolvedValue(sessions(4)),
+      }),
+    );
+    await vi.waitFor(() => expect(pill().textContent).toBe("All set"));
+    await vi.waitFor(() =>
+      expect(card().querySelectorAll("[data-testid='session-revoke']")).toHaveLength(3),
+    );
+    row("sessions-section")
+      .querySelector<HTMLButtonElement>("[data-testid='sessions-manage']")!
+      .click();
+    // All set: nothing is recommended, so nothing is accent or filled red.
+    expect(accentIn(card())).toEqual([]);
+    const btn = (testId: string) =>
+      card().querySelector<HTMLButtonElement>(`[data-testid='${testId}']`)!;
+    const filled = [...card().querySelectorAll<HTMLElement>(".account-delete-btn")].filter(shown);
+    expect(filled).toEqual([]);
+    for (const testId of ["totp-disable-btn", "sessions-revoke-all"]) {
+      expect(btn(testId).classList.contains("secondary")).toBe(true);
+      expect(btn(testId).classList.contains("destructive")).toBe(true);
+    }
+    for (const signOut of card().querySelectorAll("[data-testid='session-revoke']")) {
+      expect(signOut.classList.contains("secondary")).toBe(true);
+      expect(signOut.classList.contains("destructive")).toBe(false);
+    }
+
+    btn("totp-disable-btn").click();
+    btn("sessions-revoke-all").click();
+    const armed = [...card().querySelectorAll<HTMLElement>(".account-delete-btn")].filter(shown);
+    expect(armed.map((b) => b.textContent)).toEqual(["Confirm Disable", "Sign out everywhere"]);
   });
 
   it("keeps the change-password form closed until Change… opens it", () => {
@@ -161,6 +214,61 @@ describe("Account tab: security summary", () => {
     expect(panel.hidden).toBe(true);
     manage.click();
     expect(panel.hidden).toBe(false);
+  });
+
+  it("recounts signed-in devices after one is signed out", async () => {
+    mount(options({ onListSessions: vi.fn().mockResolvedValue(sessions(3)) }));
+    const result = () => row("sessions-section").querySelector(".status-result")!.textContent;
+    await vi.waitFor(() => expect(result()).toBe("3 devices"));
+    card().querySelector<HTMLButtonElement>("[data-testid='session-revoke']")!.click();
+    await vi.waitFor(() => expect(result()).toBe("2 devices"));
+  });
+});
+
+describe("Account tab: profile strip", () => {
+  let ac: AbortController;
+  let pane: HTMLDivElement;
+
+  beforeEach(() => {
+    ac = new AbortController();
+    localStorage.clear();
+  });
+  afterEach(() => {
+    ac.abort();
+    pane.remove();
+  });
+
+  it("opens avatar, display name, about and username editing from one Edit profile action", () => {
+    pane = buildAccountTab(options(), ac.signal);
+    document.body.appendChild(pane);
+    const profile = pane.querySelector<HTMLElement>(".account-card")!;
+    const edit = profile.querySelector<HTMLButtonElement>("[data-testid='profile-edit-toggle']")!;
+    const editor = document.getElementById(edit.getAttribute("aria-controls")!)!;
+    const inEditor = (selector: string) => editor.contains(pane.querySelector(selector));
+
+    // At rest the card offers one action, and it is the accent.
+    const onScreen = [...profile.querySelectorAll<HTMLButtonElement>("button")].filter(shown);
+    expect(onScreen.map((b) => b.textContent)).toEqual(["Edit profile"]);
+    expect(accentIn(profile)).toEqual(["Edit profile"]);
+    expect(edit.getAttribute("aria-expanded")).toBe("false");
+    for (const testId of ["avatar-upload-btn", "display-name-input", "about-input"]) {
+      expect(inEditor(`[data-testid='${testId}']`)).toBe(true);
+    }
+    expect(inEditor(".account-field-edit")).toBe(true);
+    expect(inEditor("[data-testid='username-edit-input']")).toBe(true);
+
+    // Open, Save Profile takes the accent, also with the username form open.
+    edit.click();
+    expect(editor.hidden).toBe(false);
+    expect(edit.getAttribute("aria-expanded")).toBe("true");
+    expect(accentIn(profile)).toEqual(["Save Profile"]);
+    profile.querySelector<HTMLButtonElement>(".account-field-edit")!.click();
+    expect(shown(pane.querySelector("[data-testid='username-edit-input']"))).toBe(true);
+    expect(accentIn(profile)).toEqual(["Save Profile"]);
+
+    edit.click();
+    expect(editor.hidden).toBe(true);
+    expect(accentIn(profile)).toEqual(["Edit profile"]);
   });
 });
 

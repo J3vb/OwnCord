@@ -460,7 +460,7 @@ test.describe("B9-20 settings, account and voice text", () => {
     await openSettings(page);
 
     for (const [tab, english] of [
-      ["Account", "Edit User Profile"],
+      ["Account", "Edit profile"],
       ["Notifications", "Desktop Notifications"],
       ["Text & Images", "Link Preview"],
       ["Voice & Audio", "Input Device"],
@@ -508,6 +508,9 @@ test.describe("B9-20 settings, account and voice text", () => {
     // Account deletion sits behind its own disclosure; open it by keyboard.
     const danger = account.locator("details.danger-zone > summary");
     await danger.focus();
+    await page.keyboard.press("Enter");
+    // So do the profile forms, behind Edit profile.
+    await account.getByTestId("profile-edit-toggle").focus();
     await page.keyboard.press("Enter");
     for (const [el, english] of [
       [danger.locator(".disclose-label"), "Delete account"],

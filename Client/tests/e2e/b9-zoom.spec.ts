@@ -529,6 +529,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       const pane = panel.locator(".settings-pane.active");
       await pane.waitFor();
       // Audit the on-demand forms and the deletion disclosure open.
+      await pane.getByTestId("profile-edit-toggle").click();
       await pane.getByTestId("password-change-toggle").click();
       await pane.getByTestId("sessions-manage").click();
       await pane.locator("summary", { hasText: "Delete account" }).click();

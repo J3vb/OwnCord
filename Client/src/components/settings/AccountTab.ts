@@ -53,17 +53,22 @@ interface ProfileCardResult {
   readonly card: HTMLDivElement;
   readonly headerName: HTMLDivElement;
   readonly usernameValue: HTMLDivElement;
-  readonly editUserProfileBtn: HTMLButtonElement;
   readonly editUsernameBtn: HTMLButtonElement;
   /** The big avatar; the uploader swaps its contents on success. */
   readonly avatarLarge: HTMLDivElement;
+  /** Opened by Edit profile: avatar, display name, about and username. */
+  readonly editor: HTMLDivElement;
 }
 
 // ---------------------------------------------------------------------------
 // Profile card builder
 // ---------------------------------------------------------------------------
 
-function buildProfileCard(displayName: string, username: string): ProfileCardResult {
+function buildProfileCard(
+  displayName: string,
+  username: string,
+  signal: AbortSignal,
+): ProfileCardResult {
   const card = createElement("div", { class: "account-card" });
   const banner = createElement("div", { class: "account-banner" });
 
@@ -80,12 +85,21 @@ function buildProfileCard(displayName: string, username: string): ProfileCardRes
   // Header row
   const accountHeader = createElement("div", { class: "account-header" });
   const headerName = createElement("div", { class: "account-header-name" }, displayName);
-  const editUserProfileBtn = createElement(
-    "button",
-    { class: "ac-btn" },
-    t("profile.editUserProfile"),
+  const editor = createElement("div", { class: "account-editor" });
+  const editProfileBtn = createRevealToggle(
+    t("profile.editProfile"),
+    editor,
+    signal,
+    "profile-edit-toggle",
   );
-  appendChildren(accountHeader, headerName, editUserProfileBtn);
+  // The card's one accent action while closed; once open, Save Profile has it.
+  editProfileBtn.classList.remove("secondary");
+  editProfileBtn.addEventListener(
+    "click",
+    () => editProfileBtn.classList.toggle("secondary", !editor.hidden),
+    { signal },
+  );
+  appendChildren(accountHeader, headerName, editProfileBtn);
 
   // Username field row
   const fieldsContainer = createElement("div", { class: "account-fields" });
@@ -105,10 +119,11 @@ function buildProfileCard(displayName: string, username: string): ProfileCardRes
   );
   appendChildren(usernameField, usernameLeft, editUsernameBtn);
   fieldsContainer.appendChild(usernameField);
+  editor.appendChild(fieldsContainer);
 
-  appendChildren(card, banner, avatarWrap, accountHeader, fieldsContainer);
+  appendChildren(card, banner, avatarWrap, accountHeader, editor);
 
-  return { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn, avatarLarge };
+  return { card, headerName, usernameValue, editUsernameBtn, avatarLarge, editor };
 }
 
 // ---------------------------------------------------------------------------
@@ -688,7 +703,7 @@ function buildTotpDisableView(
   const disableBtn = createElement(
     "button",
     {
-      class: "ac-btn account-delete-btn",
+      class: "ac-btn secondary destructive",
       "data-testid": "totp-disable-btn",
     },
     t("totp.disable"),
@@ -896,6 +911,7 @@ function buildSessionRow(
   s: SessionInfo,
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  onSignedOut: () => void,
 ): HTMLDivElement {
   const row = createElement("div", {
     class: "session-row",
@@ -923,7 +939,7 @@ function buildSessionRow(
 
   const revokeBtn = createElement(
     "button",
-    { class: "ac-btn", "data-testid": "session-revoke" },
+    { class: "ac-btn secondary", "data-testid": "session-revoke" },
     t("devices.signOut"),
   );
   revokeBtn.addEventListener(
@@ -935,6 +951,7 @@ function buildSessionRow(
       void options
         .onRevokeSession(s.id)
         .then(() => {
+          onSignedOut();
           showToast(
             uiStore.getState().sessionReplaced
               ? t("devices.signedOutReplaced")
@@ -971,6 +988,10 @@ function buildSessionsSection(options: SettingsOverlayOptions, signal: AbortSign
     t("devices.loading"),
   );
 
+  const recount = (): void => {
+    setText(result, t("devices.count", { count: list.childElementCount }));
+  };
+
   function load(): void {
     list.replaceChildren(status);
     setText(status, t("devices.loading"));
@@ -980,8 +1001,8 @@ function buildSessionsSection(options: SettingsOverlayOptions, signal: AbortSign
       .onListSessions()
       .then((sessions) => {
         if (signal.aborted) return;
-        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal)));
-        setText(result, t("devices.count", { count: sessions.length }));
+        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal, recount)));
+        recount();
         setStatusIcon(icon, "ok");
       })
       .catch((err: unknown) => {
@@ -996,7 +1017,7 @@ function buildSessionsSection(options: SettingsOverlayOptions, signal: AbortSign
   const revokeAllBtn = createElement(
     "button",
     {
-      class: "ac-btn account-delete-btn",
+      class: "ac-btn secondary destructive",
       style: "margin-top:12px",
       "data-testid": "sessions-revoke-all",
     },
@@ -1109,7 +1130,7 @@ function buildDeleteAccountSection(
   const deleteBtn = createElement(
     "button",
     {
-      class: "ac-btn account-delete-btn",
+      class: "ac-btn secondary destructive",
       "data-testid": "delete-account-trigger",
     },
     t("delete.button"),
@@ -1292,8 +1313,8 @@ export function buildAccountTab(
   });
 
   // Profile card
-  const { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn, avatarLarge } =
-    buildProfileCard(displayName, username);
+  const { card, headerName, usernameValue, editUsernameBtn, avatarLarge, editor } =
+    buildProfileCard(displayName, username, signal);
   section.appendChild(card);
 
   // Existing avatar, if any — the letter is only a fallback now.
@@ -1305,10 +1326,9 @@ export function buildAccountTab(
       avatarInitial({ username, displayName: user?.display_name ?? null }),
     );
   }
-  section.appendChild(buildAvatarUploader(options, avatarLarge, signal));
-
-  // Display name + about
-  section.appendChild(
+  // Avatar, display name and about lead the editor; the username row follows.
+  editor.prepend(
+    buildAvatarUploader(options, avatarLarge, signal),
     buildProfileFields(
       options,
       (name) => {
@@ -1331,7 +1351,7 @@ export function buildAccountTab(
     "aria-label": t("profile.newUsername"),
     "aria-describedby": "username-edit-error",
   });
-  const saveBtn = createElement("button", { class: "ac-btn" }, t("common.save"));
+  const saveBtn = createElement("button", { class: "ac-btn secondary" }, t("common.save"));
   const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
 
@@ -1340,9 +1360,7 @@ export function buildAccountTab(
   usernameError.style.marginTop = "4px";
   editForm.appendChild(usernameError);
 
-  let editOpener: HTMLElement = editUsernameBtn;
-  const openEditForm = (e: Event) => {
-    editOpener = e.currentTarget as HTMLElement;
+  const openEditForm = () => {
     editForm.style.display = "flex";
     editInput.value = authStore.getState().user?.username ?? "";
     editInput.focus();
@@ -1350,10 +1368,9 @@ export function buildAccountTab(
   const closeEditForm = () => {
     editForm.style.display = "none";
     setText(usernameError, "");
-    if (focusIsOurs(editForm)) editOpener.focus();
+    if (focusIsOurs(editForm)) editUsernameBtn.focus();
   };
 
-  editUserProfileBtn.addEventListener("click", openEditForm, { signal });
   editUsernameBtn.addEventListener("click", openEditForm, { signal });
 
   cancelBtn.addEventListener("click", closeEditForm, { signal });
@@ -1392,7 +1409,7 @@ export function buildAccountTab(
     { signal },
   );
 
-  section.appendChild(editForm);
+  editor.appendChild(editForm);
 
   // Security state first, then status, retention and the danger zone.
   section.appendChild(buildSecurityCard(options, signal));

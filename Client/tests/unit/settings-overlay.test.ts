@@ -594,27 +594,6 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("Edit User Profile button opens the same edit form", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-
-    // Click "Edit User Profile" button instead of "Edit" button
-    const editProfileBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-      (b) => b.textContent === "Edit User Profile",
-    ) as HTMLElement;
-    editProfileBtn.click();
-
-    const editInput = container.querySelector(
-      '[data-testid="username-edit-input"]',
-    ) as HTMLInputElement;
-    expect(editInput).not.toBeNull();
-    // The edit form should be visible
-    const editForm = editInput.closest(".setting-row") as HTMLElement;
-    expect(editForm.style.display).toBe("flex");
-
-    overlay.destroy?.();
-  });
-
   it("Cancel button hides the username edit form", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);

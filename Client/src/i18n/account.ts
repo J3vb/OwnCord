@@ -8,7 +8,7 @@ import { defineCatalog } from "./format";
  * and main page, so none of it is in the startup chunk.
  */
 export const accountText = defineCatalog("account", {
-  "profile.editUserProfile": "Edit User Profile",
+  "profile.editProfile": "Edit profile",
   "profile.username": "Username",
   "profile.edit": "Edit",
   "profile.changeAvatar": "Change Avatar",

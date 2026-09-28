@@ -598,6 +598,13 @@ details.disclose[open] > summary .icon {
   margin: 0 16px 16px;
   padding: 0;
 }
+/* Edit profile opens this under the header: avatar, profile form, username. */
+.account-editor {
+  padding: 0 16px 16px;
+}
+.account-editor .account-fields {
+  margin: 16px 0;
+}
 .account-field {
   display: flex;
   align-items: center;
