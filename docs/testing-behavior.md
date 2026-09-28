@@ -45,4 +45,27 @@ Desktop installer tests use a separate application identifier and ephemeral sign
 - Scheduled fuzzing and long race-detector simulations run on `dev`. Public CI never uploads generated fuzz reproducers. Reproduce failures locally and land the corpus entry with its fix, following `Server/Makefile`.
 - A schedule starts only after its workflow reaches the default branch. The checked-in required-check list is in `docs/plans/b0-dev-branch-protection.sh`; changing that file does not itself apply GitHub repository settings.
 
+### Quarantine
+
+A test that fails intermittently for a reason not yet fixed (a Windows-only
+race, an upstream SDK timing) is **quarantined**: listed in
+`Client/tests/e2e/quarantine.json` and excluded from the required run, so it
+cannot turn a required check red while the real fix is pending. This is a
+tracked, expiring exception — never "retry until green".
+
+- **The required run keeps `failOnFlakyTests`.** Only a listed test leaves the
+  required run; everything else that needed its retry still fails the job.
+- **Every entry is a JSON object** with `file` (relative to `Client/`), `title`
+  (exactly as the spec spells it), `reason` (why, and what removing it waits
+  on), `owner`, `added` and `expires` (both `YYYY-MM-DD`).
+- **`expires` is enforced.** `Client/scripts/check-quarantine.mjs` fails a
+  well-formed list when an entry is past its date, names a spec or title that
+  no longer exists, or drops a required field. It runs in `Client Static
+Checks` and in `npm run check:client`.
+- **Run a quarantined test with `OWNCORD_FLAKES=1`** — the configs' `grepInvert`
+  is lifted, so a fix can be confirmed or a recovery watched before the entry
+  is removed.
+- **An entry is removed in the PR that fixes the flake**, and the fix is a
+  separate concern from the quarantine. The list only shrinks.
+
 For each escaped bug, add the regression at the lowest layer that can reproduce it, demonstrate that it fails with the broken behavior, then retain a small browser journey when the failure crosses UI, network or process boundaries. Expand mutation targets only after measuring their baseline; do not lower thresholds to make new tests green.
