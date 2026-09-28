@@ -32,6 +32,7 @@ window.__test = {
   auditSentence: auditSentence,
   actionLabels: ACTION_LABEL,
   renderTokens: renderTokens,
+  downloadArchive: downloadArchive,
   openRoleModal: openRoleModal,
   renderRetention: renderRetention,
   saveChannelRetention: saveChannelRetention,
@@ -73,6 +74,7 @@ interface Bridge {
   auditSentence: (e: any) => string;
   actionLabels: Record<string, string>;
   renderTokens: () => Promise<string>;
+  downloadArchive: () => Promise<void>;
   openRoleModal: (id: number | null) => void;
   renderRetention: () => Promise<string>;
   saveChannelRetention: (id: number) => Promise<void>;
@@ -305,6 +307,41 @@ describe("Server/admin/static — panel behaviour", () => {
     const cells = doc.querySelectorAll("tbody tr td");
     expect(cells[2]!.querySelector("span")!.title).toBe("2026-09-01T10:00:00.000Z");
     expect(cells[3]!.querySelector("span")!.title).toBe("2026-09-02T11:30:00.000Z");
+  });
+
+  // The full archive can be tens of gigabytes, so the panel must not fetch it
+  // into a Blob. It asks for a single-use link with its Bearer auth and opens
+  // that link as a plain navigation, so the browser streams it to disk.
+  it("downloads the full archive through a single-use link, never a Blob", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p, method) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/archive/link" && method === "POST")
+        return { json: { token: "TOK-1", path: "/admin/api/archive/download?token=TOK-1" } };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    booted.bridge.state.me = {
+      id: 1,
+      permissions: ADMINISTRATOR,
+      role_position: 100,
+      is_owner: true,
+    };
+    booted.bridge.state.token = "SESSION";
+    // Capture the anchor the handler clicks instead of letting jsdom navigate.
+    const clicked: string[] = [];
+    window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      clicked.push(this.href);
+    };
+
+    await booted.bridge.downloadArchive();
+
+    expect(calls.some((c) => c.path === "/archive/link" && c.method === "POST")).toBe(true);
+    expect(clicked).toEqual(["http://localhost:8080/admin/api/archive/download?token=TOK-1"]);
+    // The archive body itself was never fetched into the page.
+    expect(calls.some((c) => c.path === "/archive" && c.method === "GET")).toBe(false);
   });
 
   // OC-0364. Nothing clears users.banned when a temporary ban lapses; expiry

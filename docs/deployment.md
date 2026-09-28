@@ -596,6 +596,7 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 | `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                                        |
 | `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first)           |
 | `/admin/api/archive`                | GET    | Download the full archive (owner-only; database snapshot + `data/` + `config.yaml`) |
+| `/admin/api/archive/link`           | POST   | Issue a short-lived single-use archive download link (owner-only)                   |
 
 Backups are stored in the configured backup directory (default
 `data/backups/`) with timestamps. Point it somewhere safer than the data
@@ -658,11 +659,11 @@ it would leave less free than `server.min_free_disk_mb`, the panel refuses
 with an error instead of filling the disk. It is Owner-only, because the
 archive holds password hashes and the key files.
 
-The panel holds the whole download in the browser before saving it, so the
-in-browser archive suits installs up to a few GB. For a larger install, use
-the manual procedure in
-[Before upgrading: take the archive](#before-upgrading-take-the-archive):
-stop the server and copy the data directory and `config.yaml`.
+The panel asks the server for a short-lived single-use link and opens it as a
+plain download, so the browser streams the archive straight to disk — there is
+no size that has to fit in the page's memory, and no documented ceiling. The
+link token is random, single-use, Owner-bound and expires within a minute;
+nothing else can use it.
 
 The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
 even while the server runs. The archive is still taken with WAL-mode writes in

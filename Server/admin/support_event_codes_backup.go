@@ -16,5 +16,6 @@ func init() {
 		"setup: failed to generate the recovery kit":              "setup_recovery_kit_generate_failed",
 		"setup: failed to hash the recovery kit":                  "setup_recovery_kit_hash_failed",
 		"setup: failed to store the recovery kit":                 "setup_recovery_kit_store_failed",
+		"failed to issue archive link":                            "archive_link_issue_failed",
 	})
 }

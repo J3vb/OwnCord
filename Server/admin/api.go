@@ -219,6 +219,12 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	if logBuf != nil {
 		r.Get("/logs/stream", handleLogStream(database, logBuf))
 	}
+	// The full-archive download redeemed from a single-use link. Like the log
+	// stream it carries no Authorization header: the browser opens it as a
+	// plain <a href> so the archive streams to disk rather than being buffered
+	// in the page. The link token IS the authorisation — random, Owner-bound,
+	// single-use and short-lived (POST /archive/link issues it).
+	r.Get("/archive/download", handleArchiveDownload(database, setupOpts))
 
 	// All remaining routes require authentication plus at least one
 	// moderation-capable bit (permissions.AdminPerimeter). Route groups that
@@ -309,6 +315,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database))
 		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, hub))
 		ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts))
+		ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
 		ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
 		ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version))
 	})
