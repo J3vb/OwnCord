@@ -377,7 +377,7 @@ function renderLogs(){
      filter what the client shows; this changes what the server logs.
      Admin-gated server-side, so a non-admin sees the control disabled with
      the reason rather than a silent 403. */
-  const canLevel=state.me&&((state.me.permissions&PERM.ADMINISTRATOR)!==0);
+  const canLevel=can(PERM.ADMINISTRATOR);
   html+='<div class="log-level-bar"><span class="setting-name" id="logLevelName">Server log level</span>'
     +'<span class="setting-desc" id="logLevelDesc">'+(canLevel?'Temporarily raise what the server logs, then it reverts on its own':'Requires an administrator account')+'</span>'
     +'<span class="log-level-status" id="logLevelStatus" role="status"></span>'

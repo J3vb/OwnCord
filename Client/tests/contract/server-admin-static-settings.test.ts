@@ -310,7 +310,6 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     }
   });
 
-  // The default config has no TLS domain; an empty value is no row at all.
   // An empty value reads "Not set", and a zero that switches a feature off
   // reads as its meaning, never a blank or a bare "0".
   it("shows what an empty or disabling value means", async () => {
