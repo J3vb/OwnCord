@@ -3957,6 +3957,23 @@ itself.
 
 ---
 
+### GET /admin/api/archive
+
+Download the full archive: a `VACUUM INTO` snapshot of the database, the data
+directory and `config.yaml` in one zip. What it carries and leaves out is in
+[deployment.md](deployment.md#the-full-archive).
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+`application/zip`, sent as `attachment; filename="owncord-archive.zip"`. The
+zip is built before the status is written, so a failed build is a JSON error:
+`507 STORAGE_LOW_DISK` when building it would leave the backup directory's
+volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
+
+---
+
 ## Server Updates
 
 Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see

@@ -524,7 +524,8 @@ server {
 
 The built-in backup endpoint covers the **database only**. What a restore
 needs is the whole of `data/` plus your `config.yaml` — [Restore](#restore)
-states that rule once, with what was measured about it. Restore is not
+states that rule once, with what was measured about it. The admin panel's
+[full archive](#the-full-archive) is all of it in one download. Restore is not
 rollback: putting yesterday's database back is not the same operation as
 reverting an upgrade — the costs are different and
 [Rolling back](#rolling-back) is a separate procedure.
