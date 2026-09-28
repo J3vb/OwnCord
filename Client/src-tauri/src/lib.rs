@@ -66,7 +66,7 @@ fn native_voice_state() -> NoNativeVoice {
     NoNativeVoice
 }
 
-// Used by the single-instance closure and the startup log below.
+// Used by the startup log below.
 use tauri::Manager;
 
 /// Whether a forwarded single-instance launch should restore the main window.
@@ -98,11 +98,7 @@ pub fn run() {
             update_commands::update_in_progress()
         );
         if should_restore_on_second_launch(launching) {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            message_notification::focus_main_window(app);
         }
     }));
 
