@@ -93,12 +93,14 @@
 }
 /* User/server-provided row text wraps rather than clipping (B9-23). */
 .account-header-name,
+.account-header-handle,
 .account-field-value,
 .settings-sidebar-name {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 .account-header,
+.account-header-identity,
 .account-field,
 .settings-sidebar-profile {
   min-width: 0;
@@ -381,6 +383,63 @@ details.disclose > summary {
 .st-ic.st-pending {
   color: var(--text-muted);
 }
+.status-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+.status-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.status-name {
+  flex: 0 1 190px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.status-result {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.status-state {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.status-item > .ac-btn {
+  margin-left: 0;
+}
+.status-body {
+  flex: 1 0 100%;
+}
+.status-body:empty {
+  display: none;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-active);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.status-pill[hidden] {
+  display: none;
+}
+.account-security {
+  margin-top: var(--space-6);
+}
+details.danger-zone > summary {
+  color: var(--text-danger);
+}
 .diag-stepper {
   display: flex;
   flex-wrap: wrap;
@@ -535,11 +594,22 @@ details.disclose[open] > summary .icon {
   font-weight: 700;
   color: var(--header-primary);
 }
+.account-header-handle {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
 .account-fields {
   background: var(--bg-primary);
   border-radius: var(--radius-md);
   margin: 0 16px 16px;
   padding: 0;
+}
+/* Edit profile opens this under the header: avatar, profile form, username. */
+.account-editor {
+  padding: 0 16px 16px;
+}
+.account-editor .account-fields {
+  margin: 16px 0;
 }
 .account-field {
   display: flex;
@@ -621,44 +691,6 @@ details.disclose[open] > summary .icon {
   font-weight: 700;
   color: var(--header-primary);
   margin-bottom: 16px;
-}
-
-/* ── Account tab: status selector ── */
-.settings-status-options {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.settings-status-option {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  gap: 12px;
-  transition: background 0.1s ease;
-}
-.settings-status-option:hover {
-  background: var(--bg-active);
-}
-.settings-status-option.active {
-  background: var(--bg-active);
-}
-.settings-status-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-circle);
-  flex-shrink: 0;
-}
-.settings-status-label {
-  font-size: var(--font-size-md);
-  font-weight: 500;
-  color: var(--text-normal);
-}
-.settings-status-desc {
-  font-size: var(--font-size-xs);
-  color: var(--text-muted);
-  margin-top: 1px;
 }
 
 /* ── Settings Sidebar Enhancements ── */
