@@ -122,6 +122,9 @@ const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
 // socket per account, last connect wins), ending the call on the machine the
 // user is actually at. The client stops and asks instead; the user's own
 // Reconnect clears the gate and dials.
+// Known limits: a sleep shorter than this (~90-180 s, measured from the last
+// activity) can still reconnect silently and displace another device; a long
+// sleep on a user's only device now needs the manual Reconnect here.
 const SUSPEND_GATE_MS = 2 * WAKE_GAP_MS;
 
 function uuid(): string {
@@ -587,7 +590,6 @@ export function createWsClient({
       }
       setState("connected");
       reconnectAttempt = 0;
-      lastActivityAt = Date.now();
       startHeartbeat();
       armLiveness();
       // U7d: only an authenticated session needs the wake probe, and arming it
@@ -714,8 +716,11 @@ export function createWsClient({
     config = cfg;
     intentionalClose = false;
     // U4: the user's own connect() is the choice to reclaim the connection, so
-    // it clears the suspend gate.
+    // it clears the suspend gate. Starting a dial also proves the clock is
+    // running, so a dial that fails long after the last activity backs off
+    // instead of reading as a wake.
     suspendGated = false;
+    lastActivityAt = Date.now();
     // Belt-and-braces: a fresh connect (even one not routed through
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
     // host) must not inherit a stale block from a previous connection.

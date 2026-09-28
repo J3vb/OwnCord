@@ -132,6 +132,31 @@ describe("suspend wake gate (U4)", () => {
     expect(wakes).toHaveLength(0);
   });
 
+  it("backs off and retries a dial that fails long after the last activity", async () => {
+    const wakes: number[] = [];
+    client.onSuspendWake(() => wakes.push(1));
+    // The connect page sat idle past the suspend threshold before the user
+    // logged in; the clock was running the whole time.
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect" ? Promise.reject(new Error("refused")) : Promise.resolve(undefined),
+    );
+    const states: ConnectionState[] = [];
+    client.onStateChange((s) => states.push(s));
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("error", /ws_connect failed/);
+
+    expect(wakes).toHaveLength(0);
+    expect(states).toContain("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expectConsole("error", /ws_connect failed/);
+    expect(reconnects()).toHaveLength(2);
+    expect(wakes).toHaveLength(0);
+  });
+
   it("disconnect() does not leave a stale suspend notification", async () => {
     await connectAndAuth();
     const wakes: number[] = [];
