@@ -11,7 +11,7 @@ import { createApiClient, ApiClientError } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { cleanupNotificationAudio } from "@lib/notifications";
+import { cleanupNotificationAudio, resetNotificationCoalescing } from "@lib/notifications";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
@@ -171,6 +171,10 @@ void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics
 // Registered here rather than imported by auth.store: notifications imports
 // auth.store, so that import was a cycle.
 onAuthCleared(cleanupNotificationAudio);
+// Coalescing is keyed by channel id, which is only unique per server: a stale
+// window from the previous profile must not suppress the next server's first
+// notification for the same id.
+onAuthCleared(resetNotificationCoalescing);
 // A profile switch or sign-out must not carry one account's moderation notices into the next.
 onAuthCleared(resetSafetyStore);
 onAuthCleared((reason) => {

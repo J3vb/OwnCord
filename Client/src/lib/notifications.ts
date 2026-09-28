@@ -28,6 +28,38 @@ function isWindowFocused(): boolean {
 }
 
 /**
+ * Coalescing window (U1c): messages arriving within this long after the last
+ * notification for the same channel are folded into that one alert, so a burst
+ * of twenty lines is one popup, not twenty. A mention or a DM is never folded —
+ * it is addressed to the reader, and dropping it would hide the thing the alert
+ * exists for.
+ */
+const COALESCE_WINDOW_MS = 5000;
+
+/** Last time (ms) a notification fired, by channel id. */
+const lastNotifiedAt = new Map<number, number>();
+
+/**
+ * Whether this message is part of a burst already announced for its channel.
+ * Records the new time when it is not, so the window measures from the alert
+ * the reader actually saw. `alwaysNotify` (a mention or a DM) both bypasses the
+ * check and refreshes the window.
+ */
+function shouldCoalesce(channelId: number, alwaysNotify: boolean, now: number): boolean {
+  const last = lastNotifiedAt.get(channelId);
+  if (alwaysNotify || last === undefined || now - last >= COALESCE_WINDOW_MS) {
+    lastNotifiedAt.set(channelId, now);
+    return false;
+  }
+  return true;
+}
+
+/** Forget coalescing state. Exported for tests and for logout. */
+export function resetNotificationCoalescing(): void {
+  lastNotifiedAt.clear();
+}
+
+/**
  * The name to show for a given channel/DM id, and whether it is a DM (a DM
  * gets no "#" prefix -- it is not a channel).
  *
@@ -113,6 +145,10 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // notifications", so honour it for the popup and the chime. The taskbar
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
+
+  // A burst of channel messages is one alert, not twenty (U1c). A mention or a
+  // DM is always announced, and both are what the reader might otherwise miss.
+  if (shouldCoalesce(payload.channel_id, mentioned || isDm, Date.now())) return;
 
   const channelLabel = isDm ? channelName : `#${channelName}`;
 

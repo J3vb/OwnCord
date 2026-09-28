@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { notifyIncomingMessage, cleanupNotificationAudio } from "../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  cleanupNotificationAudio,
+  resetNotificationCoalescing,
+} from "../../src/lib/notifications";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -110,6 +114,9 @@ class MockAudioContext {
 describe("notifyIncomingMessage", () => {
   beforeEach(() => {
     testPrefs.clear();
+    // Coalescing state is module-level and keyed by channel id; clear it so a
+    // burst test cannot suppress the next test's single message.
+    resetNotificationCoalescing();
 
     // These cases describe the pre-level behaviour (every non-active message
     // notifies), i.e. the "All" level. The level's own default and gate are
@@ -1410,6 +1417,84 @@ describe("notifyIncomingMessage", () => {
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
       });
+    });
+  });
+
+  describe("notification coalescing (U1c)", () => {
+    // Messages in a burst arrive at slightly different times, so each test
+    // awaits the previous notification's async chain before sending the next
+    // (two concurrent dynamic imports of the mocked notifier in one tick do not
+    // both resolve under vitest). Date.now is mocked, so this costs no window.
+    it("collapses a burst of channel messages into one popup", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1, content: "one" }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(makePayload({ id: 2, content: "two" }));
+      now.mockReturnValue(1_000_200);
+      notifyIncomingMessage(makePayload({ id: 3, content: "three" }));
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+      now.mockRestore();
+    });
+
+    it("notifies again once the coalescing window has passed", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_000 + 6000);
+      notifyIncomingMessage(makePayload({ id: 2 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
+    });
+
+    it("always lets a mention through a burst", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1, content: "chatter" }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(
+        makePayload({ id: 2, content: "hey @Me", mentions: [1], mentions_everyone: false }),
+      );
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
+    });
+
+    it("coalesces per channel, not globally", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1, channel_id: 1 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(makePayload({ id: 2, channel_id: 2 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
     });
   });
 

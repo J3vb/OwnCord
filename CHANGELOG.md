@@ -159,6 +159,7 @@ and only when it changes something a contributor or fork holder must do
 - **On Windows, the update banner now warns before Update Now that SmartScreen will show "Windows protected your PC".** The installer is not code-signed, so the prompt came as a surprise; the banner now says it is expected and to choose **More info**, then **Run anyway**.
 - **Desktop notifications no longer show raw markdown or spoilered text.** The popup body used to be the message verbatim, so `**bold**`, `> quotes`, code fences and — worse — hidden `||spoiler||` text appeared as-is, including on a lock screen. The body is now the message's visible words, with a spoiler shown as the word "Spoiler" until you open it.
 - **You choose how much a server may interrupt you.** Settings › Notifications gains a Notification level — All, Mentions only or Nothing — and each server can override it from the server header's right-click menu. New installs start at Mentions only, so a busy channel no longer pings you for every message; an existing install keeps its current All behaviour. Nothing silences the popup, the chime and the taskbar flash together, including for a mention, which a channel mute never did.
+- **A burst of messages is now one popup, not twenty.** Messages arriving in the same channel within a few seconds fold into the single alert already shown, so a fast conversation no longer stacks notifications. A message that mentions you, or a direct message, always gets its own alert.
 
 ### Under the hood
 
