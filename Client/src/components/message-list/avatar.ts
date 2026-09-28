@@ -31,10 +31,6 @@ import {
   resolveServerUrl,
 } from "./attachments";
 
-// One avatar import site for the UI layer: re-export the pure helpers so a
-// surface that draws an avatar does not import both this module and @lib/avatar.
-export { avatarInitial, resolveDisplayName, type AvatarSubject };
-
 export interface AvatarOptions {
   /** Class applied to the wrapper — each surface keeps its own sizing rules. */
   readonly className: string;

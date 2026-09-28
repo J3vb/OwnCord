@@ -18,11 +18,8 @@ import {
   saveCustomStatus,
   saveUserStatus,
 } from "@lib/userStatus";
-import {
-  avatarInitial,
-  isRenderableAvatar,
-  resolveDisplayName,
-} from "@components/message-list/avatar";
+import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
   fetchImageAsDataUrl,
   recoverEvictedImage,
