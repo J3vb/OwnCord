@@ -553,9 +553,10 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// frame broadcast in that window (auth_ok + ready write, pump startup,
 	// one RTT) is delivered to nobody and can never be re-requested, because
 	// the client only reports max(seq). Honoured only when READ-visible, the
-	// same fail-closed gate handleReconnect applies; the re-gate below stays
+	// same fail-closed gate handleReconnect applies, and only on a resume
+	// (last_seq > 0), as docs/protocol.md specifies; the re-gate below stays
 	// as defence for the abort-path promotion it already documents.
-	if c.authChannelID != 0 && allowedChannelIDs[c.authChannelID] {
+	if c.lastSeq > 0 && c.authChannelID != 0 && allowedChannelIDs[c.authChannelID] {
 		c.mu.Lock()
 		c.channelID = c.authChannelID
 		c.mu.Unlock()

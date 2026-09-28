@@ -282,3 +282,85 @@ func TestFullResyncAfterRestartActiveChannelIsReadGated(t *testing.T) {
 			"READ_MESSAGES being denied", secretID)
 	}
 }
+
+// A fresh connect (last_seq == 0) is not a resume, so docs/protocol.md says the
+// hint is ignored there: the socket must stay unsubscribed until its own
+// channel_focus, even when the named channel is READ-visible.
+func TestFreshConnectIgnoresActiveChannelID(t *testing.T) {
+	database := newTeardownTestDB(t)
+	ctx := context.Background()
+
+	userID, err := database.CreateUser(ctx, "fresh-connect-hint-user", "hash", 1)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	chID, err := database.CreateChannel(ctx, "fresh-connect-hint-room", "text", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(ctx, userID, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
+	go hub.Run()
+	defer hub.Stop()
+
+	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
+	defer srv.Close()
+
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conn, dialResp, dialErr := websocket.Dial(dialCtx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if dialResp != nil && dialResp.Body != nil {
+		_ = dialResp.Body.Close()
+	}
+	if dialErr != nil {
+		t.Fatalf("websocket.Dial: %v", dialErr)
+	}
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "auth",
+		"payload": map[string]any{
+			"token":             token,
+			"last_seq":          0,
+			"active_channel_id": chID,
+		},
+	})
+	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+
+	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer readCancel()
+	if _, _, err := conn.Read(readCtx); err != nil {
+		t.Fatalf("read auth_ok: %v", err)
+	}
+	if _, _, err := conn.Read(readCtx); err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	hub.mu.Lock()
+	c := hub.clients[userID]
+	hub.mu.Unlock()
+	if c == nil {
+		t.Fatal("client was not registered")
+	}
+	if got := c.getChannelID(); got != 0 {
+		t.Fatalf("fresh-connect client channelID = %d, want 0 — active_channel_id must be "+
+			"ignored when last_seq is 0", got)
+	}
+	hub.pubsub.mu.RLock()
+	sub := hub.pubsub.topics[ChannelTopic(chID)][userID]
+	hub.pubsub.mu.RUnlock()
+	if sub != nil {
+		t.Fatalf("fresh-connect client is subscribed to ChannelTopic(%d) via the auth-frame hint", chID)
+	}
+}
