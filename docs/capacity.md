@@ -574,7 +574,8 @@ Every number below comes from the **constrained** leg and from nothing else.
 > commit `8349ed2e`, dispatched from `dev` itself rather than a measurement
 > branch — so its `commit:` line resolves in a checkout of `dev`. The restart
 > block was re-made the same day on a later `dev` commit `8e9e8443` (run 36372371602) and also resolves in a checkout of `dev`. The capacity and
-> operational blocks remain measurement-branch runs. The workflow run id stays
+> operational blocks were still measurement-branch runs at this point (superseded
+> by the RE-05 note below). The workflow run id stays
 > the resolvable handle for every block.
 >
 > **RE-05 is met: capacity and operational are now `dev` runs (2026-09-28).**
@@ -596,7 +597,7 @@ server changes the 2026-09-12 block predates. It is the current reference figure
 for the profile; the historical block below it is kept as provenance.
 
 ```
-commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev)
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev; not yet on main)
 date (UTC):      2026-09-28
 workflow run:    36383236783  (.github/workflows/load-baseline.yml, profile=capacity)
 job:             108803153693  (capacity, constrained)
@@ -756,7 +757,7 @@ per-phase series is in each `dev` block below.
 #### Operational on `dev`, `tls.mode: self_signed` (2026-09-28)
 
 ```
-commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev)
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev; not yet on main)
 date (UTC):      2026-09-28
 workflow run:    36383239328  (.github/workflows/load-baseline.yml, profile=operational)
 job:             108803160564  (operational, constrained, tls self_signed)
@@ -794,7 +795,7 @@ refuses / 300 downloads, 0 `STORAGE_LOW_DISK`, 0 oversize, 0 WebSocket errors.
 #### Operational on `dev`, `tls.mode: off` (2026-09-28)
 
 ```
-commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev)
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev; not yet on main)
 date (UTC):      2026-09-28
 workflow run:    36383239328  (.github/workflows/load-baseline.yml, profile=operational)
 job:             108803160609  (operational, constrained, tls off)
@@ -828,9 +829,10 @@ max 0, 0 backpressure deltas, 300 admits / 995 quota refuses / 300 downloads, 0
 `STORAGE_LOW_DISK`, 0 oversize, 0 WebSocket errors, 12,085 sends, 12,073
 acknowledged, 1,133,881 deliveries. Server CPU averaged 0.21 of 2, peaked 1.16,
 `nr_throttled` did not move. TLS off is cheaper on login here (302 / 308 ms
-against 331 / 348 ms); the acknowledgement, delivery and voice-join rows are
-within a few ms of the `self_signed` leg, which is the point of publishing the
-pair as a delta rather than an absolute.
+against 331 / 348 ms); the acknowledgement and delivery rows are within 1 ms
+of the `self_signed` leg, and voice join and `auth_ok` differ by 7–18 ms in
+opposite directions, which is the point of publishing the pair as a delta
+rather than an absolute.
 
 TLS delta for this `dev` pair, `self_signed − off` (a positive number means the
 TLS leg was slower). This is the current delta; the 2026-09-23 table further
