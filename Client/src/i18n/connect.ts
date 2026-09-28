@@ -149,7 +149,8 @@ export const connectText = defineCatalog("connect", {
   "error.tooManyAttempts": "Too many failed attempts. Try again later.",
   "error.registrationRateLimited":
     "Too many accounts have been created from this network. Try again later.",
-  "error.authBusy": "The server is busy with other sign-ins. Try again in a moment.",
+  "error.authBusy": "The server is busy right now. Try again in a moment.",
+  "error.couldNotComplete": "The server could not complete that right now. Try again shortly.",
   "error.recoveryCredentialBudget":
     "Too many recovery credentials have been issued. Try again later.",
   "error.registrationUnavailable": "Registration is temporarily unavailable. Try again shortly.",

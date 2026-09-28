@@ -1469,7 +1469,7 @@ describe("errorText (B9-20, Q7)", () => {
     [
       "RATE_LIMITED",
       "too many authentication attempts in progress, try again later",
-      "The server is busy with other sign-ins. Try again in a moment.",
+      "The server is busy right now. Try again in a moment.",
     ],
     [
       "RATE_LIMITED",
@@ -1485,7 +1485,7 @@ describe("errorText (B9-20, Q7)", () => {
     [
       "INTERNAL_ERROR",
       "failed to load authentication policy",
-      "Sign-in is temporarily unavailable. Try again shortly.",
+      "The server could not complete that right now. Try again shortly.",
     ],
     [
       "INTERNAL_ERROR",
@@ -1497,7 +1497,11 @@ describe("errorText (B9-20, Q7)", () => {
       "registration failed — please try again",
       "Registration failed. Please try again.",
     ],
-    ["INTERNAL_ERROR", "failed to process registration", "Registration failed. Please try again."],
+    [
+      "INTERNAL_ERROR",
+      "failed to process registration",
+      "The server could not complete that right now. Try again shortly.",
+    ],
     [
       "INTERNAL_ERROR",
       "failed to create session",

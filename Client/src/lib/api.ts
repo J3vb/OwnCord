@@ -99,12 +99,13 @@ function authSliceCopy(message: string): string | null {
     case "too many recovery credentials issued; try again later":
       return connectText("error.recoveryCredentialBudget");
     case "login temporarily unavailable":
-    case "failed to load authentication policy":
       return connectText("error.loginUnavailable");
+    case "failed to load authentication policy":
+    case "failed to process registration":
+      return connectText("error.couldNotComplete");
     case "failed to load registration policy":
       return connectText("error.registrationUnavailable");
     case "registration failed — please try again":
-    case "failed to process registration":
       return connectText("error.registrationFailed");
     case "failed to create session":
       return connectText("error.sessionFailed");
