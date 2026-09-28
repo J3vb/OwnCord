@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -183,8 +184,17 @@ func TestBackupToSafe_FailedBackupLeavesNoCandidateFile(t *testing.T) {
 
 // TestBackupToSafe_SameNameBackupsDoNotShareATemp: two backups started in the
 // same second derive the same final name. Each must VACUUM into its own temp,
-// so a second one never removes or publishes the first one's half-written
-// file; whatever it reports, the published backup is a complete database.
+// and publishing the second must be serialized against the first so exactly
+// one lands: without that, on Windows both calls pass the pre-check, both
+// VACUUM into distinct temps, and then both rename onto the one target —
+// MoveFileEx(REPLACE_EXISTING) returns "Access is denied" when two renames
+// hit the same destination at once, so the losing backup fails on a rename
+// error instead of the "already exists" it should report, and Windows may
+// even publish two files over each other.
+//
+// A barrier installed at db.BackupVACUUMPreExecHook, which runs after the
+// destination pre-check, holds both calls until both have passed it, so the
+// race is deterministic rather than scheduler-dependent.
 func TestBackupToSafe_SameNameBackupsDoNotShareATemp(t *testing.T) {
 	database, tmpDir := newBackupFileDB(t)
 
@@ -193,6 +203,17 @@ func TestBackupToSafe_SameNameBackupsDoNotShareATemp(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	backupPath := filepath.Join(backupDir, "same-second.db")
+
+	// Both goroutines must reach this point before either proceeds: each
+	// signals its arrival and waits for the other, so both have passed the
+	// destination pre-check before either can publish.
+	var bothChecked sync.WaitGroup
+	bothChecked.Add(2)
+	db.BackupVACUUMPreExecHook = func() {
+		bothChecked.Done()
+		bothChecked.Wait()
+	}
+	t.Cleanup(func() { db.BackupVACUUMPreExecHook = nil })
 
 	errs := make(chan error, 2)
 	for range 2 {
@@ -206,8 +227,8 @@ func TestBackupToSafe_SameNameBackupsDoNotShareATemp(t *testing.T) {
 			t.Fatalf("a same-second backup failed other than on the existing destination: %v", err)
 		}
 	}
-	if succeeded == 0 {
-		t.Fatal("neither same-second backup landed")
+	if succeeded != 1 {
+		t.Fatalf("same-name backups landed %d files, want exactly 1", succeeded)
 	}
 	if err := db.CheckBackupIntegrity(context.Background(), backupPath); err != nil {
 		t.Fatalf("the published backup is not a complete database: %v", err)
