@@ -2,6 +2,13 @@
 # platform, so prettier/gofmt see identical bytes locally and in CI.
 * text=auto eol=lf
 
+# Every PR adds its line to the same `## Unreleased` block, so two branches
+# that touch it conflict on nearly every merge (58 of 89 commits did in one
+# 2026-09-25..28 window). Union merge keeps both sides' added lines instead of
+# leaving conflict markers. A malformed result is still caught: prettier and
+# scripts/check-doc-counts.mjs read the file.
+CHANGELOG.md merge=union
+
 # Binary assets
 *.png binary
 *.ico binary
