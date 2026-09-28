@@ -64,7 +64,7 @@ const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
 function handleSessionExpired(){
   state.logConnectSeq++;
   if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
-  if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
+  if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}clearLogLevelTimer();
   state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');
   resetShell();
   const err=document.getElementById('loginErr');if(err)err.textContent='Your session expired — sign in again.';
@@ -594,7 +594,7 @@ function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
   if(!leaveSection()){if(location.hash!=='#'+state.section)history.pushState(null,'','#'+state.section);return}
   try{
-    if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}}
+    if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}clearLogLevelTimer();}
     state.settingsChanged=false;
     state.section=id;renderNav();renderContent();closeNav();syncHash(id);
   }catch(err){
@@ -604,7 +604,7 @@ function navigateTo(id){
   }
 }
 
-function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');resetShell();showOverlay('loginOverlay')}
+function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}clearLogLevelTimer();state.supportPreview=null;state.supportBusy=false;state.token='';state.me=null;localStorage.removeItem('admin_token');resetShell();showOverlay('loginOverlay')}
 
 /* ═══ Content Router ═══ */
 function renderContent(){

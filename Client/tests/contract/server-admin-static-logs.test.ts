@@ -335,6 +335,27 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     expect(adminToggle.getAttribute("aria-checked")).toBe("true");
   });
 
+  // The countdown belongs to the Logs page and the session: signing out during
+  // a boost stops it, so it cannot poll later with no token.
+  it("stops the log-level countdown on sign-out", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(bridge.state.logLevelTimer).toBeTruthy();
+
+    (window as unknown as { doLogout: () => void }).doLogout();
+    expect(bridge.state.logLevelTimer).toBeNull();
+  });
+
   // A reload (or a second admin) during a boost must see the server's real
   // level, and turning it off must go back to the server's base level, not
   // an assumed "info".
