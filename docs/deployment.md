@@ -1135,7 +1135,9 @@ therefore where your supervisor puts stdout, not a server setting:
 
 One key controls verbosity: `logging.level` (`debug`/`info`/`warn`/`error`,
 default `info`). `OWNCORD_LOGGING_LEVEL` overrides it without editing
-`config.yaml`.
+`config.yaml`, and an administrator can switch a running server to debug for
+a while from the admin panel's Logs page
+([server-configuration.md](server-configuration.md#logging-logging)).
 
 A LiveKit that OwnCord supervises logs through the same pipeline, as
 `livekit companion output` entries with `component=livekit` and LiveKit's own

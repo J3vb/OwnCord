@@ -3810,7 +3810,10 @@ facts, taken from the configuration the server booted with — so an edit to
 config.yaml shows here only after a restart, which is also when it takes
 effect. Secrets appear only as `gif_configured` / `github_configured`
 booleans. `tls_domain`, `voice_url` and `backup_dir` are included only when
-the caller holds `ADMINISTRATOR` or is the owner.
+the caller holds `ADMINISTRATOR` or is the owner. `logging_level` is the
+level the server booted at, normalised (an unrecognised value reads `info`,
+an unset one `""`); a debug boost in force shows in
+`GET /admin/api/logs/level`, not here.
 
 #### Response 200 OK
 
