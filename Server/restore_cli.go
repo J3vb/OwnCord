@@ -51,6 +51,14 @@ func runRestoreCLI(cfgPath string, args []string) int {
 		dbPath = filepath.Join("data", "chatserver.db")
 	}
 
+	// SQLite verifies a database with its -wal applied, but only the main file
+	// is copied, so a source with committed frames still in its WAL would be
+	// checked as one database and restored as another.
+	if walInfo, err := os.Stat(source + "-wal"); err == nil && walInfo.Size() > 0 {
+		fmt.Fprintf(os.Stderr, "error: %s still has transactions in %s-wal that a restore would drop; checkpoint it first (sqlite3 %s 'PRAGMA wal_checkpoint(TRUNCATE)') or restore from a backup this server wrote\n", source, source, source)
+		return 1
+	}
+
 	// Verify the source before touching anything. A truncated or non-database
 	// file must be refused up front, not copied over the live database.
 	if err := db.CheckBackupIntegrity(context.Background(), source); err != nil {

@@ -791,9 +791,10 @@ docker compose run --rm --no-deps owncord restore --force data/backups/chatserve
 ```
 
 It verifies the file is a readable database that a newer server version did
-not write before touching the live one, takes a `pre_restore_*` safety copy,
-preserves the message-retry cutoff, and uses the same `database.path` and
-`backup.dir` from `config.yaml` the server does. When the live database is too
+not write — and refuses one whose `-wal` still holds transactions, since only
+the main file is copied — before touching the live one, takes a
+`pre_restore_*` safety copy, preserves the message-retry cutoff, and uses the
+same `database.path` and `backup.dir` from `config.yaml` the server does. When the live database is too
 broken to copy, it is moved aside with its `-wal` and `-shm` files as
 `chatserver.db.pre_restore_<time>` instead, and the command prints where. This
 restores the database alone — a full archive below is still the supported path

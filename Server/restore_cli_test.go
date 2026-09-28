@@ -313,3 +313,48 @@ func TestRestoreCLI_RefusesLiveDatabaseAsSource(t *testing.T) {
 		t.Fatal("the live database was truncated")
 	}
 }
+
+// TestRestoreCLI_RefusesSourceWithPendingWAL: SQLite verifies a source with its
+// -wal applied, but the restore copies only the main file. A source whose
+// committed transactions are still in its WAL must be refused, not restored
+// without them.
+func TestRestoreCLI_RefusesSourceWithPendingWAL(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	srcDir, copyDir := t.TempDir(), t.TempDir()
+	srcPath := filepath.Join(srcDir, "chatserver.db")
+	src, err := db.Open(srcPath)
+	if err != nil {
+		t.Fatalf("Open src: %v", err)
+	}
+	if err := db.Migrate(src); err != nil {
+		t.Fatalf("Migrate src: %v", err)
+	}
+	if _, err := src.CreateUser(context.Background(), "wal-only-user", "hash", 1); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	// A file-level copy taken while the server was still running: the main
+	// file and a WAL still holding committed frames.
+	source := filepath.Join(copyDir, "chatserver.db")
+	for _, suffix := range []string{"", "-wal"} {
+		b, err := os.ReadFile(srcPath + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(source+suffix, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := src.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(source + "-wal"); err != nil || info.Size() == 0 {
+		t.Fatalf("expected a non-empty -wal beside the source: %v", err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", source}); code == 0 {
+		t.Fatal("restore of a source with a pending WAL exited 0, want a refusal")
+	}
+	if !userExists(t, dbPath, "existing-owner") {
+		t.Fatal("the live database changed despite the refusal")
+	}
+}
