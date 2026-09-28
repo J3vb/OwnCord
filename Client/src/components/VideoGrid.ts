@@ -330,6 +330,14 @@ function buildVolumeControls(config: TileConfig): {
   };
 }
 
+/** F without a modifier, and not typed into a text field. */
+function isFullscreenKey(e: KeyboardEvent): boolean {
+  const typing =
+    (e.target instanceof HTMLInputElement && e.target.type !== "range") ||
+    e.target instanceof HTMLTextAreaElement;
+  return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
+}
+
 export function createVideoGrid(): VideoGridComponent {
   let root: HTMLDivElement | null = null;
   const cells = new Map<number, CellEntry>();
@@ -638,14 +646,6 @@ export function createVideoGrid(): VideoGridComponent {
     theatreTile = null;
     syncFullscreenUi();
     void callbacks.setWindowFullscreen?.(false).catch(() => {});
-  }
-
-  /** F without a modifier, and not typed into a text field. */
-  function isFullscreenKey(e: KeyboardEvent): boolean {
-    const typing =
-      (e.target instanceof HTMLInputElement && e.target.type !== "range") ||
-      e.target instanceof HTMLTextAreaElement;
-    return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
   }
 
   /** Escape or F leaves the theatre fallback wherever focus is: a click on the
