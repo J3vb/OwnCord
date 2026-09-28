@@ -1338,6 +1338,8 @@ describe("VideoGrid", () => {
     let exitFullscreen: ReturnType<typeof vi.fn>;
 
     beforeEach(() => {
+      // Attached, as in the app: the theatre view's keys are document-level.
+      document.body.appendChild(container);
       fullscreenElement = null;
       const enter = (el: Element): void => {
         fullscreenElement = el;
@@ -1367,6 +1369,7 @@ describe("VideoGrid", () => {
     });
 
     afterEach(() => {
+      container.remove();
       delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
       delete (document as { exitFullscreen?: unknown }).exitFullscreen;
       delete (document as { fullscreenElement?: unknown }).fullscreenElement;
@@ -1424,6 +1427,23 @@ describe("VideoGrid", () => {
       cell(SCREEN).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(false);
       expect(setWindowFullscreen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("leaves the theatre view with Escape or F after focus has left the tile", async () => {
+      requestFullscreen.mockImplementation(() => Promise.reject(new Error("denied")));
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const root = container.querySelector<HTMLElement>("[data-testid='video-grid']")!;
+
+      for (const key of ["Escape", "f"]) {
+        control(SCREEN, "fullscreen").click();
+        await vi.waitFor(() =>
+          expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(true),
+        );
+        // A click on the video moves focus to the grid, outside the tile.
+        root.focus();
+        root.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+        expect(cell(SCREEN).classList.contains("video-cell--theatre")).toBe(false);
+      }
     });
 
     it("keeps the call controls at hand in full screen", async () => {

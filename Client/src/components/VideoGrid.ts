@@ -346,7 +346,7 @@ export function createVideoGrid(): VideoGridComponent {
   let callState = { muted: false, deafened: false };
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let statsTile: number | null = null;
-  /** Owns the grid's document listeners (full-screen changes). */
+  /** Owns the grid's document listeners (full-screen changes, theatre keys). */
   const gridListeners = new Disposable();
 
   /** Apply JS-calculated tile sizes to all grid-mode cells. */
@@ -638,6 +638,25 @@ export function createVideoGrid(): VideoGridComponent {
     theatreTile = null;
     syncFullscreenUi();
     void callbacks.setWindowFullscreen?.(false).catch(() => {});
+  }
+
+  /** F without a modifier, and not typed into a text field. */
+  function isFullscreenKey(e: KeyboardEvent): boolean {
+    const typing =
+      (e.target instanceof HTMLInputElement && e.target.type !== "range") ||
+      e.target instanceof HTMLTextAreaElement;
+    return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
+  }
+
+  /** Escape or F leaves the theatre fallback wherever focus is: a click on the
+   *  video moves it to the grid, outside the tile (HTML full screen handles
+   *  its own Escape). A tile's F handler has already acted when it prevented
+   *  the default. */
+  function onTheatreKey(e: KeyboardEvent): void {
+    if (theatreTile === null || e.defaultPrevented) return;
+    if (e.key !== "Escape" && !isFullscreenKey(e)) return;
+    e.preventDefault();
+    leaveTheatre();
   }
 
   function onFullscreenChange(): void {
@@ -1002,18 +1021,14 @@ export function createVideoGrid(): VideoGridComponent {
 
     const entry: CellEntry = { el: cell, config, listeners: new Disposable(), name: "" };
     // F toggles full screen from anywhere in the tile (not while typing), a
-    // double-click too; Escape leaves the theatre fallback (HTML full screen
-    // handles its own Escape).
+    // double-click too. The theatre fallback's own keys are on the document
+    // (onTheatreKey).
     cell.addEventListener(
       "keydown",
       (e) => {
-        const typing = e.target instanceof HTMLInputElement && e.target.type !== "range";
-        if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing) {
+        if (isFullscreenKey(e)) {
           e.preventDefault();
           toggleFullscreen(userId);
-        } else if (e.key === "Escape" && theatreTile === userId) {
-          e.preventDefault();
-          leaveTheatre();
         }
       },
       { signal: entry.listeners.signal },
@@ -1204,6 +1219,7 @@ export function createVideoGrid(): VideoGridComponent {
     document.addEventListener("fullscreenchange", onFullscreenChange, {
       signal: gridListeners.signal,
     });
+    document.addEventListener("keydown", onTheatreKey, { signal: gridListeners.signal });
 
     // Observe container size changes to recalculate tile layout
     resizeObserver = new ResizeObserver(() => {
