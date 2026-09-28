@@ -44,8 +44,7 @@
 # measures the workflow's own commit, so the wiring here and the harness it
 # drives are always the same revision. To measure dev, dispatch with
 # `--ref dev`. A scheduled run lands its checks on the DEFAULT branch, where no
-# context here is required, and the job is guarded to the canonical repository
-# so a fork mirroring this file spends nothing.
+# context here is required.
 #
 # Re-run it deliberately before a release, or after changes to the hub, the
 # write path or the replay budget.
@@ -89,8 +88,7 @@ name: Load Baseline
 on:
   # RE-05's weekly regression watch. A schedule only ever runs from the default
   # branch, so this file does nothing until it reaches main and then measures
-  # main's commit every week. The job's canonical-repository guard keeps a fork
-  # from spending on its own copy.
+  # main's commit every week.
   schedule:
     - cron: "0 6 * * 0"
   workflow_dispatch:
@@ -145,11 +143,7 @@ jobs:
     name: ${{ inputs.profile || 'capacity' }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
     # A scheduled run has no inputs, so every `inputs.X` below carries the
     # same default the dispatch input declares. `|| 'x'` is the whole of the
-    # scheduled-vs-dispatched logic, and the canonical-repository guard is
-    # inert on dispatch: a fork dispatching this file is spending its own
-    # minutes on its own copy, which is its choice, but a fork's weekly cron
-    # is not.
-    if: github.event_name != 'schedule' || github.repository == 'J3vb/OwnCord'
+    # scheduled-vs-dispatched logic.
     runs-on: ubuntu-latest
     # 45 min covers every profile whose k6 run is ~4.5 min (60 s ramp + 180 s
     # sustain + 20 s drain) on top of the build, boot and seeding. The ceiling
