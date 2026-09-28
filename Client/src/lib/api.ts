@@ -73,14 +73,17 @@ export class ApiClientError extends Error {
   }
 }
 
-const SESSION_EXPIRED_MESSAGES = new Set([
-  "session has expired",
-  "invalid or expired session",
-  "missing or invalid authorization header",
-  "not authenticated",
-]);
+function isSessionExpired(message: string): boolean {
+  return (
+    message === "session has expired" ||
+    message === "invalid or expired session" ||
+    message === "missing or invalid authorization header" ||
+    message === "not authenticated"
+  );
+}
 
-const PERMISSION_REFUSAL = /\bpermissions?\b|role required$|^access denied$/;
+const PERMISSION_REFUSAL =
+  /\bmissing\b.*\bpermission\b|insufficient permissions|permission required$|role required$|^access denied$/i;
 
 /**
  * The user-facing copy for a server error code that has one, or null when the
@@ -93,15 +96,26 @@ const PERMISSION_REFUSAL = /\bpermissions?\b|role required$|^access denied$/;
  * suspended account, or an account-state refusal ("account is awaiting
  * approval"). Only a refused sign-in, session, suspension or permission has
  * fixed copy — the rest keep the server's own sentence, which says what went
- * wrong.
+ * wrong. RATE_LIMITED and INTERNAL_ERROR carry the auth slice's lockout,
+ * full-queue and unavailable sentences, which get copy of their own.
  */
 export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
+      if (message === "account temporarily locked due to too many failed attempts")
+        return connectText("error.accountLocked");
+      if (message === "registration queue is full, try again later")
+        return connectText("error.registrationQueueFull");
       return connectText("error.rateLimited");
+    case "INTERNAL":
+    case "INTERNAL_ERROR":
+      if (message === "login temporarily unavailable") return connectText("error.loginUnavailable");
+      if (message === "registration failed — please try again")
+        return connectText("error.registrationFailed");
+      return null;
     case "UNAUTHORIZED":
       if (message === "invalid credentials") return connectText("error.invalidCredentials");
-      return SESSION_EXPIRED_MESSAGES.has(message) ? connectText("error.unauthorized") : null;
+      return isSessionExpired(message) ? connectText("error.unauthorized") : null;
     case "FORBIDDEN":
       if (message === "your account has been suspended") return connectText("error.banned");
       return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
@@ -140,19 +154,14 @@ function capitalise(message: string): string {
 /**
  * The text for a server error: catalog copy when its code has a mapping, the
  * server's message (capitalised) only when it has none, and `fallback` for an
- * empty message. An internal failure maps to the caller's own `fallback`.
+ * empty message. An unmapped internal failure maps to the caller's own
+ * `fallback`.
  */
 export function serverErrorText(code: string, message: string, fallback: string): string {
-  switch (code) {
-    case "INTERNAL":
-    case "INTERNAL_ERROR":
-      return fallback;
-    default: {
-      const copy = serverErrorCopy(code, message);
-      if (copy !== null) return copy;
-      return message ? capitalise(message) : fallback;
-    }
-  }
+  const copy = serverErrorCopy(code, message);
+  if (copy !== null) return copy;
+  if (code === "INTERNAL" || code === "INTERNAL_ERROR") return fallback;
+  return message ? capitalise(message) : fallback;
 }
 
 /** A failed request's text: `serverErrorText` for an `ApiClientError`, else the error's own message. */

@@ -1444,6 +1444,64 @@ describe("errorText (B9-20, Q7)", () => {
     );
   });
 
+  it("gives the auth slice's lockout, full-queue and unavailable sentences their own copy", () => {
+    expect(
+      errorText(
+        new ApiClientError(
+          429,
+          "RATE_LIMITED",
+          "account temporarily locked due to too many failed attempts",
+        ),
+        "F",
+      ),
+    ).toBe(
+      "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",
+    );
+    expect(
+      errorText(
+        new ApiClientError(429, "RATE_LIMITED", "registration queue is full, try again later"),
+        "F",
+      ),
+    ).toBe("This server is not accepting new applications right now. Try again later.");
+    expect(
+      errorText(new ApiClientError(429, "RATE_LIMITED", "slow down, try again later"), "F"),
+    ).toBe("Too many requests. Try again later.");
+    expect(
+      errorText(new ApiClientError(500, "INTERNAL_ERROR", "login temporarily unavailable"), "F"),
+    ).toBe("Sign-in is temporarily unavailable. Try again shortly.");
+    expect(
+      errorText(
+        new ApiClientError(500, "INTERNAL_ERROR", "registration failed — please try again"),
+        "F",
+      ),
+    ).toBe("Registration failed. Please try again.");
+    expect(errorText(new ApiClientError(500, "INTERNAL_ERROR", "failed to logout"), "F")).toBe("F");
+  });
+
+  it("keeps the server's text for a FORBIDDEN fault that is not a missing permission", () => {
+    expect(
+      errorText(
+        new ApiClientError(403, "FORBIDDEN", "forbidden: permission service unavailable"),
+        "F",
+      ),
+    ).toBe("Forbidden: permission service unavailable");
+    expect(
+      errorText(
+        new ApiClientError(403, "FORBIDDEN", "forbidden: missing MANAGE_MESSAGES permission"),
+        "F",
+      ),
+    ).toBe("You don't have permission to do that.");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "moderation permission required"), "F"),
+    ).toBe("You don't have permission to do that.");
+    expect(errorText(new ApiClientError(403, "FORBIDDEN", "owner role required"), "F")).toBe(
+      "You don't have permission to do that.",
+    );
+    expect(errorText(new ApiClientError(403, "FORBIDDEN", "access denied"), "F")).toBe(
+      "You don't have permission to do that.",
+    );
+  });
+
   it("keeps the server's own message for an unmapped code, capitalising it", () => {
     expect(errorText(new ApiClientError(400, "INVALID_INPUT", "name already exists"), "F")).toBe(
       "Name already exists",

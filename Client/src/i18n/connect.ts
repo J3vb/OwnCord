@@ -137,6 +137,13 @@ export const connectText = defineCatalog("connect", {
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
   "error.rateLimited": "Too many requests. Try again later.",
+  "error.accountLocked":
+    "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",
+  "error.totpTooManyAttempts": "Too many incorrect codes. Try again later.",
+  "error.registrationQueueFull":
+    "This server is not accepting new applications right now. Try again later.",
+  "error.loginUnavailable": "Sign-in is temporarily unavailable. Try again shortly.",
+  "error.registrationFailed": "Registration failed. Please try again.",
   "error.unauthorized": "Your session has expired — sign in again.",
   "error.invalidCredentials": "Incorrect username or password.",
   "error.forbidden": "You don't have permission to do that.",

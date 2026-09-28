@@ -1039,7 +1039,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // partial token has already been consumed by main.ts.
       totpPending = false;
     } catch (err) {
-      const message = errorText(err, connectText("totp.failed"));
+      const message =
+        err instanceof ApiClientError &&
+        err.code === "RATE_LIMITED" &&
+        err.message === "too many failed attempts, try again later"
+          ? connectText("error.totpTooManyAttempts")
+          : errorText(err, connectText("totp.failed"));
       transitionTo("error", message);
     } finally {
       totpSubmitBtn.disabled = false;

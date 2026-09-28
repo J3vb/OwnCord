@@ -5195,7 +5195,11 @@ describe("WS Dispatcher", () => {
     it("rolls back the camera publish on a correlated refusal", async () => {
       vi.mocked(mockRollbackPendingVideo).mockReturnValue("camera");
 
-      mock.dispatch("error", { code: "FORBIDDEN", message: "no permission" }, "vid-1");
+      mock.dispatch(
+        "error",
+        { code: "FORBIDDEN", message: "missing CONNECT_VIDEO permission" },
+        "vid-1",
+      );
       expectConsole("error", /\[dispatcher\] Server error/);
       await vi.runAllTimersAsync();
 
