@@ -30,9 +30,9 @@ function isWindowFocused(): boolean {
 /**
  * Coalescing window (U1c): messages arriving within this long after the last
  * notification for the same channel are folded into that one alert, so a burst
- * of twenty lines is one popup, not twenty. A mention or a DM is never folded —
- * it is addressed to the reader, and dropping it would hide the thing the alert
- * exists for.
+ * of twenty lines is one popup, not twenty; a DM burst folds the same way. A
+ * mention is never folded — it is addressed to the reader, and dropping it
+ * would hide the thing the alert exists for.
  */
 const COALESCE_WINDOW_MS = 5000;
 
@@ -42,7 +42,7 @@ const lastNotifiedAt = new Map<number, number>();
 /**
  * Whether this message is part of a burst already announced for its channel.
  * Records the new time when it is not, so the window measures from the alert
- * the reader actually saw. `alwaysNotify` (a mention or a DM) both bypasses the
+ * the reader actually saw. `alwaysNotify` (a mention) both bypasses the
  * check and refreshes the window.
  */
 function shouldCoalesce(channelId: number, alwaysNotify: boolean, now: number): boolean {
