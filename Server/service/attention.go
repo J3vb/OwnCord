@@ -52,6 +52,12 @@ const (
 	// attentionJobFailures consecutive failed runs raise a job warning; one
 	// successful run clears it.
 	attentionJobFailures = 2
+	// A served certificate warns inside attentionCertWarn of its expiry and
+	// is critical inside attentionCertCritical. Let's Encrypt renews 30 days
+	// ahead, so an ACME certificate inside the warning window means renewal
+	// is failing.
+	attentionCertWarn     = 21 * 24 * time.Hour
+	attentionCertCritical = 7 * 24 * time.Hour
 	// attentionRecoveredKeep is how long a recovered warning stays listed so
 	// an operator who was away still sees what happened.
 	attentionRecoveredKeep = 24 * time.Hour
@@ -97,6 +103,9 @@ type AttentionSources struct {
 	// timeout. Nil (no voice, or a bare test service) reports unknown, never
 	// healthy.
 	VoiceHealth func(context.Context) VoiceHealth
+	// Certificate reports tls.mode and the served leaf certificate's expiry,
+	// zero when none is known (TLS off, or ACME before its first handshake).
+	Certificate func() (mode string, notAfter time.Time)
 }
 
 // BootStatus is what the previous run left in the boot marker (SRE-08):
@@ -276,6 +285,9 @@ type attentionReadings struct {
 	lastBackup    time.Time
 	lastBackupErr error
 	voice         *VoiceHealth
+	certMode      string
+	certNotAfter  time.Time
+	certMeasured  bool
 }
 
 func (s *AttentionService) read(ctx context.Context) attentionReadings {
@@ -314,6 +326,10 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 		v := s.src.VoiceHealth(ctx)
 		r.voice = &v
 	}
+	if s.src.Certificate != nil {
+		r.certMode, r.certNotAfter = s.src.Certificate()
+		r.certMeasured = true
+	}
 	return r
 }
 
@@ -344,6 +360,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	})
 	s.evalBackup(r, now)
 	s.evalVoice(r, now)
+	s.evalCertificate(r, now)
 	s.evalBootStatus(now)
 	s.evalJobs(now)
 	for id, w := range s.warnings {

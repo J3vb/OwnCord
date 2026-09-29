@@ -176,7 +176,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		}
 		setup.RecordSetup(r.Context(), uid, detail)
 
-		fingerprint := leafFingerprint
+		fingerprint := servedCert().Fingerprint
 		if req.Wizard != nil && req.Wizard.TLSMode != nil &&
 			(opts.RunningCfg == nil || *req.Wizard.TLSMode != opts.RunningCfg.TLS.Mode) {
 			fingerprint = ""

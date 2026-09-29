@@ -17,11 +17,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -38,6 +40,65 @@ type TLSResult struct {
 	// (Client/src-tauri/src/tofu.rs). It is empty for TLS off and for ACME
 	// before the first handshake, where the leaf is not known at start-up.
 	Fingerprint string
+	// Served tracks the leaf certificate being served now: set at load for
+	// self_signed and manual, and on every handshake for ACME, so a renewal
+	// shows up without a restart. Nil for TLS off, where a reverse proxy
+	// serves the certificate; a nil tracker reports the zero ServedCert.
+	Served *CertTracker
+}
+
+// ServedCert is a served leaf certificate's fingerprint (LeafFingerprint's
+// form) and expiry. The zero value means none is known.
+type ServedCert struct {
+	Fingerprint string
+	NotAfter    time.Time
+}
+
+// CertTracker records the leaf certificate the server most recently served.
+type CertTracker struct {
+	mu   sync.Mutex
+	last *tls.Certificate
+	cur  ServedCert
+}
+
+// Current returns the most recently served certificate, or the zero value
+// before the first one (or on a nil tracker).
+func (t *CertTracker) Current() ServedCert {
+	if t == nil {
+		return ServedCert{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cur
+}
+
+// record notes cert as served. autocert hands back the same pointer until a
+// renewal, so the hash runs once per certificate, not once per handshake.
+func (t *CertTracker) record(cert *tls.Certificate) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if cert == nil || cert == t.last || len(cert.Certificate) == 0 {
+		return
+	}
+	leaf := cert.Leaf
+	if leaf == nil {
+		parsed, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			return
+		}
+		leaf = parsed
+	}
+	t.last = cert
+	t.cur = ServedCert{Fingerprint: LeafFingerprint(*cert), NotAfter: leaf.NotAfter}
+}
+
+// staticTracker is the tracker for a config with a statically loaded leaf.
+func staticTracker(cfg *tls.Config) *CertTracker {
+	t := &CertTracker{}
+	if cfg != nil && len(cfg.Certificates) > 0 {
+		t.record(&cfg.Certificates[0])
+	}
+	return t
 }
 
 // LeafFingerprint formats cert's leaf DER as lower-case colon-hex
@@ -124,14 +185,14 @@ func LoadOrGenerate(cfg config.TLSConfig) (*TLSResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg)}, nil
+		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg), Served: staticTracker(tlsCfg)}, nil
 
 	case "manual":
 		tlsCfg, err := loadCertPair(cfg.CertFile, cfg.KeyFile)
 		if err != nil {
 			return nil, err
 		}
-		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg)}, nil
+		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg), Served: staticTracker(tlsCfg)}, nil
 
 	case "acme":
 		return loadACME(cfg)
@@ -261,12 +322,30 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 
 	tlsCfg := m.TLSConfig()
 	tlsCfg.MinVersion = tls.VersionTLS12
-	tlsCfg.GetCertificate = logCertificateFailures(tlsCfg.GetCertificate, cfg.Domain)
+	served := &CertTracker{}
+	tlsCfg.GetCertificate = logCertificateFailures(trackServed(tlsCfg.GetCertificate, served), cfg.Domain)
 
 	return &TLSResult{
 		TLSConfig:   tlsCfg,
 		HTTPHandler: m.HTTPHandler(redirect),
+		Served:      served,
 	}, nil
+}
+
+// trackServed records each certificate next hands to a member's handshake.
+// A TLS-ALPN-01 validation handshake gets a throwaway challenge certificate
+// instead, so it is skipped.
+func trackServed(
+	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
+	served *CertTracker,
+) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		cert, err := next(hello)
+		if err == nil && !slices.Contains(hello.SupportedProtos, acme.ALPNProto) {
+			served.record(cert)
+		}
+		return cert, err
+	}
 }
 
 // certFailureLogInterval bounds how often an issuance failure is logged. Long

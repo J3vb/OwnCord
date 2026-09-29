@@ -17,12 +17,15 @@ import (
 // ─── User Handlers ───────────────────────────────────────────────────────────
 
 // statsResponse is the dashboard payload: the database stats flattened with
-// the served certificate's fingerprint (see SetLeafFingerprint). The
+// the TLS mode and the served certificate (see SetServedCertificate). The
 // fingerprint is the value users compare out of band before accepting the
-// client's trust prompt; it is omitted when there is none to show.
+// client's trust prompt; it and its expiry are omitted when there is none to
+// show (TLS off, or ACME before its first handshake).
 type statsResponse struct {
 	*db.ServerStats
-	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
+	TLSMode                string     `json:"tls_mode,omitempty"`
+	CertificateFingerprint string     `json:"certificate_fingerprint,omitempty"`
+	CertificateExpiresAt   *time.Time `json:"certificate_expires_at,omitempty"`
 }
 
 func handleGetStats(users *service.UserService, hub HubBroadcaster) http.HandlerFunc {
@@ -35,7 +38,12 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 		if hub != nil {
 			stats.OnlineCount = hub.ClientCount()
 		}
-		writeJSON(w, http.StatusOK, statsResponse{ServerStats: stats, CertificateFingerprint: leafFingerprint})
+		resp := statsResponse{ServerStats: stats, TLSMode: tlsMode}
+		if cert := servedCert(); cert.Fingerprint != "" {
+			expires := cert.NotAfter.UTC()
+			resp.CertificateFingerprint, resp.CertificateExpiresAt = cert.Fingerprint, &expires
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

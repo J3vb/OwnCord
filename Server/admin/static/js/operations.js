@@ -179,11 +179,21 @@ async function renderDashboard(){
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;
   // The certificate users compare out of band before accepting the client's
-  // trust prompt (BPR-051). Shown only when the server serves a statically
-  // loaded certificate (not with TLS off or ACME before its first handshake).
-  // Rarely needed, so it waits behind a disclosure.
+  // trust prompt (BPR-051), in every TLS mode: the served one with its expiry,
+  // ACME's once its first handshake has happened, and for TLS off (a reverse
+  // proxy serves it) the command that reads it. Rarely needed, so it waits
+  // behind a disclosure.
+  const certCard=body=>'<details class="section-card disclose" id="certFingerprintCard"><summary class="section-card-header">'+I.chevronRight+'<h3>Certificate fingerprint</h3><span class="checks-sum">Show</span></summary><div class="section-card-body">'+body+'</div></details>';
+  const certNote='<p class="card-note">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p>';
   if(s.certificate_fingerprint){
-    html+='<details class="section-card disclose" id="certFingerprintCard"><summary class="section-card-header">'+I.chevronRight+'<h3>Certificate fingerprint</h3><span class="checks-sum">Show</span></summary><div class="section-card-body"><p class="card-note">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p><code class="hash">'+esc(s.certificate_fingerprint)+'</code></div></details>';
+    let body=certNote+'<code class="hash">'+esc(s.certificate_fingerprint)+'</code>';
+    if(s.certificate_expires_at)body+='<p class="card-note">Expires '+fmtLocal(s.certificate_expires_at)+'.</p>';
+    if(s.tls_mode==='acme')body+='<p class="card-note">Let’s Encrypt renews this certificate about every 60 days, and every member then sees a certificate-changed prompt. Publish the new fingerprint from here after each renewal.</p>';
+    html+=certCard(body);
+  }else if(s.tls_mode==='off'){
+    html+=certCard('<p class="card-note">Your reverse proxy serves the certificate members see, so this server cannot read its fingerprint. Run this on any machine with OpenSSL, replacing both copies of chat.example.com with your domain (and 443 with your HTTPS port if it differs). It prints the fingerprint in the form the app shows. Run it again after every renewal and publish the result out of band.</p><code class="hash">openssl s_client -connect chat.example.com:443 -servername chat.example.com &lt;/dev/null 2&gt;/dev/null | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr \'A-F\' \'a-f\'</code>');
+  }else if(s.tls_mode==='acme'){
+    html+=certCard(certNote+'<p class="card-note">The fingerprint appears here after the first HTTPS connection, once Let’s Encrypt has issued the certificate. Reload this page after connecting.</p>');
   }
   // Recent audit — VIEW_AUDIT_LOG only.
   if(can(PERM.VIEW_AUDIT_LOG))try{

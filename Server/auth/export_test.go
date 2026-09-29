@@ -42,3 +42,7 @@ func (r *RateLimiter) WindowForTest(key string) (window time.Duration, ok bool) 
 // issuance-failure log line can be asserted against an injected failing
 // issuer, rather than against a real ACME directory (B6-6).
 var LogCertificateFailuresForTest = logCertificateFailures
+
+// TrackServedForTest exposes trackServed so the ACME served-leaf tracking can
+// be asserted against an injected issuer rather than a real ACME directory.
+var TrackServedForTest = trackServed

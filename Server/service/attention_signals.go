@@ -303,6 +303,45 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
+// evalCertificate reports how long the served TLS certificate has left.
+// Nothing here renews a self-signed or manual certificate, and an ACME
+// renewal that keeps failing is silent until handshakes fail, so the panel
+// warns ahead of the date. TLS off (a reverse proxy serves the certificate)
+// and ACME before its first handshake have nothing to read: unknown.
+func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
+	sig := AttentionSignal{ID: "certificate", Label: "TLS certificate", ObservedAt: now}
+	title := "The TLS certificate expires soon"
+	action := "Replace the certificate before it expires (docs/deployment.md, \"Rotating the self-signed certificate\"; a manual certificate is reloaded on restart), then publish the new fingerprint from the Dashboard so members can check it."
+	if r.certMode == "acme" {
+		action = "Let's Encrypt renews 30 days before expiry, so renewal is failing: check that port 80 reaches this server from the internet and search Server Logs for \"TLS certificate issuance failed\". Members see the renewed certificate's fingerprint on the Dashboard once it is served."
+	}
+	switch {
+	case !r.certMeasured:
+		sig.Status, sig.Detail = AttentionStatusUnknown, "the certificate is not measured on this server"
+	case r.certMode == "off":
+		sig.Status, sig.Detail = AttentionStatusUnknown, "TLS is off here: your reverse proxy serves the certificate, so check its renewal there"
+	case r.certNotAfter.IsZero():
+		sig.Status, sig.Detail = AttentionStatusUnknown, "no certificate served yet; it is read on the first HTTPS connection"
+	default:
+		left := r.certNotAfter.Sub(now)
+		sig.Status = AttentionStatusOK
+		switch {
+		case left < attentionCertCritical:
+			sig.Status = AttentionStatusCritical
+		case left < attentionCertWarn:
+			sig.Status = AttentionStatusWarning
+		}
+		date := r.certNotAfter.UTC().Format("2006-01-02")
+		if left <= 0 {
+			sig.Value = "expired " + date
+		} else {
+			sig.Value = fmt.Sprintf("expires %s (%d days)", date, int(left.Hours()/24))
+		}
+		sig.Threshold = fmt.Sprintf("warn under %d days, critical under %d", int(attentionCertWarn.Hours()/24), int(attentionCertCritical.Hours()/24))
+	}
+	s.settle(sig, title, action)
+}
+
 // evalBootStatus reports how the previous run ended (SRE-08): a marker left
 // behind by a kill, a crash or a hardware exit is a warning, a clean shutdown
 // is ok, and a first start with no marker is unknown.

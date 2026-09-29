@@ -3231,14 +3231,19 @@ Aggregate counts for the admin dashboard.
   "invite_count": 2,
   "db_size_bytes": 1048576,
   "online_count": 3,
-  "certificate_fingerprint": "3f:a1:...:9c"
+  "tls_mode": "acme",
+  "certificate_fingerprint": "3f:a1:...:9c",
+  "certificate_expires_at": "2026-12-01T00:00:00Z"
 }
 ```
 
-`certificate_fingerprint` is the served TLS leaf certificate's SHA-256 in the
-lower-case colon-hex form the desktop client shows before its trust prompt —
-the value users compare out of band. Omitted when there is no statically
-loaded certificate (TLS off, or ACME before its first handshake).
+`tls_mode` is the configured `tls.mode`. `certificate_fingerprint` is the
+served TLS leaf certificate's SHA-256 in the lower-case colon-hex form the
+desktop client shows before its trust prompt — the value users compare out of
+band — and `certificate_expires_at` is that certificate's expiry. In `acme`
+mode both are read on the first handshake and follow each renewal. Both are
+omitted when the server serves no certificate it can read (TLS off, where a
+reverse proxy serves it, or ACME before its first handshake).
 
 ---
 
@@ -3301,7 +3306,12 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `last_exit`, `backup`, and `job:<name>` for each maintenance step.
+  `certificate`, `last_exit`, `backup`, and `job:<name>` for each maintenance
+  step.
+- `certificate` reports the served TLS certificate's expiry: `ok` with 21 days
+  or more left, `warning` inside 21 days, `critical` inside 7 days or once
+  expired. It is `unknown` with TLS off (a reverse proxy serves the
+  certificate) and in `acme` mode before the first handshake.
 - `last_exit` reports how the previous run ended (SRE-08): `ok` after a clean
   shutdown, `warning` when the run before this one left its boot marker armed
   (a `kill -9`, a crash, or a hardware-fault exit), with the previous run's

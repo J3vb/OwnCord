@@ -188,10 +188,10 @@ func (a *App) startTLS() error {
 	}
 	a.tlsCfg = tlsResult.TLSConfig
 	a.httpHandler = tlsResult.HTTPHandler
-	// The admin dashboard and the setup wizard's finish step surface the same
-	// fingerprint the banner prints, so an operator does not have to watch
-	// stderr. Set before the router mounts the admin handler.
-	admin.SetLeafFingerprint(tlsResult.Fingerprint)
+	// The admin dashboard and the setup wizard's finish step surface the served
+	// certificate (acme's after its first handshake), so an operator does not
+	// have to watch stderr. Set before the router mounts the admin handler.
+	admin.SetServedCertificate(tlsCfg.Mode, tlsResult.Served.Current)
 
 	printBanner(a.cfg, a.deps.Version, a.tlsCfg != nil, tlsResult.Fingerprint)
 	return nil

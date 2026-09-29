@@ -609,3 +609,63 @@ func TestAttention_VoiceSignal(t *testing.T) {
 		t.Fatalf("voice warning did not recover: %+v", warning(rep, "voice"))
 	}
 }
+
+// The served TLS certificate's expiry: healthy with three weeks left, a
+// warning inside them, critical in the last week or once expired. Nothing
+// to read (no source, TLS off behind a proxy, ACME before its first
+// handshake) is unknown, never healthy.
+func TestAttention_CertificateExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	eval := func(mode string, notAfter time.Time) AttentionReport {
+		t.Helper()
+		s := NewAttentionService(AttentionThresholds{}, AttentionSources{
+			Certificate: func() (string, time.Time) { return mode, notAfter },
+		})
+		s.Evaluate(context.Background(), now)
+		return s.Report()
+	}
+	days := func(n int) time.Time { return now.Add(time.Duration(n) * 24 * time.Hour) }
+
+	bare := NewAttentionService(AttentionThresholds{}, AttentionSources{})
+	bare.Evaluate(context.Background(), now)
+	wantStatus(t, bare.Report(), "certificate", AttentionStatusUnknown)
+
+	rep := eval("off", time.Time{})
+	wantStatus(t, rep, "certificate", AttentionStatusUnknown)
+	if d := signal(t, rep, "certificate").Detail; !strings.Contains(d, "reverse proxy") {
+		t.Errorf("TLS off detail = %q, want it to point at the reverse proxy", d)
+	}
+	wantStatus(t, eval("acme", time.Time{}), "certificate", AttentionStatusUnknown)
+
+	rep = eval("acme", days(60))
+	wantStatus(t, rep, "certificate", AttentionStatusOK)
+	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "2026-11-22") {
+		t.Errorf("value = %q, want the expiry date", v)
+	}
+	if len(rep.Warnings) != 0 {
+		t.Errorf("a healthy certificate raised %+v", rep.Warnings)
+	}
+
+	rep = eval("acme", days(20))
+	wantStatus(t, rep, "certificate", AttentionStatusWarning)
+	w := warning(rep, "certificate")
+	if w == nil {
+		t.Fatal("an expiring certificate raised no warning")
+	}
+	if !strings.Contains(w.Action, "port 80") {
+		t.Errorf("acme action = %q, want it to name the renewal's port 80", w.Action)
+	}
+
+	wantStatus(t, eval("acme", days(5)), "certificate", AttentionStatusCritical)
+	rep = eval("self_signed", days(-1))
+	wantStatus(t, rep, "certificate", AttentionStatusCritical)
+	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "expired") {
+		t.Errorf("value = %q, want it to say expired", v)
+	}
+
+	rep = eval("self_signed", days(10))
+	wantStatus(t, rep, "certificate", AttentionStatusWarning)
+	if a := warning(rep, "certificate").Action; !strings.Contains(a, "Rotating the self-signed certificate") {
+		t.Errorf("self_signed action = %q, want the rotation guide", a)
+	}
+}
