@@ -23,6 +23,15 @@ func (h *Hub) Unregister(c *Client) {
 // as computed by the handshake (serve.go). It gates the inherited voice-channel
 // subscription only; a nil set denies it (fail closed).
 //
+// It returns true when c was refused because it is a wake reconnect
+// (c.wakeReconnect) and a DIFFERENT session of the same account holds the
+// live connection or a parked grace-window call (wakeBlockedLocked). The
+// refusal is decided here, under h.mu, so no connect can slip between the
+// check and the replacement; c is left unregistered, the other session is
+// untouched, and the caller answers with ANOTHER_DEVICE_ACTIVE and abandons
+// the handshake (U4). A same-session reconnect (the live client's own token
+// hash) is not a refusal: it is this device reclaiming its own stale socket.
+//
 // Replacing an existing connection strips its subscriptions (UnsubscribeAll)
 // and re-subscribes the new one (Subscribe) as two separate PubSub-lock
 // acquisitions — back to back, but not atomic. A caller that must not lose a
@@ -33,12 +42,20 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
-func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
+func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
 	// after the hub lock is released.
 	var replacedVoiceChID int64
 
 	h.mu.Lock()
+	if h.wakeBlockedLocked(c) {
+		// U4: leave the other device's session alone and refuse this one;
+		// the caller sends ANOTHER_DEVICE_ACTIVE and tears the handshake
+		// down. Decided under h.mu so no connect can slip in between the
+		// check and the replacement it would have done.
+		h.mu.Unlock()
+		return true
+	}
 	if old, exists := h.clients[c.userID]; exists {
 		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
 		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
@@ -230,6 +247,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 			h.sendToVoiceChannelExcept(voiceChID, c.userID, buildVoiceE2EEAnnounce(c.userID, key, sig))
 		}
 	}
+	return false
 }
 
 // postRegisterSessionRecheck re-validates c's session token immediately

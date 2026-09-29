@@ -27,6 +27,11 @@ import (
 type resumeHint struct {
 	LastSeq   uint64
 	ChannelID int64
+	// Wake marks a reconnect the client made after the process was suspended
+	// (a laptop waking from sleep). It is the client's own guess, not a
+	// security token: registerNow uses it only to refuse displacing a
+	// DIFFERENT session's live connection (U4), never to grant anything.
+	Wake bool
 }
 
 func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*db.User, string, resumeHint, error) {
@@ -60,6 +65,9 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		// Compatibility). Absent means 0: clients up to v1.2.0-alpha.4 predate
 		// the field.
 		Epoch int `json:"epoch"`
+		// Wake marks a reconnect after a process suspend (U4). Optional;
+		// absent means an ordinary connect.
+		Wake bool `json:"wake"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("missing token"))
@@ -97,7 +105,7 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		return nil, "", resumeHint{}, fmt.Errorf("auth: principal resolution failed: %w", err)
 	}
 
-	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID}, nil
+	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID, Wake: p.Wake}, nil
 }
 
 // handshakeWrite writes one handshake-phase message (auth_ok, ready, or a
@@ -118,6 +126,16 @@ func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error
 	return conn.Write(wCtx, websocket.MessageText, msg)
 }
 
+// refuseWake answers a wake reconnect (auth payload `wake: true`) refused
+// because another device holds the session (wakeBlockedLocked): an `error`
+// frame with ANOTHER_DEVICE_ACTIVE (not auth_error — the token is still
+// valid), then the close. c was never registered, so nothing else is torn down.
+func refuseWake(ctx context.Context, conn *websocket.Conn, c *Client) {
+	slog.Info("ws: wake reconnect refused while another device holds the session", "user_id", c.userID)
+	_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeAnotherDeviceActive, "another device is active"))
+	_ = conn.Close(websocket.StatusPolicyViolation, "another device is active")
+}
+
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
 	// SRE-11: resolve the real client address through trusted_proxies, so the
 	// handshake logs and the ws_connect audit row name the client and not the
@@ -135,6 +153,9 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	c.remoteAddr = clientAddr
 	// Untrusted until handleReconnect checks it against the allowed set.
 	c.authChannelID = hint.ChannelID
+	// U4: a wake reconnect must not displace another device's live session;
+	// registerNow enforces it against the live client's token hash.
+	c.wakeReconnect = hint.Wake
 
 	// Look up role name for protocol-compliant payloads and cache on client.
 	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):

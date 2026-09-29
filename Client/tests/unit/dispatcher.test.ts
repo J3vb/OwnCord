@@ -130,7 +130,6 @@ function createMockWs() {
       sendFailureListeners.add(listener);
       return () => sendFailureListeners.delete(listener);
     },
-    onSuspendWake: vi.fn(() => () => {}),
     startCertListener: vi.fn(async () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),

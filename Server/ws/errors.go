@@ -29,4 +29,11 @@ const (
 	// reconnecting on it; without it the displaced device cannot tell the
 	// close from a network drop and the two devices trade the socket forever.
 	ErrCodeSessionReplaced = "SESSION_REPLACED"
+	// ErrCodeAnotherDeviceActive is returned in a plain `error` frame to a
+	// wake reconnect (auth frame `wake: true`) when a DIFFERENT session of
+	// the same account currently holds the live connection. It is not
+	// auth_error: the token is still valid. The wake is refused without
+	// displacing the live session; the client stops reconnecting and offers
+	// "Use here" so the user chooses whether to take over.
+	ErrCodeAnotherDeviceActive = "ANOTHER_DEVICE_ACTIVE"
 )

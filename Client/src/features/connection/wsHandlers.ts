@@ -158,8 +158,9 @@ export function rejoinVoiceAfterRestart(
 }
 
 /**
- * The `BANNED` and `SESSION_REPLACED` branches of `error`. Returns true when
- * the frame was one of them and the error chain must stop.
+ * The `BANNED`, `SESSION_REPLACED` and `ANOTHER_DEVICE_ACTIVE` branches of
+ * `error`. Returns true when the frame was one of them and the error chain
+ * must stop.
  */
 export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">): boolean {
   if (payload.code === "BANNED") {
@@ -178,12 +179,15 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     clearAuth();
     return true;
   }
-  if (payload.code === "SESSION_REPLACED") {
-    // The same account connected from another device and the server
-    // closed this socket. Reconnecting would kick that device, which
-    // would reconnect and kick this one, forever — so stop like BANNED.
-    // Unlike BANNED this device is still signed in: keep the credential
-    // and auth, and let the user take the connection back ("Use here").
+  if (payload.code === "SESSION_REPLACED" || payload.code === "ANOTHER_DEVICE_ACTIVE") {
+    // The same account is live on another device. SESSION_REPLACED is the
+    // server closing this socket because a new device took it;
+    // ANOTHER_DEVICE_ACTIVE is the server refusing this device's wake
+    // reconnect because the other device still holds it (U4). In both cases
+    // reconnecting would kick that device, which would reconnect and kick
+    // this one, forever — so stop like BANNED. Unlike BANNED this device is
+    // still signed in: keep the credential and auth, and let the user take
+    // the connection back ("Use here").
     // The voice session moves with the connection, so leave it here.
     ws.disconnect();
     if (voiceStore.getState().currentChannelId !== null) {

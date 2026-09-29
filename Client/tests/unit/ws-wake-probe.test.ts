@@ -118,9 +118,9 @@ describe("wake probe (U7d)", () => {
     client.onStateChange((s) => states.push(s));
     mockInvoke.mockClear();
 
-    // A freeze past the wake gap but under the suspend gate (U4) moves the
-    // wall clock without running any timer. A real sleep is the gate's case,
-    // covered in ws-suspend-gate.test.ts.
+    // A freeze past the wake gap moves the wall clock without running any
+    // timer. Marking the next dial a wake (U4) is covered in
+    // ws-suspend-gate.test.ts.
     vi.setSystemTime(Date.now() + 2 * 60_000);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(pingSends()).toHaveLength(1);

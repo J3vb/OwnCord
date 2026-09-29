@@ -118,7 +118,12 @@ func (h *Hub) handleReconnect(
 	// if its row is gone. Outside h.seqMu, like every DB read here.
 	h.dropOrphanVoiceGrace(ctx, c.userID)
 
-	events, ok = h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
+	events, ok, refused := h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
+	if refused {
+		// U4: nothing before registerNow touched another session; just refuse.
+		refuseWake(ctx, conn, c)
+		return true, false
+	}
 	if !ok {
 		return false, false
 	}
@@ -427,12 +432,12 @@ func (h *Hub) reconnectVetColdTail(
 // registers c inside the SAME h.seqMu critical section deliverBroadcast uses,
 // so no seq can be allocated in between (see the comment in handleReconnect).
 // It returns the events to actually send; ok=false means one of the re-checks
-// tripped and the caller must fall through to a full ready.
+// tripped and the caller must fall through to a full ready; refused=true means
+// registerNow refused a wake reconnect (U4): answer ANOTHER_DEVICE_ACTIVE.
 func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
-) ([][]byte, bool) {
-	var events [][]byte
+) (events [][]byte, ok, refused bool) {
 	h.seqMu.Lock()
 	start := time.Now()
 	switch replaySource {
@@ -448,7 +453,7 @@ func (h *Hub) reconnectRegister(
 				"user_id", c.userID, "last_seq", lastSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return nil, false
+			return nil, false, false
 		}
 		events = fresh
 	case "db":
@@ -464,7 +469,7 @@ func (h *Hub) reconnectRegister(
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return nil, false
+			return nil, false, false
 		}
 	}
 	if handleReconnectPreRegisterRaceHook != nil {
@@ -487,15 +492,15 @@ func (h *Hub) reconnectRegister(
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-		return nil, false
+		return nil, false, false
 	}
 	if handleReconnectPostCheckPreRegisterRaceHook != nil {
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
-	h.registerNow(c, allowedChannelIDs)
+	refused = h.registerNow(c, allowedChannelIDs)
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
-	return events, true
+	return events, !refused, refused
 }
 
 // reconnectWriteReplay writes the resume handshake: auth_ok followed by the

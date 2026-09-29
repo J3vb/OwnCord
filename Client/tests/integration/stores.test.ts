@@ -77,10 +77,6 @@ function createMockWsClient(): MockWsClient {
       return () => {};
     },
 
-    onSuspendWake(): () => void {
-      return () => {};
-    },
-
     async startCertListener(): Promise<void> {},
 
     onCertFirstUse(): () => void {

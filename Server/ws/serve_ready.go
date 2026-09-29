@@ -478,6 +478,14 @@ func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int6
 }
 
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
+	// U4: refuse a wake reconnect before ANY handshake state change — most
+	// importantly before the grace take and freshConnectCleanStaleVoice below,
+	// which would end the other device's live or parked call. registerNow
+	// re-checks atomically below.
+	if h.wakeBlocked(c) {
+		refuseWake(ctx, conn, c)
+		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
+	}
 	// The configured seam, never a caller-supplied handle: binding here is what
 	// lets a service-backed or instrumented Ready reader actually intercept the
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
@@ -528,7 +536,12 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	if freshConnectPreRegisterRaceHook != nil {
 		freshConnectPreRegisterRaceHook()
 	}
-	h.registerNow(c, allowedChannelIDs)
+	// U4: an atomic re-check under h.mu. A device connecting between the check
+	// above and here would otherwise be displaced; refuse instead.
+	if h.registerNow(c, allowedChannelIDs) {
+		refuseWake(ctx, conn, c)
+		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
+	}
 
 	// OC-0423: registerNow just above is the earliest point a revocation
 	// racing this handshake's DB work could have found this socket, so
