@@ -45,6 +45,9 @@ services:
       # stays free of Docker-specific values.
       OWNCORD_VOICE_LIVEKIT_URL: ws://livekit:7880
       OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT: "false"
+      # Single-port UDP media: match livekit.yaml's `rtc.udp_port` so the
+      # admin connectivity report and boot warning name that one port.
+      # OWNCORD_VOICE_UDP_PORT: "7882"
     volumes:
       # Mount your config.yaml for non-secret settings (server name, TLS, etc.)
       # See the example config at: https://github.com/J3vb/OwnCord#configuration
@@ -95,8 +98,9 @@ services:
       # credentials in your .env mint room tokens directly.
       - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
       # WebRTC UDP media. The default is the 50000-60000 range; to forward a
-      # single port instead, set `rtc.udp_port: 7882` in livekit.yaml and
-      # replace the range below with `- "7882:7882/udp"`.
+      # single port instead, set `rtc.udp_port: 7882` in livekit.yaml,
+      # replace the range below with `- "7882:7882/udp"`, and uncomment
+      # OWNCORD_VOICE_UDP_PORT on the owncord service above.
       - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
