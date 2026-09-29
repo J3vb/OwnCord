@@ -392,11 +392,13 @@ describeGlobalShortcutsSuite(async () => {
   const subject = {
     start: async () => undefined,
     supported: async () => true,
+    setKeys: async () => undefined,
     onShortcut: () => () => undefined,
   } as unknown as GlobalShortcuts;
   const native: GlobalShortcutsNativeControl = {
     emits: async () => undefined,
     commands: () => [],
+    keyCodes: () => undefined,
     supported: true,
   };
   return { subject, native };

@@ -15,10 +15,12 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
 }));
 // U6: the tab discloses whether global (unfocused) shortcuts are available.
 const mockSupported = vi.fn(async () => true);
+const mockSetKeys = vi.fn(async () => {});
 vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
   globalShortcuts: {
     supported: () => mockSupported(),
     start: vi.fn(async () => {}),
+    setKeys: (...args: unknown[]) => mockSetKeys(...(args as [])),
     onShortcut: vi.fn(() => () => {}),
   },
 }));
@@ -31,11 +33,125 @@ describe("KeybindsTab", () => {
     localStorage.clear();
     mockCaptureKeyPress.mockReset();
     mockUpdatePttKey.mockReset();
-    mockVkName.mockImplementation((vk: number) => `Key-${vk}`);
+    mockVkName.mockImplementation((vk: number) => {
+      if (vk >= 0x41 && vk <= 0x5a) return String.fromCharCode(vk);
+      return `Key-${vk}`;
+    });
   });
 
   afterEach(() => {
     localStorage.clear();
+  });
+
+  /** Press a key as a keydown on the given element (capture listens there). */
+  function capture(element: EventTarget, code: string, init: KeyboardEventInit = {}): void {
+    element.dispatchEvent(new KeyboardEvent("keydown", { code, bubbles: true, ...init }));
+  }
+
+  it("shows the shipped defaults for the global shortcuts and lets each be rebound", async () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    const deafenBtn = el.querySelector(
+      "[data-testid='keybind-global-deafen']",
+    ) as HTMLButtonElement;
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    expect(deafenBtn.textContent).toBe("Ctrl + Shift + D");
+
+    muteBtn.click();
+    capture(document, "KeyK"); // K
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + K");
+    await vi.waitFor(() =>
+      expect(mockSetKeys).toHaveBeenCalledWith({ muteVk: 0x4b, deafenVk: 0x44 }),
+    );
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBe("75");
+  });
+
+  it("rejects rebinding to a key the other global shortcut already uses", async () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    capture(document, "KeyD"); // already deafen
+
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    expect(el.textContent).toContain("already used");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("rejects rebinding to the in-app camera shortcut", async () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    capture(document, "KeyV"); // Ctrl+Shift+V is Toggle Camera
+
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    expect(el.textContent).toContain("already used");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("ignores a capture that is not a supported key", async () => {
+    const controller = new AbortController();
+    const el = buildKeybindsTab(controller.signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    capture(document, "ShiftLeft"); // a modifier alone is not bindable
+
+    expect(muteBtn.textContent).toBe("Press a supported key..."); // still capturing
+    expect(mockSetKeys).not.toHaveBeenCalled();
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBeNull();
+    controller.abort(); // release the capture listener the tab owns
+  });
+
+  it("stops listening for a capture once the capture is cancelled", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const deafenBtn = el.querySelector(
+      "[data-testid='keybind-global-deafen']",
+    ) as HTMLButtonElement;
+    deafenBtn.click();
+    // Escape cancels the capture and must not reach the overlay's own
+    // bubble-phase Escape handler (which closes Settings).
+    const bubble = vi.fn();
+    document.addEventListener("keydown", bubble);
+    capture(document, "Escape");
+    expect(bubble).not.toHaveBeenCalled();
+    document.removeEventListener("keydown", bubble);
+    // A later key must not bind.
+    capture(document, "KeyK");
+    expect(deafenBtn.textContent).toBe("Ctrl + Shift + D");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("prompts for a key while capturing and restores the label on Escape", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    expect(muteBtn.textContent).toBe("Press a supported key...");
+    capture(document, "Escape");
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+  });
+
+  it("lets Tab move focus and cancels the capture instead of binding it", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    const tab = new KeyboardEvent("keydown", { code: "Tab", bubbles: true, cancelable: true });
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    capture(document, "KeyK");
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("does not bind Enter", () => {
+    const controller = new AbortController();
+    const el = buildKeybindsTab(controller.signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    capture(document, "Enter");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBeNull();
+    controller.abort();
   });
 
   it("returns a div with settings-pane class", () => {
@@ -47,16 +163,16 @@ describe("KeybindsTab", () => {
   it("renders section headers instead of h1", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const headers = el.querySelectorAll(".keybind-section-header");
-    expect(headers.length).toBe(3);
+    expect(headers.length).toBe(4);
     const headerTexts = Array.from(headers).map((h) => h.textContent);
-    expect(headerTexts).toEqual(["Navigation", "Communication", "Messages"]);
+    expect(headerTexts).toEqual(["Navigation", "Communication", "Global Shortcuts", "Messages"]);
   });
 
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 3 Navigation + 3 Communication + 5 Messages = 12
-    expect(rows.length).toBe(12);
+    // 1 PTT + 3 Navigation + 3 Communication + 2 Global + 5 Messages = 14
+    expect(rows.length).toBe(14);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -252,7 +368,7 @@ describe("KeybindsTab", () => {
   it("renders separators between sections", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const separators = el.querySelectorAll(".settings-separator");
-    expect(separators.length).toBe(3);
+    expect(separators.length).toBe(4);
   });
 
   // --- PTT hint text ---
@@ -362,7 +478,7 @@ describe("KeybindsTab", () => {
     await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(hint.textContent).toBe(
-      "Mute and Deafen also work while OwnCord is unfocused — via Ctrl + Shift + M / Ctrl + Shift + D, or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
+      "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
     );
   });
 
@@ -372,7 +488,7 @@ describe("KeybindsTab", () => {
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
     await vi.waitFor(() => {
       expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + Shift + M / Ctrl + Shift + D shortcuts.",
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
       );
     });
   });
@@ -383,7 +499,7 @@ describe("KeybindsTab", () => {
     const hint = el.querySelector("[data-testid='keybinds-global-hint']")!;
     await vi.waitFor(() => {
       expect(hint.textContent).toBe(
-        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global Ctrl + Shift + M / Ctrl + Shift + D shortcuts.",
+        "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
       );
     });
   });

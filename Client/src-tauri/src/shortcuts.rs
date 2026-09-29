@@ -1,6 +1,9 @@
-//! Global voice shortcuts (U6): Ctrl+Shift+M mute and Ctrl+Shift+D deafen that
-//! fire whether or not OwnCord is focused. The in-app keydown handler does not
-//! claim these combinations, so there is no double toggle to guard against.
+//! Global voice shortcuts (U6): mute and deafen that fire whether or not
+//! OwnCord is focused. The combination is Ctrl+Shift plus a key that Settings
+//! (Keybinds) can rebind; both default to Ctrl+Shift+M / Ctrl+Shift+D, and a
+//! rebind is live on the running poller (the keys are read each tick). The
+//! in-app keydown handler does not claim these combinations, so there is no
+//! double toggle to guard against.
 //!
 //! Reuses the same global key-state machinery as push-to-talk (`ptt.rs`'s
 //! `combo_state`): a 20 ms polling loop that OBSERVES the combination without
@@ -15,16 +18,24 @@
 //! yet (see the Settings disclosure). The tray's Mute and
 //! Deafen items cover every platform regardless.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::ptt::{combo_state, Modifiers};
 
-/// Windows Virtual-Key codes for the fixed combinations.
-const MUTE_KEY_VK: i32 = 0x4D; // M
-const DEAFEN_KEY_VK: i32 = 0x44; // D
+/// Windows Virtual-Key codes for the shipped combinations, used until the
+/// renderer overrides them: M and D with Ctrl+Shift.
+pub(crate) const DEFAULT_MUTE_KEY_VK: i32 = 0x4D; // M
+pub(crate) const DEFAULT_DEAFEN_KEY_VK: i32 = 0x44; // D
+
+/// The key codes the poller reads on every tick. Atomics rather than consts so
+/// a rebind from Settings (`voice_shortcuts_set_keys`) takes effect on the
+/// running loop without a restart; both stay within the range `ptt.rs`'s
+/// VK/keycode table can observe.
+static MUTE_KEY_VK: AtomicI32 = AtomicI32::new(DEFAULT_MUTE_KEY_VK);
+static DEAFEN_KEY_VK: AtomicI32 = AtomicI32::new(DEFAULT_DEAFEN_KEY_VK);
 
 /// The poller thread paired with its own per-generation shutdown flag, exactly
 /// as `ptt.rs`'s `PTT_THREAD`: the Mutex is the authoritative duplicate-spawn
@@ -70,6 +81,30 @@ pub fn voice_shortcuts_supported() -> bool {
     global_keys_observable(wayland, crate::ptt::ptt_polling_supported())
 }
 
+/// Valid VK range, matching `ptt_set_key` (0 is not a key here: a global
+/// shortcut is never "disabled", the tray and the in-app shortcuts still work).
+pub(crate) fn validate_shortcut_keys(mute_vk: i32, deafen_vk: i32) -> Result<(), String> {
+    if !(1..=254).contains(&mute_vk) {
+        return Err(format!("invalid mute key code: {mute_vk} (must be 1-254)"));
+    }
+    if !(1..=254).contains(&deafen_vk) {
+        return Err(format!(
+            "invalid deafen key code: {deafen_vk} (must be 1-254)"
+        ));
+    }
+    Ok(())
+}
+
+/// Replace the global mute/deafen combinations. Live: the poll loop reads the
+/// atomics each tick, so a Settings rebind applies without a restart.
+#[tauri::command]
+pub fn voice_shortcuts_set_keys(mute_vk: i32, deafen_vk: i32) -> Result<(), String> {
+    validate_shortcut_keys(mute_vk, deafen_vk)?;
+    MUTE_KEY_VK.store(mute_vk, Ordering::SeqCst);
+    DEAFEN_KEY_VK.store(deafen_vk, Ordering::SeqCst);
+    Ok(())
+}
+
 /// Start the global voice-shortcut polling loop. Emits `voice-shortcut` with
 /// "mute" or "deafen" on each press edge. A no-op where
 /// `voice_shortcuts_supported` is false; the tray items still work there.
@@ -91,7 +126,9 @@ pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
             let mut mute_was_down = false;
             let mut deafen_was_down = false;
             while !thread_shutdown.load(Ordering::SeqCst) {
-                let (mods, [mute_key, deafen_key]) = combo_state([MUTE_KEY_VK, DEAFEN_KEY_VK]);
+                let mute_vk = MUTE_KEY_VK.load(Ordering::SeqCst);
+                let deafen_vk = DEAFEN_KEY_VK.load(Ordering::SeqCst);
+                let (mods, [mute_key, deafen_key]) = combo_state([mute_vk, deafen_vk]);
 
                 let mute_down = combo_matches(mods, mute_key);
                 if shortcut_pressed(mute_down, mute_was_down) {
@@ -168,6 +205,22 @@ mod tests {
             was_down = down;
         }
         assert_eq!(fired, 1);
+    }
+
+    #[test]
+    fn default_keys_are_ctrl_shift_m_and_d() {
+        assert_eq!(DEFAULT_MUTE_KEY_VK, 0x4D);
+        assert_eq!(DEFAULT_DEAFEN_KEY_VK, 0x44);
+    }
+
+    #[test]
+    fn set_keys_accepts_valid_codes_and_rejects_out_of_range() {
+        assert!(validate_shortcut_keys(0x4D, 0x44).is_ok());
+        assert!(validate_shortcut_keys(1, 254).is_ok());
+        assert!(validate_shortcut_keys(0, 0x44).is_err(), "0 is not a key");
+        assert!(validate_shortcut_keys(0x4D, 0).is_err());
+        assert!(validate_shortcut_keys(255, 0x44).is_err());
+        assert!(validate_shortcut_keys(0x4D, 300).is_err());
     }
 
     #[test]
