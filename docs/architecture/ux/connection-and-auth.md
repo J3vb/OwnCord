@@ -252,7 +252,10 @@ emit `cert-tofu` events. **Deciding never writes a pin** (`tofu.rs`): an
 unknown host's first connection is _rejected_ until the user confirms the
 fingerprint, so no credential is ever sent to an unconfirmed host. The HTTP
 proxy usually sees the host first (the connect page's health check precedes
-login and WS).
+login and WS). One change never reaches the UI: when the pinned and the new
+leaf are both publicly valid for the host's domain (a routine public-CA
+renewal), the proxy re-pins it itself and reports `trusted`
+([trust-model.md](../../trust-model.md)).
 
 | Event       | Target reaction                                                                                                                                                                                                                                                                | Current                                                                                                                                           |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -280,8 +283,8 @@ sequenceDiagram
 ```
 
 **Target rule:** a cert mismatch is the one moment the client must _stop and ask_
-— never auto-accept, never silently reconnect. This is correct today; the spec
-locks it.
+— never auto-accept, never silently reconnect. The public-CA renewal above is
+not a mismatch. This is correct today; the spec locks it.
 
 ---
 

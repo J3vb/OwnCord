@@ -335,8 +335,9 @@ The Tauri desktop client implements the following security measures:
   it against the prompt, character for character, over a channel the server is
   not part of. The client cannot tell a wrong fingerprint from an interception
   attempt, so accepting a mismatch is indistinguishable from accepting one.
-  The same rule applies when a certificate is rotated or renewed and every
-  client shows the mismatch prompt again — see
+  The same rule applies when a certificate changes and every client shows the
+  mismatch prompt again (a routine public-CA renewal is re-pinned without
+  one) — see
   [trust-model.md](trust-model.md) and
   [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate)
 - Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
