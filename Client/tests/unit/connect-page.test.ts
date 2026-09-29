@@ -1635,8 +1635,9 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
-  it("treats a link pasted with the link's host as a non-empty invite code", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
+  it("sends just the code of a pasted link that carries the link's host", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
     page.mount(container);
 
     const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
@@ -1655,11 +1656,12 @@ describe("ConnectPage", () => {
     const form = container.querySelector(".connect-form") as HTMLFormElement;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    // The link is a non-empty invite, so validation must not refuse it as
-    // missing before onRegister is reached.
     await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")?.classList.contains("visible")).not.toBe(
-        true,
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        "newuser",
+        "password123",
+        "abcd1234",
       );
     });
 

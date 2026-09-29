@@ -505,12 +505,16 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 
 // inviteRefusalCause names why the invite UPDATE matched no row, for the
 // operator log only — the public response stays the generic refusal, and the
-// code itself is never logged. An unknown code and a store fault on the
-// read-back both read as "invite unknown"; the refusal line is a diagnostic,
-// so a wrong guess there must never widen what the client is told.
+// code itself is never logged. A store fault on the read-back is its own
+// cause, so it is never mistaken for a dead invite; the refusal line is a
+// diagnostic, so a wrong guess there must never widen what the client is told.
 func (s *AuthService) inviteRefusalCause(ctx context.Context, code string) string {
 	invite, err := s.st.GetInvite(ctx, code)
-	if err != nil || invite == nil {
+	if err != nil {
+		slog.WarnContext(ctx, "registration refusal: invite read-back failed", "err", err)
+		return "invite lookup failed"
+	}
+	if invite == nil {
 		return "invite unknown"
 	}
 	switch {

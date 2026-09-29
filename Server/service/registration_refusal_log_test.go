@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/logctx"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -158,5 +159,35 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 				t.Errorf("log leaked the password:\n%s", out)
 			}
 		})
+	}
+}
+
+// failingInviteReadStore fails exactly the invite read-back.
+type failingInviteReadStore struct {
+	Store
+}
+
+func (failingInviteReadStore) GetInvite(context.Context, string) (*db.Invite, error) {
+	return nil, errors.New("simulated invite read failure")
+}
+
+// A store fault on the read-back must not be logged as a dead invite.
+func TestRegister_InviteReadBackFaultIsItsOwnCause(t *testing.T) {
+	svc, logs := newLoggingRegistrationService(t, RegistrationInvite)
+	svc = NewAuthService(failingInviteReadStore{Store: svc.st}, auth.NewRateLimiter(), make([]byte, 32), nil)
+
+	logs.Reset()
+	_, err := svc.Register(context.Background(), RegisterInput{
+		Username: "refused-user", Password: "securePass1", InviteCode: "deadbeefdeadbeef", Device: "test", IP: "203.0.113.33",
+	})
+	if !errors.Is(err, ErrRegistrationRejected) {
+		t.Fatalf("err = %v, want the generic refusal", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "invite lookup failed") || !strings.Contains(out, "simulated invite read failure") {
+		t.Errorf("log does not name the lookup fault:\n%s", out)
+	}
+	if strings.Contains(out, "invite unknown") {
+		t.Errorf("a lookup fault was logged as an unknown invite:\n%s", out)
 	}
 }
