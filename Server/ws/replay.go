@@ -120,8 +120,7 @@ func (h *Hub) handleReconnect(
 
 	events, ok, refused := h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
 	if refused {
-		// U4: nothing before registerNow touched another session's state,
-		// so the refusal only answers and closes. startPumps=false.
+		// U4: nothing before registerNow touched another session; just refuse.
 		refuseWake(ctx, conn, c)
 		return true, false
 	}
@@ -433,9 +432,8 @@ func (h *Hub) reconnectVetColdTail(
 // registers c inside the SAME h.seqMu critical section deliverBroadcast uses,
 // so no seq can be allocated in between (see the comment in handleReconnect).
 // It returns the events to actually send; ok=false means one of the re-checks
-// tripped and the caller must fall through to a full ready. refused=true means
-// registerNow refused a wake reconnect (U4) and the caller must answer
-// ANOTHER_DEVICE_ACTIVE instead.
+// tripped and the caller must fall through to a full ready; refused=true means
+// registerNow refused a wake reconnect (U4): answer ANOTHER_DEVICE_ACTIVE.
 func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
