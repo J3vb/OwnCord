@@ -6,6 +6,7 @@ import {
   MIN_POLL_INTERVAL_MS,
 } from "../../src/lib/session-notice";
 import type { SessionInfo } from "../../src/lib/api";
+import { expectConsole } from "../helpers/console";
 
 // B7-14: listing the sessions IS the acknowledgement — the server returns the
 // flags as they were and clears them in the same request. So the notice must
@@ -107,6 +108,27 @@ describe("startSessionNotice", () => {
 
       // The visibility event of the same return is inside the new window.
       document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSessions).toHaveBeenCalledTimes(2);
+    });
+
+    it("a failed listing does not use up the interval", async () => {
+      const ac = new AbortController();
+      controllers.push(ac);
+      const fetchSessions = vi
+        .fn((_signal: AbortSignal) => Promise.resolve<SessionInfo[]>([]))
+        .mockRejectedValueOnce(new Error("offline"));
+      const poll = startSessionNotice({ fetchSessions, notify: vi.fn(), signal: ac.signal });
+      await vi.advanceTimersByTimeAsync(0);
+      expectConsole("warn", "Sessions listing failed");
+
+      // The reconnect after a mid-outage start must list straight away.
+      poll();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSessions).toHaveBeenCalledTimes(2);
+
+      // That listing succeeded, so the window now applies.
+      poll();
       await vi.advanceTimersByTimeAsync(0);
       expect(fetchSessions).toHaveBeenCalledTimes(2);
     });

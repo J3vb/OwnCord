@@ -47,9 +47,9 @@ pub struct HttpProxyState {
     /// its own tunnel connection and re-runs the TOFU check, so a trusted
     /// outcome would otherwise emit a `cert-tofu` event (and the webview a log
     /// line) once per request. CLI-04(a): emit the trusted event for a host once
-    /// per session. The actionable statuses (`first_use`, `mismatch`) are not
-    /// gated — the first-use ceremony must be able to prompt again after the
-    /// user dismisses it.
+    /// until a `first_use` or `mismatch` is emitted for it, which clears the
+    /// claim. Those actionable statuses are never gated — the first-use ceremony
+    /// must be able to prompt again after the user dismisses it.
     trusted_reported: std::sync::Mutex<HashSet<String>>,
 }
 
@@ -75,6 +75,15 @@ impl HttpProxyState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         reported.insert(host.to_string())
+    }
+
+    /// Clear this host's trusted claim after a `first_use` or `mismatch`, so the
+    /// next trusted outcome (a re-accepted or re-pinned cert) is reported again.
+    fn clear_trusted_report(&self, host: &str) {
+        self.trusted_reported
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(host);
     }
 
     /// Remove the `remote_host` entry, but only if it still points at `port`.
@@ -262,10 +271,10 @@ async fn handle_connection<R: Runtime>(
     match tofu::evaluate(&app, &store_key, &observed)? {
         // A routine public-CA renewal was re-pinned by evaluate: as trusted.
         TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
-            // CLI-04(a): one trusted event per host per app session. Each request
-            // is its own tunnel connection and re-runs this check, so without the
-            // gate a busy server emits (and the webview logs) one line per REST
-            // call. Unmanaged state (a test harness) reports every time.
+            // CLI-04(a): one trusted event per host until its status changes.
+            // Each request is its own tunnel connection and re-runs this check,
+            // so without the gate a busy server emits (and the webview logs) one
+            // line per REST call. Unmanaged state (a test harness) reports every time.
             let first_report = app
                 .try_state::<HttpProxyState>()
                 .is_none_or(|state| state.claim_trusted_report(&store_key));
@@ -289,6 +298,9 @@ async fn handle_connection<R: Runtime>(
                 "[http_proxy] first-use cert for {} — awaiting user confirmation",
                 store_key
             );
+            if let Some(state) = app.try_state::<HttpProxyState>() {
+                state.clear_trusted_report(&store_key);
+            }
             crate::ws_proxy::emit_cert_tofu(
                 &app,
                 serde_json::json!({
@@ -310,6 +322,9 @@ async fn handle_connection<R: Runtime>(
                 "[http_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch",
                 store_key
             );
+            if let Some(state) = app.try_state::<HttpProxyState>() {
+                state.clear_trusted_report(&store_key);
+            }
             crate::ws_proxy::emit_cert_tofu(
                 &app,
                 serde_json::json!({
@@ -548,7 +563,8 @@ mod tests {
     // OC-0218 note: the copy_with_deadline stall test lives in
     // proxy_common.rs now, next to the shared helper.
 
-    // CLI-04(a): the trusted `cert-tofu` report is one per host per app session.
+    // CLI-04(a): the trusted `cert-tofu` report is one per host until a
+    // first_use or mismatch for that host clears the claim.
     // A busy server's every REST call re-runs the TOFU check on its own tunnel
     // connection, and a report per call is the log noise the item named.
     #[test]
@@ -565,6 +581,18 @@ mod tests {
         assert!(
             state.claim_trusted_report("other.example:8443"),
             "a different host is its own first report"
+        );
+
+        // A mismatch (or first use) clears the claim: once the user re-accepts,
+        // the next trusted outcome is reported again.
+        state.clear_trusted_report("chat.example:8443");
+        assert!(
+            state.claim_trusted_report("chat.example:8443"),
+            "trusted after a cleared claim must be emitted again"
+        );
+        assert!(
+            !state.claim_trusted_report("other.example:8443"),
+            "clearing one host leaves another host's claim in place"
         );
     }
 }

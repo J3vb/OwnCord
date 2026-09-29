@@ -1,8 +1,8 @@
-// CLI-04(a): the desktop socket transport logs one "TOFU cert event" line per
-// (host, status) per app session. Every tunneled REST request re-runs the TOFU
-// check, so without the gate a busy server fills the log (and any support
-// bundle) with the same trusted line. The gate touches the log line only — the
-// first-use / mismatch listeners still see every event.
+// CLI-04(a): the desktop socket transport skips a "trusted" log line while the
+// host's last logged status is already "trusted". Every tunneled REST request
+// re-runs the TOFU check, so without the gate a busy server fills the log (and
+// any support bundle) with the same trusted line. "first_use" and "mismatch"
+// always log, and the listeners still see every event.
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const { info } = vi.hoisted(() => ({ info: vi.fn() }));
@@ -37,7 +37,7 @@ describe("cert-tofu log line", () => {
     handlers.clear();
   });
 
-  it("logs once per host+status, and again when either changes", async () => {
+  it("logs a repeated trusted report once per host", async () => {
     const connection = socket.create();
     await connection.startCertListener();
 
@@ -53,6 +53,22 @@ describe("cert-tofu log line", () => {
     // A status change for a known host is not suppressed.
     emitCert("a.example:8443", "mismatch");
     expect(info).toHaveBeenCalledTimes(3);
+  });
+
+  it("logs trusted again after a mismatch is accepted", async () => {
+    const connection = socket.create();
+    await connection.startCertListener();
+
+    emitCert("a.example:8443", "trusted");
+    emitCert("a.example:8443", "mismatch");
+    emitCert("a.example:8443", "trusted");
+    emitCert("a.example:8443", "trusted");
+
+    expect(info.mock.calls.map(([, ctx]) => (ctx as { status: string }).status)).toEqual([
+      "trusted",
+      "mismatch",
+      "trusted",
+    ]);
   });
 
   it("still routes every event to the first-use and mismatch listeners", async () => {
@@ -71,7 +87,8 @@ describe("cert-tofu log line", () => {
 
     expect(firstUse).toHaveBeenCalledTimes(2);
     expect(mismatch).toHaveBeenCalledTimes(2);
-    // The log line is deduped even though routing is not.
-    expect(info).toHaveBeenCalledTimes(2);
+    // Repeated first_use and mismatch reports each log — a second, different
+    // certificate change must not vanish from the log.
+    expect(info).toHaveBeenCalledTimes(4);
   });
 });

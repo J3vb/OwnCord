@@ -88,12 +88,11 @@ export function startSessionNotice({
   const poll = (): void => {
     // focus and visibilitychange usually fire together; one listing is enough.
     if (inFlight || signal.aborted) return;
-    const now = Date.now();
-    if (now - lastPolledAt < MIN_POLL_INTERVAL_MS) return;
-    lastPolledAt = now;
+    if (Date.now() - lastPolledAt < MIN_POLL_INTERVAL_MS) return;
     inFlight = true;
     fetchSessions(signal)
       .then((sessions) => {
+        lastPolledAt = Date.now();
         if (signal.aborted) return;
         const unseen = sessions.filter((s) => s.unseen && !s.is_current);
         if (unseen.length > 0) notify(unseen);
