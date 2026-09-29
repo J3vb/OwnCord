@@ -652,8 +652,11 @@ func TestAttention_CertificateExpiry(t *testing.T) {
 	if w == nil {
 		t.Fatal("an expiring certificate raised no warning")
 	}
-	if !strings.Contains(w.Action, "port 80") {
-		t.Errorf("acme action = %q, want it to name the renewal's port 80", w.Action)
+	if !strings.Contains(w.Action, "port 80") || !strings.Contains(w.Action, "publish it to members") {
+		t.Errorf("acme action = %q, want the renewal's port 80 and the owner publishing the fingerprint", w.Action)
+	}
+	if w.Title != "The TLS certificate expires soon" {
+		t.Errorf("expiring title = %q", w.Title)
 	}
 
 	wantStatus(t, eval("acme", days(5)), "certificate", AttentionStatusCritical)
@@ -661,6 +664,9 @@ func TestAttention_CertificateExpiry(t *testing.T) {
 	wantStatus(t, rep, "certificate", AttentionStatusCritical)
 	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "expired") {
 		t.Errorf("value = %q, want it to say expired", v)
+	}
+	if ti := warning(rep, "certificate").Title; ti != "The TLS certificate has expired" {
+		t.Errorf("expired title = %q", ti)
 	}
 
 	rep = eval("self_signed", days(10))

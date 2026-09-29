@@ -313,7 +313,7 @@ func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 	title := "The TLS certificate expires soon"
 	action := "Replace the certificate before it expires (docs/deployment.md, \"Rotating the self-signed certificate\"; a manual certificate is reloaded on restart), then publish the new fingerprint from the Dashboard so members can check it."
 	if r.certMode == "acme" {
-		action = "Let's Encrypt renews 30 days before expiry, so renewal is failing: check that port 80 reaches this server from the internet and search Server Logs for \"TLS certificate issuance failed\". Members see the renewed certificate's fingerprint on the Dashboard once it is served."
+		action = "Let's Encrypt renews 30 days before expiry, so renewal is failing: check that port 80 reaches this server from the internet and search Server Logs for \"TLS certificate issuance failed\". You'll find the renewed certificate's fingerprint on the Dashboard once it is served; publish it to members."
 	}
 	switch {
 	case !r.certMeasured:
@@ -333,6 +333,7 @@ func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 		}
 		date := r.certNotAfter.UTC().Format("2006-01-02")
 		if left <= 0 {
+			title = "The TLS certificate has expired"
 			sig.Value = "expired " + date
 		} else {
 			sig.Value = fmt.Sprintf("expires %s (%d days)", date, int(left.Hours()/24))
