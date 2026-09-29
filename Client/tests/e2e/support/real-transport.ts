@@ -187,6 +187,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "ptt_set_key":
         case "ptt_stop":
         case "voice_shortcuts_start":
+        case "voice_shortcuts_set_keys":
         case "frontend_ready":
         case "plugin:window|set_title":
         case "plugin:window|is_maximized":
