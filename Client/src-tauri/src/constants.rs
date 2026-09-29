@@ -1,6 +1,11 @@
 /// Tauri store file for persisted certificate fingerprints (TOFU pinning).
 pub const CERTS_STORE: &str = "certs.json";
 
+/// Tauri store file recording, per host, the pinned leaf fingerprint last seen
+/// valid against the public web-PKI roots — what lets a routine public-CA
+/// renewal re-pin without a prompt (see `tofu::evaluate`).
+pub const CERT_WEB_PKI_STORE: &str = "cert_web_pki.json";
+
 /// Tauri store file for pinned peer voice-E2EE identity public keys (TOFU).
 pub const IDENTITY_PINS_STORE: &str = "identity_pins.json";
 

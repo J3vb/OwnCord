@@ -278,15 +278,17 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   (TOFU): the SHA-256 fingerprint of the leaf certificate is shown and must be
   accepted on first connect, then checked on every later connection,
   regardless of whether the certificate is self-signed, ACME-issued or
-  manually supplied. The desktop does not validate against the public CA list
-  on this connection. A fingerprint mismatch rejects the connection before any
-  WebSocket payload or auth frame is sent.
+  manually supplied. The desktop does not trust the public CA list on first
+  contact. A fingerprint mismatch rejects the connection before any WebSocket
+  payload or auth frame is sent, except a routine renewal where the pinned and
+  the new leaf are both publicly valid for the server's domain, which is
+  re-pinned silently ([docs/trust-model.md](docs/trust-model.md)).
 - All three native tunnels (WebSocket, HTTP REST, LiveKit) check the same pin
   store (`certs.json`) through `Client/src-tauri/src/tofu.rs`. The WebSocket
   and HTTP proxies capture the leaf fingerprint and decide before forwarding
   anything; the LiveKit proxy fails the handshake on any mismatch and refuses
   to start until a pin exists. Only the explicit `accept_cert_fingerprint`
-  command writes a pin.
+  command and that public-CA renewal write a pin.
 - The session token travels inside the first WebSocket frame, never in the
   URL.
 - LiveKit signalling goes through the Rust `livekit_proxy` loopback tunnel
