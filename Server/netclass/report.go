@@ -19,6 +19,10 @@ type Params struct {
 	TLSMode      string
 	VoiceEnabled bool
 	VoiceNodeIP  string
+	// VoiceUDPPort, when non-zero, is the single UDP port LiveKit carries all
+	// media on (voice.udp_port); the required-ports list then names it instead
+	// of the 50000-60000 range.
+	VoiceUDPPort int
 }
 
 // LocalAddress is one address on one interface, with its reachability class.
@@ -143,9 +147,20 @@ func requiredPorts(p Params) []RequiredPort {
 	// is UDP and no HTTP reverse proxy can carry it. LiveKit's own API port
 	// (7880) is deliberately absent: clients tunnel signalling through
 	// /livekit on the chat port, so forwarding it only exposes LiveKit's API.
+	//
+	// voice.udp_port switches LiveKit to one UDP port; report that one, not the
+	// range the operator is no longer asked to forward.
+	udpMedia := RequiredPort{Port: "50000-60000", Protocol: "udp", Purpose: "LiveKit WebRTC media (ICE)"}
+	if p.VoiceUDPPort > 0 {
+		udpMedia = RequiredPort{
+			Port:     strconv.Itoa(p.VoiceUDPPort),
+			Protocol: "udp",
+			Purpose:  "LiveKit WebRTC media (ICE, single-port mode)",
+		}
+	}
 	return append(ports,
 		RequiredPort{Port: "7881", Protocol: "tcp", Purpose: "LiveKit TCP media fallback"},
-		RequiredPort{Port: "50000-60000", Protocol: "udp", Purpose: "LiveKit WebRTC media (ICE)"},
+		udpMedia,
 	)
 }
 
@@ -197,13 +212,21 @@ func undeterminable(p Params) []Unknown {
 	}
 
 	if p.VoiceEnabled {
+		// Name the port(s) the operator actually forwarded: one UDP port in
+		// single-port mode (voice.udp_port), the range otherwise.
+		ports := "UDP 50000-60000"
+		fix := "forward UDP 50000-60000"
+		if p.VoiceUDPPort > 0 {
+			ports = "UDP " + strconv.Itoa(p.VoiceUDPPort)
+			fix = "forward UDP " + strconv.Itoa(p.VoiceUDPPort)
+		}
 		list = append(list, Unknown{
-			Fact: "Whether WebRTC media can actually flow on UDP 50000-60000",
+			Fact: "Whether WebRTC media can actually flow on " + ports,
 			Why: "Joining a voice channel succeeds as soon as signalling works. Media travels on a " +
-				"separate UDP range, so a missing forwarding rule there produces a call that connects " +
+				"separate UDP port, so a missing forwarding rule there produces a call that connects " +
 				"and then carries no audio.",
 			HowToCheck: "Have someone outside your network join a voice channel. If they connect but " +
-				"nobody hears anything, forward UDP 50000-60000 and leave voice.node_ip empty so LiveKit " +
+				"nobody hears anything, " + fix + " and leave voice.node_ip empty so LiveKit " +
 				"detects your public address (or set it to that address).",
 		})
 	}

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -107,13 +108,17 @@ func warnOnVoiceNodeIP(cfg *config.Config) {
 	if kind == netclass.KindGlobal {
 		return
 	}
+	udp := "UDP 50000-60000"
+	if cfg.Voice.UDPPort > 0 {
+		udp = "UDP " + strconv.Itoa(cfg.Voice.UDPPort)
+	}
 	slog.Warn("voice.node_ip is not a public address — remote clients will join voice and then hear no audio",
 		"node_ip", cfg.Voice.NodeIP,
 		"address_class", kind,
 		"why", "node_ip is the address LiveKit advertises in ICE candidates. A client outside this "+
 			"network cannot route to it, so the call connects over signalling and carries no media",
 		"fix", "clear voice.node_ip so LiveKit detects this server's public address (or set it to "+
-			"that address) and forward UDP 50000-60000 — "+
+			"that address) and forward "+udp+" — "+
 			"see docs/port-forwarding.md. Ignore this if every client is on the LAN or your tailnet")
 }
 

@@ -102,6 +102,7 @@ func handleDiagnosticsConnectivity(
 				TLSMode:      cfg.TLS.Mode,
 				VoiceEnabled: cfg.Voice.LiveKitURL != "",
 				VoiceNodeIP:  cfg.Voice.NodeIP,
+				VoiceUDPPort: cfg.Voice.UDPPort,
 			})
 			resp.Reachability = &report
 		}
