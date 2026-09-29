@@ -168,6 +168,13 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 	normalized := make(map[string]string, len(updates))
 	for key, value := range updates {
 		normalized[key] = value
+		if v, ok, err := normalizeValueSetting(key, value); ok {
+			if err != nil {
+				return nil, err
+			}
+			normalized[key] = v
+			continue
+		}
 		switch key {
 		case "require_2fa":
 			parsed, err := parseSettingsPatchBool(value)

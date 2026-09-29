@@ -144,7 +144,7 @@ const ACTION_LABEL={
   permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
-  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_archive:'downloaded the full archive',
+  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_archive:'downloaded the full archive',backup_download:'downloaded a backup',
   log_level_debug_on:'turned on debug logging for 15 minutes',log_level_reverted:'turned debug logging off',
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
   api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
@@ -555,7 +555,7 @@ function closeNav(restoreFocus=true){
 window.addEventListener('resize',()=>{if(window.innerWidth>900)closeNav(false)});
 /* Sign-out and session expiry: close the popups and forget the last
    principal's badge counts. */
-function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.modalDirty=false}
+function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.modalDirty=false;state.connectivity=null}
 
 /* ═══ Nav badges ═══ */
 /* Pending registrations (Members), active attention warnings (Dashboard) and
@@ -565,9 +565,13 @@ function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending
    every source — whenever the operator comes back to the tab, so a warning
    raised while they were away shows without a re-login (UX-12(b)). */
 const REGISTRATIONS_PAGE=50;
+/* The Members > Pending view over-fetches its first page by one row, so there
+   more than REGISTRATIONS_PAGE rows means more; the plain GET cannot tell a
+   full page from a longer queue. Later pages leave the badge alone. */
 function noteBadgeSource(path,data){
   let v;
-  if(path==='/registrations'&&Array.isArray(data))v=['pending',data.length>=REGISTRATIONS_PAGE?REGISTRATIONS_PAGE+'+':data.length];
+  const firstPage=/^\/registrations\?limit=\d+&offset=0$/.test(path);
+  if((path==='/registrations'||firstPage)&&Array.isArray(data))v=['pending',(firstPage?data.length>REGISTRATIONS_PAGE:data.length>=REGISTRATIONS_PAGE)?REGISTRATIONS_PAGE+'+':data.length];
   else if(path==='/attention'&&data&&Array.isArray(data.warnings))v=['warnings',data.warnings.filter(w=>!w.recovered_at).length];
   else if(path==='/updates'&&data&&typeof data==='object')v=['update',!!data.update_available];
   if(!v||state.badges[v[0]]===v[1])return;

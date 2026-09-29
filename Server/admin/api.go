@@ -225,6 +225,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// in the page. The link token IS the authorisation — random, Owner-bound,
 	// single-use and short-lived (POST /archive/link issues it).
 	r.Get("/archive/download", handleArchiveDownload(database, setupOpts))
+	// One backup file, redeemed from its own single-use link (POST
+	// /backups/{name}/link) on the same terms as the archive's.
+	r.Get("/backups/{name}/download", handleBackupDownload(database))
 
 	// All remaining routes require authentication plus at least one
 	// moderation-capable bit (permissions.AdminPerimeter). Route groups that
@@ -314,6 +317,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())
 		ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database))
 		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, hub))
+		ownerOnly(r, http.MethodPost, "/backups/{name}/link", handleBackupLink())
 		ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts))
 		ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
 		ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
