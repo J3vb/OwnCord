@@ -299,6 +299,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"recovery: redeem failed":                                                                                      "recovery_redeem_failed",
 	"recovery: session issue failed after redeem":                                                                  "recovery_session_issue_failed_after_redeem",
 	"register: account creation failed":                                                                            "register_account_creation_failed",
+	"registration refusal: invite read-back failed":                                                                "registration_invite_readback_failed",
 	"registration refused":                                                                                         "registration_refused",
 	"registration_mode holds an unknown value; treating registration as closed":                                    "registration_mode_unknown_value",
 	"report event not recorded":                                                                                    "report_event_not_recorded",
