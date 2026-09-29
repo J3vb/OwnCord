@@ -1321,6 +1321,16 @@ CREATE TABLE IF NOT EXISTS invites (
 
 CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code);
 
+CREATE TABLE IF NOT EXISTS invite_redemptions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    invite_id   INTEGER NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
+    user_id     INTEGER,
+    redeemed_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_redemptions_invite ON invite_redemptions(invite_id, id);
+CREATE INDEX IF NOT EXISTS idx_invite_redemptions_user   ON invite_redemptions(user_id);
+
 CREATE TABLE IF NOT EXISTS settings (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL

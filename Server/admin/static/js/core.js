@@ -91,7 +91,7 @@ async function apiRes(method,path,body,headers){
    affordance only — every route re-checks the bit server-side. */
 const PERM={MANAGE_CHANNELS:0x20000,KICK_MEMBERS:0x40000,BAN_MEMBERS:0x80000,
   MUTE_MEMBERS:0x100000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
-  VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
+  MANAGE_INVITES:0x4000000,VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
 function can(bit){
   const p=(state.me&&state.me.permissions)||0;
   if((p&PERM.ADMINISTRATOR)!==0)return true;
@@ -446,6 +446,7 @@ const NAV=[
   {id:'users',label:'Members',icon:I.users,badge:()=>state.badges.pending,badgeText:'pending registrations'},
   {id:'roles',label:'Roles & permissions',icon:I.key,allowed:()=>can(PERM.MANAGE_ROLES)},
   {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
+  {id:'invites',label:'Invites',icon:I.key,allowed:()=>can(PERM.MANAGE_INVITES)},
   {id:'emoji',label:'Emoji',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
   {section:'Moderation'},
   {id:'audit',label:'Audit log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
@@ -609,7 +610,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';return}

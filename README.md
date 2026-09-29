@@ -68,7 +68,7 @@ Every server asset and the Docker image ship for both `amd64` and `arm64`
    - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
    - Linux: `./chatserver`, from the `amd64` or `arm64` archive
 3. Open `https://localhost:8443/admin` and complete the setup wizard, entering the setup token from the server's start-up output — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
-4. Create invite codes in the OwnCord desktop client ("Invite people" in the server sidebar) and share them with friends.
+4. Create invite codes in the admin panel's **Invites** page (or the OwnCord desktop client's "Invite people" action) and share them with friends.
 
 ### Option B: Docker (Linux server)
 

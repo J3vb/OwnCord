@@ -31,6 +31,21 @@ func (q *Queries) CreateInvite(ctx context.Context, arg CreateInviteParams) erro
 	return err
 }
 
+const createInviteRedemption = `-- name: CreateInviteRedemption :exec
+INSERT INTO invite_redemptions (invite_id, user_id)
+SELECT id, ?1 FROM invites WHERE code = ?2
+`
+
+type CreateInviteRedemptionParams struct {
+	UserID *int64 `json:"userId"`
+	Code   string `json:"code"`
+}
+
+func (q *Queries) CreateInviteRedemption(ctx context.Context, arg CreateInviteRedemptionParams) error {
+	_, err := q.db.ExecContext(ctx, createInviteRedemption, arg.UserID, arg.Code)
+	return err
+}
+
 const getInvite = `-- name: GetInvite :one
 SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
 FROM invites WHERE code = ?
@@ -61,6 +76,56 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (GetInviteRow, err
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listInviteRedemptions = `-- name: ListInviteRedemptions :many
+SELECT r.id, r.user_id, COALESCE(u.username, '') AS username, r.redeemed_at
+FROM invite_redemptions r
+LEFT JOIN users u ON u.id = r.user_id
+WHERE r.invite_id = ?
+ORDER BY r.redeemed_at DESC, r.id DESC
+LIMIT ?
+`
+
+type ListInviteRedemptionsParams struct {
+	InviteID int64 `json:"inviteId"`
+	Limit    int64 `json:"limit"`
+}
+
+type ListInviteRedemptionsRow struct {
+	ID         int64  `json:"id"`
+	UserID     *int64 `json:"userId"`
+	Username   string `json:"username"`
+	RedeemedAt string `json:"redeemedAt"`
+}
+
+// user_id is nullable: an erased redeemer leaves the row with no link.
+func (q *Queries) ListInviteRedemptions(ctx context.Context, arg ListInviteRedemptionsParams) ([]ListInviteRedemptionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listInviteRedemptions, arg.InviteID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInviteRedemptionsRow{}
+	for rows.Next() {
+		var i ListInviteRedemptionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Username,
+			&i.RedeemedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInvites = `-- name: ListInvites :many

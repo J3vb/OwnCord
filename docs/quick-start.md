@@ -43,8 +43,9 @@ asset table in [Deployment](deployment.md#building-from-source) for filenames.
    its start-up output: it creates the Owner account and configures the
    basics (server name, port, security, uploads, voice). Your choices are
    written to `config.yaml` automatically — no manual editing needed.
-5. Create invite codes in the OwnCord desktop client ("Invite people" in the
-   server sidebar) and share them. A new server is **invite only** — the admin
+5. Create invite codes in the admin panel's **Invites** page (or the OwnCord
+   desktop client's "Invite people" action) and share them. A new server is
+   **invite only** — the admin
    panel offers four choices under Settings: `closed` (nobody may register),
    `invite` (an invite code is required, the default), `approval` (anyone may
    apply, an admin approves each one) and `open` (anyone may register).

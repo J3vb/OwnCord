@@ -220,6 +220,7 @@ type Store interface {
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
 	ListInvites(ctx context.Context) ([]*db.Invite, error)
 	RevokeInvite(ctx context.Context, code string) error
+	ListInviteRedemptions(ctx context.Context, inviteID int64, limit int) ([]*db.InviteRedemption, error)
 
 	// ── Voice ──
 	JoinVoiceChannel(ctx context.Context, userID, channelID int64) error

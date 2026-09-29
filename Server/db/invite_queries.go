@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"fmt"
+
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // ListInvites returns invites ordered by creation time descending.
@@ -26,4 +28,35 @@ func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
 		})
 	}
 	return invites, nil
+}
+
+// InviteRedemption is one recorded use of an invite. UserID is nil for a
+// redeemer whose account has since been erased (migration 055): the history is
+// kept, the link is cut.
+type InviteRedemption struct {
+	ID         int64
+	UserID     *int64
+	Username   string
+	RedeemedAt string
+}
+
+// ListInviteRedemptions returns an invite's redemption history, newest first.
+func (d *DB) ListInviteRedemptions(ctx context.Context, inviteID int64, limit int) ([]*InviteRedemption, error) {
+	rows, err := d.q.ListInviteRedemptions(ctx, dbgen.ListInviteRedemptionsParams{
+		InviteID: inviteID,
+		Limit:    int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ListInviteRedemptions: %w", err)
+	}
+	out := make([]*InviteRedemption, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &InviteRedemption{
+			ID:         r.ID,
+			UserID:     r.UserID,
+			Username:   r.Username,
+			RedeemedAt: r.RedeemedAt,
+		})
+	}
+	return out, nil
 }

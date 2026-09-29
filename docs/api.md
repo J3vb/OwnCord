@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 173 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 174 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -151,6 +151,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/invites/`                                                   |
 | POST    | `/api/v1/invites/`                                                   |
 | DELETE  | `/api/v1/invites/{code}`                                             |
+| GET     | `/api/v1/invites/{code}/redemptions`                                 |
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
@@ -1957,6 +1958,26 @@ Revoke an invite by its code string.
 **Permission:** `MANAGE_INVITES`
 
 #### Response 204 No Content
+
+---
+
+### GET /api/v1/invites/{code}/redemptions
+
+List who redeemed an invite, newest first (at most 200 rows). An unknown code is `404 NOT_FOUND`.
+
+**Auth:** Required
+**Permission:** `MANAGE_INVITES`
+
+#### Response 200 OK
+
+```json
+[
+  { "user_id": 42, "username": "alice", "redeemed_at": "2026-09-29 10:30:00" },
+  { "user_id": null, "username": "", "redeemed_at": "2026-09-28 18:02:11" }
+]
+```
+
+`user_id` is `null` (and `username` empty) once the redeemer's account has been erased. Uses from before migration 055 have no row, so the list can be shorter than the invite's `uses`.
 
 ---
 

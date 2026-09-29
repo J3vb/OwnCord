@@ -14,7 +14,10 @@ paths below, and the client cells of the abuse-case table, describe the tree
 before the native external-content broker; its current policy is
 [trust-model.md](../trust-model.md) §C-09. **Amended 2026-09-28 (PERF-09):**
 `054_audit_action_index.sql` only indexes the existing `audit_log` table's
-`action` column, so it adds no data class here. Other historical
+`action` column, so it adds no data class here. **Amended 2026-09-29 (O1):**
+`055_invite_redemptions.sql` adds `invite_redemptions`, the invite-redemption
+history owned by the invite-management surface rather than any of the seven
+services below, so it adds no data class here either. Other historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
