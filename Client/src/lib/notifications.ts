@@ -217,16 +217,26 @@ function currentHost(): string {
 }
 
 /**
- * Open the message a clicked notification was for — unless it came from
- * another server than the one signed into now, whose ids would name an
- * unrelated channel and message here.
+ * Open `channelId`/`messageId` from a notification or an `owncord://message/…`
+ * link. When the source named a `host` and it is not the server signed into
+ * now, the ids would name an unrelated channel and message here, so it is
+ * ignored (a link that named no server — a permalink pasted into chat — is
+ * always opened). One guard for both sources, so they cannot drift.
  */
-export function openNotificationTarget(target: NotificationTarget): void {
-  if (target.host !== currentHost()) {
-    log.debug("Notification click from another server ignored", { host: target.host });
+export function openMessageTarget(channelId: number, messageId: number, host?: string): void {
+  if (host !== undefined && host !== currentHost()) {
+    log.debug("Message target from another server ignored", { host });
     return;
   }
-  jumpToMessage(target.channelId, target.messageId);
+  jumpToMessage(channelId, messageId);
+}
+
+/**
+ * Open the message a clicked notification was for, through the same
+ * cross-server guard as a deep link.
+ */
+export function openNotificationTarget(target: NotificationTarget): void {
+  openMessageTarget(target.channelId, target.messageId, target.host);
 }
 
 /**

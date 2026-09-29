@@ -10,6 +10,6 @@ export interface DeepLinks {
    *  permalink, on both cold start and warm launches. */
   init(
     onInvite: (code: string, host?: string) => void,
-    onMessage?: (channelId: number, messageId: number) => void,
+    onMessage?: (channelId: number, messageId: number, host?: string) => void,
   ): Promise<void>;
 }

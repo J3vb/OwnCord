@@ -92,4 +92,30 @@ describe("parseMessageLink", () => {
     expect(url).toBe("owncord://message/7/1234");
     expect(parseMessageLink(url)).toEqual({ channelId: 7, messageId: 1234 });
   });
+
+  it("parses the optional host a notification's launch URI carries", () => {
+    // The Windows toast sets its launch URI to this shape (see
+    // src-tauri/src/message_notification.rs) so a click from Action Center
+    // still names the server it came from.
+    expect(parseMessageLink("owncord://message/5/42?host=chat.example:8443")).toEqual({
+      channelId: 5,
+      messageId: 42,
+      host: "chat.example:8443",
+    });
+  });
+
+  it("URL-decodes and trims the launch URI's host", () => {
+    expect(parseMessageLink("owncord://message/5/42?host=%20a.example%20")).toEqual({
+      channelId: 5,
+      messageId: 42,
+      host: "a.example",
+    });
+  });
+
+  it("treats an empty host as absent", () => {
+    expect(parseMessageLink("owncord://message/5/42?host=")).toEqual({
+      channelId: 5,
+      messageId: 42,
+    });
+  });
 });

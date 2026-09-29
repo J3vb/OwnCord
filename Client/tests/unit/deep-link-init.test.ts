@@ -127,8 +127,19 @@ describe("initDeepLinks", () => {
 
     await initDeepLinks(onInvite, onMessage);
 
-    expect(onMessage).toHaveBeenCalledWith(5, 42);
+    expect(onMessage).toHaveBeenCalledWith(5, 42, undefined);
     expect(onInvite).not.toHaveBeenCalled();
+  });
+
+  it("passes a message permalink's host through to onMessage", async () => {
+    // The Windows toast's launch URI names the server, so a click from Action
+    // Center can be ignored when another server is signed into now.
+    getCurrent.mockResolvedValue(["owncord://message/5/42?host=chat.example:8443"]);
+    const onMessage = vi.fn();
+
+    await initDeepLinks(vi.fn(), onMessage);
+
+    expect(onMessage).toHaveBeenCalledWith(5, 42, "chat.example:8443");
   });
 
   it("dispatches a warm-launch message permalink", async () => {
@@ -138,7 +149,7 @@ describe("initDeepLinks", () => {
     const handler = onOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
     handler(["owncord://message/9/7"]);
 
-    expect(onMessage).toHaveBeenCalledWith(9, 7);
+    expect(onMessage).toHaveBeenCalledWith(9, 7, undefined);
   });
 
   it("ignores a message permalink when no onMessage handler was supplied", async () => {
@@ -166,8 +177,8 @@ describe("initDeepLinks", () => {
     expect(onInvite).toHaveBeenCalledTimes(1);
     expect(onInvite).toHaveBeenCalledWith("CODE", undefined);
     expect(onMessage).toHaveBeenCalledTimes(2);
-    expect(onMessage).toHaveBeenNthCalledWith(1, 1, 2);
-    expect(onMessage).toHaveBeenNthCalledWith(2, 3, 4);
+    expect(onMessage).toHaveBeenNthCalledWith(1, 1, 2, undefined);
+    expect(onMessage).toHaveBeenNthCalledWith(2, 3, 4, undefined);
   });
 
   it("swallows a getCurrent rejection without wiring a listener", async () => {

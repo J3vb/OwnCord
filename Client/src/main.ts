@@ -11,7 +11,11 @@ import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { openNotificationTarget, resetNotificationCoalescing } from "@lib/notifications";
+import {
+  openMessageTarget,
+  openNotificationTarget,
+  resetNotificationCoalescing,
+} from "@lib/notifications";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
@@ -43,7 +47,6 @@ import {
   parseRelayedLogin,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import {
@@ -1199,9 +1202,11 @@ function handleInviteDeepLink(code: string, host?: string): void {
 // Route owncord://message/<channelId>/<messageId> permalinks to the main
 // page's jumper. Before the main page mounts (or when the channel isn't
 // visible to this user) the jump is a logged no-op — a link into a server the
-// user is not signed into has nothing to open.
-function handleMessageDeepLink(channelId: number, messageId: number): void {
-  jumpToMessage(channelId, messageId);
+// user is not signed into has nothing to open. A link that named a server (a
+// Windows toast's launch URI) is ignored when another server is signed in now,
+// the same guard a clicked notification goes through.
+function handleMessageDeepLink(channelId: number, messageId: number, host?: string): void {
+  openMessageTarget(channelId, messageId, host);
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 
