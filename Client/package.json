@@ -1,7 +1,7 @@
 {
   "name": "owncord-client",
   "private": true,
-  "version": "2.0.0-beta.1",
+  "version": "2.0.1-beta.1",
   "type": "module",
   "engines": {
     "node": "^26",
