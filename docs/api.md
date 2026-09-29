@@ -1961,6 +1961,26 @@ Revoke an invite by its code string.
 
 ---
 
+### GET /api/v1/invites/{code}/redemptions
+
+List who redeemed an invite, newest first (at most 200 rows). An unknown code is `404 NOT_FOUND`.
+
+**Auth:** Required
+**Permission:** `MANAGE_INVITES`
+
+#### Response 200 OK
+
+```json
+[
+  { "user_id": 42, "username": "alice", "redeemed_at": "2026-09-29 10:30:00" },
+  { "user_id": null, "username": "", "redeemed_at": "2026-09-28 18:02:11" }
+]
+```
+
+`user_id` is `null` (and `username` empty) once the redeemer's account has been erased. Uses from before migration 055 have no row, so the list can be shorter than the invite's `uses`.
+
+---
+
 ## File Upload and Serving
 
 ### POST /api/v1/uploads
