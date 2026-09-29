@@ -2,7 +2,6 @@ package ws_test
 
 import (
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -14,7 +13,14 @@ import (
 // port instead of the 50000-60000 range, so an owner forwards one port rather
 // than ten thousand. voice.udp_port selects it; 0 keeps the shipped range.
 
-func generateFor(t *testing.T, cfg *config.VoiceConfig) string {
+type generatedRTC struct {
+	UDPPort        int    `yaml:"udp_port"`
+	PortRangeStart int    `yaml:"port_range_start"`
+	PortRangeEnd   int    `yaml:"port_range_end"`
+	NodeIP         string `yaml:"node_ip"`
+}
+
+func generateFor(t *testing.T, cfg *config.VoiceConfig) generatedRTC {
 	t.Helper()
 	proc := ws.NewLiveKitProcess(cfg, &config.TLSConfig{}, t.TempDir())
 	cfgPath, err := proc.GenerateConfigForTest()
@@ -25,7 +31,13 @@ func generateFor(t *testing.T, cfg *config.VoiceConfig) string {
 	if err != nil {
 		t.Fatalf("reading config file: %v", err)
 	}
-	return string(content)
+	var parsed struct {
+		Rtc generatedRTC `yaml:"rtc"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		t.Fatalf("generated config is not valid YAML: %v\n%s", err, content)
+	}
+	return parsed.Rtc
 }
 
 // With voice.udp_port set, the generated file carries the single port and must
@@ -35,35 +47,18 @@ func generateFor(t *testing.T, cfg *config.VoiceConfig) string {
 func TestGenerateConfig_SinglePortUDP(t *testing.T) {
 	t.Parallel()
 
-	got := generateFor(t, &config.VoiceConfig{
+	rtc := generateFor(t, &config.VoiceConfig{
 		LiveKitAPIKey:    "testkey",
 		LiveKitAPISecret: "testsecret",
 		LiveKitURL:       "ws://localhost:7880",
 		UDPPort:          7882,
 	})
 
-	if !strings.Contains(got, "udp_port: 7882") {
-		t.Errorf("single-port config missing `udp_port: 7882`.\nGot:\n%s", got)
+	if rtc.UDPPort != 7882 {
+		t.Errorf("udp_port = %d, want 7882", rtc.UDPPort)
 	}
-	if strings.Contains(got, "port_range_start") || strings.Contains(got, "port_range_end") {
-		t.Errorf("single-port config still carries the UDP range.\nGot:\n%s", got)
-	}
-	// The rtc block must stay valid YAML with the single port in it.
-	var parsed struct {
-		Rtc struct {
-			UDPPort        int `yaml:"udp_port"`
-			PortRangeStart int `yaml:"port_range_start"`
-			PortRangeEnd   int `yaml:"port_range_end"`
-		} `yaml:"rtc"`
-	}
-	if err := yaml.Unmarshal([]byte(got), &parsed); err != nil {
-		t.Fatalf("generated config is not valid YAML: %v\n%s", err, got)
-	}
-	if parsed.Rtc.UDPPort != 7882 {
-		t.Errorf("parsed udp_port = %d, want 7882", parsed.Rtc.UDPPort)
-	}
-	if parsed.Rtc.PortRangeStart != 0 || parsed.Rtc.PortRangeEnd != 0 {
-		t.Errorf("parsed range should be absent, got %d-%d", parsed.Rtc.PortRangeStart, parsed.Rtc.PortRangeEnd)
+	if rtc.PortRangeStart != 0 || rtc.PortRangeEnd != 0 {
+		t.Errorf("range should be absent, got %d-%d", rtc.PortRangeStart, rtc.PortRangeEnd)
 	}
 }
 
@@ -72,20 +67,18 @@ func TestGenerateConfig_SinglePortUDP(t *testing.T) {
 func TestGenerateConfig_DefaultKeepsPortRange(t *testing.T) {
 	t.Parallel()
 
-	got := generateFor(t, &config.VoiceConfig{
+	rtc := generateFor(t, &config.VoiceConfig{
 		LiveKitAPIKey:    "testkey",
 		LiveKitAPISecret: "testsecret",
 		LiveKitURL:       "ws://localhost:7880",
 		UDPPort:          0,
 	})
 
-	for _, want := range []string{"port_range_start: 50000", "port_range_end: 60000"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("default config missing %q.\nGot:\n%s", want, got)
-		}
+	if rtc.PortRangeStart != 50000 || rtc.PortRangeEnd != 60000 {
+		t.Errorf("range = %d-%d, want 50000-60000", rtc.PortRangeStart, rtc.PortRangeEnd)
 	}
-	if strings.Contains(got, "udp_port") {
-		t.Errorf("default config should not carry udp_port.\nGot:\n%s", got)
+	if rtc.UDPPort != 0 {
+		t.Errorf("default config should not carry udp_port, got %d", rtc.UDPPort)
 	}
 }
 
@@ -94,7 +87,7 @@ func TestGenerateConfig_DefaultKeepsPortRange(t *testing.T) {
 func TestGenerateConfig_SinglePortKeepsNodeIP(t *testing.T) {
 	t.Parallel()
 
-	got := generateFor(t, &config.VoiceConfig{
+	rtc := generateFor(t, &config.VoiceConfig{
 		LiveKitAPIKey:    "key1",
 		LiveKitAPISecret: "secret1",
 		LiveKitURL:       "ws://localhost:7880",
@@ -102,10 +95,10 @@ func TestGenerateConfig_SinglePortKeepsNodeIP(t *testing.T) {
 		UDPPort:          7883,
 	})
 
-	if !strings.Contains(got, "udp_port: 7883") {
-		t.Errorf("missing udp_port.\nGot:\n%s", got)
+	if rtc.UDPPort != 7883 {
+		t.Errorf("udp_port = %d, want 7883", rtc.UDPPort)
 	}
-	if !strings.Contains(got, `node_ip: "203.0.113.10"`) {
-		t.Errorf("single-port mode dropped node_ip.\nGot:\n%s", got)
+	if rtc.NodeIP != "203.0.113.10" {
+		t.Errorf("single-port mode dropped node_ip, got %q", rtc.NodeIP)
 	}
 }
