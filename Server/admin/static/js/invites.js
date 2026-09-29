@@ -5,18 +5,7 @@
    is the O1 fix: before it, invites.redeemed_by was never written, so a leaked
    code could not be traced to the account that spent it. */
 
-async function inviteApi(method,path,opts){
-  const init={method,headers:{'Authorization':'Bearer '+state.token}};
-  if(opts&&opts.body!==undefined){init.headers['Content-Type']='application/json';init.body=JSON.stringify(opts.body)}
-  const res=await fetch('/api/v1/invites'+path,init);
-  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
-  if(res.status===204)return null;
-  const text=await res.text();
-  let data=null;
-  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
-  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
-  return data;
-}
+async function inviteApi(method,path,body){return memberApi('/api/v1/invites',method,path,body)}
 
 /* An invite is usable unless it is revoked or past its expiry. The server
    enforces the same rule; this only decides what to render. */
@@ -63,7 +52,7 @@ async function renderInvites(){
     html+='<td>'+inviteStatus(inv)+'</td>';
     html+='<td>'+fmtLocal(inv.created_at)+'</td>';
     html+='<td class="col-actions"><div class="act-group">';
-    html+='<button class="btn btn-outline" data-action="openInviteRedemptions" data-args="'+actArgs(inv.code)+'">Redeemed by<span class="sr-only"> for invite '+esc(inv.code)+'</span></button>';
+    html+='<button class="btn btn-outline" data-action="openInviteRedemptions" data-args="'+actArgs(inv.code,inv.uses)+'">Redeemed by<span class="sr-only"> for invite '+esc(inv.code)+'</span></button>';
     if(inviteUsable(inv))html+='<button class="btn btn-outline member-btn danger" data-action="revokeInvite" data-args="'+actArgs(inv.code)+'">Revoke<span class="sr-only"> invite '+esc(inv.code)+'</span></button>';
     html+='</div></td></tr>';
   });
@@ -108,18 +97,20 @@ async function confirmRevokeInvite(code){
 
 /* The redemption history: who spent a code and when. An erased redeemer keeps
    its row with no link, so it reads as "Account erased" rather than blank. */
-async function openInviteRedemptions(code){
+async function openInviteRedemptions(code,uses){
   let reds;
   try{reds=await inviteApi('GET','/'+code+'/redemptions')}catch(e){showToast(e.message,'error');return}
   if(!Array.isArray(reds))reds=[];
+  const unlisted=Math.max(0,(Number(uses)||0)-reds.length);
   let rows='';
-  if(!reds.length)rows='<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px">This invite has not been redeemed yet.</td></tr>';
+  if(!reds.length&&!unlisted)rows='<tr><td colspan="2" style="text-align:center;color:var(--text-muted);padding:20px">This invite has not been redeemed yet.</td></tr>';
   else reds.forEach(function(red){
     const who=red.user_id?esc(red.username||('user #'+red.user_id)):'<span style="color:var(--text-muted)">Account erased</span>';
     rows+='<tr><td>'+who+'</td><td>'+fmtLocal(red.redeemed_at)+'</td></tr>';
   });
   openModal('<div class="modal-header"><h3>Redemptions for '+esc(code)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
     +'<div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Each row is one account that redeemed this code. An erased account keeps its row so the count and time survive, but its name is gone.</p>'
+    +(unlisted?'<p style="color:var(--text-muted);margin-bottom:12px">'+unlisted+' of '+esc(uses)+' uses '+(unlisted===1?'is':'are')+' not listed: redeemed before this server tracked redemptions, or older than the entries shown.</p>':'')
     +'<div class="section-card" style="margin:0"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th scope="col">Redeemed by</th><th scope="col">When</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></div>'
     +'<div class="modal-footer"><button class="btn btn-primary" data-action="closeModal">Close</button></div>');
 }

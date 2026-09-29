@@ -62,7 +62,7 @@ func TestAdminPanelEmojiUsesTheMemberAPI(t *testing.T) {
 	// The panel deliberately calls the ordinary /api/v1/emoji routes (which
 	// enforce MANAGE_SERVER themselves) rather than a duplicate set of
 	// /admin/api handlers. If that ever moves, the helper below moves with it.
-	if !strings.Contains(source, "fetch('/api/v1/emoji'+path,init)") {
+	if !strings.Contains(source, "memberApi('/api/v1/emoji',") {
 		t.Error("emojiApi no longer targets /api/v1/emoji")
 	}
 	if !strings.Contains(source, "data-emoji-url") {

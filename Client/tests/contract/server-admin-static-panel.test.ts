@@ -72,7 +72,7 @@ interface Bridge {
   myPosition: () => number;
   renderUsers: () => Promise<string>;
   renderInvites: () => Promise<string>;
-  openInviteRedemptions: (code: string) => Promise<void>;
+  openInviteRedemptions: (code: string, uses?: number) => Promise<void>;
   renderAudit: () => Promise<string>;
   renderDashboard: () => Promise<string>;
   auditSentence: (e: any) => string;
@@ -1157,6 +1157,44 @@ describe("Server/admin/static — panel behaviour", () => {
     const modal = doc.getElementById("modalInner")!.textContent!;
     expect(modal).toContain("alice");
     expect(modal).toContain("Account erased");
+    expect(modal).not.toContain("not listed");
+
+    // Uses the history does not cover (redeemed before tracking existed, or
+    // past the listing cap) are counted, never reported as "not redeemed".
+    await booted.bridge.openInviteRedemptions("leaked-code", 5);
+    expect(doc.getElementById("modalInner")!.textContent).toContain("3 of 5 uses are not listed");
+    await booted.bridge.openInviteRedemptions("legacy-code", 3);
+    const legacy = doc.getElementById("modalInner")!.textContent!;
+    expect(legacy).toContain("3 of 3 uses are not listed");
+    expect(legacy).not.toContain("has not been redeemed yet");
+
+    // The row button hands the invite's use count to the history.
+    const content = doc.getElementById("content")!;
+    booted.bridge.state.section = "invites";
+    content.innerHTML = html;
+    const args = content
+      .querySelector('[data-action="openInviteRedemptions"]')!
+      .getAttribute("data-args");
+    expect(JSON.parse(args!)).toEqual(["leaked-code", 2]);
+
+    // Create sends the form's limits as a JSON body.
+    (doc.getElementById("inviteMaxUses") as HTMLInputElement).value = "3";
+    (doc.getElementById("inviteExpiry") as HTMLInputElement).value = "48";
+    calls.length = 0;
+    await (booted.bridge.actions.createInvite as () => Promise<void>)();
+    const create = calls.find((c) => c.method === "POST");
+    expect(create?.path).toBe("/api/v1/invites/");
+    expect(create?.body).toEqual({ max_uses: 3, expires_in_hours: 48 });
+    expect(create?.headers["Content-Type"]).toBe("application/json");
+
+    // Revoke deletes the code on the member API.
+    calls.length = 0;
+    await (booted.bridge.actions.confirmRevokeInvite as (c: string) => Promise<void>)(
+      "leaked-code",
+    );
+    expect(
+      calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/invites/leaked-code"),
+    ).toBe(true);
   });
 
   // OC-0355. The hotkey used to preventDefault whenever a .filter-search
