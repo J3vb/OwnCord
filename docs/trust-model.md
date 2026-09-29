@@ -180,7 +180,7 @@ Desktop pinning details, each with its test:
   Tests: `decide_first_use_when_no_pin`, `decide_trusted_when_pin_matches`,
   `decide_mismatch_when_pin_differs`, `capture_verifier_records_leaf_not_intermediate`.
 - First use also rejects: the app shows the fingerprint, and only an explicit
-  accept writes a pin (`tofu.rs:5-13`, `:442-443` "deciding never writes a
+  accept writes a pin (`tofu.rs:5-13`, `:435-436` "deciding never writes a
   pin"). Tests: `valid_fingerprint_is_accepted` and the six rejection cases in
   `ws_proxy.rs:513-576`.
 - The first-use prompt is the same in every `tls.mode`: the desktop does

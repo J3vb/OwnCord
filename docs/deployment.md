@@ -380,8 +380,9 @@ An expired self-signed pair keeps working, measured rather than asserted
 (`Server/auth/tls_expiry_test.go`, `TestExpiredSelfSignedCertIsServedAsIs`):
 the server loads and serves a certificate whose `NotAfter` is in the past, and
 the desktop keeps connecting past expiry because the pin is the fingerprint,
-not the validity window — `Client/src-tauri/src/tofu.rs`'s verifiers decide on
-the fingerprint alone and leave the validity dates unused. **Rotate before the
+not the validity window — `Client/src-tauri/src/tofu.rs`'s verifiers decide
+trust on the fingerprint alone; the validity dates feed only the public-CA
+renewal check, which a self-signed certificate never passes. **Rotate before the
 two years are up**; the Dashboard's attention panel warns three weeks ahead.
 
 #### Rotating the self-signed certificate
