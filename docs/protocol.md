@@ -356,10 +356,10 @@ the window becoming visible again, or the network coming back online — it
 sends a ping at once and shortens the deadline to 15 seconds (never extending
 one already due sooner). A socket that died during the suspend is redialled
 within about 15 seconds instead of staying Connected for up to a minute.
-A gap longer than six heartbeat intervals (180 seconds) since the client last
-saw its clock running — at a heartbeat tick or when a reconnect is about to
-dial — is treated as a real suspend instead: the client neither probes nor
-redials, and waits for the user to reconnect
+A gap longer than 90 seconds since the client last saw its clock running — at
+a heartbeat tick, an inbound frame or when a reconnect is about to dial — also
+marks its next dials `wake: true` ([Step 1](#step-1-client-sends-auth)), so
+the server refuses one that would displace another device
 ([connection-and-auth.md](architecture/ux/connection-and-auth.md) §4).
 
 ### Desktop Transport Liveness

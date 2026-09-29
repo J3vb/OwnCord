@@ -357,8 +357,8 @@ export function createWsClient({
   // ping now and arm the pong grace as the deadline: an awake server answers
   // within seconds, while a socket that died over the suspend is redialled in
   // 15 s rather than the 60 s silence deadline. An older unanswered ping and a
-  // sooner deadline both stand. A gap large enough to be a real suspend is
-  // handled by handleWakeSignal before this is reached.
+  // sooner deadline both stand. For a heartbeat gap, handleWakeSignal has
+  // already marked the next dial a wake (U4).
   function onWake(): void {
     if (state !== "connected" || !proxyOpen) return;
     sendRaw(JSON.stringify({ type: "ping", payload: {} }));
