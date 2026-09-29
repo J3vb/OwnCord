@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
-	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -40,10 +39,10 @@ func SetServedCertificate(mode string, served func() auth.ServedCert) {
 	tlsMode, servedCert = mode, served
 }
 
-// ServedCertificateExpiry is the attention panel's certificate source: the
-// TLS mode and the served leaf's expiry, zero when none is known.
-func ServedCertificateExpiry() (string, time.Time) {
-	return tlsMode, servedCert().NotAfter
+// ServedCertificate is the attention panel's certificate source: the TLS
+// mode and the served leaf, zero when none is known.
+func ServedCertificate() (string, auth.ServedCert) {
+	return tlsMode, servedCert()
 }
 
 // NewHandler returns an http.Handler that serves both the admin REST API and

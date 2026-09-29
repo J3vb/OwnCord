@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
@@ -52,12 +53,14 @@ const (
 	// attentionJobFailures consecutive failed runs raise a job warning; one
 	// successful run clears it.
 	attentionJobFailures = 2
-	// A served certificate warns inside attentionCertWarn of its expiry and
-	// is critical inside attentionCertCritical. Let's Encrypt renews 30 days
-	// ahead, so an ACME certificate inside the warning window means renewal
-	// is failing.
+	// A self-signed or manual certificate warns inside attentionCertWarn of
+	// its expiry and is critical inside attentionCertCritical. An ACME
+	// certificate is instead measured against its renewal point, which
+	// autocert sets min(lifetime/3, attentionACMERenewMax) before expiry (see
+	// evalCertificate).
 	attentionCertWarn     = 21 * 24 * time.Hour
 	attentionCertCritical = 7 * 24 * time.Hour
+	attentionACMERenewMax = 30 * 24 * time.Hour
 	// attentionRecoveredKeep is how long a recovered warning stays listed so
 	// an operator who was away still sees what happened.
 	attentionRecoveredKeep = 24 * time.Hour
@@ -103,9 +106,9 @@ type AttentionSources struct {
 	// timeout. Nil (no voice, or a bare test service) reports unknown, never
 	// healthy.
 	VoiceHealth func(context.Context) VoiceHealth
-	// Certificate reports tls.mode and the served leaf certificate's expiry,
-	// zero when none is known (TLS off, or ACME before its first handshake).
-	Certificate func() (mode string, notAfter time.Time)
+	// Certificate reports tls.mode and the served leaf certificate, zero when
+	// none is known (TLS off, or ACME before its first handshake).
+	Certificate func() (mode string, cert auth.ServedCert)
 }
 
 // BootStatus is what the previous run left in the boot marker (SRE-08):
@@ -286,7 +289,7 @@ type attentionReadings struct {
 	lastBackupErr error
 	voice         *VoiceHealth
 	certMode      string
-	certNotAfter  time.Time
+	cert          auth.ServedCert
 	certMeasured  bool
 }
 
@@ -327,7 +330,7 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 		r.voice = &v
 	}
 	if s.src.Certificate != nil {
-		r.certMode, r.certNotAfter = s.src.Certificate()
+		r.certMode, r.cert = s.src.Certificate()
 		r.certMeasured = true
 	}
 	return r

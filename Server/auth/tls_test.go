@@ -578,8 +578,8 @@ func TestLoadOrGenerate_ServedCertificate(t *testing.T) {
 		if got.Fingerprint != result.Fingerprint || got.Fingerprint == "" {
 			t.Errorf("mode=%s served fingerprint = %q, want %q", mode, got.Fingerprint, result.Fingerprint)
 		}
-		if !got.NotAfter.Equal(leaf.NotAfter) {
-			t.Errorf("mode=%s served NotAfter = %v, want %v", mode, got.NotAfter, leaf.NotAfter)
+		if !got.NotAfter.Equal(leaf.NotAfter) || !got.NotBefore.Equal(leaf.NotBefore) {
+			t.Errorf("mode=%s served validity = %v..%v, want %v..%v", mode, got.NotBefore, got.NotAfter, leaf.NotBefore, leaf.NotAfter)
 		}
 	}
 
@@ -619,13 +619,17 @@ func TestTrackServed_FollowsACMERenewal(t *testing.T) {
 		t.Fatalf("after first handshake served = %+v", got)
 	}
 
-	// A renewal with no parsed Leaf still reports its expiry.
+	// A renewal with no parsed Leaf still reports its validity.
 	serve = renewed
 	if _, err := wrapped(hello); err != nil {
 		t.Fatal(err)
 	}
-	want := auth.ServedCert{Fingerprint: auth.LeafFingerprint(*renewed), NotAfter: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)}
-	if got := tracker.Current(); got.Fingerprint != want.Fingerprint || !got.NotAfter.Equal(want.NotAfter) {
+	want := auth.ServedCert{
+		Fingerprint: auth.LeafFingerprint(*renewed),
+		NotBefore:   time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC),
+		NotAfter:    time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if got := tracker.Current(); got.Fingerprint != want.Fingerprint || !got.NotAfter.Equal(want.NotAfter) || !got.NotBefore.Equal(want.NotBefore) {
 		t.Fatalf("after renewal served = %+v, want %+v", got, want)
 	}
 

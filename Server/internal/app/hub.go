@@ -168,7 +168,7 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			return settings.Setting(ctx, "backup_schedule")
 		},
 		LastBackup:  admin.NewestBackup,
-		Certificate: admin.ServedCertificateExpiry,
+		Certificate: admin.ServedCertificate,
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
 			// OwnCord-managed companion: report the supervisor's own state,
 			// which probes nothing. Elsewhere (or voice unconfigured) the

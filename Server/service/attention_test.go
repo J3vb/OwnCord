@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -610,34 +611,43 @@ func TestAttention_VoiceSignal(t *testing.T) {
 	}
 }
 
-// The served TLS certificate's expiry: healthy with three weeks left, a
-// warning inside them, critical in the last week or once expired. Nothing
-// to read (no source, TLS off behind a proxy, ACME before its first
-// handshake) is unknown, never healthy.
+// The served TLS certificate's expiry. A self-signed or manual certificate
+// warns inside 21 days and is critical inside 7. An ACME certificate is
+// renewed min(lifetime/3, 30 days) before expiry, so it warns only once that
+// renewal is a third overdue and is critical two thirds in: 20 and 10 days
+// for a 90-day certificate, 10 and 5 for a 45-day one, so a healthy
+// short-lived certificate never raises. Nothing to read (no source, TLS off
+// behind a proxy, ACME before its first handshake) is unknown, never healthy.
 func TestAttention_CertificateExpiry(t *testing.T) {
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	eval := func(mode string, notAfter time.Time) AttentionReport {
+	days := func(n int) time.Time { return now.Add(time.Duration(n) * 24 * time.Hour) }
+	evalLife := func(mode string, lifetimeDays, leftDays int) AttentionReport {
 		t.Helper()
+		var cert auth.ServedCert
+		if lifetimeDays > 0 {
+			cert.NotAfter = days(leftDays)
+			cert.NotBefore = cert.NotAfter.Add(-time.Duration(lifetimeDays) * 24 * time.Hour)
+		}
 		s := NewAttentionService(AttentionThresholds{}, AttentionSources{
-			Certificate: func() (string, time.Time) { return mode, notAfter },
+			Certificate: func() (string, auth.ServedCert) { return mode, cert },
 		})
 		s.Evaluate(context.Background(), now)
 		return s.Report()
 	}
-	days := func(n int) time.Time { return now.Add(time.Duration(n) * 24 * time.Hour) }
+	eval := func(mode string, leftDays int) AttentionReport { t.Helper(); return evalLife(mode, 90, leftDays) }
 
 	bare := NewAttentionService(AttentionThresholds{}, AttentionSources{})
 	bare.Evaluate(context.Background(), now)
 	wantStatus(t, bare.Report(), "certificate", AttentionStatusUnknown)
 
-	rep := eval("off", time.Time{})
+	rep := evalLife("off", 0, 0)
 	wantStatus(t, rep, "certificate", AttentionStatusUnknown)
 	if d := signal(t, rep, "certificate").Detail; !strings.Contains(d, "reverse proxy") {
 		t.Errorf("TLS off detail = %q, want it to point at the reverse proxy", d)
 	}
-	wantStatus(t, eval("acme", time.Time{}), "certificate", AttentionStatusUnknown)
+	wantStatus(t, evalLife("acme", 0, 0), "certificate", AttentionStatusUnknown)
 
-	rep = eval("acme", days(60))
+	rep = eval("acme", 60)
 	wantStatus(t, rep, "certificate", AttentionStatusOK)
 	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "2026-11-22") {
 		t.Errorf("value = %q, want the expiry date", v)
@@ -645,22 +655,34 @@ func TestAttention_CertificateExpiry(t *testing.T) {
 	if len(rep.Warnings) != 0 {
 		t.Errorf("a healthy certificate raised %+v", rep.Warnings)
 	}
+	wantStatus(t, eval("acme", 21), "certificate", AttentionStatusOK)
 
-	rep = eval("acme", days(20))
+	rep = eval("acme", 19)
 	wantStatus(t, rep, "certificate", AttentionStatusWarning)
 	w := warning(rep, "certificate")
 	if w == nil {
-		t.Fatal("an expiring certificate raised no warning")
+		t.Fatal("an overdue renewal raised no warning")
 	}
 	if !strings.Contains(w.Action, "port 80") || !strings.Contains(w.Action, "publish it to members") {
 		t.Errorf("acme action = %q, want the renewal's port 80 and the owner publishing the fingerprint", w.Action)
 	}
+	if strings.Contains(w.Action, "Server Logs") {
+		t.Errorf("acme action = %q sends the owner to logs a background renewal never writes", w.Action)
+	}
 	if w.Title != "The TLS certificate expires soon" {
 		t.Errorf("expiring title = %q", w.Title)
 	}
+	if th := signal(t, rep, "certificate").Threshold; th != "warn under 20 days, critical under 10" {
+		t.Errorf("90-day acme threshold = %q", th)
+	}
+	wantStatus(t, eval("acme", 9), "certificate", AttentionStatusCritical)
 
-	wantStatus(t, eval("acme", days(5)), "certificate", AttentionStatusCritical)
-	rep = eval("self_signed", days(-1))
+	// A 45-day certificate renews with 15 days left: healthy at 12.
+	wantStatus(t, evalLife("acme", 45, 12), "certificate", AttentionStatusOK)
+	wantStatus(t, evalLife("acme", 45, 9), "certificate", AttentionStatusWarning)
+	wantStatus(t, evalLife("acme", 45, 4), "certificate", AttentionStatusCritical)
+
+	rep = eval("self_signed", -1)
 	wantStatus(t, rep, "certificate", AttentionStatusCritical)
 	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "expired") {
 		t.Errorf("value = %q, want it to say expired", v)
@@ -669,9 +691,14 @@ func TestAttention_CertificateExpiry(t *testing.T) {
 		t.Errorf("expired title = %q", ti)
 	}
 
-	rep = eval("self_signed", days(10))
+	rep = evalLife("self_signed", 730, 20)
 	wantStatus(t, rep, "certificate", AttentionStatusWarning)
 	if a := warning(rep, "certificate").Action; !strings.Contains(a, "Rotating the self-signed certificate") {
 		t.Errorf("self_signed action = %q, want the rotation guide", a)
 	}
+	if th := signal(t, rep, "certificate").Threshold; th != "warn under 21 days, critical under 7" {
+		t.Errorf("self_signed threshold = %q", th)
+	}
+	wantStatus(t, evalLife("manual", 90, 22), "certificate", AttentionStatusOK)
+	wantStatus(t, evalLife("manual", 90, 6), "certificate", AttentionStatusCritical)
 }

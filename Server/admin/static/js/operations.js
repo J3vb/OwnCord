@@ -179,7 +179,7 @@ async function renderDashboard(){
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;
   // The certificate users compare out of band before accepting the client's
-  // trust prompt (BPR-051), in every TLS mode: the served one with its expiry,
+  // trust prompt (BPR-051), in every TLS mode: the served one,
   // ACME's once its first handshake has happened, and for TLS off (a reverse
   // proxy serves it) the command that reads it. Rarely needed, so it waits
   // behind a disclosure.
@@ -187,7 +187,6 @@ async function renderDashboard(){
   const certNote='<p class="card-note">Users compare this against the prompt their client shows before they accept the connection. Publish it out of band — another platform, a call. A mismatch is the one warning that means an interception attempt.</p>';
   if(s.certificate_fingerprint){
     let body=certNote+'<code class="hash">'+esc(s.certificate_fingerprint)+'</code>';
-    if(s.certificate_expires_at)body+='<p class="card-note">Expires '+fmtLocal(s.certificate_expires_at)+'.</p>';
     if(s.tls_mode==='acme')body+='<p class="card-note">Let’s Encrypt renews this certificate about every 60 days, and every member then sees a certificate-changed prompt. Publish the new fingerprint from here after each renewal.</p>';
     html+=certCard(body);
   }else if(s.tls_mode==='off'){

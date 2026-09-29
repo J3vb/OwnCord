@@ -431,7 +431,7 @@ expect: **the desktop client pins this certificate too** — the first-use
 prompt is the same in every `tls.mode` — so a Let's Encrypt renewal changes
 the fingerprint and triggers the mismatch modal on every desktop client
 ([trust-model.md](trust-model.md)). The admin Dashboard shows the fingerprint
-and expiry once the first HTTPS connection has been made, and the new one after
+once the first HTTPS connection has been made, and the new one after
 each renewal; publish it every time
 ([Publishing the fingerprint](#publishing-the-fingerprint-after-a-renewal)).
 

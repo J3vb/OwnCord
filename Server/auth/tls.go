@@ -49,9 +49,10 @@ type TLSResult struct {
 }
 
 // ServedCert is a served leaf certificate's fingerprint (LeafFingerprint's
-// form) and expiry. The zero value means none is known.
+// form) and validity period. The zero value means none is known.
 type ServedCert struct {
 	Fingerprint string
+	NotBefore   time.Time
 	NotAfter    time.Time
 }
 
@@ -87,7 +88,7 @@ func (t *CertTracker) record(cert *tls.Certificate) {
 		}
 		leaf = parsed
 	}
-	t.cur = ServedCert{Fingerprint: LeafFingerprint(*cert), NotAfter: leaf.NotAfter}
+	t.cur = ServedCert{Fingerprint: LeafFingerprint(*cert), NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter}
 }
 
 // staticTracker is the tracker for a config with a statically loaded leaf.

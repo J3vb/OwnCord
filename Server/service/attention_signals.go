@@ -306,39 +306,46 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 // evalCertificate reports how long the served TLS certificate has left.
 // Nothing here renews a self-signed or manual certificate, and an ACME
 // renewal that keeps failing is silent until handshakes fail, so the panel
-// warns ahead of the date. TLS off (a reverse proxy serves the certificate)
-// and ACME before its first handshake have nothing to read: unknown.
+// warns ahead of the date. autocert renews an ACME certificate
+// min(lifetime/3, 30 days) before expiry, so ACME warns once a third of that
+// renewal window has passed unrenewed and is critical two thirds in; a
+// fixed window would flag every healthy short-lived certificate. TLS off (a
+// reverse proxy serves the certificate) and ACME before its first handshake
+// have nothing to read: unknown.
 func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "certificate", Label: "TLS certificate", ObservedAt: now}
 	title := "The TLS certificate expires soon"
 	action := "Replace the certificate before it expires (docs/deployment.md, \"Rotating the self-signed certificate\"; a manual certificate is reloaded on restart), then publish the new fingerprint from the Dashboard so members can check it."
+	warn, critical := attentionCertWarn, attentionCertCritical
 	if r.certMode == "acme" {
-		action = "Let's Encrypt renews 30 days before expiry, so renewal is failing: check that port 80 reaches this server from the internet and search Server Logs for \"TLS certificate issuance failed\". You'll find the renewed certificate's fingerprint on the Dashboard once it is served; publish it to members."
+		action = "Let's Encrypt should have renewed this certificate by now, so renewal is failing. Background renewal failures are not logged: check that port 80 reaches this server from the internet and that the domain's DNS points here. You'll find the renewed certificate's fingerprint on the Dashboard once it is served; publish it to members."
+		renew := min(r.cert.NotAfter.Sub(r.cert.NotBefore)/3, attentionACMERenewMax)
+		warn, critical = renew*2/3, renew/3
 	}
 	switch {
 	case !r.certMeasured:
 		sig.Status, sig.Detail = AttentionStatusUnknown, "the certificate is not measured on this server"
 	case r.certMode == "off":
 		sig.Status, sig.Detail = AttentionStatusUnknown, "TLS is off here: your reverse proxy serves the certificate, so check its renewal there"
-	case r.certNotAfter.IsZero():
+	case r.cert.NotAfter.IsZero():
 		sig.Status, sig.Detail = AttentionStatusUnknown, "no certificate served yet; it is read on the first HTTPS connection"
 	default:
-		left := r.certNotAfter.Sub(now)
+		left := r.cert.NotAfter.Sub(now)
 		sig.Status = AttentionStatusOK
 		switch {
-		case left < attentionCertCritical:
+		case left < critical:
 			sig.Status = AttentionStatusCritical
-		case left < attentionCertWarn:
+		case left < warn:
 			sig.Status = AttentionStatusWarning
 		}
-		date := r.certNotAfter.UTC().Format("2006-01-02")
+		date := r.cert.NotAfter.UTC().Format("2006-01-02")
 		if left <= 0 {
 			title = "The TLS certificate has expired"
 			sig.Value = "expired " + date
 		} else {
 			sig.Value = fmt.Sprintf("expires %s (%d days)", date, int(left.Hours()/24))
 		}
-		sig.Threshold = fmt.Sprintf("warn under %d days, critical under %d", int(attentionCertWarn.Hours()/24), int(attentionCertCritical.Hours()/24))
+		sig.Threshold = fmt.Sprintf("warn under %d days, critical under %d", int(warn.Hours()/24), int(critical.Hours()/24))
 	}
 	s.settle(sig, title, action)
 }

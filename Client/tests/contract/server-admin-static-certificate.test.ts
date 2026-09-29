@@ -43,16 +43,14 @@ describe("Server/admin/static — dashboard certificate card", () => {
     dom = undefined;
   });
 
-  it("shows the served fingerprint with its expiry", async () => {
+  it("shows the served fingerprint", async () => {
     const r = await dashboard({
       tls_mode: "acme",
       certificate_fingerprint: "aa:bb:cc",
-      certificate_expires_at: "2026-12-01T00:00:00Z",
     });
     dom = r.dom;
     const card = r.host.querySelector("#certFingerprintCard");
     expect(card?.querySelector(".hash")?.textContent).toBe("aa:bb:cc");
-    expect(card?.textContent).toContain("Expires");
     // ACME replaces it on every renewal; the owner is told to republish.
     expect(card?.textContent).toMatch(/renew/i);
   });

@@ -134,8 +134,9 @@ func statsFor(t *testing.T) map[string]any {
 }
 
 // In acme mode the certificate is learned on the first handshake and
-// replaced on every renewal: the dashboard shows whatever is served now,
-// with its expiry, and names the mode so the panel can explain an absence.
+// replaced on every renewal: the dashboard shows whatever is served now and
+// names the mode so the panel can explain an absence. The expiry lives on the
+// Attention panel's certificate signal, not here.
 func TestAdminAPI_Stats_FollowsTheServedCertificate(t *testing.T) {
 	served := auth.ServedCert{}
 	admin.SetServedCertificate("acme", func() auth.ServedCert { return served })
@@ -148,17 +149,14 @@ func TestAdminAPI_Stats_FollowsTheServedCertificate(t *testing.T) {
 	if _, present := stats["certificate_fingerprint"]; present {
 		t.Error("acme before its first handshake must omit the fingerprint")
 	}
-	if _, present := stats["certificate_expires_at"]; present {
-		t.Error("acme before its first handshake must omit the expiry")
-	}
 
 	served = auth.ServedCert{Fingerprint: "aa:bb", NotAfter: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}
 	stats = statsFor(t)
 	if stats["certificate_fingerprint"] != "aa:bb" {
 		t.Errorf("certificate_fingerprint = %v, want aa:bb", stats["certificate_fingerprint"])
 	}
-	if stats["certificate_expires_at"] != "2026-12-01T00:00:00Z" {
-		t.Errorf("certificate_expires_at = %v, want 2026-12-01T00:00:00Z", stats["certificate_expires_at"])
+	if _, present := stats["certificate_expires_at"]; present {
+		t.Error("the stats payload must not carry the certificate expiry")
 	}
 
 	// A renewal shows up without a restart.
