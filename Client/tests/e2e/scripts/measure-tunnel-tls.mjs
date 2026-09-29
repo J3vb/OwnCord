@@ -116,13 +116,23 @@ const binary = resolve(`tests/e2e/.bin/chatserver${process.platform === "win32" 
 const server = spawn(binary, [], { cwd: directory });
 server.stdout.on("data", (chunk) => (log += chunk));
 server.stderr.on("data", (chunk) => (log += chunk));
+const running = () =>
+  server.pid !== undefined && server.exitCode === null && server.signalCode === null;
 try {
+  await new Promise((done, fail) => {
+    server.once("spawn", done);
+    server.once("error", (error) =>
+      fail(
+        new Error(`cannot start ${binary} (run npm run test:e2e:build-server): ${error.message}`),
+      ),
+    );
+  });
   let setupToken;
-  for (let i = 0; i < 300 && !setupToken; i++) {
+  for (let i = 0; i < 300 && !setupToken && running(); i++) {
     await sleep(100);
     setupToken = /Setup token\s+(\S+)/.exec(log)?.[1];
   }
-  if (!setupToken) throw new Error(`the server printed no setup token\n${log}`);
+  if (!setupToken) throw new Error("the server printed no setup token");
   await sleep(500);
   const json = { "Content-Type": "application/json" };
   const { token } = JSON.parse(
@@ -170,8 +180,14 @@ try {
     }
     gate.close();
   }
+} catch (error) {
+  console.error(`server log:\n${log}`);
+  throw error;
 } finally {
-  server.kill();
-  await new Promise((done) => server.once("exit", done));
+  if (running()) {
+    const exited = new Promise((done) => server.once("exit", done));
+    server.kill();
+    await exited;
+  }
   await rm(directory, { recursive: true, force: true });
 }

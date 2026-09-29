@@ -97,8 +97,11 @@ GET   /api/v1/channels/1/messages
 `GET /admin/api/users` is there because the harness logs in as the server
 owner. The capture is the server's own `http request` log lines after the
 fixture's four setup calls (`POST /admin/api/setup`, `POST
-/api/v1/auth/register`, two `POST /admin/api/channels`), from a throwaway spec
-in `Client/tests/e2e/fullstack/`:
+/api/v1/auth/register`, two `POST /admin/api/channels`). Those four are not
+counted because the harness sends them straight to the server from Playwright's
+request context (`startTestServer` in `Client/tests/e2e/support/server.ts`), not
+through the client or its tunnel. The spec is a throwaway one in
+`Client/tests/e2e/fullstack/`:
 
 ```ts
 import { test } from "./fixtures";
@@ -144,27 +147,33 @@ a reused connection. Medians of 15 samples:
 | 50 ms         | 100 ms | Image   | 304.2 ms         | 101.6 ms   | **202.6 ms**       |
 
 REST is `GET /api/v1/server-info`; Image is `GET /api/v1/files/{id}` for the
-uploaded PNG. The overhead is 2 × RTT (TCP + TLS 1.3) plus a fixed ~3-5 ms of
-handshake crypto and gate timers, the same for both requests: the first image
-load pays exactly the REST call's overhead. With no added delay the whole
-overhead is that fixed ~5 ms, which is why the cost is invisible locally and
-why U7e is about remote servers. An earlier unrecorded gate reported 53 / 62 /
-92 / 152 ms at 10 / 20 / 50 / 100 ms RTT (one RTT plus a fixed ~40-50 ms); it
-did not reproduce with this script and is not used.
+uploaded PNG. Both rows go through the same gate on the same server, timed by
+the same code, so the Image rows are measured, not derived from the REST ones.
+The overhead is 2 × RTT (TCP + TLS 1.3) plus a fixed ~3-5 ms of handshake
+crypto and gate timers, the same for both requests; the first image load pays
+22.7 / 42.9 / 102.8 / 202.6 ms at 10 / 20 / 50 / 100 ms RTT. A cold open makes
+zero image fetches, so this cost starts with the first image attachment in
+view, once per image. With no added delay the whole overhead is that fixed
+~5 ms, which is why the cost is invisible locally and why U7e is about remote
+servers. An earlier unrecorded gate reported 53 / 62 / 92 / 152 ms at 10 / 20 /
+50 / 100 ms RTT (one RTT plus a fixed ~40-50 ms); it did not reproduce with this script and is
+not used.
 
-**Decision: not worth a connection pool now, and the claim is published as
-measured rather than asserted.** Summed over the 14 calls, the handshakes add
-~70 ms to a cold open at a LAN RTT (~1 ms) and ~2.8 s at a 100 ms WAN RTT,
-against ~1.4 s of request round trips on reused connections; each call takes
-three RTTs instead of one. Several of the calls run concurrently, so the
-wall-clock cost is lower than those sums, but on a slow link it is the
-user-visible pain the report records, and real. It is still not fixed here: the
-tunnel's one-request-per-connection design is what makes the `Host` rewrite and
-per-request TOFU safe (see the design notes in `http_proxy.rs`), and reuse is a
-security-relevant change to that path, not a perf-only one. The right shape is
-a pooled keep-alive tunnel that keeps the rewrite invariant, which is its own
-change with its own review; the report keeps CLI-04(b) as a measurement. The
-measured ceiling a future fix targets is the "Handshake overhead" column above.
+**Decision: connection reuse is deferred to a separate security review, not
+judged not worth it.** A pooled keep-alive tunnel would change the invariants
+the `Host` rewrite and per-request TOFU rest on, so it is not done here. Summed
+over the 14 calls, the handshakes add ~70 ms to a cold open at a LAN RTT
+(~1 ms) and ~2.8 s at a 100 ms WAN RTT, against ~1.4 s of request round trips
+on reused connections; each call takes three RTTs instead of one. Several of
+the calls run concurrently, so the wall-clock cost is lower than those sums,
+but on a slow link it is the user-visible pain the report records, and real.
+The tunnel's one-request-per-connection design is what makes the `Host` rewrite
+and per-request TOFU safe (see the design notes in `http_proxy.rs`), and reuse
+is a security-relevant change to that path, not a perf-only one. The right
+shape is a pooled keep-alive tunnel that keeps the rewrite invariant, which is
+its own change with its own review; the report keeps CLI-04(b) as a
+measurement. The measured ceiling a future fix targets is the "Handshake
+overhead" column above.
 
 ## TOFU semantics (must match ws_proxy)
 
