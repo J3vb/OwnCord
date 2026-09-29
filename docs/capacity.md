@@ -51,8 +51,9 @@ Why each part of that is load-bearing:
   quota for what it may consume.
 - **`--memory-swap=4g` equal to `--memory`** disables swap, so 4 GB is the
   ceiling rather than the point at which paging starts.
-- **`--network=host`** because LiveKit's media path is UDP (the 50000-60000
-  range, or a single `voice.udp_port`), and publishing the ports individually is not a thing. This removes a NAT hop, so the
+- **`--network=host`** because LiveKit's default media path is the UDP
+  50000-60000 range, and publishing ten thousand ports is not a thing. This
+  removes a NAT hop, so the
   latencies below are a **floor** for bridged or reverse-proxied deployments,
   not a ceiling.
 - **`debian:bookworm-slim` with the release binary mounted, not the published
