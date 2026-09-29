@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -645,5 +646,47 @@ func TestTrackServed_FollowsACMERenewal(t *testing.T) {
 	}
 	if got := tracker.Current(); got.Fingerprint != want.Fingerprint {
 		t.Fatalf("a challenge handshake replaced the served certificate: %+v", got)
+	}
+}
+
+// autocert keeps an RSA leaf beside the ECDSA one and hands it to clients that
+// cannot use ECDSA, such as a TLS 1.3-only probe. Members are served the
+// ECDSA leaf, so the RSA one must not replace the fingerprint the owner sees.
+func TestTrackServed_IgnoresACMERSALeaf(t *testing.T) {
+	tracker := &auth.CertTracker{}
+	ecdsaLeaf := selfSignedLeaf(t, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), true)
+
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "chat.example.com"},
+		NotBefore:    time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &rsaKey.PublicKey, rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaLeaf := &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: rsaKey}
+
+	serve := ecdsaLeaf
+	wrapped := auth.TrackServedForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return serve, nil
+	}, tracker)
+	hello := &tls.ClientHelloInfo{ServerName: "chat.example.com"}
+
+	if _, err := wrapped(hello); err != nil {
+		t.Fatal(err)
+	}
+	serve = rsaLeaf
+	if _, err := wrapped(hello); err != nil {
+		t.Fatal(err)
+	}
+	got := tracker.Current()
+	if got.Fingerprint != auth.LeafFingerprint(*ecdsaLeaf) || !got.NotAfter.Equal(ecdsaLeaf.Leaf.NotAfter) {
+		t.Fatalf("an RSA handshake replaced the served ECDSA leaf: %+v", got)
 	}
 }

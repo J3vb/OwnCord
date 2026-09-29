@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -56,9 +57,8 @@ type ServedCert struct {
 
 // CertTracker records the leaf certificate the server most recently served.
 type CertTracker struct {
-	mu   sync.Mutex
-	last *tls.Certificate
-	cur  ServedCert
+	mu  sync.Mutex
+	cur ServedCert
 }
 
 // Current returns the most recently served certificate, or the zero value
@@ -72,12 +72,11 @@ func (t *CertTracker) Current() ServedCert {
 	return t.cur
 }
 
-// record notes cert as served. autocert hands back the same pointer until a
-// renewal, so the hash runs once per certificate, not once per handshake.
+// record notes cert as served.
 func (t *CertTracker) record(cert *tls.Certificate) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if cert == nil || cert == t.last || len(cert.Certificate) == 0 {
+	if cert == nil || len(cert.Certificate) == 0 {
 		return
 	}
 	leaf := cert.Leaf
@@ -88,7 +87,6 @@ func (t *CertTracker) record(cert *tls.Certificate) {
 		}
 		leaf = parsed
 	}
-	t.last = cert
 	t.cur = ServedCert{Fingerprint: LeafFingerprint(*cert), NotAfter: leaf.NotAfter}
 }
 
@@ -334,15 +332,18 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 
 // trackServed records each certificate next hands to a member's handshake.
 // A TLS-ALPN-01 validation handshake gets a throwaway challenge certificate
-// instead, so it is skipped.
+// instead, so it is skipped. So is autocert's RSA leaf: it goes only to
+// clients that cannot use ECDSA, while members are served the ECDSA leaf.
 func trackServed(
 	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
 	served *CertTracker,
 ) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		cert, err := next(hello)
-		if err == nil && !slices.Contains(hello.SupportedProtos, acme.ALPNProto) {
-			served.record(cert)
+		if err == nil && cert != nil && !slices.Contains(hello.SupportedProtos, acme.ALPNProto) {
+			if _, isRSA := cert.PrivateKey.(*rsa.PrivateKey); !isRSA {
+				served.record(cert)
+			}
 		}
 		return cert, err
 	}
