@@ -870,8 +870,19 @@ async function confirmDeleteRole(id){
 /* Custom emoji live on the ordinary member API (/api/v1/emoji) rather than
    under /admin/api: the desktop client reads the same list, and MANAGE_SERVER
    is enforced by the route itself. The panel's session token authenticates
-   there unchanged. */
-async function emojiApi(method,path,body){return memberApi('/api/v1/emoji',method,path,body)}
+   there unchanged, so this needs its own fetch helper — like pluginApi. */
+async function emojiApi(method,path,opts){
+  const init={method,headers:{'Authorization':'Bearer '+state.token}};
+  if(opts&&opts.body!==undefined)init.body=opts.body;
+  const res=await fetch('/api/v1/emoji'+path,init);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  if(res.status===204)return null;
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
+  return data;
+}
 
 /* The image route needs the Authorization header, which <img src> cannot send.
    Each thumbnail is therefore fetched with the token and swapped in as a blob:
@@ -929,7 +940,7 @@ async function uploadEmoji(){
   fd.append('file',file);
   try{
     /* No explicit Content-Type: the browser must set the multipart boundary. */
-    await emojiApi('POST','/',fd);
+    await emojiApi('POST','/',{body:fd});
     showToast('Added :'+shortcode.toLowerCase()+':');
     renderContent();
   }catch(e){showToast(e.message,'error')}

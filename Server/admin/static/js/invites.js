@@ -5,7 +5,18 @@
    is the O1 fix: before it, invites.redeemed_by was never written, so a leaked
    code could not be traced to the account that spent it. */
 
-async function inviteApi(method,path,body){return memberApi('/api/v1/invites',method,path,body)}
+async function inviteApi(method,path,opts){
+  const init={method,headers:{'Authorization':'Bearer '+state.token}};
+  if(opts&&opts.body!==undefined){init.headers['Content-Type']='application/json';init.body=JSON.stringify(opts.body)}
+  const res=await fetch('/api/v1/invites'+path,init);
+  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
+  if(res.status===204)return null;
+  const text=await res.text();
+  let data=null;
+  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
+  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
+  return data;
+}
 
 /* An invite is usable unless it is revoked or past its expiry. The server
    enforces the same rule; this only decides what to render. */
@@ -67,7 +78,7 @@ async function createInvite(){
   if(maxUses<0){showToast('Max uses cannot be negative','error');return}
   if(!Number.isNaN(expiry)&&expiry<0){showToast('Expiry cannot be negative','error');return}
   try{
-    const inv=await inviteApi('POST','/',{max_uses:maxUses,expires_in_hours:Number.isNaN(expiry)?0:expiry});
+    const inv=await inviteApi('POST','/',{body:{max_uses:maxUses,expires_in_hours:Number.isNaN(expiry)?0:expiry}});
     showToast('Invite created');
     await renderContent();
     copyInviteText(inv&&inv.code);

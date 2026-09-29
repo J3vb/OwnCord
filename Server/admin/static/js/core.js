@@ -84,24 +84,6 @@ async function apiRes(method,path,body,headers){
   return{data,res};
 }
 
-/* Invites and custom emoji live on the ordinary member API (/api/v1/...)
-   rather than under /admin/api; the panel's session token authenticates there
-   unchanged. A FormData body goes out as-is so the browser sets the multipart
-   boundary; any other body is sent as JSON. */
-async function memberApi(base,method,path,body){
-  const init={method,headers:{'Authorization':'Bearer '+state.token}};
-  if(body instanceof FormData)init.body=body;
-  else if(body!==undefined){init.headers['Content-Type']='application/json';init.body=JSON.stringify(body)}
-  const res=await fetch(base+path,init);
-  if(res.status===401){handleSessionExpired();throw new Error('Your session expired — sign in again.')}
-  if(res.status===204)return null;
-  const text=await res.text();
-  let data=null;
-  if(text){try{data=JSON.parse(text)}catch(e){data=null}}
-  if(!res.ok)throw new Error((data&&(data.message||data.error))||text.trim()||res.statusText);
-  return data;
-}
-
 /* ═══ Permissions ═══ */
 /* The panel perimeter admits any role holding one moderation bit, so what a
    principal may actually do varies. GET /admin/api/me reports the caller's
