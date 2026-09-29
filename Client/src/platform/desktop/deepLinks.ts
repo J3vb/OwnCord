@@ -19,7 +19,7 @@ const SCHEME = "owncord";
  */
 async function init(
   onInvite: (code: string, host?: string) => void,
-  onMessage?: (channelId: number, messageId: number) => void,
+  onMessage?: (channelId: number, messageId: number, host?: string) => void,
 ): Promise<void> {
   let plugin: typeof import("@tauri-apps/plugin-deep-link");
   try {
@@ -33,7 +33,7 @@ async function init(
       const message = parseMessageLink(url);
       if (message !== null) {
         log.info("Deep-link message permalink received");
-        onMessage?.(message.channelId, message.messageId);
+        onMessage?.(message.channelId, message.messageId, message.host);
         continue;
       }
       const invite = parseInviteLink(url);

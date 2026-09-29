@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  openMessageTarget,
+  resetNotificationCoalescing,
+} from "../../src/lib/notifications";
 import { cleanupNotificationAudio } from "../../src/lib/notificationSound";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -1882,5 +1886,46 @@ describe("notifyIncomingMessage", () => {
         }
       },
     );
+  });
+
+  describe("openMessageTarget (the shared deep-link / notification guard)", () => {
+    it("opens a target that named the signed-in server", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      setChannelMutesHost("a.example");
+      try {
+        openMessageTarget(7, 42, "a.example");
+        expect(jump.mock.calls).toEqual([[7, 42]]);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("opens a link that named no server — a permalink pasted into chat", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      setChannelMutesHost("a.example");
+      try {
+        openMessageTarget(7, 42);
+        expect(jump.mock.calls).toEqual([[7, 42]]);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("ignores a target that named another server", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      setChannelMutesHost("b.example");
+      try {
+        openMessageTarget(7, 42, "a.example");
+        expect(jump).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
   });
 });
