@@ -29,8 +29,11 @@ export const notifier: Notifier = {
     );
   },
   // The plugin's desktop backend drops the click callback, so a message
-  // notification goes through the host's own command, which waits for the
-  // activation and emits `notification-click` (see src-tauri/src/message_notification.rs).
+  // notification goes through the host's own command (see
+  // src-tauri/src/message_notification.rs). On macOS and Linux it waits for the
+  // activation and emits `notification-click`; on Windows it shows a
+  // protocol-activation toast whose click comes back as an `owncord://message`
+  // deep link instead, so this event never fires there.
   async showMessage(title: string, body: string, target: NotificationTarget): Promise<void> {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("notify_message", {
