@@ -71,6 +71,110 @@ decisions live in Rust:
    header caveat and allows per-request logging. Still no TLS termination in
    the webview.
 
+## Measured per-request TLS cost (CLI-04(b), 2026-09-28)
+
+`Connection: close` is injected per request, so every REST call and every
+uncached image fetch (`fetchServerFile` in `attachments.ts`) opens a fresh TCP
+and TLS connection through the tunnel. CLI-04(b) asked for that cost to be
+measured before deciding whether to add connection reuse.
+
+**What one cold open costs.** Driving the real client against a real server
+with the fullstack e2e harness (`login()` in
+`Client/tests/e2e/fullstack/fixtures.ts`: a fresh profile, login to the first
+channel, 20 s settle) made **14 REST calls**, all through the tunnel, the same
+14 on each of three runs (the order varies):
+
+```
+GET   /api/v1/server-info           GET   /api/v1/users/me/moderation
+POST  /api/v1/auth/login            GET   /api/v1/appeals/mine
+GET   /api/v1/blocks                PATCH /api/v1/users/me
+GET   /api/v1/emoji                 GET   /api/v1/auth/me
+GET   /api/v1/dm-requests           GET   /api/v1/users/me/sessions   (x2)
+GET   /api/v1/users/me/recovery-kit GET   /admin/api/users
+GET   /api/v1/channels/1/messages
+```
+
+`GET /admin/api/users` is there because the harness logs in as the server
+owner. The capture is the server's own `http request` log lines after the
+fixture's four setup calls (`POST /admin/api/setup`, `POST
+/api/v1/auth/register`, two `POST /admin/api/channels`). Those four are not
+counted because the harness sends them straight to the server from Playwright's
+request context (`startTestServer` in `Client/tests/e2e/support/server.ts`), not
+through the client or its tunnel. The spec is a throwaway one in
+`Client/tests/e2e/fullstack/`:
+
+```ts
+import { test } from "./fixtures";
+test("capture", async ({ alice, server }) => {
+  await alice.waitForTimeout(20_000);
+  console.log(server.log());
+});
+```
+
+run with `npx playwright test --config playwright.config.fullstack.ts capture`
+after `npm run test:e2e:build-server && npm run build`. The cold open made **no
+image fetches** (the seeded channel is empty and the users have no avatars);
+each image attachment that comes into view later costs one fetch, and so one
+fresh connection, the first time only (the attachment caches serve it after
+that).
+
+So a remote-server cold open pays 14 connection setups instead of one. Each
+setup is a TCP handshake (one RTT, since the tunnel dials the remote per
+request) plus a full TLS 1.3 handshake (one RTT; the tunnel builds a new rustls
+config per connection, so there is no session resumption).
+
+**The measured overhead is two RTTs plus ~3-5 ms.** Measured with
+`Client/tests/e2e/scripts/measure-tunnel-tls.mjs` (run from `Client/` after
+`npm run test:e2e:build-server`), which starts the e2e server binary with a
+self-signed certificate, uploads a PNG, and times a REST call and that image
+fetch through a loopback delay gate. The gate delays every chunk by the one-way
+delay in each direction and holds each new connection for one RTT before
+dialing, standing in for the remote TCP handshake. "Fresh" is one request per
+TCP + TLS connection, as the tunnel does; "keep-alive" is the second request on
+a reused connection. Medians of 15 samples:
+
+| One-way delay | RTT    | Request | Fresh connection | Keep-alive | Handshake overhead |
+| ------------- | ------ | ------- | ---------------- | ---------- | ------------------ |
+| 0 ms          | 0 ms   | REST    | 7.6 ms           | 2.7 ms     | **4.9 ms**         |
+| 0 ms          | 0 ms   | Image   | 8.5 ms           | 3.1 ms     | **5.4 ms**         |
+| 5 ms          | 10 ms  | REST    | 33.6 ms          | 10.9 ms    | **22.6 ms**        |
+| 5 ms          | 10 ms  | Image   | 34.0 ms          | 11.3 ms    | **22.7 ms**        |
+| 10 ms         | 20 ms  | REST    | 63.6 ms          | 21.0 ms    | **42.6 ms**        |
+| 10 ms         | 20 ms  | Image   | 64.4 ms          | 21.5 ms    | **42.9 ms**        |
+| 25 ms         | 50 ms  | REST    | 153.6 ms         | 51.0 ms    | **102.6 ms**       |
+| 25 ms         | 50 ms  | Image   | 154.2 ms         | 51.5 ms    | **102.8 ms**       |
+| 50 ms         | 100 ms | REST    | 303.4 ms         | 101.0 ms   | **202.4 ms**       |
+| 50 ms         | 100 ms | Image   | 304.2 ms         | 101.6 ms   | **202.6 ms**       |
+
+REST is `GET /api/v1/server-info`; Image is `GET /api/v1/files/{id}` for the
+uploaded PNG. Both rows go through the same gate on the same server, timed by
+the same code, so the Image rows are measured, not derived from the REST ones.
+The overhead is 2 × RTT (TCP + TLS 1.3) plus a fixed ~3-5 ms of handshake
+crypto and gate timers, the same for both requests; the first image load pays
+22.7 / 42.9 / 102.8 / 202.6 ms at 10 / 20 / 50 / 100 ms RTT. A cold open makes
+zero image fetches, so this cost starts with the first image attachment in
+view, once per image. With no added delay the whole overhead is that fixed
+~5 ms, which is why the cost is invisible locally and why U7e is about remote
+servers. An earlier unrecorded gate reported 53 / 62 / 92 / 152 ms at 10 / 20 /
+50 / 100 ms RTT (one RTT plus a fixed ~40-50 ms); it did not reproduce with this script and is
+not used.
+
+**Decision: connection reuse is deferred to a separate security review, not
+judged not worth it.** A pooled keep-alive tunnel would change the invariants
+the `Host` rewrite and per-request TOFU rest on, so it is not done here. Summed
+over the 14 calls, the handshakes add ~70 ms to a cold open at a LAN RTT
+(~1 ms) and ~2.8 s at a 100 ms WAN RTT, against ~1.4 s of request round trips
+on reused connections; each call takes three RTTs instead of one. Several of
+the calls run concurrently, so the wall-clock cost is lower than those sums,
+but on a slow link it is the user-visible pain the report records, and real.
+The tunnel's one-request-per-connection design is what makes the `Host` rewrite
+and per-request TOFU safe (see the design notes in `http_proxy.rs`), and reuse
+is a security-relevant change to that path, not a perf-only one. The right
+shape is a pooled keep-alive tunnel that keeps the rewrite invariant, which is
+its own change with its own review; the report keeps CLI-04(b) as a
+measurement. The measured ceiling a future fix targets is the "Handshake
+overhead" column above.
+
 ## TOFU semantics (must match ws_proxy)
 
 - **Pin store:** the same per-host fingerprint store used by `ws_proxy.rs`
