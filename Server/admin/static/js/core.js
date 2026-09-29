@@ -599,7 +599,7 @@ function navigateTo(id){
     state.settingsChanged=false;
     state.section=id;renderNav();renderContent();closeNav();syncHash(id);
   }catch(err){
-    console.error('[Admin] Tab navigation failed for "'+id+'":', err);
+    console.error('[Admin] Tab navigation failed for', id, err);
     var c=document.getElementById('content');
     if(c)c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Failed to navigate to '+esc(id)+': '+esc(err&&err.message||String(err))+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';
   }
