@@ -23,10 +23,10 @@ const refusedReqID = "req-refusal-test-1"
 // logger redirected into a logctx-wrapped buffer — the same enrichment the
 // production server installs — so a test can read the refusal-cause line and
 // its req_id.
-func newLoggingRegistrationService(t *testing.T, mode RegistrationMode) (*AuthService, *bytes.Buffer) {
+func newLoggingRegistrationService(ctx context.Context, t *testing.T, mode RegistrationMode) (*AuthService, *bytes.Buffer) {
 	t.Helper()
 	database := newTestDB(t)
-	if err := database.SetSetting(context.Background(), registrationModeKey, string(mode)); err != nil {
+	if err := database.SetSetting(ctx, registrationModeKey, string(mode)); err != nil {
 		t.Fatalf("SetSetting: %v", err)
 	}
 	logs := &bytes.Buffer{}
@@ -125,7 +125,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc, logs := newLoggingRegistrationService(t, RegistrationInvite)
+			svc, logs := newLoggingRegistrationService(ctx, t, RegistrationInvite)
 			owner, err := svc.st.CreateUser(ctx, "owner", "hash", 1)
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
@@ -173,11 +173,12 @@ func (failingInviteReadStore) GetInvite(context.Context, string) (*db.Invite, er
 
 // A store fault on the read-back must not be logged as a dead invite.
 func TestRegister_InviteReadBackFaultIsItsOwnCause(t *testing.T) {
-	svc, logs := newLoggingRegistrationService(t, RegistrationInvite)
+	ctx := context.Background()
+	svc, logs := newLoggingRegistrationService(ctx, t, RegistrationInvite)
 	svc = NewAuthService(failingInviteReadStore{Store: svc.st}, auth.NewRateLimiter(), make([]byte, 32), nil)
 
 	logs.Reset()
-	_, err := svc.Register(context.Background(), RegisterInput{
+	_, err := svc.Register(ctx, RegisterInput{
 		Username: "refused-user", Password: "securePass1", InviteCode: "deadbeefdeadbeef", Device: "test", IP: "203.0.113.33",
 	})
 	if !errors.Is(err, ErrRegistrationRejected) {
