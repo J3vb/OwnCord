@@ -73,26 +73,25 @@ func dialAndAuthWake(t *testing.T, ctx context.Context, srvURL, token string, la
 	return conn
 }
 
-// readErrorCode reads frames until an `error` frame arrives and returns its
-// payload code. The wake refusal is a plain error frame (the token is still
-// valid), not auth_error, so a granted wake (auth_ok) surfaces as a failure.
+// readErrorCode reads the next frame, requires it to be an `error` frame, and
+// returns its payload code. The wake refusal is a plain error frame (the token
+// is still valid), not auth_error, so a granted wake (auth_ok) surfaces as a
+// failure.
 func readErrorCode(t *testing.T, ctx context.Context, conn *websocket.Conn) string {
 	t.Helper()
-	for {
-		typ, raw := readFrameType(t, ctx, conn)
-		if typ != MsgTypeError {
-			t.Fatalf("expected error, got %q (raw=%s)", typ, raw)
-		}
-		var frame struct {
-			Payload struct {
-				Code string `json:"code"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(raw, &frame); err != nil {
-			t.Fatalf("unmarshal error frame %s: %v", raw, err)
-		}
-		return frame.Payload.Code
+	typ, raw := readFrameType(t, ctx, conn)
+	if typ != MsgTypeError {
+		t.Fatalf("expected error, got %q (raw=%s)", typ, raw)
 	}
+	var frame struct {
+		Payload struct {
+			Code string `json:"code"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		t.Fatalf("unmarshal error frame %s: %v", raw, err)
+	}
+	return frame.Payload.Code
 }
 
 // A wake reconnect while another device holds the session is refused and the
