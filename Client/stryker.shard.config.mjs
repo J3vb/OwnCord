@@ -117,6 +117,7 @@ export const shards = {
     "src/lib/updater.ts",
     "src/lib/userStatus.ts",
     "src/lib/voiceJoinTrace.ts",
+    "src/lib/voiceShortcuts.ts",
     "src/lib/window-state.ts",
   ], // 2511 mutants (before the D6 additions)
   stores: [

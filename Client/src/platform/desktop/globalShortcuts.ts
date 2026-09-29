@@ -16,6 +16,10 @@ export const globalShortcuts: GlobalShortcuts = {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<boolean>("voice_shortcuts_supported");
   },
+  async setKeys(keys) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("voice_shortcuts_set_keys", { muteVk: keys.muteVk, deafenVk: keys.deafenVk });
+  },
   onShortcut(handler: (action: "mute" | "deafen") => void): () => void {
     let active = true;
     let unlisten: (() => void) | null = null;

@@ -27,6 +27,7 @@ import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
+import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
@@ -968,6 +969,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // Not a Tauri host, or the command was refused: the tray and the in-app
       // shortcuts still work; the global key path simply is not live.
     });
+    // Push the persisted rebind onto the running poller at startup, so a
+    // choice made in Settings survives a restart (the native default is
+    // Ctrl+Shift+M / Ctrl+Shift+D).
+    const globalKeys = loadGlobalShortcutVks();
+    void desktop.globalShortcuts
+      .setKeys({ muteVk: globalKeys.mute, deafenVk: globalKeys.deafen })
+      .catch(() => {
+        // Not a Tauri host, or the command was refused: keep the native default.
+      });
 
     // Toast container
     toast = createToastContainer();

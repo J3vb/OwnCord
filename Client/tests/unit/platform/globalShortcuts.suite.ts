@@ -11,6 +11,8 @@ export interface NativeControl {
   emits(action: "mute" | "deafen"): Promise<void>;
   /** The commands the renderer invoked, in order. */
   commands(): string[];
+  /** The key codes last handed to `voice_shortcuts_set_keys`, if any. */
+  keyCodes(): { muteVk: number; deafenVk: number } | undefined;
   /** Whether the platform reports global key observation. */
   supported: boolean;
 }
@@ -61,6 +63,12 @@ export function describeGlobalShortcutsSuite(
     check("starts the native poller", async () => {
       await ctx.subject.start();
       expect(ctx.native.commands()).toContain("voice_shortcuts_start");
+    });
+
+    check("hands a rebound combination to the native poller", async () => {
+      await ctx.subject.setKeys({ muteVk: 0x4b, deafenVk: 0x71 });
+      expect(ctx.native.commands()).toContain("voice_shortcuts_set_keys");
+      expect(ctx.native.keyCodes()).toEqual({ muteVk: 0x4b, deafenVk: 0x71 });
     });
   });
 }

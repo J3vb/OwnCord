@@ -1157,6 +1157,20 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     start.mockRestore();
   });
 
+  it("pushes the persisted global shortcut bindings to the poller on mount (U6)", async () => {
+    const setKeys = vi.spyOn(desktop.globalShortcuts, "setKeys").mockResolvedValue(undefined);
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    localStorage.setItem("owncord:settings:globalMuteVk", "75"); // Ctrl+Shift+K
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    expect(setKeys).toHaveBeenCalledWith({ muteVk: 0x4b, deafenVk: 0x44 });
+    localStorage.removeItem("owncord:settings:globalMuteVk");
+    setKeys.mockRestore();
+    start.mockRestore();
+  });
+
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
     const { disableScreenshare } = await import("@lib/livekitSession");
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });

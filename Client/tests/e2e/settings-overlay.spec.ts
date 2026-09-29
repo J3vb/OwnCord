@@ -286,10 +286,10 @@ test.describe("Settings — Keybinds Tab", () => {
     page,
   }) => {
     // The mocked host answers voice_shortcuts_supported=false, so the tab must
-    // disclose the gap rather than promise a global Ctrl+Shift+M it cannot deliver.
+    // disclose the gap rather than promise a global shortcut it cannot deliver.
     const hint = page.getByTestId("keybinds-global-hint");
     await expect(hint).toContainText("tray menu");
-    await expect(hint).toContainText("does not support global Ctrl + Shift + M / Ctrl + Shift + D");
+    await expect(hint).toContainText("does not support global mute/deafen shortcuts");
   });
 });
 

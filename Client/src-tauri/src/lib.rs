@@ -182,6 +182,7 @@ pub fn run() {
             ptt::ptt_listen_for_key,
             shortcuts::voice_shortcuts_start,
             shortcuts::voice_shortcuts_supported,
+            shortcuts::voice_shortcuts_set_keys,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,
             http_proxy::start_http_proxy,
