@@ -14,6 +14,7 @@ import (
 	"github.com/livekit/protocol/auth"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 // This is the real-SFU proof for single-port UDP (O1): OwnCord's *generated*
@@ -158,6 +159,20 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	if _, err := pub.LocalParticipant.PublishTrack(track, &lksdk.TrackPublicationOptions{Name: "audio"}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		tick := time.NewTicker(20 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				_ = track.WriteSample(media.Sample{Data: []byte{0xf8, 0xff, 0xfe}, Duration: 20 * time.Millisecond}, nil)
+			}
+		}
+	}()
 
 	select {
 	case <-received:
