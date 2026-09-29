@@ -150,18 +150,19 @@ func requiredPorts(p Params) []RequiredPort {
 	//
 	// voice.udp_port switches LiveKit to one UDP port; report that one, not the
 	// range the operator is no longer asked to forward.
-	udpMedia := RequiredPort{Port: "50000-60000", Protocol: "udp", Purpose: "LiveKit WebRTC media (ICE)"}
-	if p.VoiceUDPPort > 0 {
-		udpMedia = RequiredPort{
-			Port:     strconv.Itoa(p.VoiceUDPPort),
-			Protocol: "udp",
-			Purpose:  "LiveKit WebRTC media (ICE, single-port mode)",
-		}
-	}
 	return append(ports,
 		RequiredPort{Port: "7881", Protocol: "tcp", Purpose: "LiveKit TCP media fallback"},
-		udpMedia,
+		RequiredPort{Port: VoiceUDPLabel(p.VoiceUDPPort), Protocol: "udp", Purpose: "LiveKit WebRTC media (ICE)"},
 	)
+}
+
+// VoiceUDPLabel is the UDP media port spec LiveKit needs forwarded: the single
+// voice.udp_port when set, the 50000-60000 range otherwise.
+func VoiceUDPLabel(port int) string {
+	if port > 0 {
+		return strconv.Itoa(port)
+	}
+	return "50000-60000"
 }
 
 // undeterminable is unconditional. It does not shrink when the topology looks
@@ -214,19 +215,14 @@ func undeterminable(p Params) []Unknown {
 	if p.VoiceEnabled {
 		// Name the port(s) the operator actually forwarded: one UDP port in
 		// single-port mode (voice.udp_port), the range otherwise.
-		ports := "UDP 50000-60000"
-		fix := "forward UDP 50000-60000"
-		if p.VoiceUDPPort > 0 {
-			ports = "UDP " + strconv.Itoa(p.VoiceUDPPort)
-			fix = "forward UDP " + strconv.Itoa(p.VoiceUDPPort)
-		}
+		ports := "UDP " + VoiceUDPLabel(p.VoiceUDPPort)
 		list = append(list, Unknown{
 			Fact: "Whether WebRTC media can actually flow on " + ports,
 			Why: "Joining a voice channel succeeds as soon as signalling works. Media travels on a " +
 				"separate UDP port, so a missing forwarding rule there produces a call that connects " +
 				"and then carries no audio.",
 			HowToCheck: "Have someone outside your network join a voice channel. If they connect but " +
-				"nobody hears anything, " + fix + " and leave voice.node_ip empty so LiveKit " +
+				"nobody hears anything, forward " + ports + " and leave voice.node_ip empty so LiveKit " +
 				"detects your public address (or set it to that address).",
 		})
 	}

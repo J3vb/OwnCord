@@ -4,8 +4,6 @@ import (
 	"context"
 	"net"
 	"os"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -71,25 +69,6 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	cfg.LiveKitURL = "ws://127.0.0.1:7880"
 	proc := ws.NewLiveKitProcess(cfg, &config.TLSConfig{}, dataDir)
 
-	// The generated config is what is under test, so generate it the same way
-	// production does and assert the single-port keys are on disk before the
-	// binary reads them.
-	cfgPath, err := proc.GenerateConfigForTest()
-	if err != nil {
-		t.Fatalf("generateConfig: %v", err)
-	}
-	generated, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("reading generated config: %v", err)
-	}
-	if cfg.UDPPort > 0 {
-		if !strings.Contains(string(generated), "udp_port: "+strconv.Itoa(cfg.UDPPort)) {
-			t.Fatalf("generated config is not single-port:\n%s", generated)
-		}
-	} else if !strings.Contains(string(generated), "port_range_start: 50000") {
-		t.Fatalf("generated config is not range mode:\n%s", generated)
-	}
-
 	if err := proc.Start(); err != nil {
 		t.Fatalf("starting livekit: %v", err)
 	}
@@ -124,9 +103,14 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	}
 
 	received := make(chan struct{}, 1)
+	subscribed := make(chan *lksdk.RemoteTrackPublication, 1)
 	sub, err := lksdk.ConnectToRoomWithToken(cfg.LiveKitURL, token("subscriber"), &lksdk.RoomCallback{
 		ParticipantCallback: lksdk.ParticipantCallback{
-			OnTrackSubscribed: func(track *webrtc.TrackRemote, _ *lksdk.RemoteTrackPublication, _ *lksdk.RemoteParticipant) {
+			OnTrackSubscribed: func(track *webrtc.TrackRemote, remote *lksdk.RemoteTrackPublication, _ *lksdk.RemoteParticipant) {
+				select {
+				case subscribed <- remote:
+				default:
+				}
 				go func() {
 					for {
 						if _, _, rerr := track.ReadRTP(); rerr != nil {
@@ -178,6 +162,30 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	case <-received:
 	case <-time.After(20 * time.Second):
 		t.Fatal("no RTP received — the generated config does not carry media")
+	}
+
+	// RTP arriving is not enough: it must have come over the configured UDP
+	// port (or range), not a fallback such as the TCP 7881 candidate.
+	remote := <-subscribed
+	var pair *webrtc.ICECandidatePair
+	for deadline := time.Now().Add(5 * time.Second); pair == nil; time.Sleep(100 * time.Millisecond) {
+		pair, err = remote.Receiver().Transport().ICETransport().GetSelectedCandidatePair()
+		if err != nil {
+			t.Fatalf("selected candidate pair: %v", err)
+		}
+		if pair == nil && time.Now().After(deadline) {
+			t.Fatal("no selected ICE candidate pair on the subscriber")
+		}
+	}
+	if pair.Remote.Protocol != webrtc.ICEProtocolUDP {
+		t.Fatalf("media travelled over %s, want UDP (pair %s)", pair.Remote.Protocol, pair)
+	}
+	if cfg.UDPPort > 0 {
+		if pair.Remote.Port != uint16(cfg.UDPPort) {
+			t.Fatalf("media travelled on SFU port %d, want the single udp_port %d", pair.Remote.Port, cfg.UDPPort)
+		}
+	} else if pair.Remote.Port < 50000 || pair.Remote.Port > 60000 {
+		t.Fatalf("media travelled on SFU port %d, want one in 50000-60000", pair.Remote.Port)
 	}
 }
 
