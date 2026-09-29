@@ -90,9 +90,11 @@ describe("CertMismatchModal", () => {
   it("tells the user how to verify the new fingerprint before accepting", () => {
     mountModal();
     const desc = container.querySelector(".cert-desc")?.textContent ?? "";
-    // A routine renewal is named as such, so the prompt is not read as
-    // alarm-by-default...
-    expect(desc).toMatch(/Let's Encrypt or a reverse proxy/);
+    // Routine public-CA renewals are re-pinned silently, so the prompt must
+    // not call a change routine; it asks for extra care instead...
+    expect(desc).not.toMatch(/routine, but/);
+    expect(desc).toMatch(/public certificate authorities no longer prompt/);
+    expect(desc).toMatch(/extra care/);
     // ...and it says how to check: who has the value, where they find it,
     // which row to compare, over which channel, and what to do otherwise.
     expect(desc).toMatch(/server owner/);

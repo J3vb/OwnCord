@@ -115,7 +115,7 @@ export const connectText = defineCatalog("connect", {
   "cert.mismatch.title": "Certificate Warning",
   "cert.mismatch.heading": "Certificate Changed",
   "cert.mismatch.description":
-    "This server is presenting a different certificate from the one you trusted before. Servers that use Let's Encrypt or a reverse proxy replace it every few months, so this is often routine, but a routine change and a security issue look the same here. Ask the server owner for the current fingerprint through another channel, such as a call or a chat outside OwnCord (the owner finds it on the admin Dashboard), and accept only if it matches Current below, character for character. If it does not match, or you cannot check, choose Disconnect.",
+    "This server is presenting a different certificate from the one you trusted before. Routine renewals from public certificate authorities no longer prompt, so seeing this on a server you use regularly deserves extra care: verify the fingerprint with the owner before accepting. Ask the server owner for the current fingerprint through another channel, such as a call or a chat outside OwnCord (the owner finds it on the admin Dashboard), and accept only if it matches Current below, character for character. If it does not match, or you cannot check, choose Disconnect.",
   "cert.mismatch.previous": "Previous",
   "cert.mismatch.current": "Current",
   "cert.mismatch.reject": "Disconnect",
