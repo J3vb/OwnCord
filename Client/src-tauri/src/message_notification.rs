@@ -114,24 +114,8 @@ fn message_launch_uri(target: &MessageTarget) -> String {
         "owncord://message/{}/{}?host={}",
         target.channel_id,
         target.message_id,
-        percent_encode(&target.host),
+        url::form_urlencoded::byte_serialize(target.host.as_bytes()).collect::<String>(),
     )
-}
-
-/// Percent-encode everything outside the RFC 3986 unreserved set. Deliberately
-/// conservative and allocation-cheap; only a host string ever passes through.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn percent_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push('%');
-            out.push_str(&format!("{byte:02X}"));
-        }
-    }
-    out
 }
 
 /// The toast's XML: a protocol-activation toast whose title and body are the
