@@ -101,8 +101,18 @@ function createSocketConnection(): SocketConnection {
   // Route a cert-tofu event (from the http or ws proxy) to the right listeners.
   // Registered globally via startCertListener so first-use/mismatch events are
   // received during the connect page's health checks, before any WS connect.
+  //
+  // A "trusted" log line is skipped while the host's last logged status is
+  // already "trusted" (CLI-04(a)): every tunneled REST request re-runs the TOFU
+  // check, so a "trusted" event arrives on each one and would otherwise fill the
+  // log and any support bundle. "first_use" and "mismatch" always log. Routing
+  // below is untouched — the listeners still see every event.
+  const lastLoggedCertStatus = new Map<string, SocketCertEvent["status"]>();
   function handleCertTofu(raw: SocketCertEvent): void {
-    log.info("TOFU cert event", { host: raw.host, status: raw.status });
+    if (raw.status !== "trusted" || lastLoggedCertStatus.get(raw.host) !== "trusted") {
+      lastLoggedCertStatus.set(raw.host, raw.status);
+      log.info("TOFU cert event", { host: raw.host, status: raw.status });
+    }
     if (raw.status === "first_use") {
       for (const listener of certFirstUseListeners) listener(raw);
     } else if (raw.status === "mismatch") {
