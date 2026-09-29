@@ -49,7 +49,10 @@ export const connectText = defineCatalog("connect", {
   "servers.autoLogin.enable": "Enable auto-login",
   "servers.autoLogin.enabled": "Auto-login enabled",
   "servers.delete": "Delete server",
-  "servers.latency": "{ms}ms",
+  // This number times one REST call through the desktop TLS tunnel (a fresh
+  // connection and handshake per request, about 3× the network RTT), so it is
+  // labelled "response time" rather than claimed to be a ping.
+  "servers.latency": "{ms}ms response time",
   "servers.online": "{count} online",
   "servers.clientUpdateNeeded": "Client update needed",
   "servers.serverUpdateNeeded": "Server update needed",

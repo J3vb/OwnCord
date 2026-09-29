@@ -298,12 +298,12 @@
   color: var(--text-micro);
 }
 
-/* Latency badge */
+/* Latency badge — wraps between words so "{ms}ms response time" stays inside
+   the row at large or expanded text. */
 .srv-latency {
   font-size: var(--font-size-xxs);
   color: var(--text-micro);
   font-family: var(--font-mono);
-  white-space: nowrap;
 }
 .srv-latency.good {
   color: var(--green);

@@ -122,3 +122,20 @@ export function parseInviteLink(url: string): InviteLink | null {
 
   return host ? { code, host } : { code };
 }
+
+/**
+ * Normalise a raw invite code for submission: trim, then lower-case, and
+ * accept a pasted `owncord://invite/<code>` (or bare `owncord://<code>`) link
+ * by pulling its code out first. Server codes are lower-case hex and redemption
+ * is an exact, case-sensitive match, so a typed/pasted upper-case code or a
+ * whole link would otherwise be refused with the same opaque 400. Never throws,
+ * and an empty result means the caller should fall back to its own required
+ * check. Pure.
+ */
+export function normaliseInviteCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const link = parseInviteLink(trimmed);
+  const code = link ? link.code : trimmed;
+  return code.trim().toLowerCase();
+}

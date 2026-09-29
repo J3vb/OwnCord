@@ -3,6 +3,9 @@ package db_test
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // ─── GetRoleByID tests ────────────────────────────────────────────────────────
@@ -216,5 +219,33 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 	}
 	if revokedCount != 1 {
 		t.Errorf("ListInvites revoked count = %d, want 1", revokedCount)
+	}
+}
+
+// Invite.Expired names the expiry for the registration refusal log; it must
+// agree with the redemption query, which fails on an unparseable stamp.
+func TestInvite_Expired(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	past := "2026-09-29T11:00:00Z"
+	future := "2026-09-29T13:00:00Z"
+	broken := "not-a-time"
+
+	cases := []struct {
+		name string
+		at   *string
+		want bool
+	}{
+		{name: "nil never expires", at: nil, want: false},
+		{name: "past expiry", at: &past, want: true},
+		{name: "future expiry", at: &future, want: false},
+		{name: "unparseable reads as expired", at: &broken, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inv := &db.Invite{ExpiresAt: tc.at}
+			if got := inv.Expired(now); got != tc.want {
+				t.Errorf("Expired = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

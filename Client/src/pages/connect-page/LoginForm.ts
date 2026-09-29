@@ -4,6 +4,7 @@
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, errorText } from "@lib/api";
+import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
@@ -937,7 +938,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // `invite` and an unknown mode (older server / failed read) both require
       // a code. Never widen registration because the mode could not be read.
       if (mode === "invite" || mode === null) {
-        const inviteCode = inviteInput.value.trim();
+        const inviteCode = normaliseInviteCode(inviteInput.value);
         if (!inviteCode) {
           return { message: connectText("validation.inviteRequired"), field: "invite" };
         }
@@ -973,7 +974,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
           await onLogin(host, username, password);
         }
       } else {
-        const inviteCode = inviteInput.value.trim();
+        const inviteCode = normaliseInviteCode(inviteInput.value);
         await onRegister(host, username, password, inviteCode);
       }
       // If the callback didn't throw, the caller handles navigation.
