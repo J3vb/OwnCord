@@ -9,7 +9,7 @@ Production deployment guide for OwnCord server on Windows and Linux.
 - **Go 1.27+** (only if building from source)
 - **LiveKit Server** binary (only if enabling voice/video) -- see [LiveKit Setup](livekit-setup.md)
 - Required port: `8443` (OwnCord HTTPS/WebSocket)
-- Additional ports for voice/video: `7881/TCP`, `50000-60000/UDP` (`7880/TCP` is LiveKit's own API endpoint and is not needed — remote clients tunnel signalling through `/livekit`)
+- Additional ports for voice/video: `7881/TCP`, `50000-60000/UDP` — or a single UDP port when `voice.udp_port` is set (`7880/TCP` is LiveKit's own API endpoint and is not needed — remote clients tunnel signalling through `/livekit`)
 - Additional port for ACME TLS: `80/TCP`
 
 ## Building from Source
@@ -67,7 +67,7 @@ replaced by a new container that finds the old data intact.
 
 - Docker Engine 24+ and Docker Compose v2
 - `linux/amd64` or `linux/arm64` host
-- Ports available: `8443` (chat), `7881` TCP, `50000-60000` UDP (LiveKit media)
+- Ports available: `8443` (chat), `7881` TCP, `50000-60000` UDP (LiveKit media; a single UDP port instead when the LiveKit config uses `udp_port`)
 
 ### Health and privilege
 
@@ -515,9 +515,10 @@ cert management), three things matter:
    WebSocket at `/api/v1/ws`, the admin panel, uploads, **and LiveKit
    signaling**, which the server already proxies at `/livekit/*`. You do NOT
    need to expose LiveKit's port 7880 through your proxy.
-2. **What the proxy cannot front.** WebRTC media: UDP 50000–60000 (and the
-   TCP 7881 fallback) must remain directly reachable on the host running
-   LiveKit. An HTTP reverse proxy never carries this traffic.
+2. **What the proxy cannot front.** WebRTC media: UDP 50000–60000 — or the
+   single port when the LiveKit config sets `udp_port` — plus the TCP 7881
+   fallback; these must remain directly reachable on the host running LiveKit.
+   An HTTP reverse proxy never carries this traffic.
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
    proxy's own address(es) (e.g. `["10.0.0.2/32"]`) so client IPs come from
    `X-Forwarded-For` for rate limiting, the admin IP allowlist, the access
@@ -1423,9 +1424,10 @@ Three named refusals, each with the one thing to do:
 
 ### Voice joins but nobody hears anything
 
-The UDP media range (`50000-60000`) is not forwarded, or a pinned
+The UDP media port(s) — the `50000-60000` range by default, or the single
+`voice.udp_port` when set — are not forwarded, or a pinned
 `voice.node_ip` is not your current public address (leave it empty so LiveKit
-detects it, and restart after the address changes) — the one
+detects it, and restart after the address changes). This is the one
 failure the server cannot see, because the media never reaches it. The
 check-by-check walkthrough is in [Port Forwarding Guide](port-forwarding.md).
 
@@ -1664,6 +1666,10 @@ only the rows their instructions need.
 | `80`          | TCP      | ACME HTTP-01 challenge (only if `tls.mode: acme`) |
 | `7881`        | TCP      | LiveKit server (RTC/TURN over TCP)                |
 | `50000-60000` | UDP      | LiveKit WebRTC media (ICE candidates)             |
+
+With LiveKit in single-port mode (`rtc.udp_port` in its `livekit.yaml`, or
+`voice.udp_port` when OwnCord runs it), the last row is that one UDP port
+instead of the range.
 
 `7880/TCP` (LiveKit's own WebSocket/REST API) is **not** in the required set:
 the server proxies signalling to clients at `:8443/livekit`, so only clients

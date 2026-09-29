@@ -95,6 +95,8 @@ voice:
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
   # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
+  # udp_port: 0                    # carry all WebRTC media on ONE UDP port (e.g. 7882) instead of
+  #                                # the 50000-60000 range — forward just that one port. 0 = range
   # quality: "medium"              # low | medium | high
 
 # github:

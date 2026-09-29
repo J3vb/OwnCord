@@ -113,7 +113,7 @@ func warnOnVoiceNodeIP(cfg *config.Config) {
 		"why", "node_ip is the address LiveKit advertises in ICE candidates. A client outside this "+
 			"network cannot route to it, so the call connects over signalling and carries no media",
 		"fix", "clear voice.node_ip so LiveKit detects this server's public address (or set it to "+
-			"that address) and forward UDP 50000-60000 — "+
+			"that address) and forward UDP "+netclass.VoiceUDPLabel(cfg.Voice.UDPPort)+" — "+
 			"see docs/port-forwarding.md. Ignore this if every client is on the LAN or your tailnet")
 }
 

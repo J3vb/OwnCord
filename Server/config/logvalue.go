@@ -30,6 +30,7 @@ func (v VoiceConfig) LogValue() slog.Value {
 		slog.String("livekit_version", v.LiveKitVersion),
 		slog.String("node_ip", v.NodeIP),
 		slog.Bool("advertise_internal_ip", v.AdvertiseInternalIP),
+		slog.Int("udp_port", v.UDPPort),
 		slog.String("quality", v.Quality),
 	)
 }

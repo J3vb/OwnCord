@@ -9,6 +9,12 @@ rtc:
   port_range_start: 50000
   port_range_end: 60000
 
+  # Single-port mode: uncomment udp_port and DELETE port_range_start/end above
+  # to carry all WebRTC media on one UDP port, so your firewall forwards one
+  # port instead of ten thousand. Then publish that same port in
+  # docker-compose.yml in place of the 50000-60000 range.
+  # udp_port: 7882
+
   # LiveKit detects your public IP itself (over STUN) when it starts, so after a
   # dynamic address changes, `docker compose restart livekit` picks up the new
   # one with no edit here. Pin node_ip only when detection cannot work — a

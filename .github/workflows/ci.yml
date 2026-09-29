@@ -442,6 +442,32 @@ jobs:
         if: env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
 
+      # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
+      # upstream, so a YAML-only assertion cannot tell whether livekit-server
+      # accepts it — this runs OwnCord's generated livekit.yaml through a real
+      # binary and requires a real WebRTC client to receive RTP, once in range
+      # mode (the shipped default) and once with voice.udp_port. One leg, no
+      # -race: the concern is whether media flows, not new concurrency.
+      - name: Cache livekit-server archive
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: Client/tests/e2e/.bin/livekit-cache
+          key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
+
+      - name: Install livekit-server for the generated-config proof
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
+        working-directory: Client/
+        run: node tests/e2e/scripts/install-livekit.mjs
+
+      - name: Run the real-SFU single-port proof
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
+        env:
+          # Relative to the test's working directory, which is the package
+          # directory Server/ws, not Server/.
+          OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
+        run: go test -count=1 ./ws/ -run '^TestRealLiveKit_'
+
       - name: Run tests with deadlock detection
         if: env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...

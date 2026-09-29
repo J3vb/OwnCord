@@ -800,6 +800,29 @@ func TestLoadStorageBoundsAreClamped(t *testing.T) {
 	}
 }
 
+// TestLoadVoiceUDPPortOutOfRangeFallsBackToRange pins that a mistyped
+// voice.udp_port in EITHER direction falls back to 0 (the documented
+// 50000-60000 range) instead of clamping to 65535: a clamp would run LiveKit
+// on a port the owner never chose and never forwarded.
+func TestLoadVoiceUDPPortOutOfRangeFallsBackToRange(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  int
+	}{{"70000", 0}, {"-5", 0}, {"7882", 7882}} {
+		cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(cfgPath, []byte("voice:\n  udp_port: "+tc.value+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			t.Fatalf("Load() with udp_port %s returned error: %v", tc.value, err)
+		}
+		if cfg.Voice.UDPPort != tc.want {
+			t.Errorf("voice.udp_port after %s = %d, want %d", tc.value, cfg.Voice.UDPPort, tc.want)
+		}
+	}
+}
+
 // TestLoadReachabilityReportDisabledByDefault pins B6-6's owner gate, modelled
 // on TestLoadBrowserClientHostingDisabledByDefault.
 //

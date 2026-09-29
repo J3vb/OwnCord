@@ -49,7 +49,8 @@ It works behind CGNAT and strict home routers, so setup is usually faster than m
   a public address; on a tailnet that warning is expected and the `100.x`
   address is the correct value.
 - **Do not forward the media ports.** The tailnet carries the WebRTC media
-  directly, so `7881/TCP` and `50000-60000/UDP` stay closed.
+  directly, so `7881/TCP` and the UDP media port(s) — the `50000-60000` range,
+  or a single `voice.udp_port` — stay closed.
 
 ## Benefits
 

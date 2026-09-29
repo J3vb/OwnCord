@@ -78,7 +78,8 @@ Each item links to the guidance that owns it.
 
 ## Voice and video
 
-- Voice media needs UDP `50000-60000` (and TCP `7881`) reachable on the LiveKit
+- Voice media needs a reachable UDP port — `50000-60000` by default, or the
+  single `voice.udp_port` when set (and TCP `7881`) on the LiveKit
   host; an HTTP reverse proxy cannot carry it. "Joins but no audio" is almost
   always a missing forwarding rule or a wrong `voice.node_ip` — see
   [Port Forwarding](port-forwarding.md).
@@ -111,7 +112,7 @@ of band and have the user compare it before accepting —
 [Clients see a certificate mismatch](deployment.md#clients-see-a-certificate-mismatch).
 
 **Voice joins but nobody hears anything.**
-The UDP media range is not forwarded, or a pinned `voice.node_ip` is not your
+The UDP media port is not forwarded, or a pinned `voice.node_ip` is not your
 current public address (leave it empty so LiveKit detects it, and restart after
 the address changes). Both checks are in the
 [Port Forwarding Guide](port-forwarding.md); the server cannot see this

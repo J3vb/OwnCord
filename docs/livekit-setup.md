@@ -43,6 +43,18 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
      level: info
    ```
 
+   **Single-port option.** To forward one UDP port instead of the 10,000-port
+   range, replace `port_range_start`/`port_range_end` with `udp_port: 7882`
+   (any free UDP port), and publish that same port in `docker-compose.yml` in
+   place of the range. Also uncomment `OWNCORD_VOICE_UDP_PORT` on the
+   `owncord` service with the same port, so the admin connectivity report and
+   the boot warning name that port rather than the range. LiveKit ignores the
+   range once `udp_port` is set. This
+   is the easier path through a restrictive firewall or a router with a small
+   port-forwarding table. When OwnCord runs LiveKit itself (the
+   `livekit_binary`/auto-download path), `voice.udp_port` in `config.yaml`
+   generates the same single-port config for you.
+
 3. **In `config.yaml`** (copied from `config.yaml.example`), no voice edit is needed: the compose file already points the server at `ws://livekit:7880` and turns auto-download off. Leave `voice.livekit_binary` unset — see [Deployment — config.yaml for Docker](deployment.md#configyaml-for-docker).
 
 4. **Open firewall ports** on your host:
@@ -51,6 +63,9 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    | ------------- | -------- | ----------------------- |
    | `7881`        | TCP      | TCP fallback for WebRTC |
    | `50000-60000` | UDP      | WebRTC media            |
+
+   In single-port mode the second row is your one `udp_port` (for example
+   `7882/UDP`) instead of the range.
 
    `7880/TCP` is LiveKit's own API/signalling endpoint and does not need to be
    opened: OwnCord proxies signalling to clients through `/livekit` on its own
@@ -123,6 +138,9 @@ Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT
 | **7881**        | TCP      | LiveKit internal RTC (TURN/TCP fallback) |
 | **50000-60000** | UDP      | Media transport (RTP audio/video)        |
 
+With `voice.udp_port` set, the media row is that one UDP port instead of the
+range (see step 2's single-port option and `docs/port-forwarding.md`).
+
 `7880/TCP` (LiveKit's own HTTP/WS API) stays internal: OwnCord reaches it on
 the host or Docker network and proxies client signalling through `/livekit`.
 
@@ -138,7 +156,7 @@ For LAN-only setups, ensure these ports are open on Windows Firewall. For remote
 
 When `livekit_binary` is set, OwnCord manages LiveKit as a companion process:
 
-1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000. To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
+1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000 (or the single `voice.udp_port` when set). To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
 2. **Process launch**: `livekit-server --config data/livekit.yaml`
 3. **Crash recovery**: Exponential backoff restart (3s -> 6s -> 12s ... up to 60s), gives up after 10 consecutive rapid failures
 4. **Health checks**: `GET http://localhost:7880/` verifies LiveKit is responding
