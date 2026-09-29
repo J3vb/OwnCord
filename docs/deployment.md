@@ -428,11 +428,12 @@ public IP in this build
 ([What this build does not do](port-forwarding.md#what-this-build-does-not-do)).
 Certificates are cached under `acme_cache_dir`. And the sentence owners do not
 expect: **the desktop client pins this certificate too** — the first-use
-prompt is the same in every `tls.mode` — so a Let's Encrypt renewal changes
-the fingerprint and triggers the mismatch modal on every desktop client
-([trust-model.md](trust-model.md)). The admin Dashboard shows the fingerprint
-once the first HTTPS connection has been made, and the new one after
-each renewal; publish it every time
+prompt is the same in every `tls.mode`, so members compare the fingerprint
+once. A routine Let's Encrypt renewal is then re-pinned without a prompt,
+because both the old and the new certificate are publicly valid for the
+domain ([trust-model.md](trust-model.md)). The admin Dashboard shows the
+fingerprint once the first HTTPS connection has been made, and the new one
+after each renewal
 ([Publishing the fingerprint](#publishing-the-fingerprint-after-a-renewal)).
 
 ### Manual Certificate
@@ -467,10 +468,14 @@ readable by anyone on the path;
 
 ### Publishing the fingerprint after a renewal
 
-The desktop client pins the certificate it sees, so when a reverse proxy or
-Let's Encrypt renews it (about every 60 days), every member gets a
+The desktop client pins the certificate it sees. A renewal from a public CA
+(Let's Encrypt, directly or through a reverse proxy) is re-pinned without a
+prompt, provided the certificate members first accepted was publicly valid for
+your domain. Any other change — a new self-signed or private-CA certificate, or
+any change on a server reached by IP address — gives every member a
 "Certificate Changed" prompt that asks them to get the current fingerprint from
-you through another channel. Publish it each time the certificate changes:
+you through another channel. Members also need it the first time they connect.
+Publish it whenever the certificate changes:
 
 - **`self_signed`, `manual` and `acme`:** copy it from the admin Dashboard's
   **Certificate fingerprint** card (in `acme` mode it appears after the first
@@ -503,10 +508,10 @@ OwnCord when the proxy terminates TLS, and keep OwnCord bound to a private
 interface.
 
 One consequence worth knowing before you choose: with a proxy terminating TLS,
-desktop clients pin the _proxy's_ certificate, so renewals there trigger the
-same first-use mismatch modal described under
-[Let's Encrypt (ACME)](#lets-encrypt-acme). Proxy or not, certificate rotation
-is visible to desktop clients ([trust-model.md](trust-model.md)).
+desktop clients pin the _proxy's_ certificate. When the proxy uses a public CA,
+its renewals are re-pinned without a prompt, as described under
+[Let's Encrypt (ACME)](#lets-encrypt-acme); a self-signed or private-CA proxy
+certificate prompts on every change ([trust-model.md](trust-model.md)).
 
 Whatever your reason for fronting it (shared host, existing nginx, central
 cert management), three things matter:

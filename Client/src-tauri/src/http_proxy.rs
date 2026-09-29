@@ -230,18 +230,18 @@ async fn handle_connection<R: Runtime>(
     )
     .await?;
 
-    let fingerprint = captured_fp
+    let observed = captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
-        .unwrap_or_default();
-    if fingerprint.is_empty() {
-        return Err("TLS handshake completed but no certificate fingerprint was captured".into());
-    }
+        .filter(|o| !o.fingerprint.is_empty())
+        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    let fingerprint = observed.fingerprint.clone();
 
     let store_key = tofu::cert_store_key(remote_host);
-    match tofu::evaluate(&app, &store_key, &fingerprint)? {
-        TofuOutcome::Trusted => {
+    match tofu::evaluate(&app, &store_key, &observed)? {
+        // A routine public-CA renewal was re-pinned by evaluate: as trusted.
+        TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
             crate::ws_proxy::emit_cert_tofu(
                 &app,
                 serde_json::json!({

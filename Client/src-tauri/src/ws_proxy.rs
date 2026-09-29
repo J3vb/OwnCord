@@ -178,18 +178,17 @@ pub async fn ws_connect<R: Runtime>(
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = tofu::extract_host(&url);
-    let fingerprint = captured_fp
+    let observed = captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
-        .unwrap_or_default();
+        .filter(|o| !o.fingerprint.is_empty())
+        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    let fingerprint = observed.fingerprint.clone();
 
-    if fingerprint.is_empty() {
-        return Err("TLS handshake completed but no certificate fingerprint was captured".into());
-    }
-
-    match tofu::evaluate(&app, &host, &fingerprint)? {
-        TofuOutcome::Trusted => {
+    match tofu::evaluate(&app, &host, &observed)? {
+        // A routine public-CA renewal was re-pinned by evaluate: as trusted.
+        TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
             info!("[ws_proxy] TOFU check passed for {}", host);
             emit_cert_tofu(
                 &app,
@@ -446,7 +445,8 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
         })
 }
 
-/// Accept a certificate fingerprint for a host — the ONLY path that writes a pin.
+/// Accept a certificate fingerprint for a host — the only path that writes a pin
+/// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
 #[tauri::command]
 pub fn accept_cert_fingerprint<R: Runtime>(

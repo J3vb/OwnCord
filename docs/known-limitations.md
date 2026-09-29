@@ -16,12 +16,15 @@ Each item links to the guidance that owns it.
   public domain the recommended setup is a reverse proxy you trust to own
   renewal — see [TLS Setup](deployment.md#tls-setup) and
   [What this build does not do](port-forwarding.md#what-this-build-does-not-do).
-- **A certificate renewal looks like a man-in-the-middle to desktop clients.**
-  Every `tls.mode` pins the certificate on first contact, so a public-CA renewal
-  or a proxy rotation changes the fingerprint and shows every user the
-  "Certificate Changed" prompt. Have them compare the new fingerprint out of
-  band before accepting; accepting a mismatch is indistinguishable from
-  accepting an interception — see
+- **A certificate change that is not a public-CA renewal looks like a
+  man-in-the-middle to desktop clients.** Every `tls.mode` pins the certificate
+  on first contact. A routine renewal where the old and the new certificate are
+  both publicly valid for the server's domain (Let's Encrypt, or a reverse
+  proxy using a public CA) is re-pinned without a prompt. Any other change — a
+  rotated self-signed or private-CA certificate, or any certificate on an
+  IP-address server — shows every user the "Certificate Changed" prompt. Have
+  them compare the new fingerprint out of band before accepting; accepting a
+  mismatch is indistinguishable from accepting an interception — see
   [Publishing the fingerprint after a renewal](deployment.md#publishing-the-fingerprint-after-a-renewal)
   and [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
 

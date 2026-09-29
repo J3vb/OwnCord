@@ -7,17 +7,28 @@
 // handshake, then reject the connection and surface the fingerprint so the user
 // can confirm it (via `accept_cert_fingerprint`) before any credential-bearing
 // request is sent. `decide` is a pure function with no persistence side effects;
-// the only writer of a pin is the explicit `accept_cert_fingerprint` command.
+// the only writer of a pin is the explicit `accept_cert_fingerprint` command,
+// with one exception (B11-5): a routine public-CA renewal. When the pinned leaf
+// was itself publicly valid for the host and the new leaf is too, `evaluate`
+// re-pins silently instead of prompting. Every other change still prompts.
 
 use ring::digest::{digest, SHA256};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, Runtime};
 
-use crate::constants::CERTS_STORE;
+use crate::constants::{CERTS_STORE, CERT_WEB_PKI_STORE};
 
-/// Shared fingerprint captured during the TLS handshake.
-pub(crate) type CapturedFingerprint = Arc<std::sync::Mutex<Option<String>>>;
+/// What the handshake showed: the leaf's fingerprint, and whether the chain
+/// validated against the public web-PKI roots for the connection's DNS name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Observed {
+    pub(crate) fingerprint: String,
+    pub(crate) web_pki_valid: bool,
+}
+
+/// Shared observation captured during the TLS handshake.
+pub(crate) type CapturedFingerprint = Arc<std::sync::Mutex<Option<Observed>>>;
 
 /// Format a DER-encoded certificate's SHA-256 as lowercase colon-hex
 /// ("aa:bb:cc:..."), the canonical pin format used across the cert store.
@@ -68,20 +79,59 @@ pub(crate) fn default_verify_schemes() -> Vec<rustls::SignatureScheme> {
 
 // ── verifiers ───────────────────────────────────────────────────────────────
 
-/// A rustls verifier that ACCEPTS any leaf cert but records its fingerprint for
-/// the post-handshake TOFU decision. Used by the http and ws proxies. Accepting
-/// here is safe only because `evaluate` + the caller gate on the pin afterward.
+/// The public web-PKI verifier (the webpki-roots bundle, as the updater uses),
+/// built once. `None` only if rustls refuses to build it, which then marks no
+/// certificate publicly valid, so every change prompts.
+fn web_pki_verifier() -> Option<Arc<dyn rustls::client::danger::ServerCertVerifier>> {
+    static VERIFIER: std::sync::OnceLock<
+        Option<Arc<dyn rustls::client::danger::ServerCertVerifier>>,
+    > = std::sync::OnceLock::new();
+    VERIFIER
+        .get_or_init(|| {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            rustls::client::WebPkiServerVerifier::builder_with_provider(
+                Arc::new(roots),
+                Arc::new(rustls::crypto::ring::default_provider()),
+            )
+            .build()
+            .ok()
+            .map(|v| v as Arc<dyn rustls::client::danger::ServerCertVerifier>)
+        })
+        .clone()
+}
+
+/// A rustls verifier that ACCEPTS any leaf cert but records its fingerprint,
+/// and whether it is publicly valid for the host, for the post-handshake TOFU
+/// decision. Used by the http and ws proxies. Accepting here is safe only
+/// because `evaluate` + the caller gate on the pin afterward.
 #[derive(Debug)]
 pub(crate) struct CaptureVerifier {
     captured: CapturedFingerprint,
+    web_pki: Option<Arc<dyn rustls::client::danger::ServerCertVerifier>>,
 }
 
 impl CaptureVerifier {
     pub(crate) fn new() -> (Self, CapturedFingerprint) {
+        Self::build(web_pki_verifier())
+    }
+
+    /// Seam for tests: inject the web-PKI verifier.
+    #[cfg(test)]
+    fn with_web_pki(
+        web_pki: Arc<dyn rustls::client::danger::ServerCertVerifier>,
+    ) -> (Self, CapturedFingerprint) {
+        Self::build(Some(web_pki))
+    }
+
+    fn build(
+        web_pki: Option<Arc<dyn rustls::client::danger::ServerCertVerifier>>,
+    ) -> (Self, CapturedFingerprint) {
         let fp = Arc::new(std::sync::Mutex::new(None));
         (
             Self {
                 captured: fp.clone(),
+                web_pki,
             },
             fp,
         )
@@ -92,13 +142,23 @@ impl rustls::client::danger::ServerCertVerifier for CaptureVerifier {
     fn verify_server_cert(
         &self,
         end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        server_name: &rustls::pki_types::ServerName<'_>,
+        ocsp_response: &[u8],
+        now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        // Only a DNS name can be publicly valid here: an IP host always prompts
+        // on a change, whatever its certificate.
+        let web_pki_valid = matches!(server_name, rustls::pki_types::ServerName::DnsName(_))
+            && self.web_pki.as_ref().is_some_and(|v| {
+                v.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+                    .is_ok()
+            });
         if let Ok(mut guard) = self.captured.lock() {
-            *guard = Some(fingerprint_hex(end_entity.as_ref()));
+            *guard = Some(Observed {
+                fingerprint: fingerprint_hex(end_entity.as_ref()),
+                web_pki_valid,
+            });
         }
         // Accept — the TOFU decision happens after the handshake, before any
         // request bytes are forwarded.
@@ -373,26 +433,84 @@ pub(crate) enum TofuOutcome {
     FirstUse,
     /// A pin exists but differs — reject; possible MITM or cert rotation.
     Mismatch { stored: String },
+    /// A pin exists and differs, but the pinned leaf was publicly valid for
+    /// this host and so is the new one: a routine public-CA renewal. Proceed;
+    /// `evaluate` has already re-pinned.
+    Renewed { stored: String },
 }
 
 /// Pure trust decision. No I/O, no persistence — this is the whole point of the
-/// F4/F8 fix: deciding never writes a pin.
-pub(crate) fn decide(stored: Option<String>, current: &str) -> TofuOutcome {
+/// F4/F8 fix: deciding never writes a pin. `web_pki_pin` is the pinned leaf
+/// recorded as publicly valid for this host, if any; it vouches only while it
+/// equals the stored pin.
+pub(crate) fn decide(
+    stored: Option<String>,
+    web_pki_pin: Option<&str>,
+    current: &Observed,
+) -> TofuOutcome {
     match stored {
         None => TofuOutcome::FirstUse,
-        Some(s) if s == current => TofuOutcome::Trusted,
+        Some(s) if s == current.fingerprint => TofuOutcome::Trusted,
+        Some(s) if current.web_pki_valid && web_pki_pin == Some(s.as_str()) => {
+            TofuOutcome::Renewed { stored: s }
+        }
         Some(s) => TofuOutcome::Mismatch { stored: s },
     }
 }
 
-/// Load the stored pin and decide. Never persists.
+/// The fingerprint to record as the publicly valid pinned leaf after
+/// `outcome`, or `None` to leave the record alone. Only a leaf that is pinned
+/// and seen publicly valid is ever recorded.
+pub(crate) fn web_pki_record(
+    outcome: &TofuOutcome,
+    current: &Observed,
+    recorded: Option<&str>,
+) -> Option<String> {
+    let pinned = matches!(outcome, TofuOutcome::Trusted | TofuOutcome::Renewed { .. });
+    (pinned && current.web_pki_valid && recorded != Some(current.fingerprint.as_str()))
+        .then(|| current.fingerprint.clone())
+}
+
+/// Load the stored pin and decide. Persists only the automatic cases: the
+/// web-PKI record of a publicly valid pinned leaf, and a renewal's new pin.
+/// The record lives in its own store: losing it only means the next renewal
+/// prompts.
 pub(crate) fn evaluate<R: Runtime>(
     app: &AppHandle<R>,
     host: &str,
-    fingerprint: &str,
+    current: &Observed,
 ) -> Result<TofuOutcome, String> {
     let stored = load_stored_fingerprint(app, host)?;
-    Ok(decide(stored, fingerprint))
+    let records = crate::json_store::open(app, CERT_WEB_PKI_STORE).ok();
+    let recorded = records.as_ref().and_then(|r| match r.get(host) {
+        Some(Value::String(s)) => Some(s),
+        _ => None,
+    });
+    let outcome = decide(stored, recorded.as_deref(), current);
+    if let TofuOutcome::Renewed { stored } = &outcome {
+        let certs = crate::json_store::open(app, CERTS_STORE)
+            .map_err(|e| format!("failed to open certs store: {e}"))?;
+        certs.set(host, Value::String(current.fingerprint.clone()));
+        if let Err(e) = certs.save() {
+            certs.set(host, Value::String(stored.clone()));
+            return Err(format!("failed to persist renewed cert fingerprint: {e}"));
+        }
+        // Fingerprints are public cert hashes — safe to log; the TOFU audit trail.
+        log::info!(
+            "[tofu] cert for {host} renewed by a publicly trusted CA: pin {stored} -> {}",
+            current.fingerprint
+        );
+    }
+    if let (Some(fp), Some(r)) = (
+        web_pki_record(&outcome, current, recorded.as_deref()),
+        &records,
+    ) {
+        r.set(host, Value::String(fp));
+        if let Err(e) = r.save() {
+            log::warn!("[tofu] failed to record web-PKI validity for {host}: {e}");
+        }
+    }
+    Ok(outcome)
 }
 
 /// The human-readable mismatch message. The frontend parses `Stored:` out of it,
@@ -409,24 +527,125 @@ pub(crate) fn mismatch_message(host: &str, stored: &str, current: &str) -> Strin
 mod tests {
     use super::*;
 
+    fn seen(fingerprint: &str, web_pki_valid: bool) -> Observed {
+        Observed {
+            fingerprint: fingerprint.into(),
+            web_pki_valid,
+        }
+    }
+
     #[test]
     fn decide_first_use_when_no_pin() {
-        assert_eq!(decide(None, "aa:bb"), TofuOutcome::FirstUse);
+        assert_eq!(
+            decide(None, None, &seen("aa:bb", false)),
+            TofuOutcome::FirstUse
+        );
     }
 
     #[test]
     fn decide_trusted_when_pin_matches() {
-        assert_eq!(decide(Some("aa:bb".into()), "aa:bb"), TofuOutcome::Trusted);
+        assert_eq!(
+            decide(Some("aa:bb".into()), None, &seen("aa:bb", false)),
+            TofuOutcome::Trusted
+        );
     }
 
     #[test]
     fn decide_mismatch_when_pin_differs() {
         assert_eq!(
-            decide(Some("aa:bb".into()), "cc:dd"),
+            decide(Some("aa:bb".into()), None, &seen("cc:dd", false)),
             TofuOutcome::Mismatch {
                 stored: "aa:bb".into()
             }
         );
+    }
+
+    // B11-5: a routine public-CA renewal re-pins silently, but only when the
+    // pinned leaf was itself publicly valid for this host AND the new one is.
+    #[test]
+    fn decide_renews_when_old_and_new_leaf_are_web_pki_valid() {
+        assert_eq!(
+            decide(Some("aa:bb".into()), Some("aa:bb"), &seen("cc:dd", true)),
+            TofuOutcome::Renewed {
+                stored: "aa:bb".into()
+            }
+        );
+    }
+
+    #[test]
+    fn decide_prompts_when_new_leaf_is_not_web_pki_valid() {
+        assert_eq!(
+            decide(Some("aa:bb".into()), Some("aa:bb"), &seen("cc:dd", false)),
+            TofuOutcome::Mismatch {
+                stored: "aa:bb".into()
+            }
+        );
+    }
+
+    #[test]
+    fn decide_prompts_when_pinned_leaf_was_not_web_pki_valid() {
+        // A self-signed pin has no web-PKI record, so any change prompts even
+        // when the new certificate is publicly valid.
+        assert_eq!(
+            decide(Some("aa:bb".into()), None, &seen("cc:dd", true)),
+            TofuOutcome::Mismatch {
+                stored: "aa:bb".into()
+            }
+        );
+    }
+
+    #[test]
+    fn decide_prompts_when_web_pki_record_is_for_another_leaf() {
+        // The record vouches for one exact leaf; a stale one (the user later
+        // accepted a different certificate by hand) vouches for nothing.
+        assert_eq!(
+            decide(Some("aa:bb".into()), Some("ee:ff"), &seen("cc:dd", true)),
+            TofuOutcome::Mismatch {
+                stored: "aa:bb".into()
+            }
+        );
+    }
+
+    #[test]
+    fn decide_first_use_still_prompts_for_a_web_pki_valid_leaf() {
+        assert_eq!(
+            decide(None, None, &seen("aa:bb", true)),
+            TofuOutcome::FirstUse
+        );
+    }
+
+    #[test]
+    fn web_pki_record_follows_the_trusted_leaf() {
+        // A pinned leaf seen publicly valid gets recorded once...
+        assert_eq!(
+            web_pki_record(&TofuOutcome::Trusted, &seen("aa:bb", true), None),
+            Some("aa:bb".to_string())
+        );
+        assert_eq!(
+            web_pki_record(&TofuOutcome::Trusted, &seen("aa:bb", true), Some("aa:bb")),
+            None
+        );
+        // ...a renewal records the new leaf...
+        let renewed = TofuOutcome::Renewed {
+            stored: "aa:bb".into(),
+        };
+        assert_eq!(
+            web_pki_record(&renewed, &seen("cc:dd", true), Some("aa:bb")),
+            Some("cc:dd".to_string())
+        );
+        // ...and nothing else is ever recorded.
+        assert_eq!(
+            web_pki_record(&TofuOutcome::Trusted, &seen("aa:bb", false), None),
+            None
+        );
+        assert_eq!(
+            web_pki_record(&TofuOutcome::FirstUse, &seen("aa:bb", true), None),
+            None
+        );
+        let mismatch = TofuOutcome::Mismatch {
+            stored: "aa:bb".into(),
+        };
+        assert_eq!(web_pki_record(&mismatch, &seen("cc:dd", true), None), None);
     }
 
     #[test]
@@ -541,9 +760,69 @@ mod tests {
         // Accepts unconditionally — the TOFU gate happens after the handshake.
         assert!(result.is_ok());
         assert_eq!(
-            captured.lock().unwrap().as_deref(),
-            Some(fingerprint_hex(b"leaf-cert").as_str())
+            captured
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|o| o.fingerprint.clone()),
+            Some(fingerprint_hex(b"leaf-cert"))
         );
+    }
+
+    fn capture_with(stub_accepts: bool, host: &str) -> Option<Observed> {
+        use rustls::client::danger::ServerCertVerifier;
+
+        let (verifier, captured) = CaptureVerifier::with_web_pki(Arc::new(StubVerifier {
+            accept: stub_accepts,
+        }));
+        let leaf = rustls::pki_types::CertificateDer::from(b"leaf-cert".to_vec());
+        let name = rustls::pki_types::ServerName::try_from(host.to_string()).unwrap();
+        let result = verifier.verify_server_cert(
+            &leaf,
+            &[],
+            &name,
+            &[],
+            rustls::pki_types::UnixTime::since_unix_epoch(std::time::Duration::from_secs(0)),
+        );
+        // The web-PKI verdict is recorded, never enforced: the handshake is
+        // accepted either way and the TOFU gate decides afterwards.
+        assert!(result.is_ok());
+        let observed = captured.lock().unwrap().clone();
+        observed
+    }
+
+    #[test]
+    fn capture_verifier_records_web_pki_validity_for_a_dns_name() {
+        assert!(
+            capture_with(true, "chat.example.com")
+                .unwrap()
+                .web_pki_valid
+        );
+        assert!(
+            !capture_with(false, "chat.example.com")
+                .unwrap()
+                .web_pki_valid
+        );
+    }
+
+    #[test]
+    fn capture_verifier_never_marks_an_ip_host_web_pki_valid() {
+        assert!(!capture_with(true, "192.168.1.10").unwrap().web_pki_valid);
+        assert!(!capture_with(true, "2001:db8::1").unwrap().web_pki_valid);
+    }
+
+    #[test]
+    fn capture_verifier_real_web_pki_rejects_an_untrusted_leaf() {
+        use rustls::client::danger::ServerCertVerifier;
+
+        let (verifier, captured) = CaptureVerifier::new();
+        let leaf = rustls::pki_types::CertificateDer::from(b"not-a-public-cert".to_vec());
+        let name = rustls::pki_types::ServerName::try_from("chat.example.com".to_string()).unwrap();
+        let now = rustls::pki_types::UnixTime::now();
+        assert!(verifier
+            .verify_server_cert(&leaf, &[], &name, &[], now)
+            .is_ok());
+        assert!(!captured.lock().unwrap().as_ref().unwrap().web_pki_valid);
     }
 
     // ── HostScopedVerifier ──────────────────────────────────────────────────
