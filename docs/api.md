@@ -3253,7 +3253,7 @@ The dashboard's attention panel (RI-07): server-side health signals and the
 deduplicated warnings raised from them. The server samples once a minute
 (the free space on the data volume, the SQLite writer pool's cumulative wait,
 reconnect resumes, hub broadcast drops, per-channel topic sheds and
-send-queue overflow disconnects, the newest backup file, the LiveKit voice path's state and each maintenance job's last
+send-queue overflow disconnects, the newest backup file, the LiveKit voice path's state, the served TLS certificate's expiry and each maintenance job's last
 run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.

@@ -57,9 +57,9 @@ type setupResponse struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// CertificateFingerprint is the served TLS leaf certificate's SHA-256 in
 	// the client's pin format, shown on the finish step so the operator can
-	// publish it for users to compare out of band. Omitted when there is no
-	// statically loaded certificate (TLS off, or ACME before its first
-	// handshake), and when the wizard changed tls.mode: the restart will serve
+	// publish it for users to compare out of band. Omitted when no served
+	// certificate is known (TLS off, or ACME before its first handshake),
+	// and when the wizard changed tls.mode: the restart will serve
 	// a different certificate, which the dashboard shows once it is back.
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
 	// RecoveryKitSecret is the owner's recovery kit, present unless the
