@@ -16,6 +16,12 @@
  *
  * Polls once on start (the connect) and then on window focus / the document
  * becoming visible; the returned function polls again (a reconnect). No timer.
+ *
+ * A listing costs a fresh REST call (and its own TLS handshake through the
+ * desktop tunnel), and listing IS the acknowledgement, so there is nothing to
+ * gain from repeating it within minutes. A minimum interval collapses the
+ * focus+visibility pair, a rapid alt-tab and a quick reconnect into one
+ * request; the next event past the interval lists again.
  */
 
 import type { SessionInfo } from "@lib/api";
@@ -32,6 +38,13 @@ const log = createLogger("session-notice");
  * last-used are what tell two desktops apart. Anything else is shown as sent.
  */
 const DESKTOP_USER_AGENT = /^(OwnCord-Client|tauri-plugin-http)\//;
+
+/**
+ * Minimum time between listings. The window is short enough that a genuine
+ * return still refreshes the notice, and long enough that the focus +
+ * visibility pair, a quick alt-tab and a reconnect make one request.
+ */
+export const MIN_POLL_INTERVAL_MS = 30_000;
 
 export function sessionDeviceLabel(device: string): string {
   if (device === "") return accountText("notice.unknownDevice");
@@ -70,10 +83,14 @@ export function startSessionNotice({
   signal,
 }: SessionNoticeOptions): () => void {
   let inFlight = false;
+  let lastPolledAt = Number.NEGATIVE_INFINITY;
 
   const poll = (): void => {
     // focus and visibilitychange usually fire together; one listing is enough.
     if (inFlight || signal.aborted) return;
+    const now = Date.now();
+    if (now - lastPolledAt < MIN_POLL_INTERVAL_MS) return;
+    lastPolledAt = now;
     inFlight = true;
     fetchSessions(signal)
       .then((sessions) => {

@@ -29,7 +29,7 @@
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
 use log::{debug, info, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -43,6 +43,14 @@ use crate::tofu::{self, TofuOutcome};
 /// Tauri-managed state: one running tunnel per remote host.
 pub struct HttpProxyState {
     inner: Mutex<HashMap<String, ProxyEntry>>,
+    /// Hosts already reported as pinned this app session. Every request opens
+    /// its own tunnel connection and re-runs the TOFU check, so a trusted
+    /// outcome would otherwise emit a `cert-tofu` event (and the webview a log
+    /// line) once per request. CLI-04(a): emit the trusted event for a host once
+    /// per session. The actionable statuses (`first_use`, `mismatch`) are not
+    /// gated — the first-use ceremony must be able to prompt again after the
+    /// user dismisses it.
+    trusted_reported: std::sync::Mutex<HashSet<String>>,
 }
 
 struct ProxyEntry {
@@ -54,7 +62,19 @@ impl HttpProxyState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            trusted_reported: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Whether this host has not been reported as pinned yet, marking it
+    /// reported. A poisoned lock is not fatal — the worst case is one repeated
+    /// log line, never a trust decision — so recover the guard.
+    fn claim_trusted_report(&self, host: &str) -> bool {
+        let mut reported = self
+            .trusted_reported
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reported.insert(host.to_string())
     }
 
     /// Remove the `remote_host` entry, but only if it still points at `port`.
@@ -242,14 +262,23 @@ async fn handle_connection<R: Runtime>(
     match tofu::evaluate(&app, &store_key, &observed)? {
         // A routine public-CA renewal was re-pinned by evaluate: as trusted.
         TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
-            crate::ws_proxy::emit_cert_tofu(
-                &app,
-                serde_json::json!({
-                    "host": store_key,
-                    "fingerprint": fingerprint,
-                    "status": "trusted",
-                }),
-            );
+            // CLI-04(a): one trusted event per host per app session. Each request
+            // is its own tunnel connection and re-runs this check, so without the
+            // gate a busy server emits (and the webview logs) one line per REST
+            // call. Unmanaged state (a test harness) reports every time.
+            let first_report = app
+                .try_state::<HttpProxyState>()
+                .is_none_or(|state| state.claim_trusted_report(&store_key));
+            if first_report {
+                crate::ws_proxy::emit_cert_tofu(
+                    &app,
+                    serde_json::json!({
+                        "host": store_key,
+                        "fingerprint": fingerprint,
+                        "status": "trusted",
+                    }),
+                );
+            }
         }
         // F4/F8: a first-use cert is NOT silently pinned or forwarded to. Reject
         // the request (502) and surface the fingerprint so the user can confirm
@@ -518,4 +547,24 @@ mod tests {
 
     // OC-0218 note: the copy_with_deadline stall test lives in
     // proxy_common.rs now, next to the shared helper.
+
+    // CLI-04(a): the trusted `cert-tofu` report is one per host per app session.
+    // A busy server's every REST call re-runs the TOFU check on its own tunnel
+    // connection, and a report per call is the log noise the item named.
+    #[test]
+    fn trusted_report_is_claimed_once_per_host() {
+        let state = HttpProxyState::new();
+        assert!(
+            state.claim_trusted_report("chat.example:8443"),
+            "the first trusted report for a host must be emitted"
+        );
+        assert!(
+            !state.claim_trusted_report("chat.example:8443"),
+            "a repeat report for the same host must be suppressed"
+        );
+        assert!(
+            state.claim_trusted_report("other.example:8443"),
+            "a different host is its own first report"
+        );
+    }
 }

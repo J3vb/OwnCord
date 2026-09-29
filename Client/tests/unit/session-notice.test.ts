@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   sessionDeviceLabel,
   sessionNoticeMessage,
   startSessionNotice,
+  MIN_POLL_INTERVAL_MS,
 } from "../../src/lib/session-notice";
 import type { SessionInfo } from "../../src/lib/api";
 
@@ -59,27 +60,6 @@ describe("startSessionNotice", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("lists again on window focus and when the document becomes visible", async () => {
-    const { fetchSessions } = start([]);
-    await flush();
-    expect(fetchSessions).toHaveBeenCalledTimes(1);
-
-    window.dispatchEvent(new Event("focus"));
-    await flush();
-    document.dispatchEvent(new Event("visibilitychange"));
-    await flush();
-    expect(fetchSessions).toHaveBeenCalledTimes(3);
-  });
-
-  it("runs one listing at a time when focus and visibility fire together", async () => {
-    const { fetchSessions } = start([]);
-    await flush();
-    window.dispatchEvent(new Event("focus"));
-    document.dispatchEvent(new Event("visibilitychange"));
-    await flush();
-    expect(fetchSessions).toHaveBeenCalledTimes(2);
-  });
-
   it("stops listening once aborted", async () => {
     const { ac, fetchSessions, poll } = start([]);
     await flush();
@@ -88,6 +68,59 @@ describe("startSessionNotice", () => {
     poll();
     await flush();
     expect(fetchSessions).toHaveBeenCalledTimes(1);
+  });
+
+  // The listing is expensive — a fresh REST call, its own TLS handshake through
+  // the tunnel — and listing IS the acknowledgement, so the notice never needs
+  // a repeat within minutes. A minimum interval keeps focus/visibility churn
+  // and a rapid reconnect from each making their own request.
+  describe("minimum interval between listings", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("coalesces focus + visibility firing together into one listing", async () => {
+      const { fetchSessions } = start([]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSessions).toHaveBeenCalledTimes(1); // the start listing
+
+      // Regaining the window fires both events back to back; the pair, and a
+      // quick alt-tab-back, must all land in the start listing's window.
+      for (let i = 0; i < 4; i++) {
+        window.dispatchEvent(new Event("focus"));
+        document.dispatchEvent(new Event("visibilitychange"));
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSessions).toHaveBeenCalledTimes(1);
+    });
+
+    it("lists again once the interval has passed", async () => {
+      const { fetchSessions } = start([]);
+      await vi.advanceTimersByTimeAsync(MIN_POLL_INTERVAL_MS);
+
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSessions).toHaveBeenCalledTimes(2);
+
+      // The visibility event of the same return is inside the new window.
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSessions).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not list after abort", async () => {
+      const { ac, fetchSessions } = start([]);
+      await vi.advanceTimersByTimeAsync(MIN_POLL_INTERVAL_MS);
+
+      ac.abort();
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(MIN_POLL_INTERVAL_MS);
+
+      expect(fetchSessions).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
