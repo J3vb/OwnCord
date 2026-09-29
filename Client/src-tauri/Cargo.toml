@@ -130,8 +130,9 @@ notify-rust = "4"
 # Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs).
 # Data_Xml_Dom + UI_Notifications: the protocol-activation message toast
 # (message_notification.rs), whose click must survive a banner timeout by
-# launching the owncord:// handler. Already in the tree via tauri-winrt-
-# notification, so this adds no new crate — just features on the one we build.
+# launching the owncord:// handler. These are features on the existing 0.58
+# direct dependency, so no new crate version; tauri-winrt-notification builds
+# its own separate windows 0.61 copy, so nothing here is shared with it.
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Data_Xml_Dom",
