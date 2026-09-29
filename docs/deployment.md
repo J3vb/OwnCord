@@ -662,7 +662,11 @@ a time; a second request while one is being prepared is refused.
 
 The panel asks the server for a short-lived single-use link and opens it as a
 plain download, so the browser streams the archive straight to disk — there is
-no size that has to fit in the page's memory, and no documented ceiling. The
+no size limit imposed by the page's memory. The download must still finish
+within 2 hours of the request, so for a very large server on a slow link take
+the archive by hand with the procedure in
+[Before upgrading: take the archive](#before-upgrading-take-the-archive), or
+rely on a database backup, which `chatserver restore` can put back. The
 link token is random, single-use, Owner-bound and expires within a minute;
 nothing else can use it. The build starts when the browser opens the link, so
 a refusal from the free-space check arrives as a failed download in the

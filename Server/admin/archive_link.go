@@ -38,11 +38,9 @@ var linkStore = &archiveLinks{tokens: make(map[string]archiveLink)}
 
 // issue mints a random single-use token bound to actorID and the credential
 // hash, expiring after archiveLinkTTL. The token is never logged.
-func (s *archiveLinks) issue(actorID int64, tokenHash string) (string, time.Time, error) {
+func (s *archiveLinks) issue(actorID int64, tokenHash string) (string, time.Time) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", time.Time{}, err
-	}
+	_, _ = rand.Read(b)
 	token := hex.EncodeToString(b)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -55,7 +53,7 @@ func (s *archiveLinks) issue(actorID int64, tokenHash string) (string, time.Time
 	}
 	expires := now.Add(archiveLinkTTL)
 	s.tokens[token] = archiveLink{actorID: actorID, tokenHash: tokenHash, expires: expires}
-	return token, expires, nil
+	return token, expires
 }
 
 // redeem consumes a token, returning its link and whether it was valid and
@@ -92,12 +90,7 @@ func handleArchiveLink() http.HandlerFunc {
 			return
 		}
 		actor := actorFromContext(r)
-		token, expires, err := linkStore.issue(actor, hash)
-		if err != nil {
-			slog.Error("failed to issue archive link", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not create the download link")
-			return
-		}
+		token, expires := linkStore.issue(actor, hash)
 		// The token is never logged — only that one was issued and for whom.
 		slog.Info("archive download link issued", "actor_id", actor, "expires_at", expires.UTC())
 		writeJSON(w, http.StatusOK, map[string]string{
