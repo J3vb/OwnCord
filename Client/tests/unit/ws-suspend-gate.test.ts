@@ -119,10 +119,14 @@ describe("wake reconnect signal (U4 follow-up)", () => {
 
     vi.setSystemTime(Date.now() + 31_000);
     await vi.advanceTimersByTimeAsync(30_000);
-
-    // No wake flag on the (still connected) socket's next ordinary frames; the
-    // point is that no wake reconnect was armed.
     expect(reconnects()).toHaveLength(0);
+
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(reconnects().length).toBeGreaterThanOrEqual(1);
+    emitTauriEvent("ws-state", "open");
+    expect(lastAuthPayload().wake).toBeUndefined();
   });
 
   it("an explicit takeover (Use here) after a wake is not marked a wake", async () => {
