@@ -13,7 +13,8 @@
 //   cd Client && npm run test:e2e:build-server
 //   node tests/e2e/scripts/measure-tunnel-tls.mjs [one-way delay ms ...]
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { X509Certificate } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import https from "node:https";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -38,12 +39,18 @@ const freePort = () =>
     });
   });
 
+// The server's own self-signed certificate, pinned by fingerprint as the tunnel
+// pins it: it carries no subject alternative name to check a host against. A
+// kept-alive agent carries the pin itself: Node gives a per-request
+// checkServerIdentity its own pool key, so the socket would never be reused.
+let pinned;
+
 /** One request on `agent`; resolves with the body and the elapsed ms. */
 const request = (port, path, { agent, method = "GET", headers = {}, body } = {}) =>
   new Promise((done, fail) => {
     const start = performance.now();
     const req = https.request(
-      { host: "127.0.0.1", port, path, method, headers, agent, rejectUnauthorized: false },
+      { host: "127.0.0.1", port, path, method, headers, agent, ...(agent ? {} : pinned) },
       (res) => {
         const chunks = [];
         res.on("data", (chunk) => chunks.push(chunk));
@@ -92,7 +99,7 @@ async function time(port, path, headers) {
       (await request(port, path, { agent: false, headers: { ...headers, Connection: "close" } }))
         .ms,
     );
-    const agent = new https.Agent({ keepAlive: true, maxSockets: 1 });
+    const agent = new https.Agent({ keepAlive: true, maxSockets: 1, ...pinned });
     await request(port, path, { agent, headers });
     kept.push((await request(port, path, { agent, headers })).ms);
     agent.destroy();
@@ -133,6 +140,15 @@ try {
     setupToken = /Setup token\s+(\S+)/.exec(log)?.[1];
   }
   if (!setupToken) throw new Error("the server printed no setup token");
+  const cert = await readFile(join(directory, "data", "cert.pem"));
+  const fingerprint = new X509Certificate(cert).fingerprint256;
+  pinned = {
+    ca: cert,
+    checkServerIdentity: (_host, peer) =>
+      peer.fingerprint256 === fingerprint
+        ? undefined
+        : new Error("the server certificate does not match its pin"),
+  };
   await sleep(500);
   const json = { "Content-Type": "application/json" };
   const { token } = JSON.parse(
