@@ -54,6 +54,10 @@ var SubjectInventory = []InventoryClass{
 	{"14c message requests", `SELECT COUNT(*) FROM message_requests WHERE sender_id = ? OR recipient_id = ?`, inventoryBothIDs},
 	{"14d trusted senders", `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? OR sender_id = ?`, inventoryBothIDs},
 	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, inventoryBothIDs},
+	// 15b (migration 055): a redemption the subject spent. The row survives the
+	// erasure with its user_id NULLed; this class goes to zero on the link, not
+	// the row, the same bare-id-plus-token shape as every actor class above.
+	{"15b invite redemptions", `SELECT COUNT(*) FROM invite_redemptions WHERE user_id = ?`, inventoryByUID},
 	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, inventoryByUID},
 	{"17 blocks", `SELECT COUNT(*) FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?`, inventoryBothIDs},
 	{"18 channel user overrides", `SELECT COUNT(*) FROM channel_user_overrides WHERE user_id = ?`, inventoryByUID},

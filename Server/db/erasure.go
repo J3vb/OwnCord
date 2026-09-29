@@ -404,6 +404,11 @@ var erasureStatements = []struct {
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},
 	{"invites redeemed", `UPDATE invites SET redeemed_by = NULL WHERE redeemed_by = ?`},
+	// Invite redemption history (migration 055): a redemption row the subject
+	// spent survives with its invite (and use_count) so the owner keeps the
+	// count, but the link to the erased account is cut. Rows for the subject's
+	// OWN invites are already gone via the invite_id cascade above.
+	{"invite redemptions", `UPDATE invite_redemptions SET user_id = NULL WHERE user_id = ?`},
 	// Replay events naming the subject (HP-4 decision 1).
 	{"events", `DELETE FROM events WHERE ` + EventNamesUserPredicate},
 }

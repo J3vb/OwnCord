@@ -27,6 +27,8 @@ window.__test = {
   effectiveBan: effectiveBan,
   myPosition: myPosition,
   renderUsers: renderUsers,
+  renderInvites: renderInvites,
+  openInviteRedemptions: openInviteRedemptions,
   renderAudit: renderAudit,
   renderDashboard: renderDashboard,
   auditSentence: auditSentence,
@@ -69,6 +71,8 @@ interface Bridge {
   effectiveBan: (u: any) => boolean;
   myPosition: () => number;
   renderUsers: () => Promise<string>;
+  renderInvites: () => Promise<string>;
+  openInviteRedemptions: (code: string) => Promise<void>;
   renderAudit: () => Promise<string>;
   renderDashboard: () => Promise<string>;
   auditSentence: (e: any) => string;
@@ -494,6 +498,22 @@ describe("Server/admin/static — panel behaviour", () => {
       if (p === "/api/v1/admin/plugins/")
         return { json: [{ id: 1, name: "hello", version: "1.0.0", enabled: true }] };
       if (p === "/api/v1/emoji/") return { json: [{ id: 1, shortcode: "wave" }] };
+      if (p === "/api/v1/invites/")
+        return {
+          json: [
+            {
+              id: 1,
+              code: "invite-code-1",
+              max_uses: 5,
+              uses: 1,
+              expires_at: null,
+              revoked: false,
+              created_at: "2026-09-01 10:00:00",
+            },
+          ],
+        };
+      if (p === "/api/v1/invites/invite-code-1/redemptions")
+        return { json: [{ user_id: 2, username: "redeemer", redeemed_at: "2026-09-01 11:00:00" }] };
       return { json: {} };
     };
     const booted = await boot([], respond);
@@ -1088,6 +1108,55 @@ describe("Server/admin/static — panel behaviour", () => {
     // Editing an existing role still shows that role's own position.
     booted.bridge.openRoleModal(9);
     expect((doc.getElementById("rolePos") as HTMLInputElement).value).toBe("99");
+  });
+
+  // O1. The setup wizard promises invites can be managed "later in the admin
+  // panel"; before this, the panel had no invite page, and invites.redeemed_by
+  // was never written, so a leaked code could not be traced to its redeemer.
+  it("manages invites and shows a redemption history per code (O1)", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/api/v1/invites/")
+        return {
+          json: [
+            {
+              id: 1,
+              code: "leaked-code",
+              max_uses: 5,
+              uses: 2,
+              expires_at: null,
+              revoked: false,
+              created_at: "2026-09-01 10:00:00",
+            },
+          ],
+        };
+      if (p === "/api/v1/invites/leaked-code/redemptions")
+        return {
+          json: [
+            { user_id: 2, username: "alice", redeemed_at: "2026-09-01 11:00:00" },
+            { user_id: null, username: "", redeemed_at: "2026-09-01 12:00:00" },
+          ],
+        };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    // The section renders and lists the invite.
+    const html = await booted.bridge.renderInvites();
+    expect(html).toContain("leaked-code");
+    expect(html).toContain("2 / 5 uses");
+
+    // Opening the history shows the redeemer and marks the erased one.
+    await booted.bridge.openInviteRedemptions("leaked-code");
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(true);
+    const modal = doc.getElementById("modalInner")!.textContent!;
+    expect(modal).toContain("alice");
+    expect(modal).toContain("Account erased");
   });
 
   // OC-0355. The hotkey used to preventDefault whenever a .filter-search

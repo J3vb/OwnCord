@@ -71,6 +71,21 @@ func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
 	return invites, nil
 }
 
+// ListInviteRedemptions returns who redeemed an invite, newest first, so an
+// owner can trace a leaked invite to its redeemer (O1). The invite is resolved
+// by code first; an unknown code is ErrNotFound rather than an empty history.
+func (s *InviteService) ListInviteRedemptions(ctx context.Context, code string) ([]*db.InviteRedemption, error) {
+	invite, err := s.st.GetInvite(ctx, code)
+	if err != nil || invite == nil {
+		return nil, fmt.Errorf("%w: invite not found", ErrNotFound)
+	}
+	reds, err := s.st.ListInviteRedemptions(ctx, invite.ID, 200)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to list invite redemptions: %w", ErrInternal, err)
+	}
+	return reds, nil
+}
+
 // RevokeInvite revokes an invite by code on behalf of actorID.
 func (s *InviteService) RevokeInvite(ctx context.Context, actorID int64, code string) error {
 	invite, err := s.st.GetInvite(ctx, code)
