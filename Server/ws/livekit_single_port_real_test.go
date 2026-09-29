@@ -105,24 +105,22 @@ func runVoiceOverGeneratedConfig(t *testing.T, cfg *config.VoiceConfig, binary s
 	received := make(chan struct{}, 1)
 	subscribed := make(chan *lksdk.RemoteTrackPublication, 1)
 	sub, err := lksdk.ConnectToRoomWithToken(cfg.LiveKitURL, token("subscriber"), &lksdk.RoomCallback{
-		ParticipantCallback: lksdk.ParticipantCallback{
-			OnTrackSubscribed: func(track *webrtc.TrackRemote, remote *lksdk.RemoteTrackPublication, _ *lksdk.RemoteParticipant) {
-				select {
-				case subscribed <- remote:
-				default:
-				}
-				go func() {
-					for {
-						if _, _, rerr := track.ReadRTP(); rerr != nil {
-							return
-						}
-						select {
-						case received <- struct{}{}:
-						default:
-						}
+		OnTrackSubscribed: func(track *webrtc.TrackRemote, remote *lksdk.RemoteTrackPublication, _ *lksdk.RemoteParticipant) {
+			select {
+			case subscribed <- remote:
+			default:
+			}
+			go func() {
+				for {
+					if _, _, rerr := track.ReadRTP(); rerr != nil {
+						return
 					}
-				}()
-			},
+					select {
+					case received <- struct{}{}:
+					default:
+					}
+				}
+			}()
 		},
 	})
 	if err != nil {
