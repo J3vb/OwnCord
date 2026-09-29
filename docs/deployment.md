@@ -382,7 +382,7 @@ the server loads and serves a certificate whose `NotAfter` is in the past, and
 the desktop keeps connecting past expiry because the pin is the fingerprint,
 not the validity window — `Client/src-tauri/src/tofu.rs`'s verifiers decide on
 the fingerprint alone and leave the validity dates unused. **Rotate before the
-two years are up**; the server gives no warning as expiry approaches.
+two years are up**; the Dashboard's attention panel warns three weeks ahead.
 
 #### Rotating the self-signed certificate
 
@@ -430,7 +430,10 @@ Certificates are cached under `acme_cache_dir`. And the sentence owners do not
 expect: **the desktop client pins this certificate too** — the first-use
 prompt is the same in every `tls.mode` — so a Let's Encrypt renewal changes
 the fingerprint and triggers the mismatch modal on every desktop client
-([trust-model.md](trust-model.md)).
+([trust-model.md](trust-model.md)). The admin Dashboard shows the fingerprint
+once the first HTTPS connection has been made, and the new one after
+each renewal; publish it every time
+([Publishing the fingerprint](#publishing-the-fingerprint-after-a-renewal)).
 
 ### Manual Certificate
 
@@ -461,6 +464,31 @@ tls:
 Every connection is plaintext HTTP — passwords, tokens and messages are
 readable by anyone on the path;
 [trust-model.md](trust-model.md) states that plainly.
+
+### Publishing the fingerprint after a renewal
+
+The desktop client pins the certificate it sees, so when a reverse proxy or
+Let's Encrypt renews it (about every 60 days), every member gets a
+"Certificate Changed" prompt that asks them to get the current fingerprint from
+you through another channel. Publish it each time the certificate changes:
+
+- **`self_signed`, `manual` and `acme`:** copy it from the admin Dashboard's
+  **Certificate fingerprint** card (in `acme` mode it appears after the first
+  HTTPS connection and updates after each renewal).
+- **`off` behind a reverse proxy:** the proxy serves the certificate, so
+  OwnCord cannot read it. Run this on any machine with OpenSSL, with your
+  domain (and your HTTPS port, if it is not 443):
+
+  ```sh
+  openssl s_client -connect chat.example.com:443 -servername chat.example.com </dev/null 2>/dev/null \
+    | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr 'A-F' 'a-f'
+  ```
+
+  It prints the fingerprint in the lower-case colon-hex form the app shows.
+  Run it from outside your network when you can, so it sees what members see.
+
+Post it somewhere members already trust — another chat platform, a call — not
+inside OwnCord, which they cannot reach until they have accepted.
 
 ## Reverse Proxy Topology
 

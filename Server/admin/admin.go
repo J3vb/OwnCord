@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/updater"
@@ -17,18 +18,31 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
-// leafFingerprint is the served TLS certificate's SHA-256 in the client's pin
-// format, set once at startup via SetLeafFingerprint. It is not a secret — it
-// is printed in the start-up banner for users to compare out of band — and it
-// is empty when there is no statically loaded certificate (TLS off, or ACME
-// before its first handshake). The admin dashboard and the setup wizard's
-// finish step surface it so the operator does not have to watch stderr.
-var leafFingerprint string
+// servedCert reports the TLS certificate being served now, and tlsMode the
+// configured tls.mode, both set once at startup via SetServedCertificate. The
+// fingerprint is not a secret — it is printed in the start-up banner for
+// users to compare out of band. The admin dashboard and the setup wizard's
+// finish step surface it so the operator does not have to watch stderr; in
+// acme mode it is learned on the first handshake and follows every renewal.
+var (
+	servedCert = func() auth.ServedCert { return auth.ServedCert{} }
+	tlsMode    string
+)
 
-// SetLeafFingerprint installs the served certificate's fingerprint for the
-// admin panel to surface. Call once at startup, next to SetDatabasePath.
-func SetLeafFingerprint(fp string) {
-	leafFingerprint = fp
+// SetServedCertificate installs the TLS mode and the served-certificate
+// source for the admin panel to surface. Call once at startup, next to
+// SetDatabasePath. A nil served reports none.
+func SetServedCertificate(mode string, served func() auth.ServedCert) {
+	if served == nil {
+		served = func() auth.ServedCert { return auth.ServedCert{} }
+	}
+	tlsMode, servedCert = mode, served
+}
+
+// ServedCertificate is the attention panel's certificate source: the TLS
+// mode and the served leaf, zero when none is known.
+func ServedCertificate() (string, auth.ServedCert) {
+	return tlsMode, servedCert()
 }
 
 // NewHandler returns an http.Handler that serves both the admin REST API and

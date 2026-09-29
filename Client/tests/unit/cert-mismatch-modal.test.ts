@@ -87,6 +87,21 @@ describe("CertMismatchModal", () => {
     expect(texts).toContain("11:22:33:44");
   });
 
+  it("tells the user how to verify the new fingerprint before accepting", () => {
+    mountModal();
+    const desc = container.querySelector(".cert-desc")?.textContent ?? "";
+    // A routine renewal is named as such, so the prompt is not read as
+    // alarm-by-default...
+    expect(desc).toMatch(/Let's Encrypt or a reverse proxy/);
+    // ...and it says how to check: who has the value, where they find it,
+    // which row to compare, over which channel, and what to do otherwise.
+    expect(desc).toMatch(/server owner/);
+    expect(desc).toMatch(/admin Dashboard/);
+    expect(desc).toMatch(/matches Current/);
+    expect(desc).toMatch(/another channel/);
+    expect(desc).toMatch(/choose Disconnect/);
+  });
+
   it("shows 'Unknown' when storedFingerprint is empty", () => {
     mountModal({ storedFingerprint: "" });
     const fps = container.querySelectorAll(".cert-fingerprint");

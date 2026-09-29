@@ -17,11 +17,13 @@ import (
 // ─── User Handlers ───────────────────────────────────────────────────────────
 
 // statsResponse is the dashboard payload: the database stats flattened with
-// the served certificate's fingerprint (see SetLeafFingerprint). The
+// the TLS mode and the served certificate (see SetServedCertificate). The
 // fingerprint is the value users compare out of band before accepting the
-// client's trust prompt; it is omitted when there is none to show.
+// client's trust prompt; it is omitted when there is none to show (TLS off,
+// or ACME before its first handshake).
 type statsResponse struct {
 	*db.ServerStats
+	TLSMode                string `json:"tls_mode,omitempty"`
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
 }
 
@@ -35,7 +37,9 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 		if hub != nil {
 			stats.OnlineCount = hub.ClientCount()
 		}
-		writeJSON(w, http.StatusOK, statsResponse{ServerStats: stats, CertificateFingerprint: leafFingerprint})
+		resp := statsResponse{ServerStats: stats, TLSMode: tlsMode}
+		resp.CertificateFingerprint = servedCert().Fingerprint
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

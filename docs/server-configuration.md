@@ -268,7 +268,13 @@ pressure present at boot is raised rather than learned. Critical disk is
 `server.min_free_disk_mb`. The panel also reports the previous run's exit
 (`last_exit`, SRE-08), read from the boot marker `data/boot.json`: a run that
 was killed or crashed rather than shut down cleanly warns, a clean restart
-clears it, and a first start with no marker is unknown. Attention state stays
+clears it, and a first start with no marker is unknown. It also reports the
+served TLS certificate's expiry (`certificate`): for a self-signed or manual
+certificate a warning inside 21 days and critical inside 7; for an ACME
+certificate a warning once a third of its renewal window (min(lifetime/3, 30
+days) before expiry) has passed unrenewed and critical two thirds in, so 20
+and 10 days for a 90-day certificate; and unknown with TLS off or before
+ACME's first handshake. Attention state stays
 on the server: it is served
 only to `ADMINISTRATOR` holders through `GET /admin/api/attention` and is not
 exported to telemetry. Below each key's minimum the default applies, with a

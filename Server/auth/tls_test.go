@@ -2,11 +2,17 @@ package auth_test
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -522,5 +528,169 @@ func TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "chat.example.com") {
 		t.Errorf("the log does not name the configured domain:\n%s", buf.String())
+	}
+}
+
+// selfSignedLeaf builds a throwaway leaf certificate expiring at notAfter,
+// the shape an ACME issuer hands back, with Leaf populated or not.
+func selfSignedLeaf(t *testing.T, notAfter time.Time, withLeaf bool) *tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "chat.example.com"},
+		NotBefore:    notAfter.Add(-90 * 24 * time.Hour),
+		NotAfter:     notAfter,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+	if withLeaf {
+		if cert.Leaf, err = x509.ParseCertificate(der); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cert
+}
+
+// The modes with a statically loaded certificate report it as served from
+// start-up, with its expiry; TLS off serves none (a reverse proxy owns it).
+func TestLoadOrGenerate_ServedCertificate(t *testing.T) {
+	tmpDir := t.TempDir()
+	certFile := filepath.Join(tmpDir, "cert.pem")
+	keyFile := filepath.Join(tmpDir, "key.pem")
+
+	for _, mode := range []string{"self_signed", "manual"} {
+		result, err := auth.LoadOrGenerate(config.TLSConfig{Mode: mode, CertFile: certFile, KeyFile: keyFile})
+		if err != nil {
+			t.Fatalf("LoadOrGenerate(mode=%s): %v", mode, err)
+		}
+		leaf, err := x509.ParseCertificate(result.TLSConfig.Certificates[0].Certificate[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := result.Served.Current()
+		if got.Fingerprint != result.Fingerprint || got.Fingerprint == "" {
+			t.Errorf("mode=%s served fingerprint = %q, want %q", mode, got.Fingerprint, result.Fingerprint)
+		}
+		if !got.NotAfter.Equal(leaf.NotAfter) || !got.NotBefore.Equal(leaf.NotBefore) {
+			t.Errorf("mode=%s served validity = %v..%v, want %v..%v", mode, got.NotBefore, got.NotAfter, leaf.NotBefore, leaf.NotAfter)
+		}
+	}
+
+	off, err := auth.LoadOrGenerate(config.TLSConfig{Mode: "off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := off.Served.Current(); got != (auth.ServedCert{}) {
+		t.Errorf("mode=off served = %+v, want zero", got)
+	}
+}
+
+// ACME learns its leaf on the first handshake and replaces it on every
+// renewal, so the fingerprint and expiry the owner sees follow the
+// certificate members are actually shown.
+func TestTrackServed_FollowsACMERenewal(t *testing.T) {
+	tracker := &auth.CertTracker{}
+	if got := tracker.Current(); got != (auth.ServedCert{}) {
+		t.Fatalf("before any handshake served = %+v, want zero", got)
+	}
+
+	first := selfSignedLeaf(t, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), true)
+	renewed := selfSignedLeaf(t, time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC), false)
+	serve, fail := first, error(nil)
+	wrapped := auth.TrackServedForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		if fail != nil {
+			return nil, fail
+		}
+		return serve, nil
+	}, tracker)
+
+	hello := &tls.ClientHelloInfo{ServerName: "chat.example.com"}
+	if _, err := wrapped(hello); err != nil {
+		t.Fatal(err)
+	}
+	if got := tracker.Current(); got.Fingerprint != auth.LeafFingerprint(*first) || !got.NotAfter.Equal(first.Leaf.NotAfter) {
+		t.Fatalf("after first handshake served = %+v", got)
+	}
+
+	// A renewal with no parsed Leaf still reports its validity.
+	serve = renewed
+	if _, err := wrapped(hello); err != nil {
+		t.Fatal(err)
+	}
+	want := auth.ServedCert{
+		Fingerprint: auth.LeafFingerprint(*renewed),
+		NotBefore:   time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC),
+		NotAfter:    time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if got := tracker.Current(); got.Fingerprint != want.Fingerprint || !got.NotAfter.Equal(want.NotAfter) || !got.NotBefore.Equal(want.NotBefore) {
+		t.Fatalf("after renewal served = %+v, want %+v", got, want)
+	}
+
+	// A failed handshake keeps the last served certificate.
+	fail = errors.New("acme/autocert: unable to satisfy authorization")
+	if _, err := wrapped(hello); err == nil {
+		t.Fatal("the wrapper must return the issuer's error")
+	}
+	if got := tracker.Current(); got.Fingerprint != want.Fingerprint {
+		t.Fatalf("a failed handshake changed the served certificate: %+v", got)
+	}
+
+	// A TLS-ALPN-01 challenge handshake is answered with a throwaway
+	// validation certificate, never the one members see.
+	fail, serve = nil, selfSignedLeaf(t, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), true)
+	if _, err := wrapped(&tls.ClientHelloInfo{ServerName: "chat.example.com", SupportedProtos: []string{"acme-tls/1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tracker.Current(); got.Fingerprint != want.Fingerprint {
+		t.Fatalf("a challenge handshake replaced the served certificate: %+v", got)
+	}
+}
+
+// autocert keeps an RSA leaf beside the ECDSA one and hands it to clients that
+// cannot use ECDSA, such as a TLS 1.3-only probe. Members are served the
+// ECDSA leaf, so the RSA one must not replace the fingerprint the owner sees.
+func TestTrackServed_IgnoresACMERSALeaf(t *testing.T) {
+	tracker := &auth.CertTracker{}
+	ecdsaLeaf := selfSignedLeaf(t, time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), true)
+
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "chat.example.com"},
+		NotBefore:    time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &rsaKey.PublicKey, rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaLeaf := &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: rsaKey}
+
+	serve := ecdsaLeaf
+	wrapped := auth.TrackServedForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return serve, nil
+	}, tracker)
+	hello := &tls.ClientHelloInfo{ServerName: "chat.example.com"}
+
+	if _, err := wrapped(hello); err != nil {
+		t.Fatal(err)
+	}
+	serve = rsaLeaf
+	if _, err := wrapped(hello); err != nil {
+		t.Fatal(err)
+	}
+	got := tracker.Current()
+	if got.Fingerprint != auth.LeafFingerprint(*ecdsaLeaf) || !got.NotAfter.Equal(ecdsaLeaf.Leaf.NotAfter) {
+		t.Fatalf("an RSA handshake replaced the served ECDSA leaf: %+v", got)
 	}
 }

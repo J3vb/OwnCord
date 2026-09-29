@@ -22,7 +22,8 @@ Each item links to the guidance that owns it.
   "Certificate Changed" prompt. Have them compare the new fingerprint out of
   band before accepting; accepting a mismatch is indistinguishable from
   accepting an interception — see
-  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
+  [Publishing the fingerprint after a renewal](deployment.md#publishing-the-fingerprint-after-a-renewal)
+  and [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
 
 ## First-run defaults we chose not to change (accepted for beta)
 
