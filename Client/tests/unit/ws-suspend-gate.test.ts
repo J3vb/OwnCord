@@ -125,18 +125,90 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     expect(reconnects()).toHaveLength(0);
   });
 
-  it("an explicit user connect after a wake is not marked a wake", async () => {
+  it("an explicit takeover (Use here) after a wake is not marked a wake", async () => {
     await connectAndAuth();
     vi.setSystemTime(Date.now() + 10 * 60_000);
     await vi.advanceTimersByTimeAsync(30_000);
     mockInvoke.mockClear();
 
-    // The user's own Reconnect ("Use here") is a deliberate takeover, never a
-    // passive wake: no wake flag.
+    // "Use here" is the user's informed takeover, never a passive wake.
+    client.connect({ host: "localhost:8443", token: "t" }, { takeover: true });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    expect(lastAuthPayload().wake).toBeUndefined();
+  });
+
+  it("a Retry after a failed wake dial still sends wake", async () => {
+    await connectAndAuth();
+    let offline = true;
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect" && offline
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve(undefined),
+    );
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expectConsole("warn", /\[ws\] No inbound frame within the liveness deadline/);
+    // The first backoff dial fires within 1 s and fails; its retry is at
+    // least 1 s further out, so the user's Retry below is the next dial.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expectConsole("error", /ws_connect failed/);
+    offline = false;
+    mockInvoke.mockClear();
+
+    // Retry means "reconnect", not "take over from my other device".
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("ws-state", "open");
 
+    expect(lastAuthPayload().wake).toBe(true);
+  });
+
+  it("a leftover frame on the pre-sleep socket does not clear the wake", async () => {
+    await connectAndAuth();
+    mockInvoke.mockClear();
+
+    // The old socket delivers a retransmitted frame and closes after the wake:
+    // only a completed handshake proves the server still holds this session.
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "pong", payload: {} }));
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(reconnects().length).toBeGreaterThanOrEqual(1);
+    emitTauriEvent("ws-state", "open");
+    expect(lastAuthPayload().wake).toBe(true);
+  });
+
+  it("a leftover frame that beats the heartbeat tick still marks the wake", async () => {
+    await connectAndAuth();
+    mockInvoke.mockClear();
+
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "pong", payload: {} }));
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(reconnects().length).toBeGreaterThanOrEqual(1);
+    emitTauriEvent("ws-state", "open");
+    expect(lastAuthPayload().wake).toBe(true);
+  });
+
+  it("auth_ok clears the wake so a later ordinary reconnect is unmarked", async () => {
+    await connectAndAuth();
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    emitTauriEvent("ws-message", AUTH_OK);
+    mockInvoke.mockClear();
+
+    emitTauriEvent("ws-state", "closed");
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(reconnects().length).toBeGreaterThanOrEqual(1);
+    emitTauriEvent("ws-state", "open");
     expect(lastAuthPayload().wake).toBeUndefined();
   });
 

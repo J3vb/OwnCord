@@ -523,7 +523,8 @@ func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg 
 // as handleReconnect runs it. ok=false means the ring no longer covers lastSeq
 // and production would fall through to a full ready.
 func (h *Hub) ReconnectRegisterForTest(c *Client, lastSeq uint64, allowed map[int64]bool) ([][]byte, bool) {
-	return h.reconnectRegister(context.Background(), c, lastSeq, allowed, allowed, "buffer", nil, 0)
+	events, ok, _ := h.reconnectRegister(context.Background(), c, lastSeq, allowed, allowed, "buffer", nil, 0)
+	return events, ok
 }
 
 // UnregisterNowForTest exposes unregisterNow; the return is its "replaced"

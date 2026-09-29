@@ -479,14 +479,11 @@ func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int6
 
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
 	// U4: refuse a wake reconnect before ANY handshake state change — most
-	// importantly before freshConnectCleanStaleVoice below, which would delete
-	// the live device's voice row. ServeWS already refused the common case;
-	// this catches the race where another device connected after that check,
-	// and registerNow re-checks atomically below.
-	if c.wakeReconnect && h.hasLiveClientForOtherSession(c.userID, c.tokenHash) {
-		slog.Info("ws: wake reconnect refused while another device holds the session", "user_id", c.userID)
-		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeAnotherDeviceActive, "another device is active"))
-		_ = conn.Close(websocket.StatusPolicyViolation, "another device is active")
+	// importantly before the grace take and freshConnectCleanStaleVoice below,
+	// which would end the other device's live or parked call. registerNow
+	// re-checks atomically below.
+	if h.wakeBlocked(c) {
+		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
 	}
 	// The configured seam, never a caller-supplied handle: binding here is what
@@ -540,12 +537,9 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		freshConnectPreRegisterRaceHook()
 	}
 	// U4: an atomic re-check under h.mu. A device connecting between the check
-	// above and here would otherwise be displaced; refuse instead. Its teardown
-	// mirrors the wake-refusal branch above (no state was mutated yet).
+	// above and here would otherwise be displaced; refuse instead.
 	if h.registerNow(c, allowedChannelIDs) {
-		slog.Info("ws: wake reconnect refused while another device holds the session", "user_id", c.userID)
-		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeAnotherDeviceActive, "another device is active"))
-		_ = conn.Close(websocket.StatusPolicyViolation, "another device is active")
+		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
 	}
 

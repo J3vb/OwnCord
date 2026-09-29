@@ -1701,7 +1701,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
     banner.querySelector("button")!.click();
 
-    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    expect(ws.connect).toHaveBeenCalledWith(
+      { host: "chat.example.com", token: "tok-here" },
+      { takeover: true },
+    );
     expect(uiStore.getState().sessionReplaced).toBe(false);
   });
 

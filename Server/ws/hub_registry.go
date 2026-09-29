@@ -24,13 +24,13 @@ func (h *Hub) Unregister(c *Client) {
 // subscription only; a nil set denies it (fail closed).
 //
 // It returns true when c was refused because it is a wake reconnect
-// (c.wakeReconnect) and a DIFFERENT session of the same account currently
-// holds the live connection. The refusal is decided here, under h.mu, so no
-// connect can slip between the check and the replacement; c is left
-// unregistered, the live client is untouched, and the caller answers with
-// ANOTHER_DEVICE_ACTIVE and abandons the handshake (U4). A same-session
-// reconnect (the live client's own token hash) is not a refusal: it is this
-// device reclaiming its own stale socket.
+// (c.wakeReconnect) and a DIFFERENT session of the same account holds the
+// live connection or a parked grace-window call (wakeBlockedLocked). The
+// refusal is decided here, under h.mu, so no connect can slip between the
+// check and the replacement; c is left unregistered, the other session is
+// untouched, and the caller answers with ANOTHER_DEVICE_ACTIVE and abandons
+// the handshake (U4). A same-session reconnect (the live client's own token
+// hash) is not a refusal: it is this device reclaiming its own stale socket.
 //
 // Replacing an existing connection strips its subscriptions (UnsubscribeAll)
 // and re-subscribes the new one (Subscribe) as two separate PubSub-lock
@@ -48,16 +48,15 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	var replacedVoiceChID int64
 
 	h.mu.Lock()
+	if h.wakeBlockedLocked(c) {
+		// U4: leave the other device's session alone and refuse this one;
+		// the caller sends ANOTHER_DEVICE_ACTIVE and tears the handshake
+		// down. Decided under h.mu so no connect can slip in between the
+		// check and the replacement it would have done.
+		h.mu.Unlock()
+		return true
+	}
 	if old, exists := h.clients[c.userID]; exists {
-		if c.wakeReconnect && old.tokenHash != c.tokenHash {
-			// U4: a wake reconnect while another device (a different session)
-			// holds the live connection. Leave the live client alone and refuse
-			// this one; the caller sends ANOTHER_DEVICE_ACTIVE and tears the
-			// handshake down. Decided under h.mu so no connect can slip in
-			// between the check and the replacement it would have done.
-			h.mu.Unlock()
-			return true
-		}
 		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
 		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
 		replacedVoiceChID = oldVoiceChID

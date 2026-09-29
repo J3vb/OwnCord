@@ -221,21 +221,21 @@ export function createWsClient({
   // U4: the last time the app could observe the clock running: a parsed
   // inbound frame (handleMessage), a heartbeat tick (handleWakeSignal), a dial
   // (connect()) or a reconnect-point check (suspendGapExceeded). A jump larger
-  // than SUSPEND_GATE_MS between reads means the process was suspended.
-  // Checked both by the heartbeat tick (still connected) and at the reconnect
-  // point (the socket already closed before the suspend), so a long suspend
-  // does not silently dial.
+  // than WAKE_GAP_MS between reads means the process was suspended, so the
+  // next dial is marked a wake (pendingWake). Checked by the heartbeat tick,
+  // by an inbound frame, and at the reconnect point (the socket already closed
+  // before the suspend), so no read discards the evidence of a suspend.
   let lastActivityAt = Date.now();
   // When the oldest heartbeat ping sent since the last inbound frame went out.
   let unansweredPingAt: number | null = null;
   let intentionalClose = false;
   // U4: set when the heartbeat sees a real suspend (a wall-clock gap past
   // WAKE_GAP_MS), at the reconnect point when a close-then-sleep is detected,
-  // or by a wake dial (connect(cfg, wake=true)). While set, the next auth
+  // or when an inbound frame arrives after such a gap. While set, every auth
   // frame carries `wake: true` so the server can refuse a dial that would
-  // displace another device's live session. It survives transport-level retries
-  // and is cleared once an inbound frame proves the handshake progressed, or by
-  // the user's own connect.
+  // displace another device's live session. It survives transport-level
+  // retries and a user's Retry, and is cleared only by auth_ok (the server
+  // accepted the dial), an explicit takeover ("Use here") or disconnect().
   let pendingWake = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   // Mirror of the proxy's own open/closed state, kept here because the
@@ -448,17 +448,16 @@ export function createWsClient({
       // U4: the process may have been suspended while this timer was pending
       // (a wake often outlives the backoff window), or a previous wake dial
       // may have failed at the transport — `pendingWake` persists across
-      // retries until an inbound frame proves the handshake progressed. Mark
-      // the dial a wake so the server can refuse it rather than displacing
-      // another device.
-      const wake = pendingWake || suspendGapExceeded();
+      // retries until auth_ok. Mark the dial a wake so the server can refuse
+      // it rather than displacing another device.
+      if (suspendGapExceeded()) pendingWake = true;
       const nextConfig = config;
       if (!nextConfig) {
         log.warn("Reconnect aborted: missing config");
         setState("disconnected");
         return;
       }
-      void connect(nextConfig, wake);
+      void connect(nextConfig);
     }, delay);
   }
 
@@ -485,10 +484,11 @@ export function createWsClient({
     // Any parsed inbound frame proves the socket is delivering bytes — refresh
     // the CLI-01 silence deadline, even for a frame the size guard drops below.
     armLiveness();
-    // U4: and that the clock was running and the socket survived any suspend,
-    // so a later gap is measured from here and no wake marker is left armed.
-    lastActivityAt = Date.now();
-    pendingWake = false;
+    // U4: and that the clock was running, so a later gap is measured from
+    // here. A frame is not proof the server still holds this session — it may
+    // be a leftover on the socket that died during the suspend — so it can
+    // arm the wake marker but never clears it; only auth_ok does.
+    if (suspendGapExceeded()) pendingWake = true;
 
     // The size guard runs AFTER parsing (raw is already fully materialized
     // in memory either way, so this costs nothing) and exempts the handshake
@@ -558,6 +558,7 @@ export function createWsClient({
       }
       setState("connected");
       reconnectAttempt = 0;
+      pendingWake = false;
       startHeartbeat();
       armLiveness();
       // U7d: only an authenticated session needs the wake probe, and arming it
@@ -681,7 +682,7 @@ export function createWsClient({
     // transport to dial, so a report here is already reflected.
   }
 
-  async function connect(cfg: WsClientConfig, wake = false): Promise<void> {
+  async function connect(cfg: WsClientConfig, takeover = false): Promise<void> {
     wsGeneration++;
     // Captured so a disconnect() landing mid-attempt can be detected on resume
     // — disconnect() bumps wsGeneration too, so a mismatch here means this
@@ -689,11 +690,11 @@ export function createWsClient({
     const gen = wsGeneration;
     config = cfg;
     intentionalClose = false;
-    // U4: `wake` marks a dial the client made on its own after a suspend. The
-    // server refuses it if another device holds the session. A user-initiated
-    // connect (Reconnect / "Use here") passes false — a deliberate takeover —
-    // and clears any marker left by a superseded automatic wake dial.
-    pendingWake = wake;
+    // U4: only an explicit takeover ("Use here") drops the wake marker. Any
+    // other connect — the reconnect loop, Retry, a certificate re-dial — keeps
+    // it, so the server can still refuse a dial that would displace another
+    // device.
+    if (takeover) pendingWake = false;
     lastActivityAt = Date.now();
     // Belt-and-braces: a fresh connect (even one not routed through
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
@@ -812,8 +813,10 @@ export function createWsClient({
   }
 
   return {
-    connect(cfg: WsClientConfig): void {
-      void connect(cfg);
+    /** `takeover` is the user's informed choice to take the session back
+     * from another device ("Use here"); it drops any pending wake marker. */
+    connect(cfg: WsClientConfig, opts?: { readonly takeover?: boolean }): void {
+      void connect(cfg, opts?.takeover === true);
     },
 
     disconnect,

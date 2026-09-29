@@ -246,15 +246,28 @@ func (h *Hub) GetClient(userID int64) *Client {
 	return h.clients[userID]
 }
 
-// hasLiveClientForOtherSession reports whether userID has a live connection
-// whose session differs from tokenHash — i.e. another device currently holds
-// the account's one socket. A same-session match is this device's own stale
-// socket, not another device. Used by the wake-reconnect refusal (U4).
-func (h *Hub) hasLiveClientForOtherSession(userID int64, tokenHash string) bool {
+// wakeBlocked is wakeBlockedLocked for a caller that does not hold h.mu.
+func (h *Hub) wakeBlocked(c *Client) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	c, ok := h.clients[userID]
-	return ok && c.tokenHash != tokenHash
+	return h.wakeBlockedLocked(c)
+}
+
+// wakeBlockedLocked reports whether c is a wake reconnect (U4) while another
+// device — a DIFFERENT session (token hash) of the same account — holds the
+// session: its live connection, or the call it parked in the RT-8 grace
+// window. A same-session match is this device's own stale socket or parked
+// call, not another device. Caller holds h.mu (h.mu -> voiceGrace.mu is the
+// order registerNow's inheritParkedVoice already takes).
+func (h *Hub) wakeBlockedLocked(c *Client) bool {
+	if !c.wakeReconnect {
+		return false
+	}
+	if old, ok := h.clients[c.userID]; ok && old.tokenHash != c.tokenHash {
+		return true
+	}
+	e := h.voiceGrace.get(c.userID)
+	return e != nil && e.client.tokenHash != c.tokenHash
 }
 
 // ClientCount returns the number of currently registered clients (test helper).

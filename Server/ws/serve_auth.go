@@ -126,25 +126,14 @@ func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error
 	return conn.Write(wCtx, websocket.MessageText, msg)
 }
 
-// refuseWakeIfOtherDeviceActive answers a wake reconnect (auth payload
-// `wake: true`) that arrives while a DIFFERENT session of the same account
-// holds the live connection. It is called right after upgradeAndAuth, before
-// any handshake state changes (stale-voice cleanup, replay, registration), so
-// a refused wake leaves the live session and its call untouched: it writes an
-// `error` frame with ANOTHER_DEVICE_ACTIVE (not auth_error — the token is
-// still valid) and closes. Returns true when refused.
-//
-// This early check is not the authority — registerNow re-checks under h.mu,
-// closing the race where another device connects between here and
-// registration. It is here so the common refusal does no work first.
-func (h *Hub) refuseWakeIfOtherDeviceActive(ctx context.Context, conn *websocket.Conn, c *Client) bool {
-	if !c.wakeReconnect || !h.hasLiveClientForOtherSession(c.userID, c.tokenHash) {
-		return false
-	}
+// refuseWake answers a wake reconnect (auth payload `wake: true`) refused
+// because another device holds the session (wakeBlockedLocked): an `error`
+// frame with ANOTHER_DEVICE_ACTIVE (not auth_error — the token is still
+// valid), then the close. c was never registered, so nothing else is torn down.
+func refuseWake(ctx context.Context, conn *websocket.Conn, c *Client) {
 	slog.Info("ws: wake reconnect refused while another device holds the session", "user_id", c.userID)
 	_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeAnotherDeviceActive, "another device is active"))
 	_ = conn.Close(websocket.StatusPolicyViolation, "another device is active")
-	return true
 }
 
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {

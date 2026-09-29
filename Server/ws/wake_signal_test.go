@@ -186,3 +186,37 @@ func TestNormalConnect_AnotherDevice_StillDisplaces(t *testing.T) {
 		t.Fatal("deliberate second-device connect did not displace the first")
 	}
 }
+
+// A resuming wake (last_seq > 0) is refused by registerNow on the replay path
+// itself — answered ANOTHER_DEVICE_ACTIVE, never auth_ok or a fall-through to
+// a full ready — and the live session is untouched.
+func TestWakeReconnect_Resume_AnotherDeviceActive_Refused(t *testing.T) {
+	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
+	ctx := context.Background()
+
+	connA := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, false)
+	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeAuthOK {
+		t.Fatalf("device A: expected auth_ok, got %v", typ)
+	}
+	if typ, _ := readFrameType(t, ctx, connA); typ != MsgTypeReady {
+		t.Fatalf("device A: expected ready, got %v", typ)
+	}
+	// Give the ring a sequenced frame to resume from.
+	hub.BroadcastToAll([]byte(`{"type":"server_notice","payload":{}}`))
+	deadline := time.Now().Add(5 * time.Second)
+	for hub.CurrentSeqForTest() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	seq := hub.CurrentSeqForTest()
+	if seq == 0 {
+		t.Fatal("no sequenced frame to resume from")
+	}
+
+	connB := dialAndAuthWake(t, ctx, srvURL, tokenB, seq, true)
+	if code := readErrorCode(t, ctx, connB); code != ErrCodeAnotherDeviceActive {
+		t.Fatalf("resume wake error code = %q, want %q", code, ErrCodeAnotherDeviceActive)
+	}
+	if live := hub.GetClient(uid); live == nil || live.tokenHash != auth.HashToken(tokenA) || live.isSendClosed() {
+		t.Fatal("refused resume wake displaced device A")
+	}
+}

@@ -147,3 +147,53 @@ func TestRegisterNow_WakeReconnectSameSession_Replaces(t *testing.T) {
 		t.Fatal("same-session wake reconnect did not take the connection")
 	}
 }
+
+// U4: a DIFFERENT session's call parked in the RT-8 grace window is held by
+// another device too. A wake reconnect must not inherit (resume) or discard
+// (fresh connect) it — registerNow refuses and leaves the parked entry alone.
+func TestRegisterNow_WakeReconnectAnotherSessionGraced_Refused(t *testing.T) {
+	h := newEmitTestHub()
+
+	parked := NewTestClient(h, 1, make(chan []byte, 8))
+	parked.tokenHash = "session-a"
+	entry := &voiceGraceEntry{client: parked, channelID: 7, joinToken: "jt"}
+	h.voiceGrace.put(1, entry, func() {})
+	t.Cleanup(func() { h.voiceGrace.take(1) })
+
+	wake := NewTestClient(h, 1, make(chan []byte, 8))
+	wake.tokenHash = "session-b"
+	wake.wakeReconnect = true
+	wake.lastSeq = 5
+
+	if refused := h.registerNow(wake, nil); !refused {
+		t.Fatal("wake reconnect was not refused while another session's call was parked")
+	}
+	if _, ok := h.clients[1]; ok {
+		t.Fatal("refused wake was registered")
+	}
+	if h.voiceGrace.get(1) != entry {
+		t.Fatal("refused wake took the other session's parked call")
+	}
+}
+
+// U4: the same session's own parked call is not another device — a wake
+// resume inherits it as an ordinary RT-8 resume does.
+func TestRegisterNow_WakeReconnectSameSessionGraced_Inherits(t *testing.T) {
+	h := newEmitTestHub()
+
+	parked := NewTestClient(h, 1, make(chan []byte, 8))
+	parked.tokenHash = "session-a"
+	h.voiceGrace.put(1, &voiceGraceEntry{client: parked, channelID: 7, joinToken: "jt"}, func() {})
+
+	wake := NewTestClient(h, 1, make(chan []byte, 8))
+	wake.tokenHash = "session-a"
+	wake.wakeReconnect = true
+	wake.lastSeq = 5
+
+	if refused := h.registerNow(wake, nil); refused {
+		t.Fatal("same-session wake with its own parked call was refused")
+	}
+	if got := wake.getVoiceChID(); got != 7 {
+		t.Fatalf("same-session wake did not inherit its parked call: voice channel %d", got)
+	}
+}

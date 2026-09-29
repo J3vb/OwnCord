@@ -545,7 +545,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       const token = authStore.getState().token;
       if (token === null) return;
       setSessionReplaced(false);
-      ws.connect({ host: api.getConfig().host, token });
+      ws.connect({ host: api.getConfig().host, token }, { takeover: true });
     };
     // Retry is safe on a plain disconnect: connect() re-dials and the native
     // proxy re-validates the certificate, so a TOFU mismatch re-latches rather
