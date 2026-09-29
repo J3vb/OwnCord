@@ -261,14 +261,7 @@ pub(crate) struct HostScopedVerifier {
 
 impl HostScopedVerifier {
     pub(crate) fn new(pinned_host: String, expected_fingerprint: String) -> Result<Self, String> {
-        let mut roots = rustls::RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let default = rustls::client::WebPkiServerVerifier::builder_with_provider(
-            Arc::new(roots),
-            Arc::new(rustls::crypto::ring::default_provider()),
-        )
-        .build()
-        .map_err(|e| format!("failed to build web-PKI verifier: {e}"))?;
+        let default = web_pki_verifier().ok_or("failed to build web-PKI verifier")?;
         Ok(Self::with_default(
             pinned_host,
             expected_fingerprint,
