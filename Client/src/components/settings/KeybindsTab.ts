@@ -238,29 +238,38 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         conflict.style.display = "none";
         captureState.binding = action;
         button.style.borderColor = "var(--accent)";
+        setText(button, t("keybinds.pressKey"));
+
+        const finish = (): void => {
+          stopCapture();
+          button.style.borderColor = "";
+          setText(button, t("keybinds.globalKey", { key: vkName(globalKeys[action]) }));
+        };
 
         const onKey = (e: KeyboardEvent): void => {
           if (e.code === "Escape") {
             e.preventDefault();
             e.stopPropagation(); // cancel the capture, not the whole Settings overlay
-            stopCapture();
-            button.style.borderColor = "";
+            finish();
+            return;
+          }
+          if (e.code === "Tab") {
+            finish(); // focus moves on; the capture must not follow it
             return;
           }
           const vk = keyEventToVk(e);
           if (vk === null) return; // modifiers and unmapped keys do not bind
           e.preventDefault();
           e.stopPropagation();
-          stopCapture();
-          button.style.borderColor = "";
           const reason = shortcutConflict(vk, action, globalKeys);
           if (reason !== null) {
+            finish();
             conflict.style.display = "";
             return;
           }
           globalKeys[action] = vk;
           saveGlobalShortcutVk(action, vk);
-          setText(button, t("keybinds.globalKey", { key: vkName(vk) }));
+          finish();
           void desktop.globalShortcuts
             .setKeys({ muteVk: globalKeys.mute, deafenVk: globalKeys.deafen })
             .catch(() => {

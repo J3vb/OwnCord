@@ -96,8 +96,9 @@ describe("KeybindsTab", () => {
     muteBtn.click();
     capture(document, "ShiftLeft"); // a modifier alone is not bindable
 
-    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    expect(muteBtn.textContent).toBe("Press a supported key..."); // still capturing
     expect(mockSetKeys).not.toHaveBeenCalled();
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBeNull();
     controller.abort(); // release the capture listener the tab owns
   });
 
@@ -118,6 +119,39 @@ describe("KeybindsTab", () => {
     capture(document, "KeyK");
     expect(deafenBtn.textContent).toBe("Ctrl + Shift + D");
     expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("prompts for a key while capturing and restores the label on Escape", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    expect(muteBtn.textContent).toBe("Press a supported key...");
+    capture(document, "Escape");
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+  });
+
+  it("lets Tab move focus and cancels the capture instead of binding it", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    const tab = new KeyboardEvent("keydown", { code: "Tab", bubbles: true, cancelable: true });
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    capture(document, "KeyK");
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("does not bind Enter", () => {
+    const controller = new AbortController();
+    const el = buildKeybindsTab(controller.signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    muteBtn.click();
+    capture(document, "Enter");
+    expect(mockSetKeys).not.toHaveBeenCalled();
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBeNull();
+    controller.abort();
   });
 
   it("returns a div with settings-pane class", () => {

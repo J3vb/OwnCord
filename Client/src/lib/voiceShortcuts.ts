@@ -5,9 +5,10 @@
  *
  * Key codes are Windows Virtual Key (VK) values on every platform, the same
  * convention `lib/ptt.ts` uses, and must stay within the range `shortcuts.rs`
- * can poll (`ptt.rs`'s VK/keycode table). Capture reads `KeyboardEvent.code`
- * (physical key position), so the binding is layout-independent; on X11 the
- * poller's `device_query` keycodes are the same US physical positions.
+ * can poll (`ptt.rs`'s VK/keycode table). Capture must name the key the
+ * poller watches: on Windows `GetAsyncKeyState` reads the layout-mapped VK,
+ * which WebView2 reports as `KeyboardEvent.keyCode`; on X11 `device_query`
+ * keycodes are US physical positions, which `KeyboardEvent.code` names.
  */
 
 import { loadPref, savePref } from "./preferences";
@@ -54,18 +55,16 @@ export function saveGlobalShortcutVk(action: GlobalShortcutAction, vk: number): 
 }
 
 /** Physical-key VK codes for the keys a global shortcut may bind: letters,
- *  digits, function keys and non-text navigation keys. Modifiers, Escape and
- *  punctuation are deliberately absent — the combo already supplies the
- *  modifiers, and Escape closes the Settings overlay the capture lives in. */
+ *  digits, function keys and non-text navigation keys. Modifiers, Escape,
+ *  Tab, Enter, Backspace, numpad and punctuation are deliberately absent —
+ *  the combo already supplies the modifiers, Escape and Tab stay the capture's
+ *  cancel and focus keys (as in `ptt.rs`'s capture), and Windows reports a
+ *  Shift+numpad key as a navigation VK without Shift, so it could never fire. */
 const VK_BY_CODE: ReadonlyMap<string, number> = (() => {
   const map = new Map<string, number>();
   for (let i = 0; i < 26; i++) map.set(`Key${String.fromCharCode(0x41 + i)}`, 0x41 + i);
   for (let i = 0; i < 10; i++) map.set(`Digit${i}`, 0x30 + i);
-  for (let i = 0; i < 10; i++) map.set(`Numpad${i}`, 0x60 + i);
   for (let i = 1; i <= 12; i++) map.set(`F${i}`, 0x6f + i);
-  map.set("Backspace", 0x08);
-  map.set("Tab", 0x09);
-  map.set("Enter", 0x0d);
   map.set("Space", 0x20);
   map.set("PageUp", 0x21);
   map.set("PageDown", 0x22);
@@ -80,9 +79,13 @@ const VK_BY_CODE: ReadonlyMap<string, number> = (() => {
   return map;
 })();
 
+const BINDABLE_VKS: ReadonlySet<number> = new Set(VK_BY_CODE.values());
+
 /** The VK for a captured keydown, or null when the key is not bindable. */
 export function keyEventToVk(event: KeyboardEvent): number | null {
-  return VK_BY_CODE.get(event.code) ?? null;
+  if (event.code.startsWith("Numpad")) return null;
+  const vk = /Windows/.test(navigator.userAgent) ? event.keyCode : VK_BY_CODE.get(event.code);
+  return vk !== undefined && BINDABLE_VKS.has(vk) ? vk : null;
 }
 
 /** Why `vk` cannot be bound to `action`, or null when it is free. */
