@@ -596,6 +596,7 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 | `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                                        |
 | `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first)           |
 | `/admin/api/archive`                | GET    | Download the full archive (owner-only; database snapshot + `data/` + `config.yaml`) |
+| `/admin/api/archive/link`           | POST   | Issue a short-lived single-use archive download link (owner-only)                   |
 
 Backups are stored in the configured backup directory (default
 `data/backups/`) with timestamps. Point it somewhere safer than the data
@@ -654,15 +655,22 @@ An `upload.storage_dir` outside the data directory is archived as
 `data/uploads/`. Stored backups (`backup.dir`) are left out. The archive is
 built inside `backup.dir` before it is sent, so that volume needs room for
 about the size of the data directory plus the database again; when building
-it would leave less free than `server.min_free_disk_mb`, the panel refuses
-with an error instead of filling the disk. It is Owner-only, because the
-archive holds password hashes and the key files.
+it would leave less free than `server.min_free_disk_mb`, the server refuses
+the download instead of filling the disk. It is Owner-only, because the
+archive holds password hashes and the key files. Only one archive is built at
+a time; a second request while one is being prepared is refused.
 
-The panel holds the whole download in the browser before saving it, so the
-in-browser archive suits installs up to a few GB. For a larger install, use
-the manual procedure in
-[Before upgrading: take the archive](#before-upgrading-take-the-archive):
-stop the server and copy the data directory and `config.yaml`.
+The panel asks the server for a short-lived single-use link and opens it as a
+plain download, so the browser streams the archive straight to disk — there is
+no size limit imposed by the page's memory. The download must still finish
+within 2 hours of the request, so for a very large server on a slow link take
+the archive by hand with the procedure in
+[Before upgrading: take the archive](#before-upgrading-take-the-archive), or
+rely on a database backup, which `chatserver restore` can put back. The
+link token is random, single-use, Owner-bound and expires within a minute;
+nothing else can use it. The build starts when the browser opens the link, so
+a refusal from the free-space check arrives as a failed download in the
+browser rather than as a panel message.
 
 The database entry is a `VACUUM INTO` snapshot, so it is a consistent copy
 even while the server runs. The archive is still taken with WAL-mode writes in

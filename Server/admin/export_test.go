@@ -57,6 +57,14 @@ func SetArchiveBeforeSnapshotHook(h func()) (restore func()) {
 	return func() { archiveBeforeSnapshotHook = prev }
 }
 
+// SetArchiveLinkTTL overrides how long a single-use archive link stays valid,
+// so the expiry test does not wait the real minute.
+func SetArchiveLinkTTL(d time.Duration) (restore func()) {
+	prev := archiveLinkTTL
+	archiveLinkTTL = d
+	return func() { archiveLinkTTL = prev }
+}
+
 // SetPatchChannelPostCommitHook installs h to run synchronously right after
 // handlePatchChannel's AdminUpdateChannel commit, before the post-commit
 // re-read and hub fan-out — the only way to deterministically land a caller

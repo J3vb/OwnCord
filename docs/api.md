@@ -36,13 +36,15 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 171 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 173 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
 | GET     | `/admin/api/archive`                                                 |
+| GET     | `/admin/api/archive/download`                                        |
+| POST    | `/admin/api/archive/link`                                            |
 | GET     | `/admin/api/attention`                                               |
 | GET     | `/admin/api/audit-log`                                               |
 | POST    | `/admin/api/backup`                                                  |
@@ -3999,6 +4001,11 @@ Download the full archive: a `VACUUM INTO` snapshot of the database, the data
 directory and `config.yaml` in one zip. What it carries and leaves out is in
 [deployment.md](deployment.md#the-full-archive).
 
+The admin panel does not call this route; it asks for a single-use link
+(`POST /admin/api/archive/link`) and opens that, so a large archive streams to
+disk instead of being buffered in the page. This route stays for direct API
+callers that send the `Authorization` header themselves.
+
 **Auth:** Owner role
 
 #### Response 200 OK
@@ -4007,6 +4014,40 @@ directory and `config.yaml` in one zip. What it carries and leaves out is in
 zip is built before the status is written, so a failed build is a JSON error:
 `507 STORAGE_LOW_DISK` when building it would leave the backup directory's
 volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
+`409 ARCHIVE_IN_PROGRESS` while another archive is being built or sent.
+
+---
+
+### POST /admin/api/archive/link
+
+Issue a short-lived, single-use link to the full archive, for the panel to
+open as a plain browser download.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "path": "/admin/api/archive/download?token=…"
+}
+```
+
+The token is random, bound to the requesting owner, valid for about a minute
+and consumable once. It is never logged. `409 ARCHIVE_IN_PROGRESS` while
+another archive is being built or sent.
+
+---
+
+### GET /admin/api/archive/download
+
+Redeem a single-use archive link. **Auth:** the `token` query parameter (a
+browser download cannot send an `Authorization` header); the token IS the
+authorisation, and the credential that asked for it must still be a signed-in,
+non-banned Owner. `200 application/zip` on success, `403 FORBIDDEN` for an
+unknown, expired or already-used token or a principal that no longer
+qualifies, `409 ARCHIVE_IN_PROGRESS` while another archive is being built or
+sent.
 
 ---
 

@@ -438,23 +438,25 @@ async function createBackup(){
   try{await api('POST','/backup');state.backupRunning=false;showToast('Backup created');renderContent()}catch(e){state.backupRunning=false;showToast(e.message,'error');renderContent()}
 }
 
-/* The full archive is a streamed zip, so it is fetched (not through api(),
-   which always parses JSON) and saved with a Blob link, like the support
-   bundle. A failure before the server writes a body is a JSON error; a failure
-   mid-stream truncates the download, which the browser reports as a failed
-   save. */
+/* The archive can be tens of gigabytes, so it is NOT fetched into a Blob
+   (which would live in the page's memory). The panel asks for a short-lived
+   single-use link with its normal Bearer auth, then opens that link as a
+   plain navigation: the browser streams it straight to disk, and the link
+   cannot be reused or reached without the token. */
 async function downloadArchive(){
   if(state.archiveRunning)return;
   const token=state.token;state.archiveRunning=true;renderContent();
   try{
-    const res=await fetch('/admin/api/archive',{headers:{Authorization:'Bearer '+token}});
-    if(state.token!==token)return;
-    if(res.status===401){handleSessionExpired();return}
-    if(!res.ok){let msg='Could not build the archive';try{const d=await res.json();if(d&&d.message)msg=d.message}catch(e){}throw new Error(msg)}
-    const blob=await res.blob();if(state.token!==token)return;
-    const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='owncord-archive.zip';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
-    showToast('Archive downloaded');
-  }catch(e){if(state.token===token)showToast(e.message,'error')}
+    const r=await api('POST','/archive/link',{});
+    const a=document.createElement('a');a.href=r.path;a.download='owncord-archive.zip';document.body.appendChild(a);a.click();a.remove();
+    showToast('Preparing the archive. The download starts when it is ready; this can take a few minutes for large servers.');
+  }catch(e){
+    /* The link endpoint answers only for the link itself (and refuses while
+       another archive is being prepared). The build, and its free-space and
+       configuration checks, run when the browser opens the link, so their
+       failures surface as a failed download rather than a toast. */
+    if(state.token===token)showToast(e.message,'error')
+  }
   finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}
 }
 

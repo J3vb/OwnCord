@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
@@ -34,74 +35,93 @@ const archiveWorkPrefix = "owncord-archive-"
 // archive is a consistent copy even while the server runs.
 //
 // It is Owner-only: the archive holds password hashes and the key files.
+// The admin panel does not call this directly; it asks for a single-use link
+// (POST /archive/link) and opens that, so the whole archive is never buffered
+// in the page (see archive_link.go). This route stays for direct API callers.
 func handleArchive(database *db.DB, opts SetupOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Build the whole zip in a temp directory, then stream it. A failure
-		// mid-build must be a clean 500 rather than a half-written zip the
-		// browser saves as corrupt; only after the build succeeds do we write
-		// a status.
-		if opts.RunningCfg == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
-			return
-		}
-		ctx, cancel := context.WithCancel(r.Context())
-		defer cancel()
-		deadline := startArchive(w, r, cancel, archiveProgressTimeout, archiveMaxLifetime)
-		defer deadline.release()
-
-		// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
-		// target, and that directory is already the one backups write to.
-		if err := os.MkdirAll(backupBaseDir, 0o750); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
-			return
-		}
-		work, err := os.MkdirTemp(backupBaseDir, archiveWorkPrefix)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
-			return
-		}
-		defer func() { _ = os.RemoveAll(work) }()
-
-		zipPath, err := buildArchive(ctx, database, opts, work)
-		if errors.Is(err, errArchiveNoSpace) {
-			writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", err.Error())
-			return
-		}
-		if err != nil {
-			slog.Error("backup archive build failed", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
-			return
-		}
-
-		f, err := os.Open(zipPath) //nolint:gosec // G304: path is our own temp file
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
-			return
-		}
-		defer f.Close() //nolint:errcheck
-		info, err := f.Stat()
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/zip")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+archiveName+`"`)
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-
-		actor := actorFromContext(r)
-		slog.Warn("backup archive downloaded", "actor_id", actor, "bytes", info.Size())
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "backup_archive", "server", 0,
-			fmt.Sprintf("downloaded full archive (%d bytes)", info.Size()))
-
-		if _, err := io.Copy(deadline, f); err != nil {
-			// Headers are already committed; the client sees a truncated
-			// download. Log it — the operator can retry.
-			slog.Warn("backup archive download interrupted", "err", err)
-		}
+		serveArchive(w, r, database, opts, actorFromContext(r))
 	})
+}
+
+// archiveBusy is set while an archive is being built or sent.
+var archiveBusy atomic.Bool
+
+func writeArchiveBusy(w http.ResponseWriter) {
+	writeErr(w, http.StatusConflict, "ARCHIVE_IN_PROGRESS", "An archive is already being prepared. Try again when it finishes.")
+}
+
+// serveArchive builds and streams the archive. actor is who the download is
+// attributed to in the audit log; the caller has already authorised the
+// request (the owner-only route, or a redeemed single-use link).
+func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts SetupOptions, actor int64) {
+	if opts.RunningCfg == nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
+		return
+	}
+	// One archive at a time, for the whole build and transfer: two builds
+	// would each pass the free-space check before the other wrote anything.
+	if !archiveBusy.CompareAndSwap(false, true) {
+		writeArchiveBusy(w)
+		return
+	}
+	defer archiveBusy.Store(false)
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	deadline := startArchive(w, r, cancel, archiveProgressTimeout, archiveMaxLifetime)
+	defer deadline.release()
+
+	// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
+	// target, and that directory is already the one backups write to.
+	if err := os.MkdirAll(backupBaseDir, 0o750); err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
+		return
+	}
+	work, err := os.MkdirTemp(backupBaseDir, archiveWorkPrefix)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
+		return
+	}
+	defer func() { _ = os.RemoveAll(work) }()
+
+	zipPath, err := buildArchive(ctx, database, opts, work)
+	if errors.Is(err, errArchiveNoSpace) {
+		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", err.Error())
+		return
+	}
+	if err != nil {
+		slog.Error("backup archive build failed", "err", err)
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
+		return
+	}
+
+	f, err := os.Open(zipPath) //nolint:gosec // G304: path is our own temp file
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	info, err := f.Stat()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+archiveName+`"`)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	slog.Warn("backup archive downloaded", "actor_id", actor, "bytes", info.Size())
+	db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "backup_archive", "server", 0,
+		fmt.Sprintf("downloaded full archive (%d bytes)", info.Size()))
+
+	if _, err := io.Copy(deadline, f); err != nil {
+		// Headers are already committed; the client sees a truncated
+		// download. Log it — the operator can retry.
+		slog.Warn("backup archive download interrupted", "err", err)
+	}
 }
 
 // archiveBeforeSnapshotHook, when set, runs between the space check and the

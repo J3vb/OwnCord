@@ -113,6 +113,17 @@ creating the Owner account tied to access to the server's own console. It is
 written to stderr only, never to the log stream, and is regenerated at every
 start.
 
+The full-archive download uses the same single-use pattern as the log stream:
+the owner asks for a link (`POST /admin/api/archive/link`) with normal
+authentication, and the browser opens the returned URL as a plain download so
+a large archive is never buffered in the page. The link token is 32 random
+bytes, bound to the owning principal, consumable once, valid for about a
+minute, and never written to a log or audit row. Like the log-stream ticket it
+stores the hash of the credential that asked for it and re-resolves it on
+redemption, so a revoked session, a ban or a lost Owner role voids an
+outstanding link; redeeming an unknown, expired, spent or voided token is a
+uniform `403`.
+
 `POST /admin/api/setup` is unauthenticated: it is how the first Owner account
 comes to exist, and until B4-10 the only thing standing in front of it was
 "no users exist". Account erasure can now empty that table — the
