@@ -197,7 +197,7 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 			writeLinkInvalid(w)
 			return
 		}
-		f, err := os.Open(filepath.Join(backupBaseDir, name)) //nolint:gosec // G304: name was validated when the link was issued
+		f, err := openBackupEntry(link.target)
 		if err != nil {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
@@ -223,4 +223,20 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 			slog.Warn("backup download interrupted", "name", name, "err", err)
 		}
 	}
+}
+
+// openBackupEntry opens the backup directory entry named name. The path is
+// built from the directory listing's own entry, never from request input, so
+// nothing a caller sends can steer it outside the backup directory.
+func openBackupEntry(name string) (*os.File, error) {
+	entries, err := os.ReadDir(backupBaseDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.Type().IsRegular() && e.Name() == name {
+			return os.Open(filepath.Join(backupBaseDir, e.Name())) //nolint:gosec // G304: an entry of the backup directory itself
+		}
+	}
+	return nil, os.ErrNotExist
 }
