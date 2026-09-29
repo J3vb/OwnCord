@@ -492,8 +492,27 @@ describe("ServerPanel", () => {
       });
 
       const latency = container.querySelector(".srv-latency");
-      expect(latency?.textContent).toBe("42ms");
+      expect(latency?.textContent).toBe("42ms response time");
       expect(latency?.className).toBe("srv-latency good");
+    });
+
+    it("labels the number as response time, never as ping", () => {
+      // The badge times one REST call through the desktop TLS tunnel, which
+      // opens a fresh connection and handshake per request — about 3× the
+      // network RTT, not a ping. The label must not claim otherwise.
+      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      panel.updateHealthStatus("localhost:8443", {
+        status: "online",
+        latencyMs: 42,
+        version: "1.0.0",
+        onlineUsers: 0,
+      });
+
+      const latency = container.querySelector(".srv-latency");
+      expect(latency?.textContent).toContain("response time");
+      expect(latency?.textContent?.toLowerCase()).not.toContain("ping");
     });
 
     it("applies warn class for moderate latency (100-500ms)", () => {
@@ -508,7 +527,7 @@ describe("ServerPanel", () => {
       });
 
       const latency = container.querySelector(".srv-latency");
-      expect(latency?.textContent).toBe("250ms");
+      expect(latency?.textContent).toBe("250ms response time");
       expect(latency?.className).toBe("srv-latency warn");
     });
 
@@ -524,7 +543,7 @@ describe("ServerPanel", () => {
       });
 
       const latency = container.querySelector(".srv-latency");
-      expect(latency?.textContent).toBe("750ms");
+      expect(latency?.textContent).toBe("750ms response time");
       expect(latency?.className).toBe("srv-latency bad");
     });
 

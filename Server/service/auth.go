@@ -379,6 +379,8 @@ func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (
 		if strings.TrimSpace(in.InviteCode) == "" {
 			// Nothing to redeem: the same answer a bad code gets, so the
 			// response reveals nothing new.
+			slog.WarnContext(ctx, "registration refused", "cause", "invite required",
+				"ip", in.IP, "username", in.Username)
 			return "", ErrRegistrationRejected
 		}
 		return mode, nil
@@ -467,8 +469,14 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		case errors.Is(err, ErrRegistrationQueueFull):
 			return nil, ErrRegistrationQueueFull
 		case db.IsUniqueConstraintError(err):
+			slog.WarnContext(ctx, "registration refused", "cause", "username taken",
+				"ip", in.IP, "username", in.Username)
 			return nil, ErrRegistrationRejected
 		case errors.Is(err, db.ErrNotFound):
+			// The invite UPDATE matched no row; read the row back to name why.
+			// The public answer stays the generic refusal.
+			slog.WarnContext(ctx, "registration refused", "cause", s.inviteRefusalCause(ctx, in.InviteCode),
+				"ip", in.IP, "username", in.Username)
 			return nil, ErrRegistrationRejected
 		default:
 			slog.Error("register: account creation failed", "err", err, "username", in.Username)
@@ -493,6 +501,30 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 		return nil, ErrRegisteredUserFetch
 	}
 	return &AuthResult{Token: token, User: user}, nil
+}
+
+// inviteRefusalCause names why the invite UPDATE matched no row, for the
+// operator log only — the public response stays the generic refusal, and the
+// code itself is never logged. An unknown code and a store fault on the
+// read-back both read as "invite unknown"; the refusal line is a diagnostic,
+// so a wrong guess there must never widen what the client is told.
+func (s *AuthService) inviteRefusalCause(ctx context.Context, code string) string {
+	invite, err := s.st.GetInvite(ctx, code)
+	if err != nil || invite == nil {
+		return "invite unknown"
+	}
+	switch {
+	case invite.Revoked:
+		return "invite revoked"
+	case invite.MaxUses != nil && invite.Uses >= *invite.MaxUses:
+		return "invite exhausted"
+	case invite.Expired(time.Now()):
+		return "invite expired"
+	default:
+		// The row looked redeemable to this read but the atomic UPDATE matched
+		// nothing: a concurrent redemption won the race.
+		return "invite exhausted"
+	}
 }
 
 // Login runs the lockout gates and the constant-time password check, then

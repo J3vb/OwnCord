@@ -1,5 +1,39 @@
 import { describe, it, expect } from "vitest";
-import { parseInviteLink, parseMessageLink, formatMessageLink } from "@lib/deep-link";
+import {
+  parseInviteLink,
+  parseMessageLink,
+  formatMessageLink,
+  normaliseInviteCode,
+} from "@lib/deep-link";
+
+describe("normaliseInviteCode", () => {
+  it("trims and lower-cases a typed code", () => {
+    // Server codes are 16-char lower-case hex, and redemption is an exact,
+    // case-sensitive match, so a pasted-capitals code would 400.
+    expect(normaliseInviteCode("  ABCD1234  ")).toBe("abcd1234");
+  });
+
+  it("accepts a pasted owncord://invite/<code> link", () => {
+    expect(normaliseInviteCode("owncord://invite/ABCD1234")).toBe("abcd1234");
+  });
+
+  it("accepts a bare owncord://<code> link", () => {
+    expect(normaliseInviteCode("owncord://AbCd1234")).toBe("abcd1234");
+  });
+
+  it("ignores the link's host query and still lower-cases the code", () => {
+    expect(normaliseInviteCode("owncord://invite/AbCd1234?host=chat.example.com")).toBe("abcd1234");
+  });
+
+  it("returns an empty string for empty or whitespace-only input", () => {
+    expect(normaliseInviteCode("")).toBe("");
+    expect(normaliseInviteCode("   ")).toBe("");
+  });
+
+  it("passes a non-link through trimmed and lower-cased", () => {
+    expect(normaliseInviteCode("  NOT-A-LINK ")).toBe("not-a-link");
+  });
+});
 
 describe("parseInviteLink", () => {
   it("parses owncord://invite/<code>", () => {

@@ -1124,7 +1124,7 @@ describe("ConnectPage", () => {
     const dot = container.querySelector(".srv-status-dot")!;
     expect(dot.className).toContain("online");
     const latency = container.querySelector(".srv-latency")!;
-    expect(latency.textContent).toBe("42ms");
+    expect(latency.textContent).toBe("42ms response time");
     const onlineUsers = container.querySelector(".srv-online-users")!;
     expect(onlineUsers.textContent).toBe("5 online");
 
@@ -1589,11 +1589,77 @@ describe("ConnectPage", () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => {
+      // The code is lower-cased before it is sent: server codes are lower-case
+      // hex and redemption is case-sensitive.
       expect(onRegister).toHaveBeenCalledWith(
         "localhost:8443",
         "newuser",
         "password123",
-        "INVITE-CODE",
+        "invite-code",
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("accepts a pasted owncord:// invite link and sends just its code", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
+    toggleLink.click();
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "newuser";
+    passwordInput.value = "password123";
+    inviteInput.value = "owncord://invite/AbCd1234";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        "newuser",
+        "password123",
+        "abcd1234",
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("treats a link pasted with the link's host as a non-empty invite code", async () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
+    toggleLink.click();
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "newuser";
+    passwordInput.value = "password123";
+    inviteInput.value = "owncord://invite/AbCd1234?host=chat.example.com";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    // The link is a non-empty invite, so validation must not refuse it as
+    // missing before onRegister is reached.
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")?.classList.contains("visible")).not.toBe(
+        true,
       );
     });
 
