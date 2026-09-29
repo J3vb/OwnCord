@@ -116,16 +116,14 @@ const PONG_GRACE_MS = 15_000;
 // process was frozen (sleep, suspend) in between: Chromium's intensive
 // throttling of a long-hidden page spaces ticks ~60 s apart, well under this.
 const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
-// U4: a gap past this is a real suspend, not throttling. The socket is dead,
-// but the device is waking where the user left it — reconnecting on its own
-// would displace the same account's live session on another device (one
-// socket per account, last connect wins), ending the call on the machine the
-// user is actually at. The client stops and asks instead; the user's own
-// Reconnect clears the gate and dials.
-// Known limits: a sleep shorter than this (~90-180 s, measured from the last
-// activity) can still reconnect silently and displace another device; a long
-// sleep on a user's only device now needs the manual Reconnect here.
-const SUSPEND_GATE_MS = 2 * WAKE_GAP_MS;
+// U4: a wall-clock gap past WAKE_GAP_MS means the process was suspended, so
+// the next dial is marked a wake (`auth.wake = true`). The SERVER arbitrates
+// whether that wake would displace another device's live session: a lone
+// device reconnects silently, while another device holding the account is
+// answered with ANOTHER_DEVICE_ACTIVE and the user is asked before taking over.
+// Marking every wake (rather than only gaps past ~3 min) closes the 90-180 s
+// window where a woken laptop used to displace the desktop silently, and no
+// longer prompts a single-device user after a long sleep.
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -231,12 +229,14 @@ export function createWsClient({
   // When the oldest heartbeat ping sent since the last inbound frame went out.
   let unansweredPingAt: number | null = null;
   let intentionalClose = false;
-  // U4: set when a wake after a real suspend left the socket dead. While set,
-  // scheduleReconnect refuses to dial — the user must choose to reclaim the
-  // connection so a sleeping device cannot silently displace another device's
-  // live session. Cleared by a fresh connect() (the user's own action) or
-  // disconnect().
-  let suspendGated = false;
+  // U4: set when the heartbeat sees a real suspend (a wall-clock gap past
+  // WAKE_GAP_MS), at the reconnect point when a close-then-sleep is detected,
+  // or by a wake dial (connect(cfg, wake=true)). While set, the next auth
+  // frame carries `wake: true` so the server can refuse a dial that would
+  // displace another device's live session. It survives transport-level retries
+  // and is cleared once an inbound frame proves the handshake progressed, or by
+  // the user's own connect.
+  let pendingWake = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
   // Mirror of the proxy's own open/closed state, kept here because the
   // send-failure codes below are decided on this side of the seam.
@@ -269,11 +269,6 @@ export function createWsClient({
 
   // TOFU first-use confirmation listeners (F4/F8)
   const certFirstUseListeners = new Set<CertFirstUseListener>();
-
-  // U4: notified when a wake after a real suspend leaves this device holding a
-  // dead socket it must not silently reclaim. The app shows the "Reconnect
-  // here" prompt; nothing dials until the user chooses.
-  const suspendWakeListeners = new Set<() => void>();
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -315,16 +310,14 @@ export function createWsClient({
   }
 
   // U7d/U4: decide what a long gap since the last wake check means. A gap past
-  // SUSPEND_GATE_MS is a real suspend — the socket may be dead and the device
-  // is waking somewhere the user may not be, so stop and ask (U4). A shorter
-  // gap past WAKE_GAP_MS is a frozen-then-resumed process whose socket may be
-  // half-open: probe it (U7d). Anything else is an ordinary tick, which pings.
+  // WAKE_GAP_MS is a real suspend — the socket may be dead, so mark the next
+  // dial a wake (U4) and probe it (U7d). Anything else is an ordinary tick,
+  // which pings.
   function handleWakeSignal(gap: number): void {
     // The clock was observed running at this tick, whatever the gap means.
     lastActivityAt = Date.now();
-    if (gap > SUSPEND_GATE_MS) {
-      onSuspendWake();
-    } else if (gap > WAKE_GAP_MS) {
+    if (gap > WAKE_GAP_MS) {
+      pendingWake = true;
       onWake();
     } else if (proxyOpen) {
       try {
@@ -332,33 +325,6 @@ export function createWsClient({
         unansweredPingAt ??= Date.now();
       } catch (err) {
         log.warn("Heartbeat ping send failed", err);
-      }
-    }
-  }
-
-  // U4: a wake after a real suspend. The socket may be dead but the device is
-  // waking where the user left it; dialling on its own would reclaim the
-  // account's one live socket from whatever device the user is actually at.
-  // Stop and ask instead. Also cancels any reconnect timer a close armed
-  // before the suspend — its callback calls connect(), which clears the gate,
-  // so left armed it would dial and defeat the gate.
-  function onSuspendWake(): void {
-    if (intentionalClose || suspendGated) return;
-    suspendGated = true;
-    log.warn("Woke from suspend; holding the reconnect until the user chooses", {
-      host: config?.host ?? "unknown",
-    });
-    proxyOpen = false;
-    cancelReconnect();
-    stopHeartbeat();
-    stopLiveness();
-    stopWakeListeners();
-    setState("disconnected");
-    for (const listener of suspendWakeListeners) {
-      try {
-        listener();
-      } catch (err) {
-        log.error("Suspend-wake listener error", err);
       }
     }
   }
@@ -447,25 +413,24 @@ export function createWsClient({
     }
   }
 
-  // U4: whether the wall clock has jumped past the suspend threshold since the
+  // U4: whether the wall clock has jumped past the wake threshold since the
   // app last observed it running, AND refreshes that observation. Called at
   // the reconnect point so a wake where the socket already closed (the common
-  // "sleeping laptop reclaims the call" case) is gated too, not only a wake
+  // "sleeping laptop reclaims the call" case) is marked too, not only a wake
   // the still-running heartbeat notices.
   function suspendGapExceeded(): boolean {
     const now = Date.now();
     const gap = now - lastActivityAt;
     lastActivityAt = now;
-    return gap > SUSPEND_GATE_MS;
+    return gap > WAKE_GAP_MS;
   }
 
   function scheduleReconnect(retryAfterMs?: number): void {
-    if (intentionalClose || certMismatchBlock || suspendGated || !config) return;
+    if (intentionalClose || certMismatchBlock || !config) return;
     // U4: the socket closed, but if the process was suspended in between this
-    // is a wake, not a blip — ask before dialing.
+    // is a wake, not a blip — mark the dial and let the server arbitrate.
     if (suspendGapExceeded()) {
-      onSuspendWake();
-      return;
+      pendingWake = true;
     }
     // One timer at a time: the CLI-01 silence deadline and an observed close
     // can race, and a second timer would redial twice.
@@ -481,20 +446,19 @@ export function createWsClient({
     reconnectTimer = clock.setTimeout(() => {
       reconnectAttempt++;
       // U4: the process may have been suspended while this timer was pending
-      // (a wake often outlives the backoff window). A dial here would silently
-      // reclaim the account's live socket from another device — ask instead.
-      if (suspendGapExceeded()) {
-        reconnectTimer = null;
-        onSuspendWake();
-        return;
-      }
+      // (a wake often outlives the backoff window), or a previous wake dial
+      // may have failed at the transport — `pendingWake` persists across
+      // retries until an inbound frame proves the handshake progressed. Mark
+      // the dial a wake so the server can refuse it rather than displacing
+      // another device.
+      const wake = pendingWake || suspendGapExceeded();
       const nextConfig = config;
       if (!nextConfig) {
         log.warn("Reconnect aborted: missing config");
         setState("disconnected");
         return;
       }
-      void connect(nextConfig);
+      void connect(nextConfig, wake);
     }, delay);
   }
 
@@ -521,8 +485,10 @@ export function createWsClient({
     // Any parsed inbound frame proves the socket is delivering bytes — refresh
     // the CLI-01 silence deadline, even for a frame the size guard drops below.
     armLiveness();
-    // U4: and that the clock was running, so a later gap is measured from here.
+    // U4: and that the clock was running and the socket survived any suspend,
+    // so a later gap is measured from here and no wake marker is left armed.
     lastActivityAt = Date.now();
+    pendingWake = false;
 
     // The size guard runs AFTER parsing (raw is already fully materialized
     // in memory either way, so this costs nothing) and exempts the handshake
@@ -680,6 +646,11 @@ export function createWsClient({
       // Omitted when unknown so the frame stays byte-identical to before
       // for callers that never register a provider.
       const activeChannelId = lastSeq > 0 ? (activeChannelProvider?.() ?? null) : null;
+      // U4: a wake dial carries `wake: true`. The server refuses it
+      // (ANOTHER_DEVICE_ACTIVE) when another device holds the session, and
+      // accepts it otherwise — so a lone device wakes silently while a woken
+      // laptop cannot displace the desktop's call. Omitted unless set, so an
+      // ordinary auth frame is byte-identical to before.
       send({
         type: "auth",
         payload: {
@@ -687,6 +658,7 @@ export function createWsClient({
           last_seq: lastSeq,
           epoch: PROTOCOL_EPOCH,
           ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
+          ...(pendingWake ? { wake: true } : {}),
         },
       });
     } else if (next === "disconnected") {
@@ -709,7 +681,7 @@ export function createWsClient({
     // transport to dial, so a report here is already reflected.
   }
 
-  async function connect(cfg: WsClientConfig): Promise<void> {
+  async function connect(cfg: WsClientConfig, wake = false): Promise<void> {
     wsGeneration++;
     // Captured so a disconnect() landing mid-attempt can be detected on resume
     // — disconnect() bumps wsGeneration too, so a mismatch here means this
@@ -717,11 +689,11 @@ export function createWsClient({
     const gen = wsGeneration;
     config = cfg;
     intentionalClose = false;
-    // U4: the user's own connect() is the choice to reclaim the connection, so
-    // it clears the suspend gate. Starting a dial also proves the clock is
-    // running, so a dial that fails long after the last activity backs off
-    // instead of reading as a wake.
-    suspendGated = false;
+    // U4: `wake` marks a dial the client made on its own after a suspend. The
+    // server refuses it if another device holds the session. A user-initiated
+    // connect (Reconnect / "Use here") passes false — a deliberate takeover —
+    // and clears any marker left by a superseded automatic wake dial.
+    pendingWake = wake;
     lastActivityAt = Date.now();
     // Belt-and-braces: a fresh connect (even one not routed through
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
@@ -820,7 +792,7 @@ export function createWsClient({
     intentionalClose = true;
     log.info("WebSocket disconnecting (intentional)", { host: config?.host ?? "unknown" });
     certMismatchBlock = false;
-    suspendGated = false;
+    pendingWake = false;
     cancelReconnect();
     stopHeartbeat();
     stopLiveness();
@@ -914,16 +886,6 @@ export function createWsClient({
     onStateChange(listener: (state: ConnectionState) => void): () => void {
       stateListeners.add(listener);
       return () => stateListeners.delete(listener);
-    },
-
-    /**
-     * U4: register a listener for a wake after a real suspend. This device's
-     * socket is dead and will not reconnect on its own — the app should offer
-     * the user a Reconnect action, which calls connect() to clear the gate.
-     */
-    onSuspendWake(listener: () => void): () => void {
-      suspendWakeListeners.add(listener);
-      return () => suspendWakeListeners.delete(listener);
     },
 
     /**

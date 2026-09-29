@@ -59,6 +59,15 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
+
+		// U4: a wake reconnect must not displace another device's live
+		// session. Refuse it before any handshake work; registerNow re-checks
+		// under h.mu to close the race where another device connects between
+		// here and registration.
+		if hub.refuseWakeIfOtherDeviceActive(ctx, conn, c) {
+			return
+		}
+
 		startPumps := func() {
 			writeCtx, writeCancel := context.WithCancel(ctx)
 			go writePump(writeCtx, conn, c)

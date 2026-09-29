@@ -88,6 +88,26 @@ describe("SESSION_REPLACED stops the two-device reconnect fight", () => {
     expect(authStore.getState().token).toBe("t");
   });
 
+  it("treats ANOTHER_DEVICE_ACTIVE like SESSION_REPLACED: same prompt, no reconnect", async () => {
+    // The server refused this device's wake reconnect because another device
+    // holds the session (U4). Same user choice as a displacement, same path.
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "error",
+        payload: { code: "ANOTHER_DEVICE_ACTIVE", message: "another device is active" },
+      }),
+    );
+    expectConsole("error", /\[dispatcher\] Server error/);
+
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(wsConnects()).toBe(0);
+    expect(uiStore.getState().sessionReplaced).toBe(true);
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(authStore.getState().token).toBe("t");
+  });
+
   it("control: a plain close with no such frame still reconnects, and backs off", async () => {
     emitTauriEvent("ws-state", "closed");
     expect(client.getState()).toBe("reconnecting");

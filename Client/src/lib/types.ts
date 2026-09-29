@@ -72,6 +72,10 @@ export type WsErrorCode =
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
   | "SESSION_REPLACED"
+  // A wake reconnect (auth frame `wake: true`) refused because another device
+  // currently holds the account's one live socket. The client stays signed in
+  // and does not reconnect until the user chooses "Use here" (U4).
+  | "ANOTHER_DEVICE_ACTIVE"
   // Kept for older servers / existing call sites.
   | "INVALID_INPUT"
   | "SERVER_ERROR";

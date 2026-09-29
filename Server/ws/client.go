@@ -78,6 +78,15 @@ type Client struct {
 	// handleReconnect and handleFreshConnect promote it to channelID only after
 	// checking it against the freshly computed allowed-channel set.
 	authChannelID int64
+	// wakeReconnect is true when the auth frame marked this connection a
+	// wake reconnect (auth payload `wake: true`, sent by a client dialling
+	// after its process was suspended). registerNow uses it to refuse
+	// displacing a DIFFERENT session's live connection — the same account on
+	// another device — so a woken laptop cannot silently steal the call. It
+	// never grants anything and is ignored unless a live client exists.
+	// Set once during the handshake, before the client is visible to any
+	// other goroutine, so no lock guards it.
+	wakeReconnect bool
 	connectedAt   time.Time      // when the WS connection was established
 	remoteAddr    string         // client IP resolved through trusted_proxies (clientip.Resolve), no port
 	msgCount      int            // count of messages processed; resets after session check

@@ -286,7 +286,10 @@ func (h *Hub) Run() {
 					if ev.add {
 						// No handshake permission set on this path (and no DB
 						// call allowed on the hub goroutine) — nil denies the
-						// inherited voice-channel subscription.
+						// inherited voice-channel subscription. A wake
+						// refusal cannot occur here: the handshake paths
+						// refuse before queueing a Register event, and the
+						// event path never carries wakeReconnect.
 						h.registerNow(ev.c, nil)
 					} else {
 						h.unregisterNow(ev.c)

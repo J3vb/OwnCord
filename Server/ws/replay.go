@@ -492,10 +492,13 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPostCheckPreRegisterRaceHook != nil {
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
-	h.registerNow(c, allowedChannelIDs)
+	// U4: registerNow returns true when it refused a wake reconnect that would
+	// displace another device's live session (ServeWS covers the common case;
+	// this catches the race). ok=false falls through to handleFreshConnect.
+	refused := h.registerNow(c, allowedChannelIDs)
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
-	return events, true
+	return events, !refused
 }
 
 // reconnectWriteReplay writes the resume handshake: auth_ok followed by the

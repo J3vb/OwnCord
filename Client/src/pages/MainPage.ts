@@ -536,28 +536,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // countdown every second, which a live region would read out each tick.
     root.appendChild(banner.liveElement);
 
-    // U4: this device woke from sleep and ws.ts will not reconnect on its own,
-    // so a woken laptop cannot silently take the connection from the desktop
-    // the user is at. Page-local, like the banner it drives: nothing outside
-    // MainPage reads it.
-    let suspendWake = false;
-
     // "Use here" takes the connection back: this device connects again and
-    // the server displaces the other one (last connect wins).
+    // the server displaces the other one (last connect wins). It serves both
+    // a displaced socket (SESSION_REPLACED) and a wake reconnect the server
+    // refused because another device held the session (ANOTHER_DEVICE_ACTIVE,
+    // U4) — the two are the same user choice, so they share one prompt.
     const useHere = (): void => {
       const token = authStore.getState().token;
       if (token === null) return;
-      suspendWake = false;
       setSessionReplaced(false);
-      ws.connect({ host: api.getConfig().host, token });
-    };
-    // U4: "Reconnect here" is the user's choice to reclaim the connection a
-    // suspend ended, so it clears the prompt before dialing.
-    const reconnectHere = (): void => {
-      const token = authStore.getState().token;
-      if (token === null) return;
-      suspendWake = false;
-      syncBanner();
       ws.connect({ host: api.getConfig().host, token });
     };
     // Retry is safe on a plain disconnect: connect() re-dials and the native
@@ -578,7 +565,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (banner === null) return;
       const state = uiStore.getState();
       if (state.sessionReplaced) banner.showSignedInElsewhere(useHere);
-      else if (suspendWake) banner.showSuspendReconnect(reconnectHere);
       else
         applyConnectionStatus(banner, state.connectionStatus, {
           offline: deviceNetworkOffline(),
@@ -588,15 +574,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     };
     unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, syncBanner));
     unsubscribers.push(uiStore.subscribeSelector((s) => s.connectionDialFailed, syncBanner));
-    // U4: ws.ts refuses to reconnect on its own after a real suspend; this is
-    // how the page learns to offer "Reconnect here" instead of leaving the
-    // banner on a plain disconnected notice.
-    unsubscribers.push(
-      ws.onSuspendWake(() => {
-        suspendWake = true;
-        syncBanner();
-      }),
-    );
 
     // Losing or regaining the device's network only re-renders, so the banner
     // says the true thing immediately; the reconnect loop and Retry own
@@ -636,7 +613,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (status) => {
           try {
             if (status === "connected") {
-              suspendWake = false;
               restoreSavedPresence();
               pollSessions();
             }

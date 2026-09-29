@@ -246,6 +246,17 @@ func (h *Hub) GetClient(userID int64) *Client {
 	return h.clients[userID]
 }
 
+// hasLiveClientForOtherSession reports whether userID has a live connection
+// whose session differs from tokenHash — i.e. another device currently holds
+// the account's one socket. A same-session match is this device's own stale
+// socket, not another device. Used by the wake-reconnect refusal (U4).
+func (h *Hub) hasLiveClientForOtherSession(userID int64, tokenHash string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.clients[userID]
+	return ok && c.tokenHash != tokenHash
+}
+
 // ClientCount returns the number of currently registered clients (test helper).
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
