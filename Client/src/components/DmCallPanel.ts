@@ -27,7 +27,7 @@ import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
 import type { MountableComponent } from "@lib/safe-render";
 import type { RingState, OutgoingCallState } from "@lib/call-ring";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import type { VoiceState, VoiceUser } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -748,7 +748,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       const inCallHere = voice.currentChannelId === channelId;
       const u = voiceUser(voice, channelId, userId);
       const isSelf = userId === me;
-      const muted = isSelf && inCallHere ? voice.localMuted : (u?.muted ?? false);
+      const muted = isSelf && inCallHere ? isSelfMuted(voice) : (u?.muted ?? false);
       const deafened = isSelf && inCallHere ? voice.localDeafened : (u?.deafened ?? false);
       const speaking = u?.speaking === true && !muted;
       ref.wrap.classList.toggle("dcp-avatar--speaking", speaking);
@@ -787,8 +787,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const reason = frozen ? t("status.notConnected") : "";
     const { mute, deafen, camera, share } = controls;
     if (mute !== null) {
-      mute.setAttribute("aria-pressed", String(voice.localMuted));
-      swapIcon(mute, voice.localMuted ? "mic-off" : "mic", 20);
+      const selfMuted = isSelfMuted(voice);
+      mute.setAttribute("aria-pressed", String(selfMuted));
+      swapIcon(mute, selfMuted ? "mic-off" : "mic", 20);
       mute.disabled = frozen || voice.localServerMuted === true;
       mute.title =
         voice.localServerMuted === true

@@ -516,13 +516,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("a cancelled portal dialog is a silent cancel, not a refused share", async () => {
+  it("a portal that never started shows a soft notice, not a refused share", async () => {
     const onError = vi.fn();
     session.setOnError(onError);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     const { desktop } = await import("../../src/platform/desktop");
     const real = desktop.nativeVoice.startScreen;
-    desktop.nativeVoice.startScreen = () => Promise.reject("screen capture was cancelled");
+    desktop.nativeVoice.startScreen = () => Promise.reject("screen capture portal did not start");
     try {
       const sharing = session.enableScreenshare();
       await pressGoLive();
@@ -530,8 +530,11 @@ describe("LiveKitSession on the Linux native backend", () => {
     } finally {
       desktop.nativeVoice.startScreen = real;
     }
-    // polish #10: closing the picker is not a denial, so no red error.
-    expect(onError).not.toHaveBeenCalled();
+    // The portal cannot say whether the user cancelled, so neither silence
+    // nor "permission denied": a soft notice covering both.
+    expect(onError).toHaveBeenCalledWith(
+      "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
+    );
     expect(names()).not.toContain("publishScreen");
     expect(nativeCounters.screenTracks).toBe(0);
   });

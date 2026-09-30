@@ -11,6 +11,7 @@ const {
   mockVoiceSessionLeave,
   mockSetMuted,
   mockSetDeafened,
+  mockSetPttOwnsMute,
   mockEnableCamera,
   mockDisableCamera,
   mockEnableScreenshare,
@@ -23,6 +24,7 @@ const {
   mockVoiceSessionLeave: vi.fn(),
   mockSetMuted: vi.fn(),
   mockSetDeafened: vi.fn(),
+  mockSetPttOwnsMute: vi.fn(),
   mockEnableCamera: vi.fn(() => Promise.resolve()),
   mockDisableCamera: vi.fn(() => Promise.resolve()),
   mockEnableScreenshare: vi.fn(() => Promise.resolve()),
@@ -39,10 +41,12 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@stores/voice.store", () => ({
+vi.mock("@stores/voice.store", async (importOriginal) => ({
   voiceStore: { getState: mockVoiceStoreGetState },
   joinVoiceChannel: mockJoinVoiceChannel,
   leaveVoiceChannel: mockLeaveVoiceChannel,
+  isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
+  setPttOwnsMute: mockSetPttOwnsMute,
 }));
 
 vi.mock("@stores/ui.store", () => ({
@@ -92,6 +96,8 @@ interface VoiceStateStub {
   localScreenshare: boolean;
   localServerMuted: boolean;
   localServerDeafened: boolean;
+  pttGated?: boolean;
+  pttOwnsMute?: boolean;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -208,6 +214,36 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(mockSetDeafened).not.toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
     });
+
+    it("turns the mute push-to-talk applied into the user's own, never opening the mic", () => {
+      // Key up: the mic button reads unmuted, so a click means "mute".
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, pttGated: true, pttOwnsMute: true }),
+      );
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(mockSetPttOwnsMute).toHaveBeenCalledWith(false);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+    });
+
+    it("hands the user's own mute back to push-to-talk while the key is up", () => {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localMuted: true, pttGated: true, pttOwnsMute: false }),
+      );
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onMuteToggle();
+
+      // The mic stays closed until the next press; the server hears the unmute.
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(mockSetPttOwnsMute).toHaveBeenCalledWith(true);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: false } });
+    });
   });
 
   describe("onDeafenToggle", () => {
@@ -266,6 +302,21 @@ describe("createVoiceWidgetCallbacks", () => {
       // ...but the unmute must be suppressed while the server mute stands.
       expect(mockSetMuted).not.toHaveBeenCalled();
       expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    });
+
+    it("keeps the mic closed on undeafen while the push-to-talk key is up", () => {
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ localDeafened: true, localMuted: true, pttGated: true }),
+      );
+      const ws = makeWs();
+      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetDeafened).toHaveBeenCalledWith(false);
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(mockSetPttOwnsMute).toHaveBeenCalledWith(true);
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: false } });
     });
   });
 

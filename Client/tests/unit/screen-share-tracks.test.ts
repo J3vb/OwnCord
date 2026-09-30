@@ -637,6 +637,21 @@ describe("enableScreenshare", () => {
     expect(deps.onError).not.toHaveBeenCalled();
   });
 
+  it("answers a desktop portal that never started with a soft notice", async () => {
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("screen capture portal did not start", "NotAllowedError"),
+    );
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).toHaveBeenCalledWith(
+      "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
+    );
+  });
+
   it("still reports a refusal the OS made rather than the user", async () => {
     const rig = fakeRoom();
     createLocalScreenTracks.mockRejectedValue(

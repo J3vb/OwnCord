@@ -429,6 +429,23 @@ describe("DmCallPanel — connected", () => {
     expect(selfBadge.getAttribute("title")).toBe("Muted");
   });
 
+  it("does not read a push-to-talk user as muted between presses", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    patchVoice({ localMuted: true, pttGated: true, pttOwnsMute: true });
+
+    const mute = q(root, "dcp-mute")!;
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
+    const selfBadge = root.querySelector(`.dcp-avatar[data-user-id='${SELF}'] .dcp-avatar-badge`)!;
+    expect((selfBadge as HTMLElement).hidden).toBe(true);
+
+    // The user's own mute, key up, still reads muted.
+    patchVoice({ pttOwnsMute: false });
+    expect(mute.getAttribute("aria-pressed")).toBe("true");
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+  });
+
   it("keeps a moderator mute and a dropped socket out of reach, but never Leave", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();

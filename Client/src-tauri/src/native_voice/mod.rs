@@ -336,10 +336,10 @@ pub struct ScreenStarted {
 /// Start capturing `source` (a `native_voice_screen_sources` id, or
 /// `portal`), replacing any running capture, and resolve once the first
 /// frame arrives: on Wayland that is after the user completed the portal's
-/// dialog, and a dismissed dialog rejects with [`screen::CANCELLED`]. The
-/// session is released while waiting, so a leave or stop meanwhile ends the
-/// wait instead of queueing behind it. Frames then preview on the frame
-/// socket's `screen` route.
+/// dialog, and a dialog that ends without one rejects with
+/// [`screen::PORTAL_NOT_STARTED`]. The session is released while waiting,
+/// so a leave or stop meanwhile ends the wait instead of queueing behind it.
+/// Frames then preview on the frame socket's `screen` route.
 #[tauri::command]
 pub async fn native_voice_start_screen(
     state: tauri::State<'_, NativeVoiceState>,

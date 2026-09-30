@@ -94,7 +94,8 @@ export interface VoiceState {
   /** True while the mute in effect is the one push-to-talk's own release
    *  applied, not one the user asked for: a press lifts only this mute (v006),
    *  and only a user's own mute reads as muted on the mic controls. Written
-   *  only from the PTT service; optional for the same fixture reason. */
+   *  by the PTT service and the mute toggle; optional for the same fixture
+   *  reason. */
   readonly pttOwnsMute?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
@@ -411,7 +412,7 @@ export function setPttGated(gated: boolean): void {
 }
 
 /** Record whether the mute in effect is push-to-talk's own (see
- *  VoiceState.pttOwnsMute). Written only from the PTT service. */
+ *  VoiceState.pttOwnsMute). */
 export function setPttOwnsMute(owns: boolean): void {
   voiceStore.setState((prev) =>
     prev.pttOwnsMute === owns ? prev : { ...prev, pttOwnsMute: owns },

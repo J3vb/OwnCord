@@ -181,6 +181,8 @@ export const voiceText = defineCatalog("voice", {
   "share.cameraFailed": "Failed to start camera",
   "share.screenDenied": "Screen sharing permission denied",
   "share.screenFailed": "Failed to start screen sharing",
+  "share.screenNotStarted":
+    "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
   "device.pipelineError": "Audio pipeline error after device switch",
   "device.inputDisconnected": "Audio device disconnected — switched to default",
   "device.noInput": "No audio input device available",

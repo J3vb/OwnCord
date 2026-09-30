@@ -857,7 +857,7 @@ describe("NativeRoom screen share", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("maps a closed picker and a dismissed portal dialog to a dismissed picker (silent cancel)", async () => {
+  it("maps a closed picker to a dismissed picker and a portal that never started to its own outcome", async () => {
     const dismissed = { name: "NotAllowedError", message: "Permission denied by user" };
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
@@ -871,8 +871,13 @@ describe("NativeRoom screen share", () => {
         maxBitrate: 6_000_000,
         maxFramerate: 30,
       });
-    host.startScreen = () => Promise.reject("screen capture was cancelled");
-    await expect(share(room)).rejects.toMatchObject(dismissed);
+    // The portal cannot say whether the user cancelled, so it is not the
+    // silent dismissal but its own outcome.
+    host.startScreen = () => Promise.reject("screen capture portal did not start");
+    await expect(share(room)).rejects.toMatchObject({
+      name: "NotAllowedError",
+      message: "screen capture portal did not start",
+    });
     // A failure before the first frame and the first-frame timeout are
     // errors the user is told about, not cancels.
     for (const failure of [

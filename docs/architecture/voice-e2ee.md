@@ -407,10 +407,13 @@ the backend captures with libwebrtc's `DesktopCapturer`
 `localParticipant.createScreenTracks`, which `NativeRoom` implements as pick,
 then `native_voice_start_screen`. That resolves once the first frame arrives
 (on Wayland, after the dialog), so the web path's generation guard around the
-OS picker covers the portal dialog too; a dismissed dialog rejects and is
-reported as the `NotAllowedError` a dismissed browser picker raises, which the
-shared code keeps silent, while a capture that fails or produces no first
-frame is reported as a failure. The
+OS picker covers the portal dialog too. libwebrtc cannot tell a dismissed
+portal dialog from a refused or failed one, so a portal capture that ends
+before its first frame gets a soft "didn't start" notice; the X11 picker's own
+dismissal raises the `NotAllowedError` a dismissed browser picker does, which
+the shared code keeps silent, and a picked source that fails or produces no
+first frame is reported as a failure. The portal's dialog is not time-bounded;
+a stop or leave ends the wait. The
 returned `NativeScreenTrack` stands in for the browser track: its
 `mediaStreamTrack` is the local preview (the frame socket's `/screen` route,
 drawn by the same WebGL renderer as remote video), `publishTrack` publishes

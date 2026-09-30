@@ -180,8 +180,9 @@ export interface NativeVoice {
   screenSources(): Promise<NativeVoiceScreenSources>;
   /** Start capturing `source` (replacing any running capture) and resolve
    *  once its first frame arrives — on Wayland after the portal dialog
-   *  completes; a dismissed dialog rejects with "screen capture was
-   *  cancelled", any other failure before the first frame with its reason.
+   *  completes; a portal capture that ends before its first frame rejects
+   *  with "screen capture portal did not start", any other failure before
+   *  the first frame with its reason.
    *  The preview then plays on the frame socket's `/screen` route. */
   startScreen(
     session: number,

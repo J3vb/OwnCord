@@ -10,6 +10,13 @@
 // i18n-exempt: browser error message compared by value, never displayed
 export const PICKER_DISMISSED = "Permission denied by user";
 
+/** The native host's rejection of a portal capture that ended before its
+ *  first frame (`screen::PORTAL_NOT_STARTED`): the portal does not say
+ *  whether the user cancelled or something refused, so it gets a soft notice
+ *  rather than silence or a denial. */
+// i18n-exempt: host rejection marker compared by value, never displayed
+export const PORTAL_NOT_STARTED = "screen capture portal did not start";
+
 /** True in the Tauri app on a Linux desktop — the only place the native
  *  LiveKit backend exists. Keyed on the host, not on `RTCPeerConnection`, so
  *  a WebKitGTK built with WebRTC still takes the native path; a Linux
