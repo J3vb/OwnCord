@@ -329,6 +329,30 @@ describe("DmCallPanel — caller side", () => {
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto didn't answer");
   });
 
+  it("drops the callee's tile once the call went unanswered, keeping both actions", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
+
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBeNull();
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${SELF}']`)).not.toBeNull();
+    expect(q(root, "dcp-ring-again")).not.toBeNull();
+    expect(q(root, "dcp-leave-call")).not.toBeNull();
+  });
+
+  it("puts the callee's ringing tile back when Ring again starts a new ring", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBeNull();
+
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+
+    const callee = root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)!;
+    expect(callee).not.toBeNull();
+    expect(callee.classList.contains("dcp-avatar--ringing")).toBe(true);
+  });
+
   it("offers no Collapse once the call went unanswered, only while ringing", () => {
     setVoice(DM, [vu(SELF)]);
     const { root } = mount();
@@ -621,15 +645,14 @@ describe("DmCallPanel — video in the call", () => {
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
   });
 
-  it("keeps your own video once the call went unanswered, with the callee still shown", () => {
+  it("keeps your own video once the call went unanswered, without the absent callee's tile", () => {
     setVoice(DM, [vu(SELF)]);
     const { opts, root } = mount();
     panel!.setOutgoing({ channelId: DM, phase: "declined", pending: [] });
     panel!.setVideoActive(true);
 
     const people = lastPeople(opts);
-    expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
-    expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
+    expect(people.map((p) => p.userId)).toEqual([SELF]);
 
     expect(root.contains(panel!.videoElement())).toBe(true);
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto declined the call");

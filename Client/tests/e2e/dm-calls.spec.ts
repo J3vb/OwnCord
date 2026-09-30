@@ -431,7 +431,7 @@ function inRoom(userId = OTHER_USER_ID, extra: Record<string, unknown> = {}) {
 test.describe("DM calls — call panel", () => {
   test("the caller sees the ring, hears the decline, can ring again, and the call comes up when the callee joins", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
@@ -448,7 +448,21 @@ test.describe("DM calls — call panel", () => {
     await expect(panel(page).locator("[data-testid='dcp-caption']")).toHaveText(
       "Otto declined the call",
     );
+    // The absent callee has no tile: their placeholder beside your own camera
+    // or screen share reads as if they joined. Only you are drawn.
+    await expect(panel(page).locator(`.dcp-avatar[data-user-id='${OTHER_USER_ID}']`)).toHaveCount(
+      0,
+    );
+    await expect(panel(page).locator(".dcp-person")).toHaveCount(1);
+    await expect(panel(page).locator("[data-testid='dcp-ring-again']")).toBeVisible();
+    await expect(panel(page).locator("[data-testid='dcp-leave-call']")).toBeVisible();
     await expect(voiceWidget(page)).toBeVisible();
+
+    // Evidence for the PR: the unanswered call screen with no absent-callee tile.
+    await testInfo.attach("dm-call-unanswered-no-callee-tile.png", {
+      body: await page.screenshot({ animations: "disabled", caret: "hide" }),
+      contentType: "image/png",
+    });
 
     const ringsBefore = (await sentFrames(page)).filter((f) => f.type === "call_ring").length;
     await panel(page).locator("[data-testid='dcp-ring-again']").click();
@@ -456,6 +470,10 @@ test.describe("DM calls — call panel", () => {
       .poll(async () => (await sentFrames(page)).filter((f) => f.type === "call_ring").length)
       .toBe(ringsBefore + 1);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
+    // Ring again puts the callee's ringing tile back.
+    await expect(
+      panel(page).locator(`.dcp-avatar[data-user-id='${OTHER_USER_ID}'].dcp-avatar--ringing`),
+    ).toBeVisible();
 
     await emitWsMessage(page, inRoom(OTHER_USER_ID, { speaking: true }));
     await expect(panel(page)).toHaveAttribute("data-state", "connected");
