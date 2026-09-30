@@ -58,7 +58,8 @@ export function createTypingIndicator(options: TypingIndicatorOptions): Mountabl
       const textNode = document.createTextNode(` ${formatTypingText(filtered)}`);
       root.appendChild(textNode);
     }
-    // When empty, .typing-bar:empty CSS rule hides it (height: 0)
+    // When empty the bar stays in place as a reserved 24px row (DP-15), so
+    // typing start/stop does not shift the message list.
   }
 
   function mount(container: Element): void {

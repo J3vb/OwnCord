@@ -1241,9 +1241,6 @@ ul.md-list-nested {
   color: var(--text-muted);
   flex-shrink: 0;
 }
-.typing-bar:empty {
-  height: 0;
-}
 .typing-dots {
   display: inline-flex;
   gap: 3px;
