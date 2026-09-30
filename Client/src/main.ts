@@ -502,7 +502,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // FIRST authentication with a deadline: a never-authenticated attempt returns
     // to the form and says why, while a live session's later outages keep the
     // in-app reconnect banner and its retry loop. Cleared on the first "connected"
-    // (auth_ok) or when the session tears down.
+    // (auth_ok), a terminal disconnect, a first-use certificate prompt for this
+    // host, or when the session tears down.
     const preauthTimer = setTimeout(() => {
       if (!owner.isCurrent()) return;
       log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
