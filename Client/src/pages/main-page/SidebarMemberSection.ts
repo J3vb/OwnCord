@@ -79,13 +79,17 @@ export function createSidebarMemberSection(
   });
 
   // --- Header ---
+  // The arrow is a real <button> so the member list can be collapsed from the
+  // keyboard; the header div keeps its mouse click handler for a full-row
+  // target (a button click bubbles to it).
   const memberHeader = createElement("div", { class: "category sidebar-members-header" });
-  const memberArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
   const memberLabelEl = createElement(
     "span",
     { class: "category-name" },
     shellText("members.heading"),
   );
+  const memberArrow = createElement("button", { type: "button", class: "category-arrow" });
+  memberArrow.textContent = "\u25BC";
   appendChildren(memberHeader, memberArrow, memberLabelEl);
   memberListContainer.appendChild(memberHeader);
 

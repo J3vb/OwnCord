@@ -331,6 +331,41 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 	}
 }
 
+// TestDMService_ListDMs_CarriesMentionCount locks that GET /dms reports the
+// same DM mention_count the ready payload does: both read it from
+// GetUserDMChannels. ListDMs used to return the zero value, so a DM mention
+// badge silently vanished on the documented REST recovery path (the client
+// calls GET /dms when accepting a message request).
+func TestDMService_ListDMs_CarriesMentionCount(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
+
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), 1, 2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	msgID, err := database.CreateMessage(context.Background(), ch.ID, 1, "hi @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.IncrementMentionCounts(context.Background(), ch.ID, msgID, []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	svc := NewDMService(database)
+	dms, err := svc.ListDMs(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("ListDMs: %v", err)
+	}
+	if len(dms) != 1 {
+		t.Fatalf("ListDMs: got %d channels, want 1", len(dms))
+	}
+	if dms[0].MentionCount != 1 {
+		t.Errorf("MentionCount = %d, want 1: GET /dms must carry the DM mention count, as ready does", dms[0].MentionCount)
+	}
+}
+
 // erroringIsGroupDMStore forces RingTargets' IsGroupDM call to fail.
 type erroringIsGroupDMStore struct {
 	*db.DB

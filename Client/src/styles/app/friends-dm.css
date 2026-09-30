@@ -138,6 +138,34 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Name + last-message line stack; the row is avatar | body | time/badges. */
+.dm-item .dm-item-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.dm-item .dm-item-body .dm-name {
+  flex: none;
+  font-weight: 600;
+}
+.dm-item .dm-preview {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dm-item.active .dm-preview {
+  color: var(--text-faint);
+}
+.dm-item .dm-preview-time {
+  flex-shrink: 0;
+  align-self: flex-start;
+  font-size: var(--font-size-xxs);
+  color: var(--text-micro);
+}
 .dm-item .dm-close {
   width: 24px;
   height: 24px;

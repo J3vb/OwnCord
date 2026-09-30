@@ -84,6 +84,7 @@ describe("SidebarDmSection", () => {
 
   afterEach(() => {
     container.remove();
+    vi.useRealTimers();
   });
 
   // -------------------------------------------------------------------------
@@ -260,6 +261,105 @@ describe("SidebarDmSection", () => {
       section.destroy();
     });
 
+    it("shows the last-message preview and a time, matching the full DM sidebar", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          lastMessage: "see you at 6",
+          lastMessageAt: "2020-06-15T12:00:00Z",
+        }),
+      );
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const entry = container.querySelector("[data-testid='dm-entry']")!;
+      expect(entry.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
+      expect(entry.querySelector(".dm-preview-time")?.textContent).toBe("Jun 15, 2020");
+
+      section.destroy();
+    });
+
+    it("flattens markdown and hides an unclicked spoiler in the preview", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          lastMessageId: 5,
+          lastMessage: "**hi** ||the butler did it||",
+          lastMessageAt: "2020-06-15T12:00:00Z",
+        }),
+      );
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      expect(container.querySelector(".dm-preview")?.textContent).toBe("hi Spoiler");
+
+      section.destroy();
+    });
+
+    it("keys 'No messages yet' on a never-messaged DM, not on empty content", () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          lastMessageId: 5,
+          lastMessage: "",
+          lastMessageAt: "2020-06-15T12:00:00Z",
+        }),
+      );
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const preview = (id: number) =>
+        container.querySelector(`[data-channel-id='${id}'] .dm-preview`)?.textContent;
+      expect(preview(100)).toBe("No messages yet");
+      // An attachment-only last message has no words, but the DM was messaged.
+      expect(preview(101)).toBe("");
+
+      section.destroy();
+    });
+
+    it("rolls a row's time from a clock time to a date at midnight", () => {
+      vi.useFakeTimers({ now: new Date(2026, 8, 29, 23, 58) });
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          lastMessageId: 5,
+          lastMessage: "late",
+          lastMessageAt: new Date(2026, 8, 29, 23, 50).toISOString(),
+        }),
+      );
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+      const time = () => container.querySelector(".dm-preview-time")?.textContent;
+      expect(time()).toBe("11:50 PM");
+
+      vi.advanceTimersByTime(3 * 60 * 1000);
+
+      expect(time()).toBe("Sep 29");
+
+      section.destroy();
+    });
+
+    it("rebuilds a preview row when only its last message changes", () => {
+      addDmChannel(makeDm({ channelId: 100, lastMessage: "old" }));
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
+
+      updateDmLastMessagePreview(100, 900, "brand new", "2020-06-15T12:00:00Z");
+      dmStore.flush();
+
+      expect(container.querySelector("[data-testid='dm-entry']")).not.toBe(entry);
+      expect(container.querySelector(".dm-preview")?.textContent).toBe("brand new");
+
+      section.destroy();
+    });
+
     it("shows unread badge on DM entries with unread messages", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 5 }));
 
@@ -296,12 +396,18 @@ describe("SidebarDmSection", () => {
       container.appendChild(section.element);
       const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
 
-      updateDmLastMessagePreview(100, 900, "latest", "2026-09-23T12:00:00Z");
+      // The recipient's avatar is not drawn in the row, so the node is reused.
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "/new.png", status: "online" },
+        }),
+      );
       dmStore.flush();
       expect(container.querySelector("[data-testid='dm-entry']")).toBe(entry);
       entry.click();
 
-      expect(onSelectDm.mock.calls[0]![0].lastMessageId).toBe(900);
+      expect(onSelectDm.mock.calls[0]![0].recipient.avatar).toBe("/new.png");
 
       section.destroy();
     });

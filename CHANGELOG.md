@@ -84,6 +84,13 @@ and only when it changes something a contributor or fork holder must do
 
 - **The voice connection panel is tidier.** The transport-stats readout now lays Outgoing and Incoming out as a two-column grid of label/value rows, each value on one line with a single unit — a rate reads "331 kB/s" instead of the old "331.25 kB/s (2.6 Mbps)" that wrapped. A zero rate or a missing RTT is dimmed rather than shown at full strength, and the in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
 
+### Direct messages & members
+
+- **The DM list now shows each conversation's last message and when it arrived.** The sidebar and the embedded DM preview drew only names and avatars, even though the last-message text and time were already loaded — so a DM looked the same whether or not it had news in it. Both now show the last line (spoilers stay hidden) and its time — the clock time for today, a short date such as "Sep 29" before that — and follow new, edited and deleted messages.
+- **A DM mention badge no longer disappears when the client has to reload its DM list.** Accepting a message request reloads the DM list over REST, which reported a mention count of zero while the list sent on connect reported the real one; both now report the same count.
+- **Starting a DM from the member list now works with a keyboard.** The member picker's rows were click-only divs, so Tab could reach only the group-name box and the Confirm and Cancel buttons, never a person — and in the 1:1 path that picker is the only way to start a DM from the member list. The rows are now a single Tab stop you step with the arrow keys and choose with Enter or Space.
+- **The member list section can be collapsed from the keyboard.** Its header was a click-only div, so only a mouse could fold the section away; the disclosure arrow is now a real button that toggles on Enter or Space, like the channel categories and the DM section.
+
 ### Installing & updating
 
 - **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.

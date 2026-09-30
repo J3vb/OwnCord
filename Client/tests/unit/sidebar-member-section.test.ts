@@ -290,6 +290,30 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    // The header was a click-only div with a bare arrow span, so a keyboard
+    // user could never collapse the member list — unlike the channel
+    // categories and DM section, which use a real <button>.
+    it("exposes the collapse control as a focusable button that toggles on Enter", () => {
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const arrow = container.querySelector(".sidebar-members-header .category-arrow");
+      expect(arrow).not.toBeNull();
+      expect(arrow!.tagName).toBe("BUTTON");
+
+      (arrow as HTMLButtonElement).focus();
+      expect(document.activeElement).toBe(arrow);
+
+      // A native button fires click on Enter/Space, which is what the header
+      // handler listens for.
+      (arrow as HTMLElement).click();
+
+      const content = container.querySelector(".sidebar-members-content") as HTMLElement;
+      expect(content.style.display).toBe("none");
+
+      section.destroy();
+    });
+
     it("expands when header is clicked twice", () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);

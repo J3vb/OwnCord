@@ -1591,18 +1591,20 @@ List all open DM channels for the authenticated user, ordered by most recent act
       "last_message_id": 5042,
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
-      "unread_count": 3
+      "unread_count": 3,
+      "mention_count": 1
     }
   ]
 }
 ```
 
-| Field        | Description                                                                                                            |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `recipient`  | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
-| `recipients` | Every participant except the caller. What group-aware clients read.                                                    |
-| `name`       | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
-| `is_group`   | True for a group DM. Stored, not derived from the live participant count.                                              |
+| Field           | Description                                                                                                            |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `recipient`     | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
+| `recipients`    | Every participant except the caller. What group-aware clients read.                                                    |
+| `name`          | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
+| `is_group`      | True for a group DM. Stored, not derived from the live participant count.                                              |
+| `mention_count` | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
 
 `status` is viewer-adjusted: an `invisible` participant reads as `offline`.
 

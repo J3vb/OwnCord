@@ -38,6 +38,7 @@ describe("DmSidebar", () => {
 
   afterEach(() => {
     container.remove();
+    vi.useRealTimers();
   });
 
   it("renders the sidebar with search input", () => {
@@ -639,6 +640,76 @@ describe("DmSidebar", () => {
     const statusDot = container.querySelector(".dm-status") as HTMLSpanElement;
     // undefined status falls back to "offline" key
     expect(statusDot.style.background).toBe("var(--text-micro)");
+
+    sidebar.destroy?.();
+  });
+
+  // Discord's DM list always shows the last line and when it arrived; the
+  // data was already computed onto DmConversation but never drawn.
+  it("renders the last-message preview and a relative timestamp per row", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({
+          channelId: 1,
+          userId: 1,
+          username: "Alice",
+          lastMessage: "see you at 6",
+          timestamp: "2020-06-15T12:00:00Z",
+        }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    expect(container.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
+    // A compact date for an older timestamp, not the raw ISO string.
+    expect(container.querySelector(".dm-preview-time")?.textContent).toBe("Jun 15, 2020");
+
+    sidebar.destroy?.();
+  });
+
+  it("rolls a row's time from a clock time to a date at midnight", () => {
+    vi.useFakeTimers({ now: new Date(2026, 8, 29, 23, 58) });
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ timestamp: new Date(2026, 8, 29, 23, 50).toISOString() })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+    const time = () => container.querySelector(".dm-preview-time")?.textContent;
+    expect(time()).toBe("11:50 PM");
+
+    vi.advanceTimersByTime(3 * 60 * 1000);
+
+    expect(time()).toBe("Sep 29");
+
+    sidebar.destroy?.();
+  });
+
+  it("rebuilds a row when only its preview or timestamp changes", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, userId: 1, username: "Alice", lastMessage: "old" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+    const row = container.querySelector(".dm-item") as HTMLElement;
+
+    sidebar.update([
+      makeConvo({
+        channelId: 1,
+        userId: 1,
+        username: "Alice",
+        lastMessage: "new",
+        timestamp: "2020-06-15T12:00:00Z",
+      }),
+    ]);
+
+    expect(container.querySelector(".dm-item")).not.toBe(row);
+    expect(container.querySelector(".dm-preview")?.textContent).toBe("new");
 
     sidebar.destroy?.();
   });

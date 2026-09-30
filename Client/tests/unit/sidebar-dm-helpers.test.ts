@@ -467,7 +467,7 @@ describe("SidebarDmHelpers", () => {
       expect(result[0]!.active).toBe(false);
     });
 
-    it("uses 'No messages yet' when lastMessage is empty", () => {
+    it("uses 'No messages yet' when the DM was never messaged", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,

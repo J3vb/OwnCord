@@ -268,20 +268,12 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 }
 
 // readyDMChannels loads the user's open DM channels and reconciles them with
-// the rest of the ready payload: mention counts from unreadMap, and the same
-// presence rule presentableMembers applies to the members array.
-func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
+// the rest of the ready payload: the same presence rule presentableMembers
+// applies to the members array.
+func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64) ([]db.DMChannelInfo, error) {
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
-	}
-	// GetUserDMChannels computes unread from read_states but carries no mention
-	// count, so a DM mention badge used to vanish on every reconnect. The
-	// unread map now includes the user's DM rows — pull mention_count from it.
-	for i := range dmChannels {
-		if u, ok := unreadMap[dmChannels[i].ChannelID]; ok {
-			dmChannels[i].MentionCount = u.MentionCount
-		}
 	}
 	// GetUserDMChannels only applies db.StatusForViewer, which collapses
 	// invisible to offline but passes a disconnected recipient's saved
@@ -415,7 +407,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	// (and therefore visibleChannels) deliberately skips DM channels, since
 	// their visibility is membership-based rather than role-based, so without
 	// this a DM voice call's voice_state rows would never make it into ready.
-	dmChannels, err := h.readyDMChannels(ctx, database, userID, unreadMap)
+	dmChannels, err := h.readyDMChannels(ctx, database, userID)
 	if err != nil {
 		return nil, err
 	}

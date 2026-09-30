@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   failPendingOnDisconnect,
+  handleChatBulkDeleted,
+  handleChatDeleted,
+  handleChatEdited,
   handleChatMessage,
   handleChatPinned,
   handleMessagingError,
@@ -13,14 +16,17 @@ import {
   addOptimisticMessage,
   resetMessagesStore,
 } from "../../stores/messages.store";
+import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.store";
 import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
-import type { Payload } from "../connection/dispatchContext";
+import type { DispatchApi, Payload } from "../connection/dispatchContext";
+import type { DmChannelsResponse } from "../../lib/types";
 
 vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "../../lib/toast";
+import { expectConsole } from "../../../tests/helpers/console";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {
   return {
@@ -208,5 +214,210 @@ describe("handleSendFailure", () => {
     handleSendFailure("corr-c", "OFFLINE");
 
     expect(messagesStore.getState().pendingSends.has("corr-c")).toBe(false);
+  });
+});
+
+function seedDm(lastMessageId: number, lastMessage: string, lastMessageAt: string): void {
+  setDmChannels([
+    {
+      channelId: 1,
+      recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+      participants: [],
+      name: "",
+      isGroup: false,
+      lastMessageId,
+      lastMessage,
+      lastMessageAt,
+      unreadCount: 0,
+      mentionCount: 0,
+    },
+  ]);
+}
+const dm = () => dmStore.getState().channels[0]!;
+
+function dmApi(getDmChannels: () => Promise<DmChannelsResponse>): DispatchApi {
+  return { listBlocks: vi.fn(), getDmChannels };
+}
+
+function serverDms(
+  lastMessageId: number,
+  lastMessage: string,
+  lastMessageAt: string,
+): DmChannelsResponse {
+  return {
+    dm_channels: [
+      {
+        channel_id: 1,
+        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+        last_message_id: lastMessageId,
+        last_message: lastMessage,
+        last_message_at: lastMessageAt,
+        unread_count: 0,
+      },
+    ],
+  };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+describe("DM preview follows an edit or delete of its last message", () => {
+  afterEach(() => setDmChannels([]));
+
+  it("replaces the preview text when the shown message is edited", () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    handleChatEdited(undefined, { message_id: 7, channel_id: 1, content: "fixed", edited_at: "x" });
+    expect(dm().lastMessage).toBe("fixed");
+    expect(dm().lastMessageAt).toBe("2026-03-15T10:00:00Z");
+  });
+
+  it("leaves the preview alone when an older message is edited", () => {
+    seedDm(7, "latest", "2026-03-15T10:00:00Z");
+    handleChatEdited(undefined, { message_id: 6, channel_id: 1, content: "older", edited_at: "x" });
+    expect(dm().lastMessage).toBe("latest");
+  });
+
+  it("blanks the deleted preview at once, then shows the server's last message", async () => {
+    // A full ready kept stale rows 1..5, then 7 arrived live: 6 is missing from the cache.
+    addMessage({ ...chat(5, "2026-03-15T08:00:00Z"), content: "stale" });
+    addMessage({ ...chat(7, "2026-03-15T10:00:00Z"), content: "oops, wrong person" });
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const refetch = deferred<DmChannelsResponse>();
+    const api = dmApi(() => refetch.promise);
+
+    handleChatDeleted(api, { message_id: 7, channel_id: 1 });
+
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+    refetch.resolve(serverDms(6, "the real previous one", "2026-03-15T09:00:00Z"));
+    await refetch.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({
+      lastMessageId: 6,
+      lastMessage: "the real previous one",
+      lastMessageAt: "2026-03-15T09:00:00Z",
+    });
+  });
+
+  it("refetches the server's last message after a bulk delete that includes the shown one", async () => {
+    addMessage({ ...chat(5, "2026-03-15T08:00:00Z"), content: "stale" });
+    seedDm(7, "purged too", "2026-03-15T10:00:00Z");
+    const api = dmApi(() => Promise.resolve(serverDms(4, "server says", "2026-03-15T07:00:00Z")));
+
+    handleChatBulkDeleted(api, { channel_id: 1, ids: [7, 6] });
+
+    expect(dm().lastMessage).toBe("");
+    await vi.waitFor(() =>
+      expect(dm()).toMatchObject({ lastMessageId: 4, lastMessage: "server says" }),
+    );
+  });
+
+  it("keeps a newer message that replaced the preview before the refetch answered", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const refetch = deferred<DmChannelsResponse>();
+    const api = dmApi(() => refetch.promise);
+
+    handleChatDeleted(api, { message_id: 7, channel_id: 1 });
+    updateDmLastMessage(1, 8, "brand new", "2026-03-15T11:00:00Z");
+    refetch.resolve(serverDms(6, "older", "2026-03-15T09:00:00Z"));
+    await refetch.promise;
+    await Promise.resolve();
+
+    expect(dm()).toMatchObject({ lastMessageId: 8, lastMessage: "brand new" });
+  });
+
+  it("drops an answer newer than the preview so the live frame still counts as new", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const refetch = deferred<DmChannelsResponse>();
+
+    handleChatDeleted(
+      dmApi(() => refetch.promise),
+      { message_id: 7, channel_id: 1 },
+    );
+    refetch.resolve(serverDms(8, "sent right after", "2026-03-15T11:00:00Z"));
+    await refetch.promise;
+    await Promise.resolve();
+
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+    updateDmLastMessage(1, 8, "sent right after", "2026-03-15T11:00:00Z");
+    expect(dm()).toMatchObject({
+      lastMessageId: 8,
+      lastMessage: "sent right after",
+      unreadCount: 1,
+    });
+  });
+
+  it("reissues the refetch when an edit lands while one is in flight", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const first = deferred<DmChannelsResponse>();
+    const second = deferred<DmChannelsResponse>();
+    const getDmChannels = vi
+      .fn<() => Promise<DmChannelsResponse>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const api = dmApi(getDmChannels);
+
+    handleChatDeleted(api, { message_id: 7, channel_id: 1 });
+    handleChatEdited(api, { message_id: 6, channel_id: 1, content: "b", edited_at: "x" });
+    expect(getDmChannels).toHaveBeenCalledTimes(2);
+
+    first.resolve(serverDms(6, "a", "2026-03-15T09:00:00Z"));
+    await first.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+
+    second.resolve(serverDms(6, "b", "2026-03-15T09:00:00Z"));
+    await second.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 6, lastMessage: "b" });
+  });
+
+  it("reissues the refetch when another delete lands while one is in flight", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const first = deferred<DmChannelsResponse>();
+    const second = deferred<DmChannelsResponse>();
+    const getDmChannels = vi
+      .fn<() => Promise<DmChannelsResponse>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const api = dmApi(getDmChannels);
+
+    handleChatDeleted(api, { message_id: 7, channel_id: 1 });
+    handleChatDeleted(api, { message_id: 6, channel_id: 1 });
+    expect(getDmChannels).toHaveBeenCalledTimes(2);
+
+    first.resolve(serverDms(6, "deleted since", "2026-03-15T09:00:00Z"));
+    await first.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+
+    second.resolve(serverDms(5, "still here", "2026-03-15T08:00:00Z"));
+    await second.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 5, lastMessage: "still here" });
+  });
+
+  it("leaves the preview blank when the refetch fails", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const getDmChannels = vi.fn(() => Promise.reject(new Error("offline")));
+
+    handleChatDeleted(dmApi(getDmChannels), { message_id: 7, channel_id: 1 });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expectConsole("warn", /Failed to refetch a DM preview after a delete/);
+
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+  });
+
+  it("does not refetch when a message other than the shown one is deleted", () => {
+    seedDm(7, "latest", "2026-03-15T10:00:00Z");
+    const getDmChannels = vi.fn();
+
+    handleChatDeleted(dmApi(getDmChannels), { message_id: 6, channel_id: 1 });
+
+    expect(getDmChannels).not.toHaveBeenCalled();
+    expect(dm().lastMessage).toBe("latest");
   });
 });

@@ -23,7 +23,12 @@ import {
   setMessagePinned,
 } from "../../stores/messages.store";
 import { setTyping } from "../../stores/members.store";
-import { dmStore, updateDmLastMessage, updateDmLastMessagePreview } from "../../stores/dm.store";
+import {
+  dmStore,
+  reviseDmLastMessage,
+  updateDmLastMessage,
+  updateDmLastMessagePreview,
+} from "../../stores/dm.store";
 import { setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
@@ -178,16 +183,77 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   }
 }
 
-export function handleChatEdited(payload: Payload<"chat_edited">): void {
+export function handleChatEdited(
+  api: DispatchApi | undefined,
+  payload: Payload<"chat_edited">,
+): void {
   editMessage(payload);
+  reviseDmLastMessage(payload.channel_id, payload.message_id, { lastMessage: payload.content });
+  if (dmPreviewRefetches.has(payload.channel_id)) {
+    reviseDmPreviewAfterDelete(api, payload.channel_id, []);
+  }
 }
 
-export function handleChatDeleted(payload: Payload<"chat_deleted">): void {
+export function handleChatDeleted(
+  api: DispatchApi | undefined,
+  payload: Payload<"chat_deleted">,
+): void {
   deleteMessage(payload);
+  reviseDmPreviewAfterDelete(api, payload.channel_id, [payload.message_id]);
 }
 
-export function handleChatBulkDeleted(payload: Payload<"chat_bulk_deleted">): void {
+export function handleChatBulkDeleted(
+  api: DispatchApi | undefined,
+  payload: Payload<"chat_bulk_deleted">,
+): void {
   bulkDeleteMessages(payload);
+  reviseDmPreviewAfterDelete(api, payload.channel_id, payload.ids);
+}
+
+/** The in-flight GET /dms refetch per DM channel: the preview id it was
+ *  issued for, and the token of the only answer that may be applied. */
+const dmPreviewRefetches = new Map<number, { shown: number; token: number }>();
+let dmPreviewRefetchToken = 0;
+
+/** A DM whose preview showed a now-deleted message is blanked at once, then
+ *  takes the server's last message from GET /dms. A delete in the channel
+ *  while that is in flight reissues it; an answer newer than the preview is
+ *  dropped, since its chat_message frame owns it. */
+function reviseDmPreviewAfterDelete(
+  api: DispatchApi | undefined,
+  channelId: number,
+  ids: readonly number[],
+): void {
+  const shown = dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastMessageId;
+  if (shown === undefined || shown === null) return;
+  if (!ids.includes(shown) && dmPreviewRefetches.get(channelId)?.shown !== shown) return;
+  reviseDmLastMessage(channelId, shown, { lastMessage: "" });
+  const getDmChannels = api?.getDmChannels;
+  if (getDmChannels === undefined) return;
+  const token = ++dmPreviewRefetchToken;
+  dmPreviewRefetches.set(channelId, { shown, token });
+  const settle = (): boolean => {
+    if (dmPreviewRefetches.get(channelId)?.token !== token) return false;
+    dmPreviewRefetches.delete(channelId);
+    return true;
+  };
+  getDmChannels().then(
+    (r) => {
+      if (!settle()) return;
+      const p = r.dm_channels.find((d) => d.channel_id === channelId);
+      if (p === undefined || (p.last_message_id !== null && p.last_message_id > shown)) return;
+      reviseDmLastMessage(channelId, shown, {
+        lastMessageId: p.last_message_id,
+        lastMessage: p.last_message,
+        lastMessageAt: p.last_message_at,
+      });
+    },
+    (err: unknown) => {
+      if (settle()) {
+        log.warn("Failed to refetch a DM preview after a delete", { error: String(err) });
+      }
+    },
+  );
 }
 
 /** A message was pinned or unpinned elsewhere — keep this client's row in
