@@ -1756,8 +1756,13 @@ A managed livekit-server never outlives the server, even when the server dies
 without running this sequence: on Linux the kernel kills it with its parent
 (`Pdeathsig`), and on Windows it runs in a job object that is killed when the
 server exits. On Windows, closing the server's console window stops the server
-and LiveKit together; after a self-restart in `spawn` mode, the replacement
-opens a new console window of its own.
+and LiveKit together. A self-restart in `spawn` mode (update, backup restore,
+setup wizard) keeps the replacement in the same console window, so its output
+and `Ctrl+C` stay where they were. If a shell (cmd or PowerShell) started the
+server, the shell gets its prompt back when the old process exits while the
+replacement keeps logging to that window; `Ctrl+C` or closing the window still
+stops it. A server started without a console (by a service wrapper, for
+example) gets a new console window of its own.
 
 ## See Also
 
