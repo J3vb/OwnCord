@@ -19,7 +19,7 @@ The list renders from `messages.store` (`messagesByChannel`, capped 500/channel)
 | `loading`       | Channel opened, history fetch in flight, nothing cached | **In-region loading placeholder** in the message area                                                                                   |
 | `ready`         | Messages present                                        | Virtualized list                                                                                                                        |
 | `empty`         | Loaded, zero messages                                   | "This is the beginning of #channel." welcome state (already `renderEmptyState()`, `components/MessageList.ts`)                          |
-| `loading older` | Scroll-to-top with `hasMore`                            | Top spinner while `prependMessages` resolves (already the scroll-top `hasMore` branch of `handleScroll()`, `components/MessageList.ts`) |
+| `loading older` | Scroll within ~2 viewports of the top with `hasMore`    | Top spinner while `prependMessages` resolves (already the scroll-top `hasMore` branch of `handleScroll()`, `components/MessageList.ts`) |
 | `error`         | History fetch failed                                    | **Inline section error + Retry** in the message area                                                                                    |
 
 > **✓ Implemented (2026-07).** `messages.store` tracks a per-channel

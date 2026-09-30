@@ -72,6 +72,12 @@ export interface MessageListOptions {
 // -- Constants ----------------------------------------------------------------
 
 const SCROLL_TOP_THRESHOLD = 50;
+/** Older history starts loading this many viewport heights before the top
+ *  (DP-46), so the next page is usually in before the reader gets there. */
+const SCROLL_TOP_VIEWPORTS = 2;
+/** After a failed older-page fetch, scrolling inside the trigger zone waits
+ *  this long before retrying, unless the reader leaves the zone first. */
+const OLDER_RETRY_COOLDOWN_MS = 5000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 
 /** Number of items to render beyond visible viewport in each direction. */
@@ -577,6 +583,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
+  // Set when the breaker below drops a rebuild. Like renderAllSuppressed, the
+  // 2s reset replays renderWindow once, so a fast scrollbar drag that trips it
+  // still ends with the rows for where it stopped (DP-12). Once per burst, not
+  // per dropped call, so the image-height oscillation it stops cannot restart.
+  let renderWindowSuppressed = false;
 
   function renderWindow(): void {
     if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null)
@@ -627,13 +638,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // Scroll-driven spacer updates are cheap and don't need limiting.
       renderWindowCount++;
       if (renderWindowCount > 30) {
-        log.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
+        if (!renderWindowSuppressed) {
+          log.error("[MessageList] renderWindow REBUILD called >30 times in 2s — breaking loop");
+        }
+        renderWindowSuppressed = true;
         return;
       }
       if (renderWindowResetTimer === 0) {
         renderWindowResetTimer = window.setTimeout(() => {
           renderWindowCount = 0;
           renderWindowResetTimer = 0;
+          if (renderWindowSuppressed) {
+            renderWindowSuppressed = false;
+            renderWindow();
+          }
         }, 2000);
       }
 
@@ -907,6 +925,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   let loadingOlder = false;
+  let olderRetryAt = 0;
+  /** Spinner row at the top of the history while an older page is in flight.
+   *  Absolutely positioned in the scroller, so showing or hiding it never
+   *  moves the rows (and never fires a scroll that could refetch). */
+  let olderLoadingRow: HTMLDivElement | null = null;
+  function setLoadingOlder(value: boolean): void {
+    loadingOlder = value;
+    if (!value) olderLoadingRow?.remove();
+    else if (olderLoadingRow !== null) root?.appendChild(olderLoadingRow);
+  }
   // The oldest loaded message's id, not the count: a live tail append also
   // changes the count while a history fetch is still in flight, and
   // resetting the latch on that lets the next scroll refire loadOlderMessages
@@ -923,7 +951,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const oldestId = msgs.length > 0 ? msgs[0]!.id : null;
       if (oldestId !== prevOldestId) {
         prevOldestId = oldestId;
-        loadingOlder = false;
+        setLoadingOlder(false);
       }
     },
   );
@@ -935,20 +963,31 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function handleScroll(): void {
     if (root === null) return;
 
-    // Load older messages when near top
+    // Load older messages well before the top (DP-46); the floor keeps the
+    // trigger working when the viewport has no height yet.
+    const nearTop =
+      root.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, root.clientHeight * SCROLL_TOP_VIEWPORTS);
+    if (!nearTop) olderRetryAt = 0;
     if (
-      root.scrollTop < SCROLL_TOP_THRESHOLD &&
+      nearTop &&
       !loadingOlder &&
+      performance.now() >= olderRetryAt &&
       hasMoreMessages(options.channelId)
     ) {
-      loadingOlder = true;
+      setLoadingOlder(true);
+      const oldestAtFire = getChannelMessages(options.channelId)[0]?.id;
       // A failed fetch never changes the message count, so the subscriber
       // below (which only reacts to a count change) would leave loadingOlder
       // latched forever. Clear it once the load settles either way — the
       // subscriber's reset still applies to the success path but is now just
       // belt-and-braces.
       void Promise.resolve(options.onScrollTop()).finally(() => {
-        loadingOlder = false;
+        setLoadingOlder(false);
+        // Nothing was prepended: hold off so continued scrolling in the zone
+        // does not send one failing request after another.
+        if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
+          olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
+        }
       });
     }
 
@@ -976,6 +1015,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     contentContainer = createElement("div", { class: "virtual-content" });
     bottomSpacer = createElement("div", { class: "virtual-spacer-bottom" });
     const scrollAnchor = createElement("div", { class: "scroll-anchor" });
+    olderLoadingRow = createElement("div", {
+      class: "messages-older-loading",
+      role: "status",
+      "aria-label": messagingText("loading"),
+    });
+    olderLoadingRow.appendChild(createElement("div", { class: "spinner" }));
 
     scrollToBottomBtn = createElement("button", {
       class: "scroll-to-bottom-btn",
@@ -1172,6 +1217,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     bottomSpacer = null;
     scrollToBottomBtn = null;
     jumpToPresentPill = null;
+    olderLoadingRow = null;
   }
 
   function scrollToMessage(messageId: number): boolean {

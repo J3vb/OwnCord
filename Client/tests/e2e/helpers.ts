@@ -207,7 +207,9 @@ export const MOCK_MESSAGES_RICH = {
       deleted: false,
     },
   ],
-  has_more: true,
+  // The whole channel: the mock serves this same page for every `before=`
+  // fetch, so claiming more history would prepend duplicate rows.
+  has_more: false,
 };
 
 // Remote users only — the ready payload must never claim the LOCAL user
