@@ -24,6 +24,8 @@ export interface NativeControl {
   attentionRequests(): number;
   /** How many of those were the urgent kind (flash until focused). */
   urgentAttentionRequests(): number;
+  /** Every count the native host was asked to show as the unread badge. */
+  badgeCounts(): readonly number[];
 }
 
 export interface NotifierSubject {
@@ -105,6 +107,12 @@ export function describeNotifierSuite(
       ctx.subject.onMessageActivated(handler);
       await ctx.native.emitsActivation({ host: "h", channelId: 7 });
       expect(handler.mock.calls).toEqual([[{ host: "h", channelId: 7 }]]);
+    });
+
+    check("hands each unread badge count to the native host as given", async () => {
+      await ctx.subject.setUnreadBadge(12);
+      await ctx.subject.setUnreadBadge(0);
+      expect(ctx.native.badgeCounts()).toEqual([12, 0]);
     });
 
     check("shows a message notification carrying its target", async () => {

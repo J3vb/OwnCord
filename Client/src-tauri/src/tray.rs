@@ -6,6 +6,9 @@ use tauri::{
 
 use crate::text;
 
+/// The tray icon's id, so `unread_badge` can reach it to set the tooltip.
+pub const TRAY_ID: &str = "main";
+
 const SHOW_HIDE_ID: &str = "show_hide";
 const STATUS_ONLINE_ID: &str = "status_online";
 const STATUS_IDLE_ID: &str = "status_idle";
@@ -82,7 +85,7 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::E
     let app_handle = app.clone();
     let app_handle_menu = app.clone();
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id(TRAY_ID)
         .icon(
             app.default_window_icon()
                 .cloned()

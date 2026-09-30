@@ -970,6 +970,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // Not a Tauri host, or the command was refused: keep the native default.
       });
 
+    // DP-27: the taskbar and tray unread badge, cleared again on teardown so a
+    // logout or server switch does not leave this session's count behind.
+    let stopUnreadBadge: (() => void) | null = null;
+    void import("../features/unread-badge/unreadBadge").then(({ startUnreadBadge }) => {
+      if (tornDown) return;
+      stopUnreadBadge = startUnreadBadge(desktop.notifier);
+    });
+    unsubscribers.push(() => {
+      stopUnreadBadge?.();
+      stopUnreadBadge = null;
+    });
+
     // Toast container
     toast = createToastContainer();
     toast.mount(root);

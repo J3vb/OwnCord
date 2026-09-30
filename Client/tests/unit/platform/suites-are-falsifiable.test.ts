@@ -297,6 +297,7 @@ describeNotifierSuite(async () => {
     onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
     requestAttention: async () => undefined,
+    setUnreadBadge: async () => undefined,
   } as unknown as Notifier;
   const native: NotifierNativeControl = {
     permissionIs: () => undefined,
@@ -307,6 +308,7 @@ describeNotifierSuite(async () => {
     emitsActivation: async () => undefined,
     attentionRequests: () => 0,
     urgentAttentionRequests: () => 0,
+    badgeCounts: () => [],
   };
   return { subject, native };
 }, failEveryTest);

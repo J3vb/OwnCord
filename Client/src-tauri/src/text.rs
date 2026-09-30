@@ -25,6 +25,17 @@ pub const TRAY_MUTE: &str = "Mute / Unmute";
 pub const TRAY_DEAFEN: &str = "Deafen / Undeafen";
 pub const TRAY_QUIT: &str = "Quit";
 pub const TRAY_TOOLTIP: &str = "OwnCord";
+pub const TRAY_TOOLTIP_UNREAD_ONE: &str = "OwnCord — 1 unread mention";
+pub const TRAY_TOOLTIP_UNREAD: &str = "OwnCord — {count} unread mentions";
+
+/// The tray tooltip with the unread badge count (DP-27); plain at 0.
+pub fn tray_tooltip(count: u32) -> String {
+    match count {
+        0 => TRAY_TOOLTIP.to_string(),
+        1 => TRAY_TOOLTIP_UNREAD_ONE.to_string(),
+        n => TRAY_TOOLTIP_UNREAD.replace("{count}", &n.to_string()),
+    }
+}
 
 // --- Startup failure dialog (not Linux) ------------------------------------
 
@@ -79,6 +90,15 @@ mod tests {
     }
 
     #[test]
+    fn tray_tooltip_counts_unread_mentions() {
+        assert_eq!(tray_tooltip(0), "OwnCord");
+        assert_eq!(tray_tooltip(1), "OwnCord — 1 unread mention");
+        assert_eq!(tray_tooltip(5), "OwnCord — 5 unread mentions");
+        // The tooltip has room for the real number; only the overlay caps at 9+.
+        assert_eq!(tray_tooltip(12), "OwnCord — 12 unread mentions");
+    }
+
+    #[test]
     fn certificate_messages_read_the_table() {
         assert_eq!(
             cert_not_trusted("example.com:8443"),
@@ -102,6 +122,7 @@ mod tests {
     fn call_sites_do_not_repeat_the_table() {
         const CALL_SITES: &[(&str, &str)] = &[
             ("tray.rs", include_str!("tray.rs")),
+            ("unread_badge.rs", include_str!("unread_badge.rs")),
             ("lib.rs", include_str!("lib.rs")),
             ("tofu.rs", include_str!("tofu.rs")),
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
@@ -119,10 +140,12 @@ mod tests {
             TRAY_DEAFEN,
             TRAY_QUIT,
             TRAY_TOOLTIP,
+            TRAY_TOOLTIP_UNREAD_ONE,
             STARTUP_DIALOG_TITLE,
         ]
         .map(|literal| format!("\"{literal}\""));
         let prose = [
+            "unread mentions",
             "startup error and cannot continue",
             "is not yet trusted; confirm the fingerprint",
             "Certificate fingerprint changed for",

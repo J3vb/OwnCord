@@ -58,4 +58,9 @@ export interface Notifier {
    * flashing (the dock keeps bouncing) until the window is focused.
    */
   requestAttention(): Promise<void>;
+  /**
+   * Show `count` unread mentions on the taskbar button and the tray tooltip;
+   * 0 clears both. The caller pushes only when the count changes.
+   */
+  setUnreadBadge(count: number): Promise<void>;
 }
