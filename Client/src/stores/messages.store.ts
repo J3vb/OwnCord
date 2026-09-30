@@ -164,10 +164,13 @@ export function setChannelLoadError(channelId: number): void {
  *  anything in the snapshot.
  *
  *  A revisit's refetch (DP-10) reconciles into the cached window: a row the
- *  page left unchanged keeps its object, and a page that changes nothing
- *  leaves the channel's array reference as it was. Cached "sent" rows older
- *  than the page are dropped, so nothing deleted or edited while away stays
- *  on screen; scrolling up loads them again. */
+ *  page left unchanged keeps its object. While the window is still exactly
+ *  the latest page, a page that changes nothing leaves the channel's array
+ *  reference as it was and a post-only page only appends. Cached "sent" rows
+ *  older than the page are dropped, so nothing deleted or edited while away
+ *  stays on screen (scrolling up loads them again); a window that had grown
+ *  past a page (live messages while watching, or older history loaded)
+ *  therefore comes back as a new array, and the list rebuilds once. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],

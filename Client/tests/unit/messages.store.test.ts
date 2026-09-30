@@ -2007,6 +2007,20 @@ describe("messages store", () => {
       expect(getHistoryLoadState(1)).toBeNull();
     });
 
+    it("returns a new array without the rows older than the page once the window grew past it", () => {
+      setMessages(1, page(1, 50), true);
+      addMessage(makeChatPayload({ id: 51, content: "m51", timestamp: "2026-03-15T09:00:00Z" }));
+      const cached = getChannelMessages(1);
+
+      revisit();
+      setMessages(1, page(2, 51), true);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).not.toBe(cached);
+      expect(msgs.map((m) => m.id)).toEqual(cached.slice(1).map((m) => m.id));
+      msgs.forEach((m, i) => expect(m).toBe(cached[i + 1]));
+    });
+
     it("drops older cached rows beyond the page and keeps unchanged row objects inside it", () => {
       setMessages(1, page(51, 100), true);
       prependMessages(1, page(1, 50), true);
