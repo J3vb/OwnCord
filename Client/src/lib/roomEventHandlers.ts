@@ -103,6 +103,8 @@ export interface RoomEventHandlers {
   readonly handleSdkReconnected: () => void;
   readonly handleEncryptionError: (error: Error, participant?: Participant) => void;
   readonly removeAutoplayUnlock: () => void;
+  /** Forget the session's encryption-recovery state (leave). */
+  readonly resetEncryptionRecovery: () => void;
 }
 
 export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers {
@@ -113,7 +115,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   // past the streak reset (same window the streak logic uses) means the peer's
   // frames decrypt again — clear only what THIS path degraded, leaving a
   // persistent worker-death/MissingKey degradations visible (OC-0002).
-  let degradedByDecrypt = false;
+  // "other" latches: once anything else degrades the call, a quiet gap
+  // must not clear it.
+  let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearDecryptQuietTimer(): void {
@@ -129,11 +133,16 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     clearDecryptQuietTimer();
     decryptQuietTimer = setTimeout(() => {
       decryptQuietTimer = null;
-      if (degradedByDecrypt) {
-        degradedByDecrypt = false;
+      if (degradedBy === "decrypt") {
+        degradedBy = null;
         setEncryptionDegraded(false);
       }
     }, DECRYPT_STREAK_RESET_MS);
+  }
+
+  function resetEncryptionRecovery(): void {
+    clearDecryptQuietTimer();
+    degradedBy = null;
   }
 
   function removeAutoplayUnlock(): void {
@@ -323,8 +332,13 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
       // decrypting. This is the class that recovers on its own once key
       // delivery resumes, so arm the quiet-gap recovery — the worker keeps
       // re-reporting once a second while it fails, so a gap means resumed.
-      degradedByDecrypt = true;
-      armDecryptRecovery();
+      if (degradedBy !== "other") {
+        degradedBy = "decrypt";
+        armDecryptRecovery();
+      }
+    } else {
+      degradedBy = "other";
+      clearDecryptQuietTimer();
     }
     log.error("LiveKit E2EE encryption error — call may not be secured", {
       error,
@@ -344,5 +358,6 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleSdkReconnected,
     handleEncryptionError,
     removeAutoplayUnlock,
+    resetEncryptionRecovery,
   };
 }

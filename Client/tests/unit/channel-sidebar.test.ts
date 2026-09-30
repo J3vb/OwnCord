@@ -1767,6 +1767,30 @@ describe("ChannelSidebar", () => {
     expect(icon.title).toBe("Muted by a moderator");
   });
 
+  it("keeps a moderator's mute on the single icon of a self-deafened user", () => {
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 82,
+      username: "DeafAndModMuted",
+      muted: true,
+      deafened: true,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+    });
+    sidebar.mount(container);
+
+    const icons = container.querySelectorAll(".vu-muted");
+    expect(icons.length).toBe(1);
+    const icon = icons[0] as HTMLElement;
+    expect(icon.classList.contains("vu-server-muted")).toBe(true);
+    expect(icon.title).toBe("Muted by a moderator");
+  });
+
   // ── Collapsed category shows arrow-right, expanded shows arrow-down ──
 
   it("collapsed category header has 'collapsed' class", () => {

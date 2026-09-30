@@ -27,7 +27,10 @@ const mockVoiceState = vi.hoisted(() => ({
   voiceConfigs: new Map<number, { bitrate: number }>(),
 }));
 
-vi.mock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
+vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+  isLinuxDesktop: () => true,
+}));
 
 const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
 vi.mock("livekit-client", () => ({
@@ -519,8 +522,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     const { desktop } = await import("../../src/platform/desktop");
     const real = desktop.nativeVoice.startScreen;
-    desktop.nativeVoice.startScreen = () =>
-      Promise.reject("screen capture was cancelled or refused");
+    desktop.nativeVoice.startScreen = () => Promise.reject("screen capture was cancelled");
     try {
       const sharing = session.enableScreenshare();
       await pressGoLive();
@@ -530,6 +532,26 @@ describe("LiveKitSession on the Linux native backend", () => {
     }
     // polish #10: closing the picker is not a denial, so no red error.
     expect(onError).not.toHaveBeenCalled();
+    expect(names()).not.toContain("publishScreen");
+    expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("a Linux capture that fails before its first frame is reported, not silent", async () => {
+    const onError = vi.fn();
+    session.setOnError(onError);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const { desktop } = await import("../../src/platform/desktop");
+    const real = desktop.nativeVoice.startScreen;
+    desktop.nativeVoice.startScreen = () =>
+      Promise.reject("screen capture produced no frame in time");
+    try {
+      const sharing = session.enableScreenshare();
+      await pressGoLive();
+      await sharing;
+    } finally {
+      desktop.nativeVoice.startScreen = real;
+    }
+    expect(onError).toHaveBeenCalledWith("Failed to start screen sharing");
     expect(names()).not.toContain("publishScreen");
     expect(nativeCounters.screenTracks).toBe(0);
   });

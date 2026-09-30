@@ -32,7 +32,7 @@ import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
@@ -1298,10 +1298,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             prevAudioState = audioKey;
             videoGrid?.setUserAudioState(audioState);
           }
-          const callKey = `${String(state.localMuted)}|${String(state.localDeafened)}`;
+          const selfMuted = isSelfMuted(state);
+          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}`;
           if (callKey !== prevCallState) {
             prevCallState = callKey;
-            videoGrid?.setCallState({ muted: state.localMuted, deafened: state.localDeafened });
+            videoGrid?.setCallState({ muted: selfMuted, deafened: state.localDeafened });
           }
 
           // Seed the signature with the channel id so ANY voice-channel

@@ -313,7 +313,12 @@ describe("VoiceWidget", () => {
     // that the gate (not the user) silenced the mic. The button must read the
     // user's own mute, not the gate, or a PTT user sees "muted" the whole time.
     setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: true }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localMuted: true,
+      pttGated: true,
+      pttOwnsMute: true,
+    }));
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
@@ -329,10 +334,51 @@ describe("VoiceWidget", () => {
     expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
 
     // A genuine self-mute (no PTT gate) still paints muted.
-    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: false }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localMuted: true,
+      pttGated: false,
+      pttOwnsMute: false,
+    }));
     voiceStore.flush();
     expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
     expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+
+    widget.destroy?.();
+  });
+
+  it("paints a PTT user's own mute as muted while the key is up", () => {
+    // Between presses the gate is closed either way; only whose mute is in
+    // effect tells them apart. A press never lifts the user's own mute, so
+    // reading it as live would leave them talking to nobody.
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localMuted: true,
+      pttGated: true,
+      pttOwnsMute: false,
+    }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
+
+    // The mute a PTT release applied reads as the idle gate instead.
+    voiceStore.setState((prev) => ({ ...prev, pttOwnsMute: true }));
+    voiceStore.flush();
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
 
     widget.destroy?.();
   });

@@ -66,12 +66,12 @@ type ClearVoiceServerDeafenParams struct {
 	ChannelID int64 `json:"channelId"`
 }
 
-// Clears the self-deafen that ApplyVoiceServerDeafen set, mirroring the Apply
-// statement: the deafen and its implied mute are lifted together by an
-// undeafen, and leaving deafened=1 here would strand the target unable to
+// Clears the self-deafen that ApplyVoiceServerDeafen set along with
+// server_deafened: leaving deafened=1 here would strand the target unable to
 // subscribe remote audio (the client's release path requires !selfDeafened)
-// even though server_deafened and the implied mute are gone. Same "no way to
-// tell explicit from implied" caveat the mute path documents.
+// even though the moderator's deafen is gone. muted is left alone, as
+// ClearVoiceServerMute leaves it: the target unmutes themselves. Same "no way
+// to tell explicit from implied" caveat the mute path documents.
 func (q *Queries) ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServerDeafenParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, clearVoiceServerDeafen, arg.UserID, arg.ChannelID)
 }

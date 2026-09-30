@@ -622,17 +622,47 @@ describe("enableScreenshare", () => {
   });
 
   it("stays silent when the user cancels the picker (polish #10)", async () => {
-    // A cancel is not a denial. The Linux native path and getDisplayMedia's
-    // own dismissal both signal a cancel as NotAllowedError; announcing
-    // "permission denied" for closing the dialog is wrong.
+    // A cancel is not a denial. Chromium (WebView2) rejects a dismissed
+    // picker with this NotAllowedError, and the Linux native path raises the
+    // same; announcing "permission denied" for closing the dialog is wrong.
     const rig = fakeRoom();
-    createLocalScreenTracks.mockRejectedValue(new DOMException("cancelled", "AbortError"));
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("Permission denied by user", "NotAllowedError"),
+    );
     const deps = fakeDeps(rig.room);
 
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
     expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     expect(deps.onError).not.toHaveBeenCalled();
+  });
+
+  it("still reports a refusal the OS made rather than the user", async () => {
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("Permission denied by system", "NotAllowedError"),
+    );
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
+  });
+
+  it("reports an aborted capture as a failure, not a cancel", async () => {
+    // Chromium raises AbortError for a capture that could not start (a start
+    // timeout, an invalid state), never for the user closing the picker.
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("Timeout starting video source", "AbortError"),
+    );
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).toHaveBeenCalledWith("Failed to start screen sharing");
   });
 
   it("tolerates a capture with no video track", async () => {

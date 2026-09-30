@@ -39,13 +39,14 @@ import type {
 } from "../../../platform/contracts/nativeVoice";
 import { nativeCounters } from "./counters";
 
-/** OC-0473: how long a remote participant's frames may stay undecryptable
- *  before the call counts as not secured — the web path's DECRYPT_GRACE_MS
- *  (OC-0452, `lib/roomEventHandlers.ts`), which tolerates a key-rotation race. */
-const DECRYPT_GRACE_MS = 3000;
+/** OC-0473: how often a remote participant whose frames stopped decrypting
+ *  is re-reported — the web E2EE worker's cadence, so the shared streak grace
+ *  (OC-0452) and quiet-gap recovery in `lib/roomEventHandlers.ts` apply to
+ *  the native path unchanged. */
+const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { CameraUplink } from "./cameraUplink";
-import { NativeScreenTrack, startError, isDeviceFallback } from "./screenTrack";
+import { NativeScreenTrack, startError, isDeviceFallback, pickerDismissed } from "./screenTrack";
 import { pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
@@ -161,9 +162,9 @@ export class NativeRoom {
    *  has no browser peer connection, so they see "no transports". */
   readonly engine = { pcManager: undefined, client: { ws: undefined } };
   readonly remoteParticipants = new Map<string, NativeRemoteParticipant>();
-  /** OC-0473: one pending degrade per remote identity whose frames stopped
+  /** OC-0473: one re-report per remote identity whose frames stopped
    *  decrypting; cleared when they decrypt again or the peer leaves. */
-  private readonly decryptTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly decryptTimers = new Map<string, ReturnType<typeof setInterval>>();
   readonly localParticipant = {
     identity: "",
     permissions: undefined,
@@ -387,8 +388,7 @@ export class NativeRoom {
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
     const pick = await pickScreenSource();
-    // i18n-exempt: AbortError signal for the shared screen-share code, not display text
-    if (pick === null) throw new DOMException("Screen share cancelled", "AbortError");
+    if (pick === null) throw pickerDismissed();
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId !== session) throw new Error("native room disconnected during screen pick");
     // The picker resolved the capture pacing and size from the quality and fps
@@ -578,12 +578,12 @@ export class NativeRoom {
   }
 
   private clearDecryptTimer(identity: string): void {
-    clearTimeout(this.decryptTimers.get(identity));
+    clearInterval(this.decryptTimers.get(identity));
     this.decryptTimers.delete(identity);
   }
 
   private clearDecryptTimers(): void {
-    for (const timer of this.decryptTimers.values()) clearTimeout(timer);
+    for (const timer of this.decryptTimers.values()) clearInterval(timer);
     this.decryptTimers.clear();
   }
 
@@ -658,24 +658,23 @@ export class NativeRoom {
           break;
         }
         // OC-0473: a remote peer's frames stopped (or resumed) decrypting.
-        // The backend reports each transition once, so the web path's
-        // streak logic cannot run here: degrade only if no `encrypted`
-        // arrives for that peer within the grace window. Tracked per
-        // identity, so a peer whose audio decrypts while its camera does not
-        // reads as decrypting (the pre-OC-0473 behaviour for that case).
+        // The backend reports each transition once; re-report the failure the
+        // way the web worker does (an InvalidKey decrypt error once a second)
+        // until the peer decrypts again, so the shared streak grace degrades
+        // a failure that persists and the quiet gap after `encrypted` clears
+        // it. Tracked per identity, so a peer whose audio decrypts while its
+        // camera does not reads as decrypting (the pre-OC-0473 behaviour).
         this.clearDecryptTimer(event.identity);
         if (!event.encrypted) {
           const identity = event.identity;
-          this.decryptTimers.set(
-            identity,
-            setTimeout(() => {
-              this.decryptTimers.delete(identity);
-              const p = this.remoteParticipants.get(identity);
-              if (p !== undefined)
-                // i18n-exempt: internal E2EE state guard, never rendered
-                this.emit(RoomEvent.EncryptionError, new Error("native decrypt failure"), p);
-            }, DECRYPT_GRACE_MS),
-          );
+          const report = (): void => {
+            const p = this.remoteParticipants.get(identity);
+            // i18n-exempt: the web worker's decrypt error, matched by prefix, never rendered
+            const error = new Error("InvalidKey: native decrypt failure");
+            if (p !== undefined) this.emit(RoomEvent.EncryptionError, error, p);
+          };
+          report();
+          this.decryptTimers.set(identity, setInterval(report, DECRYPT_REPORT_MS));
         }
         break;
       case "reconnecting":

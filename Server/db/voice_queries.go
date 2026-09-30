@@ -363,8 +363,10 @@ func (d *DB) FindOrphanedVoiceMutes(ctx context.Context) ([]OrphanedVoiceMute, e
 }
 
 // SetVoiceServerDeafen applies or clears the moderator-imposed deafen, scoped
-// to channelID. Mirrors SetVoiceServerMute, including the asymmetric handling
-// of deafened and the channel-scoped matched result.
+// to channelID. Mirrors SetVoiceServerMute's channel-scoped matched result.
+// Unlike the mute path, clearing it also clears deafened (which applying it
+// set), so the target hears the call again; muted is left for the target to
+// lift.
 func (d *DB) SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error) {
 	var res sql.Result
 	if serverDeafened {

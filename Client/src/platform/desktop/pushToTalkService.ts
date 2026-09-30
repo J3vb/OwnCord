@@ -13,7 +13,13 @@
  */
 
 import { loadPref, savePref } from "@lib/preferences";
-import { voiceStore, setPttGated, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
+import {
+  voiceStore,
+  setPttGated,
+  setPttOwnsMute,
+  setPttPollingLive,
+  isPttPollingLive,
+} from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName } from "@lib/ptt";
 import type { PushToTalk } from "../contracts/pushToTalk";
@@ -64,7 +70,7 @@ function retainListener(attempt: PttBinding, unlisten: () => void): boolean {
  *  next PTT press wrongly treats their genuine self-mute as PTT's own to
  *  lift. The voiceStore subscription registered in initPtt closes that gap
  *  by clearing the latch on any observed unmute, not just PTT's. */
-let pttOwnsMute = false;
+const pttOwnsMute = (): boolean => voiceStore.getState().pttOwnsMute === true;
 
 /** Clear the PTT gate and, if the mute in effect is the one PTT's own last
  *  release applied (not one the user asked for) and nothing else
@@ -137,9 +143,9 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
   ) {
     // A rebind can supersede Clear/error's deferred unmute. Carry ownership
     // into the new binding instead of mistaking that old PTT mute for the user.
-    pttOwnsMute = initialState.localMuted;
+    setPttOwnsMute(initialState.localMuted);
   } else if (!initialState.localMuted) {
-    pttOwnsMute = false;
+    setPttOwnsMute(false);
   }
   pendingUngateMute = null;
 
@@ -172,7 +178,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
     retainListener(
       attempt,
       voiceStore.subscribe((s) => {
-        if (isCurrent(attempt) && !s.localMuted) pttOwnsMute = false;
+        if (isCurrent(attempt) && !s.localMuted) setPttOwnsMute(false);
       }),
     );
 
@@ -188,8 +194,8 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       releaseListeners(attempt);
       setPttPollingLive(false);
       // Capture before resetting — see ungateMic's doc comment.
-      const mutedByPtt = pttOwnsMute;
-      pttOwnsMute = false;
+      const mutedByPtt = pttOwnsMute();
+      setPttOwnsMute(false);
       ungateMic(mutedByPtt);
     });
     if (!retainListener(attempt, errorUnlisten)) return;
@@ -229,12 +235,12 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
             // republish the mic to every peer while voice_states.muted (and
             // every remote UI) still shows the user muted (v006). The mute a
             // previous release applied is PTT's own, so lifting that is fine.
-            if (localDeafened || (localMuted && !pttOwnsMute)) {
+            if (localDeafened || (localMuted && !pttOwnsMute())) {
               log.debug("PTT pressed — staying muted (user is self-muted or deafened)");
               return;
             }
             setMuted(false);
-            pttOwnsMute = false;
+            setPttOwnsMute(false);
             log.debug("PTT pressed — unmuted");
             return;
           }
@@ -242,7 +248,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
           // whether this release is what muted the mic — only then may the
           // next press lift it.
           setMuted(true);
-          pttOwnsMute = !localMuted;
+          setPttOwnsMute(!localMuted);
           log.debug("PTT released — muted");
         })
         .catch((e) => log.warn("Failed to apply PTT mute", e));
@@ -287,8 +293,8 @@ async function stopBinding(clearKey: boolean): Promise<void> {
   binding = null;
   nativeStarted = false;
   releaseListeners(previous);
-  const mutedByPtt = pttOwnsMute;
-  pttOwnsMute = false;
+  const mutedByPtt = pttOwnsMute();
+  setPttOwnsMute(false);
   setPttPollingLive(false);
   ungateMic(mutedByPtt);
   if (!clearKey && !shouldStopNative) return;
@@ -366,7 +372,7 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
     )
       return;
     setMuted(true);
-    pttOwnsMute = pttOwnsMute || !state.localMuted;
+    setPttOwnsMute(pttOwnsMute() || !state.localMuted);
   } catch (e) {
     log.warn("Failed to gate mic after binding PTT key mid-call", e);
   }

@@ -22,7 +22,7 @@ import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
-import { isLinuxDesktop } from "../features/voice/native/platform";
+import { isLinuxDesktop, PICKER_DISMISSED } from "../features/voice/native/platform";
 import { voiceText } from "../i18n/voice";
 
 const log = createLogger("screenShare");
@@ -488,11 +488,10 @@ export async function enableScreenshare(
     stopManualScreenTracks(state, room);
     setLocalScreenshare(false);
     log.error("Failed to enable screenshare", err);
-    if (err instanceof DOMException && err.name === "AbortError") {
+    if (err instanceof DOMException && err.name === "NotAllowedError") {
       // The user closed the picker: not a failure and not a denial — stay
       // silent rather than reporting "permission denied" (polish #10).
-    } else if (err instanceof DOMException && err.name === "NotAllowedError") {
-      deps.onError(voiceText("share.screenDenied"));
+      if (err.message !== PICKER_DISMISSED) deps.onError(voiceText("share.screenDenied"));
     } else {
       deps.onError(voiceText("share.screenFailed"));
     }

@@ -41,6 +41,7 @@ vi.mock("@stores/voice.store", () => ({
     subscribe: () => () => {},
   },
   setPttGated: vi.fn(),
+  setPttOwnsMute: vi.fn(),
   setPttPollingLive: (live: boolean) => {
     pollingLive = live;
   },

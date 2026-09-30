@@ -47,15 +47,34 @@ pub fn active_captures() -> usize {
     CAPTURES.load(Ordering::Relaxed)
 }
 
-/// The error a cancelled portal dialog (or any capturer that fails before
-/// its first frame) reports; the webview maps it to a silent cancel.
-pub const CANCELLED: &str = "screen capture was cancelled or refused";
+/// The error a dismissed portal dialog reports; the webview maps it to a
+/// silent cancel. The portal ends a dismissed request with no stream, which
+/// libwebrtc surfaces only as a permanent failure before the first frame.
+pub const CANCELLED: &str = "screen capture was cancelled";
 
-/// How long a capture may take to produce its first frame before it is
-/// treated as cancelled. A portal dialog the user is still looking at is not
-/// this case: the dialog is answered before the capturer is built, so a long
-/// wait here means no first frame is coming.
+/// The error a picked screen or window reports when its capturer fails
+/// before the first frame; the webview shows it.
+pub const FAILED: &str = "screen capture failed to start";
+
+/// The error a capture reports when no first frame arrives in time; the
+/// webview shows it.
+pub const TIMED_OUT: &str = "screen capture produced no frame in time";
+
+/// How long a picked screen or window may take to produce its first frame.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The same bound for a portal capture. Its dialog opens once the capture
+/// starts, so this also covers the user choosing what to share.
+const PORTAL_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The first-frame bound for `target`, and what a failure before the first
+/// frame reports.
+fn first_frame(target: Target) -> (Duration, &'static str) {
+    match target {
+        Target::Portal => (PORTAL_FIRST_FRAME_TIMEOUT, CANCELLED),
+        _ => (FIRST_FRAME_TIMEOUT, FAILED),
+    }
+}
 
 /// What to capture.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -446,6 +465,7 @@ fn run(
     on_end: impl FnOnce(),
 ) {
     let mut ready = Some(ready);
+    let (first_frame_timeout, failed) = first_frame(target);
     let mut producer = match Producer::new(target) {
         Ok(p) => p,
         Err(e) => {
@@ -461,7 +481,8 @@ fn run(
         shared,
         stopped,
         &mut ready,
-        FIRST_FRAME_TIMEOUT,
+        first_frame_timeout,
+        failed,
         on_end,
     );
 }
@@ -476,6 +497,7 @@ fn run_loop(
     stopped: &mpsc::Receiver<()>,
     ready: &mut Option<oneshot::Sender<Result<(u32, u32), String>>>,
     first_frame_timeout: Duration,
+    failed: &str,
     on_end: impl FnOnce(),
 ) {
     let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
@@ -489,7 +511,7 @@ fn run_loop(
         // "starting share" with the picker closed and no cancel.
         if ready.is_some() && started.elapsed() > first_frame_timeout {
             if let Some(r) = ready.take() {
-                let _ = r.send(Err(CANCELLED.into()));
+                let _ = r.send(Err(TIMED_OUT.into()));
             }
             return;
         }
@@ -512,7 +534,7 @@ fn run_loop(
             Grab::Failed => {
                 match ready.take() {
                     Some(r) => {
-                        let _ = r.send(Err(CANCELLED.into()));
+                        let _ = r.send(Err(failed.into()));
                     }
                     None => on_end(),
                 }
@@ -556,10 +578,8 @@ mod tests {
     /// turns.
     static SERIAL: Mutex<()> = Mutex::new(());
 
-    /// voice #9: a producer that never yields a first frame must not spin the
-    /// start loop forever — the shared enableScreenshare awaits `ready`.
-    #[test]
-    fn a_capture_that_never_produces_a_first_frame_times_out_as_cancelled() {
+    /// What the start loop reports for a grab source, driven to its end.
+    fn start_result(mut grab: fn() -> Grab, failed: &str) -> Result<(u32, u32), String> {
         let shared = Shared {
             source: Mutex::new(None),
             preview: Arc::new(watch::channel(None).0),
@@ -571,7 +591,7 @@ mod tests {
             .unwrap();
         let started = std::time::Instant::now();
         run_loop(
-            &mut || Grab::Pending,
+            &mut grab,
             CaptureOptions {
                 fps: 30.0,
                 max_width: 0,
@@ -581,15 +601,42 @@ mod tests {
             &stop_rx,
             &mut Some(ready_tx),
             Duration::from_millis(20),
+            failed,
             || {},
         );
-        // The loop returned promptly with a cancel, not after an unbounded
-        // wait.
+        // The loop returned promptly, not after an unbounded wait.
         assert!(started.elapsed() < Duration::from_secs(2));
+        rt.block_on(&mut ready_rx).unwrap()
+    }
+
+    /// voice #9: a producer that never yields a first frame must not spin the
+    /// start loop forever — the shared enableScreenshare awaits `ready`. The
+    /// timeout is a failure the user is told about, not a silent cancel.
+    #[test]
+    fn a_capture_that_never_produces_a_first_frame_times_out_as_a_failure() {
         assert_eq!(
-            rt.block_on(&mut ready_rx).unwrap(),
-            Err("screen capture was cancelled or refused".to_string())
+            start_result(|| Grab::Pending, CANCELLED),
+            Err(TIMED_OUT.to_string())
         );
+    }
+
+    /// Only a dismissed portal dialog is a cancel: a picked screen or window
+    /// whose capturer fails before its first frame is a failure.
+    #[test]
+    fn a_failure_before_the_first_frame_reports_the_targets_reason() {
+        assert_eq!(
+            start_result(|| Grab::Failed, CANCELLED),
+            Err(CANCELLED.to_string())
+        );
+        assert_eq!(
+            start_result(|| Grab::Failed, FAILED),
+            Err(FAILED.to_string())
+        );
+        assert_eq!(first_frame(Target::Portal).1, CANCELLED);
+        assert_eq!(first_frame(Target::Screen(0)).1, FAILED);
+        assert_eq!(first_frame(Target::Window(1)).1, FAILED);
+        // The portal's bound leaves the user time in its dialog.
+        assert!(first_frame(Target::Portal).0 > first_frame(Target::Screen(0)).0);
     }
 
     #[test]

@@ -312,6 +312,7 @@ export class RoomLifecycle {
     this._tokenManager.resetBudget();
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
+    this._eventHandlers.resetEncryptionRecovery();
     // OC-0042: bump first, mirroring doDisableCamera/doDisableScreenshare —
     // a concurrent enableCamera()/enableScreenshare() still awaiting device
     // acquisition (getUserMedia/getDisplayMedia/publishTrack) when the user

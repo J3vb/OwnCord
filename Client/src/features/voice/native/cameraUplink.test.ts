@@ -172,24 +172,22 @@ describe("CameraUplink", () => {
     uplink.dispose();
   });
 
-  it("reopens the frame socket after a burst of send failures", async () => {
+  it("keeps its one open socket through a burst of frame failures", async () => {
+    // A frame that fails to encode says nothing about the socket: the close
+    // listener alone reopens it, so a failure burst must not open a second
+    // loopback socket beside the still-open first one.
     const uplink = new CameraUplink("ws://127.0.0.1:9/tok/camera", {} as MediaStreamTrack, 30);
     const first = FakeSocket.last;
     first.send = () => {
-      throw new Error("socket dead");
+      throw new Error("encode failed");
     };
-    // 60 failures at 30 fps: drive the pump enough times to cross the bound.
-    for (let i = 0; i < 61; i++) {
+    for (let i = 0; i < 70; i++) {
       frameCallback!(1000 + i * 100);
-      // oxlint-disable-next-line no-await-in-loop -- each send must settle before the next so its failure is counted
+      // oxlint-disable-next-line no-await-in-loop -- each send must settle before the next
       await flush();
     }
-    await vi.waitFor(
-      () => {
-        expect(FakeSocket.instances.length).toBeGreaterThan(1);
-      },
-      { timeout: 3000 },
-    );
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(FakeSocket.instances).toEqual([first]);
     uplink.dispose();
   });
 });

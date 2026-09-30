@@ -10,7 +10,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { voiceStore, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
@@ -350,12 +350,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
 
     // Toggle button active states, swap icons, and update aria-pressed.
-    // The mic "active" (red/muted) state reflects the user's OWN mute, not a
-    // PTT gate: PTT routes through setMuted and writes localMuted, so a PTT
-    // user would otherwise read as permanently muted between presses. The
-    // pttGated flag gets its own distinct (non-active) affordance.
-    const pttGated = voice.pttGated === true;
-    const userMuted = voice.localMuted && !pttGated;
+    // The mic "active" (red/muted) state reflects the user's OWN mute, not the
+    // one a PTT release applied: PTT routes through setMuted and writes
+    // localMuted, so a PTT user would otherwise read as permanently muted
+    // between presses. An idle PTT gate gets its own (non-active) affordance.
+    const userMuted = isSelfMuted(voice);
+    const pttGated = voice.pttGated === true && !userMuted;
     muteBtn?.classList.toggle("active-ctrl", userMuted);
     muteBtn?.classList.toggle("ptt-gated", pttGated);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
@@ -671,6 +671,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
           pttGated: s.pttGated === true,
+          pttOwnsMute: s.pttOwnsMute === true,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
         }),
@@ -685,6 +686,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&
           a.pttGated === b.pttGated &&
+          a.pttOwnsMute === b.pttOwnsMute &&
           a.voiceStatus === b.voiceStatus &&
           a.encryptionDegraded === b.encryptionDegraded,
       ),

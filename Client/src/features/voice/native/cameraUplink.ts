@@ -20,8 +20,6 @@ const log = createLogger("nativeCamera");
 /** Upload formats the backend converts, keyed by `VideoFrame.format`. */
 const FORMATS: Record<string, number> = { RGBA: 1, RGBX: 1, BGRA: 2, BGRX: 2, I420: 3, NV12: 4 };
 const HEADER_BYTES = 9 * 4;
-/** Consecutive frame-send failures before the loopback socket is reopened. */
-const MAX_SEND_FAILURES = 60;
 /** How long to wait before reopening a dropped loopback frame socket. */
 const RECONNECT_DELAY_MS = 1000;
 
@@ -73,10 +71,6 @@ export class CameraUplink {
   private lastSent = -Infinity;
   private busy = false;
   private disposed = false;
-  /** Consecutive send failures; the socket is reopened once this reaches the
-   *  bound, so a dropped loopback socket resumes instead of freezing the tile
-   *  for the rest of the call (voice #13). */
-  private failures = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** `url`: the frame socket's `/camera` route. */
@@ -103,15 +97,15 @@ export class CameraUplink {
     return socket;
   }
 
-  /** Reopen the frame socket after a short cooldown. Guarded so a close and a
-   *  failure burst cannot each spawn a socket. */
+  /** Reopen the frame socket after a short cooldown, so a dropped loopback
+   *  socket resumes instead of freezing the tile for the rest of the call
+   *  (voice #13). */
   private scheduleReconnect(): void {
     if (this.disposed || this.reconnectTimer !== null) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.disposed) return;
       this.socket = this.openSocket();
-      this.failures = 0;
     }, RECONNECT_DELAY_MS);
   }
 
@@ -128,14 +122,7 @@ export class CameraUplink {
     this.lastSent = now;
     this.busy = true;
     void this.send()
-      .then(() => {
-        this.failures = 0;
-      })
-      .catch((err: unknown) => {
-        log.warn("camera frame dropped", err);
-        this.failures++;
-        if (this.failures >= MAX_SEND_FAILURES) this.scheduleReconnect();
-      })
+      .catch((err: unknown) => log.warn("camera frame dropped", err))
       .finally(() => {
         this.busy = false;
       });

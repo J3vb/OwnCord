@@ -307,6 +307,10 @@ pub fn list_outputs() -> Vec<DeviceInfo> {
 /// The open output stream and the id of the device it plays on.
 type Output = Arc<Mutex<Option<(String, cpal::Stream)>>>;
 
+/// The device id the caller last chose (empty: "System default"), shared
+/// with the watcher so a later choice takes effect on its next tick.
+pub(super) type Selected = Arc<Mutex<String>>;
+
 /// A session's playout: the mixer, its readers and the output stream.
 #[derive(Default)]
 pub struct Playout {
@@ -322,7 +326,7 @@ pub struct Playout {
     dead: Arc<AtomicBool>,
     /// The device the caller last chose (empty: the default). A reopen
     /// re-pins it; the empty id re-resolves the current default.
-    selected: String,
+    selected: Selected,
     /// Reopens a dead stream and, while "System default" is selected,
     /// follows the default sink. Always-on so a stream torn down by the sound
     /// server reopens even when a concrete device is pinned.
@@ -362,7 +366,7 @@ impl Playout {
     /// selected, follows the default sink as it moves. A concrete id is
     /// re-pinned to that id on reopen; the empty id re-resolves the default.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
-        self.selected = id.to_string();
+        *lock(&self.selected) = id.to_string();
         let result = self.switch(id);
         if self.watcher.is_none() {
             self.watcher = Some(self.start_watcher());
@@ -401,11 +405,10 @@ impl Playout {
         let reference = self.reference.clone();
         let dead = self.dead.clone();
         let selected = self.selected.clone();
-        let follows_default = selected.is_empty();
         let follow_host = host.clone();
         let follow_dead = dead.clone();
         let follow = move || {
-            let target = selected.clone();
+            let target = lock(&selected).clone();
             if let Err(e) = switch_output(
                 &mut lock(&output),
                 &target,
@@ -426,7 +429,7 @@ impl Playout {
             FOLLOW_EVERY,
             self.playing(),
             dead,
-            follows_default,
+            self.selected.clone(),
             move || {
                 host.default_output_device()?
                     .id()
@@ -439,9 +442,11 @@ impl Playout {
 }
 
 /// A thread that reopens a dead audio stream (the error callback set `dead`)
-/// and, while following the default device, calls `follow` each time that
-/// default moves. Dropping it stops and joins the thread. Shared by the
-/// playout (default sink) and the capture (default source).
+/// and, while `selected` is the empty "System default" id, calls `follow`
+/// each time that default moves. `selected` is read on every tick, so a
+/// device chosen after the watcher started is honoured. Dropping it stops
+/// and joins the thread. Shared by the playout (default sink) and the
+/// capture (default source).
 pub(super) struct Watcher {
     stop: mpsc::Sender<()>,
     thread: Option<Thread<()>>,
@@ -455,7 +460,7 @@ impl Watcher {
         every: Duration,
         playing: Option<String>,
         dead: Arc<AtomicBool>,
-        follows_default: bool,
+        selected: Selected,
         mut default_device: impl FnMut() -> Option<String> + Send + 'static,
         mut follow: impl FnMut() + Send + 'static,
     ) -> Self {
@@ -467,13 +472,15 @@ impl Watcher {
                     follow();
                     continue;
                 }
-                if !follows_default {
-                    continue;
-                }
+                // Tracked while pinned too, so returning to the default
+                // does not take the move that happened meanwhile for a new
+                // one.
                 if let Some(now) = default_device() {
                     if last.as_ref() != Some(&now) {
                         last = Some(now);
-                        follow();
+                        if lock(&selected).is_empty() {
+                            follow();
+                        }
                     }
                 }
             }
@@ -651,33 +658,38 @@ mod tests {
         Watcher,
         Arc<Mutex<Option<String>>>,
         Arc<AtomicBool>,
+        Selected,
         mpsc::Receiver<()>,
     );
 
     /// A watcher over a default sink the test moves, reporting each follow.
-    /// `follows_default` matches the empty selected id; a dead-flag set on
-    /// the returned handle also triggers a follow.
+    /// `follows_default` starts the selection at the empty id (else "usb");
+    /// the selection and a dead-flag set on the returned handles also steer
+    /// it.
     fn watch(playing: Option<&str>, follows_default: bool) -> Watched {
         let default = Arc::new(Mutex::new(playing.map(str::to_string)));
         let dead = Arc::new(AtomicBool::new(false));
+        let selected: Selected = Arc::new(Mutex::new(
+            if follows_default { "" } else { "usb" }.to_string(),
+        ));
         let (followed, follows) = mpsc::channel();
         let source = default.clone();
         let watcher = Watcher::start(
             Duration::from_millis(2),
             playing.map(str::to_string),
             dead.clone(),
-            follows_default,
+            selected.clone(),
             move || lock(&source).clone(),
             move || followed.send(()).unwrap(),
         );
-        (watcher, default, dead, follows)
+        (watcher, default, dead, selected, follows)
     }
 
     const QUIET: Duration = Duration::from_millis(50);
 
     #[test]
     fn the_watcher_follows_each_move_of_the_default_sink_once() {
-        let (_watcher, default, _dead, follows) = watch(Some("speakers"), true);
+        let (_watcher, default, _dead, _selected, follows) = watch(Some("speakers"), true);
         assert!(follows.recv_timeout(QUIET).is_err(), "default unchanged");
         *lock(&default) = Some("headphones".to_string());
         follows.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -694,7 +706,7 @@ mod tests {
 
     #[test]
     fn a_watcher_with_nothing_playing_follows_the_first_default_it_sees() {
-        let (_watcher, default, _dead, follows) = watch(None, true);
+        let (_watcher, default, _dead, _selected, follows) = watch(None, true);
         assert!(follows.recv_timeout(QUIET).is_err());
         *lock(&default) = Some("speakers".to_string());
         follows.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -704,7 +716,7 @@ mod tests {
     fn a_pinned_device_watcher_ignores_default_moves_but_reopens_a_dead_stream() {
         // voice #3: even a pinned output must reopen after the sound server
         // tears the stream down.
-        let (_watcher, default, dead, follows) = watch(Some("usb"), false);
+        let (_watcher, default, dead, _selected, follows) = watch(Some("usb"), false);
         *lock(&default) = Some("headphones".to_string());
         assert!(
             follows.recv_timeout(QUIET).is_err(),
@@ -715,8 +727,27 @@ mod tests {
     }
 
     #[test]
+    fn the_watcher_reads_the_selection_on_every_tick() {
+        // "System default" at start, then a device chosen mid-call: the
+        // pinned device must not be moved back to the default.
+        let (_watcher, default, _dead, selected, follows) = watch(Some("speakers"), true);
+        *lock(&selected) = "usb".to_string();
+        *lock(&default) = Some("headphones".to_string());
+        assert!(
+            follows.recv_timeout(QUIET).is_err(),
+            "pinned later: default moves are ignored"
+        );
+        // Back to "System default": the move seen while pinned is not a new
+        // one, the next move is.
+        *lock(&selected) = String::new();
+        assert!(follows.recv_timeout(QUIET).is_err());
+        *lock(&default) = Some("speakers".to_string());
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
     fn the_dead_flag_reopens_once_per_set() {
-        let (_watcher, _default, dead, follows) = watch(Some("speakers"), true);
+        let (_watcher, _default, dead, _selected, follows) = watch(Some("speakers"), true);
         dead.store(true, Ordering::Relaxed);
         follows.recv_timeout(Duration::from_secs(5)).unwrap();
         // Cleared by the swap: no second follow without another set.
@@ -725,7 +756,7 @@ mod tests {
 
     #[test]
     fn a_dropped_watcher_has_stopped_following() {
-        let (watcher, default, _dead, follows) = watch(Some("speakers"), true);
+        let (watcher, default, _dead, _selected, follows) = watch(Some("speakers"), true);
         drop(watcher);
         *lock(&default) = Some("headphones".to_string());
         // Dropping joined the thread and with it the follow callback.

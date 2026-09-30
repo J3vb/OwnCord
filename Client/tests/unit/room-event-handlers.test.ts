@@ -24,7 +24,7 @@ import { createRoomEventHandlers } from "@lib/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
 import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, setEncryptionDegraded } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import type { AudioElements } from "@lib/audioElements";
 import { expectConsole } from "../helpers/console";
@@ -663,6 +663,57 @@ describe("handleEncryptionError", () => {
       // "Unsecured" for the rest of the call.
       vi.advanceTimersByTime(3000);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("keeps the badge degraded when the worker dies while a decrypt recovery is pending", () => {
+      const h = build();
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      // The worker dies: no more decrypt reports arrive, and the quiet gap
+      // that follows must not read as the peer's decrypts resuming.
+      h.handlers.handleEncryptionError(new Error("E2EE worker crashed"));
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+      // A later decrypt streak and its quiet gap do not clear it either.
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("does not let a pending recovery from a left call touch the next one", () => {
+      const h = build();
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      // Leave; the next call starts clean and is degraded by its own cause,
+      // which the left call's quiet-gap timer must not clear.
+      h.handlers.resetEncryptionRecovery();
+      setEncryptionDegraded(false);
+      setEncryptionDegraded(true);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
     });
 
     it("tolerates separate transient races a few seconds apart", () => {

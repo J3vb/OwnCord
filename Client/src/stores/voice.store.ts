@@ -91,6 +91,11 @@ export interface VoiceState {
    *  a PTT release can't corrupt the mute toggle's state. Always written by
    *  the store; optional only for the same fixture reason as localServerMuted. */
   readonly pttGated?: boolean;
+  /** True while the mute in effect is the one push-to-talk's own release
+   *  applied, not one the user asked for: a press lifts only this mute (v006),
+   *  and only a user's own mute reads as muted on the mic controls. Written
+   *  only from the PTT service; optional for the same fixture reason. */
+  readonly pttOwnsMute?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
@@ -129,6 +134,7 @@ const INITIAL_STATE: VoiceState = {
   localServerMuted: false,
   localServerDeafened: false,
   pttGated: false,
+  pttOwnsMute: false,
   localCamera: false,
   localScreenshare: false,
   joinedAt: null,
@@ -151,6 +157,7 @@ export function resetVoiceStore(): void {
     localServerMuted: false,
     localServerDeafened: false,
     pttGated: false,
+    pttOwnsMute: false,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -401,6 +408,20 @@ export function setLocalDeafened(deafened: boolean): void {
  *  the user's own explicit mute (see the VoiceState.pttGated doc comment). */
 export function setPttGated(gated: boolean): void {
   voiceStore.setState((prev) => (prev.pttGated === gated ? prev : { ...prev, pttGated: gated }));
+}
+
+/** Record whether the mute in effect is push-to-talk's own (see
+ *  VoiceState.pttOwnsMute). Written only from the PTT service. */
+export function setPttOwnsMute(owns: boolean): void {
+  voiceStore.setState((prev) =>
+    prev.pttOwnsMute === owns ? prev : { ...prev, pttOwnsMute: owns },
+  );
+}
+
+/** Whether the user's own mute is in effect: localMuted, unless the mute is
+ *  the one a push-to-talk release applied. What the mic controls show. */
+export function isSelfMuted(state: VoiceState): boolean {
+  return state.localMuted && state.pttOwnsMute !== true;
 }
 
 /** Whether the Rust-side PTT key poller is actually able to report key state

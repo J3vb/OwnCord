@@ -15,13 +15,14 @@ import type {
   NativeVoiceScreenCapture,
   NativeVoiceScreenStarted,
 } from "../../../platform/contracts/nativeVoice";
+import { PICKER_DISMISSED } from "./platform";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";
 
-/** The host's rejection of a start whose portal dialog was cancelled or
- *  refused (`screen::CANCELLED`). */
+/** The host's rejection of a start whose portal dialog was dismissed
+ *  (`screen::CANCELLED`). */
 // i18n-exempt: host rejection marker compared with includes(), never displayed
-const CANCELLED = "screen capture was cancelled or refused";
+const CANCELLED = "screen capture was cancelled";
 
 /** The capture-option slice of livekit-client's `ScreenShareCaptureOptions`
  *  that the shared screen-share code sets. */
@@ -41,12 +42,18 @@ export function captureOptions(options: ScreenCaptureRequest): NativeVoiceScreen
   };
 }
 
+/** The rejection a dismissed picker raises, as a dismissed browser picker's:
+ *  the shared code keeps it silent. */
+export function pickerDismissed(): DOMException {
+  return new DOMException(PICKER_DISMISSED, "NotAllowedError");
+}
+
 /** A host start failure as the shared code classifies getDisplayMedia's: a
- *  cancelled or refused portal dialog is an `AbortError`, which the shared
- *  code treats as a silent user cancel rather than a permission denial. */
+ *  dismissed portal dialog is a dismissed picker; any other failure (a
+ *  capturer that failed, no first frame in time) stays an error it reports. */
 export function startError(err: unknown): unknown {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes(CANCELLED) ? new DOMException(message, "AbortError") : err;
+  return message.includes(CANCELLED) ? pickerDismissed() : err;
 }
 
 /** A device switch the host actually completed by falling back to the default

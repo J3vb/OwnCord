@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NativeVoiceEnvelope } from "../../../platform/contracts/nativeVoice";
+import type { Participant } from "livekit-client";
 
 vi.mock("livekit-client", () => ({
   RoomEvent: {
@@ -153,7 +154,8 @@ vi.mock("../../../platform/desktop", () => ({
 
 import { createNativeRoom } from "./nativeRoom";
 import { nativeCounters } from "./counters";
-import { setLocalDeafened } from "../../../stores/voice.store";
+import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
+import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/roomEventHandlers";
 
 const audio = {
   echoCancellation: true,
@@ -444,7 +446,7 @@ describe("NativeRoom room surface", () => {
     expect(disconnected).toHaveBeenCalledTimes(1);
   });
 
-  it("OC-0473: degrades on a remote decrypt failure that outlasts the grace window", async () => {
+  it("OC-0473: re-reports a remote decrypt failure the way the web worker does until it clears", async () => {
     vi.useFakeTimers();
     try {
       const room = createNativeRoom(audio);
@@ -456,37 +458,71 @@ describe("NativeRoom room surface", () => {
       emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
       emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
 
-      // A rotation race: the peer's frames decrypt again inside the window.
+      // The backend reports the transition once; the room re-reports it as
+      // the web worker's once-a-second InvalidKey, attributed to the peer.
       status("user-2", false);
-      vi.advanceTimersByTime(2000);
-      status("user-2", true);
-      vi.advanceTimersByTime(5000);
-      expect(encryptionError).not.toHaveBeenCalled();
-
-      // A peer who leaves while failing is not reported.
-      status("user-3", false);
-      emit({ session: 1, event: { type: "participantDisconnected", identity: "user-3" } });
-      vi.advanceTimersByTime(5000);
-      expect(encryptionError).not.toHaveBeenCalled();
-
-      // The backend reports a transition once; a failure that persists degrades.
-      status("user-2", false);
-      vi.advanceTimersByTime(2999);
-      expect(encryptionError).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1);
       expect(encryptionError).toHaveBeenCalledTimes(1);
       const [err, participant] = encryptionError.mock.calls[0]!;
       expect(participant).toBe(room.remoteParticipants.get("user-2"));
-      // Not "InvalidKey:" — handleEncryptionError's own streak logic would
-      // swallow a single event as the start of a new streak.
-      expect((err as Error).message.startsWith("InvalidKey:")).toBe(false);
+      expect((err as Error).message.startsWith("InvalidKey:")).toBe(true);
+      vi.advanceTimersByTime(2000);
+      expect(encryptionError).toHaveBeenCalledTimes(3);
+      // Decrypting again stops the reports.
+      status("user-2", true);
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).toHaveBeenCalledTimes(3);
 
-      // Leaving the room drops a pending timer.
+      // A peer who leaves while failing is no longer reported.
+      status("user-3", false);
+      emit({ session: 1, event: { type: "participantDisconnected", identity: "user-3" } });
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).toHaveBeenCalledTimes(4);
+
+      // Leaving the room stops a running report.
       status("user-2", false);
       await room.disconnect();
       vi.advanceTimersByTime(5000);
-      expect(encryptionError).toHaveBeenCalledTimes(1);
+      expect(encryptionError).toHaveBeenCalledTimes(5);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("OC-0473: a native decrypt degradation clears once the peer decrypts again", async () => {
+    vi.useFakeTimers();
+    try {
+      const room = createNativeRoom(audio);
+      const handlers = createRoomEventHandlers({} as RoomEventDeps);
+      room.on("encryptionError", (err, p) =>
+        handlers.handleEncryptionError(err as Error, p as Participant),
+      );
+      await room.connect("u", "t");
+      emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+      const status = (encrypted: boolean): void =>
+        emit({ session: 1, event: { type: "encryptionStatus", identity: "user-2", encrypted } });
+
+      // A failure past the grace window reads "Unsecured"...
+      status(false);
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+      // ...and the peer's frames decrypting again clears it.
+      status(true);
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+
+      // The local E2EE not running is not the peer's to clear.
+      status(false);
+      vi.advanceTimersByTime(3000);
+      emit({
+        session: 1,
+        event: { type: "encryptionStatus", identity: "user-1", encrypted: false },
+      });
+      status(true);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+      await room.disconnect();
+    } finally {
+      setEncryptionDegraded(false);
       vi.useRealTimers();
     }
   });
@@ -821,11 +857,12 @@ describe("NativeRoom screen share", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("maps a closed picker and a cancelled portal dialog to AbortError (silent cancel)", async () => {
+  it("maps a closed picker and a dismissed portal dialog to a dismissed picker (silent cancel)", async () => {
+    const dismissed = { name: "NotAllowedError", message: "Permission denied by user" };
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     host.pick = () => Promise.resolve(null);
-    await expect(share(room)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(share(room)).rejects.toMatchObject(dismissed);
     expect(host.calls.filter(([n]) => n === "startScreen")).toHaveLength(0);
     host.pick = () =>
       Promise.resolve({
@@ -834,10 +871,19 @@ describe("NativeRoom screen share", () => {
         maxBitrate: 6_000_000,
         maxFramerate: 30,
       });
-    host.startScreen = () => Promise.reject("screen capture was cancelled or refused");
-    await expect(share(room)).rejects.toMatchObject({ name: "AbortError" });
-    host.startScreen = () => Promise.reject("that screen or window is no longer available");
-    await expect(share(room)).rejects.toBe("that screen or window is no longer available");
+    host.startScreen = () => Promise.reject("screen capture was cancelled");
+    await expect(share(room)).rejects.toMatchObject(dismissed);
+    // A failure before the first frame and the first-frame timeout are
+    // errors the user is told about, not cancels.
+    for (const failure of [
+      "that screen or window is no longer available",
+      "screen capture failed to start",
+      "screen capture produced no frame in time",
+    ]) {
+      host.startScreen = () => Promise.reject(failure);
+      // oxlint-disable-next-line no-await-in-loop -- each start must settle before the next
+      await expect(share(room)).rejects.toBe(failure);
+    }
     expect(host.renderers).toHaveLength(0);
   });
 
