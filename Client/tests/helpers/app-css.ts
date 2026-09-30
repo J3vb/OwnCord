@@ -40,6 +40,11 @@ function selectorText(selector: Selector): string {
         case "combinator":
           return COMBINATORS[c.value] ?? ` ${c.value} `;
         case "pseudo-class":
+          // :has(...) carries a nested selector list; render it so a test can
+          // pin the whole selector rather than just the pseudo-class name.
+          if (c.kind === "has") {
+            return `:has(${c.selectors.map(selectorText).join(", ")})`;
+          }
           return `:${c.kind}`;
         case "pseudo-element":
           return `::${c.kind}`;

@@ -920,8 +920,35 @@ describe("SidebarArea", () => {
 
     it("keeps the channel list a floor the member section yields to (B9 Q1 reflow)", () => {
       expect(cascadedDeclaration(".sidebar-content-inner", "min-height")).toBeDefined();
-      expect(cascadedDeclaration(".sidebar-members-section", "flex-shrink")?.value).toMatchObject({
-        value: 1,
+      expect(cascadedDeclaration(".sidebar-members-section", "flex")?.value).toMatchObject({
+        value: {
+          grow: 1,
+          shrink: 1,
+          basis: { type: "length-percentage", value: { type: "dimension", value: { value: 0 } } },
+        },
+      });
+    });
+
+    it("sizes the member section to a definite height once one is saved (P1-01)", () => {
+      // The channel slot shrink-wraps its rows instead of collapsing to the
+      // floor, and the member section fills the rest (P1-01).
+      expect(cascadedDeclaration(".sidebar-content-inner", "flex")?.value).toMatchObject({
+        value: { grow: 0, shrink: 1, basis: { type: "auto" } },
+      });
+      // A saved/dragged/collapsed height switches it back to a definite size,
+      // so the channel list above can grow to the rest.
+      expect(cascadedDeclaration(".sidebar-members-section.sized", "flex")?.value).toMatchObject({
+        value: { grow: 0, shrink: 1, basis: { type: "auto" } },
+      });
+      // And with the section pinned, the channel slot takes the rest back so
+      // no gap opens below the member section.
+      expect(
+        cascadedDeclaration(
+          ".sidebar-content:has(.sidebar-members-section.sized) .sidebar-content-inner",
+          "flex",
+        )?.value,
+      ).toMatchObject({
+        value: { grow: 1, shrink: 1, basis: { type: "auto" } },
       });
     });
   });

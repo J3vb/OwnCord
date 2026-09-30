@@ -69,12 +69,22 @@
 .sidebar-content {
   overflow-y: auto;
 }
-/* The min-height, about three channel rows at the user's text size, keeps
-   the channel list reachable when the header wraps and the member list below
-   is long or dragged tall (B9 Q1 reflow: 940x500 with 20px text left it no
-   room, under the members section). */
+/* The channel slot shrink-wraps its rows instead of taking a flex share, so a
+   short channel list is never clipped under the member section; the member
+   section below fills the rest and scrolls its own members (P1-01). The
+   min-height, about three channel rows at the user's text size, keeps the
+   channel list reachable when the header wraps and the member list below is
+   long or dragged tall (B9 Q1 reflow: 940x500 with 20px text left it no room,
+   under the members section). */
 .sidebar-content-inner {
+  flex: 0 1 auto;
   min-height: calc(var(--font-size, 16px) * 6);
+}
+/* Once the member section is pinned to a definite height (restored, dragged or
+   collapsed), it no longer fills the rest, so the channel slot takes that
+   space back instead of leaving a gap at the bottom (P1-01). */
+.sidebar-content:has(.sidebar-members-section.sized) .sidebar-content-inner {
+  flex: 1 1 auto;
 }
 /* The unified header above already shows the server name and Invite. */
 .sidebar-content-inner .channel-sidebar-header {
@@ -121,8 +131,10 @@
      content's height so `.channel-list` (overflow-y:auto) becomes the scroller.
      Without min-height:0 the column grows past its slot and the list is clipped
      instead of scrolled (B9-21 reflow: a long channel list must stay reachable
-     at the 940x500 minimum window). */
-  flex: 1 1 0;
+     at the 940x500 minimum window). A content-sized basis (auto, not 0) lets
+     the slot above shrink-wrap a short list instead of collapsing to its floor
+     (P1-01). */
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
 }
