@@ -306,6 +306,7 @@ export function createServerPanel(
       item.addEventListener(
         "keydown",
         (e: KeyboardEvent) => {
+          if (e.target !== item) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             activate();

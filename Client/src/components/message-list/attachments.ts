@@ -863,6 +863,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       // still-loading forever (F14).
       const placeholder = createElement("div", { class: "placeholder-img loading" }, att.filename);
       wrap.appendChild(placeholder);
+      let current: Element = placeholder;
 
       const attempt = (): void => {
         void fetchImageAsDataUrl(resolvedUrl).then((dataUrl) => {
@@ -881,16 +882,16 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
               },
               { once: true },
             );
-            placeholder.replaceWith(img);
+            current.replaceWith(img);
+            current = img;
           } else {
-            placeholder.classList.remove("loading");
-            placeholder.replaceWith(
-              renderFailureStatus(
-                messageStatusText("file.imageFailed"),
-                messageStatusText("file.retry"),
-                attempt,
-              ),
+            const failure = renderFailureStatus(
+              messageStatusText("file.imageFailed"),
+              messageStatusText("file.retry"),
+              attempt,
             );
+            current.replaceWith(failure);
+            current = failure;
           }
         });
       };

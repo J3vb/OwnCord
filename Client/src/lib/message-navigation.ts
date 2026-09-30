@@ -47,15 +47,19 @@ function mayOpenNow(host: string | undefined): boolean {
  * Install the jump implementation. Returns an unregister function; calling it
  * only clears the handler if it is still the one installed here, so a late
  * teardown cannot wipe a newer page's handler. A click buffered before any
- * handler existed is flushed here, once, if it may open against the server now
- * signed in.
+ * handler existed is flushed once, after the registering page finishes its
+ * synchronous mount (the handler is installed before the page's channel
+ * controller exists), if that page is still registered and the target may
+ * open against the server then signed in.
  */
 export function setMessageJumpHandler(fn: MessageJumpHandler): () => void {
   handler = fn;
   const held = pending;
   pending = null;
-  if (held !== null && mayOpenNow(held.host)) {
-    fn(held.channelId, held.messageId);
+  if (held !== null) {
+    queueMicrotask(() => {
+      if (handler === fn && mayOpenNow(held.host)) fn(held.channelId, held.messageId);
+    });
   }
   return () => {
     if (handler === fn) handler = null;

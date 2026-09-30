@@ -1172,9 +1172,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           // discarded — whatever draft the user had typed, and on slow
           // mode / mid-upload / debounced sends left the raw GIF URL sitting
           // in the composer instead of the draft. Guarded by the same
-          // disabledReason/debounce checks as a normal send; an in-progress
+          // refusal/debounce checks as a normal send; an in-progress
           // edit and any typed draft are left untouched.
-          if (disabledReason === null) {
+          const refusal = disabledReason ?? sendGateReason;
+          if (refusal !== null) {
+            showUploadError(refusal);
+          } else {
             const now = Date.now();
             if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
               lastSendTime = now;

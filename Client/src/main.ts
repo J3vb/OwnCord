@@ -881,10 +881,13 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         onDeleteProfile(profileId) {
           // Look the host up before removal: deleting a saved profile must
           // also drop its OS credential, or re-adding the same host resumes
-          // the old remembered password (F11).
+          // the old remembered password (F11). Credentials are keyed by host,
+          // so keep it while another profile still points at that server.
           const host = profileManager.getAll().find((p) => p.id === profileId)?.host;
           profileManager.removeProfile(profileId);
-          if (host) void deleteCredential(host);
+          if (host && !profileManager.getAll().some((p) => p.host === host)) {
+            void deleteCredential(host);
+          }
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
         },

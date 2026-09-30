@@ -236,7 +236,8 @@ func (r *RateLimiter) RetryAfter(key string, limit int, window time.Duration) ti
 	return valid[0].Add(window).Sub(now)
 }
 
-// Lockout prevents any requests from key for duration regardless of the// sliding-window counter. When a LockoutStore is configured, the lockout
+// Lockout prevents any requests from key for duration regardless of the
+// sliding-window counter. When a LockoutStore is configured, the lockout
 // is persisted so it survives server restarts. The persist write must land
 // once the lockout is decided, so the caller's cancellation is detached
 // (WithoutCancel) rather than aborting the write mid-request.

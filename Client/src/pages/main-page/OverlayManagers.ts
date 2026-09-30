@@ -21,7 +21,7 @@ import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { shellText } from "../../i18n/shell";
-import { dialogOpen, isEditableTarget } from "./GlobalKeybinds";
+import { dialogOpen } from "./GlobalKeybinds";
 
 const log = createLogger("overlays");
 
@@ -166,8 +166,8 @@ export function createQuickSwitcherManager(
       close();
       return;
     }
-    // Do not open behind another modal or while typing in a field (#17).
-    if (dialogOpen() || isEditableTarget(e.target)) return;
+    // Do not open behind another modal (#17).
+    if (dialogOpen()) return;
     e.preventDefault();
     open();
   };

@@ -1365,8 +1365,9 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPinnedMessages: %v", err)
 	}
-	if len(msgs) > db.MaxPinnedMessages {
-		t.Errorf("GetPinnedMessages returned %d pins, want <= MaxPinnedMessages (%d)", len(msgs), db.MaxPinnedMessages)
+	// One row past the cap is returned so the caller can report truncation.
+	if len(msgs) != db.MaxPinnedMessages+1 {
+		t.Errorf("GetPinnedMessages returned %d pins, want MaxPinnedMessages+1 (%d)", len(msgs), db.MaxPinnedMessages+1)
 	}
 }
 

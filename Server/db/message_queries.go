@@ -854,8 +854,9 @@ func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, er
 // spare across all three batch queries.
 const MaxPinnedMessages = 1000
 
-// GetPinnedMessages returns up to MaxPinnedMessages pinned messages in a
-// channel, most-recently-pinned first, in the API response shape, including
+// GetPinnedMessages returns up to MaxPinnedMessages+1 pinned messages in a
+// channel — the extra row only tells the caller the list was truncated —
+// most-recently-pinned first, in the API response shape, including
 // user object, reactions (with me flag), and attachments.
 func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
@@ -865,7 +866,7 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
 		 ORDER BY m.pinned_at DESC, m.id DESC LIMIT ?`,
-		channelID, MaxPinnedMessages,
+		channelID, MaxPinnedMessages+1,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetPinnedMessages: %w", err)

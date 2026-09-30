@@ -431,6 +431,32 @@ describe("renderAttachment — image with dimensions", () => {
     // The filename box must not sit there looking like it is still loading.
     expect(el.querySelector(".placeholder-img.loading")).toBeNull();
   });
+
+  it("a retry that succeeds replaces the failure line with the image", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+    const el = renderAttachment({
+      id: "1",
+      url: "https://myserver.local:8443/flaky.png",
+      filename: "flaky.png",
+      size: 1000,
+      mime: "image/png",
+    });
+    await vi.waitFor(() => {
+      expect(el.querySelector(".msg-media-fallback")).not.toBeNull();
+    });
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: { get: () => "image/png" },
+      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+    });
+    (el.querySelector(".msg-media-retry") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(el.querySelector("img")).not.toBeNull();
+    });
+    expect(el.querySelector(".msg-media-fallback")).toBeNull();
+  });
 });
 
 describe("fetchImageAsDataUrl — network fetch failure", () => {

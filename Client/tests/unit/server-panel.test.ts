@@ -470,6 +470,22 @@ describe("ServerPanel", () => {
       expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false);
     });
 
+    it("Enter on the row's delete button is left to the button, not the row (#19)", () => {
+      const onServerClick = vi.fn();
+      const onDeleteProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onServerClick, onDeleteProfile }), [
+        fullProfile(),
+      ]);
+      container.appendChild(panel.element);
+
+      const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
+      const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      deleteBtn.dispatchEvent(enter);
+
+      expect(onServerClick).not.toHaveBeenCalled();
+      expect(enter.defaultPrevented).toBe(false);
+    });
+
     it("shows an empty state when the profile list is empty (#19)", () => {
       const panel = createServerPanel(makeOpts(), []);
       container.appendChild(panel.element);

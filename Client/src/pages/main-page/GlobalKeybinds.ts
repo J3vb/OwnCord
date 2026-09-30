@@ -33,19 +33,21 @@ function inVoice(): boolean {
   return voiceStore.getState().currentChannelId !== null;
 }
 
-/** True while a text-entry control owns focus (typing in a field). */
-export function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  const tag = target.tagName;
-  return (
-    tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable === true
-  );
-}
-
 /** True while a modal dialog is open — the global shortcuts must not fire
  *  behind it and swallow the key from the dialog's own fields (#17). */
 export function dialogOpen(): boolean {
-  return document.querySelector('[role="dialog"], .modal-overlay') !== null;
+  return Array.from(
+    document.querySelectorAll<HTMLElement>('.modal-overlay, [aria-modal="true"]'),
+  ).some(isShown);
+}
+
+/** A mounted-but-hidden dialog (the Settings panel inside its closed
+ *  overlay) is not open: every ancestor must be displayed too. */
+function isShown(el: HTMLElement): boolean {
+  for (let n: HTMLElement | null = el; n !== null; n = n.parentElement) {
+    if (n.hidden || getComputedStyle(n).display === "none") return false;
+  }
+  return true;
 }
 
 /**
@@ -55,10 +57,8 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   const handler = (e: KeyboardEvent): void => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     if (handlers.isSuspended?.() === true) return;
-    // A modal owns the keyboard while it is up, and a field being typed into
-    // owns its own Ctrl chords (Ctrl+F etc. must reach the field, not the app
-    // behind it).
-    if (dialogOpen() || isEditableTarget(e.target)) return;
+    // A modal owns the keyboard while it is up.
+    if (dialogOpen()) return;
 
     // `e.key` is layout-dependent and uppercases with Shift held — compare
     // case-insensitively so Ctrl+Shift+V arrives as "V", not a missed "v".

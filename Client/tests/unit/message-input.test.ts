@@ -1576,6 +1576,22 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("selecting a GIF under a slow-mode send gate is refused with the reason", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setSendGate("Slow mode — 5s");
+    (container.querySelector(".gif-btn") as HTMLElement).click();
+    expect(lastGifPickerOptions).not.toBeNull();
+    lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
+
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-upload-error")!.textContent).toBe("Slow mode — 5s");
+
+    comp.destroy?.();
+  });
+
   it("selecting a GIF sends it without discarding a typed draft", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);

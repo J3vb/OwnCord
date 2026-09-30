@@ -967,6 +967,29 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
+  it("opens on Ctrl+K from the focused composer, but not while a modal is open", () => {
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay visible";
+    document.body.appendChild(modal);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+    modal.remove();
+
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+    );
+    expect(createQuickSwitcher).toHaveBeenCalledOnce();
+
+    composer.remove();
+    cleanup();
+  });
+
   it("opens quick switcher on Meta+K (macOS)", () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();

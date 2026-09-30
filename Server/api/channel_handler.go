@@ -324,9 +324,13 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 		// Report the real cap state rather than a hardcoded false: with more
 		// than MaxPinnedMessages pins the rest are truncated, and the caller
 		// must be able to tell (F23).
+		hasMore := len(msgs) > db.MaxPinnedMessages
+		if hasMore {
+			msgs = msgs[:db.MaxPinnedMessages]
+		}
 		writeJSON(w, http.StatusOK, response{
 			Messages: msgs,
-			HasMore:  len(msgs) >= db.MaxPinnedMessages,
+			HasMore:  hasMore,
 		})
 	}
 }
