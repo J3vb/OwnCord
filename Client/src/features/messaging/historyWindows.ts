@@ -10,19 +10,24 @@ import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageMod
 import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
 
-/** Deep equality over plain data; an undefined property counts as absent and
- *  key order is ignored, so a live-built row equals its REST twin. */
+/** Fields only a live chat_message row carries (the user's role and nickname,
+ *  the echoed client_message_id); history never sends them, so their absence
+ *  from a refetched row is not a change. */
+const LIVE_ONLY_KEYS = new Set(["clientMessageId", "role", "display_name"]);
+
+/** Deep equality over plain data; null, undefined and live-only properties
+ *  count as absent and key order is ignored, so a live-built row equals its
+ *  REST twin. */
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const present = (o: Record<string, unknown>): string[] =>
+    Object.keys(o).filter((k) => o[k] != null && !LIVE_ONLY_KEYS.has(k));
   const x = a as Record<string, unknown>;
   const y = b as Record<string, unknown>;
-  const keys = Object.keys(x).filter((k) => x[k] !== undefined);
-  return (
-    keys.length === Object.keys(y).filter((k) => y[k] !== undefined).length &&
-    keys.every((k) => sameValue(x[k], y[k]))
-  );
+  const keys = present(x);
+  return keys.length === present(y).length && keys.every((k) => sameValue(x[k], y[k]));
 }
 
 /** setChannelLoading's reducer. */
@@ -81,21 +86,6 @@ export function reduceSetMessages(
     consumedEchoes.add(echoIdx);
     return false;
   });
-  // A revisit's refetch (DP-10) reconciles into the cached window instead of
-  // replacing it. The rows present when the fetch started (id <= watermark)
-  // were a contiguous window, and the page is the contiguous live tail, so
-  // when the page reaches back to them the older cached rows can stay above
-  // it. Without a watermark, with a gap, or when the page is the whole
-  // channel (nothing older can still exist), the page replaces the window.
-  const watermark = prev.loadWatermark?.get(channelId);
-  const oldestSnapshotId = trimmed[0]?.id;
-  const older =
-    hasMore &&
-    watermark !== undefined &&
-    oldestSnapshotId !== undefined &&
-    oldestSnapshotId <= watermark
-      ? previous.filter((m) => m.status === "sent" && m.id < oldestSnapshotId)
-      : [];
   // A row nothing changed keeps its object, so the list can keep its DOM row
   // and the whole array can be returned as-is when nothing changed at all.
   const cachedById = new Map(previous.filter((m) => m.status === "sent").map((m) => [m.id, m]));
@@ -103,7 +93,7 @@ export function reduceSetMessages(
     const cached = cachedById.get(m.id);
     return cached !== undefined && sameValue(cached, m) ? cached : m;
   });
-  let merged: readonly Message[] = [...older, ...snapshot, ...carried];
+  let merged: readonly Message[] = [...snapshot, ...carried];
   const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
   if (mergeTrimmed) {
     merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
@@ -119,13 +109,9 @@ export function reduceSetMessages(
   updatedLoaded.add(channelId);
 
   const updatedHasMore = new Map(prev.hasMore);
-  // Kept older rows mean the window's top is the cached one, so "more above"
-  // is the cached answer rather than the page's.
   updatedHasMore.set(
     channelId,
-    (older.length > 0 ? (prev.hasMore.get(channelId) ?? true) : hasMore) ||
-      converted.length > MAX_MESSAGES_PER_CHANNEL ||
-      mergeTrimmed,
+    hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL || mergeTrimmed,
   );
 
   const updatedLoadState = new Map(prev.historyLoadState);

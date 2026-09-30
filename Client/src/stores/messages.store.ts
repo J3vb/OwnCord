@@ -163,11 +163,11 @@ export function setChannelLoadError(channelId: number): void {
  *  carried over when they are pending/failed, or "sent" but newer than
  *  anything in the snapshot.
  *
- *  A revisit's refetch (DP-10) reconciles into the cached window: when the
- *  page reaches back to the rows present at setChannelLoading, older loaded
- *  rows stay above it, a row the page left unchanged keeps its object, and a
- *  page that changes nothing leaves the channel's array reference as it was.
- *  A page with a gap after the cached rows replaces the window. */
+ *  A revisit's refetch (DP-10) reconciles into the cached window: a row the
+ *  page left unchanged keeps its object, and a page that changes nothing
+ *  leaves the channel's array reference as it was. Cached "sent" rows older
+ *  than the page are dropped, so nothing deleted or edited while away stays
+ *  on screen; scrolling up loads them again. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
@@ -230,8 +230,8 @@ export function invalidateLoadedMessageWindows(): void {
  * "already loaded": that refetch is the only way to learn about edits,
  * deletes and reactions made while away. The rows themselves are kept (the
  * next visit renders them at once) and setMessages reconciles the refetched
- * page into them, changing only what changed and carrying pending/failed
- * rows across. Like reattachToPresent, this leaves detachedChannels alone:
+ * page into them, keeping the rows it left unchanged, dropping older rows
+ * beyond it and carrying pending/failed rows across. Like reattachToPresent, this leaves detachedChannels alone:
  * setMessages clears it once the tail has actually landed, and until then a
  * detached window must keep refusing live broadcasts.
  */

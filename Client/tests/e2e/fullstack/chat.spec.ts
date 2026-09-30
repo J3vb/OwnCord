@@ -153,29 +153,9 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   for (const text of [keep, before, gone]) await submit(text);
   await expect(row(alice, gone)).toHaveCount(1);
 
-  // Away: bob posts one message, edits one and deletes one.
-  await open("elsewhere");
-  await submit(fresh);
-  const edited = row(bob, before);
-  await edited.hover();
-  await edited.locator("[data-testid^='msg-edit-']").click();
-  await submit(after);
-  const doomed = row(bob, gone);
-  await doomed.hover();
-  const del = doomed.locator("[data-testid^='msg-delete-']");
-  await del.click();
-  await del.click();
-  await expect(row(bob, gone)).toHaveCount(0);
-
-  await open("general");
-  await expect(row(alice, fresh)).toHaveCount(1);
-  await expect(row(alice, after)).toHaveCount(1);
-  await expect(row(alice, before)).toHaveCount(0);
-  await expect(row(alice, gone)).toHaveCount(0);
-
-  // Away again while bob posts. The revisit renders the cached rows at once,
-  // and the refetched page only adds the new one: the row that did not change
-  // is never torn down and rebuilt.
+  // Away while bob posts. The revisit renders the rows that arrived live at
+  // once, and the refetched page only adds the new one: the row that did not
+  // change is never torn down and rebuilt.
   await open("elsewhere");
   await alice.evaluate((text) => {
     const w = window as unknown as { __keepRemovals: number; __keepObserver: MutationObserver };
@@ -199,4 +179,24 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
     return w.__keepRemovals;
   });
   expect(removals).toBe(0);
+
+  // Away again: bob posts one message, edits one and deletes one.
+  await open("elsewhere");
+  await submit(fresh);
+  const edited = row(bob, before);
+  await edited.hover();
+  await edited.locator("[data-testid^='msg-edit-']").click();
+  await submit(after);
+  const doomed = row(bob, gone);
+  await doomed.hover();
+  const del = doomed.locator("[data-testid^='msg-delete-']");
+  await del.click();
+  await del.click();
+  await expect(row(bob, gone)).toHaveCount(0);
+
+  await open("general");
+  await expect(row(alice, fresh)).toHaveCount(1);
+  await expect(row(alice, after)).toHaveCount(1);
+  await expect(row(alice, before)).toHaveCount(0);
+  await expect(row(alice, gone)).toHaveCount(0);
 });

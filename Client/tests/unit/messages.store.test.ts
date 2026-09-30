@@ -2007,7 +2007,7 @@ describe("messages store", () => {
       expect(getHistoryLoadState(1)).toBeNull();
     });
 
-    it("keeps older loaded rows and unchanged row objects when the page overlaps the window", () => {
+    it("drops older cached rows beyond the page and keeps unchanged row objects inside it", () => {
       setMessages(1, page(51, 100), true);
       prependMessages(1, page(1, 50), true);
       const cached = getChannelMessages(1);
@@ -2023,27 +2023,97 @@ describe("messages store", () => {
 
       const msgs = getChannelMessages(1);
       const ids = msgs.map((m) => m.id);
-      expect(ids[0]).toBe(1);
-      expect(ids).toHaveLength(100);
+      expect(ids[0]).toBe(52);
+      expect(ids).toHaveLength(49);
       expect(ids).not.toContain(90);
       expect(ids.at(-1)).toBe(101);
       expect(msgs.find((m) => m.id === 80)!.content).toBe("edited");
       // Rows nothing changed keep their object, so the list can tell them apart.
-      expect(msgs[0]).toBe(cached[0]);
+      expect(msgs[0]).toBe(cached.find((m) => m.id === 52));
       expect(msgs.find((m) => m.id === 70)).toBe(cached.find((m) => m.id === 70));
-      // The oldest row is still the cached one, so "more above" is the cached answer.
       expect(hasMoreMessages(1)).toBe(true);
     });
 
-    it("keeps a row that arrived live when the page carries its unchanged REST twin", () => {
+    it("does not show a message deleted while away that is older than the refetched page", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), true);
+      expect(getChannelMessages(1).map((m) => m.id)).toContain(20);
+
+      revisit();
+      // While away: 20 was deleted and 101-110 were posted.
+      setMessages(1, page(61, 110), true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).not.toContain(20);
+    });
+
+    it("keeps a row that arrived live when the page carries its REST twin in the server's wire shapes", () => {
       setMessages(1, page(1, 50), true);
-      addMessage(makeChatPayload({ id: 51, content: "m51", timestamp: "2026-03-15T09:00:00Z" }));
+      // chat_message's user carries the role, the nickname and an explicit
+      // null avatar, and the broadcast echoes client_message_id. History's
+      // user has none of them and omits a null avatar.
+      addMessage(
+        makeChatPayload({
+          id: 51,
+          client_message_id: "1773568800000:live",
+          user: {
+            id: 2,
+            username: "bob",
+            avatar: null,
+            display_name: "Bobby",
+            role: "member",
+          } as MessageUser,
+          content: "m51",
+          timestamp: "2026-03-15T09:00:00Z",
+          mentions: [],
+          mentions_everyone: false,
+        }),
+      );
+      const cached = getChannelMessages(1);
+      expect(cached.at(-1)?.clientMessageId).toBe("1773568800000:live");
+
+      revisit();
+      const restTwin = makeMessageResponse({
+        id: 51,
+        user: { id: 2, username: "bob" } as MessageUser,
+        content: "m51",
+        timestamp: "2026-03-15T09:00:00Z",
+        mentions: [],
+        mentions_everyone: false,
+      });
+      setMessages(1, [restTwin, ...page(1, 50)], true);
+
+      expect(getChannelMessages(1)).toBe(cached);
+    });
+
+    it("replaces a live row whose avatar changed while away", () => {
+      setMessages(1, page(1, 50), true);
+      addMessage(
+        makeChatPayload({
+          id: 51,
+          user: { id: 2, username: "bob", avatar: null, role: "member" } as MessageUser,
+          content: "m51",
+          timestamp: "2026-03-15T09:00:00Z",
+        }),
+      );
       const live = getChannelMessages(1).at(-1);
 
       revisit();
-      setMessages(1, page(2, 51), true);
+      setMessages(
+        1,
+        [
+          makeMessageResponse({
+            id: 51,
+            user: { id: 2, username: "bob", avatar: "bob.png" },
+            content: "m51",
+            timestamp: "2026-03-15T09:00:00Z",
+          }),
+          ...page(1, 50),
+        ],
+        true,
+      );
 
-      expect(getChannelMessages(1).at(-1)).toBe(live);
+      expect(getChannelMessages(1).at(-1)).not.toBe(live);
+      expect(getChannelMessages(1).at(-1)?.user.avatar).toBe("bob.png");
     });
 
     it("replaces the window when the page leaves a gap after the cached rows", () => {
