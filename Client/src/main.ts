@@ -521,6 +521,13 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // Session-scoped WS listeners — collected so they're all removed together
     // on logout/disconnect (or the next wirePostAuth).
     const sessionUnsubs: Array<() => void> = [() => clearTimeout(preauthTimer)];
+    // A first-use certificate prompt means the server answered: the user is
+    // deciding, not waiting on an offline host, and Accept resumes this login.
+    sessionUnsubs.push(
+      ws.onCertFirstUse((evt) => {
+        if (evt.host === normalizeHostForCertCompare(host)) clearTimeout(preauthTimer);
+      }),
+    );
 
     // BUG-135: Only persist credentials when the user opted in. Declining is
     // an active instruction, not just an absence of one (OCV-022): a password

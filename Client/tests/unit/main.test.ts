@@ -213,7 +213,7 @@ import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
-import { createCertMismatchModal } from "@components/CertMismatchModal";
+import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
@@ -419,6 +419,33 @@ describe("main.ts pre-auth connection deadline", () => {
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS);
     expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
     expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    clearAuth();
+  });
+
+  it("does not time out while the user answers a first-use certificate prompt", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("unpinned.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "unpinned.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    mockInvoke.mockClear();
+
+    // The server answered; the user is reading the fingerprint past the deadline.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    // Accept still resumes this login against the same host.
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
 
     clearAuth();
   });
