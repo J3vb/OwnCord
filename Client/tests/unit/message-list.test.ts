@@ -539,9 +539,55 @@ describe("MessageList", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // loadingOlder must now be false — scrolling to top again re-triggers it.
+    // loadingOlder must now be false. Scrolling on inside the trigger zone
+    // waits out the retry cooldown, but leaving the zone (50px while jsdom's
+    // clientHeight is 0) and coming back re-triggers it.
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(1);
+    root.scrollTop = 100;
+    root.dispatchEvent(new Event("scroll"));
+    root.scrollTop = 0;
     root.dispatchEvent(new Event("scroll"));
     expect(onScrollTop).toHaveBeenCalledTimes(2);
+  });
+
+  it("DP-46: after a failed older-page fetch, scrolling inside the zone waits 5s before retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      setHasMore(1, true);
+      setMessages(1, [makeMessage({ id: 1 })]);
+      messagesStore.flush();
+      const onScrollTop = vi.fn(() => Promise.resolve());
+      msgList = createMessageList({ ...options, onScrollTop });
+      msgList.mount(container);
+      const root = container.querySelector(".messages-container") as HTMLDivElement;
+      Object.defineProperty(root, "clientHeight", { configurable: true, value: 600 });
+
+      root.scrollTop = 900;
+      root.dispatchEvent(new Event("scroll"));
+      expect(onScrollTop).toHaveBeenCalledTimes(1);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // The fetch failed (nothing prepended). The reader keeps scrolling up
+      // through the zone: no request goes out within the cooldown.
+      for (let top = 880; top >= 0; top -= 40) {
+        root.scrollTop = top;
+        root.dispatchEvent(new Event("scroll"));
+        vi.advanceTimersByTime(16);
+        await Promise.resolve();
+      }
+      vi.advanceTimersByTime(4000);
+      root.dispatchEvent(new Event("scroll"));
+      expect(onScrollTop).toHaveBeenCalledTimes(1);
+
+      // Past 5s, the next scroll in the zone retries.
+      vi.advanceTimersByTime(1000);
+      root.dispatchEvent(new Event("scroll"));
+      expect(onScrollTop).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not re-trigger onScrollTop from a live tail append while a history fetch is in flight", async () => {

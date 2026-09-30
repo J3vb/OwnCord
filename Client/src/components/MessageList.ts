@@ -75,6 +75,9 @@ const SCROLL_TOP_THRESHOLD = 50;
 /** Older history starts loading this many viewport heights before the top
  *  (DP-46), so the next page is usually in before the reader gets there. */
 const SCROLL_TOP_VIEWPORTS = 2;
+/** After a failed older-page fetch, scrolling inside the trigger zone waits
+ *  this long before retrying, unless the reader leaves the zone first. */
+const OLDER_RETRY_COOLDOWN_MS = 5000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 
 /** Number of items to render beyond visible viewport in each direction. */
@@ -922,6 +925,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   let loadingOlder = false;
+  let olderRetryAt = 0;
   /** Spinner row at the top of the history while an older page is in flight.
    *  Absolutely positioned in the scroller, so showing or hiding it never
    *  moves the rows (and never fires a scroll that could refetch). */
@@ -961,12 +965,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Load older messages well before the top (DP-46); the floor keeps the
     // trigger working when the viewport has no height yet.
+    const nearTop =
+      root.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, root.clientHeight * SCROLL_TOP_VIEWPORTS);
+    if (!nearTop) olderRetryAt = 0;
     if (
-      root.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, root.clientHeight * SCROLL_TOP_VIEWPORTS) &&
+      nearTop &&
       !loadingOlder &&
+      performance.now() >= olderRetryAt &&
       hasMoreMessages(options.channelId)
     ) {
       setLoadingOlder(true);
+      const oldestAtFire = getChannelMessages(options.channelId)[0]?.id;
       // A failed fetch never changes the message count, so the subscriber
       // below (which only reacts to a count change) would leave loadingOlder
       // latched forever. Clear it once the load settles either way — the
@@ -974,6 +983,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // belt-and-braces.
       void Promise.resolve(options.onScrollTop()).finally(() => {
         setLoadingOlder(false);
+        // Nothing was prepended: hold off so continued scrolling in the zone
+        // does not send one failing request after another.
+        if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
+          olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
+        }
       });
     }
 
