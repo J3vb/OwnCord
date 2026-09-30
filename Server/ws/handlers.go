@@ -220,6 +220,9 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 	if result.SetChannelID != nil {
 		h.applySetChannelID(c, *result.SetChannelID)
 	}
+	if result.SetStatus != nil {
+		c.setLiveStatus(*result.SetStatus)
+	}
 	if result.SetE2EEPubKey != nil {
 		sig := ""
 		if result.SetE2EESignature != nil {

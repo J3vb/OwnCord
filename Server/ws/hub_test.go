@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/migrations"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -1597,7 +1598,10 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 }
 
 // hubTestSchema is the minimal schema needed for hub tests.
-var hubTestSchema = []byte(`
+// hubTestSchema ends with the real member-generation migration, so the ready
+// path's shared member read (serve_ready_members_cache.go) runs against the
+// same triggers production does.
+var hubTestSchema = append([]byte(`
 CREATE TABLE IF NOT EXISTS roles (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL UNIQUE,
@@ -1830,4 +1834,13 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     lifted_by       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-`)
+`), mustMigration("057_member_generation.sql")...)
+
+// mustMigration returns a shipped migration file's SQL.
+func mustMigration(name string) []byte {
+	raw, err := migrations.FS.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}

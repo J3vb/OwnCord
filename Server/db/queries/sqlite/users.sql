@@ -94,6 +94,22 @@ WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' '
   AND u.registration_status = 'active'
 ORDER BY u.username ASC;
 
+-- The member generation (migration 057): bumped by every write that can
+-- change what ListMembers returns, except users.status.
+-- name: GetMemberGeneration :one
+SELECT generation FROM member_generation WHERE id = 1;
+
+-- The earliest instant at which a user ListMembers currently hides for a
+-- temporary ban will reappear, as the same normalised text ListMembers
+-- compares against strftime('now'), or '' when no such ban is pending. A
+-- lapse is a change nothing writes, so a cached member list must expire here.
+-- name: NextMemberBanLapse :one
+SELECT CAST(COALESCE(MIN(replace(ban_expires, ' ', 'T')), '') AS TEXT)
+FROM users
+WHERE banned != 0
+  AND ban_expires IS NOT NULL
+  AND replace(ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
+
 -- name: CountUsers :one
 SELECT COUNT(*) FROM users;
 

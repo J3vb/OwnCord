@@ -810,6 +810,30 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 	return members, nil
 }
 
+// MemberGeneration returns the member generation: a counter SQLite triggers
+// bump, in the same commit, on every write that can change ListMembers'
+// result except a users.status change (migration 057). Equal generations mean
+// no such write committed in between.
+func (d *DB) MemberGeneration(ctx context.Context) (int64, error) {
+	gen, err := d.q.GetMemberGeneration(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("MemberGeneration: %w", err)
+	}
+	return gen, nil
+}
+
+// NextMemberBanLapse returns when the earliest temporary ban ListMembers is
+// still hiding lapses, as the "2006-01-02T15:04:05Z"-shaped text ListMembers
+// compares against SQLite's clock, or "" when none is pending. A lapse changes
+// ListMembers' result without any write, so it bumps no generation.
+func (d *DB) NextMemberBanLapse(ctx context.Context) (string, error) {
+	at, err := d.q.NextMemberBanLapse(ctx)
+	if err != nil {
+		return "", fmt.Errorf("NextMemberBanLapse: %w", err)
+	}
+	return at, nil
+}
+
 // generateInviteCode produces a random 8-byte (16-char hex) code.
 func generateInviteCode() (string, error) {
 	b := make([]byte, 8)

@@ -215,6 +215,8 @@ type Hub struct {
 	presenceMu         syncutil.Mutex
 	presenceQueue      map[int64]pendingPresence
 	presenceFlushArmed bool
+
+	members memberCache // the ready payloads' shared member list (serve_ready_members_cache.go)
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
