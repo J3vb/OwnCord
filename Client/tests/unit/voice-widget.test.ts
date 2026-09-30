@@ -41,6 +41,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
+import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -649,6 +650,24 @@ describe("VoiceWidget", () => {
     const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
     expect(muteBtn.disabled).toBe(true);
     expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(muteBtn.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+    expect(muteBtn.classList.contains("vw-listen-only")).toBe(true);
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
+    expect(muteBtn.title).toBe("Listening only — no microphone access");
+    // jsdom applies no stylesheet: the class must carry a disabled look and
+    // cancel the hover highlight in the parsed app.css.
+    expect(keyword(cascadedDeclaration(".vw-controls button.vw-listen-only", "opacity"))).toBe(
+      "0.5",
+    );
+    expect(
+      varToken(cascadedDeclaration(".vw-controls button.vw-listen-only:hover", "background")),
+    ).toBe("--bg-active");
+
+    // A granted microphone clears it.
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: false }));
+    voiceStore.flush();
+    expect(muteBtn.classList.contains("vw-listen-only")).toBe(false);
+    expect(muteBtn.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
 
     widget.destroy?.();
   });

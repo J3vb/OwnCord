@@ -355,19 +355,24 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // localMuted, so a PTT user would otherwise read as permanently muted
     // between presses. An idle PTT gate gets its own (non-active) affordance.
     const userMuted = isSelfMuted(voice);
-    const pttGated = voice.pttGated === true && !userMuted;
+    const serverMuted = voice.localServerMuted === true;
+    const serverDeafened = voice.localServerDeafened === true;
+    // Joined listen-only (no mic permission/track): there is nothing to mute,
+    // so the control reads mic-off and visibly inert. "Grant Microphone" is
+    // the action that changes this state.
+    const listenOnly = voice.listenOnly && !serverMuted;
+    const pttGated = voice.pttGated === true && !userMuted && !listenOnly;
     muteBtn?.classList.toggle("active-ctrl", userMuted);
     muteBtn?.classList.toggle("ptt-gated", pttGated);
+    muteBtn?.classList.toggle("vw-listen-only", listenOnly);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
     // A moderator-imposed mute/deafen is not ours to lift: the server refuses
     // the unmute, so disable the control and say why instead of letting the
     // click bounce off with an error toast.
-    const serverMuted = voice.localServerMuted === true;
-    const serverDeafened = voice.localServerDeafened === true;
     if (muteBtn) {
-      swapIcon(muteBtn, userMuted ? "mic-off" : "mic");
+      swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
       muteBtn.setAttribute("aria-pressed", String(userMuted));
       // A PTT gate gets its own title; the ordinary mute case leaves the
       // title to updateFrozen (which owns the freeze reason) as before.
@@ -379,11 +384,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       if (serverMuted) {
         muteBtn.disabled = true;
         muteBtn.title = t("widget.mutedByModerator");
-      } else if (voice.listenOnly) {
-        // Joined listen-only (no mic permission/track): there is nothing to
-        // mute, so the control is inert and reads unmuted. "Grant Microphone"
-        // is the action that changes this state.
+      } else if (listenOnly) {
         muteBtn.disabled = true;
+        muteBtn.title = t("widget.control.listenOnly");
       }
     }
     if (deafenBtn) {
