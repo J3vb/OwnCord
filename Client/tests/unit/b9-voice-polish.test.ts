@@ -25,6 +25,17 @@ vi.mock("@lib/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
+    getStats: vi.fn().mockReturnValue({
+      rtt: 0,
+      quality: "excellent",
+      outRate: 0,
+      inRate: 0,
+      outPackets: 0,
+      inPackets: 0,
+      totalUp: 0,
+      totalDown: 0,
+      available: true,
+    }),
     onUpdate: vi.fn().mockReturnValue(() => {}),
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
   }),

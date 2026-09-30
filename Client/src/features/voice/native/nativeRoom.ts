@@ -387,8 +387,7 @@ export class NativeRoom {
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
     const pick = await pickScreenSource();
-    // i18n-exempt: AbortError signal for the shared screen-share code (a
-    // silent user cancel), not display text
+    // i18n-exempt: AbortError signal for the shared screen-share code, not display text
     if (pick === null) throw new DOMException("Screen share cancelled", "AbortError");
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId !== session) throw new Error("native room disconnected during screen pick");

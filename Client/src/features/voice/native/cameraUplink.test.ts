@@ -70,6 +70,7 @@ describe("camera upload messages", () => {
 
 class FakeSocket {
   static readonly OPEN = 1;
+  static last: FakeSocket;
   static instances: FakeSocket[] = [];
   readyState = 1;
   bufferedAmount = 0;
@@ -180,6 +181,7 @@ describe("CameraUplink", () => {
     // 60 failures at 30 fps: drive the pump enough times to cross the bound.
     for (let i = 0; i < 61; i++) {
       frameCallback!(1000 + i * 100);
+      // oxlint-disable-next-line no-await-in-loop -- each send must settle before the next so its failure is counted
       await flush();
     }
     await vi.waitFor(

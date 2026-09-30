@@ -139,6 +139,7 @@ const {
         setSpeaking: ReturnType<typeof vi.fn>;
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
+        setExitVisible: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -222,6 +223,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setSpeaking: vi.fn(),
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
+      setExitVisible: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };

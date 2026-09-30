@@ -513,7 +513,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("a cancelled portal dialog is reported as a refused share", async () => {
+  it("a cancelled portal dialog is a silent cancel, not a refused share", async () => {
     const onError = vi.fn();
     session.setOnError(onError);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
@@ -528,7 +528,8 @@ describe("LiveKitSession on the Linux native backend", () => {
     } finally {
       desktop.nativeVoice.startScreen = real;
     }
-    expect(onError).toHaveBeenCalledWith("Screen sharing permission denied");
+    // polish #10: closing the picker is not a denial, so no red error.
+    expect(onError).not.toHaveBeenCalled();
     expect(names()).not.toContain("publishScreen");
     expect(nativeCounters.screenTracks).toBe(0);
   });

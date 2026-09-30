@@ -509,7 +509,9 @@ describe("KeybindsTab", () => {
   it("disables PTT and discloses the gap where key polling is unsupported (voice #12)", async () => {
     mockPttSupported.mockResolvedValue(false);
     const el = buildKeybindsTab(new AbortController().signal);
-    const pttBtn = el.querySelector('[aria-label="Push to Talk keybind — click to capture"]') as HTMLButtonElement;
+    const pttBtn = el.querySelector(
+      '[aria-label="Push to Talk keybind — click to capture"]',
+    ) as HTMLButtonElement;
     await vi.waitFor(() => {
       expect(pttBtn.disabled).toBe(true);
     });

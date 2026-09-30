@@ -1278,7 +1278,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
     expect(note?.textContent).toContain("system mixer");
     expect(tab.element.querySelector(".mic-meter-wrap")).toBeNull();
-    expect(getUserMedia).not.toHaveBeenCalled();
+    // The native engine acquires no audio through the webview. The camera
+    // preview may still call getUserMedia (video only) since voice #22 starts
+    // it on the default device; no audio request may occur.
+    for (const call of getUserMedia.mock.calls) {
+      expect((call[0] as MediaStreamConstraints).audio).toBe(false);
+    }
   });
 
   it("tells the user the processing toggles apply on the next join", async () => {
