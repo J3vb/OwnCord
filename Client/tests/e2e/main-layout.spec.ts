@@ -262,6 +262,23 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(dragged.sized).toBe(true);
   });
 
+  test("the first drag follows the cursor on a tall window (P1-01)", async ({ page }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    await signInFreshProfile(page);
+
+    const members = page.locator("[data-testid='sidebar-members']");
+    const before = await members.evaluate((el) => (el as HTMLElement).offsetHeight);
+    expect(before).toBeGreaterThan(1440 * 0.65);
+
+    await page.locator(".sidebar-resize-handle").evaluate((el) => {
+      el.dispatchEvent(new MouseEvent("mousedown", { clientY: 600, bubbles: true }));
+      document.dispatchEvent(new MouseEvent("mousemove", { clientY: 610, bubbles: true }));
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+
+    expect(await members.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(before - 10);
+  });
+
   test("the channel list stays reachable at 940x500 with 20px text (B9 Q1, #1780)", async ({
     page,
   }) => {

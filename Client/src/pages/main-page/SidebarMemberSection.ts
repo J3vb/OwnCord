@@ -138,7 +138,7 @@ export function createSidebarMemberSection(
       if (!isDragging) return;
       const delta = startY - e.clientY;
       const maxH = window.innerHeight * 0.65;
-      const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
+      const newHeight = Math.max(80, Math.min(startHeight + delta, Math.max(maxH, startHeight)));
       applyMemberHeight(`${newHeight}px`);
       localStorage.setItem(LS_KEY_HEIGHT, String(newHeight));
     },
