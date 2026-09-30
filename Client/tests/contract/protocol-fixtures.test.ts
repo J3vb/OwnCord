@@ -313,8 +313,8 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(alice?.displayName).toBe("Alice Fixture");
   });
 
-  it("fresh-connect: presence_batch adds a first-ever joiner by name", async () => {
-    await dispatch("fresh-connect", "presence_batch");
+  it("fresh-connect: member_join adds the joining user by name", async () => {
+    await dispatch("fresh-connect", "member_join");
     const alice = [...membersStore.getState().members.values()].find((m) => m.username === "alice");
     expect(alice?.status).toBe("online");
   });

@@ -3,12 +3,13 @@ package ws
 // presence_batch_test.go — P5-S03: connect/disconnect presence rides one
 // presence_batch per coalescing window, a presence frame that finds the
 // normal queue full is dropped (the client is marked stale and gets a full
-// snapshot) instead of kicking the client, and member_join data is sent only
+// snapshot) instead of kicking the client, and a member_join is sent only
 // for a member other clients do not have yet.
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -20,12 +21,13 @@ type batchFrame struct {
 	Type    string `json:"type"`
 	Payload struct {
 		Updates []struct {
-			UserID       int64              `json:"user_id"`
-			Status       string             `json:"status"`
-			CustomStatus *string            `json:"custom_status"`
-			Member       *memberUserPayload `json:"member"`
+			UserID       int64            `json:"user_id"`
+			Status       string           `json:"status"`
+			CustomStatus *string          `json:"custom_status"`
+			Member       *json.RawMessage `json:"member"`
 		} `json:"updates"`
-		Full bool `json:"full"`
+		Full bool              `json:"full"`
+		User memberUserPayload `json:"user"`
 	} `json:"payload"`
 }
 
@@ -102,24 +104,154 @@ func TestFreshConnect_ExistingMemberSendsNoMemberJoin(t *testing.T) {
 	}
 }
 
-func TestFreshConnect_FirstEverConnectFoldsMemberIntoBatch(t *testing.T) {
+// wantMemberJoinThenBatch asserts frames are the newcomer's member_join
+// followed by a presence_batch entry for them with no member data.
+func wantMemberJoinThenBatch(t *testing.T, frames []batchFrame, newcomer *Client) {
+	t.Helper()
+	if len(frames) != 2 || frames[0].Type != MsgTypeMemberJoin || frames[1].Type != MsgTypePresenceBatch {
+		t.Fatalf("observer got %+v, want member_join then presence_batch", frames)
+	}
+	if u := frames[0].Payload.User; u.ID != newcomer.userID || u.Username != newcomer.user.Username {
+		t.Fatalf("member_join user = %+v, want the newcomer", u)
+	}
+	u := frames[1].Payload.Updates
+	if len(u) != 1 || u[0].UserID != newcomer.userID || u[0].Member != nil {
+		t.Fatalf("batch updates = %+v, want the newcomer's presence with no member data", u)
+	}
+}
+
+func TestFreshConnect_FirstEverConnectSendsMemberJoinAheadOfBatch(t *testing.T) {
 	h, _, connect := presenceBatchHub(t)
 	observer := connect("observer", true)
 	settle(t, h)
 	drain(observer.send)
 
 	newcomer := connect("newcomer", false) // never connected: last_seen is NULL
+	h.applyConnectStatus(context.Background(), newcomer)
 	h.announceFreshConnect(newcomer)
 	settle(t, h)
 
-	frames := decodeFrames(t, drain(observer.send))
-	if len(frames) != 1 || frames[0].Type != MsgTypePresenceBatch {
-		t.Fatalf("observer got %+v, want exactly one presence_batch", frames)
+	wantMemberJoinThenBatch(t, decodeFrames(t, drain(observer.send)), newcomer)
+}
+
+func TestFreshConnect_FailedFirstHandshakeStillAnnouncesOnNextConnect(t *testing.T) {
+	h, database, connect := presenceBatchHub(t)
+	ctx := context.Background()
+	observer := connect("observer", true)
+
+	// The first-ever connect stamps last_seen, then its handshake fails
+	// before the announce.
+	first := connect("newcomer", false)
+	h.applyConnectStatus(ctx, first)
+	h.unregisterFailedHandshake(ctx, first)
+	settle(t, h)
+	drain(observer.send)
+
+	reconnect := func() *Client {
+		u, err := database.GetUserByID(ctx, first.userID)
+		if err != nil || u.LastSeen == nil {
+			t.Fatalf("GetUserByID = %+v, %v; want last_seen stamped", u, err)
+		}
+		c := herdClient(ctx, h, u)
+		h.registerNow(c, nil)
+		h.applyConnectStatus(ctx, c)
+		h.announceFreshConnect(c)
+		settle(t, h)
+		return c
 	}
-	u := frames[0].Payload.Updates
-	if len(u) != 1 || u[0].Member == nil || u[0].Member.ID != newcomer.userID || u[0].Member.Username != "newcomer" {
-		t.Fatalf("batch updates = %+v, want the newcomer with member data", u)
+	second := reconnect()
+	wantMemberJoinThenBatch(t, decodeFrames(t, drain(observer.send)), second)
+
+	// Announced once, the next connect is presence only.
+	h.unregisterFailedHandshake(ctx, second)
+	settle(t, h)
+	drain(observer.send)
+	reconnect()
+	for _, f := range decodeFrames(t, drain(observer.send)) {
+		if f.Type != MsgTypePresenceBatch {
+			t.Fatalf("a connect after the member was announced sent %s", f.Type)
+		}
 	}
+}
+
+// A herd window that carries a new member still leaves every presence frame
+// droppable: a slow client gets the newcomer's member_join and drops the
+// batch, and is marked stale rather than kicked.
+func TestPresenceHerd_WindowWithNewMemberKicksNoSlowClient(t *testing.T) {
+	h, _, connect := presenceBatchHub(t)
+	slow := connect("slow", true)
+	settle(t, h)
+	drain(slow.send)
+
+	returning := make([]*Client, 20)
+	for i := range returning {
+		returning[i] = connect(fmt.Sprintf("returning-%02d", i), true)
+	}
+	newcomer := connect("newcomer", false)
+	h.applyConnectStatus(context.Background(), newcomer)
+	drain(slow.send)
+	for len(slow.send) < cap(slow.send)-1 {
+		slow.send <- []byte(`{"type":"filler"}`)
+	}
+	for _, c := range append(returning, newcomer) {
+		h.announceFreshConnect(c)
+	}
+	settle(t, h)
+
+	if slow.isSendClosed() || h.bpQueueDisconnects.Load() != 0 {
+		t.Fatalf("a herd window with a new member kicked a slow client (disconnects = %d)", h.bpQueueDisconnects.Load())
+	}
+	if !slow.presenceStale.Load() {
+		t.Fatal("the slow client's batch was not dropped as presence")
+	}
+	frames := drain(slow.send)
+	last := decodeFrames(t, frames[len(frames)-1:])[0]
+	if last.Type != MsgTypeMemberJoin || last.Payload.User.ID != newcomer.userID {
+		t.Fatalf("the slow client's last frame = %s, want the newcomer's member_join", frames[len(frames)-1])
+	}
+}
+
+// A window batch or snapshot request the full dispatch queue refuses is not
+// lost: every connected client is marked stale, and the snapshot request is
+// retried until one gets through.
+func TestPresenceBatch_LostAtEnqueueRepairsBySnapshot(t *testing.T) {
+	database := newTeardownTestDB(t)
+	h := newTestHub(t, database, nil, nil)
+	ctx := context.Background()
+	id, err := database.CreateUser(ctx, "watcher", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u, err := database.GetUserByID(ctx, id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	watcher := herdClient(ctx, h, u)
+	h.registerNow(watcher, nil)
+	watcher.setLiveStatus(db.StatusOnline)
+
+	for len(h.broadcast) < cap(h.broadcast) {
+		h.broadcast <- broadcastMsg{}
+	}
+	h.QueuePresence(id+1, db.StatusOnline, nil)
+	h.flushPresenceQueue()
+	if !watcher.presenceStale.Load() {
+		t.Fatal("a presence_batch lost at enqueue left the connected client unmarked")
+	}
+
+	for len(h.broadcast) > 0 {
+		<-h.broadcast
+	}
+	go h.Run()
+	t.Cleanup(h.Stop)
+	settle(t, h)
+
+	for _, f := range decodeFrames(t, drain(watcher.send)) {
+		if f.Type == MsgTypePresenceBatch && f.Payload.Full {
+			return
+		}
+	}
+	t.Fatal("the lost batch was never repaired by a full snapshot")
 }
 
 func TestPresenceBatch_InvisibleEntryIsOfflineToOthersTrueToSelf(t *testing.T) {

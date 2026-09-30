@@ -63,13 +63,16 @@ type broadcastMsg struct {
 
 // enqueue hands bm to the single hub dispatch loop, stamping it for the
 // enqueue→fanout latency metric. Non-blocking: if the broadcast channel is
-// full the message is dropped and counted, with kind naming the dropped frame.
-func (h *Hub) enqueue(bm broadcastMsg, kind string) {
+// full the message is dropped and counted, with kind naming the dropped frame,
+// and enqueue reports false.
+func (h *Hub) enqueue(bm broadcastMsg, kind string) bool {
 	bm.enqueuedAt = time.Now()
 	select {
 	case h.broadcast <- bm:
+		return true
 	default:
 		h.recordQueueDrop(bm, kind)
+		return false
 	}
 }
 

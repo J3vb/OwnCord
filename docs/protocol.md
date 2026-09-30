@@ -309,9 +309,9 @@ After `auth_ok`, the server sends a `ready` message containing all initial state
 
 ### Step 5: Presence
 
-The user's arrival rides the next `presence_batch` to all connected clients
-(member data included only for a member they cannot have yet; see
-`presence_batch`):
+The user's arrival rides the next `presence_batch` to all connected clients,
+preceded by a `member_join` only for a member they cannot have yet (see
+`member_join`):
 
 ```json
 {
@@ -896,13 +896,7 @@ of N users costs each client a handful of frames instead of N.
   "payload": {
     "updates": [
       { "user_id": 1, "status": "online", "custom_status": "shipping phase 6" },
-      { "user_id": 4, "status": "offline", "custom_status": null },
-      {
-        "user_id": 9,
-        "status": "online",
-        "custom_status": null,
-        "member": { "id": 9, "username": "newuser", "avatar": null, "role": "member" }
-      }
+      { "user_id": 4, "status": "offline", "custom_status": null }
     ]
   }
 }
@@ -911,11 +905,9 @@ of N users costs each client a handful of frames instead of N.
 Each entry means what a `presence` with the same fields means: `custom_status`
 is always present (`null` when unset), and an invisible user is `"offline"`
 with `custom_status: null` for everyone but themselves — the invisible user's
-own copy of the same frame (same `seq`) carries their true status. `member`,
-when present, is the `member_join` user object for a member the recipient's
-list may not have yet: a first-ever connect, or the return of a user whose
-temporary ban lapsed. A client adds that member; an entry without `member` for
-a user it does not know is ignored.
+own copy of the same frame (same `seq`) carries their true status. An entry
+for a user the client does not know is ignored: a member the recipient's list
+may not have yet arrives first as a `member_join` (see `member_join`).
 
 **Full snapshot.** A client whose send buffer was full when a presence frame
 arrived has that frame dropped (not the connection) and receives, within the
@@ -1088,12 +1080,13 @@ All member messages are broadcast to all connected clients.
 Sent when a ban is lifted (an admin unban or an overturned ban appeal) so
 clients re-add the row `member_ban` removed. Coming online is presence, not a
 join: every client's `ready` already lists every member, so a connect sends no
-`member_join`. A member other clients cannot have yet (a first-ever connect,
-or the return of a user whose temporary ban lapsed) arrives as the `member`
-field of their `presence_batch` entry instead — or, if they change status
-inside the same window, as a `member_join` just before that `presence`.
-Clients that watched `member_join` to learn someone came online must read
-presence instead. On an unban, `status` is `"offline"`
+`member_join`. It is still sent, just ahead of the `presence_batch` (or the
+`presence`) carrying their status, for a member other clients cannot have
+yet: a first-ever connect (repeated on the next connect if that first
+handshake failed before the announcement), or the return of a user whose
+temporary ban lapsed. Unlike presence, `member_join` is never dropped for a
+full send buffer. Clients that watched `member_join` to learn someone came
+online must read presence instead. On an unban, `status` is `"offline"`
 unless the user holds a live connection (a lapsed temporary ban lets them
 reconnect before the unban).
 

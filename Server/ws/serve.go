@@ -169,6 +169,9 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 // It runs BEFORE the ready payload is built so the member list the client is
 // handed already agrees with the presence broadcast that follows it.
 func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
+	if c.user.LastSeen == nil {
+		h.presenceRepair.mark(&h.presenceRepair.joins, c.userID, true)
+	}
 	status, err := h.presence.StampConnect(ctx, c.userID, c.user.Status)
 	if err != nil {
 		slog.Warn("ws StampConnect", "err", err)
@@ -188,14 +191,15 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 
 // announceFreshConnect tells every other client that c came online after a
 // full ready. Coming online is presence, not a join: every client's ready
-// already lists every member, so the member data rides along only for a
-// member other clients cannot have yet — a first-ever connect (last_seen is
-// still NULL, stamped by applyConnectStatus after c.user was read), or the
-// return of a user whose temporary ban lapsed (member_ban removed them
-// everywhere, and users.banned stays 1 until an unban).
+// already lists every member, so a member_join goes ahead of the presence
+// only for a member other clients cannot have yet — a user still owed one
+// since their first-ever connect (applyConnectStatus marks it before the
+// stamp erases last_seen NULL; announceMember clears it), or the return of a
+// user whose temporary ban lapsed (member_ban removed them everywhere, and
+// users.banned stays 1 until an unban).
 func (h *Hub) announceFreshConnect(c *Client) {
 	p := pendingPresence{status: c.user.Status, customStatus: c.user.CustomStatus}
-	if c.user.LastSeen == nil || c.user.Banned {
+	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
 		m := memberPayloadFor(c.user, c.roleName)
 		p.member = &m
 	}

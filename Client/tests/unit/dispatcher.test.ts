@@ -1092,30 +1092,6 @@ describe("WS Dispatcher", () => {
       expect(members.has(999)).toBe(false);
     });
 
-    it("adds a member whose entry carries member data", () => {
-      seed();
-      mock.dispatch("presence_batch", {
-        updates: [
-          {
-            user_id: 7,
-            status: "online",
-            custom_status: null,
-            member: {
-              id: 7,
-              username: "newbie",
-              avatar: null,
-              role: "member",
-              display_name: "Newbie",
-            },
-          },
-        ],
-      });
-      const added = membersStore.getState().members.get(7);
-      expect(added?.username).toBe("newbie");
-      expect(added?.displayName).toBe("Newbie");
-      expect(added?.status).toBe("online");
-    });
-
     it("applies a full snapshot: anyone it leaves out is offline, listed text is kept", () => {
       seed();
       mock.dispatch("presence_batch", {

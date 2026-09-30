@@ -39,12 +39,12 @@ package ws_test
 //     null/absent would let a rename or a retype through unseen, and a field
 //     frozen only as present would leave the null form — the one a client must
 //     still handle — unfrozen. So fresh-connect records BOTH handshakes: on
-//     alice's connection auth_ok.user and her presence_batch entry's member
-//     carry every profile field, on bob's they carry the nulls (auth_ok) and
-//     the omissions (member drops display_name and identity_public_key). auth_ok is the
+//     alice's connection auth_ok.user and member_join.user carry every profile
+//     field, on bob's they carry the nulls (auth_ok) and the omissions
+//     (member_join drops display_name and identity_public_key). auth_ok is the
 //     frame B2-2 changes, which is why it is the one recorded twice.
 //   - Only the journey's own frames are recorded. The connect handshake
-//     (auth_ok / ready / presence_batch) and any channel_focus setup
+//     (auth_ok / ready / member_join / presence_batch) and any channel_focus setup
 //     are drained without recording, EXCEPT in fresh-connect, resume-replay
 //     and auth-failure, where the handshake *is* the journey. Otherwise every
 //     fixture would carry its own copy of the ready payload and one ready
@@ -611,8 +611,8 @@ func (c *wsConn) drain(types ...string) {
 }
 
 // authenticate sends the auth frame and drains the fresh-connect handshake
-// (auth_ok, ready, and the presence_batch this connect broadcasts to every
-// client, itself included — a first-ever connect, so it carries the member).
+// (auth_ok, ready, and the member_join + presence_batch this first-ever
+// connect broadcasts to every client, itself included).
 func (c *wsConn) authenticate(token string) {
 	c.t.Helper()
 	was := c.record
@@ -622,7 +622,7 @@ func (c *wsConn) authenticate(token string) {
 		"id":      "req-auth-" + c.name,
 		"payload": map[string]any{"token": token, "last_seq": 0},
 	})
-	c.drain("auth_ok", "ready", "presence_batch")
+	c.drain("auth_ok", "ready", "member_join", "presence_batch")
 	c.record = was
 }
 
@@ -677,12 +677,11 @@ func TestEpoch1Fixtures(t *testing.T) {
 }
 
 // journeyFreshConnect records the whole handshake — auth, auth_ok, ready, and
-// the presence_batch a connect broadcasts (which the connecting client receives
-// too; a first-ever connect, so its entry carries the member) — TWICE, once per
-// kind of account.
+// the member_join + presence_batch a first-ever connect broadcasts (which the
+// connecting client receives too) — TWICE, once per kind of account.
 //
 // alice has every optional profile field set; bob has none. Recording only
-// alice would freeze auth_ok.user and the batch entry's member in their populated form
+// alice would freeze auth_ok.user and member_join.user in their populated form
 // alone, so a rename, a retype or a dropped null on display_name, about,
 // custom_status, avatar or identity_public_key would move no fixture. auth_ok
 // is the frame B2-2 edits, which makes it the last one to leave half-frozen.
@@ -705,6 +704,7 @@ func journeyFreshConnect(t *testing.T, r *epochRig) {
 	})
 	a.expect("auth_ok")
 	a.expect("ready")
+	a.expect("member_join")
 	a.expect("presence_batch")
 
 	// bob, recorded: the same five frames with the bare user object — nulls
@@ -718,9 +718,11 @@ func journeyFreshConnect(t *testing.T, r *epochRig) {
 	})
 	b.expect("auth_ok")
 	b.expect("ready")
+	b.expect("member_join")
 	b.expect("presence_batch")
 
 	// bob's connect as an already-connected client sees it.
+	a.expect("member_join")
 	a.expect("presence_batch")
 
 	a.barrier()
@@ -775,7 +777,7 @@ func journeyChatSendFanout(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch") // b's connect, observed by a
+	a.drain("member_join", "presence_batch") // b's connect, observed by a
 	a.focus(textChannelID, false)
 	b.focus(textChannelID, true)
 
@@ -805,7 +807,7 @@ func journeyChatEditDelete(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 	a.focus(textChannelID, false)
 	b.focus(textChannelID, true)
 
@@ -841,7 +843,7 @@ func journeyReactionAddRemove(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 	a.focus(textChannelID, false)
 	b.focus(textChannelID, true)
 
@@ -882,7 +884,7 @@ func journeyTyping(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 	a.focus(textChannelID, false)
 	b.focus(textChannelID, true)
 
@@ -943,7 +945,7 @@ func journeyDMSend(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 
 	a.record, b.record = true, true
 	a.send(map[string]any{
@@ -973,7 +975,7 @@ func journeyDMRequest(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 
 	a.record, b.record = true, true
 	a.send(map[string]any{
@@ -1005,7 +1007,7 @@ func journeyDMRequestIgnored(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 
 	// Setup, not recorded: alice's first message stages the request and bob
 	// drains the resulting dm_request, then the request is marked ignored
@@ -1050,7 +1052,7 @@ func journeyResumeReplay(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 	b.focus(textChannelID, true)
 
 	lastSeq := a.lastSeq
@@ -1124,7 +1126,7 @@ func journeyVoiceJoinE2EELeave(t *testing.T, r *epochRig) {
 	a, b := r.dial(t, "a"), r.dial(t, "b")
 	a.authenticate(aliceTok)
 	b.authenticate(bobTok)
-	a.drain("presence_batch")
+	a.drain("member_join", "presence_batch")
 
 	a.record, b.record = true, true
 

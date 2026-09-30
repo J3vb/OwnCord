@@ -622,9 +622,6 @@ export interface PresenceBatchEntry {
   /** Always present in a window batch (null = none). A full snapshot omits
    *  it: the text is left alone, and cleared for anyone offline. */
   readonly custom_status?: string | null;
-  /** member_join data for a member this client may not have yet (a
-   *  first-ever connect, or a lapsed ban's return). */
-  readonly member?: UserWithRole;
 }
 
 /** Many users' presence in one frame: a coalescing window's changes, or with

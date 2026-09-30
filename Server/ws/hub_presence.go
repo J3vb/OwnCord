@@ -21,14 +21,11 @@ type presenceBatchPayload struct {
 }
 
 // presenceBatchEntry is one user's presence in a window batch. CustomStatus
-// follows presencePayload's rule: always present, null when unset. Member
-// carries the member_join data for a user other clients' member lists do not
-// have yet (a first-ever connect, or a lapsed ban's return).
+// follows presencePayload's rule: always present, null when unset.
 type presenceBatchEntry struct {
-	UserID       int64              `json:"user_id"`
-	Status       string             `json:"status"`
-	CustomStatus *string            `json:"custom_status"`
-	Member       *memberUserPayload `json:"member,omitempty"`
+	UserID       int64   `json:"user_id"`
+	Status       string  `json:"status"`
+	CustomStatus *string `json:"custom_status"`
 }
 
 // presenceSnapshotEntry is one user's presence in a Full snapshot. It has no
@@ -57,8 +54,9 @@ func memberPayloadFor(user *db.User, roleName string) memberUserPayload {
 //     builds the presence_batch from them under seqMu (buildPresenceBatch).
 //   - droppable marks a presence-class frame: a client whose normal queue is
 //     full drops it and is marked stale instead of being disconnected
-//     (Client.sendPresenceMsg). A batch carrying member data is not
-//     droppable — the snapshot that repairs a drop has no member data.
+//     (Client.sendPresenceMsg). Every presence_batch is droppable; a new
+//     member's data goes ahead of it as a content-class member_join
+//     (announceMember), since the snapshot that repairs a drop has none.
 //   - presenceSnapshot makes the entry a request, like barrier: every client
 //     marked presence-stale gets a full snapshot (deliverPresenceSnapshots).
 
@@ -77,13 +75,8 @@ func (h *Hub) publishGlobal(bm broadcastMsg, msg []byte, seq uint64, private map
 	}
 	h.pubsub.publishWithPriority(TopicGlobal, msg, bm.excludeUserID, priority, allow)
 	for uid, own := range private {
-		c := h.GetClient(uid)
-		switch {
-		case c == nil:
-		case bm.droppable:
+		if c := h.GetClient(uid); c != nil {
 			c.sendPresenceMsg(wrapWithSeq(own, seq))
-		default:
-			c.sendMsg(wrapWithSeq(own, seq))
 		}
 	}
 }
@@ -94,15 +87,47 @@ type presenceRepairState struct {
 	drops    atomic.Uint64 // process-lifetime count (PresenceDropCount)
 	staleAny atomic.Bool   // some client owes a snapshot at the next flush
 	// users holds whoever dropped a presence frame since their last full
-	// ready; their next resume takes the full ready. mu is a leaf lock:
+	// ready; their next resume takes the full ready. joins holds the users
+	// owed a member_join: marked by a first-ever connect before its stamp
+	// erases the signal (last_seen NULL), cleared once the member_join is on
+	// the dispatch queue, so a handshake that fails in between still
+	// announces on the next connect. A restart needs no copy: every client
+	// then takes a full ready listing every member. mu is a leaf lock:
 	// nothing is acquired while holding it.
 	mu    syncutil.Mutex
 	users map[int64]struct{}
+	joins map[int64]struct{}
+}
+
+// mark sets (or clears) userID in set, one of s's maps, and reports whether
+// it was set.
+func (s *presenceRepairState) mark(set *map[int64]struct{}, userID int64, on bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, had := (*set)[userID]
+	if on {
+		if *set == nil {
+			*set = make(map[int64]struct{})
+		}
+		(*set)[userID] = struct{}{}
+	} else {
+		delete(*set, userID)
+	}
+	return had
+}
+
+// marked reports whether userID is in set, one of s's maps.
+func (s *presenceRepairState) marked(set *map[int64]struct{}, userID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := (*set)[userID]
+	return ok
 }
 
 // pendingPresence is the coalescer's latest-wins entry for one user. member,
 // when set, is the member_join data for a user other clients' member lists do
-// not have yet; it rides the batch and survives a later state in the window.
+// not have yet; it goes out as a member_join ahead of the window's batch and
+// survives a later state in the window.
 type pendingPresence struct {
 	status       string
 	customStatus *string
@@ -192,44 +217,67 @@ func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
 	if p, ok := h.presenceQueue[userID]; ok && p.member != nil {
-		h.BroadcastToAll(buildJSON(wsMsg{Type: MsgTypeMemberJoin, Payload: memberJoinPayload{
-			User:   *p.member,
-			Status: db.BroadcastStatus(p.status),
-		}}))
+		h.announceMember(userID, p)
 	}
 	delete(h.presenceQueue, userID)
 	broadcast()
 }
 
-// flushPresenceQueue drains the coalescer into one presence_batch, and asks
-// for a snapshot for every client that dropped presence since the last flush.
-// Runs on the AfterFunc timer goroutine.
+// announceMember enqueues the member_join for a member other clients' lists
+// may not have yet, in the content class: presence may be dropped, and the
+// snapshot that repairs a drop carries no member data. Once it is on the
+// dispatch queue the user is no longer owed one. Called with presenceMu held,
+// ahead of the frame that carries the member's presence.
+func (h *Hub) announceMember(userID int64, p pendingPresence) {
+	msg := buildJSON(wsMsg{Type: MsgTypeMemberJoin, Payload: memberJoinPayload{
+		User:   *p.member,
+		Status: db.BroadcastStatus(p.status),
+	}})
+	if h.enqueue(broadcastMsg{msg: msg}, "member_join") {
+		h.presenceRepair.mark(&h.presenceRepair.joins, userID, false)
+	}
+}
+
+// flushPresenceQueue drains the coalescer into one presence_batch, preceded
+// by a member_join for each new member in it, and asks for a snapshot for
+// every client that dropped presence since the last flush. A batch or
+// snapshot request the full dispatch queue refuses is repaired the same way:
+// a lost batch marks every connected client stale, and a lost request is
+// retried a window later. Runs on the AfterFunc timer goroutine.
 //
-// presenceMu is held across the enqueue, not just the snapshot, so a
+// presenceMu is held across the batch's enqueue, not just the snapshot, so a
 // concurrent dropQueuedPresenceAndBroadcast serializes with it (OC-0005): the
 // batch and the fresher frame reach h.broadcast in the order their critical
 // sections ran, and deliverBroadcast's single consumer sequences them so.
 func (h *Hub) flushPresenceQueue() {
 	h.presenceMu.Lock()
-	defer h.presenceMu.Unlock()
 	queued := h.presenceQueue
 	h.presenceQueue = nil
 	h.presenceFlushArmed = false
 	if presenceFlushRaceHook != nil {
 		presenceFlushRaceHook(h)
 	}
+	lost := false
 	if len(queued) > 0 {
-		droppable := true
-		for _, p := range queued {
+		for uid, p := range queued {
 			if p.member != nil {
-				droppable = false
-				break
+				h.announceMember(uid, p)
 			}
 		}
-		h.enqueue(broadcastMsg{presence: queued, droppable: droppable}, "presence_batch")
+		lost = !h.enqueue(broadcastMsg{presence: queued, droppable: true}, "presence_batch")
 	}
-	if h.presenceRepair.staleAny.Swap(false) {
-		h.enqueue(broadcastMsg{presenceSnapshot: true}, "presence snapshot")
+	h.presenceMu.Unlock()
+	if lost {
+		h.mu.RLock()
+		for _, c := range h.clients {
+			c.presenceStale.Store(true)
+		}
+		h.mu.RUnlock()
+		h.presenceRepair.staleAny.Store(true)
+	}
+	if h.presenceRepair.staleAny.Swap(false) && !h.enqueue(broadcastMsg{presenceSnapshot: true}, "presence snapshot") {
+		h.presenceRepair.staleAny.Store(true)
+		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
 	}
 }
 
@@ -245,7 +293,7 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 		if _, purged := h.purgedUsers[uid]; purged {
 			continue
 		}
-		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus, Member: p.member}
+		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus}
 		if e.Status != p.status {
 			e.CustomStatus = nil
 		}
@@ -289,12 +337,7 @@ func buildPresenceBatchMsg(updates any, full bool) []byte {
 // leaf presenceResyncMu, since it runs under seqMu and the client's mu.
 func (h *Hub) presenceDropped(userID int64) {
 	h.presenceRepair.drops.Add(1)
-	h.presenceRepair.mu.Lock()
-	if h.presenceRepair.users == nil {
-		h.presenceRepair.users = make(map[int64]struct{})
-	}
-	h.presenceRepair.users[userID] = struct{}{}
-	h.presenceRepair.mu.Unlock()
+	h.presenceRepair.mark(&h.presenceRepair.users, userID, true)
 	if h.presenceRepair.staleAny.CompareAndSwap(false, true) {
 		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
 	}
@@ -303,27 +346,13 @@ func (h *Hub) presenceDropped(userID int64) {
 // presenceResyncPending reports whether userID's connection dropped a
 // presence frame since their last full ready.
 func (h *Hub) presenceResyncPending(userID int64) bool {
-	h.presenceRepair.mu.Lock()
-	defer h.presenceRepair.mu.Unlock()
-	_, ok := h.presenceRepair.users[userID]
-	return ok
+	return h.presenceRepair.marked(&h.presenceRepair.users, userID)
 }
 
 // setPresenceResync marks (or clears) userID's pending resync and reports
 // whether one was pending.
 func (h *Hub) setPresenceResync(userID int64, pending bool) bool {
-	h.presenceRepair.mu.Lock()
-	defer h.presenceRepair.mu.Unlock()
-	_, had := h.presenceRepair.users[userID]
-	if pending {
-		if h.presenceRepair.users == nil {
-			h.presenceRepair.users = make(map[int64]struct{})
-		}
-		h.presenceRepair.users[userID] = struct{}{}
-	} else {
-		delete(h.presenceRepair.users, userID)
-	}
-	return had
+	return h.presenceRepair.mark(&h.presenceRepair.users, userID, pending)
 }
 
 // deliverPresenceSnapshots sends every presence-stale client a full

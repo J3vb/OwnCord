@@ -149,17 +149,27 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "status": "online",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "member_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
             "updates": [
               {
                 "custom_status": "fixture custom status",
-                "member": {
-                  "avatar": "https://fixtures.invalid/alice-avatar.png",
-                  "display_name": "Alice Fixture",
-                  "id": "<id:number>",
-                  "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
-                  "role": "member",
-                  "username": "alice"
-                },
                 "status": "online",
                 "user_id": "<id:number>"
               }
@@ -173,15 +183,25 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "status": "online",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "bob"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "member_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
             "updates": [
               {
                 "custom_status": null,
-                "member": {
-                  "avatar": null,
-                  "id": "<id:number>",
-                  "role": "member",
-                  "username": "bob"
-                },
                 "status": "online",
                 "user_id": "<id:number>"
               }
@@ -353,15 +373,25 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "status": "online",
+            "user": {
+              "avatar": null,
+              "id": "<id:number>",
+              "role": "member",
+              "username": "bob"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "member_join"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
             "updates": [
               {
                 "custom_status": null,
-                "member": {
-                  "avatar": null,
-                  "id": "<id:number>",
-                  "role": "member",
-                  "username": "bob"
-                },
                 "status": "online",
                 "user_id": "<id:number>"
               }
