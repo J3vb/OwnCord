@@ -93,24 +93,36 @@ interface PrevSnapshot {
   readonly timestamp: number;
   readonly outBytes: number;
   readonly inBytes: number;
-  /** Lifetime counters per inbound audio stream, keyed by stats id, so loss
-   *  is measured over the last poll rather than the whole call. */
+  /** Lifetime counters per inbound audio stream, keyed by stats id, taken
+   *  when inbound loss was last settled, so loss covers the recent window
+   *  rather than the whole call. */
   readonly audioInbound: ReadonlyMap<string, AudioCounters>;
+  /** Inbound loss percent from the last settled window. */
+  readonly inboundLoss: number;
+  /** Lifetime packetsSent across our outbound audio streams. */
+  readonly audioSent: number;
 }
 
 const EMPTY_SNAPSHOT: Omit<PrevSnapshot, "timestamp"> = {
   outBytes: 0,
   inBytes: 0,
   audioInbound: new Map(),
+  inboundLoss: 0,
+  audioSent: 0,
 };
 
-/** Inbound loss percent since the previous poll. A stream seen for the first
- *  time counts from zero; negative deltas (duplicates lowering packetsLost)
- *  clamp to zero. */
-function inboundLossSince(
+/** Fewest audio packets a loss percentage is judged over. With Opus DTX a
+ *  silent stream sends about 5 packets per poll, where one lost packet would
+ *  otherwise read as ~17% loss. */
+const LOSS_SAMPLE_FLOOR = 50;
+
+/** Lost and total inbound audio packets since `prev`. A stream seen for the
+ *  first time counts from zero; negative deltas (duplicates lowering
+ *  packetsLost) clamp to zero. */
+function inboundWindow(
   prev: ReadonlyMap<string, AudioCounters>,
   next: ReadonlyMap<string, AudioCounters>,
-): number {
+): { lost: number; total: number } {
   let lost = 0;
   let received = 0;
   for (const [id, counters] of next) {
@@ -118,7 +130,7 @@ function inboundLossSince(
     lost += Math.max(0, counters.lost - (before?.lost ?? 0));
     received += Math.max(0, counters.received - (before?.received ?? 0));
   }
-  return lost + received > 0 ? (lost / (lost + received)) * 100 : 0;
+  return { lost, total: lost + received };
 }
 
 /** Collect stats from both publisher and subscriber PeerConnections.
@@ -150,6 +162,7 @@ function extractMetrics(reports: RTCStatsReport[]): {
   outBytes: number;
   inBytes: number;
   audioInbound: Map<string, AudioCounters>;
+  audioSent: number;
   remoteLoss: number;
   jitter: number;
 } {
@@ -166,6 +179,7 @@ function extractMetrics(reports: RTCStatsReport[]): {
   // inbound loss; remote-inbound-rtp carries the fraction the far end lost on
   // our outbound stream. The poller takes the worst of the two.
   const audioInbound = new Map<string, AudioCounters>();
+  let audioSent = 0;
   let remoteLossFraction = 0;
   let jitterMs = 0;
 
@@ -188,6 +202,8 @@ function extractMetrics(reports: RTCStatsReport[]): {
       if (entry.type === "outbound-rtp") {
         if (typeof entry.packetsSent === "number") outPackets += entry.packetsSent;
         if (typeof entry.bytesSent === "number") outBytes += entry.bytesSent;
+        if (entry.kind === "audio" && typeof entry.packetsSent === "number")
+          audioSent += entry.packetsSent;
       }
 
       if (entry.type === "inbound-rtp") {
@@ -223,6 +239,7 @@ function extractMetrics(reports: RTCStatsReport[]): {
     outBytes,
     inBytes,
     audioInbound,
+    audioSent,
     remoteLoss: remoteLossFraction * 100,
     jitter: jitterMs,
   };
@@ -254,16 +271,22 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
     const outRate = elapsed > 0 ? (metrics.outBytes - prev.outBytes) / elapsed : 0;
     const inRate = elapsed > 0 ? (metrics.inBytes - prev.inBytes) / elapsed : 0;
 
-    const loss = Math.max(
-      inboundLossSince(prev.audioInbound, metrics.audioInbound),
-      metrics.remoteLoss,
-    );
+    // Inbound loss holds its window open until it spans enough packets; the
+    // far end's fractionLost counts only when we sent enough audio this poll.
+    const sample = inboundWindow(prev.audioInbound, metrics.audioInbound);
+    const settled = sample.total >= LOSS_SAMPLE_FLOOR;
+    const inboundLoss = settled ? (sample.lost / sample.total) * 100 : prev.inboundLoss;
+    const remoteLoss =
+      metrics.audioSent - prev.audioSent >= LOSS_SAMPLE_FLOOR ? metrics.remoteLoss : 0;
+    const loss = Math.max(inboundLoss, remoteLoss);
 
     prev = {
       timestamp: now,
       outBytes: metrics.outBytes,
       inBytes: metrics.inBytes,
-      audioInbound: metrics.audioInbound,
+      audioInbound: settled ? metrics.audioInbound : prev.audioInbound,
+      inboundLoss,
+      audioSent: metrics.audioSent,
     };
 
     current = {

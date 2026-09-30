@@ -306,6 +306,7 @@ describe("createConnectionStatsPoller", () => {
         bytesSent: 0,
         bytesReceived: 0,
       },
+      { id: "out-audio", type: "outbound-rtp", kind: "audio", packetsSent: 100 },
       // The far end reports it lost 12% of our outbound packets.
       {
         id: "ri1",
@@ -324,6 +325,94 @@ describe("createConnectionStatsPoller", () => {
     const stats = cb.mock.calls[0]![0];
     expect(stats.loss).toBeCloseTo(12, 5);
     expect(stats.quality).toBe("bad");
+  });
+
+  it("ignores the far end's fractionLost while our mic sends only a DTX trickle", async () => {
+    let sent = 1000;
+    const room = {
+      engine: {
+        pcManager: {
+          publisher: {
+            getStats: vi.fn().mockImplementation(() => {
+              const report = new Map();
+              report.set("cp1", { type: "candidate-pair", currentRoundTripTime: 0.04 });
+              report.set("out1", {
+                id: "out1",
+                type: "outbound-rtp",
+                kind: "audio",
+                packetsSent: sent,
+              });
+              report.set("ri1", {
+                id: "ri1",
+                type: "remote-inbound-rtp",
+                kind: "audio",
+                fractionLost: 0.2,
+              });
+              return Promise.resolve(report);
+            }),
+          },
+        },
+      },
+    };
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    // One lost of five sent reads 20%, but five packets is no sample.
+    sent += 5;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBe(0);
+    expect(cb.mock.lastCall![0].quality).toBe("excellent");
+  });
+
+  it("judges inbound loss only once enough audio packets have arrived", async () => {
+    let lost = 0;
+    let received = 90_000;
+    const room = {
+      engine: {
+        pcManager: {
+          subscriber: {
+            getStats: vi.fn().mockImplementation(() => {
+              const report = new Map();
+              report.set("cp1", { type: "candidate-pair", currentRoundTripTime: 0.04 });
+              report.set("in1", {
+                id: "in1",
+                type: "inbound-rtp",
+                kind: "audio",
+                packetsLost: lost,
+                packetsReceived: received,
+              });
+              return Promise.resolve(report);
+            }),
+          },
+        },
+      },
+    };
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    // A DTX-silent peer: one lost of five received in a poll is not "bad".
+    lost += 1;
+    received += 5;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBe(0);
+    expect(cb.mock.lastCall![0].quality).toBe("excellent");
+
+    // The window stays open until it spans enough packets: 1 of 50 is 2%.
+    received += 44;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBeCloseTo(2, 5);
+    expect(cb.mock.lastCall![0].quality).toBe("fair");
+
+    // A short window in between keeps the last settled reading.
+    received += 5;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBeCloseTo(2, 5);
   });
 
   it("ignores video jitter and loss, so a screen share on a clean link stays excellent", async () => {
