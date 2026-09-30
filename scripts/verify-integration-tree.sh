@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Integration evidence for a dev squash commit (G-03 as amended 2026-08-31).
 #
-# dev is squash-merge-only and its pushes deliberately run no ci.yml matrix
-# (the pull_request trigger already ran on the PR head), so the squash commit
-# itself carries only CodeQL runs. What makes the PR-head evidence transfer to
-# the squash commit is required_status_checks.strict: an up-to-date PR's head
-# names the same tree the squash commit lands. This script turns that
+# dev is squash-merge-only and, since 2026-09-30, ci.yml also runs on every push
+# to dev, so a squash commit carries its own full-matrix run — the direct catch
+# for a merge-combination break two individually-green PR heads could not see.
+# This script is the older, independent construction that predates that trigger:
+# it proves the PR-head evidence transfers to the squash commit, which
+# required_status_checks.strict makes true, because an up-to-date PR's head
+# names the same tree the squash commit lands. It turns that
 # construction into a per-commit statement a phase-exit or hold-point evidence
 # block can cite as a command with output, instead of an assumption:
 #
