@@ -21,6 +21,9 @@
             "motd": "Welcome!",
             "replay_source": "buffer",
             "server_name": "OwnCord Server",
+            "upload_policy": {
+              "max_upload_bytes": 0
+            },
             "user": {
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",

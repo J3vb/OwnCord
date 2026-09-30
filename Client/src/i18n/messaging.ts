@@ -27,8 +27,7 @@ export const messagingText = defineCatalog("messaging", {
   "error.tooLong": "Messages are limited to {max} characters",
   "error.uploadsPending": "Please wait for uploads to finish",
   "error.attachWhileEditing": "Can't attach files while editing a message",
-  "error.fileTooLarge": "File too large: {filename} exceeds 100 MB limit",
-  "error.unsupportedType": "{filename} is not a supported file type",
+  "error.fileTooLarge": "File too large: {filename} exceeds {limit} MB limit",
   "error.tooManyAttachments": "You can attach at most {max} files to a message",
   "error.uploadFailed": "Upload failed",
   "error.uploadFailedDetail": "Upload failed: {detail}",
@@ -133,7 +132,6 @@ export const messagingText = defineCatalog("messaging", {
   "toast.pinned": "Message pinned",
   "toast.unpinned": "Message unpinned",
   "toast.pinFailed": "Failed to pin/unpin message",
-  "toast.uploadFailed": "File upload failed",
   "toast.emptyMessage": "Message cannot be empty",
 
   "header.channelFallback": "general",

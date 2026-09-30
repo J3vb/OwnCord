@@ -89,12 +89,25 @@ type HubOptions struct {
 	// to "medium".
 	VoiceQuality string
 
+	// UploadPolicy is advertised on every auth_ok as upload_policy.
+	// Startup-only, like voice.quality.
+	UploadPolicy UploadPolicy
+
 	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose
 	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client
 	// address for the handshake log and the ws_connect audit row (SRE-11).
 	// Parsed once at construction; nil/empty means RemoteAddr is used and a
 	// client-supplied header is ignored.
 	TrustedProxies []string
+}
+
+// UploadPolicy is what a client needs to refuse a doomed upload before
+// sending it. The upload route stays authoritative; this is only the
+// client's pre-check.
+type UploadPolicy struct {
+	// MaxUploadBytes is upload.max_size_mb in bytes. 0 means no per-file
+	// cap, where the upload route's 100 MiB request cap binds.
+	MaxUploadBytes int64 `json:"max_upload_bytes"`
 }
 
 // NewHub creates a Hub ready to be started with Run, validating that the
@@ -142,7 +155,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	database, limiter, svc := opts.DB, opts.Limiter, opts.Services
-	settingsReader := opts.Settings
 
 	ringSize := 1000
 	if opts.ReplayRingSize > 0 {
@@ -162,10 +174,11 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		clients:             make(map[int64]*Client),
 		db:                  database,
 		limiter:             limiter,
-		settings:            settingsReader,
+		settings:            opts.Settings,
 		readers:             opts.Readers,
 		voice:               opts.Voice,
 		defaultVoiceQuality: defaultVoiceQuality,
+		uploadPolicy:        opts.UploadPolicy,
 		voiceMod:            newVoiceModLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,

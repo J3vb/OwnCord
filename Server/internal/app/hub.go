@@ -72,6 +72,8 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		// this options struct: the setup wizard already treats voice.quality
 		// as requiring a restart to take effect.
 		VoiceQuality: cfg.Voice.Quality,
+		// auth_ok's upload_policy: the composer's pre-check (P1-09).
+		UploadPolicy: ws.UploadPolicy{MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20},
 		// server.trusted_proxies: the handshake log and the ws_connect audit
 		// row resolve the client address through it (SRE-11).
 		TrustedProxies: cfg.Server.TrustedProxies,

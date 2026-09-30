@@ -304,6 +304,14 @@ export interface AuthOkPayload {
    * counter may have restarted below the client's stale watermark.
    */
   readonly replay_source?: "none" | "buffer" | "db";
+  /** What the composer checks before an upload; absent on older servers. */
+  readonly upload_policy?: UploadPolicy;
+}
+
+/** auth_ok's upload_policy. The server's upload route stays authoritative. */
+export interface UploadPolicy {
+  /** upload.max_size_mb in bytes; 0 (no per-file cap) or absent falls back to 100 MiB. */
+  readonly max_upload_bytes?: number;
 }
 
 export interface AuthErrorPayload {

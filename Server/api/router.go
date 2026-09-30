@@ -460,12 +460,6 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 // shared file storage (and its construction error) for the profile-avatar and
 // emoji mounts, which reuse the same store.
 func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
-	// L12: verify config upload size fits within the HTTP body limit.
-	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
-		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
-			"configured_mb", cfg.Upload.MaxSizeMB,
-			"http_limit_bytes", uploadMaxBodySize)
-	}
 	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)

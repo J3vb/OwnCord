@@ -36,6 +36,7 @@ import {
   type MessageInputOptions,
 } from "@components/MessageInput";
 import type { GifApi } from "@lib/gifProvider";
+import { authStore } from "@stores/auth.store";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
 const stubGifApi: GifApi = {
@@ -1055,7 +1056,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("file picker accept attribute only advertises extensions the MIME allowlist accepts", () => {
+  it("file picker does not restrict file types (the server decides)", () => {
     const opts = makeOptions({
       onUploadFile: vi.fn(async () => ({ id: "a1", url: "http://x.png", filename: "x.png" })),
     });
@@ -1063,10 +1064,7 @@ describe("MessageInput", () => {
     comp.mount(container);
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    // .rar/.7z were advertised here but rejected by ALLOWED_TYPES on pick —
-    // an always-rejected picker option.
-    expect(fileInput.accept).not.toContain(".rar");
-    expect(fileInput.accept).not.toContain(".7z");
+    expect(fileInput.accept).toBe("");
 
     comp.destroy?.();
   });
@@ -1197,25 +1195,64 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("rejects unsupported file types", async () => {
-    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
+  it("refuses a file over the server's advertised limit before uploading, naming the limit", async () => {
+    authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
+    try {
+      const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+
+      const file = new File(["x"], "clip.mp4", { type: "video/mp4" });
+      Object.defineProperty(file, "size", { value: 11 * 1024 * 1024 });
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(onUploadFile).not.toHaveBeenCalled();
+      const error = container.querySelector(".attachment-upload-error");
+      expect(error!.textContent).toContain("clip.mp4 exceeds 10 MB limit");
+
+      comp.destroy?.();
+    } finally {
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+    }
+  });
+
+  it("uploads a file above 100 MB when the server advertises a larger limit", async () => {
+    authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 150 * 1024 * 1024 } }));
+    try {
+      const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "big.bin" }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+
+      const file = new File(["x"], "big.bin", { type: "application/octet-stream" });
+      Object.defineProperty(file, "size", { value: 120 * 1024 * 1024 });
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+      comp.destroy?.();
+    } finally {
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+    }
+  });
+
+  // D1 (a): any type the server accepts can be attached; the server stays
+  // authoritative and refuses its own blocked types.
+  it("uploads a file of a type outside the old allowlist", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "a.7z" }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
     comp.mount(container);
 
-    const badFile = new File(["exe data"], "bad.exe", { type: "application/x-msdownload" });
-
+    const file = new File(["7z"], "a.7z", { type: "application/x-7z-compressed" });
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [badFile], writable: true });
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(onUploadFile).not.toHaveBeenCalled();
-    const error = container.querySelector(".attachment-upload-error");
-    expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("is not a supported file type");
-
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
     comp.destroy?.();
   });
 
@@ -1880,9 +1917,9 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  // ── Files with empty MIME type are rejected (security hardening) ──
+  // ── Files with an empty MIME type are uploaded; the server sniffs them (D1 a) ──
 
-  it("files with empty MIME type are rejected", async () => {
+  it("files with empty MIME type are uploaded", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "unk-1", url: "http://x", filename: "data" }));
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
@@ -1893,12 +1930,8 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [noTypeFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(onUploadFile).not.toHaveBeenCalled();
-    const error = container.querySelector(".attachment-upload-error");
-    expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("is not a supported file type");
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
 
     comp.destroy?.();
   });

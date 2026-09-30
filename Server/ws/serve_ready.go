@@ -50,6 +50,7 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			"server_name":   serverName,
 			"motd":          motd,
 			"replay_source": replaySource,
+			"upload_policy": h.uploadPolicy,
 		},
 	})
 }

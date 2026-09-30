@@ -20,6 +20,7 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import { authStore } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi } from "@lib/gifProvider";
 
@@ -185,7 +186,10 @@ export function wrapWithMarker(
 const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
 const SEND_DEBOUNCE_MS = 200;
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matches server limit
+// The server's per-file cap arrives on auth_ok (upload_policy); an older
+// server, or one with no per-file cap, falls back to its 100 MiB request cap.
+// The server stays authoritative: this only refuses a doomed upload early.
+const FALLBACK_MAX_FILE_SIZE = 100 * 1024 * 1024;
 // Server/ws/command.go rejects the whole chat_send frame (as a generic parse
 // error, not an attachment-specific one) once len(Attachments) > 10 -- cap
 // the queue client-side so we never upload an attachment doomed to be
@@ -203,16 +207,6 @@ const MAX_MESSAGE_LEN = 4000;
 const DRAFT_ATTACHMENT_TTL_MS = 50 * 60 * 1000;
 /** Makes each composer's refusal-line id unique for aria-describedby. */
 let nextComposerId = 0;
-const ALLOWED_TYPES = [
-  "image/",
-  "video/",
-  "audio/",
-  "application/pdf",
-  "text/",
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/json",
-];
 
 /**
  * Keys that move the caret without an open autocomplete popup claiming them,
@@ -736,15 +730,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      showUploadError(messagingText("error.fileTooLarge", { filename: file.name }));
-      return;
-    }
-
-    // Validate file type — reject files with unknown/empty MIME type
-    if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
-      showUploadError(messagingText("error.unsupportedType", { filename: file.name }));
+    // Any file type may be attached: the server sniffs the content, refuses
+    // its blocked types and serves unsafe ones as downloads.
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes || FALLBACK_MAX_FILE_SIZE;
+    if (file.size > maxBytes) {
+      showUploadError(
+        messagingText("error.fileTooLarge", {
+          filename: file.name,
+          limit: String(Math.floor(maxBytes / (1024 * 1024))),
+        }),
+      );
       return;
     }
 
@@ -934,7 +929,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const fileInput = createElement("input", {
         type: "file",
         style: "display: none;",
-        accept: "image/*,video/*,audio/*,.pdf,.txt,.zip",
       });
       fileInput.addEventListener(
         "change",

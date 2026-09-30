@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import type { UserWithRole } from "@lib/types";
+import type { UploadPolicy, UserWithRole } from "@lib/types";
 import { resetMessagesStore } from "@stores/messages.store";
 import { resetChannelsStore } from "@stores/channels.store";
 import { resetBlocksStore } from "@stores/blocks.store";
@@ -41,6 +41,8 @@ export interface AuthState {
    * this is what such a subscriber must gate a voice_leave send on instead.
    */
   readonly logoutWasInVoice?: boolean;
+  /** auth_ok's upload_policy; null or absent means the defaults (100 MiB). */
+  readonly uploadPolicy?: UploadPolicy | null;
 }
 
 const INITIAL_STATE: AuthState = {
@@ -82,8 +84,15 @@ export function registerVoiceLogoutTeardown(teardown: VoiceLogoutTeardown): void
   voiceLogoutTeardown = teardown;
 }
 
-/** Populate auth state after a successful auth_ok message. */
-export function setAuth(token: string, user: UserWithRole, serverName: string, motd: string): void {
+/** Populate auth state after a successful auth_ok message. An omitted
+ *  uploadPolicy keeps the value the last auth_ok set. */
+export function setAuth(
+  token: string,
+  user: UserWithRole,
+  serverName: string,
+  motd: string,
+  uploadPolicy?: UploadPolicy | null,
+): void {
   authStore.setState((prev) => ({
     token,
     // auth_ok's user never carries totp_enabled — only GET /auth/me does —
@@ -97,6 +106,7 @@ export function setAuth(token: string, user: UserWithRole, serverName: string, m
         : user,
     serverName,
     motd,
+    uploadPolicy: uploadPolicy === undefined ? prev.uploadPolicy : uploadPolicy,
     isAuthenticated: true,
   }));
 }
