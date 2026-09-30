@@ -93,7 +93,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/update_handlers.go":        {Disposition: "boundary", Note: "audits the binary swap (OC-0391) with WriteAudit/LogAudit; no other calls", Calls: calls{"LogAudit": 1}},
 	// ── api ───────────────────────────────────────────────────────────────
 	"api/appeal_handler.go":           {Disposition: "adapter", Note: "db.User from the auth context and db.ModerationAction response type only; AppealService owns every call"},
-	"api/channel_handler.go":          {Disposition: "adapter", Note: "response types only; service owns the calls"},
+	"api/channel_handler.go":          {Disposition: "adapter", Note: "response types and the pin cap; service owns the calls"},
 	"api/dm_handler.go":               {Disposition: "adapter", Note: "DM response types + pure status helpers"},
 	"api/dm_request_handler.go":       {Disposition: "adapter", Note: "message-request response types; the service owns the calls"},
 	"api/emoji_handler.go":            {Disposition: "adapter", Note: "Emoji/User types only"},

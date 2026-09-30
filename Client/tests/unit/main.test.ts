@@ -550,7 +550,9 @@ describe("main.ts profile deletion clears the saved credential (F11)", () => {
   });
 
   it("deletes the removed profile's host credential so re-adding it cannot resume the old password", async () => {
-    mockProfileManager.getAll.mockReturnValue([
+    // The first read finds the profile; after removal no profile is left on
+    // that host, so its credential goes too.
+    mockProfileManager.getAll.mockReturnValueOnce([
       { id: "p1", name: "Home", host: "gone.example:8443" },
     ]);
     vi.mocked(deleteCredential).mockResolvedValue(true);

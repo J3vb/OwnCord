@@ -394,23 +394,27 @@ test.describe("Composer gating — slow mode", () => {
     await expect(textarea(page)).toBeEnabled();
     await sendMessage(page, "first message");
 
-    // The ack gates the composer with the remaining whole seconds.
-    await expect(textarea(page)).toBeDisabled({ timeout: 5_000 });
-    await expect(textarea(page)).toHaveAttribute("placeholder", /^Slow mode — \d+s$/);
-    await expect(page.locator("[data-testid='send-btn']")).toBeDisabled();
-    await expect(composer(page)).toHaveClass(/composer-disabled/);
+    // The ack gates the send with the remaining whole seconds; the draft
+    // stays editable through the cooldown (F12).
+    const sendBtn = page.locator("[data-testid='send-btn']");
+    await expect(sendBtn).toHaveClass(/send-gated/, { timeout: 5_000 });
+    await expect(sendBtn).toHaveAttribute("title", /^Slow mode — \d+s$/);
+    await expect(textarea(page)).toBeEnabled();
+    await expect(composer(page)).not.toHaveClass(/composer-disabled/);
 
-    // Only the one send went out while gated: the disabled control cannot
-    // produce a second chat_send frame.
+    // Only the one send went out while gated: a second send is refused with
+    // the countdown and produces no chat_send frame.
+    await sendMessage(page, "second message");
+    await expect(page.locator(".attachment-upload-error")).toHaveText(/^Slow mode — \d+s$/);
+    await expect(textarea(page)).toHaveValue("second message");
     await expect.poll(async () => (await chatSendFrames(page)).length).toBe(1);
 
-    // The ticker releases the composer once the 300s window elapses. runFor
+    // The ticker releases the send once the 300s window elapses. runFor
     // fires every timer on the way (heartbeats included); a single 5-minute
     // fastForward jump is what a suspend looks like and trips the U4 gate.
     await page.clock.runFor("05:01");
-    await expect(textarea(page)).toBeEnabled({ timeout: 5_000 });
+    await expect(sendBtn).not.toHaveClass(/send-gated/, { timeout: 5_000 });
     await expect(textarea(page)).toHaveAttribute("placeholder", "Message #general");
-    await expect(composer(page)).not.toHaveClass(/composer-disabled/);
     expect(await chatSendFrames(page)).toHaveLength(1);
   });
 
@@ -424,9 +428,11 @@ test.describe("Composer gating — slow mode", () => {
     await sendMessage(page, "too fast");
 
     // The refusal carries the send's correlation id, so ChannelController
-    // gates the composer from the server's limiter, not from a local guess.
-    await expect(textarea(page)).toBeDisabled({ timeout: 5_000 });
-    await expect(textarea(page)).toHaveAttribute("placeholder", /^Slow mode — \d+s$/);
+    // gates the send from the server's limiter, not from a local guess.
+    const sendBtn = page.locator("[data-testid='send-btn']");
+    await expect(sendBtn).toHaveClass(/send-gated/, { timeout: 5_000 });
+    await expect(sendBtn).toHaveAttribute("title", /^Slow mode — \d+s$/);
+    await expect(textarea(page)).toBeEnabled();
   });
 
   test("a moderator holding MANAGE_MESSAGES is not gated by slow mode", async ({ page }) => {

@@ -17,7 +17,10 @@ before the native external-content broker; its current policy is
 `action` column, so it adds no data class here. **Amended 2026-09-29 (O1):**
 `055_invite_redemptions.sql` adds `invite_redemptions`, the invite-redemption
 history owned by the invite-management surface rather than any of the seven
-services below, so it adds no data class here either. Other historical
+services below, so it adds no data class here either. **Amended 2026-09-30
+(pin order):** `056_message_pinned_at.sql` only adds a `pinned_at` pin-time
+column to the existing `messages` row, so it adds no data class here. Other
+historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and

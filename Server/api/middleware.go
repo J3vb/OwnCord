@@ -238,10 +238,7 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 				retry := limiter.RetryAfter(key, limit, window)
 				// Round up: a 59.4s remainder must not report 59 (which would
 				// tell the client to retry fractionally early).
-				secs := int(math.Ceil(retry.Seconds()))
-				if secs < 1 {
-					secs = 1
-				}
+				secs := max(int(math.Ceil(retry.Seconds())), 1)
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", secs))
 				writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, please slow down")
 				return

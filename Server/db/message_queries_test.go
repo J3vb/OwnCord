@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -1392,6 +1393,11 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 	// pin-recency order disagree.
 	if err := database.SetMessagePinned(context.Background(), second, true); err != nil {
 		t.Fatalf("pin second: %v", err)
+	}
+	// Windows' wall clock ticks coarsely, so two back-to-back pins can share a
+	// stamp and tie. Wait for the clock to advance so the pins are ordered.
+	for start := time.Now().UnixNano(); time.Now().UnixNano() == start; {
+		time.Sleep(time.Millisecond)
 	}
 	if err := database.SetMessagePinned(context.Background(), first, true); err != nil {
 		t.Fatalf("pin first: %v", err)

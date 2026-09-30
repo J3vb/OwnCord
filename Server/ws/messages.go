@@ -170,14 +170,6 @@ type chatBulkDeletedPayload struct {
 	IDs       []int64 `json:"ids"`
 }
 
-// chatPinnedPayload is the ping/unpin broadcast (F5). It carries the state so
-// a client can set the row's pin flag and the panel can refresh.
-type chatPinnedPayload struct {
-	MessageID int64 `json:"message_id"`
-	ChannelID int64 `json:"channel_id"`
-	Pinned    bool  `json:"pinned"`
-}
-
 type reactionUpdatePayload struct {
 	MessageID int64  `json:"message_id"`
 	ChannelID int64  `json:"channel_id"`
@@ -639,18 +631,6 @@ func buildChatBulkDeleted(channelID int64, ids []int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatBulkDeleted,
 		Payload: chatBulkDeletedPayload{ChannelID: channelID, IDs: ids},
-	})
-}
-
-// buildChatPinned constructs a chat_pinned broadcast.
-func buildChatPinned(messageID, channelID int64, pinned bool) []byte {
-	return buildJSON(wsMsg{
-		Type: MsgTypeChatPinned,
-		Payload: chatPinnedPayload{
-			MessageID: messageID,
-			ChannelID: channelID,
-			Pinned:    pinned,
-		},
 	})
 }
 

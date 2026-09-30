@@ -115,9 +115,12 @@ test.describe("Composer gating agreement (real server)", () => {
     await composer(bob).press("Enter");
 
     // The server accepted the send and its slow-mode limiter now refuses the
-    // next one; the client mirrors that with a live countdown.
-    await expect(composer(bob)).toBeDisabled({ timeout: 10_000 });
-    await expect(composer(bob)).toHaveAttribute("placeholder", /^Slow mode — \d+s$/);
+    // next one; the client mirrors that with a live countdown on the send
+    // control, leaving the draft editable (F12).
+    const sendBtn = bob.locator("[data-testid='send-btn']");
+    await expect(sendBtn).toHaveClass(/send-gated/, { timeout: 10_000 });
+    await expect(sendBtn).toHaveAttribute("title", /^Slow mode — \d+s$/);
+    await expect(composer(bob)).toBeEnabled();
 
     const history = (await server.api(
       `/api/v1/channels/${general.id}/messages`,
