@@ -323,6 +323,33 @@
   font-size: var(--font-size-md);
   flex: 1;
 }
+/* Embedded DM rows reuse .channel-item but stack name + preview like the full
+   DM sidebar. The body owns the flexible middle column; the time and badges
+   sit to its right. */
+.channel-item .dm-item-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.channel-item .dm-item-body .ch-name {
+  flex: none;
+  font-weight: 600;
+}
+.channel-item .dm-preview {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-item .dm-preview-time {
+  flex-shrink: 0;
+  align-self: flex-start;
+  font-size: var(--font-size-xxs);
+  color: var(--text-micro);
+}
 .channel-item .unread-badge {
   background: var(--accent);
   color: var(--on-accent);

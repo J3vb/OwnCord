@@ -642,6 +642,60 @@ describe("DmSidebar", () => {
 
     sidebar.destroy?.();
   });
+
+  // Discord's DM list always shows the last line and when it arrived; the
+  // data was already computed onto DmConversation but never drawn.
+  it("renders the last-message preview and a relative timestamp per row", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({
+          channelId: 1,
+          userId: 1,
+          username: "Alice",
+          lastMessage: "see you at 6",
+          timestamp: "2020-06-15T12:00:00Z",
+        }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    expect(container.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
+    // The time is rendered (a full date/time for an older timestamp), not the
+    // raw ISO string.
+    const time = container.querySelector(".dm-preview-time")?.textContent ?? "";
+    expect(time).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{1,2}:\d{2} [AP]M$/);
+
+    sidebar.destroy?.();
+  });
+
+  it("rebuilds a row when only its preview or timestamp changes", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, userId: 1, username: "Alice", lastMessage: "old" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+    const row = container.querySelector(".dm-item") as HTMLElement;
+
+    sidebar.update([
+      makeConvo({
+        channelId: 1,
+        userId: 1,
+        username: "Alice",
+        lastMessage: "new",
+        timestamp: "2020-06-15T12:00:00Z",
+      }),
+    ]);
+
+    expect(container.querySelector(".dm-item")).not.toBe(row);
+    expect(container.querySelector(".dm-preview")?.textContent).toBe("new");
+
+    sidebar.destroy?.();
+  });
 });
 
 // ── Unread / mention badges ────────────────────────────────────────────────

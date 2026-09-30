@@ -50,7 +50,9 @@ SELECT
       WHERE mu.channel_id = c.id AND mu.deleted = 0
         AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
                                WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0)
-    ) AS unread_count
+    ) AS unread_count,
+    CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (

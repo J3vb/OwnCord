@@ -260,6 +260,42 @@ describe("SidebarDmSection", () => {
       section.destroy();
     });
 
+    it("shows the last-message preview and a time, matching the full DM sidebar", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          lastMessage: "see you at 6",
+          lastMessageAt: "2020-06-15T12:00:00Z",
+        }),
+      );
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const entry = container.querySelector("[data-testid='dm-entry']")!;
+      expect(entry.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
+      const time = entry.querySelector(".dm-preview-time")?.textContent ?? "";
+      expect(time).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{1,2}:\d{2} [AP]M$/);
+
+      section.destroy();
+    });
+
+    it("rebuilds a preview row when only its last message changes", () => {
+      addDmChannel(makeDm({ channelId: 100, lastMessage: "old" }));
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
+
+      updateDmLastMessagePreview(100, 900, "brand new", "2020-06-15T12:00:00Z");
+      dmStore.flush();
+
+      expect(container.querySelector("[data-testid='dm-entry']")).not.toBe(entry);
+      expect(container.querySelector(".dm-preview")?.textContent).toBe("brand new");
+
+      section.destroy();
+    });
+
     it("shows unread badge on DM entries with unread messages", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 5 }));
 
@@ -288,7 +324,7 @@ describe("SidebarDmSection", () => {
       section.destroy();
     });
 
-    it("passes onSelectDm the current DM, not the one the reused row was built from", () => {
+    it("passes onSelectDm the current DM when a row redraws a new preview", () => {
       addDmChannel(makeDm({ channelId: 100 }));
 
       const onSelectDm = vi.fn();
@@ -296,10 +332,14 @@ describe("SidebarDmSection", () => {
       container.appendChild(section.element);
       const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
 
-      updateDmLastMessagePreview(100, 900, "latest", "2026-09-23T12:00:00Z");
+      // A new preview is part of the row signature now, so the row rebuilds
+      // rather than reusing the node — that is what makes the preview redraw.
+      updateDmLastMessagePreview(100, 900, "latest", "2020-06-15T12:00:00Z");
       dmStore.flush();
-      expect(container.querySelector("[data-testid='dm-entry']")).toBe(entry);
-      entry.click();
+      const rebuilt = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
+      expect(rebuilt).not.toBe(entry);
+      expect(rebuilt.querySelector(".dm-preview")?.textContent).toBe("latest");
+      rebuilt.click();
 
       expect(onSelectDm.mock.calls[0]![0].lastMessageId).toBe(900);
 

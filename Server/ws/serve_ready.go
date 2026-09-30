@@ -275,9 +275,10 @@ func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader,
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
 	}
-	// GetUserDMChannels computes unread from read_states but carries no mention
-	// count, so a DM mention badge used to vanish on every reconnect. The
-	// unread map now includes the user's DM rows — pull mention_count from it.
+	// GetUserDMChannels now carries mention_count itself (the unread count is
+	// likewise computed from read_states), but the ready payload re-applies it
+	// from the unread map so both the ready path and GET /dms report the same
+	// badge; the map's value is the same read_states.mention_count.
 	for i := range dmChannels {
 		if u, ok := unreadMap[dmChannels[i].ChannelID]; ok {
 			dmChannels[i].MentionCount = u.MentionCount

@@ -13,6 +13,8 @@
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
+import { Disposable } from "@lib/disposable";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import type { MountableComponent } from "@lib/safe-render";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
@@ -47,6 +49,8 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
   let modalInstance: ModalInstance | null = null;
   const selected = new Set<number>();
   const multi = opts.onSelectGroup !== undefined;
+  // Owns the list's roving-navigation listener; dies with the modal.
+  const pickerOwner = new Disposable();
 
   function mount(container: Element): void {
     const members = membersStore.getState().members;
@@ -114,6 +118,11 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       const item = createElement("div", {
         class: "dm-member-picker-item channel-item",
         "data-testid": `dm-picker-member-${member.id}`,
+        // Roving list item: reachable by Tab once, then arrow-stepped. Without
+        // this the modal's focus trap could only reach the input and buttons,
+        // so the picker was mouse-only — and it is the only way to start a DM.
+        role: "button",
+        tabindex: "-1",
         style: "cursor:pointer;padding:6px 8px;display:flex;align-items:center;gap:8px;",
       });
       const avatar = createElement("div", {
@@ -156,6 +165,11 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
       listContainer.appendChild(item);
     }
 
+    // One Tab stop enters the list; ArrowUp/Down step rows and Enter/Space
+    // activate the focused one (a roving list, as the DM sidebar rows do).
+    setRovingTabindex(listContainer, ".dm-member-picker-item");
+    enableRovingNavigation(listContainer, ".dm-member-picker-item", pickerOwner.signal, "vertical");
+
     // One button for both outcomes, relabelled by the selection size. A
     // separate "make it a group" control would ask the user to declare their
     // intent before picking who is in it, when the picking is the declaration.
@@ -196,6 +210,7 @@ export function createMemberPickerModal(opts: MemberPickerOptions): MountableCom
 
   function destroy(): void {
     selected.clear();
+    pickerOwner.destroy();
     if (modalInstance !== null) {
       modalInstance.destroy();
       modalInstance = null;

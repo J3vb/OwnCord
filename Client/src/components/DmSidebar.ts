@@ -14,6 +14,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { formatMessageTimestamp } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
@@ -175,8 +176,20 @@ function renderDmItem(
   const avatar = buildAvatar(convo);
 
   const name = createElement("span", { class: "dm-name" }, convo.username);
+  // The last-message preview and its time: Discord's DM list always shows the
+  // last line, and the data was already computed onto DmConversation. An empty
+  // timestamp means the DM was never messaged (lastMessage carries the "No
+  // messages yet" fallback), so there is no time to show.
+  const preview = createElement("span", { class: "dm-preview" }, convo.lastMessage);
+  const body = createElement("div", { class: "dm-item-body" });
+  appendChildren(body, name, preview);
+  const time = createElement(
+    "span",
+    { class: "dm-preview-time" },
+    convo.timestamp === "" ? "" : formatMessageTimestamp(convo.timestamp),
+  );
 
-  appendChildren(item, avatar, name);
+  appendChildren(item, avatar, body, time);
 
   // Participant count, groups only: the label may be a name that says nothing
   // about size, and "who else is in here" is the first thing you want to know.
@@ -353,6 +366,8 @@ function convoSignature(convo: DmConversation): string {
     convo.unreadCount ?? 0,
     convo.mentionCount ?? 0,
     convo.inCall === true ? "c" : "",
+    convo.lastMessage,
+    convo.timestamp,
   ].join("|");
 }
 

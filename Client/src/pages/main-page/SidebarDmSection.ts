@@ -6,6 +6,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
+import { formatMessageTimestamp } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -15,6 +16,7 @@ import { isChannelMuted } from "@lib/channel-mutes";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,6 +53,8 @@ function dmRowSignature(dm: DmChannel): string {
     isChannelMuted(dm.channelId) ? "m" : "",
     dm.mentionCount,
     dm.unreadCount,
+    dm.lastMessage,
+    dm.lastMessageAt,
   ].join("|");
 }
 
@@ -166,7 +170,21 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       "aria-hidden": "true",
     });
     const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
-    const parts: Element[] = [statusDot, name];
+    // Discord's DM list shows the last line and when it arrived. An empty
+    // timestamp means the DM was never messaged, so no time is drawn.
+    const preview = createElement(
+      "span",
+      { class: "dm-preview" },
+      dm.lastMessage || connectText("app.dmNoMessages"),
+    );
+    const body = createElement("div", { class: "dm-item-body" });
+    appendChildren(body, name, preview);
+    const time = createElement(
+      "span",
+      { class: "dm-preview-time" },
+      dm.lastMessageAt === "" ? "" : formatMessageTimestamp(dm.lastMessageAt),
+    );
+    const parts: Element[] = [statusDot, body, time];
     // A mention badge outranks the plain unread badge, and a mute never
     // dims or suppresses it: a mute silences chatter, never something
     // addressed to the reader directly (see lib/channel-mutes.ts).

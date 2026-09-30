@@ -633,4 +633,102 @@ describe("createMemberPickerModal", () => {
 
     component.destroy!();
   });
+
+  // --- Keyboard reachability (BPR-091) ---
+  //
+  // The rows were bare divs with a click handler only, so a keyboard user
+  // could never enter the list — in the 1:1 path this picker is the only way
+  // to start a DM from the member list.
+
+  it("exposes exactly one Tab stop that enters the member list", () => {
+    setCurrentUser(1);
+    setStoreMembers([
+      makeMember({ id: 10, username: "Alice" }),
+      makeMember({ id: 20, username: "Bob" }),
+    ]);
+
+    const component = createMemberPickerModal({
+      onSelect: vi.fn(),
+      onClose: vi.fn(),
+    });
+    component.mount(container);
+
+    const items = container.querySelectorAll<HTMLElement>(".dm-member-picker-item");
+    expect(items.length).toBe(2);
+    expect(items[0]!.getAttribute("role")).toBe("button");
+    // Exactly one Tab stop enters the list; the rest are arrow-reachable.
+    expect(items[0]!.getAttribute("tabindex")).toBe("0");
+    expect(items[1]!.getAttribute("tabindex")).toBe("-1");
+    expect(container.querySelectorAll(".dm-member-picker-item[tabindex='0']").length).toBe(1);
+
+    component.destroy!();
+  });
+
+  it("selects a member with Enter from the keyboard", () => {
+    setCurrentUser(1);
+    setStoreMembers([makeMember({ id: 42, username: "Alice" })]);
+
+    const onSelect = vi.fn();
+    const component = createMemberPickerModal({
+      onSelect,
+      onClose: vi.fn(),
+    });
+    component.mount(container);
+
+    const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
+    item.focus();
+    item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(onSelect).toHaveBeenCalledWith(42);
+
+    component.destroy!();
+  });
+
+  it("roves the Tab stop with Arrow keys and selects on Enter", () => {
+    setCurrentUser(1);
+    setStoreMembers([
+      makeMember({ id: 10, username: "Alice" }),
+      makeMember({ id: 20, username: "Bob" }),
+    ]);
+
+    const onSelect = vi.fn();
+    const component = createMemberPickerModal({
+      onSelect,
+      onClose: vi.fn(),
+    });
+    component.mount(container);
+
+    const items = container.querySelectorAll<HTMLElement>(".dm-member-picker-item");
+    items[0]!.focus();
+    items[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    expect(document.activeElement).toBe(items[1]);
+    expect(items[1]!.getAttribute("tabindex")).toBe("0");
+    expect(items[0]!.getAttribute("tabindex")).toBe("-1");
+
+    items[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onSelect).toHaveBeenCalledWith(20);
+
+    component.destroy!();
+  });
+
+  it("toggles a member with Space in group (multi-select) mode", () => {
+    setCurrentUser(1);
+    setStoreMembers([makeMember({ id: 20, username: "Bob" })]);
+
+    const component = createMemberPickerModal({
+      onSelect: vi.fn(),
+      onSelectGroup: vi.fn(),
+      onClose: vi.fn(),
+    });
+    component.mount(container);
+
+    const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
+    item.focus();
+    item.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+
+    expect(item.classList.contains("selected")).toBe(true);
+
+    component.destroy!();
+  });
 });

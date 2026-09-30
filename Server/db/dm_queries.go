@@ -38,9 +38,10 @@ type DMChannelInfo struct {
 	LastMessage   string `json:"last_message"`
 	LastMessageAt string `json:"last_message_at"`
 	UnreadCount   int    `json:"unread_count"`
-	// MentionCount is read_states.mention_count for this DM. It is not part of
-	// the GetUserDMChannels query — buildReady fills it from the unread map so
-	// a DM mention badge survives a reconnect.
+	// MentionCount is read_states.mention_count for this DM, carried by the
+	// GetUserDMChannels query so every path that builds a DM summary (GET
+	// /dms and the ready payload) reports the same badge. buildReady also
+	// overlays the unread map, harmlessly re-confirming the same value.
 	MentionCount int `json:"mention_count"`
 }
 
@@ -338,6 +339,7 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 			LastMessage:   rows[i].LastMessage,
 			LastMessageAt: rows[i].LastMessageAt,
 			UnreadCount:   int(rows[i].UnreadCount),
+			MentionCount:  int(rows[i].MentionCount),
 		}
 		if len(recipients) > 0 {
 			info.Recipient = recipients[0]
