@@ -26,6 +26,7 @@ let mockCurrentChannelId: number | null = null;
 let mockLocalMuted = false;
 let mockLocalDeafened = false;
 let mockPttGated = false;
+let mockPttOwnsMute = false;
 let mockPttPollingLive = false;
 const mockSetPttGated = vi.fn();
 const mockSetPttPollingLive = vi.fn((live: boolean) => {
@@ -69,10 +70,14 @@ vi.mock("@stores/voice.store", () => ({
       localMuted: mockLocalMuted,
       localDeafened: mockLocalDeafened,
       pttGated: mockPttGated,
+      pttOwnsMute: mockPttOwnsMute,
     }),
     subscribe: (listener: (state: { localMuted: boolean }) => void) => mockSubscribeStore(listener),
   },
   setPttGated: (...args: unknown[]) => mockSetPttGated(...args),
+  setPttOwnsMute: (owns: boolean) => {
+    mockPttOwnsMute = owns;
+  },
   setPttPollingLive: (live: boolean) => mockSetPttPollingLive(live),
   isPttPollingLive: () => mockPttPollingLive,
 }));
@@ -111,6 +116,7 @@ function resetAll(): void {
   mockLocalMuted = false;
   mockLocalDeafened = false;
   mockPttGated = false;
+  mockPttOwnsMute = false;
   mockPttPollingLive = false;
   mockSetPttGated.mockReset();
   mockSetPttPollingLive.mockReset();

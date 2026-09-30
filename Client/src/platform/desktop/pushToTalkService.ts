@@ -178,7 +178,9 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
     retainListener(
       attempt,
       voiceStore.subscribe((s) => {
-        if (isCurrent(attempt) && !s.localMuted) setPttOwnsMute(false);
+        // Write only on a real change: a no-op write from inside a
+        // notification still re-notifies, looping forever.
+        if (isCurrent(attempt) && !s.localMuted && pttOwnsMute()) setPttOwnsMute(false);
       }),
     );
 
