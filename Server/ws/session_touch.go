@@ -31,6 +31,6 @@ func (h *Hub) touchSession(ctx context.Context, c *Client) {
 		return
 	}
 	if err := h.authn.TouchSession(ctx, c.tokenHash); err != nil {
-		slog.Warn("ws: failed to touch session", "user_id", c.userID, "err", err)
+		slog.Warn("failed to touch session", "user_id", c.userID, "err", err)
 	}
 }
