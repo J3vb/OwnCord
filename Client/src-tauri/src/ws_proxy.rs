@@ -16,7 +16,7 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
@@ -488,6 +488,11 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         }
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to persist pin for {host}: {e}");
         return Err(format!("failed to persist cert fingerprint: {e}"));
+    }
+    // The REST tunnel's idle connections were verified against the old pin (or
+    // none): drop them so the next request re-runs the TOFU check.
+    if let Some(http) = app.try_state::<crate::http_proxy::HttpProxyState>() {
+        http.pool.invalidate(&crate::tofu::cert_store_key(&host));
     }
     // Fingerprints are public cert hashes — safe to log; this is the TOFU audit trail.
     if changed {

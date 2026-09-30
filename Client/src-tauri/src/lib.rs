@@ -10,6 +10,7 @@ mod dpapi;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
+mod http_pool;
 mod http_proxy;
 mod json_store;
 #[cfg(target_os = "linux")]

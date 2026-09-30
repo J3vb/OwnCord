@@ -11,7 +11,10 @@
 Chose **variant 1 (byte tunnel)** with a targeted header rewrite: the first
 request's `Host` is rewritten to the real host and `Connection: close` is
 injected so exactly one request rides each tunnel connection (no keep-alive
-reuse that would bypass the rewrite).
+reuse that would bypass the rewrite). Since 2026-09-30 a bodyless GET, HEAD or
+OPTIONS may reuse an idle _upstream_ TLS connection; the loopback side still
+carries one request per connection. See
+[Upstream connection reuse](#upstream-connection-reuse-2026-09-30).
 
 - `src-tauri/src/http_proxy.rs` — per-host loopback TCP→TLS tunnels
   (`HttpProxyState` = `HashMap<host, ProxyEntry>`); per-connection TOFU
@@ -159,8 +162,9 @@ servers. An earlier unrecorded gate reported 53 / 62 / 92 / 152 ms at 10 / 20 /
 50 / 100 ms RTT (one RTT plus a fixed ~40-50 ms); it did not reproduce with this script and is
 not used.
 
-**Decision: connection reuse is deferred to a separate security review, not
-judged not worth it.** A pooled keep-alive tunnel would change the invariants
+**Decision (2026-09-28): connection reuse is deferred to a separate security
+review, not judged not worth it.** It has since shipped; see
+[Upstream connection reuse](#upstream-connection-reuse-2026-09-30). A pooled keep-alive tunnel would change the invariants
 the `Host` rewrite and per-request TOFU rest on, so it is not done here. Summed
 over the 14 calls, the handshakes add ~70 ms to a cold open at a LAN RTT
 (~1 ms) and ~2.8 s at a 100 ms WAN RTT, against ~1.4 s of request round trips
@@ -174,6 +178,100 @@ shape is a pooled keep-alive tunnel that keeps the rewrite invariant, which is
 its own change with its own review; the report keeps CLI-04(b) as a
 measurement. The measured ceiling a future fix targets is the "Handshake
 overhead" column above.
+
+## Upstream connection reuse (2026-09-30)
+
+The tunnel now keeps idle upstream TLS connections in a small pool
+(`src-tauri/src/http_pool.rs`) and sends later requests over them, so a
+repeat request skips the TCP and TLS handshakes. The webview side does not
+change: every loopback connection carries one request, the proxy reads and
+rewrites that request's `Host`, and the response the webview gets says
+`Connection: close`. Only the upstream side of the tunnel is reused.
+
+**Which requests are pooled.** A GET, HEAD or OPTIONS with no body (no
+`Content-Length` above 0, no `Transfer-Encoding`), no `Upgrade` and no
+`Expect`. Everything else, including uploads and every POST, PATCH, PUT and
+DELETE, keeps the one-shot path: its own TLS connection, its own TOFU check,
+`Connection: close`, and the bidirectional copy with upload progress. PUT
+and DELETE are idempotent but not safe: a replayed DELETE can answer 404
+where the first one succeeded, so they are not retried and not pooled. On a
+cold open that pools 12 of the 14 calls listed above; `POST /auth/login` and
+`PATCH /users/me` stay one-shot.
+
+**Invariants.**
+
+- **Keyed by exact host and port.** The pool key is the tunnel's
+  `remote_host` string, which also sets the dial target, SNI and the rewritten
+  `Host`. A connection is never reused for a different host or port.
+- **Tied to the pin it verified.** Each idle connection records the
+  fingerprint its handshake verified. `checkout` reads the host's stored pin
+  first and hands out a connection only if that fingerprint is still the pin;
+  it drops every connection for the host that no longer matches, and all of
+  them when no pin is stored (a forgotten host). The next request then dials
+  fresh and runs the full TOFU check. `accept_cert_fingerprint` (re-pin or
+  first accept), a mismatch, a first-use prompt, a public-CA renewal and
+  `stop_http_proxy` also drop the host's connections outright. rustls does
+  not implement TLS renegotiation, so a connection cannot change certificate
+  after its handshake: the handshake-time check covers every request on it.
+- **Host rewrite unchanged.** Each pooled request arrives on its own loopback
+  connection and goes through the same rewrite as before, with
+  `Connection: keep-alive` upstream instead of `close`. No request reaches the
+  server without the rewrite.
+- **Only clean response ends are reused.** The proxy reads the response head
+  and relays the body exactly as far as its framing says (`Content-Length`,
+  chunked, or no body for HEAD, 1xx, 204 and 304). A response with
+  `Connection: close`, an HTTP/1.0 response, a body delimited by the
+  connection closing, `Content-Length` and `Transfer-Encoding` together, or
+  any byte left unread after the response ends the connection instead of
+  pooling it. An idle connection the server closed, or wrote to while idle, is
+  dropped at checkout. Bytes are relayed unchanged apart from the response's
+  `Connection` field, which the webview gets as one `Connection: close`.
+- **Bounded.** At most 4 idle connections per host, each closed 30 s after
+  it went idle (the server's own idle timeout is 120 s). Idle age is also
+  measured on the wall clock, so a connection that sat idle across a system
+  suspend (which the monotonic clock does not count) is not handed out.
+  Response heads are capped at 64 KiB and the data phase keeps its 600 s
+  deadline.
+- **Dead paths fail fast.** A pooled socket has TCP keepalive on (first
+  probe after 10 s idle, then every 5 s, failing after 3 unanswered; Windows
+  keeps its own probe count, since TCP_KEEPCNT does not exist before Windows
+  10 1703) and, on Linux, a 25 s TCP user timeout, so a network path that
+  died with no FIN or RST (a Wi-Fi roam, a VPN toggle) fails the socket
+  within tens of seconds instead of holding a request until the 600 s
+  data-phase deadline. Setting these is best-effort: an option the system
+  refuses is logged at debug and the verified connection is still used.
+- **One retry, for a dropped connection only.** If a pooled connection fails
+  with an I/O error before any response byte reaches the webview (the server
+  closed it as the request arrived, a reset, or a dead path), the request is
+  sent once more on a fresh, fully verified connection. A slow answer from a
+  live server is waited for under the data-phase deadline and never sent
+  twice. A failure after the retry, or after bytes reached the webview, ends
+  the webview's connection as before and is logged at debug, as on the
+  one-shot path.
+
+**Measured** on 2026-09-30 with a one-off harness that timed one request
+through the tunnel's own upstream code, over the same server, upload and
+delay gate as the table above: the one-shot path, and the second request on a
+pooled connection. "Saved" is before minus pooled. Medians of 15 samples,
+debug build:
+
+| One-way delay | RTT    | Request | Before (one-shot) | Pooled   | Saved    |
+| ------------- | ------ | ------- | ----------------- | -------- | -------- |
+| 0 ms          | 0 ms   | REST    | 49.1 ms           | 2.7 ms   | 46.4 ms  |
+| 0 ms          | 0 ms   | Image   | 48.3 ms           | 3.0 ms   | 45.3 ms  |
+| 5 ms          | 10 ms  | REST    | 73.6 ms           | 10.9 ms  | 62.7 ms  |
+| 5 ms          | 10 ms  | Image   | 73.8 ms           | 11.4 ms  | 62.4 ms  |
+| 10 ms         | 20 ms  | REST    | 63.2 ms           | 21.0 ms  | 42.2 ms  |
+| 10 ms         | 20 ms  | Image   | 63.6 ms           | 21.4 ms  | 42.2 ms  |
+| 25 ms         | 50 ms  | REST    | 153.1 ms          | 51.0 ms  | 102.1 ms |
+| 25 ms         | 50 ms  | Image   | 153.5 ms          | 51.4 ms  | 102.1 ms |
+| 50 ms         | 100 ms | REST    | 303.0 ms          | 101.0 ms | 202.1 ms |
+| 50 ms         | 100 ms | Image   | 303.3 ms          | 101.4 ms | 201.9 ms |
+
+A pooled request costs one RTT plus ~1-3 ms, the same as the keep-alive
+column above. At 100 ms RTT that is ~101 ms instead of ~303 ms per repeat
+request, and on a cold open the 12 pooled calls pay the handshakes only for
+the connections the webview opens concurrently, not once per call.
 
 ## TOFU semantics (must match ws_proxy)
 
