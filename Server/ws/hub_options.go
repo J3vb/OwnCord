@@ -249,7 +249,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
 		// applies the same live-connection rule instead of only the ready
 		// payload's presentableDMChannels doing so (OC-0304).
-		svc.DMs.SetOnlineChecker(h.IsUserConnected)
+		svc.DMs.SetLiveStatusLookup(h.LiveStatus)
 	}
 
 	registerChatHandlers(reg, chatDeps)

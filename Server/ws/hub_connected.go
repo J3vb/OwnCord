@@ -1,18 +1,7 @@
 package ws
 
-// hub_connected.go — the live-connection id snapshot, split out of
-// serve_ready.go (at its line ceiling). See connectedUserIDs.
-
-// connectedUserIDs snapshots the ids with a live WebSocket connection.
-func (h *Hub) connectedUserIDs() map[int64]bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	set := make(map[int64]bool, len(h.clients))
-	for uid := range h.clients {
-		set[uid] = true
-	}
-	return set
-}
+// hub_connected.go — live-connection status snapshots, split out of
+// serve_ready.go (at its line ceiling). See liveStatuses.
 
 // livePresences snapshots each connected user's live presence
 // (Client.livePresence), status "" for a connection that has not stamped one
@@ -25,4 +14,16 @@ func (h *Hub) livePresences() map[int64]livePresence {
 		out[uid] = c.livePresence()
 	}
 	return out
+}
+
+// LiveStatus returns userID's live status, "" when the user has no
+// connection or it has not stamped one yet. Safe to call from any goroutine.
+func (h *Hub) LiveStatus(userID int64) string {
+	h.mu.RLock()
+	c := h.clients[userID]
+	h.mu.RUnlock()
+	if c == nil {
+		return ""
+	}
+	return c.liveStatus()
 }

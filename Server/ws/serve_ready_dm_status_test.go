@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // dmChannelStatusFor pulls the recipient status for other.ID out of a ready
@@ -61,7 +62,7 @@ func dmChannelStatusFor(t *testing.T, raw []byte, otherID int64) (recipientStatu
 // dm_channels, exactly as presentableMembers already forces for the members
 // array. absent chooses "dnd", then MarkUserDisconnected-equivalent state is
 // simulated by simply never registering a client for absent (buildReady's
-// connectedUserIDs() only reflects live hub registrations, so an
+// liveStatuses() only reflects live hub registrations, so an
 // unregistered user is indistinguishable from "signed out").
 func TestBuildReady_DMChannelsHidesDisconnectedRecipientStatus(t *testing.T) {
 	hub, database := newServeHub(t)
@@ -98,5 +99,54 @@ func TestBuildReady_DMChannelsHidesDisconnectedRecipientStatus(t *testing.T) {
 	}
 	if recipientsStatus != db.StatusOffline {
 		t.Errorf("dm_channels[].recipients[].status = %q, want %q", recipientsStatus, db.StatusOffline)
+	}
+}
+
+// A connected recipient's DM status comes from the live status their
+// connection stamped, not the users.status row: the connect stamp is written
+// in a later batch, so during a restart herd the row can still read the
+// boot reset's "offline" while members already shows the user online. An
+// invisible connected recipient still reads offline to the viewer.
+func TestBuildReady_DMChannelsShowConnectedRecipientLiveStatus(t *testing.T) {
+	hub, database := newServeHub(t)
+	ctx := context.Background()
+
+	viewer := seedServeUser(t, database, "dm-live-viewer")
+	here := seedServeUser(t, database, "dm-live-here")
+	ghost := seedServeUser(t, database, "dm-live-ghost")
+	seedDMChannel(t, database, viewer.ID, here.ID)
+	seedDMChannel(t, database, viewer.ID, ghost.ID)
+
+	ghost.Status = db.StatusInvisible
+	for _, u := range []*db.User{here, ghost} {
+		c := ws.NewTestClientWithUser(hub, u, 0, make(chan []byte, 16))
+		hub.Register(c)
+		waitRegistered(t, hub, c)
+		hub.ApplyConnectStatusForTest(c)
+	}
+	// The rows lag the live stamps: here's still reads the boot reset,
+	// ghost's a stale "online".
+	if err := database.UpdateUserStatus(ctx, here.ID, db.StatusOffline); err != nil {
+		t.Fatalf("UpdateUserStatus(here): %v", err)
+	}
+	if err := database.UpdateUserStatus(ctx, ghost.ID, db.StatusOnline); err != nil {
+		t.Fatalf("UpdateUserStatus(ghost): %v", err)
+	}
+
+	msg, err := hub.BuildReadyWithRoleForTest(database, viewer.ID, ownerRole(t, database))
+	if err != nil {
+		t.Fatalf("BuildReadyWithRoleForTest: %v", err)
+	}
+	for _, tc := range []struct {
+		id   int64
+		want string
+	}{{here.ID, db.StatusOnline}, {ghost.ID, db.StatusOffline}} {
+		recipient, recipients, found := dmChannelStatusFor(t, msg, tc.id)
+		if !found {
+			t.Fatalf("dm_channels is missing recipient %d", tc.id)
+		}
+		if recipient != tc.want || recipients != tc.want {
+			t.Errorf("recipient %d: recipient.status = %q, recipients[].status = %q, want %q", tc.id, recipient, recipients, tc.want)
+		}
 	}
 }

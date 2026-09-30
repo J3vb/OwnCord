@@ -95,24 +95,29 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 	}
 }
 
-// presentableDMChannels applies presentableMembers' "no live connection means
-// offline" rule to a DM channel list's recipient statuses. GetUserDMChannels
-// already applies db.StatusForViewer (the invisible-to-others half); this
-// adds the missing "no live connection" half so dm_channels cannot disagree
-// with the members array about whether the same disconnected user is online.
-// Both Recipient (the legacy single-recipient field) and every entry of
+// presentableDMChannels applies presentableMembers' rules to a DM channel
+// list's recipient statuses, so dm_channels cannot disagree with the members
+// array about the same user: a recipient with no live connection (or one not
+// yet stamped) is offline, a connected one shows their live status rather
+// than the users.status row (whose connect stamp may still be pending), and
+// db.StatusForViewer hides an invisible recipient from the viewer. Both
+// Recipient (the legacy single-recipient field) and every entry of
 // Recipients (the group-aware field) are rewritten, since a 1:1 DM's
 // Recipient is a copy of Recipients[0], not a shared reference.
-func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo) []db.DMChannelInfo {
-	connected := h.connectedUserIDs()
+func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
+	live := h.liveStatuses()
+	status := func(id int64) string {
+		if s := live[id]; s != "" {
+			return db.StatusForViewer(s, id, viewerID)
+		}
+		return db.StatusOffline
+	}
 	for i := range dmChannels {
-		if dmChannels[i].Recipient.ID != 0 && !connected[dmChannels[i].Recipient.ID] {
-			dmChannels[i].Recipient.Status = db.StatusOffline
+		if dmChannels[i].Recipient.ID != 0 {
+			dmChannels[i].Recipient.Status = status(dmChannels[i].Recipient.ID)
 		}
 		for j := range dmChannels[i].Recipients {
-			if !connected[dmChannels[i].Recipients[j].ID] {
-				dmChannels[i].Recipients[j].Status = db.StatusOffline
-			}
+			dmChannels[i].Recipients[j].Status = status(dmChannels[i].Recipients[j].ID)
 		}
 	}
 	return dmChannels
@@ -292,15 +297,10 @@ func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader,
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
 	}
-	// GetUserDMChannels only applies db.StatusForViewer, which collapses
-	// invisible to offline but passes a disconnected recipient's saved
-	// idle/dnd through verbatim (MarkUserDisconnected deliberately keeps a
-	// chosen idle/dnd across a disconnect so the next connect can honour it,
-	// relying on every read path to hide it in the meantime). members already
-	// gets the "no live connection means offline" half of that rule from
-	// presentableMembers above; apply the same half here so dm_channels
-	// cannot disagree with members about the same user within one payload.
-	dmChannels = h.presentableDMChannels(dmChannels)
+	// GetUserDMChannels reads users.status, which keeps a chosen idle/dnd
+	// across a disconnect and trails a connect by the batched stamp; overlay
+	// the live status the members array uses so the two cannot disagree.
+	dmChannels = h.presentableDMChannels(dmChannels, userID)
 	return dmChannels, nil
 }
 

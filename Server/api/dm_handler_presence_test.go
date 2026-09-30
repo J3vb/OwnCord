@@ -46,7 +46,7 @@ func TestCreateDM_RecipientStatus_OfflineWhenDisconnected(t *testing.T) {
 
 	// Nobody currently holds a live connection — mirrors a hub with bob's
 	// session gone.
-	svc.DMs.SetOnlineChecker(func(userID int64) bool { return false })
+	svc.DMs.SetLiveStatusLookup(func(int64) string { return "" })
 
 	rr := dmPost(t, r, "/api/v1/dms", tokenAlice, map[string]any{
 		"recipient_id": bob.ID,
