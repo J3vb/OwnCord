@@ -885,6 +885,20 @@
   display: none;
 }
 
+/* ═══ Waiting for a down server (P2-T7) ═══ */
+.server-wait {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.server-wait[hidden] {
+  display: none;
+}
+
 /* ═══ Auto-connect overlay ═══ */
 .auto-connect-overlay {
   position: absolute;
@@ -925,7 +939,8 @@
   color: var(--accent-text);
   margin-bottom: 24px;
 }
-.auto-connect-cancel {
+.auto-connect-cancel,
+.server-wait-cancel {
   font-size: var(--font-size-sm);
   color: var(--text-faint);
   cursor: pointer;
@@ -935,7 +950,8 @@
   padding: 6px 20px;
   transition: all 0.15s;
 }
-.auto-connect-cancel:hover {
+.auto-connect-cancel:hover,
+.server-wait-cancel:hover {
   color: var(--text-normal);
   border-color: var(--text-muted);
 }

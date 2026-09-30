@@ -1090,6 +1090,108 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  // --- showServerWait (P2-T7) ---
+
+  it("showServerWait shows the waiting line with a keyboard-reachable Cancel", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+
+    page.showServerWait("Home Server", "localhost:8443");
+
+    const wait = container.querySelector<HTMLElement>(".server-wait")!;
+    expect(wait.hidden).toBe(false);
+    expect(wait.getAttribute("role")).toBe("status");
+    expect(wait.textContent).toContain("Waiting for Home Server…");
+    // The form stays usable beneath it: the wait is not a blocking overlay.
+    expect((container.querySelector("#host") as HTMLInputElement).disabled).toBe(false);
+
+    const cancel = wait.querySelector<HTMLButtonElement>("button")!;
+    expect(cancel.textContent).toBe("Cancel");
+    expect(cancel.type).toBe("button");
+    expect(cancel.disabled).toBe(false);
+    expect(cancel.tabIndex).toBe(0);
+    cancel.focus();
+    expect(document.activeElement).toBe(cancel);
+
+    cancel.click();
+    expect(onAutoLoginCancel).toHaveBeenCalledTimes(1);
+    expect(wait.hidden).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("typing into the form cancels the server wait", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+    page.showServerWait("Home Server", "localhost:8443");
+
+    const username = container.querySelector("#username") as HTMLInputElement;
+    username.value = "a";
+    username.dispatchEvent(new Event("input", { bubbles: true }));
+    username.value = "al";
+    username.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(onAutoLoginCancel).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLElement>(".server-wait")!.hidden).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("picking another server cancels the server wait; the same server keeps it", () => {
+    const onAutoLoginCancel = vi.fn();
+    const profiles: SimpleProfile[] = [
+      { name: "Server A", host: "a.example:8443" },
+      { name: "Server B", host: "b.example:8443" },
+    ];
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), profiles);
+    page.mount(container);
+    page.showServerWait("Server A", "a.example:8443");
+    const [serverA, serverB] = container.querySelectorAll<HTMLElement>(".server-item");
+    const wait = container.querySelector<HTMLElement>(".server-wait")!;
+
+    serverA!.click();
+    expect(onAutoLoginCancel).not.toHaveBeenCalled();
+    expect(wait.hidden).toBe(false);
+
+    serverB!.click();
+    expect(onAutoLoginCancel).toHaveBeenCalledTimes(1);
+    expect(wait.hidden).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("toggling a checkbox leaves the server wait running", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+    page.showServerWait("Home Server", "localhost:8443");
+
+    for (const id of ["#auto-connect", "#remember-password"]) {
+      container.querySelector<HTMLInputElement>(id)!.click();
+    }
+
+    expect(onAutoLoginCancel).not.toHaveBeenCalled();
+    expect(container.querySelector<HTMLElement>(".server-wait")!.hidden).toBe(false);
+
+    page.destroy?.();
+  });
+
+  it("hideServerWait hides the waiting line without cancelling", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+    page.showServerWait("Home Server", "localhost:8443");
+
+    page.hideServerWait();
+
+    expect(container.querySelector<HTMLElement>(".server-wait")!.hidden).toBe(true);
+    expect(onAutoLoginCancel).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
   // --- refreshProfiles ---
 
   it("refreshProfiles re-renders the server profile list", () => {

@@ -214,8 +214,12 @@ out a backoff, the network coming back (`online`) or the window becoming visible
 applies, and it never fires after `disconnect()`, `auth_error` or a certificate-mismatch latch. The **first**
 authentication is additionally bounded by a 20 s deadline (`PREAUTH_CONNECT_TIMEOUT_MS`): a login or stored-token
 auto-login that never reaches `auth_ok` returns to the form with "Couldn't reach this server — it may be offline"
-rather than retrying forever behind the connecting overlay. Once a session is live the deadline is cleared, so an
-outage keeps the in-place reconnect. The user-facing contract:
+rather than retrying forever behind the connecting overlay. A stored-token resume (auto-login or a quick switch
+back) that times out also shows "Waiting for <server>… Cancel" above the form and keeps probing the server's health
+(5 s, doubling to 30 s); when it answers, the stored token is resumed once, and if that resume also
+times out the form keeps the offline message rather than waiting again. Cancel, typing into the host, username or password
+field, picking another server, a manual login, leaving the page or deleting that server's last saved profile ends the wait (`waitForServer` in `main.ts`). Once a session is live the deadline is
+cleared, so an outage keeps the in-place reconnect. The user-facing contract:
 
 ```mermaid
 stateDiagram-v2
