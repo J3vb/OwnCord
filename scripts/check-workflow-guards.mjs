@@ -19,9 +19,10 @@
 // is the honest limit of what a regression test can claim here.
 //
 // Scope: workflows that reference a metered secret. Add one to METERED below
-// when a new workflow starts spending.
+// when a new workflow starts spending. Separately, every workflow is checked
+// for a reference to the updater signing key, which only release.yml may hold.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,6 +63,20 @@ export function auditWorkflow(src) {
   return CHECKS.filter((c) => !c.test(src)).map((c) => ({ name: c.name, why: c.why }));
 }
 
+// The updater signing key (and its password) is handed to release.yml only.
+// Any other workflow that references it hands the key every client trusts to
+// build steps a pull request controls.
+const SIGNING_KEY_HOLDER = "release.yml";
+
+export function signingKeyHolders(workflows) {
+  return workflows
+    .filter(
+      ({ name, src }) =>
+        name !== SIGNING_KEY_HOLDER && /secrets\.TAURI_SIGNING_PRIVATE_KEY/.test(src),
+    )
+    .map(({ name }) => name);
+}
+
 function main() {
   const failures = [];
 
@@ -79,10 +94,22 @@ function main() {
     }
   }
 
+  const workflowsDir = join(ROOT, ".github/workflows");
+  const workflows = readdirSync(workflowsDir)
+    .filter((name) => /\.ya?ml$/.test(name))
+    .map((name) => ({ name, src: readFileSync(join(workflowsDir, name), "utf8") }));
+  for (const name of signingKeyHolders(workflows)) {
+    failures.push(
+      `.github/workflows/${name}: references the updater signing key — only ${SIGNING_KEY_HOLDER} may sign; build unsigned elsewhere`,
+    );
+  }
+
   if (failures.length) {
     console.error(`\n${failures.length} workflow guard(s) missing:\n`);
     for (const f of failures) console.error(`  ${f}`);
-    console.error("\nThese guards bound who can start a metered run and how long it may last.");
+    console.error(
+      "\nThese guards bound who can start a metered run, how long it may last, and which workflow may sign updates.",
+    );
     process.exit(1);
   }
   console.log(
