@@ -318,7 +318,7 @@ func TestGetUserDMChannels_UnreadCountCapsAt100(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannel: %v", err)
 	}
-	for i := 0; i < 150; i++ {
+	for range 150 {
 		if _, err := database.CreateMessage(context.Background(), ch.ID, user2, "msg", nil); err != nil {
 			t.Fatalf("CreateMessage: %v", err)
 		}

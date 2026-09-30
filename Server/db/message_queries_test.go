@@ -1076,12 +1076,12 @@ func TestGetChannelUnreadCounts_CapsAt100(t *testing.T) {
 	bigChID := seedChannel(t, database, "bigchan")
 	smallChID := seedChannel(t, database, "smallchan")
 
-	for i := 0; i < 150; i++ {
+	for range 150 {
 		if _, err := database.CreateMessage(context.Background(), bigChID, userID, "msg", nil); err != nil {
 			t.Fatalf("CreateMessage(big): %v", err)
 		}
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, err := database.CreateMessage(context.Background(), smallChID, userID, "msg", nil); err != nil {
 			t.Fatalf("CreateMessage(small): %v", err)
 		}
