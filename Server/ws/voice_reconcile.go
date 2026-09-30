@@ -11,8 +11,8 @@ package ws
 // key holder stalls every new joiner's key exchange.
 //
 // This closes the gap by polling: once a tick, ListParticipants for every
-// room that has a row, and reconcile the SFU's participant set against the
-// DB. It runs on the startSweep pattern, never on the dispatch goroutine,
+// room that has a row or that the SFU has open, and reconcile the SFU's
+// participant set against the DB. It runs on the startSweep pattern, never on the dispatch goroutine,
 // because ListParticipants is a network round trip.
 //
 // The reap is deliberate about false positives: a participant that is absent
@@ -104,6 +104,19 @@ func (h *Hub) reconcileVoiceMembership() {
 		live[id] = struct{}{}
 	}
 	h.voiceReconcile.prune(live)
+	// Also visit rooms no row names: a sole member removed from voice leaves
+	// a room with no rows, and a participant there (a replayed, still-valid
+	// token) is an orphan too. A failure only narrows this tick to rooms with
+	// rows.
+	roomIDs, err := h.livekit.ListRoomChannelIDs(ctx)
+	if err != nil {
+		slog.Warn("voice reconcile: ListRooms failed, checking rooms with rows only", "err", err)
+	}
+	for _, channelID := range roomIDs {
+		if _, ok := byRoom[channelID]; !ok {
+			byRoom[channelID] = nil
+		}
+	}
 
 	for channelID, roomRows := range byRoom {
 		identities, listErr := h.livekit.ListParticipants(ctx, channelID)

@@ -96,9 +96,8 @@ func TestVoiceReconcile_ReapsGhostAfterTwoTicks(t *testing.T) {
 
 // TestVoiceReconcile_RemovesOrphanParticipant: an SFU participant with no
 // matching voice_states row is removed — the other half of the reconciler.
-// The room also holds a healthy member: the reconciler lists rooms with rows,
-// so a room with no rows at all is out of scope, but an orphan sharing a room
-// with a legitimate membership is exactly the stale participant it must drop.
+// The room also holds a healthy member, so the orphan shares a room with a
+// legitimate membership.
 func TestVoiceReconcile_RemovesOrphanParticipant(t *testing.T) {
 	h := newVMHarness(t, 1)
 	alice := h.members[0]
@@ -116,6 +115,25 @@ func TestVoiceReconcile_RemovesOrphanParticipant(t *testing.T) {
 	h.reconcile()
 	if h.sfu.has(RoomName(chID), orphan) {
 		t.Fatalf("reconciler left an SFU participant %q with no voice_states row", orphan)
+	}
+	h.check()
+}
+
+// TestVoiceReconcile_RemovesOrphanInRoomWithNoRows: an SFU participant in a
+// room no voice_states row names is removed too. This is the room a sole
+// member was kicked from: the row is gone, so a reconciler that only lists
+// rooms with rows would never see the participant rejoining on a still-valid
+// token.
+func TestVoiceReconcile_RemovesOrphanInRoomWithNoRows(t *testing.T) {
+	h := newVMHarness(t, 1)
+	chID := h.chanOf("rt3-empty-room")
+
+	orphan := participantIdentity(9999, "stale-token")
+	h.sfu.add(RoomName(chID), orphan)
+
+	h.reconcile()
+	if h.sfu.has(RoomName(chID), orphan) {
+		t.Fatalf("reconciler left SFU participant %q in a room with no voice_states rows", orphan)
 	}
 	h.check()
 }
