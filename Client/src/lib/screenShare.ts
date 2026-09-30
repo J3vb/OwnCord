@@ -22,6 +22,7 @@ import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
 import {
   isLinuxDesktop,
   PICKER_DISMISSED,
@@ -497,7 +498,8 @@ export async function enableScreenshare(
       // silent rather than reporting "permission denied" (polish #10).
       // The desktop portal cannot say whether the user cancelled or a
       // permission refused, so that case gets a soft notice covering both.
-      if (err.message === PORTAL_NOT_STARTED) deps.onError(voiceText("share.screenNotStarted"));
+      if (err.message === PORTAL_NOT_STARTED)
+        showToast(voiceText("share.screenNotStarted"), "info");
       else if (err.message !== PICKER_DISMISSED) deps.onError(voiceText("share.screenDenied"));
     } else {
       deps.onError(voiceText("share.screenFailed"));

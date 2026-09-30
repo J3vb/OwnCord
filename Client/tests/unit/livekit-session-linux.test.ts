@@ -228,6 +228,8 @@ globalThis.Worker = vi.fn(function () {
 import { LiveKitSession } from "../../src/lib/livekitSession";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
+import { initToast, teardownToast } from "@lib/toast";
+import type { ToastContainer } from "@components/Toast";
 import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
 import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
 
@@ -523,17 +525,23 @@ describe("LiveKitSession on the Linux native backend", () => {
     const { desktop } = await import("../../src/platform/desktop");
     const real = desktop.nativeVoice.startScreen;
     desktop.nativeVoice.startScreen = () => Promise.reject("screen capture portal did not start");
+    const toasts = { show: vi.fn() };
+    initToast(toasts as unknown as ToastContainer);
     try {
       const sharing = session.enableScreenshare();
       await pressGoLive();
       await sharing;
     } finally {
       desktop.nativeVoice.startScreen = real;
+      teardownToast();
     }
     // The portal cannot say whether the user cancelled, so neither silence
-    // nor "permission denied": a soft notice covering both.
-    expect(onError).toHaveBeenCalledWith(
+    // nor a red "permission denied": an info notice covering both.
+    expect(onError).not.toHaveBeenCalled();
+    expect(toasts.show).toHaveBeenCalledWith(
       "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
+      "info",
+      undefined,
     );
     expect(names()).not.toContain("publishScreen");
     expect(nativeCounters.screenTracks).toBe(0);

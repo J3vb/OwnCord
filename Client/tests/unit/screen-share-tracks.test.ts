@@ -18,6 +18,8 @@ import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
+import { initToast, teardownToast } from "@lib/toast";
+import type { ToastContainer } from "@components/Toast";
 
 const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
@@ -643,12 +645,22 @@ describe("enableScreenshare", () => {
       new DOMException("screen capture portal did not start", "NotAllowedError"),
     );
     const deps = fakeDeps(rig.room);
+    const toasts = { show: vi.fn() };
+    initToast(toasts as unknown as ToastContainer);
 
-    await enableScreenshare({ manualScreenTracks: [] }, deps);
+    try {
+      await enableScreenshare({ manualScreenTracks: [] }, deps);
+    } finally {
+      teardownToast();
+    }
 
     expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
-    expect(deps.onError).toHaveBeenCalledWith(
+    // A notice, not the error channel the refusals and failures use.
+    expect(deps.onError).not.toHaveBeenCalled();
+    expect(toasts.show).toHaveBeenCalledWith(
       "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
+      "info",
+      undefined,
     );
   });
 
