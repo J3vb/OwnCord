@@ -1233,7 +1233,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
   if (lastConnectHost !== "") {
     // wirePostAuth already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected
-    // overlay's ready countdown hasn't called navigate("main") yet, so
+    // overlay's ready hand-off hasn't called navigate("main") yet, so
     // the branch above never triggered. The authStore subscriber only tears
     // down once the active page IS "main", so it won't fire for this window
     // either: left alone, the overlay's timer fires navigate("main")
