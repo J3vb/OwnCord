@@ -25,8 +25,8 @@ import (
 //
 // users.status is outside the generation, since every connect writes it and
 // a herd would then never share a read. presentableMembers overlays each
-// connected member's live status instead, so a cached row's status only ever
-// shows for a connection that has not stamped one yet.
+// connected member's live status instead, so a cached row's status never
+// shows: a member whose connection has not stamped one yet shows as offline.
 type memberCache struct {
 	mu      syncutil.Mutex
 	filled  bool

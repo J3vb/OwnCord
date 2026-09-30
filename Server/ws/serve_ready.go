@@ -63,9 +63,11 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 //     the next connect can honour it, which would otherwise leave a signed-out
 //     user showing as "Do Not Disturb" indefinitely.
 //  2. A connected member shows the status their connection last stamped or
-//     chose, not the row's: members comes from the shared read
+//     chose, never the row's: members comes from the shared read
 //     (readyMembers), which may predate that write, since users.status does
-//     not move the member generation.
+//     not move the member generation. A connection that has not stamped one
+//     yet shows as offline, like no connection; its connect presence is
+//     announced after the stamp, so the viewer still converges.
 //  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
@@ -76,13 +78,11 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) []d
 	live := h.liveStatuses()
 	out := make([]db.MemberSummary, 0, len(members))
 	for _, m := range members {
-		status, connected := live[m.ID]
-		switch {
-		case !connected:
+		if status := live[m.ID]; status != "" {
+			m.Status = status
+		} else {
 			m.Status = db.StatusOffline
 			m.CustomStatus = nil
-		case status != "":
-			m.Status = status
 		}
 		out = append(out, m.ForViewer(viewerID))
 	}

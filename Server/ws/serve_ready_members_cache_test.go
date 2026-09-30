@@ -216,3 +216,44 @@ func TestReadyMembers_PresenceUpdateAfterCachedReadShowsLiveStatus(t *testing.T)
 		t.Errorf("busy after presence_update = %v, want dnd", got)
 	}
 }
+
+// A status change does not move the generation, so the cached row can say
+// "online" for a member who has since gone invisible. Until the member's new
+// connection stamps its live status, they must show as offline, never as
+// the cached row: an invisible member must not flash online.
+func TestReadyMembers_UnstampedConnectionIsOfflineNotCachedRow(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	t.Cleanup(hub.Stop)
+	ctx := context.Background()
+	viewer := seedOwnerUser(t, database, "viewer")
+	ghost := seedOwnerUser(t, database, "ghost")
+	reader := &countingReader{DB: database}
+
+	if err := database.UpdateUserCustomStatus(ctx, ghost.ID, new("lurking")); err != nil {
+		t.Fatalf("UpdateUserCustomStatus: %v", err)
+	}
+	if err := database.UpdateUserStatus(ctx, ghost.ID, db.StatusOnline); err != nil {
+		t.Fatalf("UpdateUserStatus(online): %v", err)
+	}
+	if _, ok := buildReadyMembers(t, hub, reader, viewer.ID)[ghost.ID]; !ok {
+		t.Fatal("ghost missing from the ready that fills the cache")
+	}
+	if err := database.UpdateUserStatus(ctx, ghost.ID, db.StatusInvisible); err != nil {
+		t.Fatalf("UpdateUserStatus(invisible): %v", err)
+	}
+	rc := ws.NewTestClientWithUser(hub, ghost, 0, make(chan []byte, 16))
+	hub.Register(rc)
+	waitRegistered(t, hub, rc)
+
+	m := buildReadyMembers(t, hub, reader, viewer.ID)[ghost.ID]
+	if got := m["status"]; got != db.StatusOffline {
+		t.Errorf("unstamped ghost = %v, want offline", got)
+	}
+	if got := m["custom_status"]; got != nil {
+		t.Errorf("unstamped ghost custom_status = %v, want nil", got)
+	}
+	if got := reader.lists.Load(); got != 1 {
+		t.Fatalf("ran %d ListMembers reads, want 1 (the ready must come from the cached list)", got)
+	}
+}
