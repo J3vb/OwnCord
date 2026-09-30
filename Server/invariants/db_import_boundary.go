@@ -81,7 +81,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/backup_maintenance.go":     {Disposition: "boundary", Note: "scheduled backup mechanics on the maintenance tick; settings via the service", Calls: calls{"BackupToSafe": 1}},
 	"admin/handlers_backup.go":        {Disposition: "boundary", Note: "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap", Calls: calls{"BackupToSafe": 2, "Close": 1, "LogAudit": 1, "SQLDb": 1}},
 	"admin/handlers_archive.go":       {Disposition: "boundary", Note: "full-archive download: VACUUM INTO snapshot, then zip the data dir and config", Calls: calls{"BackupToSafe": 1}},
-	"admin/archive_link.go":           {Disposition: "boundary", Note: "issues and redeems the single-use archive link; the handle re-resolves the link's credential and is threaded through to serveArchive", Hands: calls{"auth.ResolveTokenHash": 1}},
+	"admin/archive_link.go":           {Disposition: "boundary", Note: "issues and redeems the single-use archive and backup download links; the handle re-resolves the link's credential, audits a backup download with WriteAudit, and is threaded through to serveArchive", Hands: calls{"auth.ResolveTokenHash": 1}},
 	"admin/handlers_channel_perms.go": {Disposition: "adapter", Note: "override response shapes; the service owns the policy and the calls"},
 	"admin/handlers_channels.go":      {Disposition: "adapter", Note: "db.Channel in the resolver and response shapes; the service owns the calls"},
 	"admin/handlers_users.go":         {Disposition: "adapter", Note: "UserWithRole/User/Role types in the panel response shapes; UserService owns the reads"},

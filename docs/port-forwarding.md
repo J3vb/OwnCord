@@ -41,11 +41,17 @@ tells you how.
 | Which address class it has     | Yes                       | It can read its own interfaces                             |
 | Whether voice is misconfigured | Partly                    | It warns when `voice.node_ip` is not a public address      |
 
-An owner who wants that detail as JSON can switch on
-`server.reachability_report_enabled` and read
-`GET /api/v1/diagnostics/connectivity` as an administrator. It reports the same
-facts plus an `undeterminable` list. It is off by default because it enumerates
-every address on every interface.
+To run the check, open the admin panel's **Dashboard** and press **Run check**
+under **Connectivity check** (administrators only). It shows whether the voice
+server answers, the voice node IP, and the address and address class this
+server sees your own connection coming from. The same report is
+`GET /api/v1/diagnostics/connectivity` for an administrator, as JSON.
+
+An owner who also wants the ports to forward and the list of what the server
+cannot determine can switch on `server.reachability_report_enabled`; the
+Dashboard card then shows both, and the JSON gains a `reachability` block with
+an `undeterminable` list. It is off by default because it enumerates every
+address on every interface.
 
 ## Required Ports
 
