@@ -1943,8 +1943,8 @@ reconnects with the same token once the server is back and returns to the
 channel it was in. Voice ends when the socket actually drops after an
 announcement, since the server's voice state goes with the process; the
 announcement alone leaves the call, because an update can still be aborted.
-After an `update`, `backup_restore` or `setup` drop, the client re-joins the
-call with one ordinary `voice_join` once `ready` arrives
+After the drop, the client re-joins the call with one ordinary `voice_join`
+once `ready` arrives, within a window that depends on the `reason`
 ([voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md), RT-12).
 A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 
