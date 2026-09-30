@@ -29,6 +29,7 @@ import {
   renderMessage,
 } from "./message-list/renderers";
 import { getUnreadOnOpen } from "@stores/channels.store";
+import { UNREAD_COUNT_CAP } from "@lib/formatting";
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
@@ -314,8 +315,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * Suppressed while the window is detached (jumped to an old message): the
    * loaded slice is then not the tail, so "the last N messages" would put the
    * line somewhere arbitrary.
+   *
+   * A count at UNREAD_COUNT_CAP is only a lower bound, so it reads as "every
+   * loaded message is unread": the divider stays at the top of the loaded
+   * window as older history is prepended and never latches to a count-derived
+   * row that could leave real unread messages above it.
    */
-  const unreadOnOpen = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
+  const openedUnread = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
+  const unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
 
   /**
    * Message id the NEW divider is anchored to, once one has been picked.

@@ -178,7 +178,8 @@ export interface ReadyChannel {
   readonly slow_mode?: number;
   /**
    * Unread messages in this channel that mention the current user (directly or
-   * via @everyone/@here). Always ≤ unread_count. Absent from older servers.
+   * via @everyone/@here). Not capped, so it can exceed the capped unread_count.
+   * Absent from older servers.
    */
   readonly mention_count?: number;
   /**
