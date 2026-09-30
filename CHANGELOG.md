@@ -77,6 +77,7 @@ and only when it changes something a contributor or fork holder must do
 - **The channel and DM right-click menus stay on screen.** Opened near the bottom of a short window, their last items (Edit/Delete/Purge, Disconnect) were unreachable; they now flip up to fit. A member's last-message time and reply previews also read the same as the rest of the app (plain text, not raw markdown).
 - **A failed attachment or download now says so.** An image that failed to load used to sit as a filename box that looked like it was still loading; it now shows a short failure line with Retry. A failed download now shows a toast instead of a bare system dialog that told you to "check logs".
 - **Editing a message no longer throws away what you were typing.** Starting an edit while a draft or reply was in the composer cleared it; cancelling or saving the edit now brings your text and reply back, and a channel switch mid-edit keeps the pre-edit draft.
+- **Link previews no longer make a message jump.** A message with a link used to grow once while the preview was fetched and again when it arrived, nudging the row (and the scroll position) under the cursor. The preview now stays out of the layout until its metadata is ready and appears once; a page with no title, description or image adds no empty card, and a failed preview that keeps its Retry names the host a single time instead of twice.
 
 ### Desktop UI
 
@@ -110,9 +111,6 @@ and only when it changes something a contributor or fork holder must do
 ### Installing & updating
 
 - **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.
-### Fixed
-
-- **Link previews no longer make a message jump.** A message with a link used to grow once while the preview was fetched and again when it arrived, nudging the row (and the scroll position) under the cursor. The preview now stays out of the layout until its metadata is ready and appears once; a page with no title, description or image adds no empty card, and a failed preview that keeps its Retry names the host a single time instead of twice.
 
 ## v2.0.1-beta.1
 

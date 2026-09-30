@@ -177,6 +177,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
    *  awaiting card that gets consented must stay focusable for its hand-off. */
   const show = (): void => {
     wrap.classList.remove("msg-embed-link-pending");
+    titleEl.removeAttribute("tabindex");
   };
 
   const apply = (load: OgLoad): void => {
@@ -195,7 +196,9 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
       // render none at all (DP-44). siteName alone still names the host.
       if (meta.title === null && meta.description === null && meta.image === null) {
         wrap.dataset.embedState = "empty";
+        const hadFocus = wrap.contains(document.activeElement);
         wrap.hidden = true;
+        if (hadFocus) focusMessageLink(wrap, url);
         return;
       }
       wrap.dataset.embedState = "loaded";
@@ -226,6 +229,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     wrap.dataset.embedState = "loading";
     wrap.setAttribute("aria-busy", "true");
     wrap.classList.add("msg-embed-link-pending");
+    titleEl.tabIndex = -1;
     void fetchOgMeta(url).then(apply);
   }
 
@@ -242,6 +246,22 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   });
 
   return wrap;
+}
+
+/** Focus the message's own link for `url` in the row holding `card`, or the
+ *  row itself, so a card that hides never leaves focus on <body>. */
+export function focusMessageLink(card: HTMLElement, url: string): void {
+  const row = card.parentElement;
+  if (row === null) return;
+  const link = [...row.querySelectorAll<HTMLAnchorElement>("a.msg-link")].find(
+    (a) => a.getAttribute("href") === url,
+  );
+  if (link !== undefined) {
+    link.focus();
+    return;
+  }
+  row.tabIndex = -1;
+  row.focus();
 }
 
 /** Apply fetched OG metadata to the preview card elements. */

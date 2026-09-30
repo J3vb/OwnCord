@@ -202,6 +202,61 @@ describe("renderGenericLinkPreview", () => {
     expect(card.hidden).toBe(true);
   });
 
+  it("keeps a pending card's link out of the tab order until it has content", async () => {
+    const settle = deferredPreview();
+
+    const card = renderGenericLinkPreview("https://tab.example.com/page");
+    document.body.appendChild(card);
+    const title = card.querySelector<HTMLAnchorElement>(".msg-embed-link-title")!;
+    expect(title.tabIndex).toBe(-1);
+
+    settle(previewOk("Ready"));
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(title.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("hands focus to the message's own link when a focused preview resolves empty", async () => {
+    const url = "https://focus-empty.example.com/page";
+    const settle = deferredPreview();
+    const row = document.createElement("div");
+    const bodyLink = document.createElement("a");
+    bodyLink.className = "msg-link";
+    bodyLink.href = url;
+    row.appendChild(bodyLink);
+    const card = renderGenericLinkPreview(url);
+    row.appendChild(card);
+    document.body.appendChild(row);
+    card.querySelector<HTMLElement>(".msg-embed-link-title")!.focus();
+
+    settle(previewOk(null));
+    await vi.waitFor(() => {
+      expect(card.hidden).toBe(true);
+    });
+    expect(document.activeElement).toBe(bodyLink);
+  });
+
+  it("hands focus to the row when a focused retry resolves empty", async () => {
+    previewMock.mockResolvedValueOnce(refused("unavailable"));
+    const row = document.createElement("div");
+    const card = renderGenericLinkPreview("https://retry-empty.example.com/x");
+    row.appendChild(card);
+    document.body.appendChild(row);
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    const retry = card.querySelector<HTMLButtonElement>(".msg-embed-retry")!;
+    retry.focus();
+
+    previewMock.mockResolvedValueOnce(previewOk(null));
+    retry.click();
+    await vi.waitFor(() => {
+      expect(card.hidden).toBe(true);
+    });
+    expect(document.activeElement).toBe(row);
+  });
+
   it("names the host exactly once on a refusal", async () => {
     previewMock.mockResolvedValue(refused("blocked-destination"));
 
