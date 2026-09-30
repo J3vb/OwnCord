@@ -164,6 +164,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/serve_auth.go":                {Disposition: "adapter", Note: "db.User on the handshake result and the pure StatusOffline const; SessionService resolves the token and writes the connect audit"},
 	"ws/serve_pumps.go":               {Disposition: "adapter", Note: "pure StatusOffline const; the disconnect write goes through the PresenceStamper seam (readers.go)"},
 	"ws/serve_ready.go":               {Disposition: "adapter", Note: "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
+	"ws/serve_ready_encode.go":        {Disposition: "adapter", Note: "encodes the ready frame buildReady read (P5-O01); db row types and the status vocabulary only"},
 	"ws/serve_ready_members_cache.go": {Disposition: "adapter", Note: "the ready payload's shared member-list read (DP-37), through ReadySnapshotReader; MemberSummary type"},
 	"ws/voice_join.go":                {Disposition: "adapter", Note: "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},
 	"ws/voice_moderation.go":          {Disposition: "adapter", Note: "Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row"},

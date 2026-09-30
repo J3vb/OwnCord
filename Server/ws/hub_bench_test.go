@@ -74,8 +74,9 @@ func BenchmarkReconnectStorm(b *testing.B) {
 
 // BenchmarkReadyHerd is the ready side of a restart herd (DP-37): one op
 // builds 50 ready payloads at once over a 500-member roster, as 50 sockets
-// reconnecting together after a restart do. Uses only BuildReadyForTest, so
-// the same file measures a tree from before the shared member read.
+// reconnecting together after a restart do. Each ready is streamed to
+// io.Discard as the handshake streams it to the socket (P5-O01); a tree from
+// before that streaming measured the same work with BuildReadyForTest.
 //
 //	go test -run '^$' -bench ReadyHerd -benchmem ./ws/
 func BenchmarkReadyHerd(b *testing.B) {
@@ -92,7 +93,7 @@ func BenchmarkReadyHerd(b *testing.B) {
 		var wg sync.WaitGroup
 		for i := range herd {
 			wg.Go(func() {
-				if _, err := hub.BuildReadyForTest(database, users[i].ID); err != nil {
+				if err := hub.WriteReadyForTest(database, users[i].ID, nil, io.Discard); err != nil {
 					b.Errorf("buildReady: %v", err)
 				}
 			})
