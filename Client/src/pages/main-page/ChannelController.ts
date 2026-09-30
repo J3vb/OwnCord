@@ -236,8 +236,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
    *  another channel's composer would target the wrong message id. At most
    *  one edit lands, the newest; the error toast (when asked for) says the text is back
    *  only if it is. Deferred a microtask because the synchronous disconnected
-   *  path runs inside MessageInput.handleSend, whose own cancelEdit() (right
-   *  after onEditMessage returns) would otherwise wipe the restored text. */
+   *  path runs inside MessageInput.handleSend, whose own restore of the
+   *  pre-edit draft (right after onEditMessage returns) would otherwise wipe
+   *  the restored edit text. */
   function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
       const newest = edits.findLast((edit) => edit.channelId === currentChannelId);

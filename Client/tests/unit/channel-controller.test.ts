@@ -610,6 +610,30 @@ describe("createChannelController", () => {
         expect.objectContaining({ content: "for 42" }),
       );
     });
+
+    it("restores the pre-edit draft after a channel switch mid-edit (P1-08)", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // While an edit is in progress the composer reports the draft the edit
+      // displaced (not the edit text), so switching away and back keeps it.
+      mockGetDraft.mockReturnValue({
+        content: "pre-edit draft",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      mockGetChannelMessages.mockReturnValue([{ id: 7, content: "original" }]);
+      ctrl.mountChannel(42, "general");
+
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "pre-edit draft",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+    });
   });
 
   it("does not invalidate any window on the very first mount, which fetches exactly once", () => {

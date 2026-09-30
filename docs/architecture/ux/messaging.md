@@ -66,9 +66,11 @@ stateDiagram-v2
 **Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
 state — text, reply target and staged upload ids — in `ChannelController`'s
 `draftByChannel`, and restores it when the user returns; a send that consumes
-the draft leaves nothing behind. An in-progress edit is dropped, not stashed
-(restored outside edit mode it would send as a duplicate), a reply whose
-target was deleted meanwhile is dropped, and a staged upload older than
+the draft leaves nothing behind. Mid-edit, the draft the edit displaced is
+stashed and the edit text itself is dropped (restored outside edit mode it
+would send as a duplicate); cancelling or sending an edit also restores that
+displaced draft (P1-08). A reply whose target was deleted meanwhile is
+dropped, and a staged upload older than
 `DRAFT_ATTACHMENT_TTL_MS` (50 min, under the server's ~1 h unlinked-attachment
 sweep) is dropped with an "attach it again" notice. Gating the composer
 (offline, no permission) uses `aria-disabled` + `readOnly` rather

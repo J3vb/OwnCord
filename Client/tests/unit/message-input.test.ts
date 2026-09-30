@@ -333,6 +333,122 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  // ── P1-08: an edit keeps what you were typing ──
+
+  it("cancelEdit restores the draft and reply the edit displaced", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+    expect(textarea.value).toBe("original body");
+    const bars = container.querySelectorAll(".reply-bar");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(false);
+
+    comp.cancelEdit();
+
+    expect(textarea.value).toBe("draft");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
+    expect(bars[0]!.textContent).toContain("alice");
+    comp.destroy?.();
+  });
+
+  it("sending an edit restores the draft and reply the edit displaced", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+
+    textarea.value = "edited body";
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(opts.onEditMessage).toHaveBeenCalledWith(88, "edited body");
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("draft");
+    const bars = container.querySelectorAll(".reply-bar");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
+    comp.destroy?.();
+  });
+
+  it("getDraft during an edit returns the stashed pre-edit draft", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+
+    const draft = comp.getDraft();
+    expect(draft.content).toBe("draft");
+    expect(draft.replyTo).toEqual({ messageId: 7, username: "alice" });
+    comp.destroy?.();
+  });
+
+  it("a channel switch mid-edit restores the pre-edit draft on return (P1-08)", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+
+    // What ChannelController stashes before tearing the composer down.
+    const stashed = comp.getDraft();
+    comp.destroy?.();
+
+    const next = createMessageInput(opts);
+    next.mount(container);
+    next.restoreDraft(stashed);
+
+    const restored = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    expect(restored.value).toBe("draft");
+    const bars = container.querySelectorAll(".reply-bar");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
+    expect(bars[0]!.textContent).toContain("alice");
+    next.destroy?.();
+  });
+
+  it("staged attachments survive an edit and return with the pre-edit draft", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "srv-1", url: "/f/1", filename: "a.png" }));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["x"], "a.png", { type: "image/png" })],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "draft";
+    comp.startEdit(88, "original body");
+
+    // The edit never touches the staged chip...
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+    comp.cancelEdit();
+
+    // ...and it rides the restored draft.
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+    expect(textarea.value).toBe("draft");
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    expect(opts.onSend).toHaveBeenCalledWith("draft", null, ["srv-1"]);
+    comp.destroy?.();
+  });
+
   it("typing emits onTyping (throttled)", () => {
     vi.useFakeTimers();
     const opts = makeOptions();
@@ -656,12 +772,13 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
-    it("drops an in-progress edit instead of stashing it as a new-message draft", () => {
+    it("never stashes the in-progress edit text as a new-message draft", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);
       comp.mount(container);
       comp.startEdit(5, "original text");
 
+      // The pre-edit draft (empty here) is stashed, never the edit text.
       const draft = comp.getDraft();
       expect(draft).toEqual({ content: "", replyTo: null, attachments: [] });
 
