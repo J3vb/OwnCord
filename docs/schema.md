@@ -29,7 +29,7 @@ OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-
 SQLite only allows one writer at a time. File-backed databases (the production
 mode) therefore run a split pool: a single-connection writer pool
 (`SetMaxOpenConns(1)`) plus a multi-connection read-only pool sized
-`max(4, NumCPU)` and clamped to 1–64, configurable via `database.max_readers`
+`max(8, 2× NumCPU)` and clamped to 1–64, configurable via `database.max_readers`
 (`Server/db/db.go`). Only in-memory databases (tests) keep the historical
 single shared connection.
 

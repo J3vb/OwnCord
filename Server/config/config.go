@@ -339,8 +339,9 @@ type DatabaseConfig struct {
 	Path string `yaml:"path"`
 
 	// MaxReaders bounds the read-only connection pool. 0 (default) keeps the
-	// automatic sizing of max(4, NumCPU). Values are clamped to [1, 64] —
-	// readers beyond the CPU count mostly buy queueing, not throughput.
+	// automatic sizing of max(8, 2×NumCPU). Values are clamped to [1, 64] —
+	// readers beyond roughly twice the CPU count mostly buy queueing, not
+	// throughput.
 	MaxReaders int `yaml:"max_readers"`
 }
 
