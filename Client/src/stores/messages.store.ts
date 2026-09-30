@@ -148,7 +148,8 @@ export function setChannelLoading(channelId: number): void {
   messagesStore.setState((prev) => reduceSetChannelLoading(prev, channelId));
 }
 
-/** Mark a channel's first-page history fetch as failed (the region offers Retry). */
+/** Mark a channel's first-page history fetch as failed (the region offers Retry).
+ *  A window with rows is detached, since they may end short of the live tail. */
 export function setChannelLoadError(channelId: number): void {
   messagesStore.setState((prev) => reduceSetChannelLoadError(prev, channelId));
 }
@@ -179,14 +180,19 @@ export function setChannelLoadError(channelId: number): void {
  *  than the page stay above it instead of being dropped. They may still show
  *  an edit, delete or reaction missed while offline until the next visit
  *  refetches them. A gap, or a page that is the whole channel, replaces the
- *  window as usual. */
+ *  window as usual. A splice past the row cap trims the oldest rows, unless
+ *  that would drop `anchorId`, the row the reader is looking at: then it
+ *  trims the newest end and detaches the window, as prependMessages does. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMore: boolean,
   splice = false,
+  anchorId: number | null = null,
 ): void {
-  messagesStore.setState((prev) => reduceSetMessages(prev, channelId, messages, hasMore, splice));
+  messagesStore.setState((prev) =>
+    reduceSetMessages(prev, channelId, messages, hasMore, splice, anchorId),
+  );
 }
 
 /**

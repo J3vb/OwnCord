@@ -2447,6 +2447,80 @@ describe("WS Dispatcher", () => {
         }
       });
 
+      it("detaches the kept rows when the refetch fails, so no live row lands across the gap", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockRejectedValue(new Error("503"));
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        load200();
+
+        mock.dispatch("ready", readyPayload);
+        mock.dispatch("ready", readyPayload);
+        await settle();
+
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 200));
+        expect(isWindowDetached(1)).toBe(true);
+        mock.dispatch("chat_message", {
+          ...storedMessage(261),
+          user: { id: 2, username: "bob", avatar: null },
+        });
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 200));
+        expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
+      });
+
+      it("keeps the reader's anchor when a splice overflows the row cap", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockResolvedValue({ messages: page(481, 530), has_more: true });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 10 : null));
+        try {
+          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setMessages(1, page(451, 500), true);
+          for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
+          expect(isWindowDetached(1)).toBe(false);
+
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("ready", readyPayload);
+          await settle();
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 500));
+          expect(isWindowDetached(1)).toBe(true);
+          expect(isChannelLoaded(1)).toBe(true);
+        } finally {
+          unregister();
+        }
+      });
+
+      it("trims the oldest rows when a splice overflows below the reader's anchor", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockResolvedValue({ messages: page(481, 530), has_more: true });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 490 : null));
+        try {
+          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setMessages(1, page(451, 500), true);
+          for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
+
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("ready", readyPayload);
+          await settle();
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(31, 530));
+          expect(isWindowDetached(1)).toBe(false);
+        } finally {
+          unregister();
+        }
+      });
+
       it("falls back to the tail for a detached window no list is showing", async () => {
         cleanup();
         const getMessages = vi.fn().mockResolvedValue({ messages: page(451, 500), has_more: true });

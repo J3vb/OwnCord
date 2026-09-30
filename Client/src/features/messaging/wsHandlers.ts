@@ -430,7 +430,13 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
             })
           : getMessages(activeAfterReady, { limit: 50 }).then((resp) => {
               if (!stillActive()) return;
-              setMessages(activeAfterReady, resp.messages, resp.has_more, true);
+              setMessages(
+                activeAfterReady,
+                resp.messages,
+                resp.has_more,
+                true,
+                readingAnchor(activeAfterReady),
+              );
             });
       refetch.catch((err: unknown) => {
         log.warn("Failed to reload message history after resync", { error: String(err) });
@@ -441,7 +447,8 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
         // An empty channel shows the inline error + Retry (MessageController's
         // loadMessages re-fetches because invalidate cleared "loaded"). Rows
         // still on screen hide that region, so say it with a toast, as the
-        // normal load path does.
+        // normal load path does; the error detaches them, so "Jump to
+        // Present" refetches and no live row lands across the gap.
         setChannelLoadError(activeAfterReady);
         if (getChannelMessages(activeAfterReady).length > 0) {
           showToast(shellText("messages.loadHistoryFailed"), "error");

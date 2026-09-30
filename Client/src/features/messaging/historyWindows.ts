@@ -44,11 +44,17 @@ export function reduceSetChannelLoading(prev: MessagesState, channelId: number):
   return { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark };
 }
 
-/** setChannelLoadError's reducer. */
+/** setChannelLoadError's reducer. Rows the failed fetch did not reconcile may
+ *  end short of the live tail, so a window that has any is detached: live
+ *  broadcasts stop appending across the gap and "Jump to Present" refetches. */
 export function reduceSetChannelLoadError(prev: MessagesState, channelId: number): MessagesState {
   const updated = new Map(prev.historyLoadState);
   updated.set(channelId, "error");
-  return { ...prev, historyLoadState: updated };
+  const rows = prev.messagesByChannel.get(channelId) ?? [];
+  if (!rows.some((m) => m.status === "sent")) return { ...prev, historyLoadState: updated };
+  const detachedChannels = new Set(prev.detachedChannels);
+  detachedChannels.add(channelId);
+  return { ...prev, historyLoadState: updated, detachedChannels };
 }
 
 /** setMessages' reducer: merge a newest-first REST page into the channel's window. */
@@ -58,6 +64,7 @@ export function reduceSetMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
   splice = false,
+  anchorId: number | null = null,
 ): MessagesState {
   const converted = messages.map(messageResponseToMessage).toReversed();
   const trimmed =
@@ -109,9 +116,17 @@ export function reduceSetMessages(
       ? previous.filter((m) => m.status === "sent" && m.id < minSnapshotId)
       : [];
   let merged: readonly Message[] = [...older, ...snapshot, ...carried];
-  const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
-  if (mergeTrimmed) {
-    merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
+  const overflow = merged.length - MAX_MESSAGES_PER_CHANNEL;
+  const mergeTrimmed = overflow > 0;
+  // A splice that would trim the reader's anchor off the top keeps the head
+  // instead and detaches, as prependMessages does, so the reader stays put.
+  const anchorIdx = anchorId === null ? -1 : merged.findIndex((m) => m.id === anchorId);
+  const keepHead = mergeTrimmed && older.length > 0 && anchorIdx !== -1 && anchorIdx < overflow;
+  if (keepHead) {
+    const cut = merged.slice(MAX_MESSAGES_PER_CHANNEL).filter((m) => m.status !== "sent");
+    merged = [...merged.slice(0, MAX_MESSAGES_PER_CHANNEL), ...cut];
+  } else if (mergeTrimmed) {
+    merged = merged.slice(overflow);
   }
   if (merged.length === previous.length && merged.every((m, i) => m === previous[i])) {
     merged = previous;
@@ -128,15 +143,20 @@ export function reduceSetMessages(
     channelId,
     (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMore) : hasMore) ||
       converted.length > MAX_MESSAGES_PER_CHANNEL ||
-      mergeTrimmed,
+      (mergeTrimmed && !keepHead),
   );
 
   const updatedLoadState = new Map(prev.historyLoadState);
   updatedLoadState.delete(channelId);
 
-  // Loading the plain tail always reattaches: this *is* the live end.
+  // Loading the plain tail reattaches: this *is* the live end, unless the
+  // trim above cut it off again.
   const updatedDetached = new Set(prev.detachedChannels);
-  updatedDetached.delete(channelId);
+  if (keepHead) {
+    updatedDetached.add(channelId);
+  } else {
+    updatedDetached.delete(channelId);
+  }
 
   // The watermark's job ends here — it was consumed as carryFloor above.
   const updatedWatermark = new Map(prev.loadWatermark ?? []);
