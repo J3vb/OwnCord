@@ -120,6 +120,9 @@ function fetchOgMeta(url: string): Promise<OgLoad> {
 
 // -- Link preview rendering ---------------------------------------------------
 
+/** How long a link preview waits for its image before it shows without one. */
+const OG_IMAGE_REVEAL_CAP_MS = 3000;
+
 /** Drop a URL's cached preview (and in-flight answer) so an explicit retry
  *  re-asks the broker rather than replaying the refusal. */
 function clearOgEntry(url: string): void {
@@ -178,8 +181,11 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   content.appendChild(retryEl);
 
   /** Zero-height until the card has something to show, so the row grows once,
-   *  when the metadata lands, instead of twice (DP-44). Not `hidden`: an
-   *  awaiting card that gets consented must stay focusable for its hand-off. */
+   *  when the preview (and its image) lands, instead of twice (DP-44). Not
+   *  `hidden`: an awaiting card that gets consented must stay focusable for its
+   *  hand-off. */
+  wrap.classList.add("msg-embed-link-pending");
+  titleEl.tabIndex = -1;
   const show = (): void => {
     wrap.classList.remove("msg-embed-link-pending");
     titleEl.removeAttribute("tabindex");
@@ -207,10 +213,23 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
         return;
       }
       wrap.dataset.embedState = "loaded";
-      show();
       statusEl.hidden = true;
       hostEl.hidden = false;
-      applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      const imageSettled = applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      if (meta.image === null) {
+        show();
+        return;
+      }
+      // An image slower than the cap is dropped rather than growing the row
+      // a second time after the card is shown.
+      const cap = setTimeout(() => {
+        imageWrap.remove();
+        show();
+      }, OG_IMAGE_REVEAL_CAP_MS);
+      void imageSettled.then(() => {
+        clearTimeout(cap);
+        show();
+      });
       return;
     }
     wrap.dataset.embedState = "failed";
@@ -233,8 +252,6 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   } else {
     wrap.dataset.embedState = "loading";
     wrap.setAttribute("aria-busy", "true");
-    wrap.classList.add("msg-embed-link-pending");
-    titleEl.tabIndex = -1;
     void fetchOgMeta(url).then(apply);
   }
 
@@ -269,7 +286,8 @@ export function focusMessageLink(card: HTMLElement, url: string): void {
   row.focus();
 }
 
-/** Apply fetched OG metadata to the preview card elements. */
+/** Apply fetched OG metadata to the preview card elements. Resolves once the
+ *  preview's image, if any, has loaded or failed. */
 export function applyOgMeta(
   meta: OgMeta,
   titleEl: HTMLElement,
@@ -278,7 +296,7 @@ export function applyOgMeta(
   imageWrap: HTMLElement,
   url: string,
   displayHost: string,
-): void {
+): Promise<void> {
   setText(titleEl, meta.title ?? displayHost);
   setText(hostEl, meta.siteName ?? displayHost);
   if (meta.description !== null) {
@@ -289,53 +307,51 @@ export function applyOgMeta(
   } else {
     descEl.style.display = "none";
   }
-  if (meta.image !== null) {
-    showOgImage(meta, meta.image, imageWrap, url);
-  }
+  if (meta.image === null) return Promise.resolve();
+  return showOgImage(meta, meta.image, imageWrap, url);
 }
 
-/** Show a preview's image. The broker forgets old handles, so when one has
- *  expired the preview is asked for again — once per URL — for a fresh one. */
+/** Show a preview's image, resolving once it has loaded or failed. The broker
+ *  forgets old handles, so when one has expired the preview is asked for
+ *  again — once per URL — for a fresh one. */
 function showOgImage(
   meta: OgMeta,
   handle: ExternalImageHandle,
   imageWrap: HTMLElement,
   url: string,
   reask = true,
-): void {
-  const reaskPreview = (): void => {
-    if (!reask) return;
+): Promise<void> {
+  const reaskPreview = (): Promise<void> => {
+    if (!reask) return Promise.resolve();
     let fresh = ogReasked.get(url);
     if (fresh === undefined) {
       clearOgEntry(url);
       fresh = fetchOgMeta(url);
       ogReasked.set(url, fresh);
     }
-    void fresh.then((next) => {
-      if (next.ok && next.meta.image !== null) {
-        showOgImage(next.meta, next.meta.image, imageWrap, url, false);
-      }
-    });
+    return fresh.then((next) =>
+      next.ok && next.meta.image !== null
+        ? showOgImage(next.meta, next.meta.image, imageWrap, url, false)
+        : undefined,
+    );
   };
   // The image arrives as broker-fetched bytes (a same-origin blob: URL),
   // never as an og:image URL the webview would load behind the broker.
   const source = { handle };
-  void loadExternalImage(source).then((result) => {
+  return loadExternalImage(source).then((result) => {
     if (!result.ok) {
-      if (result.failure === "expired-handle") reaskPreview();
-      return;
+      return result.failure === "expired-handle" ? reaskPreview() : undefined;
     }
     const src = result.value;
     const img = createElement("img", {
       class: "msg-embed-link-img",
       src,
       alt: meta.title ?? "",
-      loading: "lazy",
     });
     recoverEvictedImage(img, source, () => {
       img.remove();
       imageWrap.style.display = "none";
-      reaskPreview();
+      void reaskPreview();
     });
     img.addEventListener("error", () => {
       imageWrap.style.display = "none";
@@ -353,5 +369,9 @@ function showOgImage(
     }
     imageWrap.appendChild(img);
     imageWrap.style.display = "";
+    return new Promise<void>((resolve) => {
+      img.addEventListener("load", () => resolve(), { once: true });
+      img.addEventListener("error", () => resolve(), { once: true });
+    });
   });
 }

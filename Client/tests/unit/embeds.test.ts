@@ -202,6 +202,75 @@ describe("renderGenericLinkPreview", () => {
     expect(card.hidden).toBe(true);
   });
 
+  it("grows the row once for a preview with an image, when the image has loaded", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: {
+        title: "Pic",
+        description: null,
+        siteName: null,
+        image: "h1" as ExternalImageHandle,
+      },
+    });
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+
+    const card = renderGenericLinkPreview("https://pic.example.com/page");
+    document.body.appendChild(card);
+
+    const img = await vi.waitFor(() => {
+      const el = card.querySelector<HTMLImageElement>(".msg-embed-link-img");
+      if (el === null) throw new Error("no image yet");
+      return el;
+    });
+    expect(card.dataset.embedState).toBe("loaded");
+    expect(card.classList.contains("msg-embed-link-pending")).toBe(true);
+
+    img.dispatchEvent(new Event("load"));
+    await vi.waitFor(() => {
+      expect(card.classList.contains("msg-embed-link-pending")).toBe(false);
+    });
+    expect(card.querySelector(".msg-embed-link-img")).toBe(img);
+  });
+
+  it("shows the card without its image when the image is slower than the cap", async () => {
+    vi.useFakeTimers();
+    try {
+      previewMock.mockResolvedValue({
+        ok: true,
+        value: {
+          title: "Slow",
+          description: null,
+          siteName: null,
+          image: "h1" as ExternalImageHandle,
+        },
+      });
+      const image: { settle?: (result: ImageResult) => void } = {};
+      imageMock.mockImplementation(
+        () =>
+          new Promise<ImageResult>((resolve) => {
+            image.settle = resolve;
+          }),
+      );
+
+      const card = renderGenericLinkPreview("https://slow.example.com/page");
+      document.body.appendChild(card);
+      await vi.waitFor(() => {
+        expect(imageMock).toHaveBeenCalled();
+      });
+      expect(card.classList.contains("msg-embed-link-pending")).toBe(true);
+
+      vi.advanceTimersByTime(3000);
+      expect(card.classList.contains("msg-embed-link-pending")).toBe(false);
+      expect(card.querySelector(".msg-embed-link-image")).toBeNull();
+
+      image.settle?.({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(card.querySelector(".msg-embed-link-img")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("adds no card when the preview's text is only blank strings", async () => {
     previewMock.mockResolvedValue({
       ok: true,
