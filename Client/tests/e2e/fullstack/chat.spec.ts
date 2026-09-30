@@ -218,13 +218,17 @@ test("a server restart keeps the reader where they were in older history", async
     password: "OwnCord-E2E-pass-123!",
   });
   const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/ws`);
-  const replies = new Map<string, (frame: { type: string; payload?: { code?: string } }) => void>();
+  // One send is in flight at a time: its reply is the frame carrying its id.
+  let pending: {
+    id: string;
+    resolve: (frame: { type: string; payload?: { code?: string } }) => void;
+  } | null = null;
   let ready!: () => void;
   const readyFrame = new Promise<void>((resolve) => (ready = resolve));
   socket.addEventListener("message", (event) => {
     const frame = JSON.parse(String(event.data));
     if (frame.type === "ready") ready();
-    if (typeof frame.id === "string") replies.get(frame.id)?.(frame);
+    if (pending && frame.id === pending.id) pending.resolve(frame);
   });
   await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
   socket.send(JSON.stringify({ type: "auth", payload: { token: auth.token } }));
@@ -235,8 +239,8 @@ test("a server restart keeps the reader where they were in older history", async
     // The server allows ten sends a second; wait out a refusal and resend.
     for (;;) {
       const requestId = crypto.randomUUID();
-      const reply = new Promise<{ type: string; payload?: { code?: string } }>((resolve) =>
-        replies.set(requestId, resolve),
+      const reply = new Promise<{ type: string; payload?: { code?: string } }>(
+        (resolve) => (pending = { id: requestId, resolve }),
       );
       socket.send(
         JSON.stringify({
