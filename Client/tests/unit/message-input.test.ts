@@ -1238,19 +1238,20 @@ describe("MessageInput", () => {
 
     afterEach(() => authStore.setState((s) => ({ ...s, uploadPolicy: null })));
 
-    it("refuses a blocked extension before uploading, however it is spelled or placed", async () => {
+    it("refuses a blocked final extension before uploading, however it is spelled", async () => {
       authStore.setState((s) => ({
         ...s,
         uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024, blocked_extensions: ["bat", "ps1"] },
       }));
-      for (const name of ["cleanup.BAT", "report.pdf.bat", "invoice.ps1.txt", "run.bat. "]) {
+      for (const name of ["cleanup.BAT", "report.pdf.bat", "photo.jpg.ps1", "run.bat. "]) {
         const { onUploadFile, error } = await pick(name);
         expect(onUploadFile, name).not.toHaveBeenCalled();
         expect(error, name).toMatch(/this server doesn't allow \.(bat|ps1) files$/);
         expect(error, name).toContain(name);
       }
-      const ok = await pick("notes.txt");
-      expect(ok.onUploadFile).toHaveBeenCalled();
+      for (const name of ["notes.txt", "invoice.ps1.txt", "www.amazon.bat.png"]) {
+        expect((await pick(name)).onUploadFile, name).toHaveBeenCalled();
+      }
     });
 
     it("in allow-only mode refuses anything not listed, including no extension", async () => {

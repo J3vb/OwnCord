@@ -228,10 +228,10 @@ every non-empty file, and clients disable attaching. An older server omits
 `upload_policy`; clients then assume 100 MiB.
 
 `blocked_extensions` and `allowed_extensions` are the file-type policy in
-force (config.yaml's lists, or the owner's saved ones). A blocked extension
-anywhere in a file name is refused, case-insensitively, ignoring trailing dots
-and spaces; a non-empty `allowed_extensions` accepts only those final
-extensions. Either is omitted when empty or unknown, and clients then refuse
+force (config.yaml's lists, or the owner's saved ones). Only a file name's
+final extension counts, case-insensitively, ignoring trailing dots and spaces:
+a blocked one is refused, and a non-empty `allowed_extensions` accepts only
+those. Either is omitted when empty or unknown, and clients then refuse
 nothing by name. The values are read with the server-name cache, so a change
 reaches a new connection within 30 seconds.
 

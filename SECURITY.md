@@ -189,7 +189,7 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   sniffs the type from the file bytes,
   refuses executable and script magic bytes (`blockedMagic`,
   `Server/storage/storage.go`), refuses names under the owner's file-type
-  policy (`storage.FileTypePolicy`: blocked extensions, by default Windows
+  policy (`storage.FileTypePolicy`: blocked final extensions, by default Windows
   scripts, installers and disk images, plus an optional allow-only list;
   owner-only in the admin panel), and serves HTML, SVG, XML, PDF and XSL as
   `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff`.

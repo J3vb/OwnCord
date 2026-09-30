@@ -115,8 +115,8 @@ type UploadPolicy struct {
 	// disabled: the upload route refuses every non-empty file.
 	MaxUploadBytes int64 `json:"max_upload_bytes"`
 	// BlockedExtensions and AllowedExtensions are the file-type policy in
-	// force (storage.FileTypePolicy): a blocked extension anywhere in the name
-	// is refused, and a non-empty allowed list is allow-only mode.
+	// force (storage.FileTypePolicy): a blocked final extension is refused,
+	// and a non-empty allowed list is allow-only mode.
 	BlockedExtensions []string `json:"blocked_extensions,omitempty"`
 	AllowedExtensions []string `json:"allowed_extensions,omitempty"`
 }

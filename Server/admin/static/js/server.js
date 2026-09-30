@@ -55,7 +55,7 @@ async function renderSettings(){
   const owner=isOwner();
   const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
   html+=settingsCard('Upload file types',
-    '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by name, however the name is capitalised and wherever the extension appears in it, such as <code>report.pdf.bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'
+    '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by their last extension, however it is capitalised, so <code>report.pdf.bat</code> is refused for <code>bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'
     +settingsRow('upload_blocked_extensions','Blocked file types','Never accepted',extInput('upload_blocked_extensions'))
     +settingsRow('upload_allowed_extensions','Allow only these file types','Leave empty to accept any file type that is not blocked',extInput('upload_allowed_extensions')));
   /* Facts, not inputs: these take effect from config.yaml at start-up, so
@@ -141,7 +141,7 @@ async function saveSettings(){
   const body=settingsDiff(settingsFormValues(SETTINGS_KEYS));
   if(!Object.keys(body).length){setSettingsChanged(false);showToast('Settings saved');return}
   try{
-    state._settings=await api('PATCH','/settings',body);
+    state._settings={...state._settings,...await api('PATCH','/settings',body)};
     if('server_name' in body&&state.me){state.me.server_name=body.server_name;renderTopbar()}
     setSettingsChanged(false);showToast('Settings saved');
   }catch(e){

@@ -200,22 +200,17 @@ function uploadsDisabledByServer(): boolean {
 /**
  * The extension this server's file-type policy refuses `name` for ("" for a
  * name with none in allow-only mode), or null when it is allowed. Mirrors the
- * server's check: case-insensitive, every extension in the name, trailing
- * dots and spaces ignored.
+ * server's check: case-insensitive, the final extension only, trailing dots
+ * and spaces ignored.
  */
 function refusedExtension(name: string): string | null {
   const policy = authStore.getState().uploadPolicy;
-  const exts = name
-    .toLowerCase()
-    .replace(/[. ]+$/, "")
-    .split(".")
-    .slice(1)
-    .map((e) => e.trim());
-  const blocked = exts.find((e) => policy?.blocked_extensions?.includes(e) === true);
-  if (blocked !== undefined) return blocked;
+  const trimmed = name.toLowerCase().replace(/[. ]+$/, "");
+  const dot = trimmed.lastIndexOf(".");
+  const ext = dot < 0 ? "" : trimmed.slice(dot + 1).trim();
+  if (policy?.blocked_extensions?.includes(ext) === true) return ext;
   const allowed = policy?.allowed_extensions ?? [];
-  const final = exts.at(-1) ?? "";
-  return allowed.length === 0 || allowed.includes(final) ? null : final;
+  return allowed.length === 0 || allowed.includes(ext) ? null : ext;
 }
 // Server/ws/command.go rejects the whole chat_send frame (as a generic parse
 // error, not an attachment-specific one) once len(Attachments) > 10 -- cap

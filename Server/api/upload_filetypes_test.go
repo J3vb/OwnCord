@@ -36,11 +36,12 @@ func TestUpload_BlockedExtensionRefused(t *testing.T) {
 	h := fileTypeHarness(t, storage.FileTypePolicy{Blocked: storage.DefaultBlockedExtensions})
 	assertBlocked(t, h, "cleanup.BAT", []byte("@echo off\r\n"), ".bat")
 	assertBlocked(t, h, "report.pdf.ps1", []byte("Get-ChildItem\n"), ".ps1")
-	assertBlocked(t, h, "notes.hta.txt", []byte("<html></html>"), ".hta")
+	assertBlocked(t, h, "photo.jpg.hta", []byte("<html></html>"), ".hta")
 
-	rr := doUpload(t, h.router, h.token, "file", "notes.txt", []byte("hello"))
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("notes.txt: status %d, body %s", rr.Code, rr.Body.String())
+	for _, name := range []string{"notes.txt", "www.amazon.com.txt", "notes.hta.txt"} {
+		if rr := doUpload(t, h.router, h.token, "file", name, []byte("hello")); rr.Code != http.StatusCreated {
+			t.Fatalf("%s: status %d, body %s", name, rr.Code, rr.Body.String())
+		}
 	}
 }
 

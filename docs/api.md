@@ -2001,7 +2001,7 @@ Upload a file as multipart form data.
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
 
-The file name is then checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and covers every extension in the name, so `report.pdf.bat` and `report.bat.pdf` are both refused when `bat` is blocked; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
+The file name is then checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
 #### Response 201 Created
 

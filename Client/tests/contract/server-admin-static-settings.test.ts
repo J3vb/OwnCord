@@ -960,6 +960,33 @@ describe("Server/admin/static — upload file types", () => {
     expect(field(dom.window.document, "upload_blocked_extensions").value).toBe("");
   });
 
+  it("keeps config.yaml's lists as the baseline after a save, so a later save sends only its own edit", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(
+      calls,
+      respondWith({
+        "PATCH /settings": { json: { ...LOADED_SETTINGS, server_name: "Renamed" } },
+      }),
+    );
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const input = (key: string, value: string) => {
+      field(document, key).value = value;
+      field(document, key).dispatchEvent(new dom!.window.Event("input", { bubbles: true }));
+    };
+
+    input("server_name", "Renamed");
+    await booted.bridge.saveSettings();
+    input("motd", "New MOTD");
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      motd: "New MOTD",
+    });
+  });
+
   it("is read-only for anyone but the owner", async () => {
     const booted = await boot([], respondWith());
     dom = booted.dom;

@@ -18,6 +18,7 @@ func TestFileTypePolicy_DefaultsBlockWindowsScripts(t *testing.T) {
 		"x.wsf", "x.wsh", "page.hta", "screen.scr", "setup.msi", "pkg.msix", "pkg.appx",
 		"app.jar", "keys.reg", "panel.cpl", "old.com", "x.pif", "x.application", "x.gadget",
 		"setup.inf", "link.lnk", "site.url", "disk.iso", "disk.img", "disk.vhd", "disk.vhdx",
+		"x.ws", "x.appref-ms", "docs.library-ms", "x.searchconnector-ms", "host.rdp", "fix.diagcab",
 	} {
 		err := p.Check(name)
 		if err == nil {
@@ -28,7 +29,10 @@ func TestFileTypePolicy_DefaultsBlockWindowsScripts(t *testing.T) {
 			t.Errorf("Check(%q) = %q, want the blocked file type shape", name, err)
 		}
 	}
-	for _, name := range []string{"photo.png", "notes.txt", "report.pdf", "archive.zip", "README", "v1.2.3.tar.gz"} {
+	for _, name := range []string{
+		"photo.png", "notes.txt", "report.pdf", "archive.zip", "README", "v1.2.3.tar.gz",
+		"www.amazon.com.png", "backup-example.com.zip", "jquery.js.map", "photo.img.jpg", "setup.inf.txt",
+	} {
 		if err := p.Check(name); err != nil {
 			t.Errorf("Check(%q) = %v, want allowed", name, err)
 		}
@@ -40,7 +44,7 @@ func TestFileTypePolicy_CaseAndDoubleExtensions(t *testing.T) {
 	for _, name := range []string{
 		"RUN.BAT", "Run.Bat", // case-insensitive
 		"report.pdf.bat",         // the final extension
-		"report.bat.pdf",         // an inner extension
+		"photo.jpg.bat",          // a disguised final extension
 		"evil.bat.", "evil.bat ", // Windows drops trailing dots and spaces
 		"evil.bat. . ",
 		".bat",
@@ -53,19 +57,21 @@ func TestFileTypePolicy_CaseAndDoubleExtensions(t *testing.T) {
 	if err := p.Check("report.pdf.bat"); err == nil || err.Error() != "blocked file type: .bat" {
 		t.Errorf("Check(report.pdf.bat) = %v, want %q", err, "blocked file type: .bat")
 	}
-	if err := p.Check("batch.txt"); err != nil {
-		t.Errorf("Check(batch.txt) = %v, want allowed (the base name is not an extension)", err)
+	for _, name := range []string{"batch.txt", "report.bat.pdf", "lib.js.map"} {
+		if err := p.Check(name); err != nil {
+			t.Errorf("Check(%q) = %v, want allowed (only the final extension counts)", name, err)
+		}
 	}
 }
 
 func TestFileTypePolicy_AllowOnlyMode(t *testing.T) {
 	p := storage.FileTypePolicy{Blocked: []string{"bat"}, Allowed: []string{"png", "pdf"}}
-	for _, name := range []string{"a.png", "A.PNG", "doc.pdf", "v1.2.pdf"} {
+	for _, name := range []string{"a.png", "A.PNG", "doc.pdf", "v1.2.pdf", "a.bat.pdf"} {
 		if err := p.Check(name); err != nil {
 			t.Errorf("Check(%q) = %v, want allowed", name, err)
 		}
 	}
-	for _, name := range []string{"a.txt", "README", "a.png.exe", "a.bat.pdf"} {
+	for _, name := range []string{"a.txt", "README", "a.png.exe", "a.pdf.bat"} {
 		err := p.Check(name)
 		if err == nil || !strings.HasPrefix(err.Error(), "blocked file type: ") {
 			t.Errorf("Check(%q) = %v, want a blocked file type", name, err)
@@ -89,7 +95,7 @@ func TestParseExtensionList(t *testing.T) {
 	if got, err := storage.ParseExtensionList("  "); err != nil || len(got) != 0 {
 		t.Errorf("ParseExtensionList(blank) = %q, %v; want empty, nil", got, err)
 	}
-	for _, bad := range []string{"tar.gz", "a/b", `a\b`, "a:b", strings.Repeat("x", 33), "a\u202eb"} {
+	for _, bad := range []string{"tar.gz", "a/b", `a\b`, "a:b", strings.Repeat("x", 33), "a\u202eb", "...", "."} {
 		if _, err := storage.ParseExtensionList(bad); err == nil {
 			t.Errorf("ParseExtensionList(%q) = nil error, want invalid", bad)
 		}

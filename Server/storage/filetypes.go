@@ -17,6 +17,7 @@ var DefaultBlockedExtensions = []string{
 	"sct", "hta", "scr", "msi", "msp", "msc", "msix", "msixbundle", "appx", "appxbundle",
 	"appinstaller", "application", "jar", "reg", "cpl", "com", "pif", "gadget", "inf",
 	"lnk", "url", "scf", "settingcontent-ms", "chm", "iso", "img", "vhd", "vhdx", "exe", "dll",
+	"ws", "appref-ms", "library-ms", "searchconnector-ms", "rdp", "diagcab",
 }
 
 // maxExtensionLen bounds one list entry, so a list stays a list of extensions.
@@ -26,7 +27,7 @@ const maxExtensionLen = 32
 // what ValidateFileType allows and can never widen it: the magic-byte blocks
 // in Save apply to every file whatever its name.
 type FileTypePolicy struct {
-	// Blocked extensions are refused wherever they appear in the name.
+	// Blocked extensions are refused as the final extension of the name.
 	Blocked []string
 	// Allowed, when non-empty, switches on allow-only mode: the final
 	// extension must be listed. A blocked extension stays blocked.
@@ -34,26 +35,23 @@ type FileTypePolicy struct {
 }
 
 // Check refuses filename when the policy blocks it, with the same "blocked
-// file type:" error shape as ValidateFileType. Matching is case-insensitive
-// and sees every extension in the name, so report.pdf.bat and report.bat.pdf
-// are both refused for bat; trailing dots and spaces, which Windows drops
-// when it saves the file, are ignored.
+// file type:" error shape as ValidateFileType. Only the final extension
+// counts, as it picks the program Windows opens the file with: report.pdf.bat
+// is refused for bat and report.bat.pdf is not. Matching is case-insensitive;
+// trailing dots and spaces, which Windows drops when it saves the file, are
+// ignored.
 func (p FileTypePolicy) Check(filename string) error {
-	parts := strings.Split(strings.ToLower(strings.TrimRight(filename, ". ")), ".")
-	exts := parts[1:]
-	for _, ext := range exts {
-		if ext = strings.TrimSpace(ext); slices.Contains(p.Blocked, ext) {
-			return fmt.Errorf("blocked file type: .%s", ext)
+	name := strings.ToLower(strings.TrimRight(filename, ". "))
+	dot := strings.LastIndexByte(name, '.')
+	if dot < 0 {
+		if len(p.Allowed) == 0 {
+			return nil
 		}
-	}
-	if len(p.Allowed) == 0 {
-		return nil
-	}
-	if len(exts) == 0 {
 		return errors.New("blocked file type: no file extension")
 	}
-	if final := strings.TrimSpace(exts[len(exts)-1]); !slices.Contains(p.Allowed, final) {
-		return fmt.Errorf("blocked file type: .%s", final)
+	ext := strings.TrimSpace(name[dot+1:])
+	if slices.Contains(p.Blocked, ext) || len(p.Allowed) > 0 && !slices.Contains(p.Allowed, ext) {
+		return fmt.Errorf("blocked file type: .%s", ext)
 	}
 	return nil
 }
@@ -65,18 +63,19 @@ func ParseExtensionList(s string) ([]string, error) {
 }
 
 // NormalizeExtensions lower-cases each entry and strips its leading dots,
-// dropping empty entries and duplicates. An entry that cannot be one
-// extension (a dot, a path or stream separator, a space or an invisible
-// character inside it, or over 32 bytes) is an error rather than an entry
-// that silently never matches.
+// dropping blank entries and duplicates. An entry that cannot be one
+// extension (nothing but dots, a dot, a path or stream separator, a space or
+// an invisible character inside it, or over 32 bytes) is an error rather than
+// an entry that silently never matches.
 func NormalizeExtensions(list []string) ([]string, error) {
 	out := make([]string, 0, len(list))
 	for _, raw := range list {
-		ext := strings.ToLower(strings.TrimLeft(strings.TrimSpace(raw), "."))
-		if ext == "" || slices.Contains(out, ext) {
+		trimmed := strings.TrimSpace(raw)
+		ext := strings.ToLower(strings.TrimLeft(trimmed, "."))
+		if trimmed == "" || slices.Contains(out, ext) {
 			continue
 		}
-		if len(ext) > maxExtensionLen || strings.ContainsFunc(ext, func(r rune) bool {
+		if ext == "" || len(ext) > maxExtensionLen || strings.ContainsFunc(ext, func(r rune) bool {
 			return strings.ContainsRune(`./\:,`, r) || unicode.IsSpace(r) || unicode.IsControl(r) || unicode.In(r, unicode.Cf)
 		}) {
 			return nil, fmt.Errorf("%q is not a file extension", raw)

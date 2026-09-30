@@ -61,6 +61,10 @@ func TestUploadFileTypes_InvalidEntryFailsLoad(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "upload.allowed_extensions") {
 		t.Fatalf("Load = %v, want an upload.allowed_extensions error", err)
 	}
+	_, err = loadUploadYAML(t, "upload:\n  blocked_extensions: [bat, cmd, ...]\n")
+	if err == nil || !strings.Contains(err.Error(), "upload.blocked_extensions") {
+		t.Fatalf("Load = %v, want an upload.blocked_extensions error for ...", err)
+	}
 }
 
 func TestUploadFileTypes_EnvOverride(t *testing.T) {
