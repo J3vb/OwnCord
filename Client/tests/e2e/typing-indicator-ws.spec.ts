@@ -106,6 +106,6 @@ test.describe("Typing Indicator — WebSocket", () => {
     await expect(page.locator(".msg-text", { hasText: "dp15-unique-message" })).toBeVisible({
       timeout: 5_000,
     });
-    await expect(typingBar).toBeEmpty();
+    await expect(typingBar).toBeEmpty({ timeout: 1_000 });
   });
 });
