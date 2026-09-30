@@ -1128,7 +1128,7 @@ authStore.subscribeSelector(
   (s) => s.isAuthenticated,
   (isAuthenticated) => {
     // The router only reaches "main" from the connected overlay's own
-    // onReady, 800ms after `ready` arrives — so a session that ends between
+    // onReady, a task after `ready` arrives — so a session that ends between
     // auth_ok and ready (a ban, an auth_error on an intervening reconnect)
     // flips isAuthenticated false while the router is still "connect". The synchronous session cleanup has already
     // destroyed its overlay; lastConnectHost retains the transport ownership

@@ -172,9 +172,10 @@ test.describe("Register Flow — Submission", () => {
 
     await page.locator(".btn-primary[type='submit']").click();
 
-    // Should transition to the connected overlay
-    const overlay = page.locator(".connected-overlay");
-    await expect(overlay).toBeVisible({ timeout: 5000 });
+    // Should transition to the main app: the connected overlay hands off as
+    // soon as `ready` arrives, so assert the destination, not the transient
+    // overlay.
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 5000 });
   });
 
   test("register shows loading state during submission", async ({ page }) => {
@@ -225,8 +226,8 @@ test.describe("Register Flow — Submission", () => {
     await expect(submitBtn).toHaveClass(/loading/);
     await expect(submitBtn.locator(".btn-text")).toHaveText("Registering…");
 
-    // And it completes into the connected overlay.
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5_000 });
+    // And it completes into the main app.
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 5_000 });
   });
 
   test("register error shows error banner", async ({ page }) => {
@@ -283,7 +284,7 @@ test.describe("Register Flow — Registration modes", () => {
     await expect(page.locator("#invite").locator("..")).toHaveClass(/form-group--hidden/);
 
     await page.locator(".btn-primary[type='submit']").click();
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 5000 });
   });
 
   test("approval mode shows the pending-approval notice up front and submits without a code", async ({
@@ -300,7 +301,7 @@ test.describe("Register Flow — Registration modes", () => {
     await page.locator("#username").fill("newuser");
     await page.locator("#password").fill("password123");
     await page.locator(".btn-primary[type='submit']").click();
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 5000 });
   });
 
   test("closed mode disables register and states why", async ({ page }) => {

@@ -108,9 +108,11 @@ test.describe("Saved-password login", () => {
     await page.locator(".totp-overlay input[autocomplete='one-time-code']").fill("123456");
     await page.locator(".totp-overlay button.btn-primary").click();
 
-    // Verifying completes the session and the client moves on to connecting,
-    // proving the saved-password path reaches the same end state as a typed one.
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 10000 });
+    // Verifying completes the session and the client moves on to the main
+    // app, proving the saved-password path reaches the same end state as a
+    // typed one. The connected overlay hands off as soon as `ready` arrives,
+    // so assert the destination, not the transient overlay.
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 10000 });
   });
 
   test("shows the server's message when the saved password is rejected", async ({ page }) => {
@@ -182,7 +184,7 @@ test.describe("Saved-password login", () => {
     await page.locator("#remember-password").uncheck();
     await page.locator(".btn-primary[type='submit']").click();
 
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 10000 });
     await expect
       .poll(async () => page.evaluate(() => window.__mockDeletedCredentials ?? []), {
         timeout: 10000,
