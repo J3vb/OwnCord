@@ -311,25 +311,74 @@ type Output = Arc<Mutex<Option<(String, cpal::Stream)>>>;
 /// with the watcher so a later choice takes effect on its next tick.
 pub(super) type Selected = Arc<Mutex<String>>;
 
-/// The sound-server host a watcher polls. A sound-server restart kills its
-/// connection for good, so each reopen goes through a fresh host that then
-/// replaces this one, and a host that stops answering is rebuilt.
-pub(super) type WatchedHost = Arc<Mutex<cpal::Host>>;
+/// Where a backend stands in cpal's own preference (PipeWire, PulseAudio,
+/// then ALSA).
+fn rank(id: cpal::HostId) -> usize {
+    cpal::ALL_HOSTS
+        .iter()
+        .position(|h| *h == id)
+        .unwrap_or(usize::MAX)
+}
 
-/// The id of `host`'s default device per `default`, rebuilding the host when
-/// it does not answer so the next poll asks a live connection.
-pub(super) fn default_id(
-    host: &WatchedHost,
-    default: impl Fn(&cpal::Host) -> Option<cpal::Device>,
-) -> Option<String> {
-    let mut host = lock(host);
-    let id = default(&host)
-        .and_then(|d| d.id().ok())
-        .map(|d| d.to_string());
-    if id.is_none() {
-        *host = cpal::default_host();
+/// The best backend among `available` when it ranks above `current`, or is
+/// `current` itself and `same_too` asks for a fresh one of it.
+fn better_backend(
+    current: cpal::HostId,
+    available: &[cpal::HostId],
+    same_too: bool,
+) -> Option<cpal::HostId> {
+    let best = available.iter().copied().min_by_key(|h| rank(*h))?;
+    (rank(best) < rank(current) || (same_too && best == current)).then_some(best)
+}
+
+/// The sound-server host a watcher polls and reopens through. A sound-server
+/// restart kills a host's connection for good, so it is rebuilt; but while
+/// the server is down cpal's default is ALSA, whose constant `default` device
+/// would hide every later move of the real default, so a rebuild never
+/// settles on a lower backend than the one in use, and a lower one in use is
+/// replaced as soon as the preferred backend is back.
+pub(super) struct WatchedHost(Mutex<cpal::Host>);
+
+impl WatchedHost {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self(Mutex::new(cpal::default_host())))
     }
-    id
+
+    /// `f` over a fresh connection to the best backend up now, no lower than
+    /// the one in use, which then serves the polls. `None` while only a lower
+    /// backend answers (the sound server is still restarting).
+    pub(super) fn reopen<R>(&self, f: impl FnOnce(&cpal::Host) -> R) -> Option<R> {
+        let mut host = lock(&self.0);
+        let id = better_backend(host.id(), &cpal::available_hosts(), true)?;
+        let fresh = cpal::host_from_id(id).ok()?;
+        let result = f(&fresh);
+        *host = fresh;
+        Some(result)
+    }
+
+    /// `f` over the host in use.
+    pub(super) fn with<R>(&self, f: impl FnOnce(&cpal::Host) -> R) -> R {
+        f(&lock(&self.0))
+    }
+
+    /// The id of the default device per `default`. A host that does not
+    /// answer is rebuilt so the next poll asks a live connection, and a
+    /// fallback backend is replaced once the preferred one is back.
+    pub(super) fn default_id(
+        &self,
+        default: impl Fn(&cpal::Host) -> Option<cpal::Device>,
+    ) -> Option<String> {
+        let mut host = lock(&self.0);
+        let id = default(&host)
+            .and_then(|d| d.id().ok())
+            .map(|d| d.to_string());
+        if let Some(better) = better_backend(host.id(), &cpal::available_hosts(), id.is_none()) {
+            if let Ok(fresh) = cpal::host_from_id(better) {
+                *host = fresh;
+            }
+        }
+        id
+    }
 }
 
 /// A session's playout: the mixer, its readers and the output stream.
@@ -427,7 +476,7 @@ impl Playout {
     }
 
     fn start_watcher(&self) -> Watcher {
-        let host: WatchedHost = Arc::new(Mutex::new(cpal::default_host()));
+        let host = WatchedHost::new();
         let poll_host = host.clone();
         let output = self.output.clone();
         let mixer = self.mixer.clone();
@@ -435,26 +484,40 @@ impl Playout {
         let dead = self.dead.clone();
         let selected = self.selected.clone();
         let follow_dead = dead.clone();
+        let pinned_returned = {
+            let (host, output, selected) =
+                (host.clone(), self.output.clone(), self.selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let playing = lock(&output).as_ref().map(|(id, _)| id.clone());
+                !target.is_empty()
+                    && playing.as_ref() != Some(&target)
+                    && host.with(|h| output_devices(h).iter().any(|(d, _)| d.id == target))
+            }
+        };
         let follow = move || {
-            let fresh = cpal::default_host();
             let target = lock(&selected).clone();
             // Always reopen: a dead stream is usually still on the same
             // sink, so "already plays there" must not skip it.
-            let result = switch_output(
-                &mut lock(&output),
-                &target,
-                true,
-                output_devices(&fresh),
-                |device| {
-                    open_output(
-                        device,
-                        mixer.clone(),
-                        reference.clone().map(Reference::new),
-                        follow_dead.clone(),
-                    )
-                },
-            );
-            *lock(&host) = fresh;
+            let Some(result) = host.reopen(|fresh| {
+                switch_output(
+                    &mut lock(&output),
+                    &target,
+                    true,
+                    output_devices(fresh),
+                    |device| {
+                        open_output(
+                            device,
+                            mixer.clone(),
+                            reference.clone().map(Reference::new),
+                            follow_dead.clone(),
+                        )
+                    },
+                )
+            }) else {
+                log::warn!("[native_voice] reopening the playout stream: no sound server yet");
+                return false;
+            };
             match result {
                 Ok(fell_back) => {
                     if fell_back {
@@ -475,7 +538,8 @@ impl Playout {
             self.playing(),
             dead,
             self.selected.clone(),
-            move || default_id(&poll_host, |h| h.default_output_device()),
+            move || poll_host.default_id(|h| h.default_output_device()),
+            pinned_returned,
             follow,
         )
     }
@@ -485,7 +549,9 @@ impl Playout {
 /// and, while `selected` is the empty "System default" id, calls `follow`
 /// each time that default moves. `follow` reports whether it reopened; a
 /// failed reopen of a dead stream (the sound server still restarting) is
-/// retried on the next tick. `selected` is read on every tick, so a
+/// retried on the next tick. A reopen that fell back from a pinned device
+/// (not listed yet after the restart) is followed again once
+/// `pinned_returned` says that device is listed. `selected` is read on every tick, so a
 /// device chosen after the watcher started is honoured. Dropping it stops
 /// and joins the thread. Shared by the playout (default sink) and the
 /// capture (default source).
@@ -504,6 +570,7 @@ impl Watcher {
         dead: Arc<AtomicBool>,
         selected: Selected,
         mut default_device: impl FnMut() -> Option<String> + Send + 'static,
+        mut pinned_returned: impl FnMut() -> bool + Send + 'static,
         mut follow: impl FnMut() -> bool + Send + 'static,
     ) -> Self {
         let (stop, stopped) = mpsc::channel();
@@ -514,6 +581,10 @@ impl Watcher {
                     if !follow() {
                         dead.store(true, Ordering::Relaxed);
                     }
+                    continue;
+                }
+                if pinned_returned() {
+                    follow();
                     continue;
                 }
                 // Tracked while pinned too, so returning to the default
@@ -748,6 +819,7 @@ mod tests {
             dead.clone(),
             selected.clone(),
             move || lock(&source).clone(),
+            || false,
             move || {
                 followed.send(()).unwrap();
                 true
@@ -828,6 +900,7 @@ mod tests {
             dead,
             Arc::new(Mutex::new(String::new())),
             || Some("speakers".to_string()),
+            || false,
             move || {
                 n += 1;
                 attempted.send(n).unwrap();
@@ -841,6 +914,79 @@ mod tests {
             attempts.recv_timeout(QUIET).is_err(),
             "recovered: no more reopens"
         );
+    }
+
+    #[test]
+    fn a_pinned_sink_that_returns_after_a_restart_is_switched_back_to() {
+        // A Bluetooth headset is pinned; after a sound-server restart only
+        // the built-in sink is listed at first, so the reopen falls back.
+        let listed = Arc::new(Mutex::new(vec!["speakers"]));
+        let output = Arc::new(Mutex::new(Some(("bt".to_string(), "dead"))));
+        let selected: Selected = Arc::new(Mutex::new("bt".to_string()));
+        let dead = Arc::new(AtomicBool::new(true));
+        let (opened, opens) = mpsc::channel();
+        let returned = {
+            let (listed, output, selected) = (listed.clone(), output.clone(), selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let playing = lock(&output).as_ref().map(|(id, _)| id.clone());
+                playing.as_ref() != Some(&target) && lock(&listed).iter().any(|s| *s == target)
+            }
+        };
+        let follow = {
+            let (listed, output, selected) = (listed.clone(), output.clone(), selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let sinks = sinks(&lock(&listed));
+                switch_output(&mut lock(&output), &target, true, sinks, |sink| {
+                    opened.send(*sink).unwrap();
+                    Ok("live")
+                })
+                .is_ok()
+            }
+        };
+        let _watcher = Watcher::start(
+            Duration::from_millis(2),
+            Some("bt".to_string()),
+            dead,
+            selected,
+            || None,
+            returned,
+            follow,
+        );
+        assert_eq!(opens.recv_timeout(Duration::from_secs(5)), Ok("speakers"));
+        assert!(
+            opens.recv_timeout(QUIET).is_err(),
+            "the headset is not back: no reopen storm"
+        );
+        lock(&listed).push("bt");
+        assert_eq!(opens.recv_timeout(Duration::from_secs(5)), Ok("bt"));
+        assert!(opens.recv_timeout(QUIET).is_err(), "back on the headset");
+        assert_eq!(
+            lock(&output).as_ref().map(|(id, _)| id.clone()),
+            Some("bt".to_string())
+        );
+    }
+
+    #[test]
+    fn a_restart_never_settles_on_a_lower_backend() {
+        use cpal::HostId::{Alsa, PulseAudio};
+        // Mid-restart only ALSA is up: no rebuild onto it.
+        assert_eq!(better_backend(PulseAudio, &[Alsa], true), None);
+        // The server is back: a fresh connection to it.
+        assert_eq!(
+            better_backend(PulseAudio, &[PulseAudio, Alsa], true),
+            Some(PulseAudio)
+        );
+        // Started on ALSA while the server was down: upgraded once it is up,
+        // but a live ALSA host is not rebuilt on every poll.
+        assert_eq!(
+            better_backend(Alsa, &[PulseAudio, Alsa], false),
+            Some(PulseAudio)
+        );
+        assert_eq!(better_backend(Alsa, &[Alsa], false), None);
+        // A machine with only ALSA still recovers through ALSA.
+        assert_eq!(better_backend(Alsa, &[Alsa], true), Some(Alsa));
     }
 
     #[test]

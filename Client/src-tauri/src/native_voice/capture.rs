@@ -20,7 +20,7 @@ use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::native::apm::AudioProcessingModule;
 use nnnoiseless::DenoiseState;
 
-use super::playout::{default_id, host_devices, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
+use super::playout::{host_devices, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
 
 /// A lock helper mirroring playout's, for the shared input-stream slot.
@@ -321,24 +321,32 @@ impl Capture {
         if self.watcher.is_some() || !self.feed.ready() {
             return;
         }
-        let host: WatchedHost = Arc::new(Mutex::new(cpal::default_host()));
+        let host = WatchedHost::new();
         let poll_host = host.clone();
         let selected = self.selected.clone();
         let resolved = self.resolved.clone();
         let dead = self.dead.clone();
         let feed = self.feed.clone();
         let stream = self.stream.clone();
+        let pinned_returned = {
+            let (host, resolved, selected) =
+                (host.clone(), self.resolved.clone(), self.selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let current = lock(&resolved).as_ref().map(|(id, _)| id.clone());
+                !target.is_empty()
+                    && current.as_ref() != Some(&target)
+                    && host.with(|h| input_devices(h).iter().any(|(d, _)| d.id == target))
+            }
+        };
         let follow = move || {
             // The watcher owns recovery: re-resolve (the default may have
             // moved) and replace the dead stream in the shared slot.
-            let fresh = cpal::default_host();
             let id = lock(&selected).clone();
-            let picked = pick(&id, input_devices(&fresh));
-            *lock(&host) = fresh;
             // Muted (no stream) means the user is not publishing; a pending
             // dead flag from just before the mute must not reopen the mic.
             let muted = lock(&stream).is_none();
-            let Ok((picked, _)) = picked else {
+            let Some(Ok((picked, _))) = host.reopen(|fresh| pick(&id, input_devices(fresh))) else {
                 log::warn!("[native_voice] reopening the capture stream: no device");
                 return muted;
             };
@@ -367,7 +375,8 @@ impl Capture {
             lock(&self.resolved).as_ref().map(|(id, _)| id.clone()),
             self.dead.clone(),
             self.selected.clone(),
-            move || default_id(&poll_host, |h| h.default_input_device()),
+            move || poll_host.default_id(|h| h.default_input_device()),
+            pinned_returned,
             follow,
         ));
     }
