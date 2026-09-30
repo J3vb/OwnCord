@@ -83,12 +83,10 @@ type HubOptions struct {
 	ReplayColdLimit int
 
 	// VoiceQuality is the operator-configured voice.quality (cfg.Voice.Quality)
-	// — voice_join's fallback for a channel with no per-channel voice_quality
-	// override, which is every channel today (CreateChannel never writes that
-	// column, and it has no DEFAULT). Startup-only, like the rest of this
-	// struct: the setup wizard already treats voice.quality as
-	// restart-required. Empty or not one of voiceQualities' keys falls back
-	// to "medium", same as an invalid per-channel override does.
+	// — voice_join's only source of a channel's quality. Startup-only, like
+	// the rest of this struct: the setup wizard already treats voice.quality
+	// as restart-required. Empty or not one of voiceQualities' keys falls back
+	// to "medium".
 	VoiceQuality string
 
 	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose

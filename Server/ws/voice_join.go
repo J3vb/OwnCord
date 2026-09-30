@@ -571,19 +571,12 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, c *Client, ch *db.Channel, 
 	h.sendVoicePeerKeys(c, channelID)
 
 	// Send voice_config to the joiner. h.defaultVoiceQuality (the operator's
-	// voice.quality config) is the fallback for a channel with no per-channel
-	// override — which is every channel today, since CreateChannel never
-	// writes voice_quality and the column has no DEFAULT (OC-0439).
+	// voice.quality config) is the only source. A per-channel voice_quality
+	// override was read here, but nothing ever wrote the column — not
+	// CreateChannel, not the admin channel update — so the branch was
+	// unreachable and is dropped (voice report #14); the global
+	// voice.quality is authoritative.
 	quality := h.defaultVoiceQuality
-	if ch.VoiceQuality != nil && *ch.VoiceQuality != "" {
-		q := *ch.VoiceQuality
-		if validVoiceQuality(q) {
-			quality = q
-		} else {
-			slog.Warn("ws handleVoiceJoin invalid voice quality, using default",
-				"quality", q, "channel_id", channelID)
-		}
-	}
 	maxUsers := ch.VoiceMaxUsers
 	bitrate := qualityBitrate(quality)
 	c.sendMsg(buildVoiceConfig(channelID, quality, bitrate, maxUsers))

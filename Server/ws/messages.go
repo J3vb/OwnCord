@@ -185,14 +185,18 @@ type typingPayload struct {
 }
 
 type voiceStatePayload struct {
-	ChannelID   int64  `json:"channel_id"`
-	UserID      int64  `json:"user_id"`
-	Username    string `json:"username"`
-	Muted       bool   `json:"muted"`
-	Deafened    bool   `json:"deafened"`
-	Speaking    bool   `json:"speaking"`
-	Camera      bool   `json:"camera"`
-	Screenshare bool   `json:"screenshare"`
+	ChannelID int64  `json:"channel_id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Muted     bool   `json:"muted"`
+	Deafened  bool   `json:"deafened"`
+	// Speaking is always false on the wire: the column is reset to 0 on
+	// insert and never updated, and LiveKit's ActiveSpeakersChanged
+	// (voice_speakers) is the speaking authority. Kept for
+	// protocol-compatibility (voice report #15).
+	Speaking    bool `json:"speaking"`
+	Camera      bool `json:"camera"`
+	Screenshare bool `json:"screenshare"`
 	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are
 	// always set alongside them, so a client that ignores these two still
 	// renders the user as silenced; they exist so the UI can distinguish a
@@ -215,10 +219,15 @@ type voiceDisconnectedPayload struct {
 }
 
 type voiceConfigPayload struct {
-	ChannelID       int64  `json:"channel_id"`
-	Quality         string `json:"quality"`
-	Bitrate         int    `json:"bitrate"`
-	MaxUsers        int    `json:"max_users"`
+	ChannelID int64  `json:"channel_id"`
+	Quality   string `json:"quality"`
+	Bitrate   int    `json:"bitrate"`
+	MaxUsers  int    `json:"max_users"`
+	// ThresholdMode, MixingThreshold and TopSpeakers are reserved: they ship
+	// on every frame but the client stores and never reads them (voice report
+	// #15). LiveKit's ActiveSpeakersChanged is authoritative for speaking, so
+	// there is no mixing configuration to drive. Kept on the wire for
+	// protocol-compatibility; do not build on them without a reader.
 	ThresholdMode   string `json:"threshold_mode"`
 	MixingThreshold int    `json:"mixing_threshold"`
 	TopSpeakers     int    `json:"top_speakers"`
