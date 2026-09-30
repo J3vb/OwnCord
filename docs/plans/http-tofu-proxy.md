@@ -273,6 +273,32 @@ column above. At 100 ms RTT that is ~101 ms instead of ~303 ms per repeat
 request, and on a cold open the 12 pooled calls pay the handshakes only for
 the connections the webview opens concurrently, not once per call.
 
+**TCP_NODELAY (2026-09-30).** The same measurement showed a fresh connection's
+request held back by Nagle's algorithm: a small write waits for the handshake's
+last ACK, so it leaves about 40 ms late at a low RTT. The tunnel now sets
+`TCP_NODELAY` on every upstream socket it opens (`dial_upstream` in
+`http_proxy.rs`), one-shot and pooled alike, before the TLS handshake. Measured
+with `measure-tunnel-tls.mjs --tunnel` and the ignored `measure_tunnel_nodelay`
+test, one GET per fresh connection, Nagle on against off, medians of 15 samples,
+debug build:
+
+| One-way delay | RTT    | Request | Before (Nagle on) | After (Nagle off) | Saved   |
+| ------------- | ------ | ------- | ----------------- | ----------------- | ------- |
+| 0 ms          | 0 ms   | REST    | 48.2 ms           | 6.2 ms            | 42.0 ms |
+| 0 ms          | 0 ms   | Image   | 48.1 ms           | 7.7 ms            | 40.3 ms |
+| 5 ms          | 10 ms  | REST    | 72.2 ms           | 31.7 ms           | 40.5 ms |
+| 5 ms          | 10 ms  | Image   | 73.6 ms           | 33.0 ms           | 40.6 ms |
+| 25 ms         | 50 ms  | REST    | 152.1 ms          | 152.1 ms          | -0.1 ms |
+| 25 ms         | 50 ms  | Image   | 153.3 ms          | 153.0 ms          | 0.3 ms  |
+| 50 ms         | 100 ms | REST    | 303.2 ms          | 302.9 ms          | 0.3 ms  |
+| 50 ms         | 100 ms | Image   | 303.5 ms          | 303.6 ms          | -0.1 ms |
+
+The saving is the delayed-ACK timer and is visible only while the round trip is
+shorter than it, so it is ~40 ms at 0-10 ms RTT and washes out at 50 ms and
+above, where the round trips dominate. Setting the option is best-effort: an
+option the system refuses is logged and the connection is used anyway, as the
+pooled keepalive options are.
+
 ## TOFU semantics (must match ws_proxy)
 
 - **Pin store:** the same per-host fingerprint store used by `ws_proxy.rs`
