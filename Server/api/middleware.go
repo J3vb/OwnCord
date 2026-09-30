@@ -316,6 +316,17 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 			}
 
 			ip := clientIPWithProxies(r, proxyNets)
+			if !ipInNets(ip, allowedNets) {
+				// Name the setting so a self-hoster can fix it without reading
+				// the source: the default allowlist is private networks only,
+				// so a remote or VPS operator is refused until they add their
+				// address or reach the panel over an SSH tunnel. The reply
+				// deliberately says nothing about which IP was seen or which
+				// CIDRs are configured (no topology disclosure).
+				writeErr(w, http.StatusForbidden, "FORBIDDEN",
+					"access denied by "+settingName+" — this address is not in its allowlist")
+				return
+			}
 			// A local peer forwarding for someone else while no proxy is
 			// trusted means the allowlist is judging the proxy, not the
 			// client: every client inherits the proxy's private address.
@@ -328,17 +339,6 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 							"setting", settingName, "peer", ip)
 					})
 				}
-			}
-			if !ipInNets(ip, allowedNets) {
-				// Name the setting so a self-hoster can fix it without reading
-				// the source: the default allowlist is private networks only,
-				// so a remote or VPS operator is refused until they add their
-				// address or reach the panel over an SSH tunnel. The reply
-				// deliberately says nothing about which IP was seen or which
-				// CIDRs are configured (no topology disclosure).
-				writeErr(w, http.StatusForbidden, "FORBIDDEN",
-					"access denied by "+settingName+" — this address is not in its allowlist")
-				return
 			}
 			next.ServeHTTP(w, r)
 		})

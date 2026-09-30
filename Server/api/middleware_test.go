@@ -1551,3 +1551,27 @@ func TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies(t *testi
 		t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
 	}
 }
+
+// TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused: when the
+// allowlist refuses the local proxy's address, it does not admit every client,
+// so the warning claiming it does must stay silent.
+func TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"203.0.113.0/24"}, nil)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+	if strings.Contains(buf.String(), "trusted_proxies is empty") {
+		t.Errorf("warned although the allowlist refused the peer; log:\n%s", buf.String())
+	}
+}
