@@ -25,6 +25,7 @@ function harness(env = {}, vu = 1, files = {}) {
   const logins = [];
   let closes = 0;
   let body = {};
+  let dialMs = 0;
   class Metric {
     constructor(name) {
       this.name = name;
@@ -60,13 +61,19 @@ function harness(env = {}, vu = 1, files = {}) {
     ws: {
       connect: (url, params, callback) => {
         connects.push({ url, params, at: now });
+        now += dialMs;
         callback({
           send: (frame) => frames.push(JSON.parse(frame)),
           on: (event, handler) => {
             handlers[event] = handler;
           },
           setInterval: (callback, ms) => intervals.set(ms, callback),
-          setTimeout: (callback, ms) => timeouts.push({ ms, callback }),
+          // k6/ws refuses a timer that is not in the future.
+          setTimeout: (callback, ms) => {
+            if (!(ms > 0))
+              throw new Error(`setTimeout requires a >0 timeout parameter, received ${ms}`);
+            timeouts.push({ ms, callback });
+          },
           close: () => {
             closes++;
           },
@@ -86,6 +93,10 @@ function harness(env = {}, vu = 1, files = {}) {
     logins,
     closes: () => closes,
     evaluate,
+    // How long the next ws.connect takes to open, on the harness clock.
+    dialTakes: (ms) => {
+      dialMs = ms;
+    },
     at: (seconds) => {
       now = epoch + seconds * 1000;
     },
@@ -825,6 +836,20 @@ test("scale herd: every socket drops on its spread slot and redials a full ready
   h.evaluate("websocketScenario()");
   h.receive({ type: "ready" });
   assert.equal(h.metrics.herd_readies.length, 1);
+});
+
+test("scale herd: a dial that opens after the VU's slot drops on the next tick, not a 0 ms timer", () => {
+  // Under load a connect takes seconds: a VU that starts dialling just before
+  // its slot opens after it, and k6 refuses socket.setTimeout(fn, 0).
+  const h = harness(scaleEnv(), 185);
+  h.at(511.37); // the slot is 511.38
+  h.dialTakes(2000);
+  h.evaluate("websocketScenario()");
+  const drop = h.timeouts.find((t) => t.ms === 1);
+  assert.ok(drop, "the late dial still drops at once");
+  drop.callback();
+  assert.equal(h.closes(), 1);
+  assert.equal(h.metrics.herd_drops.length, 1);
 });
 
 test("scale thresholds: existing budgets per phase, D3 herd and login-burst gates, no run-wide latency gate", () => {

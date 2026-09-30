@@ -626,8 +626,9 @@ while the server is down (`Client/src/lib/ws.ts`), so a 10–30 s spread is
 realistic.
 
 A VU that is kicked, or is still dialling when its slot passes, joins the herd
-with that dial. `herd_ready_at_ms` is measured from the herd's start to each
-VU's first `ready` after its drop.
+with that dial. A dial that started before its slot but opened after it drops
+on the next tick and redials. `herd_ready_at_ms` is measured from the herd's
+start to each VU's first `ready` after its drop.
 
 The observer polls `/api/v1/metrics` every 5 s and tags each delta with its
 window:

@@ -1809,7 +1809,9 @@ export default function () {
           herdDrops.add(1, scaleTags());
           socket.close();
         },
-        Math.max(0, herdDropAt - openAt),
+        // A dial that opened after its slot drops on the next tick: k6
+        // refuses a timer that is not in the future.
+        Math.max(1, herdDropAt - openAt),
       );
     }
 
