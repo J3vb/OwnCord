@@ -232,7 +232,7 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := clientIPWithProxies(r, proxyNets)
-			key := prefix + ip
+			key := prefix + clientip.RateKey(ip)
 
 			if !limiter.Allow(key, limit, window) {
 				// The true remainder, not the full window: a client told to
@@ -307,6 +307,7 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 	allowedNets := parseCIDRList(allowedCIDRs)
 	proxyNets := parseCIDRList(trustedProxyCIDRs)
 	restrict := len(allowedCIDRs) > 0
+	var warnUndeclaredProxy sync.Once
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !restrict {
@@ -315,6 +316,19 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 			}
 
 			ip := clientIPWithProxies(r, proxyNets)
+			// A local peer forwarding for someone else while no proxy is
+			// trusted means the allowlist is judging the proxy, not the
+			// client: every client inherits the proxy's private address.
+			if len(proxyNets) == 0 && r.Header.Get("X-Forwarded-For") != "" {
+				if peer := net.ParseIP(ip); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {
+					warnUndeclaredProxy.Do(func() {
+						slog.Warn("a local peer sent X-Forwarded-For but trusted_proxies is empty — the "+
+							"allowlist is checking the reverse proxy's address, not the real client's, "+
+							"so it admits every client; set server.trusted_proxies to the proxy hop(s)",
+							"setting", settingName, "peer", ip)
+					})
+				}
+			}
 			if !ipInNets(ip, allowedNets) {
 				// Name the setting so a self-hoster can fix it without reading
 				// the source: the default allowlist is private networks only,

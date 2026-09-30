@@ -931,3 +931,21 @@ func TestLoadWarnsOnEmptyAdminCIDRs(t *testing.T) {
 		t.Error("Load() did not warn that an empty server.admin_allowed_cidrs disables the /admin IP perimeter")
 	}
 }
+
+// TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies pins that the shipped
+// allowlist with no trusted_proxies warns too: behind a same-host reverse
+// proxy every request arrives from loopback, which the default admits, so the
+// default is the case the warning matters most for.
+func TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies(t *testing.T) {
+	rec := &recordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if _, err := config.Load(filepath.Join(t.TempDir(), "config.yaml")); err != nil {
+		t.Fatalf("Load() with defaults returned error: %v", err)
+	}
+	if !rec.warned("trusted_proxies is empty") {
+		t.Error("Load() with the default admin_allowed_cidrs and no trusted_proxies did not warn")
+	}
+}
