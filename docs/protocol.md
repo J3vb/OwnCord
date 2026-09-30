@@ -1518,7 +1518,9 @@ the target's client honoring the flag plus the server refusing their own
 undeafen. Deafening also applies a server mute, so a user who cannot hear the
 room cannot keep talking into it. Clearing it clears `deafened` too, so the
 target hears the room again; `muted` is left as-is, and the target unmutes
-themselves.
+themselves. The server cannot tell a deafen the target chose from the one the
+moderator applied, so the desktop client keeps a deafen the target set before
+the moderator did and restates it with `voice_deafen`.
 
 ### voice_mod_move (Client -> Server)
 
