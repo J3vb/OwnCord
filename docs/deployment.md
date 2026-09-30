@@ -1170,7 +1170,7 @@ which one is near:
 - `server.max_ws_connections` (default `0` = unlimited) → further WebSocket
   upgrades are refused with 503 before the upgrade completes, until
   connections free up → `ws_conn_rejects` (nonzero means you hit it).
-- `database.max_readers` (default `0` = automatic, `max(4, CPU count)`,
+- `database.max_readers` (default `0` = automatic, `max(8, 2× CPU count)`,
   clamped to 1–64) → read queries queue behind the pool →
   `db_reader_wait_seconds` growing.
 - `upload.max_size_mb` (default `100`) → a larger file is refused with

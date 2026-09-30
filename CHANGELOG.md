@@ -130,6 +130,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.
 
+### Under the hood
+
+- **The read-only connection pool is bigger, so reads queue less under a rush of logins.** `database.max_readers` still defaults to automatic, but the automatic size is now `max(8, 2× CPU count)` instead of `max(4, CPU count)` — a two-core server goes from 4 reader connections to 8. On a large server the default stays well under the existing 1–64 clamp. The write pool is unchanged (still exactly one connection). No user-visible change; fewer read stalls during a restart herd.
+
 ## v2.0.1-beta.1
 
 **OwnCord 2.0.1 beta 1** is the second public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It hardens the rough edges of the first beta: a server update, backup restore or restart no longer signs everyone out, voice survives a network blip or a media-server restart, a laptop waking no longer takes over your desktop call, routine certificate renewals stop prompting, and the admin panel now answers before you dig. Existing `2.0.0-beta.1` servers and clients upgrade in place. It is still a beta and a hobby project — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive.
