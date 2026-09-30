@@ -104,7 +104,7 @@ func hasConsole() bool {
 	if err != nil {
 		return false
 	}
-	h, err := windows.CreateFile(name, windows.GENERIC_WRITE, windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
+	h, err := windows.CreateFile(name, windows.GENERIC_WRITE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, 0, 0)
 	if err != nil {
 		return false
 	}
