@@ -216,6 +216,37 @@ describe("message request decisions", () => {
     expect(channelsStore.getState().activeChannelId).toBe(101);
   });
 
+  it("fills the accepted DM's preview from GET /dms when dm_channel_open carried none", async () => {
+    await open(1);
+    const dms = vi.fn(() =>
+      Promise.resolve({
+        dm_channels: [
+          {
+            channel_id: 101,
+            recipient: { id: 11, username: "stranger1", avatar: "", status: "online" },
+            last_message_id: 501,
+            last_message: "hello 1",
+            last_message_at: "2026-09-05T12:00:00Z",
+            unread_count: 0,
+          },
+        ],
+      }),
+    );
+    Object.assign(fx.api, { getDmChannels: dms });
+    // The accept's dm_channel_open has no last message and beats the POST's answer.
+    addDmChannel(dm(1));
+    button(1, "accept").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    await settle();
+    expect(channelsStore.getState().activeChannelId).toBe(101);
+    expect(dmStore.getState().channels.find((c) => c.channelId === 101)).toMatchObject({
+      lastMessageId: 501,
+      lastMessage: "hello 1",
+      lastMessageAt: "2026-09-05T12:00:00Z",
+    });
+  });
+
   it("never opens a conversation for a request that only disappeared", async () => {
     await open(1);
     button(1, "accept").click();

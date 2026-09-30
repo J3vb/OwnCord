@@ -29,6 +29,7 @@ import {
   clearDmUnread,
   dmChannelFromPayload,
   dmStore,
+  updateDmLastMessagePreview,
   type DmChannel,
 } from "@stores/dm.store";
 import { setActiveDmUser, setSidebarMode } from "@stores/ui.store";
@@ -107,6 +108,10 @@ function enterConversation(dm: DmChannel): void {
  * Open the accepted conversation once the server has opened it: from its
  * dm_channel_open, or from GET /dms when that frame was lost (a resume gets
  * no ready to carry it). Dropped when `signal` aborts.
+ *
+ * GET /dms is asked either way: the accept's dm_channel_open carries no last
+ * message, so without it the row would say "No messages yet" beside the
+ * held message.
  */
 export function openAcceptedConversation(
   channelId: number,
@@ -118,19 +123,31 @@ export function openAcceptedConversation(
   const dm = find();
   if (dm !== undefined) {
     enterConversation(dm);
-    return;
+  } else {
+    const unsub = dmStore.subscribe(() => {
+      const found = find();
+      if (found === undefined || signal.aborted) return;
+      unsub();
+      enterConversation(found);
+    });
+    signal.addEventListener("abort", unsub, { once: true });
   }
-  const unsub = dmStore.subscribe(() => {
-    const found = find();
-    if (found === undefined || signal.aborted) return;
-    unsub();
-    enterConversation(found);
-  });
-  signal.addEventListener("abort", unsub, { once: true });
   api.getDmChannels?.(signal).then(
     (r) => {
       const p = r.dm_channels.find((d) => d.channel_id === channelId);
-      if (p !== undefined && !signal.aborted) addDmChannel(dmChannelFromPayload(p));
+      if (p === undefined || signal.aborted) return;
+      const fetched = dmChannelFromPayload(p);
+      if (find() === undefined) {
+        addDmChannel(fetched);
+      } else if (fetched.lastMessageId !== null) {
+        // Monotonic: a live message that landed first is newer and stays.
+        updateDmLastMessagePreview(
+          channelId,
+          fetched.lastMessageId,
+          fetched.lastMessage,
+          fetched.lastMessageAt,
+        );
+      }
     },
     // The frame, or the next ready, still opens it while the view is open.
     () => {},
