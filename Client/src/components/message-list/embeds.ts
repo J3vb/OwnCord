@@ -61,6 +61,11 @@ export function clearEmbedCaches(): void {
 
 // -- OG fetch -----------------------------------------------------------------
 
+function nonBlank(text: string | null): string | null {
+  const trimmed = text?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+}
+
 /** Fetch OG metadata for a URL through the external-content broker, which
  *  owns the whole destination policy (resolved-address classification,
  *  redirects, time/byte/type ceilings) and parses the page natively — the
@@ -88,10 +93,10 @@ function fetchOgMeta(url: string): Promise<OgLoad> {
       load = {
         ok: true,
         meta: {
-          title: result.value.title,
-          description: result.value.description,
+          title: nonBlank(result.value.title),
+          description: nonBlank(result.value.description),
           image: result.value.image,
-          siteName: result.value.siteName,
+          siteName: nonBlank(result.value.siteName),
         },
       };
     } else {
@@ -115,6 +120,9 @@ function fetchOgMeta(url: string): Promise<OgLoad> {
 
 // -- Link preview rendering ---------------------------------------------------
 
+/** How long a link preview waits for its image before it shows without one. */
+const OG_IMAGE_REVEAL_CAP_MS = 3000;
+
 /** Drop a URL's cached preview (and in-flight answer) so an explicit retry
  *  re-asks the broker rather than replaying the refusal. */
 function clearOgEntry(url: string): void {
@@ -135,7 +143,9 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
 
   const content = createElement("div", { class: "msg-embed-link-content" });
 
-  const hostEl = createElement("div", { class: "msg-embed-host" }, displayHost);
+  // Filled once the metadata settles; a host shown while the fetch is pending
+  // would make the row grow twice (DP-44).
+  const hostEl = createElement("div", { class: "msg-embed-host" });
   content.appendChild(hostEl);
 
   const titleEl = createElement("a", {
@@ -169,8 +179,17 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   retryEl.hidden = true;
   content.appendChild(statusEl);
   content.appendChild(retryEl);
-  wrap.dataset.embedState = "loading";
-  wrap.setAttribute("aria-busy", "true");
+
+  /** Zero-height until the card has something to show, so the row grows once,
+   *  when the preview (and its image) lands, instead of twice (DP-44). Not
+   *  `hidden`: an awaiting card that gets consented must stay focusable for its
+   *  hand-off. */
+  wrap.classList.add("msg-embed-link-pending");
+  titleEl.tabIndex = -1;
+  const show = (): void => {
+    wrap.classList.remove("msg-embed-link-pending");
+    titleEl.removeAttribute("tabindex");
+  };
 
   const apply = (load: OgLoad): void => {
     wrap.removeAttribute("aria-busy");
@@ -183,17 +202,47 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     if (!retryable && document.activeElement === retryEl) titleEl.focus();
     retryEl.hidden = !retryable;
     if (load.ok) {
+      const { meta } = load;
+      // No title, description or image: an empty card with nothing in it, so
+      // render none at all (DP-44). siteName alone still names the host.
+      if (meta.title === null && meta.description === null && meta.image === null) {
+        wrap.dataset.embedState = "empty";
+        const hadFocus = wrap.contains(document.activeElement);
+        wrap.hidden = true;
+        if (hadFocus) focusMessageLink(wrap, url);
+        return;
+      }
       wrap.dataset.embedState = "loaded";
       statusEl.hidden = true;
-      applyOgMeta(load.meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      hostEl.hidden = false;
+      const imageSettled = applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      if (meta.image === null) {
+        show();
+        return;
+      }
+      // An image slower than the cap is dropped rather than growing the row
+      // a second time after the card is shown.
+      const cap = setTimeout(() => {
+        imageWrap.remove();
+        show();
+      }, OG_IMAGE_REVEAL_CAP_MS);
+      void imageSettled.then(() => {
+        clearTimeout(cap);
+        show();
+      });
       return;
     }
     wrap.dataset.embedState = "failed";
     wrap.dataset.embedFailure = load.failure;
+    // The host names the failed card once, as the link itself; the separate
+    // host element would repeat it (DP-44).
     setText(titleEl, displayHost);
+    setText(hostEl, "");
+    hostEl.hidden = true;
     descEl.style.display = "none";
     setText(statusEl, t("preview.failed"));
     statusEl.hidden = false;
+    show();
   };
 
   // Check cache first for instant render
@@ -201,14 +250,15 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   if (cached !== undefined) {
     apply(cached);
   } else {
-    // Show URL as fallback title while loading
-    setText(titleEl, displayHost);
+    wrap.dataset.embedState = "loading";
+    wrap.setAttribute("aria-busy", "true");
     void fetchOgMeta(url).then(apply);
   }
 
   retryEl.addEventListener("click", () => {
     if (wrap.dataset.embedState === "loading") return;
-    // The retry stays mounted (and focused) while it re-asks.
+    // The retry stays mounted (and focused) while it re-asks, so the card
+    // keeps its height and focus rather than collapsing the row.
     statusEl.hidden = true;
     retryEl.setAttribute("aria-disabled", "true");
     wrap.dataset.embedState = "loading";
@@ -220,7 +270,24 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   return wrap;
 }
 
-/** Apply fetched OG metadata to the preview card elements. */
+/** Focus the message's own link for `url` in the row holding `card`, or the
+ *  row itself, so a card that hides never leaves focus on <body>. */
+export function focusMessageLink(card: HTMLElement, url: string): void {
+  const row = card.parentElement;
+  if (row === null) return;
+  const link = [...row.querySelectorAll<HTMLAnchorElement>("a.msg-link")].find(
+    (a) => a.getAttribute("href") === url,
+  );
+  if (link !== undefined) {
+    link.focus();
+    return;
+  }
+  row.tabIndex = -1;
+  row.focus();
+}
+
+/** Apply fetched OG metadata to the preview card elements. Resolves once the
+ *  preview's image, if any, has loaded or failed. */
 export function applyOgMeta(
   meta: OgMeta,
   titleEl: HTMLElement,
@@ -229,11 +296,9 @@ export function applyOgMeta(
   imageWrap: HTMLElement,
   url: string,
   displayHost: string,
-): void {
+): Promise<void> {
   setText(titleEl, meta.title ?? displayHost);
-  if (meta.siteName !== null) {
-    setText(hostEl, meta.siteName);
-  }
+  setText(hostEl, meta.siteName ?? displayHost);
   if (meta.description !== null) {
     const desc =
       meta.description.length > 200 ? meta.description.slice(0, 197) + "..." : meta.description;
@@ -242,53 +307,51 @@ export function applyOgMeta(
   } else {
     descEl.style.display = "none";
   }
-  if (meta.image !== null) {
-    showOgImage(meta, meta.image, imageWrap, url);
-  }
+  if (meta.image === null) return Promise.resolve();
+  return showOgImage(meta, meta.image, imageWrap, url);
 }
 
-/** Show a preview's image. The broker forgets old handles, so when one has
- *  expired the preview is asked for again — once per URL — for a fresh one. */
+/** Show a preview's image, resolving once it has loaded or failed. The broker
+ *  forgets old handles, so when one has expired the preview is asked for
+ *  again — once per URL — for a fresh one. */
 function showOgImage(
   meta: OgMeta,
   handle: ExternalImageHandle,
   imageWrap: HTMLElement,
   url: string,
   reask = true,
-): void {
-  const reaskPreview = (): void => {
-    if (!reask) return;
+): Promise<void> {
+  const reaskPreview = (): Promise<void> => {
+    if (!reask) return Promise.resolve();
     let fresh = ogReasked.get(url);
     if (fresh === undefined) {
       clearOgEntry(url);
       fresh = fetchOgMeta(url);
       ogReasked.set(url, fresh);
     }
-    void fresh.then((next) => {
-      if (next.ok && next.meta.image !== null) {
-        showOgImage(next.meta, next.meta.image, imageWrap, url, false);
-      }
-    });
+    return fresh.then((next) =>
+      next.ok && next.meta.image !== null
+        ? showOgImage(next.meta, next.meta.image, imageWrap, url, false)
+        : undefined,
+    );
   };
   // The image arrives as broker-fetched bytes (a same-origin blob: URL),
   // never as an og:image URL the webview would load behind the broker.
   const source = { handle };
-  void loadExternalImage(source).then((result) => {
+  return loadExternalImage(source).then((result) => {
     if (!result.ok) {
-      if (result.failure === "expired-handle") reaskPreview();
-      return;
+      return result.failure === "expired-handle" ? reaskPreview() : undefined;
     }
     const src = result.value;
     const img = createElement("img", {
       class: "msg-embed-link-img",
       src,
       alt: meta.title ?? "",
-      loading: "lazy",
     });
     recoverEvictedImage(img, source, () => {
       img.remove();
       imageWrap.style.display = "none";
-      reaskPreview();
+      void reaskPreview();
     });
     img.addEventListener("error", () => {
       imageWrap.style.display = "none";
@@ -306,5 +369,10 @@ function showOgImage(
     }
     imageWrap.appendChild(img);
     imageWrap.style.display = "";
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      img.addEventListener("load", () => resolve(), { once: true });
+      img.addEventListener("error", () => resolve(), { once: true });
+    });
   });
 }

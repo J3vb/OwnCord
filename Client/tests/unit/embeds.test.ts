@@ -177,6 +177,242 @@ describe("renderGenericLinkPreview", () => {
     });
   });
 
+  it("takes no layout space and shows no host or title while the preview is pending", () => {
+    deferredPreview();
+
+    const card = renderGenericLinkPreview("https://pending.example.com/page");
+    document.body.appendChild(card);
+
+    // The row must not grow for a card that has nothing to show yet (DP-44):
+    // zero height and no visible content until the metadata settles.
+    expect(card.classList.contains("msg-embed-link-pending")).toBe(true);
+    expect(card.querySelector(".msg-embed-host")?.textContent).not.toContain("pending.example.com");
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("");
+  });
+
+  it("adds no card when the resolved preview has no title, description or image", async () => {
+    previewMock.mockResolvedValue(previewOk(null));
+
+    const card = renderGenericLinkPreview("https://empty.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("empty");
+    });
+    expect(card.hidden).toBe(true);
+  });
+
+  it("grows the row once for a preview with an image, when the image has loaded", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: {
+        title: "Pic",
+        description: null,
+        siteName: null,
+        image: "h1" as ExternalImageHandle,
+      },
+    });
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+
+    const card = renderGenericLinkPreview("https://pic.example.com/page");
+    document.body.appendChild(card);
+
+    const img = await vi.waitFor(() => {
+      const el = card.querySelector<HTMLImageElement>(".msg-embed-link-img");
+      if (el === null) throw new Error("no image yet");
+      return el;
+    });
+    expect(card.dataset.embedState).toBe("loaded");
+    expect(card.classList.contains("msg-embed-link-pending")).toBe(true);
+
+    img.dispatchEvent(new Event("load"));
+    await vi.waitFor(() => {
+      expect(card.classList.contains("msg-embed-link-pending")).toBe(false);
+    });
+    expect(card.querySelector(".msg-embed-link-img")).toBe(img);
+  });
+
+  it("does not collapse a cached image preview on a rebuild when its image is already loaded", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: {
+        title: "Pic",
+        description: null,
+        siteName: null,
+        image: "h1" as ExternalImageHandle,
+      },
+    });
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+    const url = "https://cached-pic.example.com/page";
+    const first = renderGenericLinkPreview(url);
+    document.body.appendChild(first);
+    const firstImg = await vi.waitFor(() => {
+      const el = first.querySelector<HTMLImageElement>(".msg-embed-link-img");
+      if (el === null) throw new Error("no image yet");
+      return el;
+    });
+    firstImg.dispatchEvent(new Event("load"));
+    await vi.waitFor(() => {
+      expect(first.classList.contains("msg-embed-link-pending")).toBe(false);
+    });
+
+    const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+    const width = vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(640);
+    try {
+      const rebuilt = renderGenericLinkPreview(url);
+      document.body.appendChild(rebuilt);
+      await vi.waitFor(() => {
+        expect(rebuilt.classList.contains("msg-embed-link-pending")).toBe(false);
+      });
+      expect(rebuilt.querySelector(".msg-embed-link-img")).not.toBeNull();
+    } finally {
+      complete.mockRestore();
+      width.mockRestore();
+    }
+  });
+
+  it("shows the card without its image when the image is slower than the cap", async () => {
+    vi.useFakeTimers();
+    try {
+      previewMock.mockResolvedValue({
+        ok: true,
+        value: {
+          title: "Slow",
+          description: null,
+          siteName: null,
+          image: "h1" as ExternalImageHandle,
+        },
+      });
+      const image: { settle?: (result: ImageResult) => void } = {};
+      imageMock.mockImplementation(
+        () =>
+          new Promise<ImageResult>((resolve) => {
+            image.settle = resolve;
+          }),
+      );
+
+      const card = renderGenericLinkPreview("https://slow.example.com/page");
+      document.body.appendChild(card);
+      await vi.waitFor(() => {
+        expect(imageMock).toHaveBeenCalled();
+      });
+      expect(card.classList.contains("msg-embed-link-pending")).toBe(true);
+
+      vi.advanceTimersByTime(3000);
+      expect(card.classList.contains("msg-embed-link-pending")).toBe(false);
+      expect(card.querySelector(".msg-embed-link-image")).toBeNull();
+
+      image.settle?.({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(card.querySelector(".msg-embed-link-img")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adds no card when the preview's text is only blank strings", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: "  ", description: "", siteName: "", image: null },
+    });
+
+    const card = renderGenericLinkPreview("https://blank.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("empty");
+    });
+    expect(card.hidden).toBe(true);
+  });
+
+  it("names a blank-titled preview by its host", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: "", description: "Some text", siteName: " ", image: null },
+    });
+
+    const card = renderGenericLinkPreview("https://untitled.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("untitled.example.com");
+    expect(card.querySelector(".msg-embed-host")?.textContent).toBe("untitled.example.com");
+  });
+
+  it("keeps a pending card's link out of the tab order until it has content", async () => {
+    const settle = deferredPreview();
+
+    const card = renderGenericLinkPreview("https://tab.example.com/page");
+    document.body.appendChild(card);
+    const title = card.querySelector<HTMLAnchorElement>(".msg-embed-link-title")!;
+    expect(title.tabIndex).toBe(-1);
+
+    settle(previewOk("Ready"));
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(title.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("hands focus to the message's own link when a focused preview resolves empty", async () => {
+    const url = "https://focus-empty.example.com/page";
+    const settle = deferredPreview();
+    const row = document.createElement("div");
+    const bodyLink = document.createElement("a");
+    bodyLink.className = "msg-link";
+    bodyLink.href = url;
+    row.appendChild(bodyLink);
+    const card = renderGenericLinkPreview(url);
+    row.appendChild(card);
+    document.body.appendChild(row);
+    card.querySelector<HTMLElement>(".msg-embed-link-title")!.focus();
+
+    settle(previewOk(null));
+    await vi.waitFor(() => {
+      expect(card.hidden).toBe(true);
+    });
+    expect(document.activeElement).toBe(bodyLink);
+  });
+
+  it("hands focus to the row when a focused retry resolves empty", async () => {
+    previewMock.mockResolvedValueOnce(refused("unavailable"));
+    const row = document.createElement("div");
+    const card = renderGenericLinkPreview("https://retry-empty.example.com/x");
+    row.appendChild(card);
+    document.body.appendChild(row);
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+    const retry = card.querySelector<HTMLButtonElement>(".msg-embed-retry")!;
+    retry.focus();
+
+    previewMock.mockResolvedValueOnce(previewOk(null));
+    retry.click();
+    await vi.waitFor(() => {
+      expect(card.hidden).toBe(true);
+    });
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("names the host exactly once on a refusal", async () => {
+    previewMock.mockResolvedValue(refused("blocked-destination"));
+
+    const card = renderGenericLinkPreview("https://blocked.example.com/x");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+
+    const host = "blocked.example.com";
+    const visibleHosts = Array.from(card.querySelectorAll<HTMLElement>("*")).filter(
+      (el) => el.textContent === host && el.style.display !== "none" && !el.hasAttribute("hidden"),
+    );
+    expect(visibleHosts).toHaveLength(1);
+  });
+
   // The renderer no longer classifies destinations: private-address policy is
   // the broker's (Rust corpus tests in src-tauri/src/external_content.rs).
   it.each([

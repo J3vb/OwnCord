@@ -168,6 +168,27 @@ describe("the per-server choice", () => {
     expect(document.querySelector('[data-testid="external-consent-dialog"]')).toBeNull();
   });
 
+  it("moves focus off a consented preview whose cached answer is empty", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: null, description: null, siteName: null, image: null },
+    });
+    setExternalConsentChoice("ask");
+    const first = show(LINK);
+    concealed(first)[0]?.click();
+    await vi.waitFor(() =>
+      expect(first.querySelector<HTMLElement>(".msg-embed-link")?.dataset.embedState).toBe("empty"),
+    );
+
+    forgetAdmittedItems();
+    const row = show(LINK);
+    concealed(row)[0]?.focus();
+    concealed(row)[0]?.click();
+    await vi.waitFor(() => expect(concealed(row)).toHaveLength(0));
+    expect(row.querySelector<HTMLElement>(".msg-embed-link")?.hidden).toBe(true);
+    expect(document.activeElement).toBe(row);
+  });
+
   it("'Load automatically' loads every concealed item on this server only", async () => {
     const row = show();
     concealed(row)[1]?.click();
