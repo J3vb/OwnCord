@@ -545,23 +545,15 @@ made on Linux, which is where the form above applies.
 
 OC-0445's diagnosis profiled the constrained server with the block and mutex
 samplers on, because a CPU profile alone cannot see contention on the single
-SQLite writer. Enabling `server.pprof_enabled` now turns both samplers on for
-you — default 100 µs between block samples
-(`server.pprof_block_profile_rate`) and one in five contended mutex events
-(`server.pprof_mutex_profile_fraction`), both overridable by that key or by
-`OWNCORD_SERVER_PPROF_BLOCK_PROFILE_RATE` /
-`OWNCORD_SERVER_PPROF_MUTEX_PROFILE_FRACTION` — so no scratch build is needed.
-The listener is on `127.0.0.1:6060`; the container runs with
-`--network=host`, so the host reaches it directly. During the run, curl
-`goroutine?debug=2` dumps every 2 s and back-to-back 30 s CPU profiles, then
-block, mutex and heap profiles once at the end, with the sampler pinned to the
-generator CPUs (`taskset -c 2,3`) so it does not compete with the server it
-measures.
-
-Before P5-O09 those samplers were off (SetBlockProfileRate and
-SetMutexProfileFraction were never called, so `/debug/pprof/block` came back
-empty), and this diagnosis needed a one-off build with them switched on by
-hand. The rates above can be set to `0` to disable either sampler.
+SQLite writer. Enabling `server.pprof_enabled` (e.g.
+`-e OWNCORD_SERVER_PPROF_ENABLED=true`) turns both samplers on, so no scratch
+build is needed; their rates and overrides are in
+[server-configuration.md](server-configuration.md). The listener is on
+`127.0.0.1:6060`; the container runs with `--network=host`, so the host reaches
+it directly. During the run, curl `goroutine?debug=2` dumps every 2 s and
+back-to-back 30 s CPU profiles, then block, mutex and heap profiles once at the
+end, with the sampler pinned to the generator CPUs (`taskset -c 2,3`) so it
+does not compete with the server it measures.
 
 ## Measured
 
