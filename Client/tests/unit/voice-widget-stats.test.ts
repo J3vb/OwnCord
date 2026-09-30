@@ -128,7 +128,9 @@ describe("VoiceWidget transport stats redesign", () => {
     const { widget, container } = mount();
     pushStats({ outRate: 331_250, outPackets: 2305, rtt: 18 });
 
-    const outValues = container.querySelectorAll(".vw-stats-col")[0]!.querySelectorAll(".vw-stat-value");
+    const outValues = container
+      .querySelectorAll(".vw-stats-col")[0]!
+      .querySelectorAll(".vw-stat-value");
     expect(outValues[0]!.textContent).toBe("331250 B/s");
     expect(outValues[0]!.textContent).not.toContain("bps");
 
@@ -139,16 +141,20 @@ describe("VoiceWidget transport stats redesign", () => {
     const { widget, container } = mount();
     pushStats({ outRate: 0, inRate: 0, rtt: 0 });
 
-    const outRows = container.querySelectorAll(".vw-stats-col")[0]!.querySelectorAll(".vw-stats-row");
+    const outRows = container
+      .querySelectorAll(".vw-stats-col")[0]!
+      .querySelectorAll(".vw-stats-row");
     const rttValue = outRows[2]!.querySelector(".vw-stat-value")!;
     expect(rttValue.textContent).toBe("—");
     expect(rttValue.classList.contains("vw-stat-value--empty")).toBe(true);
     expect((rttValue as HTMLElement).style.color).toBe("");
 
-    const inRows = container.querySelectorAll(".vw-stats-col")[1]!.querySelectorAll(".vw-stats-row");
-    expect(inRows[0]!.querySelector(".vw-stat-value")!.classList.contains("vw-stat-value--empty")).toBe(
-      true,
-    );
+    const inRows = container
+      .querySelectorAll(".vw-stats-col")[1]!
+      .querySelectorAll(".vw-stats-row");
+    expect(
+      inRows[0]!.querySelector(".vw-stat-value")!.classList.contains("vw-stat-value--empty"),
+    ).toBe(true);
 
     widget.destroy?.();
   });
@@ -157,7 +163,9 @@ describe("VoiceWidget transport stats redesign", () => {
     const { widget, container } = mount();
     pushStats({ outRate: 331_250, outPackets: 2305, rtt: 42 });
 
-    const outRows = container.querySelectorAll(".vw-stats-col")[0]!.querySelectorAll(".vw-stats-row");
+    const outRows = container
+      .querySelectorAll(".vw-stats-col")[0]!
+      .querySelectorAll(".vw-stats-row");
     const rttValue = outRows[2]!.querySelector(".vw-stat-value")!;
     expect(rttValue.textContent).toBe("42.0 ms");
     expect(rttValue.classList.contains("vw-stat-value--empty")).toBe(false);

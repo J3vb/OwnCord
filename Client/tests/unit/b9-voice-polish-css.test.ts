@@ -71,8 +71,7 @@ describe("voice widget transport-stats redesign CSS", () => {
       value?: { type: string; min?: { type: string }; max?: { type: string } };
     }
     const declared = cascadedDeclaration(".vw-stats-grid", "grid-template-columns")?.value as
-      | { value?: { type?: string; items?: Track[] } }
-      | undefined;
+      { value?: { type?: string; items?: Track[] } } | undefined;
     const list = declared?.value;
     expect(list?.type).toBe("track-list");
     expect(list?.items).toHaveLength(2);
