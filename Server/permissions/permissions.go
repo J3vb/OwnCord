@@ -39,9 +39,12 @@ const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 // AdminPerimeter is the set of bits that admits a principal to the /admin/api
 // surface. Holding ANY one of them is enough to pass the perimeter; each route
 // group then re-checks the specific bit it needs. ManageMessages and
-// ManageInvites are excluded: neither has an admin-panel route. ModerateMembers
-// is deliberately excluded too (B5-8 plan, decision 6/Question 5): a
-// warning-only moderator must not inherit the perimeter's read surface
+// ManageInvites are excluded: neither has an /admin/api route. ManageInvites
+// does have an admin-panel page (the Invites section), but that page reaches
+// the invites through the member API (/api/v1/invites, gated on the same bit),
+// so holding ManageInvites alone must not open the /admin/api perimeter.
+// ModerateMembers is deliberately excluded too (B5-8 plan, decision 6/Question
+// 5): a warning-only moderator must not inherit the perimeter's read surface
 // (/stats, the /users list, /me), which re-checks nothing by design — the
 // report queue lives under /api/v1, not /admin/api.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |

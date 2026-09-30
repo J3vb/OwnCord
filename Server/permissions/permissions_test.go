@@ -479,7 +479,9 @@ func TestAdminPerimeter_Membership(t *testing.T) {
 			t.Errorf("%s should admit to the admin perimeter", permissions.Name(p))
 		}
 	}
-	// Bits with no admin-panel route must not open the perimeter.
+	// Bits with no /admin/api route must not open the perimeter — ManageInvites
+	// has an admin-panel page but reaches invites through /api/v1/invites, so
+	// it stays out.
 	refused := []int64{
 		permissions.SendMessages, permissions.ReadMessages, permissions.ManageMessages,
 		permissions.ManageInvites, permissions.ConnectVoice,
