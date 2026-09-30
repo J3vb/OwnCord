@@ -11,13 +11,7 @@
 // TLS handshake, as the tunnel builds a new rustls config per connection.
 //
 //   cd Client && npm run test:e2e:build-server
-//   node tests/e2e/scripts/measure-tunnel-tls.mjs [--tunnel] [one-way delay ms ...]
-//
-// With --tunnel, the same server and gates time the tunnel's own upstream code
-// instead: one request per fresh connection with Nagle's algorithm on against
-// the same with TCP_NODELAY off, through the ignored `measure_tunnel_nodelay`
-// test in src-tauri/src/http_proxy.rs. It runs `cargo test`, so on Linux set up
-// the webrtc toolchain first (Client/CLAUDE.md).
+//   node tests/e2e/scripts/measure-tunnel-tls.mjs [one-way delay ms ...]
 import { spawn } from "node:child_process";
 import { X509Certificate } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -27,9 +21,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const args = process.argv.slice(2);
-const tunnel = args.includes("--tunnel");
-const delays = args.filter((arg) => arg !== "--tunnel").map(Number);
+const delays = process.argv.slice(2).map(Number);
 if (delays.length === 0) delays.push(0, 5, 10, 25, 50);
 const SAMPLES = 15;
 const PASSWORD = "OwnCord-Measure-pass-123!";
@@ -187,49 +179,22 @@ try {
     ).text,
   );
 
-  if (tunnel) {
-    const gates = await Promise.all(delays.map((delay) => delayGate(port, delay)));
-    try {
-      const exitCode = await new Promise((done, fail) => {
-        const cargo = spawn(
-          "cargo",
-          ["test", "--lib", "measure_tunnel_nodelay", "--", "--ignored", "--nocapture"],
-          {
-            cwd: resolve("src-tauri"),
-            stdio: "inherit",
-            env: {
-              ...process.env,
-              OWNCORD_MEASURE_GATES: delays.map((delay, i) => `${delay}:${gates[i].port}`).join(),
-              OWNCORD_MEASURE_REQUESTS: `REST=/api/v1/server-info,Image=/api/v1/files/${id}`,
-              OWNCORD_MEASURE_TOKEN: token,
-            },
-          },
-        );
-        cargo.once("error", fail);
-        cargo.once("exit", done);
-      });
-      if (exitCode !== 0) throw new Error(`cargo test exited with ${exitCode}`);
-    } finally {
-      for (const gate of gates) gate.close();
+  console.log(
+    "| One-way delay | RTT | Request | Fresh connection | Keep-alive | Handshake overhead |",
+  );
+  console.log("| --- | --- | --- | --- | --- | --- |");
+  for (const delay of delays) {
+    const gate = await delayGate(port, delay);
+    for (const [name, path] of [
+      ["REST (server-info)", "/api/v1/server-info"],
+      ["Image (files/{id})", `/api/v1/files/${id}`],
+    ]) {
+      const { fresh, kept } = await time(gate.port, path, auth);
+      console.log(
+        `| ${delay} ms | ${2 * delay} ms | ${name} | ${fresh.toFixed(1)} ms | ${kept.toFixed(1)} ms | ${(fresh - kept).toFixed(1)} ms |`,
+      );
     }
-  } else {
-    console.log(
-      "| One-way delay | RTT | Request | Fresh connection | Keep-alive | Handshake overhead |",
-    );
-    console.log("| --- | --- | --- | --- | --- | --- |");
-    for (const delay of delays) {
-      const gate = await delayGate(port, delay);
-      for (const [name, path] of [
-        ["REST (server-info)", "/api/v1/server-info"],
-        ["Image (files/{id})", `/api/v1/files/${id}`],
-      ]) {
-        const { fresh, kept } = await time(gate.port, path, auth);
-        console.log(
-          `| ${delay} ms | ${2 * delay} ms | ${name} | ${fresh.toFixed(1)} ms | ${kept.toFixed(1)} ms | ${(fresh - kept).toFixed(1)} ms |`,
-        );
-      }
-      gate.close();
-    }
+    gate.close();
   }
 } catch (error) {
   console.error(`server log:\n${log}`);

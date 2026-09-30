@@ -278,9 +278,8 @@ request held back by Nagle's algorithm: a small write waits for the handshake's
 last ACK, so it leaves about 40 ms late at a low RTT. The tunnel now sets
 `TCP_NODELAY` on every upstream socket it opens (`dial_upstream` in
 `http_proxy.rs`), one-shot and pooled alike, before the TLS handshake. Measured
-with `measure-tunnel-tls.mjs --tunnel` and the ignored `measure_tunnel_nodelay`
-test, one GET per fresh connection, Nagle on against off, medians of 15 samples,
-debug build:
+through the tunnel's upstream code, one GET per fresh connection, Nagle on
+against off, medians of 15 samples, debug build:
 
 | One-way delay | RTT    | Request | Before (Nagle on) | After (Nagle off) | Saved   |
 | ------------- | ------ | ------- | ----------------- | ----------------- | ------- |
