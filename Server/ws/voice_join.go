@@ -113,9 +113,38 @@ func (h *Hub) restorePendingModFlags(c *Client, wasServerMuted, wasServerDeafene
 	}
 }
 
+// voiceJoinSwitchCapacityOK is the advisory capacity pre-flight for the switch
+// case, mirroring handleVoiceModMoveV2's pre-flight (voice_moderation.go):
+// without it, voiceJoinLeaveCurrent tears the caller out of their current call
+// before voiceJoinPersist's atomic check ever runs, so a switch to a full
+// channel ends the old call for nothing (OC-0351). Same-channel re-join stays
+// gated by ALREADY_JOINED in voiceJoinLeaveCurrent, not here — this only
+// guards the destructive leave a genuine switch would trigger. The atomic
+// JoinVoiceChannelIfCapacity check in voiceJoinPersist remains the authority
+// for the race; this is advisory, exactly as in the move path. On refusal it
+// has already sent the error frame and returns false.
+func (h *Hub) voiceJoinSwitchCapacityOK(ctx context.Context, c *Client, channelID int64, ch *db.Channel) bool {
+	cur := c.getVoiceChID()
+	if cur <= 0 || cur == channelID || ch.VoiceMaxUsers <= 0 {
+		return true
+	}
+	count, err := h.voice.CountInChannel(ctx, channelID)
+	if err != nil {
+		slog.Error("ws voice_join: capacity pre-check failed", "err", err, "channel_id", channelID)
+		c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check channel capacity"))
+		return false
+	}
+	if count >= ch.VoiceMaxUsers {
+		c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
+		return false
+	}
+	return true
+}
+
 // voiceJoinPrecheck runs every gate that must pass before handleVoiceJoin
-// mutates any state: rate limit, payload parse, CONNECT_VOICE, channel
-// existence, channel type, DM block, archive, authenticated user and LiveKit
+// mutates any state: rate limit, payload parse, a moderator's rejoin block
+// (voice_rejoin_block.go), CONNECT_VOICE, channel existence, channel type, DM
+// block, archive, switch capacity, authenticated user and LiveKit
 // availability. It reports the target channel id and row when the join may
 // proceed; on refusal it has already sent the error frame and returns false.
 func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.RawMessage) (int64, *db.Channel, bool) {
@@ -174,26 +203,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
-	// Advisory capacity pre-flight for the switch case, mirroring
-	// handleVoiceModMoveV2's pre-flight (voice_moderation.go): without it,
-	// voiceJoinLeaveCurrent below tears the caller out of their current call
-	// before voiceJoinPersist's atomic check ever runs, so a switch to a full
-	// channel ends the old call for nothing (OC-0351). Same-channel re-join
-	// stays gated by ALREADY_JOINED in voiceJoinLeaveCurrent, not here — this
-	// only guards the destructive leave a genuine switch would trigger. The
-	// atomic JoinVoiceChannelIfCapacity check in voiceJoinPersist remains the
-	// authority for the race; this is advisory, exactly as in the move path.
-	if cur := c.getVoiceChID(); cur > 0 && cur != channelID && ch.VoiceMaxUsers > 0 {
-		count, cErr := h.voice.CountInChannel(ctx, channelID)
-		if cErr != nil {
-			slog.Error("ws voice_join: capacity pre-check failed", "err", cErr, "channel_id", channelID)
-			c.sendMsg(buildErrorMsg(ErrCodeInternal, "failed to check channel capacity"))
-			return 0, nil, false
-		}
-		if count >= ch.VoiceMaxUsers {
-			c.sendMsg(buildErrorMsg(ErrCodeChannelFull, "voice channel is full"))
-			return 0, nil, false
-		}
+	if !h.voiceJoinSwitchCapacityOK(ctx, c, channelID, ch) {
+		return 0, nil, false
 	}
 
 	// Ensure authenticated user is present before any state changes.
