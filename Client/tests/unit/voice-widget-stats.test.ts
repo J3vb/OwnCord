@@ -23,7 +23,18 @@ vi.mock("@lib/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
-    getStats: vi.fn(),
+    // Before any sample the real poller reports empty, unavailable stats.
+    getStats: vi.fn().mockReturnValue({
+      rtt: 0,
+      quality: "excellent",
+      outRate: 0,
+      inRate: 0,
+      outPackets: 0,
+      inPackets: 0,
+      totalUp: 0,
+      totalDown: 0,
+      available: false,
+    }),
     onUpdate: vi.fn().mockImplementation((cb: (stats: unknown) => void) => {
       (connectionStatsMock.listeners as Array<(stats: unknown) => void>).push(cb);
       return () => {};
@@ -83,6 +94,7 @@ function pushStats(partial: Partial<ConnectionStats>): void {
     inPackets: 0,
     totalUp: 0,
     totalDown: 0,
+    available: true,
     ...partial,
   };
   for (const cb of connectionStatsMock.listeners as Array<(s: ConnectionStats) => void>) cb(stats);
