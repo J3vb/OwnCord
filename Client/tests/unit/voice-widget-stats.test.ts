@@ -8,7 +8,10 @@
 // b9-voice-polish-css.test.ts; here we pin the DOM the redesign produces.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const connectionStatsMock = vi.hoisted(() => ({ listeners: [] as unknown[] }));
+const connectionStatsMock = vi.hoisted(() => ({
+  listeners: [] as unknown[],
+  qualityListeners: [] as unknown[],
+}));
 
 vi.mock("@lib/livekitSession", () => ({
   getRoomForStats: vi.fn().mockReturnValue(null),
@@ -39,7 +42,10 @@ vi.mock("@lib/connectionStats", () => ({
       (connectionStatsMock.listeners as Array<(stats: unknown) => void>).push(cb);
       return () => {};
     }),
-    onQualityChanged: vi.fn().mockReturnValue(() => {}),
+    onQualityChanged: vi.fn().mockImplementation((cb: unknown) => {
+      connectionStatsMock.qualityListeners.push(cb);
+      return () => {};
+    }),
   }),
   formatBytes: (v: number) => `${v} B`,
   formatRateCompact: (v: number) => `${v} B/s`,
@@ -94,14 +100,23 @@ function pushStats(partial: Partial<ConnectionStats>): void {
     inPackets: 0,
     totalUp: 0,
     totalDown: 0,
+    loss: 0,
+    jitter: 0,
     available: true,
     ...partial,
   };
   for (const cb of connectionStatsMock.listeners as Array<(s: ConnectionStats) => void>) cb(stats);
 }
 
+function fireQualityChange(quality: string, prevQuality: string): void {
+  for (const cb of connectionStatsMock.qualityListeners as Array<(q: string, p: string) => void>) {
+    cb(quality, prevQuality);
+  }
+}
+
 beforeEach(() => {
   connectionStatsMock.listeners.length = 0;
+  connectionStatsMock.qualityListeners.length = 0;
   resetStores();
 });
 
@@ -208,6 +223,23 @@ describe("VoiceWidget connection panel (Option C)", () => {
     expect(totals).toHaveLength(2);
     expect(totals[0]!.textContent).toBe("2360 B");
     expect(totals[1]!.textContent).toBe("631 B");
+    widget.destroy?.();
+  });
+
+  it("a quality drop to poor does not add `visible` to the stats pane", () => {
+    const { widget, container } = mount();
+    const pane = container.querySelector(".vw-stats")!;
+    // The pane starts closed and manual toggling still owns it: a quality
+    // change must never open it on its own.
+    expect(pane.classList.contains("visible")).toBe(false);
+
+    // The drop arrives both as a live sample and as the debounced change.
+    pushStats({ quality: "poor", rtt: 300 });
+    expect(container.querySelector(".vw-signal .vw-ping")?.textContent).toBe("300ms");
+    fireQualityChange("poor", "excellent");
+
+    expect(pane.classList.contains("visible")).toBe(false);
+
     widget.destroy?.();
   });
 

@@ -13,6 +13,7 @@ import {
   createConnectionStatsPoller,
   formatBytes,
   formatRateCompact,
+  qualityFromSignals,
   type ConnectionStatsPoller,
   type QualityLevel,
 } from "../../src/lib/connectionStats";
@@ -56,6 +57,40 @@ describe("formatRateCompact", () => {
     expect(formatRateCompact(99_960)).toBe("100 kB/s");
     expect(formatRateCompact(999_600)).toBe("1.0 MB/s");
     expect(formatRateCompact(9_960_000)).toBe("10 MB/s");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quality from RTT + loss + jitter
+// ---------------------------------------------------------------------------
+
+describe("qualityFromSignals", () => {
+  it("is excellent on a clean low-latency link", () => {
+    expect(qualityFromSignals(40, 0, 0)).toBe("excellent");
+  });
+
+  it("rtt 40 ms, 0% loss, 5 ms jitter is excellent", () => {
+    expect(qualityFromSignals(40, 0, 5)).toBe("excellent");
+  });
+
+  it("rtt 40 ms with 8% loss is poor", () => {
+    // A low-RTT but lossy link must not read as excellent.
+    expect(qualityFromSignals(40, 8, 0)).toBe("poor");
+  });
+
+  it("takes the worst of RTT, loss and jitter", () => {
+    expect(qualityFromSignals(600, 0, 0)).toBe("bad");
+    expect(qualityFromSignals(40, 12, 0)).toBe("bad");
+    expect(qualityFromSignals(40, 0, 120)).toBe("bad");
+    expect(qualityFromSignals(40, 3, 0)).toBe("fair");
+    expect(qualityFromSignals(40, 0, 40)).toBe("fair");
+  });
+
+  it("keeps the RTT-only thresholds when loss and jitter are zero", () => {
+    expect(qualityFromSignals(50, 0, 0)).toBe("excellent");
+    expect(qualityFromSignals(150, 0, 0)).toBe("fair");
+    expect(qualityFromSignals(300, 0, 0)).toBe("poor");
+    expect(qualityFromSignals(400, 0, 0)).toBe("bad");
   });
 });
 
@@ -144,6 +179,23 @@ describe("createConnectionStatsPoller", () => {
 
   // --- Polling with mock room ---
 
+  /** A room whose stats are rebuilt from `entries()` on every poll. */
+  function createLiveRoom(entries: () => Array<Record<string, unknown>>): unknown {
+    return {
+      engine: {
+        pcManager: {
+          subscriber: {
+            getStats: vi
+              .fn()
+              .mockImplementation(() =>
+                Promise.resolve(new Map(entries().map((e) => [String(e.id), e]))),
+              ),
+          },
+        },
+      },
+    };
+  }
+
   function createMockRoom(statsEntries: Array<Record<string, unknown>>): unknown {
     const report = new Map<string, Record<string, unknown>>();
     for (const entry of statsEntries) {
@@ -206,6 +258,285 @@ describe("createConnectionStatsPoller", () => {
 
     const stats = cb.mock.calls[0]![0];
     expect(stats.quality).toBe("fair");
+  });
+
+  it("lowers quality when a good-RTT link is dropping packets (DP-41)", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04, // 40ms — on RTT alone this is excellent
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      // 80 lost of 1000 = 8% inbound loss => poor
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        kind: "audio",
+        packetsReceived: 920,
+        packetsLost: 80,
+        bytesReceived: 1000,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.rtt).toBe(40);
+    expect(stats.loss).toBeGreaterThan(7);
+    expect(stats.quality).toBe("poor");
+  });
+
+  it("lowers quality when a good-RTT link is jittery (DP-41)", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      // 120 ms interarrival jitter => bad
+      { id: "in1", type: "inbound-rtp", kind: "audio", packetsReceived: 100, jitter: 0.12 },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.jitter).toBeCloseTo(120, 5);
+    expect(stats.quality).toBe("bad");
+  });
+
+  it("uses remote-inbound-rtp packetsLost for the far end's view of our stream", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      { id: "out-audio", type: "outbound-rtp", kind: "audio", packetsSent: 1000 },
+      // The far end reports it lost 12% of our outbound packets.
+      {
+        id: "ri1",
+        type: "remote-inbound-rtp",
+        kind: "audio",
+        localId: "out-audio",
+        packetsLost: 120,
+        jitter: 0.01,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.loss).toBeCloseTo(12, 5);
+    expect(stats.quality).toBe("bad");
+  });
+
+  it("does not judge loss from a DTX trickle in either direction", async () => {
+    let sent = 1000;
+    let remoteLost = 0;
+    let lost = 0;
+    let received = 1000;
+    const room = createLiveRoom(() => [
+      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
+      { id: "out1", type: "outbound-rtp", kind: "audio", packetsSent: sent },
+      {
+        id: "ri1",
+        type: "remote-inbound-rtp",
+        kind: "audio",
+        localId: "out1",
+        packetsLost: remoteLost,
+      },
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        kind: "audio",
+        packetsLost: lost,
+        packetsReceived: received,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    // Both sides fall silent: one lost of five packets each poll is no sample.
+    for (let i = 0; i < 8; i++) {
+      sent += 5;
+      remoteLost += 1;
+      lost += 1;
+      received += 4;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(cb.mock.lastCall![0].quality).toBe("excellent");
+    }
+    expect(cb.mock.lastCall![0].loss).toBe(0);
+  });
+
+  it("keeps 0.5% random loss excellent while someone talks", async () => {
+    let lost = 0;
+    let received = 0;
+    const room = createLiveRoom(() => [
+      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        kind: "audio",
+        packetsLost: lost,
+        packetsReceived: received,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+
+    // About 100 packets a poll, one of every 200 lost.
+    for (let i = 0; i < 8; i++) {
+      const drop = i % 2;
+      lost += drop;
+      received += 100 - drop;
+      await vi.advanceTimersByTimeAsync(i === 0 ? 2100 : 2000);
+      expect(cb.mock.lastCall![0].quality).toBe("excellent");
+    }
+  });
+
+  it("lets a muted peer's loss and jitter expire instead of sticking", async () => {
+    let sent = 0;
+    let remoteLost = 0;
+    let lost = 0;
+    let received = 0;
+    const room = createLiveRoom(() => [
+      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
+      { id: "out1", type: "outbound-rtp", kind: "audio", packetsSent: sent },
+      {
+        id: "ri1",
+        type: "remote-inbound-rtp",
+        kind: "audio",
+        localId: "out1",
+        packetsLost: remoteLost,
+        jitter: 0.06,
+      },
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        kind: "audio",
+        packetsLost: lost,
+        packetsReceived: received,
+        jitter: 0.12,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+
+    // Both directions talk over an 8% lossy, jittery link.
+    for (let i = 0; i < 4; i++) {
+      sent += 100;
+      remoteLost += 8;
+      lost += 8;
+      received += 92;
+      await vi.advanceTimersByTimeAsync(i === 0 ? 2100 : 2000);
+    }
+    expect(cb.mock.lastCall![0].loss).toBeCloseTo(8, 5);
+    expect(cb.mock.lastCall![0].jitter).toBeCloseTo(120, 5);
+    expect(cb.mock.lastCall![0].quality).toBe("bad");
+
+    // Both mute: no packets move, so their last jitter no longer counts...
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].jitter).toBe(0);
+
+    // ...and the lossy window ages out of the recent history.
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(cb.mock.lastCall![0].loss).toBe(0);
+    expect(cb.mock.lastCall![0].quality).toBe("excellent");
+  });
+
+  it("ignores video jitter and loss, so a screen share on a clean link stays excellent", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      { id: "in-audio", type: "inbound-rtp", kind: "audio", packetsReceived: 500, jitter: 0.005 },
+      // Screen-share keyframes spread one RTP timestamp across many packets.
+      {
+        id: "in-video",
+        type: "inbound-rtp",
+        kind: "video",
+        packetsReceived: 5000,
+        packetsLost: 600,
+        jitter: 0.15,
+      },
+      { id: "ri-video", type: "remote-inbound-rtp", kind: "video", packetsLost: 1000, jitter: 0.2 },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.jitter).toBeCloseTo(5, 5);
+    expect(stats.loss).toBe(0);
+    expect(stats.quality).toBe("excellent");
+  });
+
+  it("measures inbound loss over recent packets, not the whole call", async () => {
+    let lost = 0;
+    let received = 90_000;
+    const room = createLiveRoom(() => [
+      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        kind: "audio",
+        packetsLost: lost,
+        packetsReceived: received,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100); // a long clean call so far
+    expect(cb.mock.lastCall![0].quality).toBe("excellent");
+
+    // 16 of the next 200 packets are lost: ~0.02% over the call, 8% lately.
+    lost += 16;
+    received += 184;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBeCloseTo(8, 5);
+    expect(cb.mock.lastCall![0].quality).toBe("poor");
+
+    // The link recovers; the earlier loss no longer counts.
+    received += 200;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBe(0);
+    expect(cb.mock.lastCall![0].quality).toBe("excellent");
+
+    // packetsLost can fall when duplicates arrive; that clamps to zero.
+    lost -= 2;
+    received += 200;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(cb.mock.lastCall![0].loss).toBe(0);
   });
 
   it("classifies quality as poor for RTT 200-400ms", async () => {

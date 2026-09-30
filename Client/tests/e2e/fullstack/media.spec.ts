@@ -330,7 +330,7 @@ test("microphone denial offers recovery and device removal produces the applicat
   await expectDecodedMedia(bob);
 });
 
-test("the real stats poller expands connection details when RTT degrades", async ({
+test("a quality crash updates the readout without opening the stats pane", async ({
   alice,
   bob,
 }) => {
@@ -341,6 +341,14 @@ test("the real stats poller expands connection details when RTT degrades", async
   await alice.evaluate(() => {
     window.__ocMedia.poorQuality = true;
   });
+  // The degraded RTT reaches the ping readout, but the pane is on-demand:
+  // only a click on the signal icon opens it.
+  await expect(alice.locator(".vw-signal .vw-ping")).toHaveText("800ms");
+  // Outlast the 3 s quality debounce, so an auto-expand on the quality change
+  // would have fired before the pane is checked.
+  await alice.waitForTimeout(4_000);
+  await expect(alice.locator(".vw-stats")).not.toHaveClass(/visible/);
+  await alice.locator(".vw-signal").click();
   await expect(alice.locator(".vw-stats")).toHaveClass(/visible/);
   await expect(alice.locator(".vw-stats")).toContainText("800");
 });
