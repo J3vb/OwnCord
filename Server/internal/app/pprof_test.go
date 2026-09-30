@@ -70,9 +70,10 @@ func TestStartPprof_ServesOnLoopback(t *testing.T) {
 }
 
 //go:noinline
-func contendedMutexWorker(mu *sync.Mutex, start chan struct{}) {
+func contendedMutexWorker(mu *sync.Mutex, start, done chan struct{}) {
 	<-start
 	mu.Lock()
+	close(done)
 	mu.Unlock()
 }
 
@@ -98,10 +99,7 @@ func TestStartPprof_BlockProfileServesContention(t *testing.T) {
 	mu.Lock()
 	start := make(chan struct{})
 	done := make(chan struct{})
-	go func() {
-		contendedMutexWorker(&mu, start)
-		close(done)
-	}()
+	go contendedMutexWorker(&mu, start, done)
 	close(start)
 	time.Sleep(100 * time.Millisecond) // hold the lock well past the sampling threshold
 	mu.Unlock()
