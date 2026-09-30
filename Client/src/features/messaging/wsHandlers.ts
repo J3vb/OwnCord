@@ -23,7 +23,12 @@ import {
   setMessagePinned,
 } from "../../stores/messages.store";
 import { setTyping } from "../../stores/members.store";
-import { dmStore, updateDmLastMessage, updateDmLastMessagePreview } from "../../stores/dm.store";
+import {
+  dmStore,
+  reviseDmLastMessage,
+  updateDmLastMessage,
+  updateDmLastMessagePreview,
+} from "../../stores/dm.store";
 import { setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
@@ -180,14 +185,40 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
 
 export function handleChatEdited(payload: Payload<"chat_edited">): void {
   editMessage(payload);
+  reviseDmLastMessage(payload.channel_id, payload.message_id, { lastMessage: payload.content });
 }
 
 export function handleChatDeleted(payload: Payload<"chat_deleted">): void {
   deleteMessage(payload);
+  reviseDmPreviewAfterDelete(payload.channel_id, [payload.message_id]);
 }
 
 export function handleChatBulkDeleted(payload: Payload<"chat_bulk_deleted">): void {
   bulkDeleteMessages(payload);
+  reviseDmPreviewAfterDelete(payload.channel_id, payload.ids);
+}
+
+/** A DM whose preview showed a now-deleted message falls back to the newest
+ *  surviving loaded message, as GET /dms would report it; with none loaded
+ *  the text is blanked rather than left showing the deleted one. */
+function reviseDmPreviewAfterDelete(channelId: number, ids: readonly number[]): void {
+  const shown = dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastMessageId;
+  if (shown === undefined || shown === null || !ids.includes(shown)) return;
+  const survivor = messagesStore
+    .getState()
+    .messagesByChannel.get(channelId)
+    ?.findLast((m) => !m.deleted && m.status === "sent" && m.id < shown);
+  reviseDmLastMessage(
+    channelId,
+    shown,
+    survivor === undefined
+      ? { lastMessage: "" }
+      : {
+          lastMessageId: survivor.id,
+          lastMessage: survivor.content,
+          lastMessageAt: survivor.timestamp,
+        },
+  );
 }
 
 /** A message was pinned or unpinned elsewhere — keep this client's row in

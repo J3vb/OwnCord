@@ -280,6 +280,21 @@ export function updateDmLastMessagePreview(
   });
 }
 
+/** Keep a DM's preview in step with an edit or delete of the message it shows:
+ *  a no-op unless `messageId` is still the channel's `lastMessageId`. Neither
+ *  moves the channel in the list nor touches its counts. */
+export function reviseDmLastMessage(
+  channelId: number,
+  messageId: number,
+  patch: Partial<Pick<DmChannel, "lastMessageId" | "lastMessage" | "lastMessageAt">>,
+): void {
+  dmStore.setState((prev) => {
+    const dm = prev.channels.find((c) => c.channelId === channelId);
+    if (dm === undefined || dm.lastMessageId !== messageId) return prev;
+    return { channels: prev.channels.map((c) => (c === dm ? { ...dm, ...patch } : c)) };
+  });
+}
+
 /** Clear the unread and mention counts for a DM channel — they clear together,
  *  matching channels.store.clearUnread and the server's read-state advance. */
 export function clearDmUnread(channelId: number): void {

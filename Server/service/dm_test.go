@@ -332,11 +332,10 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 }
 
 // TestDMService_ListDMs_CarriesMentionCount locks that GET /dms reports the
-// same DM mention_count the ready payload does. GetUserDMChannels carries no
-// mention count, and buildReady patches it from the unread map; ListDMs used
-// to return the zero value, so a DM mention badge silently vanished on the
-// documented REST recovery path (the client calls GET /dms when accepting a
-// message request) even though ready would have shown it.
+// same DM mention_count the ready payload does: both read it from
+// GetUserDMChannels. ListDMs used to return the zero value, so a DM mention
+// badge silently vanished on the documented REST recovery path (the client
+// calls GET /dms when accepting a message request).
 func TestDMService_ListDMs_CarriesMentionCount(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})

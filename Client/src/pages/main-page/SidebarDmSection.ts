@@ -6,7 +6,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { formatMessageTimestamp } from "@lib/formatting";
+import { atEachMidnight, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -16,7 +16,7 @@ import { isChannelMuted } from "@lib/channel-mutes";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
-import { connectText } from "../../i18n/connect";
+import { dmPreviewText } from "./SidebarDmHelpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,8 +53,8 @@ function dmRowSignature(dm: DmChannel): string {
     isChannelMuted(dm.channelId) ? "m" : "",
     dm.mentionCount,
     dm.unreadCount,
-    dm.lastMessage,
-    dm.lastMessageAt,
+    dmPreviewText(dm),
+    formatDmRowTime(dm.lastMessageAt),
   ].join("|");
 }
 
@@ -172,17 +172,13 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
     // Discord's DM list shows the last line and when it arrived. An empty
     // timestamp means the DM was never messaged, so no time is drawn.
-    const preview = createElement(
-      "span",
-      { class: "dm-preview" },
-      dm.lastMessage || connectText("app.dmNoMessages"),
-    );
+    const preview = createElement("span", { class: "dm-preview" }, dmPreviewText(dm));
     const body = createElement("div", { class: "dm-item-body" });
     appendChildren(body, name, preview);
     const time = createElement(
       "span",
       { class: "dm-preview-time" },
-      dm.lastMessageAt === "" ? "" : formatMessageTimestamp(dm.lastMessageAt),
+      formatDmRowTime(dm.lastMessageAt),
     );
     const parts: Element[] = [statusDot, body, time];
     // A mention badge outranks the plain unread badge, and a mute never
@@ -263,6 +259,8 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // the list, which survives every keyed re-render.
   const listLifecycle = new Disposable();
   enableRovingNavigation(dmList, "[data-testid='dm-entry']", listLifecycle.signal, "vertical");
+  // A row's time is "3:04 PM" today and "Sep 29" after midnight.
+  atEachMidnight(listLifecycle.signal, renderDmListItems);
 
   // --- Store subscription ---
   const unsubDmSection = dmStore.subscribeSelector(
@@ -297,6 +295,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     element: dmSection,
     update: renderDmListItems,
     destroy: () => {
+      listLifecycle.destroy();
       for (const unsub of unsubs) {
         unsub();
       }

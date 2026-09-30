@@ -14,7 +14,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { formatMessageTimestamp } from "@lib/formatting";
+import { atEachMidnight, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
@@ -186,7 +186,7 @@ function renderDmItem(
   const time = createElement(
     "span",
     { class: "dm-preview-time" },
-    convo.timestamp === "" ? "" : formatMessageTimestamp(convo.timestamp),
+    formatDmRowTime(convo.timestamp),
   );
 
   appendChildren(item, avatar, body, time);
@@ -367,7 +367,7 @@ function convoSignature(convo: DmConversation): string {
     convo.mentionCount ?? 0,
     convo.inCall === true ? "c" : "",
     convo.lastMessage,
-    convo.timestamp,
+    formatDmRowTime(convo.timestamp),
   ].join("|");
 }
 
@@ -495,6 +495,8 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
 
     // One Tab stop for the list; ArrowUp/Down step, Enter/Space open.
     enableRovingNavigation(list, VISIBLE_ROW, disposable.signal, "vertical");
+    // A row's time is "3:04 PM" today and "Sep 29" after midnight.
+    atEachMidnight(disposable.signal, () => update(rendered));
 
     appendChildren(root, header, sectionLabel, list);
     container.appendChild(root);

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   failPendingOnDisconnect,
+  handleChatBulkDeleted,
+  handleChatDeleted,
+  handleChatEdited,
   handleChatMessage,
   handleChatPinned,
   handleMessagingError,
@@ -13,6 +16,7 @@ import {
   addOptimisticMessage,
   resetMessagesStore,
 } from "../../stores/messages.store";
+import { dmStore, setDmChannels } from "../../stores/dm.store";
 import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
 import type { Payload } from "../connection/dispatchContext";
@@ -208,5 +212,70 @@ describe("handleSendFailure", () => {
     handleSendFailure("corr-c", "OFFLINE");
 
     expect(messagesStore.getState().pendingSends.has("corr-c")).toBe(false);
+  });
+});
+
+describe("DM preview follows an edit or delete of its last message", () => {
+  function seedDm(lastMessageId: number, lastMessage: string, lastMessageAt: string): void {
+    setDmChannels([
+      {
+        channelId: 1,
+        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+        participants: [],
+        name: "",
+        isGroup: false,
+        lastMessageId,
+        lastMessage,
+        lastMessageAt,
+        unreadCount: 0,
+        mentionCount: 0,
+      },
+    ]);
+  }
+  const dm = () => dmStore.getState().channels[0]!;
+  afterEach(() => setDmChannels([]));
+
+  it("replaces the preview text when the shown message is edited", () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    handleChatEdited({ message_id: 7, channel_id: 1, content: "fixed", edited_at: "x" });
+    expect(dm().lastMessage).toBe("fixed");
+    expect(dm().lastMessageAt).toBe("2026-03-15T10:00:00Z");
+  });
+
+  it("leaves the preview alone when an older message is edited", () => {
+    seedDm(7, "latest", "2026-03-15T10:00:00Z");
+    handleChatEdited({ message_id: 6, channel_id: 1, content: "older", edited_at: "x" });
+    expect(dm().lastMessage).toBe("latest");
+  });
+
+  it("falls back to the newest surviving loaded message when the shown one is deleted", () => {
+    addMessage({ ...chat(6, "2026-03-15T09:00:00Z"), content: "earlier" });
+    addMessage({ ...chat(7, "2026-03-15T10:00:00Z"), content: "oops, wrong person" });
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+
+    handleChatDeleted({ message_id: 7, channel_id: 1 });
+
+    expect(dm()).toMatchObject({
+      lastMessageId: 6,
+      lastMessage: "earlier",
+      lastMessageAt: "2026-03-15T09:00:00Z",
+    });
+  });
+
+  it("blanks the deleted text when no earlier message is loaded", () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    handleChatDeleted({ message_id: 7, channel_id: 1 });
+    expect(dm().lastMessage).toBe("");
+  });
+
+  it("applies the same fallback to a bulk delete that includes the shown message", () => {
+    addMessage({ ...chat(5, "2026-03-15T08:00:00Z"), content: "kept" });
+    addMessage({ ...chat(6, "2026-03-15T09:00:00Z"), content: "purged" });
+    addMessage({ ...chat(7, "2026-03-15T10:00:00Z"), content: "purged too" });
+    seedDm(7, "purged too", "2026-03-15T10:00:00Z");
+
+    handleChatBulkDeleted({ channel_id: 1, ids: [7, 6] });
+
+    expect(dm()).toMatchObject({ lastMessageId: 5, lastMessage: "kept" });
   });
 });

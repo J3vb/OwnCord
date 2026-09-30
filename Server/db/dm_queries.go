@@ -40,8 +40,7 @@ type DMChannelInfo struct {
 	UnreadCount   int    `json:"unread_count"`
 	// MentionCount is read_states.mention_count for this DM, carried by the
 	// GetUserDMChannels query so every path that builds a DM summary (GET
-	// /dms and the ready payload) reports the same badge. buildReady also
-	// overlays the unread map, harmlessly re-confirming the same value.
+	// /dms and the ready payload) reports the same badge.
 	MentionCount int `json:"mention_count"`
 }
 

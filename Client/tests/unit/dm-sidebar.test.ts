@@ -38,6 +38,7 @@ describe("DmSidebar", () => {
 
   afterEach(() => {
     container.remove();
+    vi.useRealTimers();
   });
 
   it("renders the sidebar with search input", () => {
@@ -662,10 +663,26 @@ describe("DmSidebar", () => {
     sidebar.mount(container);
 
     expect(container.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
-    // The time is rendered (a full date/time for an older timestamp), not the
-    // raw ISO string.
-    const time = container.querySelector(".dm-preview-time")?.textContent ?? "";
-    expect(time).toMatch(/^\d{2}\/\d{2}\/\d{4} \d{1,2}:\d{2} [AP]M$/);
+    // A compact date for an older timestamp, not the raw ISO string.
+    expect(container.querySelector(".dm-preview-time")?.textContent).toBe("Jun 15, 2020");
+
+    sidebar.destroy?.();
+  });
+
+  it("rolls a row's time from a clock time to a date at midnight", () => {
+    vi.useFakeTimers({ now: new Date(2026, 8, 29, 23, 58) });
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ timestamp: new Date(2026, 8, 29, 23, 50).toISOString() })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+    const time = () => container.querySelector(".dm-preview-time")?.textContent;
+    expect(time()).toBe("11:50 PM");
+
+    vi.advanceTimersByTime(3 * 60 * 1000);
+
+    expect(time()).toBe("Sep 29");
 
     sidebar.destroy?.();
   });
