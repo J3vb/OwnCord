@@ -13,6 +13,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/diskutil"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -46,6 +47,9 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	// Service layer — centralises business logic for REST and WS handlers.
 	// *db.DB satisfies service.Store directly.
 	svc := service.New(database, limiter)
+	// Before NewHub: its first settings-cache fill reads the file-type lists
+	// auth_ok carries.
+	svc.Uploads.SetStorageLimits(storageLimits(cfg))
 
 	lk, proc, voiceEnabled := buildVoice(cfg)
 
@@ -107,6 +111,20 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	hub.RearmTimeoutExpiries()
 
 	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
+}
+
+// storageLimits is B5-2's two bounds on the upload service: the per-user
+// quota (upload.user_quota_mb, 0 = unlimited) and the headroom floor
+// (server.min_free_disk_mb) probed on the upload volume, which may not be the
+// data volume /health watches; and config.yaml's file-type lists.
+func storageLimits(cfg *config.Config) service.StorageLimits {
+	return service.StorageLimits{
+		UserQuotaBytes: cfg.Upload.UserQuotaBytes(),
+		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
+		Dir:            cfg.Upload.StorageDir,
+		MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20,
+		FileTypes:      storage.FileTypePolicy{Blocked: cfg.Upload.BlockedExtensions, Allowed: cfg.Upload.AllowedExtensions},
+	}
 }
 
 // buildVoice creates the LiveKit client and, when OwnCord manages the

@@ -2,10 +2,21 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
+
+	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
@@ -72,5 +83,77 @@ func TestUpload_SavedPolicyReplacesConfig(t *testing.T) {
 	assertBlocked(t, h, "notes.txt", []byte("hello"), ".txt")
 	if rr := doUpload(t, h.router, h.token, "file", "build.bat", []byte("@echo off\r\n")); rr.Code != http.StatusCreated {
 		t.Fatalf("build.bat after the owner unblocked it: status %d, body %s", rr.Code, rr.Body.String())
+	}
+}
+
+// The first auth_ok after start-up carries config.yaml's lists: the hub fills
+// its settings cache while StartRuntime builds it, before NewRouter runs.
+func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	cfg := &config.Config{
+		Server: config.ServerConfig{Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"}},
+		Upload: config.UploadConfig{MaxSizeMB: 10, StorageDir: t.TempDir(), BlockedExtensions: []string{"bat", "ps1"}, AllowedExtensions: []string{"txt"}},
+	}
+	rt, err := app.StartRuntime(cfg, database, nil)
+	if err != nil {
+		t.Fatalf("app.StartRuntime: %v", err)
+	}
+	handler, cleanup := api.NewRouter(cfg, database, "test", nil, nil, rt)
+	t.Cleanup(cleanup)
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	hash, _ := auth.HashPassword("correctPass1")
+	uid, err := database.CreateUser(context.Background(), "filetypes", hash, 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateSession(context.Background(), uid, auth.HashToken(token), "test", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/api/v1/ws", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("websocket.Dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
+	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]any{"token": token}})
+	if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	var authOK struct {
+		Type    string `json:"type"`
+		Payload struct {
+			UploadPolicy struct {
+				BlockedExtensions []string `json:"blocked_extensions"`
+				AllowedExtensions []string `json:"allowed_extensions"`
+			} `json:"upload_policy"`
+		} `json:"payload"`
+	}
+	_, msg, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read auth_ok: %v", err)
+	}
+	if err := json.Unmarshal(msg, &authOK); err != nil || authOK.Type != "auth_ok" {
+		t.Fatalf("auth_ok: %v; raw=%s", err, msg)
+	}
+	if got := authOK.Payload.UploadPolicy; !slices.Equal(got.BlockedExtensions, []string{"bat", "ps1"}) || !slices.Equal(got.AllowedExtensions, []string{"txt"}) {
+		t.Fatalf("auth_ok upload_policy = %+v, want config.yaml's lists; raw=%s", got, msg)
 	}
 }

@@ -93,8 +93,8 @@ type StorageReservation struct {
 	released  bool
 }
 
-// SetStorageLimits installs the limits; the composition root calls it once
-// the store exists.
+// SetStorageLimits installs the limits; the composition root calls it before
+// the hub first reads the file-type policy.
 func (s *UploadService) SetStorageLimits(l StorageLimits) {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
