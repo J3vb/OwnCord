@@ -105,8 +105,8 @@ type HubOptions struct {
 // sending it. The upload route stays authoritative; this is only the
 // client's pre-check.
 type UploadPolicy struct {
-	// MaxUploadBytes is upload.max_size_mb in bytes. 0 means no per-file
-	// cap, where the upload route's 100 MiB request cap binds.
+	// MaxUploadBytes is upload.max_size_mb in bytes. 0 means uploads are
+	// disabled: the upload route refuses every non-empty file.
 	MaxUploadBytes int64 `json:"max_upload_bytes"`
 }
 

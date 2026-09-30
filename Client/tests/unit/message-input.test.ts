@@ -1239,6 +1239,72 @@ describe("MessageInput", () => {
     }
   });
 
+  it("disables attaching when the server advertises uploads disabled (0), even after mount", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "p.png" }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+    const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
+    expect(attachBtn.disabled).toBe(false);
+    try {
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
+      authStore.flush();
+
+      expect(attachBtn.disabled).toBe(true);
+      expect(attachBtn.title).toBe("Uploads are disabled on this server");
+
+      comp.openFilePicker();
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["x"], "a.bin", { type: "application/octet-stream" })],
+        writable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      const pasteEvent = new Event("paste", { bubbles: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              kind: "file",
+              type: "image/png",
+              getAsFile: () => new File(["img"], "p.png", { type: "image/png" }),
+            },
+          ],
+        },
+      });
+      textarea.dispatchEvent(pasteEvent);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(onUploadFile).not.toHaveBeenCalled();
+      expect(container.querySelectorAll(".attachment-preview-item").length).toBe(0);
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Uploads are disabled on this server",
+      );
+
+      // A later auth_ok that re-enables uploads re-enables the control.
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
+      authStore.flush();
+      expect(attachBtn.disabled).toBe(false);
+      expect(attachBtn.title).toBe("");
+    } finally {
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+      comp.destroy?.();
+    }
+  });
+
+  it("keeps the attach button disabled while gated even if uploads are enabled", () => {
+    const comp = createMessageInput(
+      makeOptions({ onUploadFile: vi.fn(async () => ({ id: "x", url: "x", filename: "x" })) }),
+    );
+    comp.mount(container);
+    comp.setDisabled("Not connected");
+    const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
+    expect(attachBtn.disabled).toBe(true);
+    comp.setDisabled(null);
+    expect(attachBtn.disabled).toBe(false);
+    comp.destroy?.();
+  });
+
   // D1 (a): any type the server accepts can be attached; the server stays
   // authoritative and refuses its own blocked types.
   it("uploads a file of a type outside the old allowlist", async () => {

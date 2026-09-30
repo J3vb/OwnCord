@@ -187,9 +187,15 @@ const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
 const SEND_DEBOUNCE_MS = 200;
 // The server's per-file cap arrives on auth_ok (upload_policy); an older
-// server, or one with no per-file cap, falls back to its 100 MiB request cap.
+// server that omits it falls back to its 100 MiB request cap, and an
+// advertised 0 means uploads are disabled on that server.
 // The server stays authoritative: this only refuses a doomed upload early.
 const FALLBACK_MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+/** True when this server advertised max_upload_bytes 0 (uploads disabled). */
+function uploadsDisabledByServer(): boolean {
+  return authStore.getState().uploadPolicy?.max_upload_bytes === 0;
+}
 // Server/ws/command.go rejects the whole chat_send frame (as a generic parse
 // error, not an attachment-specific one) once len(Attachments) > 10 -- cap
 // the queue client-side so we never upload an attachment doomed to be
@@ -562,12 +568,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.placeholder = disabled
       ? disabledReason!
       : messagingText("composer.placeholder", { channel: options.channelName });
+    const uploadsOff = uploadsDisabledByServer();
     for (const btn of controlButtons) {
-      if (disabled) {
+      const isAttach = btn.classList.contains("attach-btn");
+      if (isAttach) btn.title = uploadsOff ? messagingText("attach.serverDisabled") : "";
+      if (disabled || (isAttach && uploadsOff)) {
         btn.setAttribute("disabled", "true");
       } else {
-        // Don't re-enable the attach button when uploads aren't wired.
-        if (btn.classList.contains("attach-btn") && options.onUploadFile === undefined) continue;
         // Likewise for GIFs when this server has no GIF provider configured.
         if (btn.classList.contains("gif-btn") && gifUnavailable) continue;
         btn.removeAttribute("disabled");
@@ -721,6 +728,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
+    if (uploadsDisabledByServer()) {
+      showUploadError(messagingText("attach.serverDisabled"));
+      return;
+    }
 
     // Attachments queued during an edit are neither sent (the edit branch
     // never reads pendingAttachments) nor cleared -- they'd silently ride
@@ -732,7 +743,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     // Any file type may be attached: the server sniffs the content, refuses
     // its blocked types and serves unsafe ones as downloads.
-    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes || FALLBACK_MAX_FILE_SIZE;
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
     if (file.size > maxBytes) {
       showUploadError(
         messagingText("error.fileTooLarge", {
@@ -943,7 +954,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       );
       attachBtn.addEventListener("click", () => fileInput.click(), { signal });
       openPicker = () => {
-        if (disabledReason !== null) return;
+        if (disabledReason !== null || uploadsDisabledByServer()) return;
         fileInput.click();
       };
       root?.appendChild(fileInput);
@@ -981,6 +992,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     controlButtons.push(sendBtn, emojiBtn, gifBtn);
     if (options.onUploadFile !== undefined) {
       controlButtons.push(attachBtn);
+      disposable.onStoreChange(
+        authStore,
+        (s) => s.uploadPolicy?.max_upload_bytes,
+        () => applyDisabledState(),
+      );
     }
 
     textarea.addEventListener(

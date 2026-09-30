@@ -122,8 +122,8 @@ const (
 	defaultMaxBodySize = config.MaxMessageBytes
 
 	// uploadMaxBodySize is the request body size limit for file uploads
-	// (100 MiB) when upload.max_size_mb is 0 or at most 100; a larger
-	// per-file cap raises it (uploadBodyCap).
+	// (100 MiB) when upload.max_size_mb is at most 100 (0 disables uploads);
+	// a larger per-file cap raises it (uploadBodyCap).
 	uploadMaxBodySize = 100 << 20
 
 	// uploadMultipartMargin is the room uploadBodyCap leaves for the

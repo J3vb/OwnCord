@@ -86,6 +86,17 @@ func TestUpload_OverSmallCapKeepsTheSizeRejection(t *testing.T) {
 	}
 }
 
+// upload.max_size_mb: 0 disables uploads: storage.Save refuses every
+// non-empty file with the ordinary size rejection and keeps nothing.
+func TestUpload_ZeroMaxSizeRefusesUploads(t *testing.T) {
+	h := cappedHarness(t, 0)
+	rr := streamedUpload(t, h.router, h.token, 1)
+	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
+	if h.filesOnDisk(t) != 0 {
+		t.Fatal("a refused upload left a file on disk")
+	}
+}
+
 func TestUploadBodyCap(t *testing.T) {
 	const hundredMiB = int64(100 << 20)
 	for _, tc := range []struct {
@@ -93,8 +104,9 @@ func TestUploadBodyCap(t *testing.T) {
 		fileCap int64
 		want    int64
 	}{
-		// upload.max_size_mb: 0 is no per-file cap; the 100 MiB request cap binds.
-		{"no per-file cap", 0, hundredMiB},
+		// A 0 cap (unset, or max_size_mb 0, which disables uploads) keeps the
+		// 100 MiB request cap; storage.Save refuses the file itself.
+		{"zero cap", 0, hundredMiB},
 		// A smaller per-file cap keeps the 100 MiB request cap, so an oversize
 		// file still reaches storage.Save and its own size rejection.
 		{"small cap", 10 << 20, hundredMiB},

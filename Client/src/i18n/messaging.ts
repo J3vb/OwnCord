@@ -36,6 +36,7 @@ export const messagingText = defineCatalog("messaging", {
   "edit.cancel": "Cancel editing",
   "attach.label": "Attach file",
   "attach.unavailable": "File uploads not available",
+  "attach.serverDisabled": "Uploads are disabled on this server",
   "attach.remove": "Remove attachment {filename}",
   "emoji.label": "Emoji",
   "gif.button": "GIF",

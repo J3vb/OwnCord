@@ -310,7 +310,7 @@ export interface AuthOkPayload {
 
 /** auth_ok's upload_policy. The server's upload route stays authoritative. */
 export interface UploadPolicy {
-  /** upload.max_size_mb in bytes; 0 (no per-file cap) or absent falls back to 100 MiB. */
+  /** upload.max_size_mb in bytes; 0 means uploads are disabled; absent falls back to 100 MiB. */
   readonly max_upload_bytes?: number;
 }
 

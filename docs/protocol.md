@@ -220,8 +220,9 @@ buffer), or `"db"` (persistent `events` table). See
 `upload_policy` is what a client checks before an upload; the upload route
 stays authoritative, and later fields may be added. `max_upload_bytes` is
 `upload.max_size_mb` in bytes, the largest file `POST /api/v1/uploads`
-accepts. `0` means no per-file cap, where the route's 100 MiB request cap
-binds. An older server omits `upload_policy`; clients then assume 100 MiB.
+accepts. `0` means uploads are disabled on this server: the route refuses
+every non-empty file, and clients disable attaching. An older server omits
+`upload_policy`; clients then assume 100 MiB.
 
 ### Step 3: Failure -- auth_error
 
