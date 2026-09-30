@@ -1,12 +1,22 @@
 name: CI
 
 on:
-  # dev is deliberately not a push trigger: while a dev -> main PR is open every
-  # push to dev already fires pull_request(synchronize), so listing it here ran
-  # the whole suite twice for one push. Use workflow_dispatch for a dev branch
-  # with no PR open yet.
+  # dev is a push trigger so a broken integration commit — two PRs that were
+  # each green alone but not together, which no PR run ever sees because both
+  # merged before either combined tree was built — shows up as a red run on the
+  # dev commit itself. Every push to dev selects every capability (the `changes`
+  # job answers --all for anything that is not a pull request into dev), so this
+  # is the full suite, at full cost, on each integration commit.
+  #
+  # The price: while a dev -> main release PR is open, a push to dev fires both
+  # this and pull_request(synchronize), and the two events fall in different
+  # `ci-${{ github.ref }}` concurrency groups, so the suite runs twice for that
+  # one push. The release window is short and a missed merge-combination break
+  # was worse, so the duplication is accepted rather than unified into one
+  # concurrency group (which would change how a PR and its merge serialize).
+  # workflow_dispatch still covers any other branch on demand.
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -31,14 +41,17 @@ jobs:
   # (`--all`) rather than by skipping this job, so that "this job ran" and
   # "these outputs exist" are the same statement.
   #
-  # Selection is deliberately limited to a pull request INTO DEV. A PR into main
-  # and a push to main run every capability, because
-  # scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each context in
-  # docs/plans/b0-dev-branch-protection.sh to have concluded `success` on the
-  # tagged commit and counts `skipped` as NOT success. Releases are cut from
-  # main, so a check legitimately skipped there would block the release instead
-  # of saving anything. Day-to-day work happens on PRs into dev, which is where
-  # the long runs the audit measured came from.
+  # Selection is deliberately limited to a pull request INTO DEV. A PR into main,
+  # a push to main and a push to dev all run every capability. A push to main is
+  # required because scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each
+  # context in docs/plans/b0-dev-branch-protection.sh to have concluded `success`
+  # on the tagged commit and counts `skipped` as NOT success; releases are cut
+  # from main, so a check legitimately skipped there would block the release
+  # instead of saving anything. A push to dev runs everything because that is the
+  # whole point of the trigger: only the combined tree can show a
+  # merge-combination break, so the diff-selected subset is not enough. Day-to-day
+  # work happens on PRs into dev, which is where the long runs the audit measured
+  # came from; a dev push selects everything rather than a subset.
   changes:
     name: Change selection
     runs-on: ubuntu-latest

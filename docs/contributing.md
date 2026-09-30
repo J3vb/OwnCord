@@ -269,6 +269,12 @@ Three consequences worth knowing before you open a PR:
   A PR into `main` always runs every job, because release evidence requires each
   required check to have concluded `success` on the tagged commit, so a
   legitimately skipped check would block the release instead of saving anything.
+  A **push to `dev`** also runs every job: it is the merged tree of a squash and
+  is what catches a merge-combination break (two PRs each green alone, red
+  together) that no single PR head ever built. A push to `dev` while a
+  `dev` → `main` release PR is open runs the suite twice — the push event and
+  the PR's `synchronize` event are separate concurrency groups — which is
+  accepted during that short window.
 
 - Squash merge, and a conventional commit subject on the squashed commit.
 

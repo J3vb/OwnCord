@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # G-03 / RL-14: make `dev` PR-only so every integration commit gets CI.
 #
-# Today `.github/workflows/ci.yml` triggers on `push: [main]` and
-# `pull_request: [main, dev]`. A direct push to `dev` with no open PR runs
-# nothing at all — which is why the audited head 5cc08889 has no CI evidence.
-# Requiring a PR routes every dev commit through the existing pull_request
-# trigger, with no workflow change and no duplicated runs.
+# When this was written `.github/workflows/ci.yml` triggered on
+# `push: [main]` and `pull_request: [main, dev]`, so a direct push to `dev`
+# with no open PR ran nothing at all — which is why the audited head 5cc08889
+# has no CI evidence. Requiring a PR routes every dev commit through the
+# existing pull_request trigger, with no workflow change and no duplicated runs.
+#
+# Since 2026-09-30 ci.yml ALSO runs on push to `dev` (dev-branch-protection /
+# merge-combination breakage), so a squash commit now carries its own full-matrix
+# run in addition to the PR-head one. PR-only remains enforced for the review and
+# merge gate; the two are complementary, and a push during an open dev->main
+# release PR runs the suite twice by design.
 #
 # Run this yourself: Claude Code's sandbox blocks repo-settings writes.
 #   bash docs/plans/b0-dev-branch-protection.sh
