@@ -95,12 +95,12 @@ stateDiagram-v2
 
 All four are optimistic with rollback; each also emits a WS control message.
 
-| Control         | Local state                                                                                                                                                                                                                                                                                                                           | WS message                    | Rollback                  |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------- |
-| **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `features/voice/mediaControl.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative) |
-| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume)                                                                                                                                                                                 | `voice_deafen` + `voice_mute` | implies mute              |
-| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                            | `voice_camera{enabled}`       | revert on failure + toast |
-| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                                      | `voice_screenshare{enabled}`  | revert + toast            |
+| Control         | Local state                                                                                                                                                                                                                                                                                                                           | WS message                    | Rollback                                     |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------- |
+| **Mute**        | `localMuted` (`setLocalMuted`) — stops the mic capture track (`stopMicTrackOnMute` in the Room's `publishDefaults`, applied by `applyMicMuteState`, `features/voice/mediaControl.ts`), so the OS microphone in-use indicator goes out; the LiveKit publication is **not** removed — it stays muted, and unmute re-acquires the device | `voice_mute{muted}`           | n/a (local-authoritative)                    |
+| **Deafen**      | `localDeafened` + forces mute — unsubscribes remote _voice_ audio only; screen-share/stream audio keeps playing (it has its own per-tile mute/volume)                                                                                                                                                                                 | `voice_deafen` + `voice_mute` | implies mute                                 |
+| **Camera**      | `localCamera` set optimistically, rolled back on device failure (`enableCamera()` in `lib/screenShare.ts`)                                                                                                                                                                                                                            | `voice_camera{enabled}`       | revert on failure + toast                    |
+| **Screenshare** | `localScreenshare` optimistic, rollback on failure (`enableScreenshare()` in `lib/screenShare.ts`); rate-limited                                                                                                                                                                                                                      | `voice_screenshare{enabled}`  | revert + toast; a dismissed picker is silent |
 
 `stopMicTrackOnMute` carries the SDK's own documented tradeoff: with a Bluetooth
 headset connected, stopping and re-acquiring the capture track makes the device
@@ -111,9 +111,9 @@ the accepted cost.
 | Control state  | Presentation                                                                                                                                                                                                                                     |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                        |
-| deafened       | Headphone-slash; implies muted styling                                                                                                                                                                                                           |
+| deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                     |
 | server muted   | Distinct server-muted icon (title "Muted by a moderator"); the widget's own mute/deafen controls are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/VoiceWidget.ts` |
-| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`)                                                                                                                                                       |
+| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled and reads unmuted                                                                                                         |
 | camera on      | Self video tile in the grid                                                                                                                                                                                                                      |
 | screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
 | speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)                                                                                                                                                                    |
@@ -121,7 +121,10 @@ the accepted cost.
 **Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
 each tile is a button (click, Enter, Space) that opens it in focus view, with a
 filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
-**LIVE** badge, and the speaking ring (`--text-positive`) is on camera tiles.
+**LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
+headphone-slash badge for a muted or deafened user are on camera tiles. A
+**Show chat** control in the grid's header leaves the grid or focus view for
+the chat without leaving the call.
 A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
@@ -155,12 +158,13 @@ control a permanent part of the listen-only badge.
 PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
 `setMuted(!pressed)` only while in a channel (the `ptt-state` listener inside `initPtt()`, `lib/ptt.ts`). **Target UX:**
 
-| State               | Presentation                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| PTT bound, released | Muted; hint "Hold {key} to talk"                                                                                      |
-| PTT pressed         | Unmuted + speaking ring                                                                                               |
-| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key" |
-| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                             |
+| State               | Presentation                                                                                                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PTT bound, released | Mic stays closed, but the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the mic |
+| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                             |
+| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                               |
+| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                           |
+| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables the binding                                                           |
 
 ---
 
@@ -181,7 +185,7 @@ Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store
 
 ## 6. Token refresh & reconnect (invisible)
 
-Token refresh (23 h timer) and voice reconnect (five attempts, 3 s-doubling
+Token refresh (a 4 min timer against the 5 min token) and voice reconnect (five attempts, 3 s-doubling
 backoff capped at 6 s, about 27 s) should be **invisible on success** beyond the
 "Reconnecting voice…" badge while a reconnect runs. Only exhaustion surfaces:
 "Voice connection lost — failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the

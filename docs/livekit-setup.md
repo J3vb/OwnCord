@@ -192,7 +192,6 @@ Client                     OwnCord Server              LiveKit Server
 - TTL: 5 minutes; the client refreshes via `voice_token_refresh` every 4 minutes (rate limited to 1/60s)
 - Publish is scoped per track source via `CanPublishSources`: microphone from `SPEAK_VOICE`, camera from `USE_VIDEO`, screen share from `SHARE_SCREEN`, each independently
 - `canSubscribe` is always true
-- Client can request refresh via `voice_token_refresh` (rate limited to 1/60s)
 
 **Client connection paths:**
 

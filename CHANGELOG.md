@@ -215,7 +215,7 @@ and only when it changes something a contributor or fork holder must do
 - **The "Secured" badge recovers after a brief key-delivery stall.** A transient decryption failure used to leave "Unsecured" for the rest of the call; the badge now clears once the peer's frames decrypt again.
 - **A deafened member shows one icon, not two.** The roster drew both mic-off and headphones-off for a deafened user, who is always muted too; it now shows headphones-off alone, and camera tiles carry a mute/deafen badge like the sidebar row.
 - **On Linux, a call now recovers from a suspend or a sound-server restart instead of going silently dead.** A native audio stream torn down by a laptop sleeping, or by restarting PipeWire/PulseAudio, used to be only logged — you stayed in the call but heard nothing, or were silent to everyone, until you muted and unmuted. The stream is now reopened automatically, and a USB headset made the system-default microphone mid-call is followed without a manual device switch.
-- **Sharing your screen on Linux no longer hangs if the capturer never produces a frame.** The share stayed stuck on "starting share" with no cancel; it now gives up after 15 seconds as a cancelled share.
+- **Sharing your screen on Linux no longer hangs if the capturer never produces a frame.** The share stayed stuck on "starting share" with no cancel; a picked screen or window now gives up after 15 seconds and reports that the share failed.
 - **A fast leave-and-rejoin no longer waits behind the previous call's teardown.** The new session is set up without holding the lock that is closing the old one, so switching channels is immediate.
 
 ### Accounts & admin

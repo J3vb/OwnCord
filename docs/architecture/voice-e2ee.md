@@ -253,8 +253,10 @@ the webview only as the `native_voice_connect` result
 (`NativeVoiceConnected.frames`); the handshake is refused unless the request
 path starts with the token (compared in constant time), so no other local
 process or web page can read or inject frames. Closing the session drops the
-server, which aborts the listener and every connection it accepted. Two
-routes:
+server, which aborts the listener and every connection it accepted. A
+renderer or camera uplink whose socket closes while it is still in use reopens
+it after 1 s, so a dropped connection does not freeze the tile for the rest of
+the call. Two routes:
 
 - `/<token>/remote/<track sid>`: one subscribed remote video track's decoded
   frames, native to webview, as width, height and the three I420 planes
@@ -552,16 +554,19 @@ first, ids are `cpal`'s stable device ids, names the sink descriptions) and an
 `audiooutput` switch reopens the output stream on the chosen device (an unknown
 id falls back to the default and reports it; the device already playing is
 left alone, and a device that fails to open leaves the current stream
-playing). A sink that disappears mid-call is moved by the sound server itself;
-the stream error is only logged. The stream is opened on a concrete sink, so
-"System default" (an empty id) would stay on the sink it opened on. A
-`devicechange` re-applies it (the hot-plug re-apply above), and a default
-changed in the system mixer with no hot-plug raises no `devicechange`, so
-while "System default" is selected a watcher thread asks the sound server for
-the default sink every 2 s and reopens the stream there when it moves. It
-polls through the host connection that opened the stream, adds one thread
-for the call, and is stopped and joined when another device is chosen or the
-session closes.
+playing). A sink that disappears mid-call is moved by the sound server itself.
+The stream is opened on a concrete sink, so "System default" (an empty id)
+would stay on the sink it opened on. A `devicechange` re-applies it (the
+hot-plug re-apply above), and a default changed in the system mixer with no
+hot-plug raises no `devicechange`, so a watcher thread asks the sound server
+for the default sink every 2 s and, while "System default" is selected,
+reopens the stream there when it moves. The same watcher reopens a stream the
+sound server tore down (a suspend and resume, a PipeWire or PulseAudio
+restart): the stream's error callback flags it, and the next tick reopens it
+on the chosen device, or on the current default for "System default". It
+polls through the host connection that opened the stream, adds one thread for
+the call, starts when the stream first opens, and is stopped and joined when
+the session closes.
 
 **Echo cancellation reference.** At first the echo canceller's reference was
 the device module's synthetic mix (every remote track at unity, on the pump's
@@ -596,7 +601,11 @@ on, through RNNoise (`nnnoiseless`, a pure-Rust port of the same model), into
 an unbuffered `NativeAudioSource` that backs the published microphone track.
 Mute closes the input stream (the OS in-use indicator goes out) and keeps the
 publication; unmute reopens it on the device it last resolved, so a
-push-to-talk press does not enumerate devices.
+push-to-talk press does not enumerate devices. The capture shares the
+playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
+sound server tore down and, while "System default" is selected, follows the
+default source as it moves; while muted it only re-resolves, so the next
+unmute opens the device the selection now names.
 
 **APM and RNNoise together.** Both stay on when both are enabled, as on the
 web path, where the browser's processing precedes the RNNoise worklet. The
