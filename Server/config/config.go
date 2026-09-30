@@ -284,6 +284,16 @@ type ServerConfig struct {
 	// it remotely through an SSH port-forward. See
 	// docs/server-configuration.md.
 	PprofEnabled bool `yaml:"pprof_enabled"`
+	// PprofBlockProfileRate is the average interval, in nanoseconds, between
+	// block samples while the pprof listener is enabled (Go's
+	// runtime.SetBlockProfileRate unit). 100000 samples roughly every 100 µs
+	// of blocked time, enough to see the single SQLite writer's contention
+	// that a CPU profile cannot. 0 disables block sampling.
+	PprofBlockProfileRate int `yaml:"pprof_block_profile_rate"`
+	// PprofMutexProfileFraction samples one in N contended mutex events while
+	// the pprof listener is enabled (Go's runtime.SetMutexProfileFraction).
+	// 0 disables mutex sampling.
+	PprofMutexProfileFraction int `yaml:"pprof_mutex_profile_fraction"`
 	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
 	// endpoints. The webhook already authenticates cryptographically (LiveKit
 	// JWT signature over the body hash) — this perimeter is defence-in-depth,
@@ -430,6 +440,10 @@ func defaults() Config {
 			WAFCRSMode:    "detect",
 			RestartMode:   "auto",
 			MinFreeDiskMB: 256,
+			// Applied only while PprofEnabled is true, so a disabled
+			// profiler still adds nothing at runtime.
+			PprofBlockProfileRate:     100_000,
+			PprofMutexProfileFraction: 5,
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -527,6 +541,10 @@ server:
   #                           # container's own loopback: reach it with e.g.
   #                           # docker run --rm --network container:<name>
   #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
+  # pprof_block_profile_rate: 100000       # nanoseconds between block samples when
+  #                           # pprof is on (0 disables); sees SQLite writer contention.
+  # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
+  #                           # when pprof is on (0 disables).
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.

@@ -25,6 +25,10 @@ server:
   #                           # container's own loopback: reach it with e.g.
   #                           # docker run --rm --network container:<name>
   #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
+  # pprof_block_profile_rate: 100000       # nanoseconds between block samples when
+  #                           # pprof is on (0 disables); sees SQLite writer contention.
+  # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
+  #                           # when pprof is on (0 disables).
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.
