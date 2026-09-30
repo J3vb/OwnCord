@@ -595,7 +595,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   function renderUnanswered(v: Extract<DmCallView, { kind: "unanswered" }>): void {
     root.classList.add("dm-call-panel--expanded");
     const name = callName(v.dm, currentUserId());
-    const ids = [currentUserId(), ...v.dm.participants.map((p) => p.id)];
+    // Nobody else is in the room (deriveCallView hands us "unanswered" only
+    // then), so the absent callee has no tile: showing their placeholder would
+    // look like they joined. Ring again restores the ringing tile.
+    const ids = [currentUserId()];
     let stage: HTMLElement;
     if (videoActive) {
       stage = videoStage(v.dm, ids);
