@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 174 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 176 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -50,6 +50,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/backup`                                                  |
 | GET     | `/admin/api/backups`                                                 |
 | DELETE  | `/admin/api/backups/{name}`                                          |
+| GET     | `/admin/api/backups/{name}/download`                                 |
+| POST    | `/admin/api/backups/{name}/link`                                     |
 | POST    | `/admin/api/backups/{name}/restore`                                  |
 | GET     | `/admin/api/channels`                                                |
 | POST    | `/admin/api/channels`                                                |
@@ -254,6 +256,7 @@ endpoints return plain-text errors — see their section):
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
+| `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
 
 ---
 
@@ -3828,12 +3831,18 @@ channel (pinned messages exempt, direct messages never in scope); a
 per-channel override in either direction is
 [`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
+`server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
+held to the same limits the first-run setup wizard enforces.
+
 Three keys are accepted and stored but have **no runtime effect**:
 `server_icon` (reserved for a future release), `max_upload_bytes` (the real
 limit is `upload.max_size_mb` in config.yaml, applied at startup), and
 `voice_quality` (the real setting is `voice.quality` in config.yaml). The
 admin panel does not show them; it reads the values in effect from
-[`GET /admin/api/config`](#get-adminapiconfig).
+[`GET /admin/api/config`](#get-adminapiconfig). They are still validated like
+the wizard's values: `max_upload_bytes` is a whole number of bytes from
+1048576 (1 MB) to 10737418240 (10240 MB), and `voice_quality` is `low`,
+`medium` or `high` (case-insensitive, stored lower-case).
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
@@ -3842,9 +3851,9 @@ user has TOTP enabled.
 
 #### Errors
 
-| Status | Code          | Cause                                                                                     |
-| ------ | ------------- | ----------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Unknown key, invalid boolean or registration mode, or `require_2fa` preconditions not met |
+| Status | Code          | Cause                                                                                      |
+| ------ | ------------- | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
 
@@ -4008,6 +4017,40 @@ List backups, newest first.
 
 `name` is validated against path traversal. Returns `204 No Content`, or
 `404 NOT_FOUND` if the file does not exist.
+
+---
+
+### POST /admin/api/backups/{name}/link
+
+Issue a short-lived, single-use link to download one backup file, on the same
+terms as the [archive link](#post-adminapiarchivelink).
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "path": "/admin/api/backups/chatserver_20260804_120000.db/download?token=…"
+}
+```
+
+The token is random, bound to the requesting owner and to this one file,
+valid for about a minute and consumable once. It is never logged. `400` for a
+name that fails the path-traversal check, `404 NOT_FOUND` when no such `.db`
+backup exists.
+
+---
+
+### GET /admin/api/backups/{name}/download
+
+Redeem a single-use backup link. **Auth:** the `token` query parameter, as for
+[`GET /admin/api/archive/download`](#get-adminapiarchivedownload); the
+credential that asked for it must still be a signed-in, non-banned Owner, and
+`{name}` must be the file the link was issued for. `200
+application/octet-stream` streamed from disk as an attachment, audited as
+`backup_download`; `403 FORBIDDEN` for an unknown, expired, already-used or
+other-file token or a principal that no longer qualifies.
 
 ---
 
@@ -4446,6 +4489,13 @@ literally named "Voice Channels", and any voice channel outside it.)
 
 `PATCH` accepts `category`, so moving a channel between categories is an edit
 rather than a delete-and-recreate. An empty string makes it uncategorized.
+
+A name already used by another channel of the same `type` in the same
+`category` is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
+or a `PATCH` that changes the name or the category. It is a check at write
+time, not a database constraint, so channels that already share a name are
+left as they are, and a `PATCH` that leaves both name and category alone still
+saves.
 
 ---
 

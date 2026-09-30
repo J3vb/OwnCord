@@ -198,7 +198,9 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
+import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
+import { uiStore } from "@stores/ui.store";
 import { messagesStore } from "@stores/messages.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
@@ -207,6 +209,7 @@ import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { leaveVoice } from "@lib/livekitSession";
 import { deleteCredential, loadCredential } from "@lib/credentials";
+import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createConnectPage } from "@pages/ConnectPage";
 
 const A = "a.example:8443";
@@ -376,6 +379,28 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
     expect(authStore.getState().token).toBe("stored-token-a");
     expect(transportLog().at(-1)).toContain("a.example");
     expect(peakLiveTransports()).toBe(1);
+  });
+
+  it("times out a resume to an offline server, returning to the form with an error", async () => {
+    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
+      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
+    );
+    await loginWithPassword(A, 1);
+
+    await quickSwitchTo(A);
+    await vi.advanceTimersByTimeAsync(10);
+    const page = latestConnectPage();
+    // The resume reached the transport with the stored token...
+    expect(page.showAutoConnecting).toHaveBeenCalledWith("Server A");
+
+    // ...but the offline server never answers, so the pre-auth deadline must
+    // end the infinite "Auto-connecting…" screen rather than retry forever.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+
+    expectConsole("warn", /Pre-auth connection timed out/);
+    // The connect page reads this store and paints it over the overlay.
+    expect(uiStore.getState().transientError).toContain("offline");
+    expect(transportLog().at(-1)).toBe("ws_disconnect");
   });
 
   it("keeps A's sign-in through Add server, so switching back skips the password", async () => {
