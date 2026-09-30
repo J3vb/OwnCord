@@ -13,6 +13,8 @@ import {
   applyServerMessage,
   messagesStore,
   setMessages,
+  setAroundMessages,
+  getChannelMessages,
   invalidateLoadedMessageWindows,
   setChannelLoading,
   setChannelLoadError,
@@ -37,6 +39,8 @@ import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
+import { shellText } from "../../i18n/shell";
+import { readingAnchor } from "./readingAnchor";
 import {
   activatePendingMessages,
   acknowledgePendingMessage,
@@ -387,49 +391,62 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
     const getMessages = api?.getMessages;
     // Only invalidate when the refetch below can actually happen — api is
     // a Partial<...>, so getMessages may be absent, and there may be no
-    // resolvable active channel to refetch. Dropping every loaded window
-    // with nothing able to reload it would leave a mounted MessageList
-    // showing only carried-through pending rows until the user navigates
-    // away and back.
+    // resolvable active channel to refetch. A channel marked not loaded with
+    // nothing able to reload it would take live broadcasts onto a window
+    // that may have a hole in it.
     if (activeAfterReady !== null && getMessages !== undefined) {
-      // Mark the active channel loading BEFORE invalidating its window —
-      // invalidate drops its rows synchronously, and if historyLoadState
-      // is left idle for even one microtask, MessageList's "no rows +
-      // idle" empty-state branch renders the channel as genuinely empty
-      // for the whole in-flight refetch instead of showing the in-region
-      // spinner (OC-0007).
+      const getMessagesAround = api?.getMessagesAround;
+      // P2-T4: every loaded row stays on screen, and the refetch splices into
+      // the window. A reader back in history (a detached window) is refetched
+      // around the message at the top of the list, so it stays where it is;
+      // with no list showing it, the tail is refetched instead.
+      const anchor = isWindowDetached(activeAfterReady) ? readingAnchor(activeAfterReady) : null;
+      // Mark the active channel loading BEFORE invalidating: it records the
+      // watermark the splice checks the page against, and a channel with no
+      // rows shows the in-region spinner instead of reading as a genuinely
+      // empty channel for the whole refetch (OC-0007).
       setChannelLoading(activeAfterReady);
       invalidateLoadedMessageWindows();
-      getMessages(activeAfterReady, { limit: 50 })
-        .then((resp) => {
-          // OC-0203: the user can switch (or the active channel can be
-          // cleared) while this fetch is in flight. Writing the snapshot
-          // unconditionally would re-add a channel the user already left
-          // to loadedChannels with a pre-resync-era snapshot —
-          // MessageController.loadMessages then short-circuits on
-          // isChannelLoaded() forever, so the hole this whole resync
-          // block exists to close becomes permanent instead. Only the
-          // channel still on screen when the response lands may accept
-          // it.
-          if (channelsStore.select((s) => s.activeChannelId) !== activeAfterReady) return;
-          setMessages(activeAfterReady, resp.messages, resp.has_more);
-        })
-        .catch((err) => {
-          log.warn("Failed to reload message history after resync", { error: String(err) });
-          // Same staleness guard as the .then above — a rejection for a
-          // channel the user already left must not flag it load-errored;
-          // that channel's own mount/retry path owns its state now.
-          if (channelsStore.select((s) => s.activeChannelId) !== activeAfterReady) return;
-          // The invalidate above already dropped this channel's window,
-          // so a silent catch would leave a mounted MessageList showing
-          // its "no messages yet" welcome state — indistinguishable from
-          // a genuinely empty channel. Route through the same
-          // historyLoadState the normal load path uses so the region
-          // shows the inline error + Retry instead (MessageController's
-          // loadMessages, wired to the Retry button, re-fetches because
-          // invalidate also cleared "loaded").
-          setChannelLoadError(activeAfterReady);
-        });
+      // OC-0203: the user can switch (or the active channel can be cleared)
+      // while the fetch is in flight. Writing the page unconditionally would
+      // re-add a channel the user already left to loadedChannels with a
+      // pre-resync-era page — MessageController.loadMessages then
+      // short-circuits on isChannelLoaded() forever, so the hole this whole
+      // resync block exists to close becomes permanent instead. Only the
+      // channel still on screen when the response lands may accept it.
+      const stillActive = (): boolean =>
+        channelsStore.select((s) => s.activeChannelId) === activeAfterReady;
+      const refetch: Promise<void> =
+        anchor !== null && getMessagesAround !== undefined
+          ? getMessagesAround(activeAfterReady, anchor, { limit: 50 }).then((resp) => {
+              if (!stillActive()) return;
+              setAroundMessages(
+                activeAfterReady,
+                resp.messages,
+                resp.has_more_before,
+                resp.has_more_after,
+                true,
+              );
+            })
+          : getMessages(activeAfterReady, { limit: 50 }).then((resp) => {
+              if (!stillActive()) return;
+              setMessages(activeAfterReady, resp.messages, resp.has_more, true);
+            });
+      refetch.catch((err: unknown) => {
+        log.warn("Failed to reload message history after resync", { error: String(err) });
+        // Same staleness guard as above — a rejection for a channel the user
+        // already left must not flag it load-errored; that channel's own
+        // mount/retry path owns its state now.
+        if (!stillActive()) return;
+        // An empty channel shows the inline error + Retry (MessageController's
+        // loadMessages re-fetches because invalidate cleared "loaded"). Rows
+        // still on screen hide that region, so say it with a toast, as the
+        // normal load path does.
+        setChannelLoadError(activeAfterReady);
+        if (getChannelMessages(activeAfterReady).length > 0) {
+          showToast(shellText("messages.loadHistoryFailed"), "error");
+        }
+      });
     }
   }
   clock.hasReceivedReadyBefore = true;

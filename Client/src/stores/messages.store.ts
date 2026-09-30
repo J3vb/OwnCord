@@ -172,13 +172,21 @@ export function setChannelLoadError(channelId: number): void {
  *  away stays on screen (scrolling up loads them again), the channel gets a
  *  new array and the list rebuilds once. A revisit that opens with unread
  *  messages always rebuilds the list once, when this lands, to place the NEW
- *  divider. */
+ *  divider.
+ *
+ *  `splice` is a full-ready resync's refetch (P2-T4): when the page reaches
+ *  back to the newest row loaded at setChannelLoading, the loaded rows older
+ *  than the page stay above it instead of being dropped. They may still show
+ *  an edit, delete or reaction missed while offline until the next visit
+ *  refetches them. A gap, or a page that is the whole channel, replaces the
+ *  window as usual. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMore: boolean,
+  splice = false,
 ): void {
-  messagesStore.setState((prev) => reduceSetMessages(prev, channelId, messages, hasMore));
+  messagesStore.setState((prev) => reduceSetMessages(prev, channelId, messages, hasMore, splice));
 }
 
 /**
@@ -198,15 +206,20 @@ export function setMessages(
  * setMessages protects a live broadcast that landed mid-fetch: a reattached
  * window claims to BE the live tail, and dropping such a row here would
  * delete it with no badge, no "Jump to Present" pill, and no recovery path.
+ *
+ * `splice` is a full-ready resync's refetch around a loaded row (P2-T4): the
+ * loaded rows above the window stay, and so do the rows below it while it
+ * stays detached, with the same missed-change caveat as setMessages'.
  */
 export function setAroundMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMoreBefore: boolean,
   hasMoreAfter: boolean,
+  splice = false,
 ): void {
   messagesStore.setState((prev) =>
-    reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter),
+    reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter, splice),
   );
 }
 
@@ -218,10 +231,10 @@ export function setAroundMessages(
  * loaded before the drop would otherwise keep a permanent hole in its
  * history for the rest of the session.
  *
- * Carries pending/failed optimistic rows exactly like setMessages' merge —
- * they are the only copy of an unsent message — but drops "sent" rows so the
- * next fetch rebuilds a contiguous window instead of leaving stale rows
- * above a gap the fetch has no way to detect.
+ * invalidateChannelMessageWindow for every loaded channel (P2-T4): the rows,
+ * hasMore and the detached flag stay, so the screen does not change, and the
+ * next fetch reconciles into them — setMessages replaces a window the tail
+ * does not reach, so no gap survives it.
  */
 export function invalidateLoadedMessageWindows(): void {
   messagesStore.setState((prev) => reduceInvalidateLoadedMessageWindows(prev));

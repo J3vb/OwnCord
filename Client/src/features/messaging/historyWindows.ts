@@ -57,6 +57,7 @@ export function reduceSetMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMore: boolean,
+  splice = false,
 ): MessagesState {
   const converted = messages.map(messageResponseToMessage).toReversed();
   const trimmed =
@@ -96,7 +97,18 @@ export function reduceSetMessages(
     const cached = cachedById.get(m.id);
     return cached !== undefined && sameValue(cached, m) ? cached : m;
   });
-  let merged: readonly Message[] = [...snapshot, ...carried];
+  // A resync splice keeps the loaded rows older than the page when the page
+  // reaches back to what was loaded at fetch start, so nothing is missing
+  // between them. A gap, or a page that is the whole channel, replaces.
+  const minSnapshotId = trimmed[0]?.id ?? 0;
+  const older =
+    splice &&
+    hasMore &&
+    trimmed.length > 0 &&
+    minSnapshotId <= (prev.loadWatermark?.get(channelId) ?? 0)
+      ? previous.filter((m) => m.status === "sent" && m.id < minSnapshotId)
+      : [];
+  let merged: readonly Message[] = [...older, ...snapshot, ...carried];
   const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
   if (mergeTrimmed) {
     merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
@@ -114,7 +126,9 @@ export function reduceSetMessages(
   const updatedHasMore = new Map(prev.hasMore);
   updatedHasMore.set(
     channelId,
-    hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL || mergeTrimmed,
+    (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMore) : hasMore) ||
+      converted.length > MAX_MESSAGES_PER_CHANNEL ||
+      mergeTrimmed,
   );
 
   const updatedLoadState = new Map(prev.historyLoadState);
@@ -146,6 +160,7 @@ export function reduceSetAroundMessages(
   messages: readonly MessageResponse[],
   hasMoreBefore: boolean,
   hasMoreAfter: boolean,
+  splice = false,
 ): MessagesState {
   const converted = messages.map(messageResponseToMessage);
   // Defensive: the server caps a window at 100, so this never fires today.
@@ -166,14 +181,34 @@ export function reduceSetAroundMessages(
   const attached = !hasMoreAfter && trimmed.length === converted.length;
   const maxWindowId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
   const carried = previous.filter((m) => m.status !== "sent" || (attached && m.id > maxWindowId));
+  // A resync splice is centred on a loaded row, so it overlaps the window:
+  // keep the loaded rows above it, and below it while it stays detached.
+  const splicing = splice && trimmed.length > 0;
+  const minWindowId = trimmed[0]?.id ?? 0;
+  const older =
+    splicing && hasMoreBefore
+      ? previous.filter((m) => m.status === "sent" && m.id < minWindowId)
+      : [];
+  const newer =
+    splicing && !attached ? previous.filter((m) => m.status === "sent" && m.id > maxWindowId) : [];
+  let merged: readonly Message[] =
+    older.length + newer.length + carried.length > 0
+      ? [...older, ...trimmed, ...newer, ...carried]
+      : trimmed;
+  const mergeTrimmed = splicing && merged.length > MAX_MESSAGES_PER_CHANNEL;
+  if (mergeTrimmed) merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
   const updatedMessages = new Map(prev.messagesByChannel);
-  updatedMessages.set(channelId, carried.length > 0 ? [...trimmed, ...carried] : trimmed);
+  updatedMessages.set(channelId, merged);
 
   const updatedLoaded = new Set(prev.loadedChannels);
   updatedLoaded.add(channelId);
 
   const updatedHasMore = new Map(prev.hasMore);
-  updatedHasMore.set(channelId, hasMoreBefore);
+  updatedHasMore.set(
+    channelId,
+    (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMoreBefore) : hasMoreBefore) ||
+      mergeTrimmed,
+  );
 
   const updatedLoadState = new Map(prev.historyLoadState);
   updatedLoadState.delete(channelId);
@@ -198,24 +233,7 @@ export function reduceSetAroundMessages(
 /** invalidateLoadedMessageWindows' reducer. */
 export function reduceInvalidateLoadedMessageWindows(prev: MessagesState): MessagesState {
   if (prev.loadedChannels.size === 0) return prev;
-  const updatedMessages = new Map(prev.messagesByChannel);
-  for (const channelId of prev.loadedChannels) {
-    const existing = updatedMessages.get(channelId);
-    if (existing === undefined) continue;
-    const carried = existing.filter((m) => m.status !== "sent");
-    if (carried.length > 0) {
-      updatedMessages.set(channelId, carried);
-    } else {
-      updatedMessages.delete(channelId);
-    }
-  }
-  return {
-    ...prev,
-    messagesByChannel: updatedMessages,
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    detachedChannels: new Set(),
-  };
+  return { ...prev, loadedChannels: new Set() };
 }
 
 /** invalidateChannelMessageWindow's reducer. */
