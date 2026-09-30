@@ -153,11 +153,12 @@ type queueDropState struct {
 }
 
 // recordQueueDrop counts a frame enqueue dropped on a full broadcast queue. A
-// content-bearing one is also left for applyQueueContentDrops to settle into
-// the resync watermark under seqMu (SRV-03).
+// content-bearing one, or a presence_batch window, is also left for
+// applyQueueContentDrops to settle into the resync watermark under seqMu
+// (SRV-03).
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 	h.broadcastDrops.Add(1)
-	if bm.nsfwChannelID != 0 {
+	if bm.nsfwChannelID != 0 || bm.presence != nil {
 		h.queueDrops.dropped.Add(1)
 	}
 	slog.Warn("hub: broadcast channel full, dropping "+kind,

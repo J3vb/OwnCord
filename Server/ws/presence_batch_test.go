@@ -364,8 +364,8 @@ func TestPresenceStale_NextWindowSendsFullSnapshot(t *testing.T) {
 	for _, e := range snap.Payload.Updates {
 		got[e.UserID] = e.Status
 	}
-	if got[slow.userID] != db.StatusOnline || got[ghost.userID] != db.StatusOffline {
-		t.Fatalf("snapshot = %v, want self online and the invisible ghost offline", got)
+	if _, listed := got[ghost.userID]; got[slow.userID] != db.StatusOnline || listed {
+		t.Fatalf("snapshot = %v, want self online and the invisible ghost left out", got)
 	}
 	if slow.presenceStale.Load() {
 		t.Fatal("the snapshot did not clear the stale mark")
@@ -440,4 +440,88 @@ func queuedFrame(h *Hub, bm broadcastMsg) []byte {
 		return msg
 	}
 	return bm.msg
+}
+
+// fullSnapshot returns the statuses in the last full presence_batch on c.
+func fullSnapshot(t *testing.T, c *Client) map[int64]string {
+	t.Helper()
+	var got map[int64]string
+	for _, f := range decodeFrames(t, drain(c.send)) {
+		if f.Type == MsgTypePresenceBatch && f.Payload.Full {
+			got = map[int64]string{}
+			for _, e := range f.Payload.Updates {
+				got[e.UserID] = e.Status
+			}
+		}
+	}
+	if got == nil {
+		t.Fatalf("user %d got no full presence snapshot", c.userID)
+	}
+	return got
+}
+
+func TestPresenceSnapshot_InvisibleIsIndistinguishableFromOffline(t *testing.T) {
+	h, database, connect := presenceBatchHub(t)
+	ctx := context.Background()
+	observer := connect("observer", true)
+	ghost := connect("ghost", true)
+	ghost.setLiveStatus(db.StatusInvisible)
+	away, err := database.CreateUser(ctx, "away", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	settle(t, h)
+	drain(observer.send)
+	drain(ghost.send)
+
+	observer.presenceStale.Store(true)
+	ghost.presenceStale.Store(true)
+	h.enqueue(broadcastMsg{presenceSnapshot: true}, "presence snapshot")
+	if err := h.awaitDispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := fullSnapshot(t, observer)
+	_, ghostListed := seen[ghost.userID]
+	_, awayListed := seen[away]
+	if ghostListed != awayListed || seen[ghost.userID] != seen[away] {
+		t.Fatalf("observer's snapshot = %v: the connected invisible user %d reads differently from the offline user %d", seen, ghost.userID, away)
+	}
+	if own := fullSnapshot(t, ghost); own[ghost.userID] != db.StatusInvisible {
+		t.Fatalf("the ghost's own snapshot = %v, want its true invisible status", own)
+	}
+}
+
+// A presence_batch lost at enqueue consumed no seq, so replay cannot carry
+// it: a resume from before the loss must take the full ready.
+func TestPresenceBatch_LostAtEnqueueForcesFullReadyOnResume(t *testing.T) {
+	database := newTeardownTestDB(t)
+	h := newTestHub(t, database, nil, nil)
+	ctx := context.Background()
+	id, err := database.CreateUser(ctx, "away", "hash", 4)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u, err := database.GetUserByID(ctx, id)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	h.deliverBroadcast(broadcastMsg{msg: buildChannelDelete(98)})
+	lastSeq := h.ReplayBuffer().NewestSeq()
+
+	for len(h.broadcast) < cap(h.broadcast) {
+		h.broadcast <- broadcastMsg{}
+	}
+	h.QueuePresence(id+1, db.StatusOnline, nil)
+	h.flushPresenceQueue()
+	for len(h.broadcast) > 0 {
+		<-h.broadcast
+	}
+	h.deliverBroadcast(broadcastMsg{msg: buildChannelDelete(99)})
+
+	c := herdClient(ctx, h, u)
+	c.lastSeq = lastSeq
+	if _, _, ok := h.reconnectPrecheck(ctx, c, lastSeq); ok {
+		t.Fatal("a resume from before a lost presence_batch took replay, want the full ready")
+	}
 }

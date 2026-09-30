@@ -242,7 +242,8 @@ func (h *Hub) announceMember(userID int64, p pendingPresence) {
 // by a member_join for each new member in it, and asks for a snapshot for
 // every client that dropped presence since the last flush. A batch or
 // snapshot request the full dispatch queue refuses is repaired the same way:
-// a lost batch marks every connected client stale, and a lost request is
+// a lost batch marks every connected client stale (and, via recordQueueDrop,
+// sends a resume from before it to the full ready), and a lost request is
 // retried a window later. Runs on the AfterFunc timer goroutine.
 //
 // presenceMu is held across the batch's enqueue, not just the snapshot, so a
@@ -356,8 +357,9 @@ func (h *Hub) setPresenceResync(userID int64, pending bool) bool {
 }
 
 // deliverPresenceSnapshots sends every presence-stale client a full
-// presence_batch: each connected user's status as that client may see it,
-// its own true status included; anyone absent is offline. Unsequenced, like
+// presence_batch: each connected user who is not offline to that client, its
+// own true status included; anyone absent is offline, so an invisible user
+// reads exactly like one with no connection. Unsequenced, like
 // the other targeted repair frames, and droppable again (a still-full queue
 // just stays stale). Runs on the dispatch goroutine, so it lands after every
 // presence frame already sequenced and reads a registry no older than them.
@@ -376,8 +378,8 @@ func (h *Hub) deliverPresenceSnapshots() {
 	live := h.liveStatuses()
 	public := make([]presenceSnapshotEntry, 0, len(live))
 	for uid, s := range live {
-		if s != "" {
-			public = append(public, presenceSnapshotEntry{UserID: uid, Status: db.BroadcastStatus(s)})
+		if s := db.BroadcastStatus(s); s != "" && s != db.StatusOffline {
+			public = append(public, presenceSnapshotEntry{UserID: uid, Status: s})
 		}
 	}
 	slices.SortFunc(public, func(a, b presenceSnapshotEntry) int { return cmp.Compare(a.UserID, b.UserID) })
@@ -385,9 +387,9 @@ func (h *Hub) deliverPresenceSnapshots() {
 	for _, c := range stale {
 		c.presenceStale.Store(false)
 		msg := shared
-		if i, ok := slices.BinarySearchFunc(public, c.userID, func(e presenceSnapshotEntry, uid int64) int { return cmp.Compare(e.UserID, uid) }); ok && public[i].Status != live[c.userID] {
-			own := slices.Clone(public)
-			own[i].Status = live[c.userID]
+		i, listed := slices.BinarySearchFunc(public, c.userID, func(e presenceSnapshotEntry, uid int64) int { return cmp.Compare(e.UserID, uid) })
+		if s := live[c.userID]; !listed && s != "" && s != db.StatusOffline {
+			own := slices.Insert(slices.Clone(public), i, presenceSnapshotEntry{UserID: c.userID, Status: s})
 			msg = buildPresenceBatchMsg(own, true)
 		}
 		c.sendPresenceMsg(msg)

@@ -912,8 +912,9 @@ may not have yet arrives first as a `member_join` (see `member_join`).
 **Full snapshot.** A client whose send buffer was full when a presence frame
 arrived has that frame dropped (not the connection) and receives, within the
 next window, an unsequenced `presence_batch` with `"full": true`. It lists
-every connected user as that client may see them (its own true status
-included), without `custom_status`; every member it leaves out is offline.
+every connected user who is not offline to that client (its own true status
+included, even when invisible), without `custom_status`; every member it
+leaves out is offline, so an invisible member is simply absent.
 Keep a listed member's custom text and clear an offline one's, which is what
 `ready` shows.
 
