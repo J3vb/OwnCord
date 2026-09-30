@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -56,6 +57,9 @@ type StorageLimits struct {
 	// unknown-length request can possibly cost, since no single file can
 	// land for more than this; 0 means unset (falls back to the request cap).
 	MaxUploadBytes int64
+	// FileTypes is the config.yaml file-type policy; FileTypePolicy lets a
+	// list saved in the admin panel replace either of its lists.
+	FileTypes storage.FileTypePolicy
 }
 
 // storageQuota is the in-process half of the counter.
@@ -89,8 +93,8 @@ type StorageReservation struct {
 	released  bool
 }
 
-// SetStorageLimits installs the limits; the composition root calls it once
-// the store exists.
+// SetStorageLimits installs the limits; the composition root calls it before
+// the hub first reads the file-type policy.
 func (s *UploadService) SetStorageLimits(l StorageLimits) {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()

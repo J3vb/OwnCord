@@ -490,6 +490,8 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"upload refused: server storage below its reserved headroom":                                   "upload_refused_low_disk",
 	"upload failed: server storage error":                                                          "upload_storage_error",
 	"upload rejected":                                                                              "upload_rejected",
+	"upload refused: reading the file-type policy failed":                                          "upload_file_type_policy_unreadable",
+	"auth_ok: reading the upload file-type policy failed":                                          "auth_ok_upload_file_type_policy_unreadable",
 	"auto-generated key saved to disk":                                                             "key_auto_generated",
 	"livekit companion output":                                                                     "livekit_companion_log",
 	"database backup created":                                                                      "backup_created",

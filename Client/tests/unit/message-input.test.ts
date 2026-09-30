@@ -1219,6 +1219,61 @@ describe("MessageInput", () => {
     }
   });
 
+  describe("server file-type policy", () => {
+    async function pick(name: string) {
+      const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: name }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["x"], name, { type: "" })],
+        writable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+      const error = container.querySelector(".attachment-upload-error")?.textContent ?? null;
+      comp.destroy?.();
+      return { onUploadFile, error };
+    }
+
+    afterEach(() => authStore.setState((s) => ({ ...s, uploadPolicy: null })));
+
+    it("refuses a blocked final extension before uploading, however it is spelled", async () => {
+      authStore.setState((s) => ({
+        ...s,
+        uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024, blocked_extensions: ["bat", "ps1"] },
+      }));
+      for (const name of ["cleanup.BAT", "report.pdf.bat", "photo.jpg.ps1", "run.bat. "]) {
+        const { onUploadFile, error } = await pick(name);
+        expect(onUploadFile, name).not.toHaveBeenCalled();
+        expect(error, name).toMatch(/this server doesn't allow \.(bat|ps1) files$/);
+        expect(error, name).toContain(name);
+      }
+      for (const name of ["notes.txt", "invoice.ps1.txt", "www.amazon.bat.png"]) {
+        expect((await pick(name)).onUploadFile, name).toHaveBeenCalled();
+      }
+    });
+
+    it("in allow-only mode refuses anything not listed, including no extension", async () => {
+      authStore.setState((s) => ({
+        ...s,
+        uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024, allowed_extensions: ["png", "pdf"] },
+      }));
+      expect((await pick("clip.mp4")).error).toBe(
+        "clip.mp4 can't be uploaded: this server doesn't allow .mp4 files",
+      );
+      expect((await pick("README")).error).toBe(
+        "README can't be uploaded: this server only accepts certain file types",
+      );
+      expect((await pick("Photo.PNG")).onUploadFile).toHaveBeenCalled();
+    });
+
+    it("uploads any type when the server sends no lists (an older server)", async () => {
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
+      expect((await pick("cleanup.bat")).onUploadFile).toHaveBeenCalled();
+    });
+  });
+
   it("uploads a file above 100 MB when the server advertises a larger limit", async () => {
     authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 150 * 1024 * 1024 } }));
     try {

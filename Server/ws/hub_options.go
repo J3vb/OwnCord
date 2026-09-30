@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
 )
 
 // HubOptions carries everything a Hub needs before Run starts (S-11 / B3-4).
@@ -93,6 +95,10 @@ type HubOptions struct {
 	// Startup-only, like voice.quality.
 	UploadPolicy UploadPolicy
 
+	// UploadFileTypes supplies upload_policy's two extension lists, read with
+	// the server_name/motd cache. Nil leaves them out.
+	UploadFileTypes UploadFileTypes
+
 	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose
 	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client
 	// address for the handshake log and the ws_connect audit row (SRE-11).
@@ -108,6 +114,17 @@ type UploadPolicy struct {
 	// MaxUploadBytes is upload.max_size_mb in bytes. 0 means uploads are
 	// disabled: the upload route refuses every non-empty file.
 	MaxUploadBytes int64 `json:"max_upload_bytes"`
+	// BlockedExtensions and AllowedExtensions are the file-type policy in
+	// force (storage.FileTypePolicy): a blocked final extension is refused,
+	// and a non-empty allowed list is allow-only mode.
+	BlockedExtensions []string `json:"blocked_extensions,omitempty"`
+	AllowedExtensions []string `json:"allowed_extensions,omitempty"`
+}
+
+// UploadFileTypes reads the upload file-type policy in force;
+// service.UploadService satisfies it.
+type UploadFileTypes interface {
+	FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error)
 }
 
 // NewHub creates a Hub ready to be started with Run, validating that the
@@ -156,10 +173,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	database, limiter, svc := opts.DB, opts.Limiter, opts.Services
 
-	ringSize := 1000
-	if opts.ReplayRingSize > 0 {
-		ringSize = opts.ReplayRingSize
-	}
+	ringSize := cmp.Or(max(opts.ReplayRingSize, 0), 1000) // unset or negative: 1000
 
 	reg := NewHandlerRegistry()
 
@@ -178,7 +192,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		readers:             opts.Readers,
 		voice:               opts.Voice,
 		defaultVoiceQuality: defaultVoiceQuality,
-		uploadPolicy:        opts.UploadPolicy,
+		settingsUpload:      opts.UploadPolicy,
+		uploadFileTypes:     opts.UploadFileTypes,
 		voiceMod:            newVoiceModLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,

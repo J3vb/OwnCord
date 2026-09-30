@@ -88,7 +88,8 @@ func perturb(v reflect.Value) any {
 		for i := range v.Len() {
 			out = append(out, v.Index(i).String())
 		}
-		return append(out, "203.0.113.0/24")
+		// Valid as an extension too: the upload extension lists reject a "/".
+		return append(out, "perturbed-7")
 	default:
 		panic("unhandled config kind " + v.Kind().String())
 	}

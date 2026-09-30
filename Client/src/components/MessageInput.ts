@@ -196,6 +196,22 @@ const FALLBACK_MAX_FILE_SIZE = 100 * 1024 * 1024;
 function uploadsDisabledByServer(): boolean {
   return authStore.getState().uploadPolicy?.max_upload_bytes === 0;
 }
+
+/**
+ * The extension this server's file-type policy refuses `name` for ("" for a
+ * name with none in allow-only mode), or null when it is allowed. Mirrors the
+ * server's check: case-insensitive, the final extension only, trailing dots
+ * and spaces ignored.
+ */
+function refusedExtension(name: string): string | null {
+  const policy = authStore.getState().uploadPolicy;
+  const trimmed = name.toLowerCase().replace(/[. ]+$/, "");
+  const dot = trimmed.lastIndexOf(".");
+  const ext = dot < 0 ? "" : trimmed.slice(dot + 1).trim();
+  if (policy?.blocked_extensions?.includes(ext) === true) return ext;
+  const allowed = policy?.allowed_extensions ?? [];
+  return allowed.length === 0 || allowed.includes(ext) ? null : ext;
+}
 // Server/ws/command.go rejects the whole chat_send frame (as a generic parse
 // error, not an attachment-specific one) once len(Attachments) > 10 -- cap
 // the queue client-side so we never upload an attachment doomed to be
@@ -741,8 +757,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
 
-    // Any file type may be attached: the server sniffs the content, refuses
-    // its blocked types and serves unsafe ones as downloads.
+    // Any file type the server's file-type policy allows may be attached:
+    // the server also sniffs the content, refuses its blocked types and
+    // serves unsafe ones as downloads.
+    const refused = refusedExtension(file.name);
+    if (refused !== null) {
+      showUploadError(
+        refused === ""
+          ? messagingText("error.fileTypeNoExtension", { filename: file.name })
+          : messagingText("error.fileTypeBlocked", { filename: file.name, ext: refused }),
+      );
+      return;
+    }
     const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
     if (file.size > maxBytes) {
       showUploadError(
