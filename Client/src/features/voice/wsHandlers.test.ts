@@ -9,7 +9,9 @@ import {
   voiceStore,
   resetVoiceStore,
   joinVoiceChannel,
+  leaveVoiceChannel,
   setVoiceStatus,
+  setLocalDeafened,
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import type { Payload } from "../connection/dispatchContext";
@@ -141,6 +143,29 @@ describe("handleVoiceState moderator enforcement", () => {
 
     await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(false));
     expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it("releases a moderator's deafen lifted after a moderator move", async () => {
+    // A moderator deafens a member who had not deafened themselves.
+    joinVoiceChannel(4);
+    const socket = socketStub();
+    handleVoiceState(socket, voiceState({ deafened: true, server_deafened: true }));
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(true));
+    setLocalDeafened(true);
+    // The move: the server's voice_leave for the old channel clears the
+    // session's moderator flags, and the re-join restates them.
+    leaveVoiceChannel();
+    joinVoiceChannel(5);
+    handleVoiceState(socket, voiceState({ channel_id: 5, deafened: true, server_deafened: true }));
+    vi.mocked(setDeafened).mockClear();
+
+    handleVoiceState(
+      socket,
+      voiceState({ channel_id: 5, deafened: false, server_deafened: false }),
+    );
+
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(false));
+    expect(socket.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
   });
 
   it("does nothing to local audio for another user's voice state", async () => {

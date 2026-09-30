@@ -83,9 +83,11 @@ export interface VoiceState {
    *  the store; optional for the same fixture reason as peerVerifications. */
   readonly localServerMuted?: boolean;
   readonly localServerDeafened?: boolean;
-  /** The member had deafened themselves before a moderator deafened them, so
-   *  the moderator's lift hands the deafen back rather than releasing it. */
-  readonly deafenedBeforeModerator?: boolean;
+  /** The local deafen in effect is the one a moderator's deafen applied, not
+   *  the member's own: the moderator's lift releases it, while a deafen the
+   *  member chose survives the lift. Follows localDeafened, so it outlives a
+   *  leave (a moderator move) and clears on any undeafen. */
+  readonly moderatorDeafened?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
    *  i.e. the mic should be gated (silenced) for PTT reasons. This is
    *  deliberately a separate flag from localMuted: PTT must never write the
@@ -137,7 +139,7 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localServerMuted: false,
   localServerDeafened: false,
-  deafenedBeforeModerator: false,
+  moderatorDeafened: false,
   pttGated: false,
   pttOwnsMute: false,
   localCamera: false,
@@ -161,7 +163,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localServerMuted: false,
     localServerDeafened: false,
-    deafenedBeforeModerator: false,
+    moderatorDeafened: false,
     pttGated: false,
     pttOwnsMute: false,
     localCamera: false,
@@ -352,7 +354,6 @@ export function leaveVoiceChannel(): void {
       // Server mute lives with the voice session; a new session starts clean.
       localServerMuted: false,
       localServerDeafened: false,
-      deafenedBeforeModerator: false,
       encryptionDegraded: false,
     };
     const channelId = prev.currentChannelId;
@@ -393,13 +394,11 @@ export function setEncryptionDegraded(degraded: boolean): void {
   );
 }
 
-/** Record whether the member was deafened by their own choice when a
- *  moderator deafened them (see VoiceState.deafenedBeforeModerator). */
-export function setDeafenedBeforeModerator(deafened: boolean): void {
+/** Record that the local deafen is the one a moderator's deafen applied
+ *  (see VoiceState.moderatorDeafened). */
+export function setModeratorDeafened(applied: boolean): void {
   voiceStore.setState((prev) =>
-    prev.deafenedBeforeModerator === deafened
-      ? prev
-      : { ...prev, deafenedBeforeModerator: deafened },
+    prev.moderatorDeafened === applied ? prev : { ...prev, moderatorDeafened: applied },
   );
 }
 
@@ -416,6 +415,7 @@ export function setLocalDeafened(deafened: boolean): void {
   voiceStore.setState((prev) => ({
     ...prev,
     localDeafened: deafened,
+    moderatorDeafened: deafened && prev.moderatorDeafened === true,
   }));
 }
 

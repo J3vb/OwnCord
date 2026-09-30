@@ -11,7 +11,7 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
   setVoiceConfig,
-  setDeafenedBeforeModerator,
+  setModeratorDeafened,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
@@ -60,8 +60,11 @@ import { connectText } from "../../i18n/connect";
  * Lifting a moderator deafen also clears the row's own deafen (the server
  * cannot tell whose it was), so a member who had deafened themselves before
  * the moderator did would hear the room again unasked. The client knows:
- * `deafenedBeforeModerator`, taken on the deafen's rising edge, keeps them
- * deafened on the lift and restates their own deafen to the server.
+ * `moderatorDeafened` marks a deafen it applied for the moderator, so any
+ * other deafen in effect at the lift is the member's own, kept and restated
+ * to the server. It follows the local deafen, not the moderator flags, so a
+ * moderator move (a leave that clears those flags, then a re-join that
+ * restates them) cannot mistake the moderator's deafen for the member's.
  */
 function enforceModeratorAudioState(
   ws: DispatchWs,
@@ -73,13 +76,12 @@ function enforceModeratorAudioState(
   selfDeafened: boolean,
 ): void {
   const voice = voiceStore.getState();
-  if (serverDeafened && !prevServerDeafened) setDeafenedBeforeModerator(voice.localDeafened);
-  const deafenLifted = prevServerDeafened && !serverDeafened;
-  const keepOwnDeafen =
-    deafenLifted && voice.deafenedBeforeModerator === true && voice.localDeafened;
-  if (deafenLifted) setDeafenedBeforeModerator(false);
-  if (keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
   const applyDeafen = serverDeafened && !voice.localDeafened;
+  if (applyDeafen) setModeratorDeafened(true);
+  const deafenLifted = prevServerDeafened && !serverDeafened;
+  const keepOwnDeafen = deafenLifted && voice.localDeafened && voice.moderatorDeafened !== true;
+  if (deafenLifted) setModeratorDeafened(false);
+  if (keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
   const applyMute = serverMuted && !voice.localMuted;
   const releaseMute = prevServerMuted && !serverMuted && voice.localMuted && !selfMuted;
   const releaseDeafen = deafenLifted && !keepOwnDeafen && voice.localDeafened && !selfDeafened;
