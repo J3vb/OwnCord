@@ -353,8 +353,9 @@ What exists today, all of it in `Server/api/upload_handler.go`,
 `Server/storage/storage.go` and `Server/api/constants.go`:
 
 - `POST /api/v1/uploads`, session-authenticated, **10 uploads per minute per
-  user** (`auth.Key("upload", user.ID)`), a 100 MiB request-body ceiling and
-  a 10 MiB multipart memory limit.
+  user** (`auth.Key("upload", user.ID)`), a request-body ceiling of 100 MiB,
+  or `upload.max_size_mb` plus 1 MiB of multipart framing when that is
+  larger (`uploadBodyCap`), and a 10 MiB multipart memory limit.
 - A per-file ceiling of `upload.max_size_mb` (compiled default 100), enforced
   while writing plus a one-byte over-read probe, with the partial file
   removed on any failure after `os.Create`.
