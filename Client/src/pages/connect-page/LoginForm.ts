@@ -150,7 +150,7 @@ export interface LoginFormApi {
 // ---------------------------------------------------------------------------
 
 /** How long a login keeps retrying a busy server before it gives up (P5-S02). */
-const AUTH_BUSY_RETRY_BUDGET_MS = 60_000;
+const AUTH_BUSY_RETRY_BUDGET_MS = 70_000;
 /** The shortest wait before a retry, whatever Retry-After says (the
  *  saved-password relay sends none). The login route allows 5 attempts per IP
  *  per minute and refused ones count, so attempts at least 15 s apart keep

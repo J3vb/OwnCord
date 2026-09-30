@@ -109,7 +109,7 @@ describe("LoginForm retries a busy server", () => {
     page.mount(container);
 
     submitTyped();
-    await vi.advanceTimersByTimeAsync(40_000);
+    await vi.advanceTimersByTimeAsync(50_000);
     expect(banner().classList.contains("visible")).toBe(false);
     await vi.advanceTimersByTimeAsync(20_000);
 
@@ -118,7 +118,7 @@ describe("LoginForm retries a busy server", () => {
     expect(busyShown()).toBe(false);
     const calls = onLogin.mock.calls.length;
     expect(calls).toBeGreaterThan(1);
-    expect(calls).toBeLessThanOrEqual(4);
+    expect(calls).toBeLessThanOrEqual(5);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(onLogin).toHaveBeenCalledTimes(calls);
 
@@ -168,7 +168,7 @@ describe("LoginForm retries a busy server", () => {
       for (const t of attempts) {
         expect(attempts.filter((a) => a <= t && a > t - 60_000).length).toBeLessThan(5);
       }
-      expect(Math.max(...attempts) - Math.min(...attempts)).toBeLessThan(60_000);
+      expect(Math.max(...attempts) - Math.min(...attempts)).toBeLessThan(70_000);
       expect(banner().textContent).toBe(connectText("error.authBusy"));
 
       page.destroy?.();
