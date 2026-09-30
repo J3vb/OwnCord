@@ -49,7 +49,7 @@
 # Re-run it deliberately before a release, or after changes to the hub, the
 # write path or the replay budget.
 #
-# FOUR PROFILES (B6-10), one cgroup recipe. `inputs.profile` selects the
+# FIVE PROFILES (B6-10, P5-S01), one cgroup recipe. `inputs.profile` selects the
 # scenario set inside Server/scripts/k6/ws-load.js; the legs and the extra
 # environment follow from it:
 #
@@ -79,8 +79,17 @@
 #     OWNCORD_SERVER_MAX_WS_CONNECTIONS at twice the probe maximum, so a config
 #     cap can never be published as the ceiling the search "found" — the run
 #     asserts ws_conn_rejects stayed 0.
+#   scale — what 1,000-2,000 people online do (P5-S01, owner decision D2):
+#     `scale_connections` held (default 2,000), a small active fraction
+#     sending, then a burst minute, a login burst from distinct addresses, and
+#     a herd in which every socket redials a full `ready`. Constrained-only.
+#     Boots with `server.trusted_proxies: ["127.0.0.1/32"]` and gives every
+#     seeded user and every VU its own X-Forwarded-For address, so per-IP
+#     limits see distinct people — a MEASUREMENT setting, never a deployment
+#     recommendation. Registration runs 2 x NumCPU in parallel and keeps each
+#     session token, so VUs start from a token as a returning client does.
 #
-# The restart and ceiling-search profiles set no voice channel: their voice leg
+# The restart, ceiling-search and scale profiles set no voice channel: their voice leg
 # is off, both in the script (no K6_VOICE_VUS) and in the server load, because
 # neither measures the media path.
 name: Load Baseline
@@ -103,6 +112,7 @@ on:
           - operational
           - restart
           - ceiling-search
+          - scale
       users:
         description: "Registered users to seed (BPR-030 says 250)"
         required: false
@@ -127,6 +137,22 @@ on:
         description: "ceiling-search: highest connection count probed (and users to seed)"
         required: false
         default: "500"
+      scale_connections:
+        description: "scale: connections held (D2 says 2000)"
+        required: false
+        default: "2000"
+      scale_active:
+        description: "scale: fraction of connections that send (D2 says 0.1)"
+        required: false
+        default: "0.1"
+      scale_burst_send_ms:
+        description: "scale: per active user send interval in the burst minute, ms (2000 = 100 msg/s at the defaults)"
+        required: false
+        default: "2000"
+      scale_herd_spread_s:
+        description: "scale: seconds over which every socket drops and redials (D3 says 15)"
+        required: false
+        default: "15"
 
 permissions:
   contents: read
@@ -152,7 +178,9 @@ jobs:
     # bcrypt cost 12 on two cores (~0.5 s each, ~4 min at the 500 default)
     # before any of it starts — so it gets the headroom the plan's risk row
     # promised rather than a timeout in the middle of a probe.
-    timeout-minutes: ${{ (inputs.profile || 'capacity') == 'ceiling-search' && 75 || 45 }}
+    # scale seeds scale_connections + 501 users at cost 12 (~10 min on two
+    # cores) and runs ~11 min of k6 after its VUs initialise.
+    timeout-minutes: ${{ (inputs.profile || 'capacity') == 'ceiling-search' && 75 || ((inputs.profile || 'capacity') == 'scale' && 90 || 45) }}
     # Per-run parameters, so the profile logic is one derive step rather than
     # an `if:` on a dozen steps. These sit at job scope, not workflow scope:
     # `matrix` is not an available context in the workflow-level `env:` block.
@@ -163,7 +191,10 @@ jobs:
       TLS_MODE: ${{ matrix.tls }}
       CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
       SEED_USERS_INPUT: ${{ inputs.users || '250' }}
-      CONNECTIONS: ${{ inputs.connections || '100' }}
+      CONNECTIONS: ${{ (inputs.profile || 'capacity') == 'scale' && (inputs.scale_connections || '2000') || inputs.connections || '100' }}
+      SCALE_ACTIVE: ${{ inputs.scale_active || '0.1' }}
+      SCALE_BURST_SEND_MS: ${{ inputs.scale_burst_send_ms || '2000' }}
+      SCALE_HERD_SPREAD_S: ${{ inputs.scale_herd_spread_s || '15' }}
       VOICE: ${{ inputs.voice || '25' }}
     strategy:
       fail-fast: false
@@ -290,8 +321,13 @@ jobs:
           # login that cannot succeed (Codex P2 on #1629). With the BPR-030
           # defaults (250 users, 100 connections) `users` already covers all
           # of these; a smaller `users` is what would break them.
+          # scale's login burst logs K fresh users in, one per login-burst VU,
+          # and those VUs share the id pool with the cohort and the observer.
+          scale_logins=500
           if [ "$PROFILE" = "ceiling-search" ]; then
             seed_users=$((CEILING_MAX + 1))
+          elif [ "$PROFILE" = "scale" ]; then
+            seed_users=$((CONNECTIONS + 1 + scale_logins))
           elif [ "$PROFILE" = "operational" ] && [ "$SEED_USERS_INPUT" -lt $((2 * CONNECTIONS + 1)) ]; then
             seed_users=$((2 * CONNECTIONS + 1))
           elif [ "$PROFILE" = "restart" ] && [ "$SEED_USERS_INPUT" -lt $((CONNECTIONS + 1)) ]; then
@@ -341,6 +377,16 @@ jobs:
             ceiling_channels=1
           fi
 
+          # scale: 20 channels, about 100 members each at 2,000. ws-load.js
+          # refuses at init a mix that would put more than half the topic
+          # limit on one channel (OC-0447), so a faster burst is one message
+          # away from its fix rather than a silent limiter measurement.
+          case "$PROFILE" in
+          ceiling-search) text_channels=$ceiling_channels ;;
+          scale) text_channels=20 ;;
+          *) text_channels=1 ;;
+          esac
+
           {
             echo "HTTP_BASE=$scheme://127.0.0.1:8443"
             echo "SUT_WS_URL=$ws_scheme://127.0.0.1:8443/api/v1/ws"
@@ -350,6 +396,8 @@ jobs:
             echo "RESTART_AT=$restart_at"
             echo "RESTART_RECOVERY_S=$recovery_s"
             echo "CEILING_CHANNELS=$ceiling_channels"
+            echo "TEXT_CHANNELS=$text_channels"
+            echo "SCALE_LOGINS=$scale_logins"
           } >>"$GITHUB_ENV"
 
       # --- boot, one step per leg -------------------------------------------
@@ -388,6 +436,15 @@ jobs:
             # "ceiling" the search reports. The run asserts ws_conn_rejects
             # stayed 0, which is what makes that claim checkable.
             extra_env+=(-e "OWNCORD_SERVER_MAX_WS_CONNECTIONS=$((CEILING_MAX * 2))")
+            ;;
+          scale)
+            # The generator's X-Forwarded-For is trusted from loopback only,
+            # so every seeded user and VU is its own address to the per-IP
+            # limits. A measurement setting: it is not a deployment
+            # recommendation. The connection cap is twice the population, as
+            # for the search, so ws_conn_rejects == 0 is a checkable claim.
+            extra_env+=(-e OWNCORD_SERVER_TRUSTED_PROXIES=127.0.0.1/32)
+            extra_env+=(-e "OWNCORD_SERVER_MAX_WS_CONNECTIONS=$((CONNECTIONS * 2))")
             ;;
           esac
           if [ "$TLS_MODE" = "off" ]; then
@@ -511,25 +568,23 @@ jobs:
           echo "CHANNEL_ID=$CHANNEL_ID" >>"$GITHUB_ENV"
           echo "VOICE_ID=$VOICE_ID" >>"$GITHUB_ENV"
 
-          # The ceiling search's cohort is spread over CEILING_CHANNELS text
-          # channels (OC-0447); the one above is the first of them, and every
-          # other profile keeps using it alone. The ids go to k6 as a
-          # comma-separated list, and a connection picks one by its own VU
-          # slot, so a step's cohort divides evenly between them.
-          CEILING_CHANNEL_IDS="$CHANNEL_ID"
-          if [ "$PROFILE" = "ceiling-search" ]; then
-            for i in $(seq 2 "$CEILING_CHANNELS"); do
-              cid=$(curl -sk -X POST "$BASE/admin/api/channels" \
-                -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-                -d "{\"name\":\"loadtest-$i\",\"type\":\"text\"}" | jq -r .id)
-              if [ -z "$cid" ] || [ "$cid" = "null" ]; then
-                echo "::error::ceiling channel $i create failed"
-                exit 1
-              fi
-              CEILING_CHANNEL_IDS="$CEILING_CHANNEL_IDS,$cid"
-            done
-          fi
-          echo "CEILING_CHANNEL_IDS=$CEILING_CHANNEL_IDS" >>"$GITHUB_ENV"
+          # The ceiling search's and the scale profile's cohorts are spread
+          # over TEXT_CHANNELS text channels (OC-0447); the one above is the
+          # first of them, and every other profile keeps using it alone. The
+          # ids go to k6 as a comma-separated list, and a connection picks one
+          # by its own VU slot, so a cohort divides evenly between them.
+          TEXT_CHANNEL_IDS="$CHANNEL_ID"
+          for i in $(seq 2 "$TEXT_CHANNELS"); do
+            cid=$(curl -sk -X POST "$BASE/admin/api/channels" \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              -d "{\"name\":\"loadtest-$i\",\"type\":\"text\"}" | jq -r .id)
+            if [ -z "$cid" ] || [ "$cid" = "null" ]; then
+              echo "::error::text channel $i create failed"
+              exit 1
+            fi
+            TEXT_CHANNEL_IDS="$TEXT_CHANNEL_IDS,$cid"
+          done
+          echo "TEXT_CHANNEL_IDS=$TEXT_CHANNEL_IDS" >>"$GITHUB_ENV"
 
           INVITE=$(curl -sk -X POST "$BASE/api/v1/invites" \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
@@ -540,6 +595,50 @@ jobs:
           fi
 
           USERS="$SEED_USERS"
+          if [ "$PROFILE" = "scale" ]; then
+            # User n registers from the address VU n later uses (ws-load.js
+            # scaleAddress), and the session token its registration returns
+            # is kept: tokens.txt holds one per line in user order, so a VU
+            # starts from its token as a returning desktop client does and the
+            # measured windows hold no bcrypt but the login burst's. As many in
+            # flight as the server's bcrypt admission budget (2 x NumCPU); a
+            # refusal from it is retried, anything else fails the seeding.
+            # tokens.txt stays in the run directory and is never uploaded.
+            # Both run inside xargs' `bash -c`, which shellcheck cannot follow.
+            # shellcheck disable=SC2317
+            scale_address() { echo "10.$((($1 >> 16) & 255)).$((($1 >> 8) & 255)).$(($1 & 255))"; }
+            # shellcheck disable=SC2317
+            register_one() {
+              local i=$1 out code
+              for _ in 1 2 3 4 5; do
+                out=$(curl -sk -w '\n%{http_code}' -X POST "$BASE/api/v1/auth/register" \
+                  -H 'Content-Type: application/json' -H "X-Forwarded-For: $(scale_address "$i")" \
+                  -d "{\"username\":\"loadtest$i\",\"password\":\"LoadTest123!\",\"invite_code\":\"$INVITE\"}")
+                code=${out##*$'\n'}
+                [ "$code" = 429 ] || break
+                sleep 1
+              done
+              case "$code" in
+              200 | 201) printf '%s %s\n' "$i" "$(printf '%s' "${out%$'\n'*}" | jq -r .token)" ;;
+              *)
+                echo "::error::registering loadtest$i failed with $code" >&2
+                exit 255
+                ;;
+              esac
+            }
+            export -f scale_address register_one
+            export BASE INVITE
+            parallel=$((2 * $(docker exec owncord-sut nproc)))
+            echo "registering $USERS users, $parallel in flight"
+            # shellcheck disable=SC2016 # $1 is the inner shell's argument
+            seq 1 "$USERS" | xargs -P "$parallel" -n 1 bash -c 'register_one "$1"' _ >"$WORK/tokens.unsorted"
+            # In user order, one per line, and every line a token for its user.
+            sort -n -k1,1 "$WORK/tokens.unsorted" |
+              awk 'NR != $1 || $2 == "" || $2 == "null" { bad = 1 } { print $2 } END { exit bad }' >"$WORK/tokens.txt"
+            rm -f "${WORK:?}/tokens.unsorted"
+            echo "registered $USERS users and kept $(wc -l <"$WORK/tokens.txt") session tokens"
+            exit 0
+          fi
           for i in $(seq 1 "${USERS:-250}"); do
             code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/auth/register" \
               -H 'Content-Type: application/json' \
@@ -594,7 +693,13 @@ jobs:
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
           K6_CEILING_MAX: ${{ env.CEILING_MAX }}
-          K6_CEILING_CHANNELS: ${{ env.CEILING_CHANNEL_IDS }}
+          K6_CEILING_CHANNELS: ${{ env.TEXT_CHANNEL_IDS }}
+          K6_SCALE_CHANNELS: ${{ env.TEXT_CHANNEL_IDS }}
+          K6_SCALE_TOKENS: ${{ env.WORK }}/tokens.txt
+          K6_SCALE_ACTIVE: ${{ env.SCALE_ACTIVE }}
+          K6_SCALE_BURST_SEND_MS: ${{ env.SCALE_BURST_SEND_MS }}
+          K6_SCALE_HERD_SPREAD_S: ${{ env.SCALE_HERD_SPREAD_S }}
+          K6_SCALE_LOGINS: ${{ env.SCALE_LOGINS }}
           K6_RESTART_AT: ${{ env.RESTART_AT }}
           K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
           MATRIX_LEG: ${{ matrix.leg }}
@@ -602,20 +707,22 @@ jobs:
           mkdir -p Server/scripts/k6/reports
 
           # cgroup + generator evidence, one sample every 5 s with a wall-clock
-          # stamp, so the document can slice it by phase (operational, restart)
-          # or by step (ceiling-search). loadavg is the HOST's and is where k6
-          # itself runs: if the generator saturates before the server's cgroup
-          # is throttled, the step is generator-limited and is published as
-          # such, never as a server ceiling.
+          # stamp, so the document can slice it by phase (operational, restart,
+          # scale) or by step (ceiling-search). loadavg is the HOST's and is
+          # where k6 itself runs; k6_ticks is k6's own CPU (utime + stime, in
+          # CLK_TCK ticks), so a window where the generator saturates its two
+          # CPUs before the server's cgroup is throttled is marked
+          # generator-limited and published as such, never as a server ceiling.
           #
           # The loop watches a flag rather than the container, so the restart
           # drill's outage window is sampled too.
           (
             while [ ! -f "$WORK/.sampling-done" ]; do
-              printf '%s loadavg=%s %s\n' \
+              printf '%s loadavg=%s %s k6_ticks=%s\n' \
                 "$(date -u +%s)" \
                 "$(cut -d' ' -f1-3 /proc/loadavg)" \
-                "$(docker exec owncord-sut cat /sys/fs/cgroup/cpu.stat 2>/dev/null | tr '\n' ' ' || true)"
+                "$(docker exec owncord-sut cat /sys/fs/cgroup/cpu.stat 2>/dev/null | tr '\n' ' ' || true)" \
+                "$(awk '{ print $14 + $15 }' "/proc/$(cat "$WORK/k6.pid" 2>/dev/null)/stat" 2>/dev/null || true)"
               sleep 5
             done
           ) >"$WORK/cpu.stat.log" 2>&1 &
@@ -664,7 +771,12 @@ jobs:
           fi
 
           k6_rc=0
-          (cd Server/scripts/k6 && taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js) || k6_rc=$?
+          # exec, so the background job's pid IS k6's and the sampler can read
+          # its CPU from /proc.
+          (cd Server/scripts/k6 && exec taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js) &
+          k6_pid=$!
+          echo "$k6_pid" >"$WORK/k6.pid"
+          wait "$k6_pid" || k6_rc=$?
           cp Server/scripts/k6/reports/k6-summary.json "$WORK/" 2>/dev/null || true
 
           touch "$WORK/.sampling-done"
@@ -742,18 +854,76 @@ jobs:
       # the JSON figure is the same number the Attention panel alerts on, so
       # the gate can no longer drift from what an operator sees. A missing or
       # unreadable snapshot fails the gate rather than passing it.
-      - name: Assert the ceiling search never hit the topic limiter
-        if: always() && env.PROFILE == 'ceiling-search' && matrix.leg == 'constrained'
+      #
+      # The scale profile is shaped the same way and gated the same way: a shed
+      # frame means a window measured the limiter (OC-0447).
+      - name: Assert the run never hit the topic limiter
+        if: always() && (env.PROFILE == 'ceiling-search' || env.PROFILE == 'scale') && matrix.leg == 'constrained'
         run: |
           if ! shed=$(jq -er '.topic_sheds_total' "$WORK/metrics-after.json" 2>/dev/null); then
             echo "::error::metrics-after.json is missing or has no topic_sheds_total, so topic-limiter shedding cannot be checked"
             exit 1
           fi
           if [ "$shed" != "0" ]; then
-            echo "::error::$shed frame(s) were shed by topicRateLimitPerSecond. The search is shaped to stay under it (CEILING_CHANNELS=$CEILING_CHANNELS), so this means the shaping is wrong: the steps above the first shed are INCONCLUSIVE, not a server ceiling. Widen K6_CEILING_CHANNELS and re-run; do NOT publish these steps as the hardware ceiling."
+            echo "::error::$shed frame(s) were shed by topicRateLimitPerSecond. The $PROFILE profile is shaped to stay under it (TEXT_CHANNELS=$TEXT_CHANNELS), so this means the shaping is wrong: the steps or windows from the first shed on are INCONCLUSIVE, not a server ceiling. Widen the channel list and re-run; do NOT publish them as the hardware ceiling."
             exit 1
           fi
-          echo "no topic-limiter shedding: every step was limited by the server, not by the limiter"
+          echo "no topic-limiter shedding: every step or window was limited by the server, not by the limiter"
+
+      # scale: the server's and the generator's CPU per window, from the 5 s
+      # samples, anchored on the run start k6 wrote into its summary. A window
+      # whose k6 averaged 90% or more of its two CPUs is GENERATOR-LIMITED: its
+      # numbers say what the generator could offer, not what the server can
+      # carry, and they are published as such. If the steady window is, the
+      # runner question (a larger runner or a lighter driver) is the owner's
+      # call, decision D6, and docs/capacity.md says so.
+      - name: Slice server and generator CPU by window
+        if: always() && env.PROFILE == 'scale'
+        run: |
+          summary="$WORK/k6-summary.json"
+          if ! start_ms=$(jq -er '.load_measurement.run_start_epoch_ms' "$summary" 2>/dev/null); then
+            echo "::warning::no k6 summary, so CPU cannot be sliced by window"
+            exit 0
+          fi
+          jq -r '.load_measurement.windows[] | "\(.phase) \(.start_s) \(.end_s // 1000000000)"' "$summary" >"$WORK/windows.txt"
+          # Each 5 s interval is booked to the window its end falls in.
+          awk -v start_ms="$start_ms" -v hz="$(getconf CLK_TCK)" -v cores=2 '
+            FNR == NR { name[++n] = $1; from[n] = $2; to[n] = $3; next }
+            {
+              t = $1 - start_ms / 1000; usage = ""; ticks = ""
+              for (i = 2; i <= NF; i++) {
+                if ($i == "usage_usec") usage = $(i + 1)
+                if ($i ~ /^k6_ticks=[0-9]+$/) ticks = substr($i, 10)
+              }
+              if (prev_t != "" && t > prev_t) {
+                dt = t - prev_t
+                for (p = 1; p <= n; p++) {
+                  if (t <= from[p] || t > to[p]) continue
+                  if (usage != "" && prev_u != "") {
+                    c = (usage - prev_u) / 1e6 / dt; ssum[p] += c; sn[p]++
+                    if (c > speak[p]) speak[p] = c
+                  }
+                  if (ticks != "" && prev_k != "") {
+                    c = (ticks - prev_k) / hz / dt; gsum[p] += c; gn[p]++
+                    if (c > gpeak[p]) gpeak[p] = c
+                  }
+                }
+              }
+              prev_t = t; prev_u = usage; prev_k = ticks
+            }
+            END {
+              printf "%-10s %-22s %-22s\n", "window", "server avg/peak of 2", "k6 avg/peak of " cores
+              for (p = 1; p <= n; p++) {
+                s = sn[p] ? sprintf("%.2f / %.2f", ssum[p] / sn[p], speak[p]) : "-"
+                g = gn[p] ? sprintf("%.2f / %.2f", gsum[p] / gn[p], gpeak[p]) : "-"
+                mark = gn[p] && gsum[p] / gn[p] >= 0.9 * cores ? "  GENERATOR-LIMITED" : ""
+                printf "%-10s %-22s %-22s%s\n", name[p], s, g, mark
+              }
+            }
+          ' "$WORK/windows.txt" "$WORK/cpu.stat.log" | tee "$WORK/windows-cpu.txt"
+          if grep -q GENERATOR-LIMITED "$WORK/windows-cpu.txt"; then
+            echo "::warning::at least one window is generator-limited: publish it as such, not as a server result (docs/capacity.md, Scale profile)"
+          fi
 
       - name: Upload results
         if: always()
@@ -770,4 +940,5 @@ jobs:
             ${{ runner.temp }}/loadtest/server.log
             ${{ runner.temp }}/loadtest/cpu.stat.log
             ${{ runner.temp }}/loadtest/drain.txt
+            ${{ runner.temp }}/loadtest/windows-cpu.txt
           retention-days: 30
