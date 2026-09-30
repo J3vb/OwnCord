@@ -485,6 +485,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		clearPendingModFlags(d.Mod, c.TargetID)
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
+	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
 	if !d.Mod.SendToUser(c.TargetID, buildVoiceMoved(c.ToChannelID)) {
 		clearPendingModFlags(d.Mod, c.TargetID)
 		writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
@@ -526,6 +527,7 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID, state.ChannelID) {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
+	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
 	d.Mod.SendToUser(c.TargetID,
 		buildVoiceDisconnected(state.ChannelID, "You were disconnected from voice by a moderator"))
 

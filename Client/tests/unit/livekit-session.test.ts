@@ -22,7 +22,14 @@ const mockVoiceState = vi.hoisted(() => ({
   // audio-bitrate publish path populate an entry for the channel under test.
   voiceConfigs: new Map<number, { bitrate: number }>(),
   voiceStatus: "idle",
+  // The roster the reconnect loop reads to tell whether the server still
+  // holds our membership. Reset per test to one that lists everyone
+  // everywhere; tests of a released membership replace it.
+  voiceUsers: new Map() as { get(channelId: number): { has(userId: number): boolean } | undefined },
 }));
+
+/** A roster in which the server still holds every membership. */
+const membershipHeld = { get: () => ({ has: () => true }) };
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
  *  hoisted mock factory can mutate it after hoisting. */
@@ -238,6 +245,7 @@ import { getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import {
@@ -345,7 +353,15 @@ describe("LiveKitSession", () => {
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
     mockVoiceState.voiceStatus = "idle";
+    mockVoiceState.voiceUsers = membershipHeld;
+    // The reconnect loop only retries into a channel that still exists, over a
+    // chat socket that is not closed for good.
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([1, 5, 7, 9, 11].map((id) => [id, { id, type: "voice" } as any])),
+    }));
     session = new LiveKitSession();
+    session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
     // Reset mockRoom state
     mockRoom.state = "connected";
     mockRoom.remoteParticipants = new Map();
@@ -357,6 +373,7 @@ describe("LiveKitSession", () => {
 
   afterEach(() => {
     session.cleanupAll();
+    resetChannelsStore();
     vi.useRealTimers();
   });
 
@@ -2418,7 +2435,7 @@ describe("LiveKitSession", () => {
   describe("restoreLocalVoiceState", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
+      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
     });
 
     it("applies noise suppressor when enhancedNoiseSuppression pref is true on join", async () => {
@@ -3537,7 +3554,9 @@ describe("LiveKitSession", () => {
       };
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
-      session.setWsClient({ send: sendSpy } as any);
+      // The chat socket is closed for good, so the D-4 slow phase does not run
+      // and the loop gives up once the fast attempts are spent.
+      session.setWsClient({ send: sendSpy, getState: () => "disconnected" } as any);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
       const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
@@ -3565,11 +3584,10 @@ describe("LiveKitSession", () => {
       // its room key still resident, and only the reconnect-flavoured audio
       // cleanup having run — so per-call screenshare mute/volume state survives
       // until some later explicit leave or join.
-      expect(leaveVoiceSpy).toHaveBeenCalledWith(true);
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(false);
       expect((session as any)._state.type).toBe("idle");
-      // ...and exactly one voice_leave reaches the server: leaveVoice(true)
-      // sends it, so the give-up path must not send its own as well.
-      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
+      // ...and no voice_leave goes out over a socket that is not connected.
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(0);
     });
 
     // v004 regression: if the user leaves/switches channels while the FINAL
@@ -3607,6 +3625,9 @@ describe("LiveKitSession", () => {
             lastUrl: "/livekit",
             lastDirectUrl: "ws://localhost:7880",
           };
+          // ...and the chat socket closes for good, so the loop breaks straight
+          // into the post-loop give-up check instead of an in-loop checkpoint.
+          session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
         }
         return Promise.reject(new Error("always fails"));
       });
@@ -3619,7 +3640,7 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      // Exhaust the whole RT-9 budget so the loop reaches the post-loop check.
+      // Exhaust the fast attempts so the loop reaches the post-loop check.
       await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
@@ -3664,6 +3685,9 @@ describe("LiveKitSession", () => {
             lastUrl: "/livekit",
             lastDirectUrl: "ws://localhost:7880",
           };
+          // ...and the chat socket closes for good, so the loop breaks straight
+          // into the post-loop give-up check instead of an in-loop checkpoint.
+          session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
         }
         return Promise.reject(new Error("always fails"));
       });
@@ -3676,7 +3700,7 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      // Exhaust the whole RT-9 budget so the loop reaches the post-loop check.
+      // Exhaust the fast attempts so the loop reaches the post-loop check.
       await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
@@ -3710,7 +3734,7 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(27_000);
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000); // to the D-4 ceiling
       await reconnectPromise;
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
@@ -3795,6 +3819,284 @@ describe("LiveKitSession", () => {
     });
   });
 
+  // P2-T5 / DP-39: after the five fast attempts the loop keeps retrying every
+  // 15 s while the chat socket is up and the channel exists, until the D-4
+  // five-minute ceiling — an SFU restart or a long Wi-Fi drop resumes the
+  // call instead of ejecting the user after about 27 s.
+  describe("attemptAutoReconnect slow phase (D-4)", () => {
+    let wsState: string;
+    let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => void>>;
+    let errorCb: ReturnType<typeof vi.fn<(message: string) => void>>;
+    let ac: AbortController;
+
+    beforeEach(() => {
+      wsState = "connected";
+      sendSpy = vi.fn<(msg: { type: string }) => void>();
+      errorCb = vi.fn<(message: string) => void>();
+      ac = new AbortController();
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: sendSpy, getState: () => wsState } as any);
+      session.setOnError(errorCb);
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[5, { id: 5, type: "voice" } as any]]),
+      }));
+      // Through setState so the session stamps when this token arrived.
+      (session as any).setState({
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "old-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac,
+      });
+    });
+
+    afterEach(() => {
+      resetChannelsStore();
+    });
+
+    function startLoop(): Promise<void> {
+      return (session as any).attemptAutoReconnect(
+        "old-token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+    }
+
+    it("keeps retrying after five failed connects and resumes on attempt 7", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      let connects = 0;
+      mockRoom.connect.mockImplementation(async () => {
+        connects++;
+        if (connects < 7) throw new Error("SFU down");
+      });
+
+      const loop = startLoop();
+      // 27 s of fast attempts, then 15 s gaps: attempt 7 lands at about 57 s.
+      await vi.advanceTimersByTimeAsync(60_000);
+      await loop;
+
+      expect(connects).toBe(7);
+      expect(leaveVoiceSpy).not.toHaveBeenCalled();
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("connected");
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
+    });
+
+    it("refreshes the token before an attempt more than 4 minutes after the last one", async () => {
+      // The server answers voice_token_refresh with an ordinary voice_token
+      // for the channel we are still reconnecting to.
+      sendSpy.mockImplementation((msg: { type: string }) => {
+        if (msg.type === "voice_token_refresh") {
+          queueMicrotask(() => {
+            void session.handleVoiceToken("fresh-token", "/livekit", 5, "ws://localhost:7880");
+          });
+        }
+      });
+      const tokensAfterFourMinutes: string[] = [];
+      const start = Date.now();
+      mockRoom.connect.mockImplementation(async (_url: string, token: string) => {
+        if (Date.now() - start > 4 * 60_000) tokensAfterFourMinutes.push(token);
+        if (token !== "fresh-token") throw new Error("SFU down");
+      });
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 30_000);
+      await loop;
+
+      expect(sendSpy).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+      expect(tokensAfterFourMinutes.length).toBeGreaterThan(0);
+      expect(tokensAfterFourMinutes).not.toContain("old-token");
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.latestToken).toBe("fresh-token");
+    });
+
+    it("stops with no further connects when the user leaves during the slow phase", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(45_000); // attempt 6 (42 s) has failed
+      const connectsBeforeLeave = mockRoom.connect.mock.calls.length;
+      expect(connectsBeforeLeave).toBe(6);
+
+      session.leaveVoice(true);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(connectsBeforeLeave);
+      expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+    });
+
+    it("ends the loop when the chat socket closes for good", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(30_000); // the five fast attempts have failed
+      wsState = "disconnected";
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(5);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(0);
+    });
+
+    it("resumes through the loop when the chat socket returns inside the server's grace window", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      mockRoom.connect.mockImplementation(async () => {
+        if (wsState !== "connected") throw new Error("network down");
+      });
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting"; // the Wi-Fi drop takes the chat socket down too
+      await vi.advanceTimersByTimeAsync(9_000);
+      wsState = "connected"; // RT-8: the resume inherits the parked membership
+      // Attempts at 3 and 9 s wait out the socket; the one at 15 s resumes.
+      await vi.advanceTimersByTimeAsync(6_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+      expect(leaveVoiceSpy).not.toHaveBeenCalled();
+      expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_join")).toBe(false);
+      expect((session as any)._state.type).toBe("connected");
+    });
+
+    it("rejoins with voice_join when the server released the membership during a long drop", async () => {
+      // The media path is back before the chat socket, and the stale roster
+      // still lists us: nothing can tell yet whether the server kept the
+      // membership, so the loop must not connect on the old token.
+      mockRoom.connect.mockResolvedValue(undefined);
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(90_000);
+      // The socket resumes past the RT-8 grace window: the replayed self
+      // voice_leave (or a full ready) no longer lists us in the channel.
+      wsState = "connected";
+      mockVoiceState.voiceUsers = new Map();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+
+      // Never connects on the old token with no membership behind it.
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
+      expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_leave")).toBe(false);
+      expect(errorCb).not.toHaveBeenCalled();
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("joining");
+
+      // The server answers the join and the ordinary join path resumes the call.
+      mockVoiceState.currentChannelId = 5;
+      await session.handleVoiceToken("rejoin-token", "/livekit", 5, "ws://localhost:7880", true);
+
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.latestToken).toBe("rejoin-token");
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      // The answered rejoin is no longer pending: a later, unrelated refusal
+      // is not reported as a lost call.
+      session.failPendingRejoin();
+      expect(errorCb).not.toHaveBeenCalled();
+    });
+
+    it("ends the call without retrying when the server refuses the rejoin after a kick", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("network down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(40_000);
+      // A moderator kicked the reconnecting user: its voice_leave replays when
+      // the socket resumes, and its voice_disconnected was lost with the socket.
+      wsState = "connected";
+      mockVoiceState.voiceUsers = new Map();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+      const joins = () => sendSpy.mock.calls.filter(([m]) => m.type === "voice_join").length;
+      expect(joins()).toBe(1);
+
+      // The server refuses the rejoin; the dispatcher's join rollback reports it.
+      session.failPendingRejoin();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect(joins()).toBe(1);
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("gives up instead of rejoining when the channel is deleted during the fast attempts", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      // The deletion evicts us (a self voice_leave), then removes the channel.
+      mockVoiceState.voiceUsers = new Map();
+      resetChannelsStore();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await loop;
+
+      expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_join")).toBe(false);
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("gives up at the ceiling without sending while the chat socket is still reconnecting", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      mockRoom.connect.mockRejectedValue(new Error("network down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
+      await loop;
+
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(false);
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect((session as any)._state.type).toBe("idle");
+      expect(sendSpy).not.toHaveBeenCalled();
+    });
+
+    it("ends the loop when the channel is deleted", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(30_000);
+      resetChannelsStore();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(5);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("gives up with the voice-lost toast once the ceiling passes", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 30_000);
+      expect(leaveVoiceSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await loop;
+
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(true);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect((session as any)._state.type).toBe("idle");
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
+    });
+  });
+
   describe("attemptAutoReconnect tail supersession guard (OC-0009)", () => {
     // reconnectSuperseded() is only checked up through room.connect(); once
     // the success branch sets state to "connected" it stops being usable
@@ -3812,7 +4114,7 @@ describe("LiveKitSession", () => {
       };
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
-      session.setWsClient({ send: sendSpy } as any);
+      session.setWsClient({ send: sendSpy, getState: () => "connected" } as any);
 
       let resolveMic!: () => void;
       mockRoom.localParticipant.setMicrophoneEnabled.mockImplementationOnce(

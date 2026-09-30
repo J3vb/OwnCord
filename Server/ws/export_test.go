@@ -15,6 +15,14 @@ import (
 	"github.com/livekit/protocol/livekit"
 )
 
+// SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
+// for the test's duration.
+func SetVoiceRejoinBlockWindowForTest(t interface{ Cleanup(func()) }, d time.Duration) {
+	prev := voiceRejoinBlockWindow
+	voiceRejoinBlockWindow = d
+	t.Cleanup(func() { voiceRejoinBlockWindow = prev })
+}
+
 // ─── hub sweep helpers ─────────────────────────────────────────────────────
 
 // SweepStaleClientsForTest exposes sweepStaleClients for external tests.
