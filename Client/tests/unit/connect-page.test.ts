@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ApiClientError } from "../../src/lib/api";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 import { uiStore, setTransientError } from "../../src/stores/ui.store";
@@ -1123,7 +1124,7 @@ describe("ConnectPage", () => {
     const dot = container.querySelector(".srv-status-dot")!;
     expect(dot.className).toContain("online");
     const latency = container.querySelector(".srv-latency")!;
-    expect(latency.textContent).toBe("42ms");
+    expect(latency.textContent).toBe("42ms response time");
     const onlineUsers = container.querySelector(".srv-online-users")!;
     expect(onlineUsers.textContent).toBe("5 online");
 
@@ -1520,6 +1521,30 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("TOTP submit refused for too many codes shows the lockout copy", async () => {
+    const onTotpSubmit = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiClientError(429, "RATE_LIMITED", "too many failed attempts, try again later"),
+      );
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+
+    page.showTotp();
+
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    totpInput.value = "999999";
+    (container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(container.querySelector(".error-banner")!.textContent).toBe(
+        "Too many incorrect codes. Try again later.",
+      );
+    });
+
+    page.destroy?.();
+  });
+
   // --- Password visibility toggle ---
 
   it("toggles password visibility when eye button is clicked", () => {
@@ -1564,11 +1589,79 @@ describe("ConnectPage", () => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
     await vi.waitFor(() => {
+      // The code is lower-cased before it is sent: server codes are lower-case
+      // hex and redemption is case-sensitive.
       expect(onRegister).toHaveBeenCalledWith(
         "localhost:8443",
         "newuser",
         "password123",
-        "INVITE-CODE",
+        "invite-code",
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("accepts a pasted owncord:// invite link and sends just its code", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
+    toggleLink.click();
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "newuser";
+    passwordInput.value = "password123";
+    inviteInput.value = "owncord://invite/AbCd1234";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        "newuser",
+        "password123",
+        "abcd1234",
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("sends just the code of a pasted link that carries the link's host", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
+    page.mount(container);
+
+    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
+    toggleLink.click();
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "newuser";
+    passwordInput.value = "password123";
+    inviteInput.value = "owncord://invite/AbCd1234?host=chat.example.com";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        "newuser",
+        "password123",
+        "abcd1234",
       );
     });
 

@@ -23,6 +23,15 @@ func (h *Hub) Unregister(c *Client) {
 // as computed by the handshake (serve.go). It gates the inherited voice-channel
 // subscription only; a nil set denies it (fail closed).
 //
+// It returns true when c was refused because it is a wake reconnect
+// (c.wakeReconnect) and a DIFFERENT session of the same account holds the
+// live connection or a parked grace-window call (wakeBlockedLocked). The
+// refusal is decided here, under h.mu, so no connect can slip between the
+// check and the replacement; c is left unregistered, the other session is
+// untouched, and the caller answers with ANOTHER_DEVICE_ACTIVE and abandons
+// the handshake (U4). A same-session reconnect (the live client's own token
+// hash) is not a refusal: it is this device reclaiming its own stale socket.
+//
 // Replacing an existing connection strips its subscriptions (UnsubscribeAll)
 // and re-subscribes the new one (Subscribe) as two separate PubSub-lock
 // acquisitions — back to back, but not atomic. A caller that must not lose a
@@ -33,12 +42,20 @@ func (h *Hub) Unregister(c *Client) {
 // serializes the two entirely, rather than merely narrowing the window. See
 // replay.go's handleReconnect, which re-reads the replay tail and calls
 // registerNow inside one h.seqMu section for exactly this reason.
-func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
+func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	// Voice channel the replaced connection was in, if any. Re-elected below,
 	// after the hub lock is released.
 	var replacedVoiceChID int64
 
 	h.mu.Lock()
+	if h.wakeBlockedLocked(c) {
+		// U4: leave the other device's session alone and refuse this one;
+		// the caller sends ANOTHER_DEVICE_ACTIVE and tears the handshake
+		// down. Decided under h.mu so no connect can slip in between the
+		// check and the replacement it would have done.
+		h.mu.Unlock()
+		return true
+	}
 	if old, exists := h.clients[c.userID]; exists {
 		oldE2EEKey, oldE2EESig := old.getE2EEPubKey()
 		oldVoiceChID, oldVoiceJoinToken, oldVoiceJoinCompleted := old.clearVoiceState()
@@ -126,6 +143,8 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	}
 	h.clients[c.userID] = c
 
+	inheritedVoiceChID := h.inheritParkedVoice(c)
+
 	// Subscribe the new client to its default pub/sub topics immediately
 	// after UnsubscribeAll(old) above, with nothing in between.
 	//
@@ -190,6 +209,11 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 	if replacedVoiceChID != 0 {
 		h.updateKeyHolder(replacedVoiceChID)
 	}
+	// RT-8: elections held while the membership was parked could not see it,
+	// so a grace inherit re-elects the same way.
+	if inheritedVoiceChID != 0 {
+		h.updateKeyHolder(inheritedVoiceChID)
+	}
 
 	// Re-sync this connection's local E2EE peer-key map now that it is
 	// reachable (OC-0276). voice_e2ee_announce is delivered as an
@@ -223,6 +247,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) {
 			h.sendToVoiceChannelExcept(voiceChID, c.userID, buildVoiceE2EEAnnounce(c.userID, key, sig))
 		}
 	}
+	return false
 }
 
 // postRegisterSessionRecheck re-validates c's session token immediately
@@ -268,6 +293,7 @@ func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) bool {
 	}
 	if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 		slog.Info("ws post-register session recheck: session revoked during handshake, aborting", "user_id", c.userID)
+		c.markTerminalKick()
 		h.unregisterFailedHandshake(ctx, c)
 		return true
 	}
@@ -308,4 +334,45 @@ func (h *Hub) unregisterNow(c *Client) bool {
 // else's.
 func (h *Hub) shouldMarkOffline(c *Client, replaced bool) bool {
 	return !replaced && h.GetClient(c.userID) == nil
+}
+
+// clientEvent is a register (add=true) or unregister (add=false) request.
+// Both kinds share one channel so per-connection ordering is preserved.
+type clientEvent struct {
+	c   *Client
+	add bool
+}
+
+// DisconnectUser forcibly disconnects the client identified by userID.
+// No-op if the user is not currently connected.
+func (h *Hub) DisconnectUser(userID int64) {
+	c := h.GetClient(userID)
+	if c == nil {
+		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		return
+	}
+	slog.Info("hub: disconnecting user", "user_id", userID)
+	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+	h.kickClientTerminal(c)
+}
+
+// DisconnectRevokedUser drops the live connection of a user whose sessions
+// were just revoked (sign-out-everywhere, B4-7): the socket authenticated on
+// a session that no longer exists, and the revoked-session sweep would only
+// notice on its next tick. No frame precedes the close — the same treatment
+// the sweep gives a revoked session — so the client's reconnect meets the
+// 401 that tells it to sign in again. No-op if the user is not connected.
+//
+// This inspects h.clients at one instant, so a revocation landing while a
+// connection's handshake is still in flight finds nothing to kick here. That
+// window is closed on the other side instead, by postRegisterSessionRecheck
+// (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
+func (h *Hub) DisconnectRevokedUser(userID int64) {
+	c := h.GetClient(userID)
+	if c == nil {
+		h.leaveParkedVoice(context.Background(), h.voiceGrace.take(userID), voiceLeaveReasonDisconnect)
+		return
+	}
+	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
+	h.kickClientTerminal(c)
 }

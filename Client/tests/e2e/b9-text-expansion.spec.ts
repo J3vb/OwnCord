@@ -20,13 +20,17 @@ import { findUnnamedControls } from "./support/b9-accessibility";
 // their journeys here.
 // ---------------------------------------------------------------------------
 
+// In the tab's grouped order (Motion, Readability, Chat). The playwright
+// config emulates prefers-reduced-motion: reduce, so the OS row says so.
 const ENGLISH = [
   ["Reduce Motion", "Disable animations and transitions"],
+  ["Sync with OS", "Follow your system setting. It is asking for less motion right now."],
   ["High Contrast", "Increase contrast for better readability"],
-  ["Role Colors", "Show colored usernames based on role in chat"],
-  ["Sync with OS", "Automatically enable reduced motion based on your OS accessibility settings"],
   ["Large Font", "Use larger text throughout the app for better readability"],
+  ["Role Colors", "Show colored usernames based on role in chat"],
 ] as const;
+/** The text-size readout row, which has no switch. */
+const READOUT = ["Text size", "Set in Appearance"] as const;
 
 async function expandCatalogText(page: Page): Promise<boolean> {
   return page.evaluate(async (url) => {
@@ -61,7 +65,10 @@ test.describe("B9-3 Accessibility tab text", () => {
 
   test("reads the catalog's English copy and names each switch with it", async ({ page }) => {
     await openAccessibility(page, false);
-    const rows = pane(page).locator(".setting-row");
+    const readout = pane(page).locator(".setting-readout");
+    await expect(readout.locator(".setting-label")).toHaveText(READOUT[0]);
+    await expect(readout.locator(".setting-desc")).toHaveText(READOUT[1]);
+    const rows = pane(page).locator(".setting-row:not(.setting-readout)");
     await expect(rows).toHaveCount(ENGLISH.length);
     for (const [i, [label, desc]] of ENGLISH.entries()) {
       const row = rows.nth(i);
@@ -76,9 +83,19 @@ test.describe("B9-3 Accessibility tab text", () => {
   }, testInfo) => {
     await openAccessibility(page, true);
     const root = pane(page);
-    const rows = root.locator(".setting-row");
+    const rows = root.locator(".setting-row:not(.setting-readout)");
     await expect(rows).toHaveCount(ENGLISH.length);
     expect(await findUnnamedControls(root)).toEqual([]);
+
+    const readout = root.locator(".setting-readout");
+    await readout.scrollIntoViewIfNeeded();
+    for (const [el, english] of [
+      [readout.locator(".setting-label"), READOUT[0]],
+      [readout.locator(".setting-desc"), READOUT[1]],
+    ] as const) {
+      await expect(el).toHaveText(new RegExp(`^⟦${english} .+⟧$`));
+      expect(await el.evaluate((n) => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
+    }
 
     for (const [i, [label, desc]] of ENGLISH.entries()) {
       const row = rows.nth(i);
@@ -172,7 +189,7 @@ test.describe("B9-18 connect and shell text", () => {
     await navigateToMainPageReady(page);
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     await expect(sidebar.locator(".server-online")).toHaveText(/^\d+ online$/);
-    await expect(sidebar.locator("[data-testid='invite-btn']")).toHaveText("Invite");
+    await expect(sidebar.locator("[data-testid='invite-btn']")).toHaveAccessibleName("Invite");
     await expect(sidebar.locator(".sidebar-dm-section .category-name")).toHaveText(
       "DIRECT MESSAGES",
     );
@@ -193,13 +210,19 @@ test.describe("B9-18 connect and shell text", () => {
     await navigateToMainPageReady(page);
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     await expect(sidebar.locator(".server-online")).toHaveText(/^⟦\d+ online .+⟧$/);
-    // The header wraps its buttons instead of squeezing out the server name.
+    // The header wraps its action row instead of squeezing out the server name.
     await expectWhole(sidebar.locator(".server-online"));
     await expect(sidebar.locator(".server-name")).toHaveText("Test Server");
     await expectWhole(sidebar.locator(".server-name"));
+    // The header actions are icon buttons: named by the catalog, and on screen.
     for (const [el, english] of [
       [sidebar.locator("[data-testid='invite-btn']"), "Invite"],
       [sidebar.locator("[data-testid='audit-log-btn']"), "Audit Log"],
+    ] as const) {
+      await expect(el).toHaveAccessibleName(expanded(english));
+      await expectWhole(el);
+    }
+    for (const [el, english] of [
       [sidebar.locator(".sidebar-dm-section .category-name"), "DIRECT MESSAGES"],
       [sidebar.locator(".sidebar-members-header .category-name"), "MEMBERS"],
     ] as const) {
@@ -454,7 +477,7 @@ test.describe("B9-20 settings, account and voice text", () => {
     await openSettings(page);
 
     for (const [tab, english] of [
-      ["Account", "Edit User Profile"],
+      ["Account", "Edit profile"],
       ["Notifications", "Desktop Notifications"],
       ["Text & Images", "Link Preview"],
       ["Voice & Audio", "Input Device"],
@@ -499,7 +522,15 @@ test.describe("B9-20 settings, account and voice text", () => {
     await page.keyboard.press("Home");
     await expect(sidebar.locator("#settings-tab-account")).toBeFocused();
     await expect(sidebar.locator("#settings-tab-account")).toHaveAttribute("aria-selected", "true");
+    // Account deletion sits behind its own disclosure; open it by keyboard.
+    const danger = account.locator("details.danger-zone > summary");
+    await danger.focus();
+    await page.keyboard.press("Enter");
+    // So do the profile forms, behind Edit profile.
+    await account.getByTestId("profile-edit-toggle").focus();
+    await page.keyboard.press("Enter");
     for (const [el, english] of [
+      [danger.locator(".disclose-label"), "Delete account"],
       [account.locator(".account-field-label", { hasText: "Username" }), "Username"],
       [account.locator("[data-testid='profile-save-btn']"), "Save Profile"],
       [account.locator("[data-testid='delete-account-trigger']"), "Delete Account"],

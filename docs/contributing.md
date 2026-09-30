@@ -12,7 +12,7 @@ How to set up the development environment and contribute to OwnCord.
 | Linux x64       | ✅     | ✅           |
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
-- **Go 1.26+** (server)
+- **Go 1.27+** (server)
 - **Node.js 26.x / npm 11.x** (client) — `Client/.nvmrc` is the source of truth;
   `engine-strict` makes a different major a hard failure at `npm ci`, not a
   warning, and `node scripts/check-node-policy.mjs` fails the Repository
@@ -31,7 +31,7 @@ works the same on Windows, macOS and Linux.
 | Command                       | Description                                                                                                                   |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `npm run bootstrap`           | `npm ci` in all three package roots                                                                                           |
-| `npm run check`               | Everything CI gates on: server, client, Rust                                                                                  |
+| `npm run check`               | CI's static, unit and drift gates: server, client, Rust (not the Playwright, govulncheck, npm-audit or coverage-floor jobs)   |
 | `npm run check:server`        | Server only — build variants, vet, race, deadlock, lint, generated-output drift                                               |
 | `npm run check:client`        | Client only — typecheck, lint (warnings denied, import cycles), knip, coverage-gated unit + integration tests, bundle budgets |
 | `npm run check:rust`          | Tauri backend — `cargo test --lib` and clippy                                                                                 |
@@ -134,26 +134,29 @@ Windows client builds and server-only work need none of this. Design and rationa
 | `npm run test:browser`      | Vitest browser-mode tests                  |
 
 PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
-`src/lib/permissions.ts`). The full-client mutation baseline
-(`src/lib/**` + `src/stores/**`, 76 files / 12 387 mutants) is the sharded
-`mutation` job in `.github/workflows/nightly-test-depth.yml`, driven locally
-with `cd Client && STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores>
+`src/lib/permissions.ts`). The full-client mutation baseline (the base config's
+configured surface, 146 files today) is the sharded `mutation` job in
+`.github/workflows/nightly-test-depth.yml`, driven locally with `cd Client &&
+STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores|safety-moderation>
 npx stryker run stryker.shard.config.mjs`. `Client/scripts/check-mutation-shards.mjs`
-proves the shard union still equals the configured surface. The measured score
-is recorded in `docs/plans/b7-8-mutation-baseline-*.md`.
+proves the shard union still equals the configured surface, and now runs in
+`Client Static Checks` on every PR so a new file cannot sit in no shard until the
+nightly fails. The measured score is recorded in
+`docs/plans/b7-8-mutation-baseline-*.md`.
 
 **Type checking, linting & formatting**
 
-| Command                   | Description                                                    |
-| ------------------------- | -------------------------------------------------------------- |
-| `npm run typecheck`       | Full typecheck (all sources)                                   |
-| `npm run typecheck:build` | Typecheck build config only                                    |
-| `npm run lint`            | oxlint (warnings denied) + import cycles + ESLint check (src/) |
-| `npm run lint:fix`        | ESLint auto-fix                                                |
-| `npm run lint:ox`         | oxlint only; fails on any warning under `Client/src/`          |
-| `npm run format`          | Prettier format (src/ + tests/)                                |
-| `npm run format:check`    | Prettier check only (no writes)                                |
-| `npm run knip`            | Dead code and unused export detection                          |
+| Command                     | Description                                                          |
+| --------------------------- | -------------------------------------------------------------------- |
+| `npm run typecheck`         | Full typecheck (all sources)                                         |
+| `npm run typecheck:build`   | Typecheck build config only                                          |
+| `npm run check:admin-types` | Check the Server-owned admin panel (`checkJs`, shrink-only baseline) |
+| `npm run lint`              | oxlint (warnings denied) + import cycles + ESLint check (src/)       |
+| `npm run lint:fix`          | ESLint auto-fix                                                      |
+| `npm run lint:ox`           | oxlint only; fails on any warning under `Client/src/`                |
+| `npm run format`            | Prettier format (src/ + tests/)                                      |
+| `npm run format:check`      | Prettier check only (no writes)                                      |
+| `npm run knip`              | Dead code and unused export detection                                |
 
 ### Git hooks (recommended)
 
@@ -302,6 +305,18 @@ fails closed on any missing input.
    rename that heading to the tag; the beta's section is already written (RE-04
    moved it to `## v2.0.0-beta.1` in this lane), so at tag time only confirm it
    and start a fresh `## Unreleased` for the work that follows.
+
+   **The section is the GitHub release page, copied verbatim** — `release.yml`
+   pastes it with no rewriting step — so write it for end users:
+   - a one-paragraph intro saying what this release gives them;
+   - then **Highlights**, **Added**, **Changed**, **Fixed** and **Known issues**
+     in plain language, no walls of PR numbers;
+   - internal, CI and test-only changes in a short **Under the hood** list at
+     the end.
+
+   The `CHANGELOG.md` "How to write an entry" rules still apply underneath; the
+   beta.1 release had to be rewritten after publishing because the section was
+   internal prose, and this step is what stops that happening again.
 
 4. **Flip the platform table and the alpha wording.** In `docs/quick-start.md`
    the "Server binary / Linux ARM64" row changes from "Not published yet" to the

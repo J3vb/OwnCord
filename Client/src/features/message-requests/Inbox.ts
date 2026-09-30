@@ -19,6 +19,7 @@
 import type { DmRequestDecision } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import type { ModalInstance } from "@lib/modalFactory";
+import { parseTimestamp } from "@lib/formatting";
 import { uiStore } from "@stores/ui.store";
 import { formatDate } from "../../i18n/format";
 import { messageRequestsText as t } from "../../i18n/messageRequests";
@@ -68,12 +69,12 @@ function renderShown(r: MessageRequest): { head: HTMLElement; text: HTMLElement 
       createElement("span", { class: "requests-username" }, `@${r.sender.username}`),
     );
   }
-  const at = new Date(r.createdAt);
+  const at = parseTimestamp(r.createdAt);
   if (!Number.isNaN(at.getTime())) {
     head.appendChild(
       createElement(
         "time",
-        { class: "requests-time", datetime: r.createdAt },
+        { class: "requests-time", datetime: at.toISOString() },
         formatDate(at, { dateStyle: "medium", timeStyle: "short" }),
       ),
     );

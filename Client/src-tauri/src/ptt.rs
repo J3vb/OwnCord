@@ -81,35 +81,93 @@ fn is_key_down(vk: i32) -> bool {
 
 #[cfg(target_os = "linux")]
 fn is_key_down(vk: i32) -> bool {
-    use device_query::{DeviceQuery, DeviceState};
-    // Cache DeviceState per thread — creating it on every call would open/close
-    // /dev/input/ file descriptors every 20ms in the polling loop.
-    // checked_new() returns None when no X11 display is reachable (e.g. a
-    // pure-Wayland session without XWayland), so PTT degrades to "key never
-    // pressed" instead of panicking on every poll.
-    thread_local! {
-        static DEVICE_STATE: Option<DeviceState> = {
-            let ds = DeviceState::checked_new();
-            if ds.is_none() {
-                log::warn!(
-                    "PTT unavailable: no X11/XWayland display for global key state"
-                );
-            }
-            ds
-        };
-    }
     let Some(keycode) = linux::vk_to_keycode(vk) else {
         return false;
     };
-    DEVICE_STATE.with(|ds| {
-        ds.as_ref()
-            .is_some_and(|ds| ds.get_keys().contains(&keycode))
-    })
+    held_keys().contains(&keycode)
+}
+
+/// One XQueryKeymap snapshot of every held key (empty with no X display).
+#[cfg(target_os = "linux")]
+fn held_keys() -> Vec<device_query::Keycode> {
+    use device_query::DeviceQuery;
+    DEVICE_STATE.with(|ds| ds.as_ref().map(|ds| ds.get_keys()).unwrap_or_default())
+}
+
+// The shared per-thread X11 key-state handle. Hoisted to module scope so both
+// `is_key_down` and `combo_state` read the same cached DeviceState. Cache per
+// thread — creating it on every call would open/close /dev/input/ file
+// descriptors every 20ms in a polling loop. checked_new() returns None when no
+// X11 display is reachable (e.g. a pure-Wayland session without XWayland), so
+// the global paths degrade to "key never pressed" instead of panicking.
+#[cfg(target_os = "linux")]
+thread_local! {
+    static DEVICE_STATE: Option<device_query::DeviceState> = {
+        use device_query::DeviceState;
+        let ds = DeviceState::checked_new();
+        if ds.is_none() {
+            log::warn!("Global key state unavailable: no X11/XWayland display");
+        }
+        ds
+    };
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
 fn is_key_down(_vk: i32) -> bool {
     false
+}
+
+/// Which modifiers are held right now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Modifiers {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub meta: bool,
+}
+
+/// The held modifiers plus whether each of `vks` is down, for U6's global
+/// Ctrl+Shift+M/Ctrl+Shift+D. The modifiers cannot come from `is_key_down` on
+/// Linux: the modifier VKs are deliberately absent from `linux::vk_to_keycode`
+/// (LShift/RShift and LControl/RControl each collapse to one VK, which a single
+/// (vk, Keycode) pair cannot represent). `device_query` does expose them as
+/// distinct Keycodes, so Linux reads them from the same single key snapshot.
+#[cfg(windows)]
+pub(crate) fn combo_state<const N: usize>(vks: [i32; N]) -> (Modifiers, [bool; N]) {
+    let mods = Modifiers {
+        ctrl: is_key_down(0x11),
+        shift: is_key_down(0x10),
+        alt: is_key_down(0x12),
+        meta: is_key_down(0x5B) || is_key_down(0x5C),
+    };
+    (mods, vks.map(is_key_down))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn combo_state<const N: usize>(vks: [i32; N]) -> (Modifiers, [bool; N]) {
+    combo_state_from(&held_keys(), vks)
+}
+
+#[cfg(target_os = "linux")]
+fn combo_state_from<const N: usize>(
+    keys: &[device_query::Keycode],
+    vks: [i32; N],
+) -> (Modifiers, [bool; N]) {
+    use device_query::Keycode;
+    let any = |a: Keycode, b: Keycode| keys.contains(&a) || keys.contains(&b);
+    let mods = Modifiers {
+        ctrl: any(Keycode::LControl, Keycode::RControl),
+        shift: any(Keycode::LShift, Keycode::RShift),
+        alt: any(Keycode::LAlt, Keycode::RAlt),
+        meta: any(Keycode::LMeta, Keycode::RMeta),
+    };
+    let down = vks.map(|vk| linux::vk_to_keycode(vk).is_some_and(|k| keys.contains(&k)));
+    (mods, down)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) fn combo_state<const N: usize>(_vks: [i32; N]) -> (Modifiers, [bool; N]) {
+    (Modifiers::default(), [false; N])
 }
 
 // ---------------------------------------------------------------------------
@@ -465,6 +523,39 @@ pub async fn ptt_listen_for_key() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn combo_state_reads_modifiers_and_keys_from_one_snapshot() {
+        use device_query::Keycode;
+        let (mods, down) = combo_state_from(
+            &[Keycode::RControl, Keycode::LShift, Keycode::M],
+            [0x4D, 0x44],
+        );
+        assert_eq!(
+            mods,
+            Modifiers {
+                ctrl: true,
+                shift: true,
+                alt: false,
+                meta: false
+            }
+        );
+        assert_eq!(down, [true, false]);
+
+        let (mods, down) =
+            combo_state_from(&[Keycode::LAlt, Keycode::RMeta, Keycode::D], [0x4D, 0x44]);
+        assert_eq!(
+            mods,
+            Modifiers {
+                ctrl: false,
+                shift: false,
+                alt: true,
+                meta: true
+            }
+        );
+        assert_eq!(down, [false, true]);
+    }
 
     // PTT_VKEY is a process-global AtomicI32 and cargo runs tests on parallel
     // threads, so every mutating assertion lives in this ONE test — splitting

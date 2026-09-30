@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strconv"
 	"sync/atomic"
+	"time"
 
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/plugin"
 )
 
@@ -78,8 +80,8 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 }
 
 // mustFullResync reports whether a client resuming from lastSeq predates the
-// most recent channel-visibility change and therefore cannot converge via
-// replay.
+// most recent channel-visibility change or content shed (SRV-03) and
+// therefore cannot converge via replay.
 func (h *Hub) mustFullResync(lastSeq uint64) bool {
 	if w := h.visibilityChangeSeq.Load(); w > 0 && lastSeq <= w {
 		return true
@@ -165,7 +167,9 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 		set[id] = struct{}{}
 	}
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 	h.purgedMessages = set
 	dropped := h.replayBuf.RemoveWhere(func(data []byte) bool { return eventNamesMessage(data, set) })
 	var rows int64
@@ -201,7 +205,9 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 		}
 	}
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 	if h.purgedUsers == nil {
 		h.purgedUsers = make(map[int64]struct{})
 	}
@@ -375,7 +381,10 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Fast path: inject seq after the opening brace.
 	// e.g., {"type":"chat_message",...} → {"seq":123,"type":"chat_message",...}
 	// Guard: msg must be a non-empty JSON object (starts with '{' and has content).
-	if len(msg) < 2 || msg[0] != '{' {
+	// Frames above config.MaxMessageBytes pass through unsequenced, like a
+	// non-object frame: every server-built envelope is far smaller, and the
+	// bound keeps the capacity arithmetic below provably overflow-free.
+	if len(msg) < 2 || len(msg) > config.MaxMessageBytes || msg[0] != '{' {
 		return msg
 	}
 	// `{"seq":` + up-to-20-digit uint64 + `,` = at most 28 extra bytes; the

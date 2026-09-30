@@ -219,6 +219,12 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	if logBuf != nil {
 		r.Get("/logs/stream", handleLogStream(database, logBuf))
 	}
+	// The full-archive download redeemed from a single-use link. Like the log
+	// stream it carries no Authorization header: the browser opens it as a
+	// plain <a href> so the archive streams to disk rather than being buffered
+	// in the page. The link token IS the authorisation — random, Owner-bound,
+	// single-use and short-lived (POST /archive/link issues it).
+	r.Get("/archive/download", handleArchiveDownload(database, setupOpts))
 
 	// All remaining routes require authentication plus at least one
 	// moderation-capable bit (permissions.AdminPerimeter). Route groups that
@@ -232,6 +238,13 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// logs are not scoped to any narrower moderation bit.
 		r.With(requirePerm(permissions.Administrator)).
 			Post("/logs/ticket", handleLogTicket(database))
+
+		// Runtime log level (SRE-07): read the level in force, set a timed
+		// debug boost that reverts on its own, or revert it at once.
+		// ADMINISTRATOR like the log stream it tunes.
+		r.With(requirePerm(permissions.Administrator)).Get("/logs/level", handleGetLogLevel(setupOpts.LogLevel))
+		r.With(requirePerm(permissions.Administrator)).Patch("/logs/level", handleSetLogLevel(database, setupOpts.LogLevel))
+		r.With(requirePerm(permissions.Administrator)).Delete("/logs/level", handleRevertLogLevel(database, setupOpts.LogLevel))
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe(settings, version))
@@ -301,6 +314,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodGet, "/backups", handleListBackups())
 		ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database))
 		ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, hub))
+		ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts))
+		ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
 		ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
 		ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version))
 	})

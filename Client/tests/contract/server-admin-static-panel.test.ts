@@ -27,8 +27,14 @@ window.__test = {
   effectiveBan: effectiveBan,
   myPosition: myPosition,
   renderUsers: renderUsers,
+  renderInvites: renderInvites,
+  openInviteRedemptions: openInviteRedemptions,
   renderAudit: renderAudit,
+  renderDashboard: renderDashboard,
+  auditSentence: auditSentence,
+  actionLabels: ACTION_LABEL,
   renderTokens: renderTokens,
+  downloadArchive: downloadArchive,
   openRoleModal: openRoleModal,
   renderRetention: renderRetention,
   saveChannelRetention: saveChannelRetention,
@@ -65,8 +71,14 @@ interface Bridge {
   effectiveBan: (u: any) => boolean;
   myPosition: () => number;
   renderUsers: () => Promise<string>;
+  renderInvites: () => Promise<string>;
+  openInviteRedemptions: (code: string, uses?: number) => Promise<void>;
   renderAudit: () => Promise<string>;
+  renderDashboard: () => Promise<string>;
+  auditSentence: (e: any) => string;
+  actionLabels: Record<string, string>;
   renderTokens: () => Promise<string>;
+  downloadArchive: () => Promise<void>;
   openRoleModal: (id: number | null) => void;
   renderRetention: () => Promise<string>;
   saveChannelRetention: (id: number) => Promise<void>;
@@ -301,6 +313,41 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(cells[3]!.querySelector("span")!.title).toBe("2026-09-02T11:30:00.000Z");
   });
 
+  // The full archive can be tens of gigabytes, so the panel must not fetch it
+  // into a Blob. It asks for a single-use link with its Bearer auth and opens
+  // that link as a plain navigation, so the browser streams it to disk.
+  it("downloads the full archive through a single-use link, never a Blob", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p, method) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/archive/link" && method === "POST")
+        return { json: { path: "/admin/api/archive/download?token=TOK-1" } };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    booted.bridge.state.me = {
+      id: 1,
+      permissions: ADMINISTRATOR,
+      role_position: 100,
+      is_owner: true,
+    };
+    booted.bridge.state.token = "SESSION";
+    // Capture the anchor the handler clicks instead of letting jsdom navigate.
+    const clicked: string[] = [];
+    window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      clicked.push(this.href);
+    };
+
+    await booted.bridge.downloadArchive();
+
+    expect(calls.some((c) => c.path === "/archive/link" && c.method === "POST")).toBe(true);
+    expect(clicked).toEqual(["http://localhost:8080/admin/api/archive/download?token=TOK-1"]);
+    // The archive body itself was never fetched into the page.
+    expect(calls.some((c) => c.path === "/archive" && c.method === "GET")).toBe(false);
+  });
+
   // OC-0364. Nothing clears users.banned when a temporary ban lapses; expiry
   // is decided lazily everywhere else.
   it("treats a lapsed temporary ban as not banned (OC-0364)", async () => {
@@ -451,6 +498,22 @@ describe("Server/admin/static — panel behaviour", () => {
       if (p === "/api/v1/admin/plugins/")
         return { json: [{ id: 1, name: "hello", version: "1.0.0", enabled: true }] };
       if (p === "/api/v1/emoji/") return { json: [{ id: 1, shortcode: "wave" }] };
+      if (p === "/api/v1/invites/")
+        return {
+          json: [
+            {
+              id: 1,
+              code: "invite-code-1",
+              max_uses: 5,
+              uses: 1,
+              expires_at: null,
+              revoked: false,
+              created_at: "2026-09-01 10:00:00",
+            },
+          ],
+        };
+      if (p === "/api/v1/invites/invite-code-1/redemptions")
+        return { json: [{ user_id: 2, username: "redeemer", redeemed_at: "2026-09-01 11:00:00" }] };
       return { json: {} };
     };
     const booted = await boot([], respond);
@@ -595,6 +658,154 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("limit=51");
   });
 
+  // Each label is written for the target the server records with it: a
+  // self-target, a target without an id and a numbered object must all leave
+  // a complete sentence.
+  it("reads every recorded target shape as a complete sentence", async () => {
+    const rowsIn: [string, string, number, string?][] = [
+      ["session_revoke_all", "user", 1],
+      ["setting_change", "setting", 0],
+      ["registration_mode_change", "setting", 0],
+      ["retention_policy_change", "setting", 0],
+      ["role_reorder", "role", 0],
+      ["role_create", "role", 5],
+      ["message_delete", "message", 55],
+      ["session_revoke", "session", 12],
+      ["invite_create", "invite", 3],
+      ["emoji_delete", "emoji", 5],
+      ["api_token_create", "api_token", 3],
+      ["api_token_revoke", "api_token", 0],
+      ["appeal_assign", "appeal", 3],
+      ["appeal_submit", "moderation_action", 4],
+      ["permission_preview", "channel", 3],
+      ["account_deleted", "user", 0],
+      ["plugin_install", "plugin", 0],
+      ["voice_mod_kick", "user", 9],
+      ["backup_create", "server", 0],
+      ["user_ban", "user", 0, "tok"],
+    ];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?"))
+        return {
+          json: rowsIn.map(([action, target_type, target_id, subject_token], i) => ({
+            id: rowsIn.length - i,
+            action,
+            actor_id: 1,
+            actor_name: "owner",
+            target_type,
+            target_id,
+            subject_token,
+            detail: "",
+            created_at: "2020-01-02 10:00:00",
+          })),
+        };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+
+    expect(
+      [...doc.querySelectorAll("#auditTbody tr.audit-row .audit-what")].map((r) => r.textContent),
+    ).toEqual([
+      "owner signed out all their sessions",
+      "owner changed a server setting",
+      "owner changed who can join",
+      "owner changed the message retention policy",
+      "owner reordered the roles",
+      "owner created role #5",
+      "owner deleted a message #55",
+      "owner signed out a session #12",
+      "owner created an invite #3",
+      "owner removed an emoji #5",
+      "owner created an API token #3",
+      "owner revoked an API token",
+      "owner took an appeal #3",
+      "owner appealed a moderation action #4",
+      "owner previewed permissions for channel #3",
+      "owner deleted an account",
+      "owner installed a plugin",
+      "owner disconnected user #9",
+      "owner took a backup",
+      "owner banned an erased account",
+    ]);
+  });
+
+  // No row may end on a dangling word, whatever target the server records:
+  // an id of 0, an erased account, the actor themselves, a setting or the
+  // server. Nor may an actor without a user row read as a bare number.
+  it("completes every action's sentence for every target and actor shape", async () => {
+    const booted = await boot([], (p) =>
+      p === "/setup/status" ? { json: { needs_setup: false } } : { json: {} },
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    const div = booted.dom.window.document.createElement("div");
+    const text = (e: object) => {
+      div.innerHTML = bridge.auditSentence(e);
+      return div.textContent!;
+    };
+    const shapes = [
+      { target_type: "user", target_id: 0 },
+      { target_type: "user", target_id: 0, subject_token: "tok" },
+      { target_type: "user", target_id: 1 },
+      { target_type: "channel", target_id: 0 },
+      { target_type: "role", target_id: 0 },
+      { target_type: "setting", target_id: 0 },
+      { target_type: "server", target_id: 0 },
+      { target_type: "", target_id: 0 },
+    ];
+    const codes = Object.keys(bridge.actionLabels);
+    expect(codes.length).toBeGreaterThan(50);
+    for (const action of codes) {
+      const label = bridge.actionLabels[action]!;
+      for (const shape of shapes) {
+        const sentence = text({ action, actor_id: 1, actor_name: "owner", ...shape });
+        expect(sentence, action).not.toMatch(/[{}]|\b(of|to|for|on|with|from|at|by)$/);
+        if (label.endsWith(" {t}"))
+          expect(sentence, action).not.toBe(`owner ${label.slice(0, -4)}`);
+      }
+    }
+
+    const backup = { action: "backup_create", target_type: "server", target_id: 0 };
+    expect(text({ ...backup, actor_id: 0, actor_name: "" })).toBe("The server took a backup");
+    expect(
+      text({
+        action: "identity_key_update",
+        actor_id: 0,
+        actor_name: "",
+        actor_token: "tok",
+        target_type: "user",
+        target_id: 0,
+        subject_token: "tok",
+      }),
+    ).toBe("An erased account changed their encryption key");
+    expect(text({ ...backup, actor_id: 9, actor_name: "" })).toBe("user #9 took a backup");
+  });
+
+  // Every client connection writes user_login and ws_connect, so the
+  // dashboard's five-row Recent activity would read as sign-ins only.
+  it("hides sign-ins and connections from the dashboard's Recent activity", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) return { json: [] };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    await booted.bridge.renderDashboard();
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=5&offset=0&hide_signins=1",
+    );
+  });
+
   // AO-7. Search and the action filter used to run over the fetched page of
   // 50 only, so an older match was unreachable. They are now GET /audit-log
   // q and action parameters, and a keystroke refetches without re-rendering
@@ -636,7 +847,7 @@ describe("Server/admin/static — panel behaviour", () => {
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
-    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+    expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
 
     const search = doc.querySelector<HTMLInputElement>(".filter-search")!;
     expect(search.maxLength).toBe(100);
@@ -649,8 +860,8 @@ describe("Server/admin/static — panel behaviour", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 350));
 
     const fetched = calls.find((c) => c.path.startsWith("/audit-log?"))?.path;
-    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co");
-    const rows = doc.querySelectorAll("#auditTbody tr");
+    expect(fetched).toBe("/audit-log?limit=51&offset=0&q=needle%20%26%20co&hide_signins=1");
+    const rows = doc.querySelectorAll("#auditTbody tr.audit-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.textContent).toContain("removed #needle & co");
     expect(doc.querySelector(".pagination-info")!.textContent).toBe("Page 1 · 1 matching entry");
@@ -672,7 +883,109 @@ describe("Server/admin/static — panel behaviour", () => {
     select.dispatchEvent(new window.Event("change", { bubbles: true }));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete",
+      "/audit-log?limit=51&offset=0&q=needle%20%26%20co&action=channel_delete&hide_signins=1",
+    );
+  });
+
+  // UX clarity: each row reads as a sentence with the raw code kept in its
+  // tooltip, rows sit under day headings, and sign-in and connection rows are
+  // hidden on the server until the Sign-ins chip is pressed or the action
+  // filter names one of them.
+  it("reads audit rows as sentences and hides sign-ins until asked", async () => {
+    const calls: FetchCall[] = [];
+    const now = new Date().toISOString();
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p.startsWith("/audit-log?")) {
+        return {
+          json: [
+            {
+              id: 3,
+              action: "channel_delete",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "channel",
+              target_id: 7,
+              detail: "",
+              created_at: now,
+            },
+            {
+              id: 2,
+              action: "profile_update",
+              actor_id: 1,
+              actor_name: "owner",
+              target_type: "user",
+              target_id: 1,
+              detail: "",
+              created_at: "2020-01-02 10:00:00",
+            },
+            {
+              id: 1,
+              action: "made_up_thing",
+              actor_id: 2,
+              actor_name: "bob",
+              target_type: "server",
+              target_id: 0,
+              detail: "",
+              created_at: "2020-01-02 09:00:00",
+            },
+          ],
+          headers: { "X-Audit-Actions": '["channel_delete","user_login"]' },
+        };
+      }
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+    booted.bridge.state.section = "audit";
+    doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&hide_signins=1",
+    );
+
+    const rows = [...doc.querySelectorAll("#auditTbody tr.audit-row")];
+    expect(rows.map((r) => r.querySelector(".audit-what")!.textContent)).toEqual([
+      "owner deleted channel #7",
+      "owner updated their profile",
+      "bob made up thing",
+    ]);
+    expect(rows.map((r) => r.getAttribute("title"))).toEqual([
+      "channel_delete",
+      "profile_update",
+      "made_up_thing",
+    ]);
+    const days = [...doc.querySelectorAll("#auditTbody tr.audit-day")].map((r) => r.textContent);
+    expect(days).toHaveLength(2);
+    expect(days[0]).toBe("Today");
+
+    const chip = doc.querySelector<HTMLButtonElement>("#auditSignins")!;
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    calls.length = 0;
+    chip.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0",
+    );
+
+    // Filtering on a sign-in action shows it even with the chip off.
+    chip.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    calls.length = 0;
+    const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "All Actions",
+      "Channel delete",
+      "User login",
+    ]);
+    select.value = "user_login";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
+      "/audit-log?limit=51&offset=0&action=user_login",
     );
   });
 
@@ -714,7 +1027,7 @@ describe("Server/admin/static — panel behaviour", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toContain("offset=50");
     expect(booted.bridge.state.auditPage).toBe(2);
-    expect(doc.querySelectorAll("#auditTbody tr")).toHaveLength(50);
+    expect(doc.querySelectorAll("#auditTbody tr.audit-row")).toHaveLength(50);
   });
 
   // A failed search used to leave the old query's rows on screen; and a page
@@ -755,7 +1068,7 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.querySelector<HTMLButtonElement>('[data-action="turnAuditPage"][data-args="[1]"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=50&q=foo",
+      "/audit-log?limit=51&offset=50&q=foo&hide_signins=1",
     );
 
     fail = true;
@@ -772,7 +1085,7 @@ describe("Server/admin/static — panel behaviour", () => {
     doc.querySelector<HTMLButtonElement>('#auditResults [data-action="reloadAudit"]')!.click();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
-      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete",
+      "/audit-log?limit=51&offset=0&q=foo&action=channel_delete&hide_signins=1",
     );
   });
 
@@ -795,6 +1108,93 @@ describe("Server/admin/static — panel behaviour", () => {
     // Editing an existing role still shows that role's own position.
     booted.bridge.openRoleModal(9);
     expect((doc.getElementById("rolePos") as HTMLInputElement).value).toBe("99");
+  });
+
+  // O1. The setup wizard promises invites can be managed "later in the admin
+  // panel"; before this, the panel had no invite page, and invites.redeemed_by
+  // was never written, so a leaked code could not be traced to its redeemer.
+  it("manages invites and shows a redemption history per code (O1)", async () => {
+    const calls: FetchCall[] = [];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/api/v1/invites/")
+        return {
+          json: [
+            {
+              id: 1,
+              code: "leaked-code",
+              max_uses: 5,
+              uses: 2,
+              expires_at: null,
+              revoked: false,
+              created_at: "2026-09-01 10:00:00",
+            },
+          ],
+        };
+      if (p === "/api/v1/invites/leaked-code/redemptions")
+        return {
+          json: [
+            { user_id: 2, username: "alice", redeemed_at: "2026-09-01 11:00:00" },
+            { user_id: null, username: "", redeemed_at: "2026-09-01 12:00:00" },
+          ],
+        };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { window } = booted.dom;
+    const doc = window.document;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    // The section renders and lists the invite.
+    const html = await booted.bridge.renderInvites();
+    expect(html).toContain("leaked-code");
+    expect(html).toContain("2 / 5 uses");
+
+    // Opening the history shows the redeemer and marks the erased one.
+    await booted.bridge.openInviteRedemptions("leaked-code");
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(true);
+    const modal = doc.getElementById("modalInner")!.textContent!;
+    expect(modal).toContain("alice");
+    expect(modal).toContain("Account erased");
+    expect(modal).not.toContain("not listed");
+
+    // Uses the history does not cover (redeemed before tracking existed, or
+    // past the listing cap) are counted, never reported as "not redeemed".
+    await booted.bridge.openInviteRedemptions("leaked-code", 5);
+    expect(doc.getElementById("modalInner")!.textContent).toContain("3 of 5 uses are not listed");
+    await booted.bridge.openInviteRedemptions("legacy-code", 3);
+    const legacy = doc.getElementById("modalInner")!.textContent!;
+    expect(legacy).toContain("3 of 3 uses are not listed");
+    expect(legacy).not.toContain("has not been redeemed yet");
+
+    // The row button hands the invite's use count to the history.
+    const content = doc.getElementById("content")!;
+    booted.bridge.state.section = "invites";
+    content.innerHTML = html;
+    const args = content
+      .querySelector('[data-action="openInviteRedemptions"]')!
+      .getAttribute("data-args");
+    expect(JSON.parse(args!)).toEqual(["leaked-code", 2]);
+
+    // Create sends the form's limits as a JSON body.
+    (doc.getElementById("inviteMaxUses") as HTMLInputElement).value = "3";
+    (doc.getElementById("inviteExpiry") as HTMLInputElement).value = "48";
+    calls.length = 0;
+    await (booted.bridge.actions.createInvite as () => Promise<void>)();
+    const create = calls.find((c) => c.method === "POST");
+    expect(create?.path).toBe("/api/v1/invites/");
+    expect(create?.body).toEqual({ max_uses: 3, expires_in_hours: 48 });
+    expect(create?.headers["Content-Type"]).toBe("application/json");
+
+    // Revoke deletes the code on the member API.
+    calls.length = 0;
+    await (booted.bridge.actions.confirmRevokeInvite as (c: string) => Promise<void>)(
+      "leaked-code",
+    );
+    expect(
+      calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/invites/leaked-code"),
+    ).toBe(true);
   });
 
   // OC-0355. The hotkey used to preventDefault whenever a .filter-search
@@ -919,6 +1319,45 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
       retention_days: "90",
     });
+  });
+  it("states channel counts only from the full channel list, in agreeing verb form", async () => {
+    let channelsReadable = true;
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/retention")
+        return {
+          json: {
+            server_days: 0,
+            revision: "revision-1",
+            channels: [{ channel_id: 7, days: 30, updated_by: 1, updated_at: "" }],
+          },
+        };
+      if (p === "/retention/preview") return { json: [] };
+      if (p === "/channels")
+        return channelsReadable
+          ? {
+              json: [
+                { id: 5, name: "general", type: "text" },
+                { id: 7, name: "archive", type: "text" },
+              ],
+            }
+          : { status: 403, json: { message: "forbidden" } };
+      return { json: {} };
+    };
+    const booted = await boot([], respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
+
+    const full = await booted.bridge.renderRetention();
+    expect(full).toContain("1 channel follows this; 1 channel has its own rule.");
+    expect(full).toContain("Show all 2 channels");
+
+    channelsReadable = false;
+    const partial = await booted.bridge.renderRetention();
+    expect(partial).toContain("1 channel has its own rule; every other channel follows this.");
+    expect(partial).not.toContain("0 channels follow");
+    expect(partial).not.toContain("Show all");
+    expect(partial).toContain("Show listed channels");
   });
   it("binds the confirmation to the proposed window and shows its observation and exclusions", async () => {
     const calls: FetchCall[] = [];
@@ -1139,5 +1578,59 @@ describe("Server/admin/static — panel behaviour", () => {
     (doc.querySelector('#userMenu [data-action="doLogout"]') as HTMLButtonElement).click();
     expect(doc.getElementById("loginOverlay")!.classList.contains("visible")).toBe(true);
     expect(bridge.state.token).toBe("");
+  });
+
+  // UX-12(b). The badges used to load once at sign-in, so a warning raised
+  // while the operator was away stayed unseen until a re-login. Coming back
+  // to the tab refreshes every source — the open section's included — and a
+  // signed-out panel fetches nothing.
+  it("refreshes the nav badges when the tab comes back into view (UX-12(b))", async () => {
+    const calls: FetchCall[] = [];
+    let warnings = [{ id: "a" }];
+    const respond: Responder = (p) => {
+      if (p === "/setup/status") return { json: { needs_setup: false } };
+      if (p === "/me")
+        return {
+          json: {
+            id: 1,
+            username: "ada",
+            role_name: "Owner",
+            permissions: ADMINISTRATOR,
+            role_position: 100,
+            is_owner: true,
+            server_name: "Lab",
+            version: "1.2.0",
+          },
+        };
+      if (p === "/attention") return { json: { warnings } };
+      if (p === "/registrations") return { json: [] };
+      if (p === "/updates") return { json: { update_available: false } };
+      return { json: {} };
+    };
+    const booted = await boot(calls, respond);
+    dom = booted.dom;
+    const { bridge, dom: jsdom } = booted;
+    const doc = jsdom.window.document;
+    const tick = () => new Promise((resolve) => jsdom.window.setTimeout(resolve, 0));
+    await bridge.enterApp();
+    await tick();
+    const dashboard = () =>
+      doc.getElementById("sidebarNav")!.querySelector(`[data-args='["dashboard"]']`)!;
+    expect(bridge.state.section).toBe("dashboard");
+    expect(dashboard().textContent).toBe("Dashboard1 (1 active warnings)");
+
+    // A warning raised while the operator was on another tab.
+    warnings = [{ id: "a" }, { id: "b" }];
+    doc.dispatchEvent(new jsdom.window.Event("visibilitychange"));
+    await tick();
+    await tick();
+    expect(dashboard().textContent).toBe("Dashboard2 (2 active warnings)");
+
+    // Signed out, a return to the tab loads nothing.
+    (doc.querySelector('#userMenu [data-action="doLogout"]') as HTMLButtonElement).click();
+    calls.length = 0;
+    doc.dispatchEvent(new jsdom.window.Event("visibilitychange"));
+    await tick();
+    expect(calls).toEqual([]);
   });
 });

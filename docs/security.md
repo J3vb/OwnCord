@@ -77,7 +77,10 @@ OwnCord supports TOTP-based 2FA:
 ## Account Recovery
 
 The recovery kit (B4-5) is a secret the account holder keeps offline; the
-server stores only an argon2id verifier of it. Redeeming the kit replaces the
+server stores only an argon2id verifier of it. The setup wizard offers to
+generate the owner's kit at first run — shown once on the finish step, with
+only its verifier stored — and any account can enrol or rotate one from the
+desktop client while signed in. Redeeming the kit replaces the
 password, revokes every session, spends the kit and writes a content-free
 audit row in one transaction, then signs the holder in without the second
 factor — it exists for the case where the devices are gone. A spent or lost
@@ -109,6 +112,17 @@ address, so behind a same-host reverse proxy or a container port relay with
 creating the Owner account tied to access to the server's own console. It is
 written to stderr only, never to the log stream, and is regenerated at every
 start.
+
+The full-archive download uses the same single-use pattern as the log stream:
+the owner asks for a link (`POST /admin/api/archive/link`) with normal
+authentication, and the browser opens the returned URL as a plain download so
+a large archive is never buffered in the page. The link token is 32 random
+bytes, bound to the owning principal, consumable once, valid for about a
+minute, and never written to a log or audit row. Like the log-stream ticket it
+stores the hash of the credential that asked for it and re-resolves it on
+redemption, so a revoked session, a ban or a lost Owner role voids an
+outstanding link; redeeming an unknown, expired, spent or voided token is a
+uniform `403`.
 
 `POST /admin/api/setup` is unauthenticated: it is how the first Owner account
 comes to exist, and until B4-10 the only thing standing in front of it was
@@ -258,8 +272,9 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `update_apply`,
-  `update_applied`, `update_failed`, `ws_connect`
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`,
+  `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
+  `update_failed`, `ws_connect`
 
 Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
@@ -303,7 +318,7 @@ The Tauri desktop client implements the following security measures:
 - HTTP fetch is restricted to `http://127.0.0.1:*` (the Rust TOFU proxies' loopback tunnels) — no `https://` destination at all. It still **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` as defence in depth should a wildcard ever return
 - `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
 - The `https://*` wildcard was removed in B7-16: link previews, external images, GIFs and external avatars are fetched by the native external-content broker (`src-tauri/src/external_content.rs`), and the CSP `img-src` no longer allows `https:`. The broker's policy is in [trust-model.md](trust-model.md) §"Desktop preview destination policy (C-09)"
-- CSP `connect-src` allows only `'self'`, IPC and loopback `http:`/`ws:` (`localhost`, `127.0.0.1`) — no `https:` or `wss:` source, so a compromised renderer's own `fetch` or `WebSocket` cannot reach a remote host. REST and the chat socket go through IPC, and LiveKit through the loopback TOFU tunnel; a local server's LiveKit `direct_url` is used as-is only when it is itself loopback `ws:`/`http:`, and anything else (LiveKit Cloud, a TLS LiveKit elsewhere) is tunnelled like a remote server's (`src/platform/desktop/nativeProxies.ts`). The exception is Linux, where voice runs in the native Rust LiveKit backend outside the webview's CSP and keeps any local server's `direct_url`
+- CSP `connect-src` allows only `'self'`, IPC and loopback `http:`/`ws:` (`localhost`, `127.0.0.1`) — no `https:` or `wss:` source, so a compromised renderer's own `fetch` or `WebSocket` cannot reach a remote host. REST and the chat socket go through IPC, and LiveKit through the loopback TOFU tunnel; a local server's LiveKit `direct_url` is used as-is only when it is loopback `ws:`/`http:` — the same rule on every platform, Linux native voice included — and anything else (LiveKit Cloud, a TLS LiveKit elsewhere, or a compose-internal name like `ws://livekit:7880` that does not resolve on the host) is tunnelled like a remote server's (`src/platform/desktop/nativeProxies.ts`)
 - Regression-guarded by `tests/unit/capabilities-scope.test.ts` and `tests/unit/tauri-conf-csp.test.ts`; the original rationale is in [docs/plans/tauri-capability-narrowing.md](plans/tauri-capability-narrowing.md)
 
 ### TLS and Certificate Pinning (TOFU)
@@ -320,8 +335,9 @@ The Tauri desktop client implements the following security measures:
   it against the prompt, character for character, over a channel the server is
   not part of. The client cannot tell a wrong fingerprint from an interception
   attempt, so accepting a mismatch is indistinguishable from accepting one.
-  The same rule applies when a certificate is rotated or renewed and every
-  client shows the mismatch prompt again — see
+  The same rule applies when a certificate changes and every client shows the
+  mismatch prompt again (a routine public-CA renewal is re-pinned without
+  one) — see
   [trust-model.md](trust-model.md) and
   [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate)
 - Update downloads validate `server_url` uses `https://` and rejects URLs with userinfo
@@ -369,6 +385,6 @@ This section carries the security-relevant rows only.
 - [ ] Configure rate limits (defaults are sensible but review for your use case)
 - [ ] Run regular backups via the admin panel
 - [ ] Keep the server updated (admin panel shows available updates)
-- [ ] Firewall: only expose port 8443 (HTTPS); for voice/video also 7881/TCP and 50000-60000/UDP (LiveKit TCP fallback + media — see [deployment.md](deployment.md)); port 80 only when using ACME. Do not expose 7880 (LiveKit's own API); own clients tunnel signalling through `/livekit` on 8443.
+- [ ] Firewall: only expose port 8443 (HTTPS); for voice/video also 7881/TCP and the media UDP port(s) — `50000-60000` by default, or a single `voice.udp_port` (LiveKit TCP fallback + media — see [deployment.md](deployment.md)); port 80 only when using ACME. Do not expose 7880 (LiveKit's own API); own clients tunnel signalling through `/livekit` on 8443.
 - [ ] Enable server-wide 2FA requirement once all users have enrolled
 - [ ] Set `admin_allowed_cidrs` to restrict admin panel access to trusted networks

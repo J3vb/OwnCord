@@ -150,6 +150,11 @@ async function bootAccountSettings(page: Page, extraRoutes: HttpRoute[]): Promis
   await openSettings(page);
 }
 
+/** The profile forms sit behind the card's Edit profile action. */
+async function openProfileEditor(page: Page): Promise<void> {
+  await page.locator(".settings-pane.active [data-testid='profile-edit-toggle']").click();
+}
+
 /**
  * The delete-dialog disclosure. B7-15c (PR #1671) rewrites the exact sentence
  * to "Deletion is immediate and permanent: …" from "This action is permanent
@@ -178,6 +183,7 @@ test.describe("Settings > Account — profile edit", () => {
       { pattern: "/api/v1/users/me", method: "PATCH", status: 200, body: profile },
     ]);
 
+    await openProfileEditor(page);
     // Pre-filled from the signed-in user, who has neither field set.
     await expect(page.locator("[data-testid='display-name-input']")).toHaveValue("");
     await expect(page.locator("[data-testid='about-input']")).toHaveValue("");
@@ -213,16 +219,17 @@ test.describe("Settings > Account — profile edit", () => {
       },
     ]);
 
+    await openProfileEditor(page);
     await page.locator("[data-testid='display-name-input']").fill("Ada");
     await page.locator("[data-testid='profile-save-btn']").focus();
     await page.keyboard.press("Enter");
 
-    await expect(page.locator("[data-testid='profile-error']")).toHaveText("display_name too long");
+    await expect(page.locator("[data-testid='profile-error']")).toHaveText("Display_name too long");
     await expect(page.locator("[data-testid='profile-save-btn']")).toBeFocused();
     await expect(page.locator("[data-testid='display-name-input']")).toHaveValue("Ada");
     await expect(page.locator(".account-header-name")).toHaveText("testuser");
     await expect(
-      page.locator("[data-testid='toast']", { hasText: "display_name too long" }),
+      page.locator("[data-testid='toast']", { hasText: "Display_name too long" }),
     ).toBeVisible();
   });
 
@@ -237,6 +244,7 @@ test.describe("Settings > Account — profile edit", () => {
       },
     ]);
 
+    await openProfileEditor(page);
     await page.locator(".settings-pane.active .account-field-edit").click();
     const row = page.locator(".settings-pane.active .setting-row", {
       has: page.locator("[data-testid='username-edit-input']"),
@@ -312,7 +320,7 @@ test.describe("Settings > Account — avatar upload", () => {
       .setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: PNG_1X1 });
 
     await expect(page.locator("[data-testid='avatar-error']")).toHaveText(
-      "avatar must be a PNG, JPEG or WebP image",
+      "Avatar must be a PNG, JPEG or WebP image",
     );
     // The letter fallback is still what the avatar shows.
     await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toHaveCount(0);
@@ -500,6 +508,7 @@ test.describe("Settings > Account — delete account", () => {
     const confirmArea = page.locator("[data-testid='delete-account-confirm-area']");
     await expect(confirmArea).toBeHidden();
 
+    await page.locator("summary", { hasText: "Delete account" }).click();
     await page.locator("[data-testid='delete-account-trigger']").click();
     await expect(confirmArea).toBeVisible();
     // The disclosure is rendered, and it is the destructive copy.
@@ -536,6 +545,7 @@ test.describe("Settings > Account — delete account", () => {
       },
     ]);
 
+    await page.locator("summary", { hasText: "Delete account" }).click();
     await page.locator("[data-testid='delete-account-trigger']").click();
     await page.locator("[data-testid='delete-account-password']").fill("nope");
     await page.locator("[data-testid='delete-account-confirm']").focus();

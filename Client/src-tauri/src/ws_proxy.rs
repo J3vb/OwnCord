@@ -17,13 +17,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Runtime};
-use tauri_plugin_store::StoreExt;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
 
 /// Maximum time to wait for the WebSocket handshake to complete.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How often the proxy sends a protocol Ping. Every server version answers it
+/// with a Pong from its read loop, so the proxy hears the server at least this
+/// often without relying on the webview's JS heartbeat timer, which the OS may
+/// throttle while the window is minimised.
+const PING_INTERVAL: Duration = Duration::from_secs(25);
+
+/// Close the socket when no frame at all (text, ping, pong, ...) has arrived
+/// for this long: 2.5 ping intervals, so one lost Pong never closes a live
+/// connection. A half-open socket would otherwise stay "connected" forever.
+const LIVENESS_TIMEOUT: Duration = Duration::from_millis(62_500);
 
 use crate::constants::CERTS_STORE;
 use crate::tofu::{self, TofuOutcome};
@@ -168,18 +178,17 @@ pub async fn ws_connect<R: Runtime>(
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = tofu::extract_host(&url);
-    let fingerprint = captured_fp
+    let observed = captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
-        .unwrap_or_default();
+        .filter(|o| !o.fingerprint.is_empty())
+        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    let fingerprint = observed.fingerprint.clone();
 
-    if fingerprint.is_empty() {
-        return Err("TLS handshake completed but no certificate fingerprint was captured".into());
-    }
-
-    match tofu::evaluate(&app, &host, &fingerprint)? {
-        TofuOutcome::Trusted => {
+    match tofu::evaluate(&app, &host, &observed)? {
+        // A routine public-CA renewal was re-pinned by evaluate: as trusted.
+        TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
             info!("[ws_proxy] TOFU check passed for {}", host);
             emit_cert_tofu(
                 &app,
@@ -230,12 +239,12 @@ pub async fn ws_connect<R: Runtime>(
     }
     // ── End TOFU check ───────────────────────────────────────────────────
 
-    let (mut sink, mut stream) = ws_stream.split();
+    let (sink, stream) = ws_stream.split();
 
     // Channel for JS → server messages (bounded for backpressure). The slot
     // gets the ONLY Sender: teardown ownership is proven by generation, so no
     // clone may outlive the slot — one would keep rx.recv() pending forever.
-    let (tx, mut rx) = mpsc::channel::<String>(256);
+    let (tx, rx) = mpsc::channel::<String>(256);
     if !state.install_sender(my_generation, tx).await {
         info!("[ws_proxy] handshake superseded by a newer connect; dropping stale socket");
         return Err("superseded by a newer connection".into());
@@ -260,33 +269,21 @@ pub async fn ws_connect<R: Runtime>(
 
         // Task: forward server → JS
         set.spawn(async move {
-            while let Some(msg) = stream.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        let _ = app_read.emit("ws-message", text.to_string());
-                    }
-                    Ok(Message::Close(frame)) => {
-                        debug!("[ws_proxy] server sent Close frame: {:?}", frame);
-                        break;
-                    }
-                    Err(e) => {
-                        warn!("[ws_proxy] read error: {}", e);
-                        let _ = app_read.emit("ws-error", format!("{e}"));
-                        break;
-                    }
-                    _ => {} // ignore binary/ping/pong
-                }
-            }
+            read_frames(
+                stream,
+                LIVENESS_TIMEOUT,
+                |text| {
+                    let _ = app_read.emit("ws-message", text);
+                },
+                |err| {
+                    let _ = app_read.emit("ws-error", err);
+                },
+            )
+            .await;
         });
 
-        // Task: forward JS → server
-        set.spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                if sink.send(Message::Text(msg.into())).await.is_err() {
-                    break;
-                }
-            }
-        });
+        // Task: forward JS → server, plus the liveness pings
+        set.spawn(write_frames(sink, rx, PING_INTERVAL));
 
         // Block until the first worker finishes (normal exit or panic).
         let first = set.join_next().await;
@@ -319,6 +316,83 @@ pub async fn ws_connect<R: Runtime>(
     });
 
     Ok(())
+}
+
+/// Why [`read_frames`] stopped.
+#[derive(Debug, PartialEq, Eq)]
+enum ReadEnd {
+    /// The server closed the socket (Close frame or end of stream).
+    Closed,
+    /// The socket failed with a read error.
+    Failed,
+    /// Nothing arrived for the liveness timeout: the connection is presumed
+    /// half-open (a firewall or NAT dropped it without a FIN or RST).
+    Silent,
+}
+
+/// Forward server text frames to `on_text` until the server closes, the read
+/// fails, or nothing arrives for `silence`. Every inbound frame, including a
+/// Pong answering [`write_frames`]'s pings, proves the server is alive and
+/// restarts the deadline.
+async fn read_frames<S>(
+    mut stream: S,
+    silence: Duration,
+    mut on_text: impl FnMut(String),
+    on_error: impl Fn(String),
+) -> ReadEnd
+where
+    S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    loop {
+        let msg = match tokio::time::timeout(silence, stream.next()).await {
+            Ok(Some(msg)) => msg,
+            Ok(None) => return ReadEnd::Closed,
+            Err(_) => {
+                warn!(
+                    "[ws_proxy] no frame from the server for {}s; closing the half-open socket",
+                    silence.as_secs_f32()
+                );
+                on_error("liveness timeout: the server stopped answering".into());
+                return ReadEnd::Silent;
+            }
+        };
+        match msg {
+            Ok(Message::Text(text)) => on_text(text.to_string()),
+            Ok(Message::Close(frame)) => {
+                debug!("[ws_proxy] server sent Close frame: {:?}", frame);
+                return ReadEnd::Closed;
+            }
+            Err(e) => {
+                warn!("[ws_proxy] read error: {}", e);
+                on_error(format!("{e}"));
+                return ReadEnd::Failed;
+            }
+            _ => {} // binary/ping/pong: liveness only
+        }
+    }
+}
+
+/// Forward JS messages from `rx` to the server, and send a protocol Ping every
+/// `ping_every` so [`read_frames`] hears a Pong even while JS is quiet. Ends
+/// when `rx` closes (disconnect) or a send fails.
+async fn write_frames<S>(mut sink: S, mut rx: mpsc::Receiver<String>, ping_every: Duration)
+where
+    S: futures_util::Sink<Message> + Unpin,
+{
+    let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + ping_every, ping_every);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        let frame = tokio::select! {
+            msg = rx.recv() => match msg {
+                Some(text) => Message::Text(text.into()),
+                None => break,
+            },
+            _ = ping.tick() => Message::Ping(Vec::new().into()),
+        };
+        if sink.send(frame).await.is_err() {
+            break;
+        }
+    }
 }
 
 /// Send a text message through the proxy WebSocket.
@@ -371,7 +445,8 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
         })
 }
 
-/// Accept a certificate fingerprint for a host — the ONLY path that writes a pin.
+/// Accept a certificate fingerprint for a host — the only path that writes a pin
+/// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
 #[tauri::command]
 pub fn accept_cert_fingerprint<R: Runtime>(
@@ -387,7 +462,7 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
 
-    let store = app.store(CERTS_STORE).map_err(|e| {
+    let store = crate::json_store::open(&app, CERTS_STORE).map_err(|e| {
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to open certs store: {e}");
         format!("failed to open certs store: {e}")
     })?;
@@ -608,6 +683,88 @@ mod tests {
             got, None,
             "rx.recv() must yield None so the write task exits"
         );
+    }
+
+    // ── Liveness (CLI-01) ────────────────────────────────────────────────────
+    //
+    // A firewall or NAT that drops the connection without a FIN/RST leaves a
+    // half-open socket that reads nothing forever. The proxy must close it so
+    // JS sees "closed" and reconnects, but must never close a live connection
+    // that is merely quiet.
+
+    use tokio::io::DuplexStream;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+    use tokio_tungstenite::WebSocketStream;
+
+    async fn socket_pair() -> (WebSocketStream<DuplexStream>, WebSocketStream<DuplexStream>) {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        (
+            WebSocketStream::from_raw_socket(client, Role::Client, None).await,
+            WebSocketStream::from_raw_socket(server, Role::Server, None).await,
+        )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_server_is_closed_at_the_liveness_deadline() {
+        // The server end stays open but never sends a byte: a half-open socket.
+        let (client, _server) = socket_pair().await;
+        let (_sink, stream) = client.split();
+        let errors = std::sync::Mutex::new(Vec::new());
+
+        let started = tokio::time::Instant::now();
+        let end = read_frames(
+            stream,
+            LIVENESS_TIMEOUT,
+            |_| {},
+            |e| errors.lock().unwrap().push(e),
+        )
+        .await;
+
+        assert_eq!(end, ReadEnd::Silent);
+        assert_eq!(started.elapsed(), LIVENESS_TIMEOUT);
+        assert_eq!(
+            errors.lock().unwrap().len(),
+            1,
+            "the close must be logged to JS"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_server_that_only_answers_pings_is_kept_for_five_minutes() {
+        // The server sends nothing of its own; its read loop auto-answers each
+        // Ping with a Pong, as every OwnCord server version does. JS sends
+        // nothing either (a minimised window with a throttled heartbeat).
+        let (client, mut server) = socket_pair().await;
+        tokio::spawn(async move { while let Some(Ok(_)) = server.next().await {} });
+        let (sink, stream) = client.split();
+        let (_tx, rx) = mpsc::channel::<String>(4);
+        tokio::spawn(write_frames(sink, rx, PING_INTERVAL));
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(300),
+            read_frames(stream, LIVENESS_TIMEOUT, |_| {}, |_| {}),
+        )
+        .await;
+
+        assert!(
+            outcome.is_err(),
+            "a live connection was closed: {:?}",
+            outcome.ok()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn text_is_forwarded_and_a_close_frame_ends_the_read() {
+        let (client, mut server) = socket_pair().await;
+        let (_sink, stream) = client.split();
+        server.send(Message::Text("hello".into())).await.unwrap();
+        server.close(None).await.unwrap();
+        let mut texts = Vec::new();
+
+        let end = read_frames(stream, LIVENESS_TIMEOUT, |t| texts.push(t), |_| {}).await;
+
+        assert_eq!(end, ReadEnd::Closed);
+        assert_eq!(texts, ["hello"]);
     }
 
     // B4_conn_ipc-9: ws_disconnect must invalidate an in-flight ws_connect

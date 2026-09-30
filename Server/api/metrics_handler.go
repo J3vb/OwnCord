@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // EventPersisterMetrics is the nested event-persistence block of ServerMetrics.
@@ -33,7 +36,25 @@ type ServerMetrics struct {
 	// per-client backpressure counters below. Any nonzero growth here means
 	// sequenced events were lost before delivery and is worth alerting on.
 	BroadcastDrops uint64 `json:"broadcast_drops"`
+	// TopicSheds counts channel frames dropped by the topic limiter before a
+	// seq was assigned (SRV-03) — replay cannot recover them, so like
+	// broadcast_drops any growth is worth alerting on.
+	TopicSheds     uint64 `json:"topic_sheds_total"`
 	LiveKitHealthy *bool  `json:"livekit_healthy,omitempty"`
+
+	// Shipped in-process latency distributions (SRE-M1). These exist in every
+	// build, unlike the OpenTelemetry instruments, which compile only with
+	// -tags otel.
+	BroadcastMs   *metrics.Summary `json:"ws_broadcast_ms,omitempty"`
+	DispatchLagMs *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
+	ChatAckMs     *metrics.Summary `json:"chat_send_ack_ms,omitempty"`
+	// VoiceJoinMs is each phase of a completed voice join (voice_join_ms).
+	VoiceJoinMs *ws.VoiceJoinPhases `json:"voice_join_ms,omitempty"`
+
+	// BroadcastQueueDepth is the hub dispatch channel's current depth; the
+	// max-seqMu-hold gauge is the worst single critical-section hold.
+	BroadcastQueueDepth int     `json:"hub_broadcast_queue_depth"`
+	SeqMuMaxHoldMs      float64 `json:"hub_seqmu_max_hold_ms"`
 
 	// Reconnect replay tier hits. A rising full-resync share means the replay
 	// budget (ring size / cold cap) is too small for observed disconnect gaps.
@@ -95,17 +116,27 @@ type MetricsSources struct {
 	ConnectedUsers func() int
 	VoiceSessions  func() int
 	BroadcastDrops func() uint64
-	LiveKitHealth  func(context.Context) (bool, error)
-	ReconnectTiers func() (buffer, db, full uint64)
-	Backpressure   func() (queueDisconnects, highFallbacks, lowDrops uint64)
-	ConnRejects    func() uint64
-	PersisterStats func() (persisted, dropped, flushes, errs uint64, ok bool)
-	DBStats        func() sql.DBStats // writer pool
-	DBReaderStats  func() sql.DBStats // reader pool
-	PermCache      func() (hits, misses uint64)
-	DiskFree       func() (uint64, error)
-	DiskMinFree    uint64
-	UploadBytes    func(context.Context) (int64, error)
+	// TopicSheds, BroadcastMs, DispatchLagMs, ChatAckMs, VoiceJoinMs,
+	// BroadcastQueueDepth and SeqMuMaxHoldMs are the shipped in-process metrics (SRE-M1). Nil
+	// fields are skipped, so tests and partial wirings stay cheap.
+	TopicSheds          func() uint64
+	BroadcastMs         func() metrics.Summary
+	DispatchLagMs       func() metrics.Summary
+	ChatAckMs           func() metrics.Summary
+	VoiceJoinMs         func() ws.VoiceJoinPhases
+	BroadcastQueueDepth func() int
+	SeqMuMaxHoldMs      func() float64
+	LiveKitHealth       func(context.Context) (bool, error)
+	ReconnectTiers      func() (buffer, db, full uint64)
+	Backpressure        func() (queueDisconnects, highFallbacks, lowDrops uint64)
+	ConnRejects         func() uint64
+	PersisterStats      func() (persisted, dropped, flushes, errs uint64, ok bool)
+	DBStats             func() sql.DBStats // writer pool
+	DBReaderStats       func() sql.DBStats // reader pool
+	PermCache           func() (hits, misses uint64)
+	DiskFree            func() (uint64, error)
+	DiskMinFree         uint64
+	UploadBytes         func(context.Context) (int64, error)
 	// PushCounters is nil when dispatch is off (the compiled default); the
 	// three fields stay at their zero value then.
 	PushCounters func() (dispatched, failed, pruned uint64)
@@ -136,6 +167,7 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		if src.BroadcastDrops != nil {
 			metrics.BroadcastDrops = src.BroadcastDrops()
 		}
+		fillHubLatency(&metrics, src)
 		if src.LiveKitHealth != nil {
 			healthy, _ := src.LiveKitHealth(r.Context())
 			metrics.LiveKitHealthy = &healthy
@@ -194,5 +226,35 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, metrics)
+	}
+}
+
+// fillHubLatency copies the hub's latency distributions, queue depth, seqMu
+// hold and topic sheds into metrics.
+func fillHubLatency(metrics *ServerMetrics, src MetricsSources) {
+	if src.TopicSheds != nil {
+		metrics.TopicSheds = src.TopicSheds()
+	}
+	if src.BroadcastMs != nil {
+		s := src.BroadcastMs()
+		metrics.BroadcastMs = &s
+	}
+	if src.DispatchLagMs != nil {
+		s := src.DispatchLagMs()
+		metrics.DispatchLagMs = &s
+	}
+	if src.ChatAckMs != nil {
+		s := src.ChatAckMs()
+		metrics.ChatAckMs = &s
+	}
+	if src.VoiceJoinMs != nil {
+		v := src.VoiceJoinMs()
+		metrics.VoiceJoinMs = &v
+	}
+	if src.BroadcastQueueDepth != nil {
+		metrics.BroadcastQueueDepth = src.BroadcastQueueDepth()
+	}
+	if src.SeqMuMaxHoldMs != nil {
+		metrics.SeqMuMaxHoldMs = src.SeqMuMaxHoldMs()
 	}
 }

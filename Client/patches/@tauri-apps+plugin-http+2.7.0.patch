@@ -1,12 +1,12 @@
 diff --git a/node_modules/@tauri-apps/plugin-http/dist-js/index.cjs b/node_modules/@tauri-apps/plugin-http/dist-js/index.cjs
-index f1bba45..2b6e4c9 100644
+index b64701c..0ee0df5 100644
 --- a/node_modules/@tauri-apps/plugin-http/dist-js/index.cjs
 +++ b/node_modules/@tauri-apps/plugin-http/dist-js/index.cjs
-@@ -103,41 +103,85 @@ async function fetch(input, init) {
+@@ -113,44 +113,85 @@ async function fetch(input, init) {
              danger
          }
      });
--    const abort = () => core.invoke('plugin:http|fetch_cancel', { rid });
+-    const abort = () => core.invoke('plugin:http|fetch_cancel', { rid }).catch(() => { });
 +    const reportCleanupError = (error) => {
 +        console.error('Failed to release Tauri HTTP resource', error);
 +    };
@@ -22,9 +22,8 @@ index f1bba45..2b6e4c9 100644
      // Optimistically check for abort signal
      // and avoid doing any work after doing intial work on the Rust side
      if (signal?.aborted) {
--        // we don't care about the result of this proimse
--        // eslint-disable-next-line @typescript-eslint/no-floating-promises
--        abort();
+-        // we don't care about the result of this promise
+-        void abort();
 +        onRequestAbort();
          throw new Error(ERROR_REQUEST_CANCELLED);
      }
@@ -32,6 +31,7 @@ index f1bba45..2b6e4c9 100644
 -    const { status, statusText, url, headers: responseHeaders, rid: responseRid } = await core.invoke('plugin:http|fetch_send', {
 -        rid
 -    });
+-    let bodyDropped = false;
 +    signal?.addEventListener('abort', onRequestAbort, { once: true });
 +    let response;
 +    try {
@@ -50,7 +50,10 @@ index f1bba45..2b6e4c9 100644
 +        if (onBodyAbort) signal?.removeEventListener('abort', onBodyAbort);
 +    };
      const dropBody = () => {
--        return core.invoke('plugin:http|fetch_cancel_body', { rid: responseRid });
+-        if (bodyDropped)
+-            return Promise.resolve();
+-        bodyDropped = true;
+-        return core.invoke('plugin:http|fetch_cancel_body', { rid: responseRid }).catch(() => { });
 +        if (!bodyCancellation) {
 +            // Rust also closes this resource at EOF, before its IPC reply arrives.
 +            const mayRaceWithEof = readPending;
@@ -98,7 +101,7 @@ index f1bba45..2b6e4c9 100644
              controller.close();
              return;
          }
-@@ -150,15 +194,19 @@ async function fetch(input, init) {
+@@ -163,15 +204,19 @@ async function fetch(input, init) {
          : new ReadableStream({
              start: (controller) => {
                  // listen for abort events to cancel reading
@@ -123,14 +126,14 @@ index f1bba45..2b6e4c9 100644
          });
      const res = new Response(body, {
 diff --git a/node_modules/@tauri-apps/plugin-http/dist-js/index.js b/node_modules/@tauri-apps/plugin-http/dist-js/index.js
-index 01f0ea4..e539106 100644
+index 12e51ed..6185429 100644
 --- a/node_modules/@tauri-apps/plugin-http/dist-js/index.js
 +++ b/node_modules/@tauri-apps/plugin-http/dist-js/index.js
-@@ -101,41 +101,85 @@ async function fetch(input, init) {
+@@ -111,44 +111,85 @@ async function fetch(input, init) {
              danger
          }
      });
--    const abort = () => invoke('plugin:http|fetch_cancel', { rid });
+-    const abort = () => invoke('plugin:http|fetch_cancel', { rid }).catch(() => { });
 +    const reportCleanupError = (error) => {
 +        console.error('Failed to release Tauri HTTP resource', error);
 +    };
@@ -146,9 +149,8 @@ index 01f0ea4..e539106 100644
      // Optimistically check for abort signal
      // and avoid doing any work after doing intial work on the Rust side
      if (signal?.aborted) {
--        // we don't care about the result of this proimse
--        // eslint-disable-next-line @typescript-eslint/no-floating-promises
--        abort();
+-        // we don't care about the result of this promise
+-        void abort();
 +        onRequestAbort();
          throw new Error(ERROR_REQUEST_CANCELLED);
      }
@@ -156,6 +158,7 @@ index 01f0ea4..e539106 100644
 -    const { status, statusText, url, headers: responseHeaders, rid: responseRid } = await invoke('plugin:http|fetch_send', {
 -        rid
 -    });
+-    let bodyDropped = false;
 +    signal?.addEventListener('abort', onRequestAbort, { once: true });
 +    let response;
 +    try {
@@ -174,7 +177,10 @@ index 01f0ea4..e539106 100644
 +        if (onBodyAbort) signal?.removeEventListener('abort', onBodyAbort);
 +    };
      const dropBody = () => {
--        return invoke('plugin:http|fetch_cancel_body', { rid: responseRid });
+-        if (bodyDropped)
+-            return Promise.resolve();
+-        bodyDropped = true;
+-        return invoke('plugin:http|fetch_cancel_body', { rid: responseRid }).catch(() => { });
 +        if (!bodyCancellation) {
 +            // Rust also closes this resource at EOF, before its IPC reply arrives.
 +            const mayRaceWithEof = readPending;
@@ -222,7 +228,7 @@ index 01f0ea4..e539106 100644
              controller.close();
              return;
          }
-@@ -148,15 +192,19 @@ async function fetch(input, init) {
+@@ -161,15 +202,19 @@ async function fetch(input, init) {
          : new ReadableStream({
              start: (controller) => {
                  // listen for abort events to cancel reading

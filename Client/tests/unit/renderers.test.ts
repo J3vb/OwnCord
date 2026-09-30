@@ -19,11 +19,13 @@ import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
+import { setConnectionStatus } from "../../src/stores/ui.store";
+import { shellText } from "../../src/i18n/shell";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
-} from "../../src/components/message-list/reaction-tooltip";
+} from "../../src/features/messaging/reactionUsers";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
 import {
@@ -73,6 +75,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: false,
   }));
+  setConnectionStatus("connected");
 }
 
 /** Seed the member list so @tokens resolve — unresolvable tokens stay plain text. */
@@ -394,6 +397,26 @@ describe("renderers", () => {
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
         "Could not save this message — retry now or it is lost on restart",
       );
+
+      ac.abort();
+    });
+
+    it("says a refused pre-restore retry was caused by the restore (OC-0476)", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c4",
+        id: 0,
+        content: "queued before the restore",
+        errorCode: "BEFORE_RESTORE",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "The server was restored — check the conversation before sending this again.",
+      );
+      expect(el.textContent).toContain("queued before the restore");
 
       ac.abort();
     });
@@ -1227,6 +1250,25 @@ describe("renderers", () => {
       const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
       deleteBtn.click();
       expect(opts.onDeleteClick).toHaveBeenCalledWith(1);
+
+      ac.abort();
+    });
+
+    it("disables delete with the connection reason while the socket is down", () => {
+      setConnectionStatus("reconnecting");
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      const deleteBtn = container.querySelector(
+        "[data-testid='msg-delete-1']",
+      ) as HTMLButtonElement;
+      expect(deleteBtn.disabled).toBe(true);
+      expect(deleteBtn.getAttribute("aria-disabled")).toBe("true");
+      expect(deleteBtn.title).toBe(shellText("channel.reconnecting"));
+      deleteBtn.dispatchEvent(new MouseEvent("click"));
+      expect(opts.onDeleteClick).not.toHaveBeenCalled();
 
       ac.abort();
     });

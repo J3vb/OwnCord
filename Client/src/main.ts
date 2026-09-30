@@ -7,13 +7,20 @@ import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
-import { createApiClient, ApiClientError } from "@lib/api";
+import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { cleanupNotificationAudio } from "@lib/notifications";
+import {
+  openMessageTarget,
+  openNotificationTarget,
+  resetNotificationCoalescing,
+} from "@lib/notifications";
+import { cleanupNotificationAudio } from "@lib/notificationSound";
+import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
+import { setLastChannelHost } from "@lib/last-channel";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
 import { resetSafetyStore } from "./features/safety/store";
 import {
@@ -40,7 +47,6 @@ import {
   parseRelayedLogin,
 } from "@lib/credentials";
 import { initWindowState } from "@lib/window-state";
-import { jumpToMessage } from "@lib/message-navigation";
 import { createCertMismatchModal, createCertFirstUseModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import {
@@ -59,6 +65,10 @@ import { getActivePresenceSender } from "@lib/presence";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
+
+// First, while storage still holds only what earlier sessions wrote: that is
+// how an install from before the notification level is told from a new one.
+settleNotificationLevelDefault();
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -114,6 +124,12 @@ document.addEventListener("click", (e) => {
 // Install global error handlers first
 installGlobalErrorHandlers();
 
+// Start log persistence immediately after: an early startup failure (a missing
+// #app element, a failing lazy chunk) must still reach the on-disk log, not
+// just the in-memory ring. The listener is installed before the first render
+// and back-fills the bootstrap window (CLI-03).
+void initLogPersistence();
+
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
 
@@ -155,7 +171,7 @@ function handleUnauthorized(): void {
 }
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
-// Diagnostics back the lazily loaded Settings > Logs panel, so their engine and
+// Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
 // text stay out of the startup chunk (B9-20). The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
 void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
@@ -164,6 +180,10 @@ void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics
 // Registered here rather than imported by auth.store: notifications imports
 // auth.store, so that import was a cycle.
 onAuthCleared(cleanupNotificationAudio);
+// Coalescing is keyed by channel id, which is only unique per server, so a
+// stale window from the previous profile must not suppress the next server's
+// first notification for the same id.
+onAuthCleared(resetNotificationCoalescing);
 // A profile switch or sign-out must not carry one account's moderation notices into the next.
 onAuthCleared(resetSafetyStore);
 onAuthCleared((reason) => {
@@ -461,6 +481,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     authStore.setState((prev) => ({ ...prev, token }));
     lastConnectHost = host;
     lastConnectToken = token;
+    // UX-8: scope the last-channel store to this server before the dispatcher
+    // wires, so the first `ready` (which restores it) reads the right key.
+    // It has to be here, not MainPage: the first ready arrives before MainPage
+    // mounts, and it is what restores the last channel.
+    setLastChannelHost(host);
     ws.connect({ host, token });
     dispatcherCleanup = wireDispatcher(ws, api);
     owner.addCleanup(dispatcherCleanup);
@@ -897,8 +922,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // credential read was still pending) must not paint an error over
         // the login that superseded it.
         if (!autoLoginCancelled && pageOwner.isCurrent() && attempt.isCurrent()) {
-          const message =
-            err instanceof Error ? err.message : connectText("session.autoLoginFailed");
+          const message = errorText(err, connectText("session.autoLoginFailed"));
           log.warn("Auto-login failed", { host: profile.host, error: message });
           connectPage.showError(connectText("session.autoLoginFailedDetail", { message }));
         }
@@ -987,9 +1011,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       // for "an explicit logout just happened, don't auto-login" (set by the
       // isAuthenticated subscriber further down), and every connect-page
       // mount — quick-switch included — must clear it here or it survives in
-      // sessionStorage and goes on to suppress an unrelated, later
-      // clearAuth("server_shutdown") auto-login that deliberately does NOT
-      // re-set it (OC-0028).
+      // sessionStorage and goes on to suppress a later, unrelated
+      // auto-login (OC-0028).
       const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
       sessionStorage.removeItem("owncord:skip-auto-login");
 
@@ -1054,9 +1077,8 @@ authStore.subscribeSelector(
   (isAuthenticated) => {
     // The router only reaches "main" from the connected overlay's own
     // onReady, 800ms after `ready` arrives — so a session that ends between
-    // auth_ok and ready (a ban, an auth_error on an intervening reconnect,
-    // a server_restart shutdown) flips isAuthenticated false while the
-    // router is still "connect". The synchronous session cleanup has already
+    // auth_ok and ready (a ban, an auth_error on an intervening reconnect)
+    // flips isAuthenticated false while the router is still "connect". The synchronous session cleanup has already
     // destroyed its overlay; lastConnectHost retains the transport ownership
     // needed to finish teardown here. Otherwise the overlay (position:fixed, opaque,
     // z-index 200, appended straight to #app in wirePostAuth's auth_ok
@@ -1086,13 +1108,12 @@ authStore.subscribeSelector(
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
-      // Clear stored credential on logout — but keep it when the server
-      // kicked us by shutting down: the token is still valid, and deleting
-      // the credential would break auto-login every time the server restarts.
+      // Clear stored credential on logout. (A server restart never gets
+      // here: it keeps the session and reconnects.)
       const host = api.getConfig().host;
       const reason = authStore.getState().logoutReason;
-      if (host && reason !== "server_shutdown") {
-        // A protocol-epoch refusal keeps the credential too: the token is
+      if (host) {
+        // A protocol-epoch refusal keeps the credential: the token is
         // still valid, and the update the connect page offers relaunches
         // straight into auto-login with it (sessionStorage — and so the
         // skip flag below — does not survive that relaunch).
@@ -1100,9 +1121,7 @@ authStore.subscribeSelector(
         // (B7-13), and the departed session is left for that return.
         if (reason !== "protocol_epoch" && reason !== "server_switch") void deleteCredential(host);
         // Whenever this session must not turn around and auto-login with the
-        // credential (removed, or just refused), say so. A server_shutdown
-        // keeps the credential precisely so auto-login still works on
-        // restart, so it deliberately does not set this.
+        // credential (removed, or just refused), say so.
         sessionStorage.setItem("owncord:skip-auto-login", "1");
       }
       navigate("connect");
@@ -1124,8 +1143,11 @@ window.addEventListener("beforeunload", () => {
 });
 
 // Initial render (fire-and-forget — the initial page is "connect", whose
-// render branch is synchronous)
-void renderPage(activePage);
+// render branch is synchronous), then tell the native host's startup watchdog
+// the window came up.
+void renderPage(activePage).then(() =>
+  desktop.appProcess.reportReady().catch((err) => log.warn("Failed to report frontend ready", err)),
+);
 
 // Initialize window state persistence (fire-and-forget)
 void initWindowState();
@@ -1180,13 +1202,17 @@ function handleInviteDeepLink(code: string, host?: string): void {
 // Route owncord://message/<channelId>/<messageId> permalinks to the main
 // page's jumper. Before the main page mounts (or when the channel isn't
 // visible to this user) the jump is a logged no-op — a link into a server the
-// user is not signed into has nothing to open.
-function handleMessageDeepLink(channelId: number, messageId: number): void {
-  jumpToMessage(channelId, messageId);
+// user is not signed into has nothing to open. A link that named a server (a
+// Windows toast's launch URI) is ignored when another server is signed in now,
+// the same guard a clicked notification goes through.
+function handleMessageDeepLink(channelId: number, messageId: number, host?: string): void {
+  openMessageTarget(channelId, messageId, host);
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);
 
-// Initialize log persistence to disk (fire-and-forget)
-void initLogPersistence();
+// A clicked message notification opens the message it was for (U1d). The native
+// host emits `notification-click` with the target; routing it through the same
+// jumper a permalink uses keeps one implementation.
+desktop.notifier.onMessageActivated(openNotificationTarget);
 
 log.info("OwnCord client initialized");

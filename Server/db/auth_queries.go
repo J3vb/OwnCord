@@ -166,6 +166,16 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
 	}
+	// The redemption record (migration 055) commits with the account and the
+	// invite's use_count: a leaked invite can now be traced to its redeemer
+	// (O1). Best-effort is wrong here — it is part of the same transaction, so
+	// a failure rolls back the whole registration.
+	if err := d.q.WithTx(tx).CreateInviteRedemption(ctx, dbgen.CreateInviteRedemptionParams{
+		UserID: &uid,
+		Code:   inviteCode,
+	}); err != nil {
+		return 0, fmt.Errorf("CreateUserWithInvite record redemption: %w", err)
+	}
 	if _, err := insertSession(ctx, d.q.WithTx(tx), uid, sessionTokenHash, device, ip, false); err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite create session: %w", err)
 	}
@@ -522,16 +532,14 @@ func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*Se
 		return nil, fmt.Errorf("GetSessionWithBanStatus: %w", err)
 	}
 	return &SessionWithBanStatus{
-		Session: Session{
-			ID:        row.ID,
-			UserID:    row.UserID,
-			TokenHash: row.Token,
-			Device:    derefString(row.Device),
-			IP:        derefString(row.IpAddress),
-			CreatedAt: row.CreatedAt,
-			LastUsed:  row.LastUsed,
-			ExpiresAt: row.ExpiresAt,
-		},
+		ID:         row.ID,
+		UserID:     row.UserID,
+		TokenHash:  row.Token,
+		Device:     derefString(row.Device),
+		IP:         derefString(row.IpAddress),
+		CreatedAt:  row.CreatedAt,
+		LastUsed:   row.LastUsed,
+		ExpiresAt:  row.ExpiresAt,
 		Banned:     row.Banned != 0,
 		BanReason:  row.BanReason,
 		BanExpires: row.BanExpires,

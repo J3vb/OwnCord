@@ -10,7 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/ws"
+	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/api"
 )
 
 // startACMEServer starts the ACME HTTP-01 challenge server when Let's Encrypt
@@ -65,42 +66,32 @@ func serveAndWait(ctx context.Context, log *slog.Logger, rc *RestartCoordinator,
 		}
 	case <-ctx.Done():
 		if reason, ok := rc.Requested(); ok {
-			log.Info("restart requested, draining connections (30s timeout)", "reason", reason)
+			log.Info("restart requested, draining connections (up to 30s for HTTP, 10s per other shutdown step)", "reason", reason)
 		} else {
-			log.Info("shutdown signal received, draining connections (30s timeout)")
+			log.Info("shutdown signal received, draining connections (up to 30s for HTTP, 10s per other shutdown step)")
 		}
 	}
 
 	return nil
 }
 
-// shutdownServers performs the ordered graceful shutdown: the ACME
-// server, then in-flight HTTP handlers, then the WebSocket hub. Extracted
-// from run.
-func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv *http.Server, hub *ws.Hub) error {
+// shutdownServers drains the ACME server, then in-flight HTTP handlers. The
+// hub stops in the next close step ("hub-notice"), so in-flight handlers'
+// broadcasts still reach a live hub (and the event persister) or the frames
+// would vanish from the replay/event store across the restart. Shutdown does
+// not wait on hijacked WebSocket connections, so connected clients do not
+// delay the drain — they get the restart notice right after it.
+func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv *http.Server) error {
 	if acmeSrv != nil {
 		if err := acmeSrv.Shutdown(shutdownCtx); err != nil {
 			log.Warn("ACME HTTP server shutdown error", "error", err)
 		}
 	}
 
-	// Drain in-flight HTTP handlers FIRST: their broadcasts must still reach
-	// a live hub (and the event persister) or the frames vanish from the
-	// replay/event store across the restart. Shutdown does not wait on
-	// hijacked WebSocket connections, so the hub's own stop below is not
-	// delayed by connected clients — they get the restart notice right after
-	// the drain instead of right before it.
-	shutdownErr := srv.Shutdown(shutdownCtx)
-
-	// Stop the WebSocket hub: notify clients, stop LiveKit, close all client
-	// connections. Threaded with the same 30s budget the operator was told
-	// about — the notice sleep and LiveKit stop count against it rather than
-	// extending it.
-	hub.GracefulStopContext(shutdownCtx)
-
-	if shutdownErr != nil {
-		return fmt.Errorf("graceful shutdown: %w", shutdownErr)
+	srv.RegisterOnShutdown(api.CancelInFlightTransfers(srv))
+	srv.RegisterOnShutdown(admin.EndArchives(srv))
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("graceful shutdown: %w", err)
 	}
-
 	return nil
 }

@@ -53,7 +53,9 @@ sequenceDiagram
 dedicated mutex; the client reports its `last_seq` on reconnect and the hub
 picks the cheapest replay tier. A `visibilityChangeSeq` watermark forces a full
 re-sync whenever channel visibility changed while the client was away, so
-permission changes can never be replayed around. `auth_ok.replay_source`
+permission changes can never be replayed around; a message frame shed before it
+got a `seq` (topic limiter or full dispatch queue) moves the same watermark, so
+a client resuming at or behind the shed recovers it from the database. `auth_ok.replay_source`
 (`none|buffer|db`) reports which tier served the reconnect and feeds the
 `ws_reconnect_tier_total` metric. `active_channel_id` is what lets a resuming
 client re-declare its channel without a separate focus frame, and an absent
@@ -109,13 +111,20 @@ into a typed `Command`, dispatches to a single V2 handler, and the handler's
 `Result` is applied by one applier. There is no second (V1) generation, no
 lenient parser, and no second registry. Handlers stay effect-light — the two
 hub-coupled voice routines (`handleVoiceJoin`/`handleVoiceLeave`, also called
-un-throttled on disconnect and channel switch) are triggered from the applier via
-`Result.JoinVoice` / `Result.LeaveVoice` rather than re-expressed as pure events.
+un-throttled on channel switch and on disconnect — a completed call is first
+held for 15 s so a resuming socket inherits it, `voice_grace.go`) are triggered
+from the applier via `Result.JoinVoice` / `Result.LeaveVoice` rather than
+re-expressed as pure events.
 
-The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold),
+The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold; each
+connection's protocol Ping every 25s refreshes activity and closes a peer that
+misses a Pong),
 revoked-session sweep (30s, plus
 per-connection revalidation every 10 messages), stale-voice-state sweep (60s),
-panic containment on the run loop (3 panics/60s → stop), LiveKit client and
+LiveKit membership reconciler (60s, `voice_reconcile.go`; see
+[livekit-setup.md](../livekit-setup.md)),
+panic containment on the run loop (3 panics/60s, or one Windows memory fault
+(SRE-08) → stop and exit), LiveKit client and
 optional managed subprocess, and the voice E2EE key-holder map
 ([voice-e2ee.md](voice-e2ee.md)). Collaborators are supplied up front through
 the validated `ws.HubOptions` (`Server/ws/hub_options.go`) — `NewHub` runs

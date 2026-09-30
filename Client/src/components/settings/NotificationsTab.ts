@@ -4,11 +4,137 @@
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows } from "./helpers";
-import { listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
+import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
+import { getChannelMutesHost, listMutedChannels, unmuteChannel } from "@lib/channel-mutes";
+import {
+  NOTIFICATION_LEVELS,
+  getGlobalNotificationLevel,
+  getServerNotificationLevel,
+  setGlobalNotificationLevel,
+  setServerNotificationLevel,
+  clearServerNotificationLevel,
+  type NotificationLevel,
+} from "@lib/notificationLevel";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
+
+const LEVEL_LABELS: Readonly<Record<NotificationLevel, () => string>> = {
+  all: () => t("notifications.level.all"),
+  mentions: () => t("notifications.level.mentions"),
+  nothing: () => t("notifications.level.nothing"),
+};
+
+/**
+ * The notification level row: All / Mentions only / Nothing.
+ *
+ * A radiogroup in the row shape the tab already uses, rather than a `<select>`
+ * — three options are all visible at once and each is one keystroke away.
+ */
+function buildLevelRow(signal: AbortSignal): HTMLDivElement {
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("notifications.level.label")),
+    createElement("div", { class: "setting-desc" }, t("notifications.level.desc")),
+  );
+
+  const group = createElement("div", {
+    class: "level-options",
+    role: "radiogroup",
+    "aria-label": t("notifications.level.label"),
+    "data-testid": "notification-level",
+  });
+
+  const buttons = new Map<NotificationLevel, HTMLButtonElement>();
+  const paint = (): void => {
+    const current = getGlobalNotificationLevel();
+    for (const [level, button] of buttons) {
+      const on = level === current;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", String(on));
+    }
+  };
+  const choose = (level: NotificationLevel): void => {
+    setGlobalNotificationLevel(level);
+    paint();
+  };
+
+  for (const level of NOTIFICATION_LEVELS) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `notification-level-${level}`,
+      },
+      LEVEL_LABELS[level](),
+    );
+    button.addEventListener("click", () => choose(level), { signal });
+    // Enter/Space are handled by the roving navigation below (so keyboard and
+    // mouse share the click path), matching the theme tiles in Appearance.
+    buttons.set(level, button);
+    group.appendChild(button);
+  }
+  paint();
+  setRovingTabindex(group, "[role='radio']");
+  enableRovingNavigation(group, "[role='radio']", signal);
+
+  appendChildren(row, info, group);
+  return row;
+}
+
+/**
+ * The connected server's override of the global level, shown only while
+ * connected. "Follow global setting" clears the override; the three levels set
+ * an explicit value, so one noisy community can be quieted without muting every
+ * other server. Stored against the host (see @lib/notificationLevel), so the
+ * choice returns when you switch back.
+ */
+function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
+  if (getChannelMutesHost() === null) return null;
+  const row = createElement("div", {
+    class: "setting-row",
+    "data-testid": "server-notification-level-row",
+  });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("div", { class: "setting-label" }, t("notifications.serverLevel.label")),
+    createElement("div", { class: "setting-desc" }, t("notifications.serverLevel.desc")),
+  );
+
+  const select = createElement("select", {
+    class: "form-input",
+    "aria-label": t("notifications.serverLevel.label"),
+    "data-testid": "server-notification-level",
+  });
+  const options: ReadonlyArray<{ value: string; label: string }> = [
+    { value: "", label: t("notifications.serverLevel.follow") },
+    ...NOTIFICATION_LEVELS.map((level) => ({ value: level, label: LEVEL_LABELS[level]() })),
+  ];
+  for (const { value, label } of options) {
+    select.appendChild(createElement("option", { value }, label));
+  }
+  select.value = getServerNotificationLevel() ?? "";
+  select.addEventListener(
+    "change",
+    () => {
+      if (select.value === "") clearServerNotificationLevel();
+      else setServerNotificationLevel(select.value as NotificationLevel);
+    },
+    { signal },
+  );
+
+  appendChildren(row, info, select);
+  return row;
+}
 
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -18,7 +144,17 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   // a browser API. A denied permission makes "Desktop Notifications" a switch
   // that cannot do anything, so the panel says so and offers the one action
   // that can change it.
-  section.appendChild(buildPermissionRow(signal));
+  const permissionRow = buildPermissionRow(signal, (blocked) => {
+    // A denied permission makes this switch unable to deliver anything: dim
+    // it and say why, but leave it operable (the choice still applies later).
+    desktopRow.classList.toggle("blocked", blocked);
+    blockedReason.hidden = !blocked;
+  });
+  section.appendChild(permissionRow);
+
+  section.appendChild(buildLevelRow(signal));
+  const serverLevelRow = buildServerLevelRow(signal);
+  if (serverLevelRow !== null) section.appendChild(serverLevelRow);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
@@ -47,7 +183,14 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  appendToggleRows(section, toggles, signal);
+  const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];
+  const blockedReason = createElement(
+    "div",
+    { class: "setting-desc setting-blocked-reason" },
+    t("notifications.blockedReason"),
+  );
+  blockedReason.hidden = true;
+  desktopRow.querySelector(".setting-desc")!.after(blockedReason);
 
   section.appendChild(buildMutedChannelsSection(signal));
   return section;
@@ -66,7 +209,10 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
  * "granted") gets wording that says so instead of a granted claim, and no
  * Allow action, since asking it changes nothing.
  */
-function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
+function buildPermissionRow(
+  signal: AbortSignal,
+  onBlocked: (blocked: boolean) => void,
+): HTMLDivElement {
   const row = createElement("div", {
     class: "setting-row",
     "data-testid": "notification-permission-row",
@@ -78,7 +224,16 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
     t("notifications.permission.label"),
   );
   const desc = createElement("div", { class: "setting-desc" });
-  const actionWrap = createElement("div", {});
+  // The state as an icon and one word; the line below only says how to fix it.
+  const status = createElement("span", {
+    class: "status-pill",
+    "data-testid": "notification-permission-status",
+  });
+  const statusIconEl = statusIcon("pending");
+  const statusWord = createElement("span", {});
+  status.append(statusIconEl, statusWord);
+  status.hidden = true;
+  const actionWrap = createElement("div", { class: "setting-actions" });
   appendChildren(info, label, desc);
 
   const allow = createElement(
@@ -87,21 +242,35 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
     t("notifications.permission.allow"),
   );
   allow.hidden = true;
-  actionWrap.appendChild(allow);
+  appendChildren(actionWrap, status, allow);
   appendChildren(row, info, actionWrap);
 
-  function setState(text: string): void {
+  function setState(kind: StatusKind, word: string, text: string): void {
+    status.hidden = false;
+    setStatusIcon(statusIconEl, kind);
+    setText(statusWord, word);
     setText(desc, text);
+    desc.hidden = text === "";
+    onBlocked(kind === "crit");
   }
 
   function showGranted(): void {
-    setState(t("notifications.permission.granted"));
+    setState("ok", t("notifications.permission.allowed"), "");
     allow.hidden = true;
   }
 
   function showDenied(): void {
-    setState(t("notifications.permission.denied"));
+    setState("crit", t("notifications.permission.blocked"), t("notifications.permission.denied"));
     allow.hidden = false;
+  }
+
+  function showUnavailable(): void {
+    setState(
+      "pending",
+      t("notifications.permission.unavailableState"),
+      t("notifications.permission.unavailable"),
+    );
+    allow.hidden = true;
   }
 
   allow.addEventListener(
@@ -117,8 +286,7 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
         .catch(() => {
           // No native notifier to ask. Say the limitation instead of leaving a
           // button that can never succeed.
-          setState(t("notifications.permission.unavailable"));
-          allow.hidden = true;
+          showUnavailable();
         })
         .finally(() => {
           allow.disabled = false;
@@ -130,7 +298,11 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
   void desktop.notifier.permissionGranted().then(
     (granted) => {
       if (!desktop.notifier.readsOsPermission) {
-        setState(t("notifications.permission.unknown"));
+        setState(
+          "pending",
+          t("notifications.permission.unknownState"),
+          t("notifications.permission.unknown"),
+        );
         allow.hidden = true;
       } else if (granted) showGranted();
       else showDenied();
@@ -138,8 +310,7 @@ function buildPermissionRow(signal: AbortSignal): HTMLDivElement {
     () => {
       // The notifier itself is absent (non-Tauri host): a real limitation,
       // not a denial, and no Allow action can fix it.
-      setState(t("notifications.permission.unavailable"));
-      allow.hidden = true;
+      showUnavailable();
     },
   );
 

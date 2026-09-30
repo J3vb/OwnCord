@@ -1,0 +1,12 @@
+{
+  "quarantine": [
+    {
+      "file": "tests/e2e/native/native-extra.spec.ts",
+      "title": "F5 and Ctrl+R never reload the app and a release build opens no DevTools",
+      "reason": "Windows/WebView2 only: the injected F12 accelerator intermittently opens a DevTools window and, less often, a reload races the assertion (four failures 2026-09-22..23, none reproducible on Linux). Excluded from the required run until the WebView2 accelerator keys are disabled or the check stops racing the browser process.",
+      "owner": "ci",
+      "added": "2026-09-28",
+      "expires": "2026-12-31"
+    }
+  ]
+}

@@ -6,16 +6,37 @@
 // =============================================================================
 
 const FRAME_SIZE = 480;
-const WASM_MEMORY_INITIAL_PAGES = 256;
 const OUTPUT_RING_CAPACITY = 50;
 const RN_NOISE_INT16_SCALE = 32768;
+
+// The shipped @jitsi/rnnoise-wasm build minifies every export to a one-letter
+// name; this is its `Module["asm"]` table from dist/rnnoise.js, e.g.
+// `_rnnoise_create = Module["asm"]["f"]`. The import object in _initWasm is
+// likewise tied to this build, so a different rnnoise.wasm needs both updated.
+const EXPORT_NAMES = {
+  memory: "c",
+  __wasm_call_ctors: "d",
+  rnnoise_create: "f",
+  malloc: "g",
+  rnnoise_destroy: "h",
+  free: "i",
+  rnnoise_process_frame: "j",
+};
 
 class RNNoiseProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
 
-    /** @type {WebAssembly.Instance | null} */
-    this._instance = null;
+    /** @type {(() => number) | null} */
+    this._create = null;
+    /** @type {((state: number) => void) | null} */
+    this._destroy = null;
+    /** @type {((state: number, out: number, inp: number) => number) | null} */
+    this._process = null;
+    /** @type {((bytes: number) => number) | null} */
+    this._malloc = null;
+    /** @type {((ptr: number) => void) | null} */
+    this._free = null;
     /** @type {number} */
     this._state = 0;
     /** @type {number} */
@@ -68,60 +89,68 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
   async _initWasm(wasmBytes) {
     let allocated = false;
     try {
-      // Basic validation: check for expected exports
       const module = await WebAssembly.compile(wasmBytes);
-      const expectedExports = [
-        "rnnoise_create",
-        "rnnoise_destroy",
-        "rnnoise_process_frame",
-        "malloc",
-        "free",
-      ];
-      const availableExports = WebAssembly.Module.exports(module).map((exp) => exp.name);
-
-      const hasRequiredExports = expectedExports.every((exp) => availableExports.includes(exp));
-      if (!hasRequiredExports) {
-        throw new Error("WASM module missing required RNNoise exports");
+      const present = new Set(WebAssembly.Module.exports(module).map((entry) => entry.name));
+      const missing = Object.entries(EXPORT_NAMES)
+        .filter(([, exportName]) => !present.has(exportName))
+        .map(([name, exportName]) => `${name} (${exportName})`);
+      if (missing.length > 0) {
+        throw new Error(`WASM module missing required RNNoise exports: ${missing.join(", ")}`);
       }
 
-      const memory = new WebAssembly.Memory({ initial: WASM_MEMORY_INITIAL_PAGES });
+      // The module exports its own memory and imports only the two Emscripten
+      // runtime helpers (resize-heap and memcpy) — it is not a WASI module, so
+      // the old wasi_snapshot_preview1 stubs never matched. Both helpers run
+      // only after instantiation, so they can read the memory captured below.
+      let memory = null;
       const importObject = {
-        env: {
-          memory,
-          emscripten_notify_memory_growth: () => {
-            this._heapF32 = new Float32Array(memory.buffer);
+        a: {
+          a: (requestedSize) => {
+            const extraPages = Math.ceil((requestedSize - memory.buffer.byteLength) / 65536);
+            if (extraPages <= 0) return true;
+            try {
+              memory.grow(extraPages);
+              this._heapF32 = new Float32Array(memory.buffer);
+              return true;
+            } catch {
+              return false;
+            }
           },
-        },
-        wasi_snapshot_preview1: {
-          proc_exit: () => {},
-          fd_close: () => 0,
-          fd_write: () => 0,
-          fd_seek: () => 0,
+          b: (dest, src, num) => {
+            new Uint8Array(memory.buffer).copyWithin(dest, src, src + num);
+          },
         },
       };
 
-      // Try instantiating with the raw WASM bytes
-      const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
-      this._instance = instance;
-      this._heapF32 = new Float32Array(memory.buffer);
-
-      // Call RNNoise C API
+      const instance = await WebAssembly.instantiate(module, importObject);
       const exports = instance.exports;
-      this._state = exports.rnnoise_create();
-      this._inputPtr = exports.malloc(FRAME_SIZE * 4);
-      this._outputPtr = exports.malloc(FRAME_SIZE * 4);
+      memory = exports[EXPORT_NAMES.memory];
+      this._heapF32 = new Float32Array(memory.buffer);
+      this._create = exports[EXPORT_NAMES.rnnoise_create];
+      this._destroy = exports[EXPORT_NAMES.rnnoise_destroy];
+      this._process = exports[EXPORT_NAMES.rnnoise_process_frame];
+      this._malloc = exports[EXPORT_NAMES.malloc];
+      this._free = exports[EXPORT_NAMES.free];
+
+      // Emscripten runs __wasm_call_ctors before any exported C function; the
+      // RNNoise globals malloc reads during rnnoise_create are only initialized
+      // here. The Emscripten wrapper does this on instantiation.
+      exports[EXPORT_NAMES.__wasm_call_ctors]();
+
+      this._state = this._create();
+      this._inputPtr = this._malloc(FRAME_SIZE * 4);
+      this._outputPtr = this._malloc(FRAME_SIZE * 4);
       allocated = true;
 
       this._ready = true;
       this.port.postMessage({ type: "ready" });
     } catch (err) {
       // Cleanup allocated memory on failure
-      if (allocated && this._instance) {
+      if (allocated) {
         try {
-          const exports = this._instance.exports;
-          if (this._inputPtr) exports.free(this._inputPtr);
-          if (this._outputPtr) exports.free(this._outputPtr);
-          if (this._state) exports.rnnoise_destroy(this._state);
+          if (this._inputPtr && this._free) this._free(this._inputPtr);
+          if (this._outputPtr && this._free) this._free(this._outputPtr);
+          if (this._state && this._destroy) this._destroy(this._state);
         } catch (cleanupErr) {
           // Log cleanup errors but don't override original error
           console.warn("Failed to cleanup WASM memory:", cleanupErr);
@@ -141,8 +170,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
    * @private
    */
   _processFrame() {
-    if (!this._instance || !this._heapF32) return;
-    const exports = this._instance.exports;
+    if (!this._process || !this._heapF32) return;
 
     const inOff = this._inputPtr / 4;
     const outOff = this._outputPtr / 4;
@@ -157,7 +185,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
       this._heapF32[inOff + i] = this._inputRing[i] * RN_NOISE_INT16_SCALE;
     }
 
-    exports.rnnoise_process_frame(this._state, this._outputPtr, this._inputPtr);
+    this._process(this._state, this._outputPtr, this._inputPtr);
 
     // Write to contiguous buffer
     const writeStart = this._outWritePos * FRAME_SIZE;
@@ -180,12 +208,11 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
    * @private
    */
   _cleanup() {
-    if (this._instance && this._state) {
+    if (this._state && this._destroy && this._free) {
       try {
-        const exports = this._instance.exports;
-        exports.rnnoise_destroy(this._state);
-        exports.free(this._inputPtr);
-        exports.free(this._outputPtr);
+        this._destroy(this._state);
+        this._free(this._inputPtr);
+        this._free(this._outputPtr);
       } catch (err) {
         console.warn("RNNoise cleanup failed:", err);
         // Continue cleanup even if individual steps fail

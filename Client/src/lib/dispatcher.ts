@@ -21,7 +21,9 @@ import {
   handleAuthError,
   handleAuthOk,
   handleConnectionError,
+  handleRestartDrop,
   handleServerRestart,
+  rejoinVoiceAfterRestart,
 } from "../features/connection/wsHandlers";
 import {
   applyReadyActiveChannel,
@@ -192,6 +194,9 @@ export function wireDispatcher(
       applyReadyDmRequests(api);
       applyReadyEmoji(api);
       applyReadySafety(api, payload);
+      // RT-12: if a planned restart took us out of a voice channel, put us
+      // back once ready confirms the post-restart world.
+      rejoinVoiceAfterRestart(clock, ws, payload);
 
       log.info("Ready payload applied", {
         channels: payload.channels.length,
@@ -269,11 +274,11 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.VOICE_STATE, handleVoiceState));
 
-  unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ws, payload)));
+  unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ws, payload, clock)));
 
-  unsubs.push(ws.on(S.VOICE_DISCONNECTED, handleVoiceDisconnected));
+  unsubs.push(ws.on(S.VOICE_DISCONNECTED, (payload) => handleVoiceDisconnected(payload, clock)));
 
-  unsubs.push(ws.on(S.VOICE_LEAVE, handleVoiceLeave));
+  unsubs.push(ws.on(S.VOICE_LEAVE, (payload) => handleVoiceLeave(payload, clock)));
 
   unsubs.push(ws.on(S.VOICE_CONFIG, handleVoiceConfig));
 
@@ -287,7 +292,8 @@ export function wireDispatcher(
 
   // ── Server Events ─────────────────────────────────────
 
-  unsubs.push(ws.on(S.SERVER_RESTART, handleServerRestart));
+  unsubs.push(ws.on(S.SERVER_RESTART, (payload) => handleServerRestart(clock, payload)));
+  unsubs.push(ws.onStateChange((state) => handleRestartDrop(clock, state)));
 
   // Local transport failures (proxy not open, outbound channel full/closed):
   // fail the matching optimistic row exactly like a server error reply would.

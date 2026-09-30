@@ -52,13 +52,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 -- An empty action or query matches every row. action is an exact match;
 -- query is a case-insensitive (ASCII) substring of the actor name, action,
 -- target type or detail. instr, not LIKE, so the caller's text carries no
--- wildcards to escape.
+-- wildcards to escape. A non-zero hide_signins drops the sign-in and
+-- connection rows (user_login, ws_connect) that dominate a quiet server's log.
 SELECT a.id, a.actor_id, COALESCE(u.username, '') AS actor_name, a.action,
        a.target_type, a.target_id, a.detail, COALESCE(a.subject_token, '') AS subject_token,
        COALESCE(a.actor_token, '') AS actor_token, a.created_at
 FROM audit_log a
 LEFT JOIN users u ON u.id = a.actor_id
 WHERE (CAST(sqlc.arg(action) AS TEXT) = '' OR a.action = sqlc.arg(action))
+  AND (CAST(sqlc.arg(hide_signins) AS INTEGER) = 0 OR a.action NOT IN ('user_login', 'ws_connect'))
   AND (CAST(sqlc.arg(query) AS TEXT) = ''
        OR instr(lower(COALESCE(u.username, '')), lower(sqlc.arg(query))) > 0
        OR instr(lower(a.action), lower(sqlc.arg(query))) > 0

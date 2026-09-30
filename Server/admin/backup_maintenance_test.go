@@ -182,6 +182,47 @@ func TestMaintainBackups_RetentionKeepsPreRestoreCopies(t *testing.T) {
 	}
 }
 
+// TestMaintainBackups_RetentionKeepsPreMigrateCopies: the boot-time
+// pre_migrate_* safety copy is the rollback target for the schema move
+// that was about to happen. Like the pre_restore_ copies it is not retention
+// history and must survive pruning even when older than the window.
+func TestMaintainBackups_RetentionKeepsPreMigrateCopies(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	ctx := context.Background()
+
+	mustSetSetting(t, database, "backup_schedule", "off")
+	mustSetSetting(t, database, "backup_retention", "7")
+
+	ancientManual := filepath.Join(dir, "chatserver_a.db")
+	ancientSafety := filepath.Join(dir, "pre_migrate_021_voice_server_moderation.db")
+	newest := filepath.Join(dir, "chatserver_b.db")
+	for _, p := range []string{ancientManual, ancientSafety, newest} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, ancientManual, 400*24*time.Hour)
+	backdate(t, ancientSafety, 400*24*time.Hour)
+	backdate(t, newest, time.Hour)
+
+	if err := admin.MaintainBackups(ctx, database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	got := listBackupFiles(t, dir)
+	want := map[string]bool{"pre_migrate_021_voice_server_moderation.db": true, "chatserver_b.db": true}
+	if len(got) != len(want) {
+		t.Fatalf("files = %v, want exactly %v (expired manual pruned, pre-migration safety copy kept)", got, want)
+	}
+	for _, name := range got {
+		if !want[name] {
+			t.Errorf("unexpected surviving file %q", name)
+		}
+	}
+}
+
 // TestMaintainBackups_OutOfRangeRetentionPrunesNothing is OC-0393's second
 // instance: pruneExpiredBackups builds its cutoff with the identical
 // now.Add(-days*24h) arithmetic as the message-retention sweep, and
@@ -226,5 +267,59 @@ func mustSetSetting(t *testing.T, database interface {
 	t.Helper()
 	if err := database.SetSetting(context.Background(), key, value); err != nil {
 		t.Fatalf("SetSetting(%s): %v", key, err)
+	}
+}
+
+// TestMaintainBackups_RemovesStaleBackupTemps: a backup killed mid-VACUUM
+// leaves a ".tmp" and SQLite's ".tmp-journal" sidecar, which no *.db scan
+// ever reclaims. The tick removes those untouched for longer than the
+// shortest schedule interval and leaves a fresh one — a backup that may still
+// be writing it — alone, whatever the schedule.
+func TestMaintainBackups_RemovesStaleBackupTemps(t *testing.T) {
+	database := openAdminTestDB(t)
+	dir := t.TempDir()
+	admin.SetBackupBaseDir(dir)
+	t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+	mustSetSetting(t, database, "backup_schedule", "off")
+
+	stale := filepath.Join(dir, "scheduled_20260101_000000.db.123.tmp")
+	staleJournal := stale + "-journal"
+	fresh := filepath.Join(dir, "chatserver_20260101_000000.db.456.tmp")
+	for _, p := range []string{stale, staleJournal, fresh} {
+		if err := os.WriteFile(p, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staleArchive := filepath.Join(dir, "owncord-archive-123")
+	freshArchive := filepath.Join(dir, "owncord-archive-456")
+	for _, d := range []string{staleArchive, freshArchive} {
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "snapshot.db"), []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backdate(t, stale, 25*time.Hour)
+	backdate(t, staleJournal, 25*time.Hour)
+	backdate(t, staleArchive, 25*time.Hour)
+
+	if err := admin.MaintainBackups(context.Background(), database, service.NewSettingsService(database)); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("a stale backup temp survived the tick (stat err=%v)", err)
+	}
+	if _, err := os.Stat(staleJournal); !os.IsNotExist(err) {
+		t.Fatalf("a stale backup temp's journal survived the tick (stat err=%v)", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatalf("the tick removed a backup temp that may still be written: %v", err)
+	}
+	if _, err := os.Stat(staleArchive); !os.IsNotExist(err) {
+		t.Fatalf("a stale archive work dir survived the tick (stat err=%v)", err)
+	}
+	if _, err := os.Stat(freshArchive); err != nil {
+		t.Fatalf("the tick removed an archive work dir that may still be building: %v", err)
 	}
 }

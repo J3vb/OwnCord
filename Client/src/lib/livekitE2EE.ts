@@ -25,6 +25,7 @@ import {
   setLocalSessionFingerprint,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
+import { markJoinMilestone } from "@lib/voiceJoinTrace";
 import { E2EEIdentity, rawFromBase64 } from "../features/voice/e2eeIdentity";
 import { E2EEEpoch } from "../features/voice/e2eeEpoch";
 import { E2EEPeerState, type PendingAnnounce } from "../features/voice/e2eePeerState";
@@ -294,6 +295,7 @@ export class E2EEManager {
       await this._worker.applyCurrentRoomKey(() => this._sessionGeneration === myGeneration);
       if (this._sessionGeneration !== myGeneration) return false;
       log.info("E2EE: key holder — generated room key", { channelId });
+      markJoinMilestone("e2ee room key generated");
       this._epoch.startKeyRotationTimer();
     }
 
@@ -324,6 +326,7 @@ export class E2EEManager {
       // participant's handleOfferInner discarded our offer as "unknown
       // peer" and never recovered short of the 5-minute rotation (OC-0098).
       this.deps.getWs()?.send({ type: "voice_e2ee_announce", payload: announcePayload });
+      markJoinMilestone("e2ee announce sent");
     }
 
     // Drain any announces that arrived before our keypair was ready. These
@@ -361,6 +364,7 @@ export class E2EEManager {
       // offer immediately. The resolver is set above, so an immediate offer
       // won't be missed.
       this.deps.getWs()?.send({ type: "voice_e2ee_announce", payload: announcePayload });
+      markJoinMilestone("e2ee announce sent");
       // Wait up to 10s for the key holder to send an offer. If the first
       // attempt times out, re-announce our public key (the offer may have been
       // lost if the key holder disconnected mid-send) and wait 5s more.
@@ -536,9 +540,10 @@ export class E2EEManager {
    * `verifiedKey` — the bytes whose fingerprint the caller displayed and the
    * user confirmed out-of-band — overwriting the stored pin for {host,userId}
    * and clearing the mismatch block (the identity-key analogue of accepting a
-   * changed TLS cert). A legitimate key rotation (reinstall / new device /
-   * wiped keyring) is thus recoverable instead of a permanent lockout; the next
-   * announce re-verifies against the new pin.
+   * changed TLS cert). A changed key that verifies is re-pinned automatically
+   * in verifyPeerAnnounce; this path recovers a peer blocked for a key the
+   * server stopped delivering. The next announce re-verifies against the new
+   * pin.
    *
    * The verified key MUST be passed in, never re-read from membersStore here:
    * the store is server-writable (a `user_update` mutates it), so re-reading it
@@ -1021,6 +1026,7 @@ export class E2EEManager {
     this._e2eeEpoch = 0;
     this._pendingAnnounces.length = 0;
     this._blockedAnnounces.clear();
+    this._peers.keyChangedPeers.clear();
     this._epoch.clearKeyRotationTimer();
     this.clearReconnectConfirmTimer();
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a

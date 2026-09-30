@@ -1,16 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockGetActiveThemeName, mockApplyThemeByName } = vi.hoisted(() => ({
+const { mockGetActiveThemeName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-  mockApplyThemeByName: vi.fn(),
 }));
 
-// Only the theme *selection* is stubbed. restoreAccent() stays real, because the
-// accent assertions below are about what it actually writes to the document.
+// Only the theme *selection* is stubbed. applyTheme/applyThemeByName and
+// restoreAccent() stay real, because the assertions below are about what they
+// actually write to the document.
 vi.mock("@lib/themes", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
-  applyThemeByName: mockApplyThemeByName,
 }));
 
 import { applyStoredAppearance } from "@lib/appearance";
@@ -54,12 +53,14 @@ describe("applyStoredAppearance", () => {
 
     applyStoredAppearance();
 
-    expect(mockApplyThemeByName).toHaveBeenCalledWith("neon-glow");
+    // applyTheme's neon-glow palette lands inline on documentElement, and its
+    // body class is delegated to applyThemeByName.
+    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#17181b");
+    expect(document.body.classList.contains("theme-neon-glow")).toBe(true);
     // largeFont is "true" above, so 16px is raised to the 18px Large Font floor.
     // This assertion used to read "16px" — it was pinning OC-0319, the bug where
     // the toggle changed nothing, not a behaviour worth keeping.
     expect(document.documentElement.style.getPropertyValue("--font-size")).toBe("18px");
-    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#17181b");
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#123456");
     expect(document.body.style.getPropertyValue("--accent")).toBe("#123456");
     expect(document.documentElement.classList.contains("compact-mode")).toBe(true);

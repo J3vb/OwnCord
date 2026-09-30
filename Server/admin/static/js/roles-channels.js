@@ -15,27 +15,42 @@ async function renderChannels(){
   /* Categories are free text — a channel of any type may live under any one of
      them. Collect the ones already in use so the create/edit forms can offer
      them as a datalist instead of hardcoding names nobody has to use. */
-  const catSet={};
-  let html=rcHead('Channels',channels.length+' channel'+(channels.length===1?'':'s')+'. The lock opens who can see and use a channel.',
+  const catSet=new Set();
+  let html=rcHead('Channels',channels.length+' channel'+(channels.length===1?'':'s')+', grouped by category as members see them.',
     '<button class="btn btn-accent" data-action="openChannelModal" data-args="'+actArgs(null)+'">'+I.plus+' Create Channel</button>');
-  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Type</th><th>Category</th><th>Archived</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!channels.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
+  /* Grouped under their category like the client sidebar: an uncategorised
+     voice channel sits under Voice, and groups come in the order their first
+     channel does. The type is the row's icon (named for screen readers), and
+     Archived shows only on a channel that is. */
+  const groups=new Map();
   channels.forEach(ch=>{
-    const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
-    const cat=ch.category||ch.Category||'';const archived=ch.archived||ch.Archived||false;
-    html+='<tr><td><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--text-muted)">'+chIcon(type)+'</span><strong>'+esc(name)+'</strong></div></td>';
-    html+='<td><span class="badge '+(type==='voice'?'badge-yellow':type==='announcement'?'badge-accent':'badge-muted')+'">'+esc(type)+'</span></td>';
-    html+='<td style="font-size:12px;color:var(--text-muted)">'+esc(cat)+'</td>';
-    html+='<td>'+(archived?'<span class="badge badge-muted">Yes</span>':'<span class="badge badge-green">No</span>')+'</td>';
-    const lockBtn=type==='dm'?'':'<button class="act-btn" title="Access" aria-label="Access for #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
-    state.channelCache[id]=ch;
-    if(cat)catSet[cat]=true;
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
+    const cat=ch.category||ch.Category||((ch.type||ch.Type)==='voice'?'Voice':'');
+    if(!groups.has(cat))groups.set(cat,[]);
+    groups.get(cat).push(ch);
   });
-  html+='</tbody></table></div></div>';
-  state.channelCategories=Object.keys(catSet).sort();
+  html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl ch-tbl"><thead><tr><th>Channel</th><th style="text-align:right">Actions</th></tr></thead>';
+  if(!channels.length)html+='<tbody><tr><td colspan="2" class="tbl-empty">No channels yet. Create one to get started.</td></tr></tbody>';
+  groups.forEach((chs,cat)=>{
+    html+='<tbody>';
+    if(groups.size>1||cat)html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')+'</th></tr>';
+    chs.forEach(ch=>{
+      const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
+      const archived=ch.archived||ch.Archived||false;
+      html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
+        +(archived?'<span class="badge badge-muted">Archived</span>':'')+'</div></td>';
+      const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
+      state.channelCache[id]=ch;
+      if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
+      html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn" title="Edit" aria-label="Edit #'+esc(name)+'" data-action="openChannelEditModal" data-args="'+actArgs(id)+'">'+I.edit+'</button>'+lockBtn+'<button class="act-btn danger" title="Delete" aria-label="Delete #'+esc(name)+'" data-action="openDeleteChannel" data-args="'+actArgs(id,name)+'">'+I.trash+'</button></div></td></tr>';
+    });
+    html+='</tbody>';
+  });
+  html+='</table></div></div>';
+  state.channelCategories=[...catSet].sort();
   return html;
 }
+/* A channel type in words, beside its icon. */
+const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',dm:'Direct message'};
 
 /* <datalist> of the categories currently in use. Purely a suggestion list —
    typing a brand-new name is the supported way to create a category. */
@@ -259,7 +274,7 @@ function renderChannelPermsModal(){
     +panel('overrides',
       '<p class="drawer-intro">Set single permissions for one role or member in this channel. Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
       +'<div class="form-group"><label class="form-label" for="permTarget">Role or member</label>'
-      +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="renderPermMatrix">'+opts+'</select></div>'
+      +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="onPermTargetChange">'+opts+'</select></div>'
       +'<div id="permMatrix"></div>'
       +'<div id="permPreview"></div>')
     +panel('explain',
@@ -312,15 +327,16 @@ function renderPermMatrix(){
   const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
   const val=sel?sel.value:'';
+  /* The radios read from the snapshot, so remember which target they belong
+     to; onPermTargetChange compares the live radios against that target's
+     snapshot to tell whether a switch would discard edits. */
+  if(sel)sel.dataset.painted=val;
   if(!val){box.innerHTML='<p class="drawer-intro">Pick a role or member above to edit its per-channel permissions.</p>';return}
-  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
-  let allow=0,deny=0,adminNote='';
-  if(kind==='r'){
-    const role=pc.roles.find(r=>r.role_id===tid);
-    if(role){allow=role.allow;deny=role.deny;if((role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.'}
-  }else{
-    const o=pc.users.find(u=>u.user_id===tid);
-    if(o){allow=o.allow;deny=o.deny}
+  const {allow,deny}=snapshotOverrideMasks(val);
+  let adminNote='';
+  if(val.charAt(0)==='r'){
+    const role=pc.roles.find(r=>r.role_id===parseInt(val.slice(2),10));
+    if(role&&(role.permissions&ADMIN_BIT)!==0)adminNote='This role holds Administrator — every override below is bypassed.';
   }
   let html='';
   if(adminNote)html+='<p style="color:var(--text-warning);font-size:12px;margin:0 0 8px">'+esc(adminNote)+'</p>';
@@ -356,6 +372,47 @@ function permTargetPath(){
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+}
+
+/* The masks a target carried in the snapshot — what renderPermMatrix painted
+   its radios from. */
+function snapshotOverrideMasks(val){
+  const pc=state.permChannel;
+  if(!pc||!val)return {allow:0,deny:0};
+  const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
+  if(kind==='r'){const r=pc.roles.find(r=>r.role_id===tid);return r?{allow:r.allow,deny:r.deny}:{allow:0,deny:0}}
+  const o=pc.users.find(u=>u.user_id===tid);return o?{allow:o.allow,deny:o.deny}:{allow:0,deny:0};
+}
+/* True when the matrix's live radios differ from the target they were painted
+   for — i.e. an override edit that switching the target would discard. */
+function permMatrixHasEdits(){
+  const sel=document.getElementById('permTarget');
+  const painted=sel&&sel.dataset.painted;
+  if(!painted)return false;
+  const now=collectOverrideMasks(),was=snapshotOverrideMasks(painted);
+  return now.allow!==was.allow||now.deny!==was.deny;
+}
+/* True when an Access-tab checkbox differs from the snapshot, so a discarded
+   matrix edit does not clear dirt that belongs to another tab. */
+function accessTabHasEdits(){
+  const pc=state.permChannel;if(!pc)return false;
+  return (pc.roles||[]).some(role=>{
+    if((role.permissions&ADMIN_BIT)!==0)return false;
+    const box=document.getElementById('permRole'+role.role_id);
+    if(!(box instanceof HTMLInputElement))return false;
+    return box.checked!==((role.deny&0x2)===0);
+  });
+}
+/* Switching the target repaints the matrix from the snapshot. Ask first when
+   the current target holds an edit; declining keeps the select on the target
+   the edits belong to. */
+function onPermTargetChange(){
+  const sel=this;
+  if(permMatrixHasEdits()&&!confirmDiscardModal()){sel.value=sel.dataset.painted||'';return}
+  renderPermMatrix();
+  /* The repaint discarded the previous target's edits; keep the flag honest
+     for a beforeunload or a later dismiss. */
+  state.modalDirty=accessTabHasEdits();
 }
 
 /* ═══ Access explanation and change preview (RI-06) ═══ */
@@ -440,6 +497,9 @@ async function previewPermChange(){
 async function clearPermOverride(){
   const path=permTargetPath();
   if(!path){showToast('Pick a role or member first','error');return}
+  /* Clearing closes the drawer, so any other unsaved edit in it would go with
+     it — ask first, the same way the dismissals do. */
+  if(!confirmDiscardModal())return;
   try{
     await api('DELETE',path);
     closeModal();showToast('Override cleared');renderContent();
@@ -685,6 +745,7 @@ function renderRolePlacement(){
 function placeRoleAboveDefault(slot){
   const input=document.getElementById('rolePos');if(!input)return;
   input.value=String(slot);
+  markModalDirty();
   renderRolePlacement();
   input.focus();
 }
@@ -853,10 +914,11 @@ async function renderEmoji(){
   html+='<button class="btn btn-accent" data-action="uploadEmoji">'+I.upload+' Upload</button>';
   html+='</div></div></div>';
 
+  /* Nothing installed: one line instead of an empty table. */
+  if(!list.length)return html+'<section class="section-card" aria-labelledby="emoji-installed-h"><div class="section-card-header"><h3 id="emoji-installed-h">Installed</h3></div><div class="empty-line">'+I.smile+'<span>No custom emoji yet. Upload one above.</span></div></section>';
   html+='<div class="section-card"><div class="section-card-header"><h3>Installed ('+list.length+')</h3><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Refresh</button></div><div class="section-card-body no-pad">';
   html+='<table class="tbl"><thead><tr><th style="width:60px">Preview</th><th>Shortcode</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!list.length)html+='<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:24px">No custom emoji yet</td></tr>';
-  else list.forEach(function(e){
+  list.forEach(function(e){
     html+='<tr><td><img alt="'+esc(e.shortcode)+'" data-emoji-url="'+esc(e.url)+'" style="width:32px;height:32px;object-fit:contain"></td>';
     html+='<td style="font-family:var(--font-mono)">:'+esc(e.shortcode)+':</td>';
     html+='<td><div class="act-group" style="justify-content:flex-end"><button class="act-btn danger" title="Delete" aria-label="Delete" data-action="confirmDeleteEmoji" data-args="'+actArgs(e.id,e.shortcode)+'">'+I.trash+'</button></div></td></tr>';
@@ -898,6 +960,6 @@ async function deleteEmoji(id){
 }
 
 Object.assign(ACTIONS,{clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
-  deleteEmoji,explainAccess,moveRole,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
-  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderPermMatrix,renderRolePlacement,
+  deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
+  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});

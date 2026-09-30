@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   selectDmConversation,
-  addDmToChannelsStore,
   handleCreateDm,
   buildDmConversations,
   type DmHelperDeps,
 } from "../../src/pages/main-page/SidebarDmHelpers";
 import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
-import { dmStore, addDmChannel } from "../../src/stores/dm.store";
+import { dmStore, addDmChannel, addDmToChannelsStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";

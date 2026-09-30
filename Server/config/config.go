@@ -202,14 +202,22 @@ type VoiceConfig struct {
 	// default stays false so existing configs keep their behaviour.
 	AutoDownloadLiveKit bool `yaml:"auto_download_livekit"`
 	// LiveKitVersion overrides the pinned livekit-server release version used
-	// by auto-download (e.g. "1.13.5"). Empty = the built-in pin.
+	// by auto-download (e.g. "1.13.7"). Empty = the built-in pin.
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
-	// in addition to the external node_ip mapping, so clients on the local
-	// network can connect while remote clients use the public IP.
-	AdvertiseInternalIP bool   `yaml:"advertise_internal_ip"`
-	Quality             string `yaml:"quality"` // low | medium | high
+	// in addition to the detected public address, so clients on the local
+	// network can connect while remote clients use the public IP. It keeps
+	// use_external_ip on in the generated livekit.yaml, so NodeIP is ignored.
+	AdvertiseInternalIP bool `yaml:"advertise_internal_ip"`
+	// UDPPort carries all WebRTC media on a single UDP port (LiveKit's
+	// udp_port) instead of the port_range_start/end range below. It exists so
+	// an owner forwards one UDP port rather than the 50000-60000 range.
+	// 0 (the default) keeps the range, so an existing install is unaffected.
+	// It must not collide with the TCP media port (7881) or LiveKit's own API
+	// port (7880).
+	UDPPort int    `yaml:"udp_port"`
+	Quality string `yaml:"quality"` // low | medium | high
 }
 
 // ServerConfig holds HTTP server settings.
@@ -268,6 +276,14 @@ type ServerConfig struct {
 	// Prometheus scraper can be allowlisted without widening /admin to its
 	// network. Empty (default) falls back to AdminAllowedCIDRs.
 	MetricsAllowedCIDRs []string `yaml:"metrics_allowed_cidrs"`
+	// PprofEnabled exposes Go's pprof HTTP endpoints on a SEPARATE listener
+	// for operator-directed profiling (SRE-M1). Off by default, and
+	// deliberately never mounted on the main router: a profiling endpoint
+	// exposes heap contents and can burn CPU, so it is its own socket bound
+	// to the fixed loopback address 127.0.0.1:6060 and nothing else; reach
+	// it remotely through an SSH port-forward. See
+	// docs/server-configuration.md.
+	PprofEnabled bool `yaml:"pprof_enabled"`
 	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
 	// endpoints. The webhook already authenticates cryptographically (LiveKit
 	// JWT signature over the body hash) — this perimeter is defence-in-depth,
@@ -504,6 +520,13 @@ server:
   #   - "10.0.0.0/8"
   #   - "172.16.0.0/12"
   #   - "192.168.0.0/16"
+  # pprof_enabled: false      # expose Go's pprof endpoints on a separate
+  #                           # listener bound to 127.0.0.1:6060 only, for
+  #                           # operator profiling. Off by default; never mounted
+  #                           # on the main router. In Docker that is the
+  #                           # container's own loopback: reach it with e.g.
+  #                           # docker run --rm --network container:<name>
+  #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.
@@ -569,11 +592,13 @@ voice:
   auto_download_livekit: true # download and run livekit-server automatically when
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
-  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.5")
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.7")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
-  # node_ip: ""                    # public IP for WebRTC media (required for remote users behind NAT)
+  # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
   # advertise_internal_ip: false   # also advertise LAN IPs so local-network clients can connect
+  # udp_port: 0                    # carry all WebRTC media on ONE UDP port (e.g. 7882) instead of
+  #                                # the 50000-60000 range — forward just that one port. 0 = range
   # quality: "medium"              # low | medium | high
 
 # github:
@@ -795,6 +820,9 @@ type boundedKey struct {
 	// meaning names what the fallback stands for, so the warning says what
 	// happened to the operator's intent ("0 means unlimited").
 	meaning string
+	// highToDef sends a value ABOVE max to def as well, for a key where the
+	// max is no nearer the operator's intent than any other value (a port).
+	highToDef bool
 }
 
 // boundedKeys is the one place a bounded configuration key states its range
@@ -807,27 +835,31 @@ func boundedKeys(cfg *Config) []boundedKey {
 	const maxMiB = math.MaxInt64 >> 20
 	def := defaults()
 	return []boundedKey{
-		{"upload.max_size_mb", &cfg.Upload.MaxSizeMB, 0, maxMiB, def.Upload.MaxSizeMB, "the default, 100 MB"},
-		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited"},
-		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it"},
-		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content"},
-		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows"},
-		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb"},
-		{"attention.writer_wait_ms_per_min", &cfg.Attention.WriterWaitMsPerMin, 1, 60_000, def.Attention.WriterWaitMsPerMin, "the default, 5000 ms per minute"},
-		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute"},
-		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute"},
-		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days"},
+		{"upload.max_size_mb", &cfg.Upload.MaxSizeMB, 0, maxMiB, def.Upload.MaxSizeMB, "the default, 100 MB", false},
+		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited", false},
+		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it", false},
+		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content", false},
+		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows", false},
+		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb", false},
+		{"attention.writer_wait_ms_per_min", &cfg.Attention.WriterWaitMsPerMin, 1, 60_000, def.Attention.WriterWaitMsPerMin, "the default, 5000 ms per minute", false},
+		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute", false},
+		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute", false},
+		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days", false},
+		{"voice.udp_port", &cfg.Voice.UDPPort, 0, 65535, def.Voice.UDPPort, "0, which uses the 50000-60000 range", true},
 	}
 }
 
 // applyBounds brings every bounded key into its range, warning by key name:
-// below the minimum falls back to the default, above the maximum clamps.
+// below the minimum falls back to the default, above the maximum clamps
+// (or falls back to the default too, for a highToDef key).
 func applyBounds(cfg *Config) {
 	for _, b := range boundedKeys(cfg) {
 		v := *b.ptr
 		fixed := v
 		switch {
 		case v < b.min:
+			fixed = b.def
+		case v > b.max && b.highToDef:
 			fixed = b.def
 		case v > b.max:
 			fixed = b.max

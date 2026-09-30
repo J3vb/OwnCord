@@ -258,11 +258,23 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   await expectDecodedMedia(bob, true);
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
 
-  // The application server intentionally removes voice membership when
-  // its authenticated socket disconnects. Require cleanup, then a fresh
-  // authorized join and key exchange after application reconnection.
+  // RT-8: a brief socket blip no longer ends the call. The server parks the
+  // membership for a grace window and the resume inherits it, so the widget
+  // stays up and media keeps flowing without a manual rejoin or key exchange.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
+  aliceTransport.online();
+  await expect(alice.locator(".reconnecting-banner")).not.toBeVisible();
+  await expect(alice.locator(".voice-widget")).toHaveClass(/visible/);
+  await expectDecodedMedia(bob, true);
+  expect((await mediaStats(alice)).senders).toBe(baseline.senders);
+
+  // A blip longer than the grace window does end the membership: the expiry
+  // removes the SFU participant, which ends the client's LiveKit room, then a
+  // fresh authorized join and key exchange works as before.
+  await aliceTransport.offline();
+  await expect(alice.locator(".reconnecting-banner")).toBeVisible();
+  await alice.waitForTimeout(16_000); // outlast the 15 s server grace window
   aliceTransport.online();
   await expect(alice.locator(".reconnecting-banner")).not.toBeVisible();
   await expect(alice.locator(".voice-widget")).not.toHaveClass(/visible/);

@@ -103,16 +103,18 @@ export const shellText = defineCatalog("shell", {
 
   "identity.verified": "Identity verified",
   "identity.verifiedWithNumber": "Identity verified · Safety number: {safetyNumber}",
-  "identity.mismatch": "Identity key changed — click to review and re-pin",
+  "identity.mismatch":
+    "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review",
+  "identity.keyChanged": "Security key changed · Safety number: {safetyNumber}",
   "identity.unknown":
     "Could not check this participant's identity — key storage is unavailable, so they are blocked for E2EE until it recovers",
   "identity.unverified": "Identity not verified — this participant published no key.",
   "identity.unverifiedWithFingerprint":
     "Identity not verified — this participant published no key. Session fingerprint (changes every call — not an identity): {fingerprint}",
   "identity.title": "Identity Warning",
-  "identity.heading": "Identity Key Changed",
+  "identity.heading": "Identity Not Verified",
   "identity.description":
-    "This participant's end-to-end encryption identity key no longer matches the one pinned on first contact. This usually means they reinstalled or switched device, but it could also indicate that the server swapped their key. Verify the new key out-of-band before trusting it.",
+    "This participant is blocked from end-to-end encryption: the server stopped delivering their identity key, or their announce was not signed by it. This can be a glitch, but it could also indicate that the server tampered with their key. Verify the key out-of-band before trusting it.",
   "identity.participant": "Participant",
   "identity.newKey": "New key",
   "identity.accept": "Trust New Key",
@@ -207,6 +209,8 @@ export const shellText = defineCatalog("shell", {
 
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",
+
+  "toast.dismiss": "Dismiss notification",
 
   "quickSwitch.label": "Switch server",
   "quickSwitch.title": "Switch Server",

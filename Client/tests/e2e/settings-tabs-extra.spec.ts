@@ -34,6 +34,7 @@ import {
   switchSettingsTab,
   emitWsMessage,
 } from "./helpers";
+import { Q1, setAppearance, textContrast } from "./support/b9-accessibility";
 
 // ---------------------------------------------------------------------------
 // Local harness additions
@@ -519,6 +520,38 @@ test.describe("Settings — Advanced Tab", () => {
     expect(preserved).not.toBeNull();
     expect(await page.evaluate(() => localStorage.getItem("owncord:settings:fontSize"))).toBeNull();
   });
+});
+
+test.describe("Settings — Advanced Tab button contrast", () => {
+  // The cache actions are secondary buttons and Clear & Restart is destructive
+  // (danger text at rest, danger fill once armed); each must read at 4.5:1 on
+  // its composited background in every theme, with and without High Contrast.
+  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
+    test(`${theme}: secondary and destructive buttons read at 4.5:1`, async ({ page }) => {
+      await mockSession(page);
+      await page.goto("/");
+      const failures: string[] = [];
+      for (const highContrast of [false, true]) {
+        await setAppearance(page, { theme, highContrast, accent: null });
+        await navigateToMainPageReady(page);
+        await openSettings(page);
+        await switchSettingsTab(page, "Advanced");
+        const button = (label: string) =>
+          page.locator(".setting-row", { hasText: label }).locator("button.ac-btn");
+        const check = async (name: string): Promise<void> => {
+          const { ratio } = await textContrast(button(name));
+          if (ratio < Q1.text) failures.push(`hc=${highContrast} ${name}: ${ratio.toFixed(2)}`);
+        };
+        await check("Clear Image Cache");
+        await check("Clear All Cache & Restart");
+        await button("Clear All Cache & Restart").click();
+        await expect(button("Clear All Cache & Restart")).toHaveClass(/ac-btn-danger/);
+        await page.mouse.move(0, 0);
+        await check("Clear All Cache & Restart");
+      }
+      expect(failures).toEqual([]);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

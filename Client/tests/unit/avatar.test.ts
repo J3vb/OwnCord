@@ -12,8 +12,9 @@ vi.mock("@components/message-list/attachments", () => ({
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
 }));
 
-const { avatarInitial, createAvatarElement, isRenderableAvatar, resolveDisplayName } =
-  await import("@lib/avatar");
+const { avatarInitial, resolveDisplayName } = await import("@lib/avatar");
+const { createAvatarElement, isRenderableAvatar } =
+  await import("../../src/components/message-list/avatar");
 
 describe("resolveDisplayName", () => {
   it("prefers the display name when there is one", () => {

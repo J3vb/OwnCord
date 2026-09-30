@@ -64,9 +64,7 @@ func (h *Hub) enqueue(bm broadcastMsg, kind string) {
 	select {
 	case h.broadcast <- bm:
 	default:
-		h.broadcastDrops.Add(1)
-		slog.Warn("hub: broadcast channel full, dropping "+kind,
-			"channel_id", bm.channelID, "msg_len", len(bm.msg))
+		h.recordQueueDrop(bm, kind)
 	}
 }
 
@@ -123,9 +121,9 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 }
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
-// reason describes why the server is restarting (e.g., "update").
-// delaySeconds tells clients how long until the server actually shuts down.
-func (h *Hub) BroadcastServerRestart(reason string, delaySeconds int) {
+// reason says why the server is restarting; delaySeconds tells clients how
+// long until the socket drops, and 0 cancels an earlier announcement.
+func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
 	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
 }
 
@@ -241,44 +239,15 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 	if role, err := h.readers.Members.GetRoleForUser(ctx, userID); err == nil && role != nil {
 		roleName = role.Name
 	}
-	// The ban disconnected them and reconnecting was refused while banned,
-	// so they cannot be online at unban time — report offline regardless of
-	// the stale status the row carries (serve_ready's "no live connection is
-	// offline, whatever the row says" rule).
-	user.Status = "offline"
+	// A lapsed temporary ban lets the user reconnect while users.banned is
+	// still 1, so they can be online at unban time. With no live connection,
+	// report offline regardless of the stale status the row carries
+	// (serve_ready's "no live connection is offline, whatever the row says"
+	// rule); with one, the row holds the status their connect stamped.
+	if h.GetClient(userID) == nil {
+		user.Status = db.StatusOffline
+	}
 	h.BroadcastToAll(buildMemberJoin(user, roleName))
-}
-
-// DisconnectUser forcibly disconnects the client identified by userID.
-// No-op if the user is not currently connected.
-func (h *Hub) DisconnectUser(userID int64) {
-	c := h.GetClient(userID)
-	if c == nil {
-		return
-	}
-	slog.Info("hub: disconnecting user", "user_id", userID)
-	c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-	h.kickClient(c)
-}
-
-// DisconnectRevokedUser drops the live connection of a user whose sessions
-// were just revoked (sign-out-everywhere, B4-7): the socket authenticated on
-// a session that no longer exists, and the revoked-session sweep would only
-// notice on its next tick. No frame precedes the close — the same treatment
-// the sweep gives a revoked session — so the client's reconnect meets the
-// 401 that tells it to sign in again. No-op if the user is not connected.
-//
-// This inspects h.clients at one instant, so a revocation landing while a
-// connection's handshake is still in flight finds nothing to kick here. That
-// window is closed on the other side instead, by postRegisterSessionRecheck
-// (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
-func (h *Hub) DisconnectRevokedUser(userID int64) {
-	c := h.GetClient(userID)
-	if c == nil {
-		return
-	}
-	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID)
-	h.kickClient(c)
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients
@@ -362,7 +331,9 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 
 	if h.dropsForPurgedUser(msg) || h.dropsForPurgedMessage(msg) {
 		return
@@ -385,6 +356,10 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		return
 	}
 
+	// Dispatch lag: enqueue→dispatch start, how long this frame waited for the
+	// single dispatch goroutine (SRV-04).
+	h.observeDispatchLag(bm.enqueuedAt)
+
 	// B5-7's content gate, resolved HERE — on the dispatch goroutine, at the
 	// head of the queue, before seqMu — rather than by whoever enqueued the
 	// frame. See resolveChannelContentGate and nsfwChannelID.
@@ -395,22 +370,18 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	// serializes every broadcast.
 	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
 		h.seqMu.Lock()
+		start := time.Now()
 		defer h.seqMu.Unlock()
+		defer h.observeSeqMuHold(start)
+		defer h.applyQueueContentDrops()
 
 		// Channel-scoped sends consult the topic limiter BEFORE a seq is
 		// allocated: a shed frame that consumed a seq would sit in the replay
 		// buffer as a number no client ever saw live, and since clients ack
-		// only max(seq), it could never be requested back. The limit is a
-		// sliding 1s window via the shared auth.RateLimiter (the deleted
-		// TopicRateLimiter was a token bucket with a full refill at each
-		// window boundary — sliding is stricter on boundary-straddling
-		// bursts, the same sustained rate).
-		if bm.recipients == nil && bm.channelID != 0 {
-			if !h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
-				slog.Warn("hub: topic rate limit exceeded, dropping message",
-					"channel_id", bm.channelID)
-				return 0, 0, false
-			}
+		// only max(seq), it could never be requested back. allowTopicFrame
+		// owns the shed handling (count + watermark, SRV-03).
+		if !h.allowTopicFrame(bm) {
+			return 0, 0, false
 		}
 
 		// A frame naming an erased user, produced by a request that read
@@ -481,16 +452,17 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 	}()
 
 	// Instrumentation runs after seqMu is released: a metrics provider must
-	// never extend the critical section that serializes every broadcast.
-	// seq == 0 means the topic limiter shed the frame before delivery.
+	// never extend the critical section serializing every broadcast. The
+	// in-process histogram records the same latency as the OTel-only one.
+	// seq == 0 means the topic limiter shed the frame.
 	if seq != 0 {
 		m := telemetry.NewAppMetrics()
 		m.WSMessagesTotal.Add(context.Background(), 1)
 		if !bm.enqueuedAt.IsZero() {
 			m.WSBroadcastLatency.Record(context.Background(), time.Since(bm.enqueuedAt).Seconds())
 		}
+		h.recordBroadcastLatency(bm.enqueuedAt)
 	}
-
 	if channelSend {
 		slog.Debug("hub: channel broadcast",
 			"channel_id", bm.channelID, "delivered", delivered, "seq", seq)

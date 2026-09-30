@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // watermarkVoiceBroadcaster wraps mockBroadcaster and additionally implements
@@ -21,14 +23,15 @@ type watermarkVoiceBroadcaster struct {
 type evictCall struct {
 	userID    int64
 	channelID int64
+	reason    string
 }
 
 func (b *watermarkVoiceBroadcaster) MarkVisibilityChanged() {
 	b.markCalls++
 }
 
-func (b *watermarkVoiceBroadcaster) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64) bool {
-	b.evictCalls = append(b.evictCalls, evictCall{userID, channelID})
+func (b *watermarkVoiceBroadcaster) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
+	b.evictCalls = append(b.evictCalls, evictCall{userID, channelID, reason})
 	return true
 }
 
@@ -81,8 +84,9 @@ func TestLeaveGroupDM_EvictsLeaverFromVoice(t *testing.T) {
 		t.Fatalf("leave: %d %s", rr.Code, rr.Body.String())
 	}
 
-	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != 2 || bc.evictCalls[0].channelID != group.ChannelID {
-		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=2 channel=%d", bc.evictCalls, group.ChannelID)
+	want := evictCall{2, group.ChannelID, ws.VoiceLeaveReasonDMLeave}
+	if len(bc.evictCalls) != 1 || bc.evictCalls[0] != want {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly %+v", bc.evictCalls, want)
 	}
 }
 
@@ -134,8 +138,9 @@ func TestBlockUser_EvictsBlockedUserFromSharedDMVoice(t *testing.T) {
 		t.Fatalf("block: %d %s", blockRR.Code, blockRR.Body.String())
 	}
 
-	if len(bc.evictCalls) != 1 || bc.evictCalls[0].userID != 2 || bc.evictCalls[0].channelID != created.ChannelID {
-		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly one for user=2 channel=%d", bc.evictCalls, created.ChannelID)
+	want := evictCall{2, created.ChannelID, ws.VoiceLeaveReasonBlocked}
+	if len(bc.evictCalls) != 1 || bc.evictCalls[0] != want {
+		t.Fatalf("DisconnectFromVoiceInChannel calls = %+v, want exactly %+v", bc.evictCalls, want)
 	}
 }
 

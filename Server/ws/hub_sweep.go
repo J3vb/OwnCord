@@ -12,9 +12,11 @@ import (
 )
 
 // staleClientTimeout is the maximum duration a client can go without sending
-// any message before being considered stale and disconnected. The client sends
-// a ping every 30s, so 90s (3x) gives plenty of margin.
-const staleClientTimeout = 90 * time.Second
+// any message or answering a protocol Ping before being considered stale and
+// disconnected. pingPump refreshes activity on every Pong (25s) and closes a
+// peer that misses one itself, so this sweep is the backstop; the app-level
+// ping (every 30s) keeps old peers covered too.
+var staleClientTimeout = 90 * time.Second
 
 // onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
 func (h *Hub) onStaleTick() {
@@ -62,6 +64,15 @@ func (h *Hub) kickClient(c *Client) {
 	// and refuses. The reverse order leaves the dead client holding the topic.
 	c.closeSend()
 	h.pubsub.UnsubscribeAll(c)
+}
+
+// kickClientTerminal is kickClient for a disconnect that refuses
+// reconnection (ban, revoked or expired session): it marks c first, so the
+// read-loop teardown ends a voice call at once instead of parking it in the
+// grace window for a resume that can never come.
+func (h *Hub) kickClientTerminal(c *Client) {
+	c.markTerminalKick()
+	h.kickClient(c)
 }
 
 // startSweep runs sweep on its own goroutine so the hub dispatch loop never
@@ -144,12 +155,12 @@ func (h *Hub) sweepRevokedSessions() {
 		case service.SessionRevoked:
 			slog.Info("session sweep: revoked/expired session, disconnecting",
 				"user_id", c.userID)
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 		case service.SessionBanned:
 			slog.Info("session sweep: banned user, disconnecting",
 				"user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 		case service.SessionLive:
 		}
 	}
@@ -209,7 +220,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// still-permitted channel may have committed while it ran. The
 		// eviction is conditional on the client still being in the checked
 		// channel — never on whatever channel it is in by now.
-		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID) {
+		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
 			continue
 		}
 		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",
@@ -255,7 +266,17 @@ func (h *Hub) sweepStaleVoiceStates() {
 	}
 	h.mu.RUnlock()
 
+	// RT-8: a membership parked in the grace window has no live client, so the
+	// scan above classified it as stale — but it is deliberately held for a
+	// resuming socket. Skip exactly the parked (user, channel) pairs; the
+	// grace timer owns their teardown. Snapshot the pairs first so this holds
+	// no grace lock while deleting rows.
+	parked := h.voiceGrace.snapshot()
+
 	for _, s := range stale {
+		if parked[s.userID] == s.channelID {
+			continue
+		}
 		if sweepStaleVoiceJoinRaceHook != nil {
 			sweepStaleVoiceJoinRaceHook(s.userID, s.channelID, s.joinedAt)
 		}
@@ -387,6 +408,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn /
 		// clearVoiceStateIfMatch and the LiveKit webhook's inline
 		// compare-and-clear.
+		h.voiceGrace.takeJoin(vs.UserID, channelID, "")
 		h.mu.RLock()
 		client, ok := h.clients[vs.UserID]
 		h.mu.RUnlock()

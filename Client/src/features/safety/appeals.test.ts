@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@stores/ui.store", () => ({ openSettings: vi.fn() }));
 
 import { expectConsole } from "../../../tests/helpers/console";
+import { pinZone } from "../../../tests/helpers/tz-pin";
 import { ApiClientError, type MyAppeal, type OwnModerationAction } from "../../lib/api";
 import { appealBody, fitsAppealLimit } from "./Appeals";
 import { renderSafetyTab } from "./SafetyTab";
@@ -10,6 +11,8 @@ import { applyAppealStatus, refreshOwnModeration, resetSafetyStore, safetyStore 
 import { handleAppealStatus } from "./wsHandlers";
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+let restoreTZ: () => void;
 
 function row(over: Partial<OwnModerationAction> & { id: number }): OwnModerationAction {
   return {
@@ -78,12 +81,14 @@ const primaryOf = (pane: HTMLElement) =>
 const errorOf = (pane: HTMLElement) => q(pane, "#safety-appeal-error");
 
 beforeEach(() => {
+  restoreTZ = pinZone("UTC");
   resetSafetyStore();
   vi.clearAllMocks();
 });
 afterEach(() => {
   resetSafetyStore();
   document.body.replaceChildren();
+  restoreTZ();
 });
 
 describe("appeals store", () => {
@@ -167,6 +172,13 @@ describe("filing an appeal", () => {
     expect(pane.textContent).toContain("goes only to this server's moderators");
     expect(pane.textContent).toContain("Kicks can't be appealed");
     expect(pane.textContent).toContain("contact the server's operator directly");
+    // Those rules wait behind a closed "How appeals work" disclosure.
+    const rules = [...pane.querySelectorAll("details")].find((d) =>
+      d.querySelector("summary")!.textContent.startsWith("How appeals work"),
+    )!;
+    expect(rules.open).toBe(false);
+    expect(rules.textContent).toContain("Kicks can't be appealed");
+    expect(rules.textContent).toContain("goes only to this server's moderators");
     ac.abort();
   });
 
@@ -257,7 +269,7 @@ describe("filing an appeal", () => {
     primaryOf(pane).click();
     await flush();
     expect(errorOf(pane).textContent).toBe(
-      "Your appeal wasn't accepted: bad request: body is too long",
+      "Your appeal wasn't accepted: Bad request: body is too long",
     );
     expect(bodyOf(pane).getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(bodyOf(pane));

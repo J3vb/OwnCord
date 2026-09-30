@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -113,7 +114,16 @@ func (h *Hub) handleReconnect(
 		}
 	}
 
-	events, ok = h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
+	// RT-8: registerNow inherits a parked grace membership; drop it first
+	// if its row is gone. Outside h.seqMu, like every DB read here.
+	h.dropOrphanVoiceGrace(ctx, c.userID)
+
+	events, ok, refused := h.reconnectRegister(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs, replaySource, persistedTail, maxPersistedSeq)
+	if refused {
+		// U4: nothing before registerNow touched another session; just refuse.
+		refuseWake(ctx, conn, c)
+		return true, false
+	}
 	if !ok {
 		return false, false
 	}
@@ -205,11 +215,11 @@ func (h *Hub) reconnectPrecheck(
 	// what lets a service-backed or instrumented reader actually intercept the
 	// two reads below — the same posture handleFreshConnect takes.
 	database := h.readers.Visibility
-	// Channel-visibility changes are delivered as targeted, unsequenced
-	// messages, so replay cannot bring a client that missed one back into a
-	// coherent state — force the full-ready path instead.
+	// Visibility changes are targeted and unsequenced, and a shed content
+	// frame (SRV-03) never got a seq, so replay cannot bring a client that
+	// missed one back into a coherent state — force the full-ready path.
 	if h.mustFullResync(lastSeq) {
-		slog.Info("ws replay skipped (visibility changed since last_seq), sending full ready",
+		slog.Info("ws replay skipped (resync watermark at or past last_seq), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
@@ -422,13 +432,14 @@ func (h *Hub) reconnectVetColdTail(
 // registers c inside the SAME h.seqMu critical section deliverBroadcast uses,
 // so no seq can be allocated in between (see the comment in handleReconnect).
 // It returns the events to actually send; ok=false means one of the re-checks
-// tripped and the caller must fall through to a full ready.
+// tripped and the caller must fall through to a full ready; refused=true means
+// registerNow refused a wake reconnect (U4): answer ANOTHER_DEVICE_ACTIVE.
 func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
-) ([][]byte, bool) {
-	var events [][]byte
+) (events [][]byte, ok, refused bool) {
 	h.seqMu.Lock()
+	start := time.Now()
 	switch replaySource {
 	case "buffer":
 		fresh := h.ReplayBuffer().EventsSinceFilteredContent(lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
@@ -436,12 +447,13 @@ func (h *Hub) reconnectRegister(
 			// The buffer window closed between the earlier check and this
 			// lock (an extreme write burst evicted lastSeq) — there is
 			// nothing left to fall back to for this attempt but a full ready.
+			h.observeSeqMuHold(start)
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: buffer window closed just before registration, forcing full ready",
 				"user_id", c.userID, "last_seq", lastSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return nil, false
+			return nil, false, false
 		}
 		events = fresh
 	case "db":
@@ -451,12 +463,13 @@ func (h *Hub) reconnectRegister(
 		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
 			events = persistedTail
 		default:
+			h.observeSeqMuHold(start)
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail just before registration, forcing full ready",
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
 			h.reconnectTierFull.Add(1)
 			telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-			return nil, false
+			return nil, false, false
 		}
 	}
 	if handleReconnectPreRegisterRaceHook != nil {
@@ -472,20 +485,22 @@ func (h *Hub) reconnectRegister(
 	// the fan-out can't reach an unregistered client, and the entry check has
 	// already passed, so nothing else catches it before this resume commits
 	// to permissions computed before the change (OC-0206).
-	if h.mustFullResync(lastSeq) {
+	if h.mustFullResyncAtRegister(lastSeq) {
+		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
-		slog.Warn("ws handleReconnect: visibility changed during handshake, forcing full ready",
+		slog.Warn("ws handleReconnect: resync watermark moved during handshake, forcing full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
-		return nil, false
+		return nil, false, false
 	}
 	if handleReconnectPostCheckPreRegisterRaceHook != nil {
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
-	h.registerNow(c, allowedChannelIDs)
+	refused = h.registerNow(c, allowedChannelIDs)
+	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
-	return events, true
+	return events, !refused, refused
 }
 
 // reconnectWriteReplay writes the resume handshake: auth_ok followed by the
@@ -681,14 +696,4 @@ func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, 
 			return false
 		},
 	)
-}
-
-// maxColdReplayLimit returns the effective persisted-replay cap. The budget
-// arrives via HubOptions (B3-4): the dispatch loop reads replayBuf unlocked,
-// so the ring is sized exactly once, at construction.
-func (h *Hub) maxColdReplayLimit() int {
-	if h.coldReplayLimit > 0 {
-		return h.coldReplayLimit
-	}
-	return maxColdReplay
 }

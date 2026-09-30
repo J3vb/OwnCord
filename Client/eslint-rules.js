@@ -8,6 +8,8 @@
 //
 // Plain JS, ESM, no build step — eslint.config.js imports this directly.
 
+import path from "node:path";
+
 /** True when `node` calls `<methodName>(...)` through any of the receivers the
  *  reconnect code uses: `this.<methodName>()` (the class form in
  *  livekitSession.ts), a bare `<methodName>()` local closure, or
@@ -227,8 +229,8 @@ const e2eeVerifiedStatusLiteral = {
     schema: [],
     messages: {
       dynamicStatus:
-        "The `status` passed here must be a string literal ('verified' | 'unverified' | 'mismatch' | " +
-        "'unknown'), not a computed expression. Add a new literal call site for this outcome instead of " +
+        "The `status` passed here must be a string literal ('verified' | 'changed' | 'unverified' | " +
+        "'mismatch' | 'unknown'), not a computed expression. Add a new literal call site for this outcome instead of " +
         "deriving the status dynamically — that is what keeps 'verified' provably tied to a real signature check.",
     },
   },
@@ -325,15 +327,30 @@ const noIdentityScopeFallback = {
 // is one of those handlers writing to a domain store directly, bypassing the
 // dispatcher. Store *reads* (`fooStore.getState()`) are unaffected; this only
 // flags calls to an imported store-mutator function (set/add/update/... from
-// a `*/stores/*` module) reached from inside a `ws.on(...)` callback.
+// a store module) reached from inside a `ws.on(...)` callback.
+//
+// OC-0478: B9 added three domain stores under `features/*/store.ts`
+// (safety, message-requests, moderation) that this rule used to miss — their
+// module path is not `stores/`, and several mutators (apply*, note*, begin*,
+// fail*, refresh*) were outside the verb list, so a page-local ws.on could
+// write them clean. Both are widened here. Store *instances* stay safe: only
+// imports whose names match the mutator verbs are recorded, so `safetyStore`
+// is never recorded and a `safetyStore.getState()` read is never flagged.
 // ─────────────────────────────────────────────────────────────────────────
 
 const STORE_MUTATOR_PREFIX =
-  /^(set|add|remove|update|increment|clear|toggle|open|close|join|leave|mark|confirm|bulk|rollback|reset|prepend|reattach|invalidate|load)[A-Z_]/;
+  /^(set|add|remove|update|increment|clear|toggle|open|close|join|leave|mark|confirm|bulk|rollback|reset|prepend|reattach|invalidate|load|apply|note|begin|fail|refresh)[A-Z_]/;
 
-function isStoreModuleSource(source) {
-  // Matches both the "@stores/..." alias and relative "../stores/..." paths.
-  return typeof source === "string" && /(?:^|\/)@?stores\//.test(source);
+function isStoreModuleSource(source, filename) {
+  if (typeof source !== "string") return false;
+  if (source.startsWith("@stores/")) return true;
+  if (!source.startsWith(".")) return false;
+  // Resolve a relative specifier against the importing file, so every
+  // spelling of the same module ("./store", "../<name>/store",
+  // "../../stores/x") lands on one path: the `stores/` layer or a
+  // feature-local `src/features/<name>/store.ts`.
+  const resolved = path.resolve(path.dirname(filename), source).split(path.sep).join("/");
+  return /\/src\/stores\//.test(resolved) || /\/src\/features\/[^/]+\/store$/.test(resolved);
 }
 
 function isWsOnCall(node) {
@@ -356,7 +373,7 @@ const noStoreWriteInWsOn = {
     type: "problem",
     docs: {
       description:
-        "Disallow calling an imported store-mutator (set*/add*/update*/... from a stores/ module) from " +
+        "Disallow calling an imported store-mutator (set*/add*/update*/... from a stores/ or features/*/store module) from " +
         "inside a ws.on(...) callback outside dispatcher.ts. dispatcher.ts is the single place server " +
         "events are allowed to write into domain stores; a page-local ws.on(...) handler may read store " +
         "state and drive its own local UI, but must not mutate a domain store itself.",
@@ -375,7 +392,7 @@ const noStoreWriteInWsOn = {
 
     return {
       ImportDeclaration(node) {
-        if (!isStoreModuleSource(node.source.value)) return;
+        if (!isStoreModuleSource(node.source.value, context.filename)) return;
         for (const spec of node.specifiers) {
           if (spec.type === "ImportSpecifier" && STORE_MUTATOR_PREFIX.test(spec.local.name)) {
             storeMutatorImports.add(spec.local.name);

@@ -36,7 +36,6 @@ docker run -d --name owncord-sut \
   -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
   -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
   -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
-  -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
   -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
   debian:bookworm-slim /app/chatserver
 ```
@@ -52,8 +51,9 @@ Why each part of that is load-bearing:
   quota for what it may consume.
 - **`--memory-swap=4g` equal to `--memory`** disables swap, so 4 GB is the
   ceiling rather than the point at which paging starts.
-- **`--network=host`** because LiveKit's media path is UDP 50000-60000, and
-  publishing ten thousand ports is not a thing. This removes a NAT hop, so the
+- **`--network=host`** because LiveKit's default media path is the UDP
+  50000-60000 range, and publishing ten thousand ports is not a thing. This
+  removes a NAT hop, so the
   latencies below are a **floor** for bridged or reverse-proxied deployments,
   not a ceiling.
 - **`debian:bookworm-slim` with the release binary mounted, not the published
@@ -62,13 +62,12 @@ Why each part of that is load-bearing:
   machine budget; the packaging is qualified separately by the artifact and
   container lifecycle smokes (`Server/cmd/smoke`,
   `Server/scripts/docker-smoke.sh`).
-- **`node_ip=127.0.0.1` with `advertise_internal_ip`.** OwnCord's generated
-  `livekit.yaml` sets `use_external_ip: true`; without a `node_ip` the SFU
-  discovers the machine's public address by STUN and advertises ICE candidates
-  no same-machine client can reach — voice connects and carries no media. These
-  two knobs are a property of measuring on one machine, not of the product. The
-  server logs its "node_ip is not a public address" warning, which is correct
-  here and must not be copied into a real deployment.
+- **`advertise_internal_ip`.** OwnCord's generated `livekit.yaml` sets
+  `use_external_ip: true`; on its own the SFU then advertises only the
+  machine's STUN-discovered public address, which no same-machine client can
+  reach — voice connects and carries no media. `advertise_internal_ip` keeps
+  the host candidates alongside it. This knob is a property of measuring on one
+  machine, not a deployment recommendation.
 - **The load generators are outside that budget**, pinned with
   `taskset -c 2,3`. A generator sharing the server's cores measures the
   generator.
@@ -86,16 +85,18 @@ Why each part of that is load-bearing:
 
 Everything else is the shipped default. The non-defaults are:
 
-| Key                                             | Value       | Why                                                                                                                |
-| ----------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| `security.auth_rate_limit_multiplier`           | `100`       | Every connection logs in from 127.0.0.1, and the per-IP auth limits assume roughly one person per address          |
-| `voice.livekit_api_key` / `livekit_api_secret`  | per run     | The shipped dev credentials are blanked at load and disable voice entirely, so a run on them would measure nothing |
-| `voice.livekit_binary`                          | mounted SFU | Pins the SFU version and removes the container's need for egress and a CA bundle                                   |
-| `voice.node_ip` / `voice.advertise_internal_ip` | loopback    | See above — single-machine ICE, not a deployment setting                                                           |
+| Key                                            | Value       | Why                                                                                                                |
+| ---------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| `security.auth_rate_limit_multiplier`          | `100`       | Every connection logs in from 127.0.0.1, and the per-IP auth limits assume roughly one person per address          |
+| `voice.livekit_api_key` / `livekit_api_secret` | per run     | The shipped dev credentials are blanked at load and disable voice entirely, so a run on them would measure nothing |
+| `voice.livekit_binary`                         | mounted SFU | Pins the SFU version and removes the container's need for egress and a CA bundle                                   |
+| `voice.advertise_internal_ip`                  | `true`      | See above — single-machine ICE, not a deployment setting                                                           |
 
-The SFU is **livekit-server 1.13.5**, the release the server itself downloads
+The SFU is **livekit-server 1.13.7**, the release the server itself downloads
 (`ws.DefaultLiveKitVersion`). Measuring a different SFU release than the product
-ships would measure something no owner ever runs.
+ships would measure something no owner ever runs. The qualifying runs recorded
+below predate the 1.13.7 pin and were measured against **1.13.5**; the blocks
+name the release each was run on.
 
 ## Latency budgets
 
@@ -113,11 +114,21 @@ column is where the B6 PRD started, kept so the tightening is auditable.
 | Voice join, OwnCord half (`voice_join` → `voice_token`) | < 250 ms | < 500 ms | < 2 s / < 4 s    | k6 `voice_join_time`             |
 | Graceful drain to exit 0                                | < 20 s   | —        | unchanged        | `Server/cmd/smoke` `drainBudget` |
 
-Each tightened budget keeps at least twice the measured p99 as headroom, so a
-busier runner does not turn a published promise into a flake. `auth_time` is
-the one with the least room on purpose: its floor is bcrypt at cost 12, roughly
-a quarter-second of one core, and that is a deliberate security cost rather
-than something to tune away.
+For the **steady** profile these budgets were tightened from a measured p99
+with at least twice it as headroom, so a busier runner does not turn a published
+promise into a flake. That headroom is a property of the steady shape:
+the operational profile runs a storm, a 25-way voice churn and upload pressure
+alongside the same fan-out, and there the acknowledgement p99 was once measured
+_at_ its budget (ramp p99 299 ms on 2026-09-23) and once over it (tls-off upload
+p99 301 ms against 300, filed as OC-0481). Both were busy-runner tails on the
+2026-09-23 pair: the `dev` re-measurement of 2026-09-28 puts the operational
+upload-phase p99 at 71 ms (tls-off) and 65 ms (`self_signed`), and the run-wide
+p99 at 64 ms on both, so OC-0481 is resolved with no budget change.
+The budgets do not move for a busy-runner tail — it is a finding, not a
+number to loosen (see the operational section). `auth_time` is the one steady
+row with the least room on purpose: its floor is bcrypt at cost 12, roughly a
+quarter-second of one core, and that is a deliberate security cost rather than
+something to tune away.
 
 Two of the PRD's rows are corrected rather than satisfied, because as written
 they ask for measurements that cannot exist:
@@ -213,8 +224,15 @@ assertions offline, with no SFU and no `lk` binary.
   to 100 recipients. That is a stress shape, not typical chat traffic; it is the
   fan-out the recipient-delivery budget is measured against.
 - **Nothing in CI gates these numbers.** Like the benchmark baseline, they are
-  recorded and published. `load-baseline.yml` is `workflow_dispatch` only,
-  because a perf run on shared runners is a flake source.
+  recorded and published. `load-baseline.yml` is `workflow_dispatch` plus a
+  weekly `schedule:`, never part of the blocking CI matrix, because a perf run
+  on shared runners is a flake source. GitHub runs a `schedule:` only from the
+  default branch, so the schedule begins once this workflow reaches `main`;
+  from then it re-measures the constrained profile on `main`'s commit each
+  week (the workflow and the harness it drives are always the same revision),
+  prints the commit it measured, and uploads its artifacts, so a regression is
+  visible in the Actions history without anyone dispatching a run. A `dev`
+  measurement is a dispatch with `--ref dev`. It does not gate anything.
 - **The operational profiles below are per-phase, not per-run.** That section's
   database figures are deltas between phases of one run, so they answer "which
   scenario did the writer queue behind" and not "how long did the run wait".
@@ -339,9 +357,10 @@ planned total and mean per-channel message rates, a conservative per-channel
 one-second send bound, and **each channel's observed send-attempt count/rate**
 (count divided by the 60 s hold, excluding ramp sends). This is generator-side
 traffic evidence, not a server admission counter. Delayed processing can still
-bunch frames at the server: the workflow's existing server-log gate must find
-zero `topic rate limit exceeded` lines before any step is called a hardware
-measurement. Report held population and generator saturation alongside it.
+bunch frames at the server: the workflow's post-run gate must read
+`topic_sheds_total == 0` from the server's `/api/v1/metrics` snapshot before
+any step is called a hardware measurement. Report held population and
+generator saturation alongside it.
 
 - **Publishes** the last step at which every budget above still held, plus the
   per-step table. The steps are informational and nothing is gated on them. The
@@ -359,15 +378,33 @@ measurement. Report held population and generator saturation alongside it.
 - **If every step holds at `K6_CEILING_MAX`, the answer is "above 500"** and the
   search stops there. It is not chased further on a shared runner.
 
+The corrected search was run on 2026-09-28 (run 36360932108, on `dev`); its
+per-step table and the limiting resources it names are under "Ceiling search" in
+the measured section below.
+
 ### Voice control churn
 
 The voice connections stop joining once and sitting: every `K6_VOICE_CHURN_MS`
-(default 10 000) each leaves and rejoins. The voice-join budget above is
-therefore applied under churn rather than under a single join, and a new
-`voice_state_delivery_ms` measures a `voice_state` broadcast reaching a
-_different_ connection.
+(default 10 000) each leaves and rejoins, so the voice-join budget above is
+applied under churn rather than under a single join. A `voice_state_delivery_ms`
+trend measures a `voice_state` broadcast reaching a _different_ connection.
 
-- **Budget**: the voice-join row above. `voice_state_delivery_ms` has none.
+`K6_VOICE_CHURN_PHASE` selects the churn's shape (PERF-02):
+
+- **`spread` (default)** — each voice VU's leave+rejoin sits at its own offset
+  through the period, so the cohort's joins arrive like an ordinary
+  population's churn and the voice-join row measures one join. This is the
+  shape a published voice-join figure is taken from.
+- **`aligned`** — every voice VU leaves and rejoins on the same instant. This
+  serialises the cohort's joins into one queue: it is the deliberate burst
+  OC-0480 records, published as that and never used for the voice-join row.
+  The voice-join budget does not gate an `aligned` run (the burst is published
+  unbudgeted); the count sanity gate still does. The 130–437 ms p95 previously
+  published in this section came from this shape; it is a harness artifact, not
+  a single-join cost.
+
+- **Budget**: the voice-join row above, taken under `spread` (and by the
+  capacity profile, which does not churn). `voice_state_delivery_ms` has none.
 - **Still not a WebRTC measurement.** k6 speaks OwnCord's control plane only;
   the media path remains `lk load-test`'s, as the profile's caveats say.
 
@@ -406,22 +443,29 @@ TLS delta rather than a configuration delta.
 ### Graceful shutdown under load
 
 The **workflow**, not k6, sends the stop: it waits until the connections are up
-and sending, `docker stop --time=90`s the container (a grace past the 30 s
-budget, so an overrun is measured rather than SIGKILLed), records the server's
-exit code and the drain wall clock, then starts the same container again — same
-cgroup, same flags, same data directory, so the second boot is the same server
-and not a lookalike.
+and sending, `docker stop --time=90`s the container (a grace past both the 30 s
+drill gate and the server's 50 s teardown cap, so an overrun is measured rather
+than SIGKILLed), records the server's exit code and the drain wall clock, then
+starts the same container again — same cgroup, same flags, same data directory,
+so the second boot is the same server and not a lookalike.
 
 - **Measures** the restart frame reaching every connection and the lead from
   frame arrival to the socket actually closing; the resume time after the second
   boot; the sends attempted during the drain; and the sends lost.
-- **Gated on** exit code 0, a drain inside the 30 s stop timeout, `sends_lost:
+- **Gated on** exit code 0, a drain inside 30 s, `sends_lost:
 count==0`, and no replay gap across the restart. A message that was sent,
   never acknowledged and absent from the channel history after the second boot
   is a **lost message** — a defect recorded in the findings ledger and
   published as "lost N of M" until it is fixed, not a number to round. The
   history is the only place to look: the post-restart resume is a full re-sync
   (next point), so no replay will ever carry a drain-window send.
+- **The 30 s drain gate is deliberately stricter than the server's cap.** The
+  server bounds its whole teardown at 50 s (`teardownBudget` in
+  `Server/internal/app/lifecycle.go`), of which the HTTP drain alone may take
+  30 s (`httpDrainBudget`) to let a slow upload or export finish. The drill has
+  no slow transfers in flight, so a normal restart must still finish well
+  inside 30 s; a drain between 30 s and 50 s fails the drill even though the
+  server would not have cut it short.
 - **Delivery and acknowledgement keep their `phase:pre-restart` and
   `phase:post-restart` tags**, with a separate `phase:recovery` for the stop,
   drain, outage and reconnects. The explicit windows below separate recovery
@@ -514,7 +558,7 @@ does not compete with the server it measures.
 
 Every number below comes from the **constrained** leg and from nothing else.
 
-> **Provenance note (2026-09-25).** These qualifying runs were dispatched from
+> **Provenance note (2026-09-25, superseded by the RE-05 note below).** These qualifying runs were dispatched from
 > measurement branches, not from `dev` or `main`: the `commit:` line in each
 > block is that branch's head, which is **not** an ancestor of `dev`/`main` and
 > so does not resolve in a checkout of either. The **workflow run id** in each
@@ -523,6 +567,80 @@ Every number below comes from the **constrained** leg and from nothing else.
 > (the comparison B10 item 8 asks for) is **pending at R6**; until it exists,
 > these branch runs are the only qualifying evidence, and they are published as
 > that. No unresolvable short SHA is presented as a release-revision citation.
+>
+> **Ceiling-search and restart are now `dev` runs (2026-09-28).** The
+> ceiling-search block below was the first qualifying run on a `dev` ancestor —
+> commit `8349ed2e`, dispatched from `dev` itself rather than a measurement
+> branch — so its `commit:` line resolves in a checkout of `dev`. The restart
+> block was re-made the same day on a later `dev` commit `8e9e8443` (run 36372371602) and also resolves in a checkout of `dev`. The capacity and
+> operational blocks were still measurement-branch runs at this point (superseded
+> by the RE-05 note below). The workflow run id stays
+> the resolvable handle for every block.
+>
+> **RE-05 is met: capacity and operational are now `dev` runs (2026-09-28).**
+> The capacity block below was re-made on the `dev` tip `a989b8a8` (run 36383236783) and the operational pair on the same commit (run 36383239328),
+> after the k6 harness and server fixes the older blocks predate. Both runs'
+> `commit:` lines resolve in a checkout of `dev`, which is exactly the B10
+> item-8 comparison RE-05 owed. Every block now cites a resolvable
+> `dev` revision; no measurement-branch run remains as a qualifying figure,
+> and the operational re-measurement resolves OC-0481 (see that section). Once
+> this workflow reaches `main` (the next release), its weekly `schedule:` keeps
+> a fresh run of `main`'s commit in the Actions history without anyone
+> dispatching one.
+
+### The profile on `dev` (RE-05, 2026-09-28)
+
+This is the B10 item-8 comparison RE-05 asked for: the same constrained profile
+re-measured on a `dev` ancestor with the corrected k6 harness (OC-0445) and the
+server changes the 2026-09-12 block predates. It is the current reference figure
+for the profile; the historical block below it is kept as provenance.
+
+```
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev; not yet on main)
+date (UTC):      2026-09-28
+workflow run:    36383236783  (.github/workflows/load-baseline.yml, profile=capacity)
+job:             108803153693  (capacity, constrained)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+| Profile target                       | Achieved                                                   | Met? |
+| ------------------------------------ | ---------------------------------------------------------- | ---- |
+| 250 registered users                 | 250 seeded, all registrations accepted                     | Yes  |
+| 100 simultaneous connections (180 s) | 100 authenticated and ready, `vus_max` 100 for the sustain | Yes  |
+| 25 concurrent voice participants     | 625/625 tracks at 0% packet loss, 0 errors                 | Yes  |
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 264 ms | 271 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 17 ms  | 23 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 35 ms  | 77 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 36 ms  | 82 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 4 ms   | 5 ms   | 250 ms / 500 ms    | Yes  |
+
+Every budget is met with room. 12,139 messages sent, 12,131 acknowledged,
+**1,139,557 cross-connection deliveries**, 25 voice tokens, **0 WebSocket
+errors**, 100/100 sockets authenticated and ready. Server CPU inside the cgroup
+averaged 0.28 of its 2 CPUs, peaked at 0.91, and `nr_throttled` did not move:
+the two CPUs were not the constraint. The ceiling leg of the same run (the whole
+4-CPU runner) measured recipient delivery p95 / p99 34 / 55 ms against the
+constrained leg's 36 / 82 ms, so the reference cgroup is still not the limiting
+factor at this profile.
+
+### The profile as first published (2026-09-12, historical)
+
+The block below is the run the tightened budgets were originally set from. Its
+commit is a measurement branch, so only its run id resolves; it is kept for the
+budget-tightening provenance and is superseded as the current figure by the
+`dev` block above.
 
 ```
 commit:          593c764b2d749a9415741211c01216d9d5da2153  (measurement branch feat/b6-9-published-capacity-profile; not on dev/main)
@@ -601,20 +719,137 @@ movement is a few milliseconds, so the budgets are not sitting on the noise.
 The operational blocks below were re-made on 2026-09-23 from commit `4b2ea56b`
 (run 35856013841, on branch `fm/oc-0445-fable`), after OC-0445 found that the
 2026-09-16 operational figures had measured a phase-locked load generator rather
-than the server — the `self_signed` block says how. The restart and
-ceiling-search blocks are still the 2026-09-16 runs from commit `e57335c7`, on
-the branch that added them. None of these SHAs is an ancestor of `dev`/`main`;
-the run id is the resolvable handle. Each block is filled from its own
-**constrained** leg and from nothing else, and the `tls off` block publishes as
-a delta against the `self_signed` one rather than on its own.
+than the server — the `self_signed` block says how. **They were re-made again on
+the `dev` tip `a989b8a8` (run 36383239328) on 2026-09-28**, so every operational
+figure now resolves in a checkout of `dev`; the two `dev` blocks below are the
+current figures and the 2026-09-23 pair is kept as the intermediate provenance.
+The ceiling-search and restart blocks were re-made on 2026-09-28, both dispatched
+from `dev` itself — ceiling-search from commit `8349ed2e` (run 36360932108) and
+restart from commit `8e9e8443` (run 36372371602) — so their `commit:` lines
+resolve in a checkout of `dev`. The restart block replaces the **superseded**
+2026-09-16 run from commit `e57335c7`, which predates the OC-0446 harness
+correction and the OC-0484 fix and is kept below as historical evidence only.
+Every other historical block's SHA is a measurement branch, not an ancestor of
+`dev`/`main`, and there the run id is the only resolvable handle. Each block is
+filled from its own **constrained** leg and from nothing else, and the `tls off`
+block publishes as a delta against the `self_signed` one rather than on its own.
 
-The budget rows missed under the restart drill are published as missed and are
-findings-ledger entries (OC-0446, OC-0447); neither was re-run on a bigger
-machine and no budget was loosened. The operational profile's two misses were
-OC-0445, and the blocks below are its re-measurement, with the harness
-corrected and the server unchanged.
+The budget rows missed under the 2026-09-16 restart drill are published as
+missed and are findings-ledger entries (OC-0446, OC-0447); neither was re-run on
+a bigger machine and no budget was loosened. OC-0447's ceiling-search correction
+was re-measured on 2026-09-28 (run 36360932108) and passes its zero-shedding
+gate; OC-0446's restart correction was re-measured the same day (run 36372371602)
+after OC-0484's full-resync subscription gap was fixed by
+[#1940](https://github.com/J3vb/OwnCord/pull/1940), and that run passes every
+validity gate. The operational profile's two misses were OC-0445, and the blocks
+below are its re-measurement, with the harness corrected and the server
+unchanged.
 
-#### Operational, `tls.mode: self_signed`
+**OC-0481 is resolved by the `dev` re-measurement.** That finding recorded a
+single tls-off upload-phase acknowledgement p99 of 301 ms against the 300 ms
+budget on a busy shared runner (2026-09-23). The same profile on `dev` measured
+the upload-phase p99 at **71 ms** on the tls-off leg and 65 ms on the
+`self_signed` leg, and the run-wide p99 at 64 ms on both — the earlier 301 ms
+was a busy-runner tail, and no budget was loosened to accommodate it. The full
+per-phase series is in each `dev` block below.
+
+#### Operational on `dev`, `tls.mode: self_signed` (2026-09-28)
+
+```
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev; not yet on main)
+date (UTC):      2026-09-28
+workflow run:    36383239328  (.github/workflows/load-baseline.yml, profile=operational)
+job:             108803160564  (operational, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 331 ms | 348 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 15 ms  | 20 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 40 ms  | 64 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 42 ms  | 68 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 33 ms  | 59 ms  | 250 ms / 500 ms    | Yes  |
+
+Per phase, send → acknowledgement p95 / p99: ramp 27 / 44 ms, sustain
+43 / 73 ms, upload 41 / 65 ms, storm window 39 / 61 ms; delivery 30 / 47,
+44 / 76, 42 / 68 and 40 / 66 ms. The spread voice churn (PERF-02 / OC-0480,
+the default since) keeps the voice-join p95 at 33 ms instead of the old aligned
+25-way rejoin's 157 ms. 100 of 100 storm sockets resumed from the in-memory
+buffer (`ws_replay_source{tier:buffer}` 100, `db` 0, `none` 0), `ws_replay_gap`
+max 0, all three `backpressure_*` deltas 0, 300 upload admits / 995 quota
+refuses / 300 downloads, 0 `STORAGE_LOW_DISK`, 0 oversize, 0 WebSocket errors.
+12,089 sends, 12,074 acknowledged, 1,134,078 deliveries. Server CPU averaged
+0.23 of its 2 CPUs, peaked at 1.22, `nr_throttled` did not move.
+
+#### Operational on `dev`, `tls.mode: off` (2026-09-28)
+
+```
+commit:          a989b8a8d803cc601dc30f2d17a64da5585b05e3  (on dev; not yet on main)
+date (UTC):      2026-09-28
+workflow run:    36383239328  (.github/workflows/load-baseline.yml, profile=operational)
+job:             108803160609  (operational, constrained, tls off)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 and lk, pinned to CPUs 2-3 with taskset
+```
+
+Same shape as the block above; the delta against it follows the table:
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 302 ms | 308 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 22 ms  | 31 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 40 ms  | 64 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 42 ms  | 67 ms  | 200 ms / 400 ms    | Yes  |
+| Voice join (OwnCord half)     | 26 ms  | 41 ms  | 250 ms / 500 ms    | Yes  |
+
+Per phase, send → acknowledgement p95 / p99: ramp 28 / 41 ms, sustain
+39 / 54 ms, **upload 43 / 71 ms**, storm 38 / 53 ms; delivery 32 / 49,
+40 / 56, 44 / 74 and 40 / 56 ms. The upload-phase p99 that OC-0481 recorded at
+301 ms is 71 ms here. 100 of 100 storm resumes from the buffer, `ws_replay_gap`
+max 0, 0 backpressure deltas, 300 admits / 995 quota refuses / 300 downloads, 0
+`STORAGE_LOW_DISK`, 0 oversize, 0 WebSocket errors, 12,085 sends, 12,073
+acknowledged, 1,133,881 deliveries. Server CPU averaged 0.21 of 2, peaked 1.16,
+`nr_throttled` did not move. TLS off is cheaper on login here (302 / 308 ms
+against 331 / 348 ms); the acknowledgement and delivery rows are within 1 ms
+of the `self_signed` leg, and voice join and `auth_ok` differ by 7–18 ms in
+opposite directions, which is the point of publishing the pair as a delta
+rather than an absolute.
+
+TLS delta for this `dev` pair, `self_signed − off` (a positive number means the
+TLS leg was slower). This is the current delta; the 2026-09-23 table further
+down is historical.
+
+| Row                           | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99  |
+| ----------------------------- | --------------------- | ------------- | ---------------- |
+| REST login                    | 331 / 348 ms          | 302 / 308 ms  | **+29 / +40 ms** |
+| WebSocket open → `auth_ok`    | 15 / 20 ms            | 22 / 31 ms    | **−7 / −11 ms**  |
+| Send → sender acknowledgement | 40 / 64 ms            | 40 / 64 ms    | **0 / 0 ms**     |
+| Send → recipient delivery     | 42 / 68 ms            | 42 / 67 ms    | **0 / +1 ms**    |
+| Voice join (OwnCord half)     | 33 / 59 ms            | 26 / 41 ms    | **+7 / +18 ms**  |
+
+The two legs are still two matrix jobs on two runner VMs, so the reading is
+unchanged: the TLS cost of this profile is not distinguishable from runner
+noise at one run per mode.
+
+#### Operational, `tls.mode: self_signed` (2026-09-23, historical)
 
 ```
 commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
@@ -682,6 +917,14 @@ advance runs inside the message transaction. That halved writer waits and
 took ~7% off the aligned-burst p95 (318 → 297 ms locally). Spread sends are
 unchanged at 18 ms. These local figures are not reference-runner figures.
 
+**OC-0454 is declined by owner decision D-09 (Q14, 2026-09-26) as an accepted
+low, and this document does not budget the aligned burst.** The shape is a
+property of per-frame fan-out cost — one TLS record and one write syscall per
+frame per recipient — not a correctness defect, and a real population rarely
+presses Enter in unison. Reopen on a user-visible burst scenario where the
+acknowledgement tail costs someone; the fix then is a connection wrapper that
+coalesces queued frames into one flush.
+
 **Measurement-only rows — no budget is published for any of them, and this
 document does not invent one.**
 
@@ -721,7 +964,7 @@ Server CPU inside the cgroup, from `cpu.stat.log` (5 s samples of
 uploads cohort's login ramp. **The two CPUs were not the constraint on this
 run.**
 
-#### Operational, `tls.mode: off`
+#### Operational, `tls.mode: off` (2026-09-23, historical)
 
 ```
 commit:          4b2ea56bb9777c6a435b8eb6423d1293a7276230  (measurement branch fm/oc-0445-fable; not on dev/main)
@@ -758,9 +1001,11 @@ Per phase, send → acknowledgement p95 / p99: ramp 35 / 151 ms, sustain
 51 / 176 ms, upload 110 / 301 ms, storm window 102 / 271 ms. The second run
 (35856019988) measured 96 / 267 ms and 98 / 266 ms on this leg and missed the
 voice-join p95 (335 ms against 250) — a row the interleaved `dev` runs missed
-too (437 ms on `self_signed` in 35856022553); voice join p95 moved between 130
-and 437 ms across the four runs of that hour and is not distinguishable from
-runner noise at one run per mode. The `dev` runs measured 373 / 452 and
+too (437 ms on `self_signed` in 35856022553). Those runs were taken under the
+old aligned churn, so that voice-join row measured a 25-way simultaneous rejoin
+rather than one join (PERF-02 / OC-0480): it is a harness shape, not a
+single-join cost. The default is now `spread`; a `spread` operational run is
+what republishes this table. The `dev` runs measured 373 / 452 and
 276 / 352 ms for acknowledgement on this leg.
 
 Per-phase database waits on this leg, for comparison with the table above:
@@ -773,9 +1018,11 @@ Per-phase database waits on this leg, for comparison with the table above:
 | upload  | 3,766        | 75.2 s         | 45,414       | 15.5 s         |
 | run     | 8,257        | 137.0 s        | 100,112      | 35.8 s         |
 
-#### TLS delta, `self_signed − off`
+#### TLS delta, `self_signed − off` (2026-09-23 pair, historical)
 
-A positive number means the TLS leg was slower.
+The delta between the two 2026-09-23 blocks above, kept as provenance; the
+current delta is the `dev` pair's, published with the `dev` `tls.mode: off`
+block. A positive number means the TLS leg was slower.
 
 | Row                                 | self_signed p95 / p99 | off p95 / p99 | Delta p95 / p99   |
 | ----------------------------------- | --------------------- | ------------- | ----------------- |
@@ -803,6 +1050,88 @@ one run per mode"**. Nothing here recommends running with TLS off; the default
 remains `self_signed`.
 
 #### Restart under load
+
+**Measured on `dev` (2026-09-28).** The corrected drill (OC-0446) was
+re-dispatched on `dev` after the full-resync subscription gap (**OC-0484**) was
+fixed by [#1940](https://github.com/J3vb/OwnCord/pull/1940), and this run passes
+every validity gate — including `ws_replay_gap max==0`, which both pre-fix
+`dev` dispatches failed (max 9 and 13), and `sends_lost count==0`. The profile
+is published below. A same-day intermediate re-dispatch (run 36371370515,
+commit `8e9e8443`) failed only on `sends_lost=3` (248 drain sends: 244 acked,
+4 unanswered, 3 absent from history) with every other gate passing, including
+`ws_replay_gap max==0`; recorded as an observed stop-boundary flake, not a
+result. OC-0484 is resolved by #1940, and its ledger entry records both invalid
+`dev` runs and this flake.
+
+```
+commit:          8e9e8443f423f30dbb603f376edf052c0bab180b  (on dev; not yet on main)
+date (UTC):      2026-09-28
+workflow run:    36372371602  (.github/workflows/load-baseline.yml, profile=restart)
+job:             108771187580  (restart, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6, pinned to CPUs 2-3 with taskset (no voice leg on this profile)
+```
+
+The stop is scheduled at T+135 s — 60 s of ramp, then a 75 s `pre-restart`
+window at full fan-out, so both steady windows are the same length (OC-0446).
+
+| Drill figure                       | Measured                                    | Gate                    | Met? |
+| ---------------------------------- | ------------------------------------------- | ----------------------- | ---- |
+| Drain wall clock (`docker stop`)   | **6,122 ms**                                | inside 30 s             | Yes  |
+| Server exit code                   | **0**                                       | 0                       | Yes  |
+| `server_restart` frames received   | **100 of 100**                              | 100                     | Yes  |
+| Lead, frame arrival → socket close | p95 5,004 ms, max 5,005 ms                  | ≥ `delay_seconds` (5 s) | Yes  |
+| Sends attempted during the drain   | **250: 250 acked, 0 errored, 0 unanswered** | —                       | —    |
+| Sends lost across the restart      | **0**                                       | 0                       | Yes  |
+| Replay gap across the restart      | max 0                                       | 0                       | Yes  |
+| Resume tier after the second boot  | 100 of 100 `none`                           | `none` by design        | Yes  |
+| Resume time after the second boot  | p95 71 ms, p99 81 ms, max 86 ms             | no budget               | —    |
+
+The budget rows, and the two sides of the stop:
+
+| Path                          | p95    | p99    | Budget (p95 / p99) | Met? |
+| ----------------------------- | ------ | ------ | ------------------ | ---- |
+| REST login                    | 216 ms | 231 ms | 600 ms / 1 s       | Yes  |
+| WebSocket open → `auth_ok`    | 6 ms   | 10 ms  | 200 ms / 500 ms    | Yes  |
+| Send → sender acknowledgement | 20 ms  | 35 ms  | 150 ms / 300 ms    | Yes  |
+| Send → recipient delivery     | 20 ms  | 36 ms  | 200 ms / 400 ms    | Yes  |
+
+| Side           | Recipient delivery p95 / p99 | Sender ack p95 / p99 | Deliveries |
+| -------------- | ---------------------------- | -------------------- | ---------- |
+| `pre-restart`  | **20 / 31 ms**               | 21 / 32 ms           | 371,143    |
+| `post-restart` | **21 / 39 ms**               | 20 / 37 ms           | 370,990    |
+
+Every threshold was met. The equal-length windows now measure within a
+millisecond of each other — delivery p95 20 vs 21 ms, ack p95 21 vs 20 ms over
+371,143 and 370,990 deliveries — so the ~10× imbalance OC-0446 described is
+gone and the stop costs no steady-state latency. The `recovery` window (stop,
+drain, outage, reconnects) measured delivery p95 22 ms / p99 49 ms over 143,167
+samples and is not a budget row.
+
+**No resource in the reference box limits this profile.** Server CPU inside the
+cgroup (`cpu.stat.log`, 5 s samples of `usage_usec`) averaged **0.27 of 2 CPUs**
+over the first boot and **0.16 of 2** over the second, peaking at **0.50 of 2**;
+`nr_throttled` stayed **0** across the whole run. The single SQLite writer —
+whose queue is what the ceiling search names as the limiter above 400
+connections — queued 1,837 waits for **3.7 s** total, split across the phases
+(533 waits / 0.8 s pre-restart, 280 / 1.4 s in recovery, 612 / 0.8 s
+post-restart), and the reader pool never queued outside recovery (3,254 waits /
+13.8 s, all in the stop window). With 100 connections and full fan-out on both
+sides of the stop, CPU sat at a quarter of its two-CPU budget and the writer
+queue stayed sub-second per steady phase, so the profile is met with room — the
+same conclusion the steady block reached, against the same cgroup.
+
+The block below is the **superseded 2026-09-16 measurement**, kept as historical
+evidence for OC-0446 and not a current result. It also predates the OC-0484 fix
+below, and its `post-restart` window is the pre-correction one:
 
 ```
 commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
@@ -837,7 +1166,7 @@ The stop was sent 90 s into the run — 60 s of ramp plus 30 s at full fan-out.
 
 No message was lost: every one of the 250 drain-window sends was acknowledged
 before the socket closed, and all 100 connections came back and re-synced with
-no gap. The drain finished in a fifth of the 30 s budget under 100 connections
+no gap. The drain finished in a fifth of the 30 s drill gate under 100 connections
 and in-flight writes.
 
 The budget rows, and the two sides of the stop:
@@ -900,13 +1229,132 @@ it.** Three things changed, none of which re-measures anything published here:
   when a window did not carry the workload — a comparison between two windows
   is worthless if either was empty.
 
-The next restart run must validate these windows and publish the recovery and
-settled p95s with their counts; the harness correction alone establishes no
-new latency result. The
-34/51 ms and 393/452 ms above remain what that run measured, and remain not an
-equal-load comparison.
+The corrected drill was dispatched on 2026-09-28. Its first `dev` dispatches
+failed the drill's own `ws_replay_gap max==0` validity gate (max 9 on
+`8349ed2e`, max 13 on `a04f8edd`), so they published no latency result. The gap
+was a real property of the post-restart resume, not a harness artifact
+(**OC-0484**): `active_channel_id` was honoured only inside `handleReconnect`,
+and only after its final `mustFullResync` check passed (`Server/ws/replay.go`).
+A restart renumbers the sequence space, so every post-restart resume is forced
+onto the full-resync path _before_ that check, and `handleFreshConnect` then
+registered the socket with `channelID` still 0 — it subscribed no `ChannelTopic`.
+Channel frames broadcast between `auth_ok` and the client's post-`auth_ok`
+`channel_focus` reached nobody on that socket, and the client tracks only
+`max(seq)`, so the hole was silent and permanent until the user re-mounted the
+channel. [#1940](https://github.com/J3vb/OwnCord/pull/1940) honours
+`active_channel_id` on the full-ready path too; the `dev` run at the top of this
+section passes the gate at `max 0`. The 34/51 ms and 393/452 ms above remain
+what the 2026-09-16 run measured, and remain not an equal-load comparison.
 
 #### Ceiling search
+
+**The re-measured multi-channel search is published here.** This is the run
+PERF-03 exists for: the corrected harness (OC-0447), dispatched from `dev`
+itself, with the zero-shedding gate passing.
+
+```
+commit:          8349ed2ecb84cafd84afaaf94cac79831b417181  (on dev; not yet on main)
+date (UTC):      2026-09-28
+workflow run:    36360932108  (.github/workflows/load-baseline.yml, profile=ceiling-search)
+job:             108737854635  (ceiling-search, constrained, tls self_signed)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container (limits.txt):
+                 nproc 2
+                 cpu.max 200000 100000      (= 2 CPUs)
+                 cpuset.cpus.effective 0-1
+                 memory.max 4294967296      (= 4 GiB)
+                 memory.swap.max 0          (= no swap)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6, pinned to CPUs 2-3 with taskset (no voice leg on this profile)
+```
+
+501 users seeded (one per probe slot for the 500 step), `obs_ws_conn_rejects`
+**0** — so no figure below is a configuration cap — `login_giveups` 0 (one login
+was refused by the bcrypt admission budget and retried — `auth_admission_refused`
+1), and `topic_sheds_total` **0** with no `topic rate limit exceeded` line: every
+step was limited by the server, not by the topic limiter or a config default.
+The cohort is spread over 11 text channels (`CEILING_CHANNELS=11`) at the 2 s
+send interval, so the total offer is `N × 1000 / 2000` messages/s with no
+channel above its share of the 100/s limiter. Every requested population was
+held: `obs_connected_users` was exactly 100 / 200 / 300 / 400 / 500 at each
+step's hold, and each step's `ws_connections` arrivals were 100 (its own ramp).
+The observed total send-attempt rate matched the planned rate through step 400
+(50.0, 100.0, 150.0, 199.9/s against 50/100/150/200 planned); it read high at
+step 500 (281.7/s observed against 250 planned), which is the generator bunching
+frames as the server's ack path slows — generator-side evidence, not admission.
+
+| Step | Held (`obs_connected_users`) | Delivery p95 / p99    | Sender ack p95 / p99  | Login p95 / p99    | `auth_ok` p95 | Writer wait (step total; per wait) | Server CPU (avg / peak of 2) | Host loadavg (avg / peak) |
+| ---- | ---------------------------- | --------------------- | --------------------- | ------------------ | ------------- | ---------------------------------- | ---------------------------- | ------------------------- |
+| 100  | 100                          | **6 / 8 ms**          | **5 / 8 ms**          | 269 / 272 ms       | 3 ms          | 1.0 s; 0.8 ms                      | 0.12 / 0.26                  | 0.69 / 1.05               |
+| 200  | 200                          | **15 / 22 ms**        | **14 / 21 ms**        | 275 / 283 ms       | 8 ms          | 4.8 s; 1.6 ms                      | 0.25 / 0.26                  | 2.19 / 2.68               |
+| 300  | 300                          | **30 / 60 ms**        | **30 / 59 ms**        | **352 / 361 ms**   | 7 ms          | 7.4 s; 2.0 ms                      | 0.46 / 0.47                  | 2.23 / 2.69               |
+| 400  | 400                          | 97 / 286 ms           | 99 / 287 ms           | **737 / 1,362 ms** | 83 ms         | 80.7 s; 14.9 ms                    | 0.72 / 0.75                  | 3.09 / 3.45               |
+| 500  | 500                          | **7,331 / 11,618 ms** | **7,253 / 11,533 ms** | 2,573 / 2,866 ms   | 818 ms        | 1,466.2 s; 78.9 ms                 | 1.11 / 1.50                  | 3.58 / 3.72               |
+
+(Budgets, from the table at the top of this document: REST login 600 ms / 1 s;
+WebSocket open → `auth_ok` 200 / 500 ms; send → sender acknowledgement
+150 / 300 ms; send → recipient delivery 200 / 400 ms.)
+
+**The last step at which every budget held is 300.** Step 400 breaks the REST
+login budget (p95 737 ms against 600 ms) while the two message paths still hold
+(delivery 97 ms, ack 99 ms); step 500 breaks recipient delivery and sender
+acknowledgement together (p95 7.3 s against 200 ms and 150 ms), along with
+`auth_ok` (p95 818 ms against 200 ms) and the still-broken login (p95 2,573 ms).
+
+**Login breaks first, at 400, under near-saturated ramp CPU with the writer
+also queueing; the message paths break at 500 on the single SQLite writer, with
+the CPU at its full budget.** Every step held its population and the search
+never walked into the topic limiter, so the numbers are the server's own.
+
+The table's CPU column covers each step's 60 s hold. `ws-load.js` times a VU's
+REST login when it starts, so each step's 100 logins fall in its 30 s ramp, and
+`cpu.stat.log` (5 s samples of `usage_usec`) shows the ramps running much hotter
+than the holds.
+
+- **Login breaks at 400 with the ramp CPU near saturation.** The step-400 ramp
+  averages **1.49 of 2** and peaks at **1.70**. That is the window in which its
+  logins are timed (p95 737 ms against 600 ms). The hold that follows sits at
+  0.72, so the CPU pressure is the login ramp itself, whose bcrypt checks are
+  CPU work. The writer also queues more at this step (per wait 2.0 ms at 300,
+  14.9 ms at 400), and the login's session persist shares it. This run does not
+  separate the two, so the login break is attributed to the ramp CPU and the
+  writer together, not to the writer alone. Both message paths still hold at
+  400 (delivery 97 ms, ack 99 ms).
+- **The message paths break at 500 on the SQLite writer.** The per-waiting
+  checkout cost is 0.8 ms at 100, 1.6 ms at 200, 2.0 ms at 300, 14.9 ms at 400,
+  and **78.9 ms at 500**. The step-500 window alone records 18,587 writer waits
+  totalling **1,466 s** of waiting, against 3,683 waits / 7.4 s at the last step
+  that met every budget. Delivery and ack p95 reach 7.3 s. The ramp CPU at 500
+  averages **1.85 of 2** and peaks at **2.02**, the full budget, and
+  `nr_throttled` goes from 0 to **11** in that ramp. So the writer queue that
+  breaks the message paths forms on a CPU that is also saturated.
+- **The reader pool never queued** — 1,565 reader waits / 5.4 s over the entire
+  run — so the contention is the writer's, not the read side.
+- **Dispatch lag is not the limiter.** `ws_dispatch_lag_ms` over the run was p95
+  2 ms / p99 10 ms / max 160 ms, `ws_broadcast_ms` the same shape, and
+  `hub_seqmu_max_hold_ms` 168.75 ms — the hub's own fan-out serialization stayed
+  in the sub-200 ms range the whole run, consistent with OC-0454's finding that
+  per-frame fan-out cost does not bind at these counts.
+- **Both failing steps are generator-_contended_ on the host.** At step 400 the
+  host 4-CPU load average was 3.09 (peak 3.45) with k6 pinned to two CPUs; at
+  step 500 it reached 3.72. The server-side signals above (ramp CPU at 400, the
+  writer queue at 500) move with the failing budgets, so the steps are not
+  marked generator-limited.
+
+The last all-budget step is **300 connections** on the 2-vCPU reference box.
+Beyond it, login is the first budget to fail (at 400, near-saturated ramp CPU
+with the writer also queueing) and the message paths follow at 500 through the
+writer queue — the operational
+section's property that the SQLite writer is one checkout at a time, so a
+per-message hop that is sub-millisecond idle becomes a queue once enough senders
+share it. This is _not_ the fan-out CPU limit: dispatch lag and the `seqMu` hold
+stayed sub-200 ms throughout.
+
+The per-step figures are informational — nothing is gated on the search, and no
+new budget is set by it. The block below is the **superseded 2026-09-16
+single-channel run**, kept as historical evidence for OC-0447 and not a current
+result:
 
 ```
 commit:          e57335c789e19b08b3302a68de1598353cf1578d  (measurement branch feat/b6-10-operational-measurements; not on dev/main)
@@ -970,8 +1418,8 @@ The rest of what the run says, for whoever re-runs it:
 - The per-step figures are informational. Nothing is gated on them and no new
   budget is set by them.
 
-**The harness has since been corrected (OC-0447), and the figures above predate
-it.** The search no longer walks into the limiter:
+**The harness has since been corrected (OC-0447).** The search no longer walks
+into the limiter:
 
 - **The cohort is spread across channels with enforced headroom.** The earlier
   correction seeded `ceil(ceiling_max / 150)` channels but allowed missing or
@@ -981,17 +1429,20 @@ it.** The search no longer walks into the limiter:
   mean, at most 46 scheduled sends in one second). The total remains 250
   messages/s at step 500. The summary publishes the planned rate and observed
   send-attempt rate for every channel and hold. Sender and focus use the same id.
-- **Shedding is now a hard failure, not a footnote.** A post-run step greps
-  the server log for `topic rate limit exceeded` on the ceiling leg and fails
-  the run if it finds any, with the same posture as the run's own
+- **Shedding is now a hard failure, not a footnote.** A post-run step reads
+  `topic_sheds_total` from the server's `/api/v1/metrics` snapshot on the
+  ceiling leg (it originally grepped the server log for
+  `topic rate limit exceeded`) and fails the run if it is non-zero or missing,
+  with the same posture as the run's own
   `obs_ws_conn_rejects == 0`: the search is shaped to stay under the limiter,
   so a shed frame means the shaping is wrong and the steps above the first shed
   are **inconclusive rather than a ceiling**. `CEILING_CHANNELS` is printed in
   the failure so the fix is one input away.
 
-The table above remains historical evidence from the single-channel run.
-The new spread changes recipient fan-out at **every** step, including 100;
-none of the old latency figures qualifies this multi-channel shape. The next
-constrained run must hold each requested population, show the unchanged total
-send rate and per-channel headroom, and pass the zero-shedding log gate before
-publishing a new per-step budget table or a hardware-ceiling claim.
+That correction was re-measured on 2026-09-28 (the multi-channel block at the
+top of this section): the corrected search holds every requested population up
+to 500, passes the zero-shedding gate, and locates the last all-budget step at
+**300**. Login breaks first at 400, with near-saturated ramp CPU and the writer
+also queueing, and the message paths break at 500 on the **SQLite writer**. The 2026-09-16 table above remains historical single-channel evidence and is
+**not** comparable to the multi-channel shape — the new spread changes recipient
+fan-out at every step, including 100.

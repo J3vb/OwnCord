@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -38,6 +38,9 @@ func SetBackupDir(dir string) {
 	}
 	backupBaseDir = absOrRaw(dir)
 }
+
+// BackupDir is the resolved backup directory SetBackupDir configured.
+func BackupDir() string { return backupBaseDir }
 
 func absOrRaw(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
@@ -76,10 +79,12 @@ func handleBackup(database *db.DB) http.Handler {
 		timestamp := time.Now().UTC().Format("20060102_150405")
 		backupPath := filepath.Join(backupDir, "chatserver_"+timestamp+".db")
 
-		// Detached like the restore path's safety backup: an interrupted
-		// VACUUM INTO leaves a truncated .db that handleListBackups would
-		// present as restorable. BackupToSafe is rooted at the configured
-		// backup dir (SetBackupDir), not the historical hardcoded default.
+		// Detached like the restore path's safety backup. BackupToSafe runs
+		// the VACUUM on the reader pool and publishes the result with an
+		// atomic rename, so an interrupted backup leaves a .tmp the listing
+		// ignores rather than a truncated .db it would present as restorable.
+		// It is rooted at the configured backup dir (SetBackupDir), not the
+		// historical hardcoded default.
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
 			return
@@ -268,7 +273,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		}
 
 		// Safety: create a pre-restore backup before overwriting. WithoutCancel:
-		// the restore proceeds regardless of client disconnect (Close/copyFile
+		// the restore proceeds regardless of client disconnect (Close/copyBackupFile
 		// below are not ctx-aware), so the safety backup must not be skippable
 		// by a canceled request ctx.
 		// backupBaseDir, not a cwd-relative path: the safety copy has to land in
@@ -288,7 +293,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		}
 
 		// Notify clients that the server is restarting.
-		hub.BroadcastServerRestart("backup_restore", 5)
+		hub.BroadcastServerRestart(ws.RestartReasonBackupRestore, 5)
 
 		// Checkpoint the WAL and close the database connection before overwriting
 		// to prevent corruption from concurrent writes (BUG-096).
@@ -302,9 +307,9 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			// database.Close() closes the writer and reader pools regardless of
 			// the error it returns (Server/db/db.go), so this process cannot
 			// serve anything more either way — every other failure path below
-			// (copyFile failing, and the success path itself) restarts for
+			// (copyBackupFile failing, and the success path itself) restarts for
 			// exactly that reason. The live database file is still intact here
-			// (copyFile hasn't run yet), so the restarted process comes back on
+			// (copyBackupFile hasn't run yet), so the restarted process comes back on
 			// the pre-restore data rather than leaving clients pinned on
 			// "Reconnecting..." against a process that never actually restarts.
 			slog.Error("failed to close database before restore — restarting anyway, DB pools are closed either way", "err", err)
@@ -329,7 +334,7 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 		// Stream the backup file over the (now closed) database to avoid loading
 		// the entire DB into memory (could be hundreds of MiB).
 		if err := copyBackupFile(target, dbPath); err != nil {
-			// copyFile truncates the destination with os.Create before it can know
+			// copyBackupFile truncates the destination with os.Create before it can know
 			// whether the read will succeed, so the live database file is already
 			// destroyed by the time we get here — and the DB is closed, so nothing
 			// is holding the old contents. Put the safety copy back rather than
@@ -389,28 +394,4 @@ func closeDatabase(database *db.DB) error {
 // copyBackupFile is the restore path's file-copy hook. It exists as a var so
 // tests can inject the hard-to-simulate mid-copy failure (truncate-then-fail)
 // the rollback branch exists for; production never swaps it.
-var copyBackupFile = copyFile
-
-// copyFile streams src to dst without loading the entire file into memory.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src) //nolint:gosec // G703: src is from sanitized backup path
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer in.Close() //nolint:errcheck
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return fmt.Errorf("create destination: %w", err)
-	}
-
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("copy: %w", err)
-	}
-	if err := out.Sync(); err != nil {
-		_ = out.Close()
-		return fmt.Errorf("sync: %w", err)
-	}
-	return out.Close()
-}
+var copyBackupFile = db.CopyDatabaseFile

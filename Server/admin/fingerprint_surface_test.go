@@ -5,9 +5,19 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/auth"
 )
+
+// serveCert installs a fixed served certificate for the test and clears it
+// afterwards.
+func serveCert(t *testing.T, mode, fp string) {
+	t.Helper()
+	admin.SetServedCertificate(mode, func() auth.ServedCert { return auth.ServedCert{Fingerprint: fp} })
+	t.Cleanup(func() { admin.SetServedCertificate("", nil) })
+}
 
 // OP-01: the served leaf certificate's fingerprint must be reachable from the
 // admin panel, not only the stderr banner, so an operator who cannot watch
@@ -16,8 +26,7 @@ import (
 
 func TestAdminAPI_Stats_CarriesCertificateFingerprint(t *testing.T) {
 	const fp = "aa:bb:cc:dd"
-	admin.SetLeafFingerprint(fp)
-	t.Cleanup(func() { admin.SetLeafFingerprint("") })
+	serveCert(t, "self_signed", fp)
 
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
@@ -39,8 +48,7 @@ func TestAdminAPI_Stats_CarriesCertificateFingerprint(t *testing.T) {
 }
 
 func TestAdminAPI_Stats_OmitsFingerprintWhenUnknown(t *testing.T) {
-	admin.SetLeafFingerprint("")
-	t.Cleanup(func() { admin.SetLeafFingerprint("") })
+	serveCert(t, "acme", "")
 
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
@@ -61,8 +69,7 @@ func TestAdminAPI_Stats_OmitsFingerprintWhenUnknown(t *testing.T) {
 
 func TestSetup_FinishStepCarriesCertificateFingerprint(t *testing.T) {
 	const fp = "11:22:33:44"
-	admin.SetLeafFingerprint(fp)
-	t.Cleanup(func() { admin.SetLeafFingerprint("") })
+	serveCert(t, "self_signed", fp)
 
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
@@ -86,8 +93,7 @@ func TestSetup_FinishStepCarriesCertificateFingerprint(t *testing.T) {
 }
 
 func TestSetup_FinishStepOmitsFingerprintWhenWizardChangesTLSMode(t *testing.T) {
-	admin.SetLeafFingerprint("11:22:33:44")
-	t.Cleanup(func() { admin.SetLeafFingerprint("") })
+	serveCert(t, "self_signed", "11:22:33:44")
 
 	database := openAdminTestDB(t)
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -107,5 +113,68 @@ func TestSetup_FinishStepOmitsFingerprintWhenWizardChangesTLSMode(t *testing.T) 
 	}
 	if fp, present := resp["certificate_fingerprint"]; present {
 		t.Errorf("certificate_fingerprint = %v; the restart serves a different certificate, so it must be omitted", fp)
+	}
+}
+
+// statsFor fetches the dashboard payload as a generic map.
+func statsFor(t *testing.T) map[string]any {
+	t.Helper()
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, nil, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	w := doRequest(t, handler, http.MethodGet, "/stats", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /stats = %d, want 200", w.Code)
+	}
+	var stats map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return stats
+}
+
+// In acme mode the certificate is learned on the first handshake and
+// replaced on every renewal: the dashboard shows whatever is served now and
+// names the mode so the panel can explain an absence. The expiry lives on the
+// Attention panel's certificate signal, not here.
+func TestAdminAPI_Stats_FollowsTheServedCertificate(t *testing.T) {
+	served := auth.ServedCert{}
+	admin.SetServedCertificate("acme", func() auth.ServedCert { return served })
+	t.Cleanup(func() { admin.SetServedCertificate("", nil) })
+
+	stats := statsFor(t)
+	if stats["tls_mode"] != "acme" {
+		t.Errorf("tls_mode = %v, want acme", stats["tls_mode"])
+	}
+	if _, present := stats["certificate_fingerprint"]; present {
+		t.Error("acme before its first handshake must omit the fingerprint")
+	}
+
+	served = auth.ServedCert{Fingerprint: "aa:bb", NotAfter: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)}
+	stats = statsFor(t)
+	if stats["certificate_fingerprint"] != "aa:bb" {
+		t.Errorf("certificate_fingerprint = %v, want aa:bb", stats["certificate_fingerprint"])
+	}
+	if _, present := stats["certificate_expires_at"]; present {
+		t.Error("the stats payload must not carry the certificate expiry")
+	}
+
+	// A renewal shows up without a restart.
+	served = auth.ServedCert{Fingerprint: "cc:dd", NotAfter: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)}
+	if got := statsFor(t)["certificate_fingerprint"]; got != "cc:dd" {
+		t.Errorf("after renewal certificate_fingerprint = %v, want cc:dd", got)
+	}
+}
+
+// With TLS off a reverse proxy owns the certificate: the payload says so,
+// and claims no fingerprint the server cannot see.
+func TestAdminAPI_Stats_NamesTLSOff(t *testing.T) {
+	serveCert(t, "off", "")
+	stats := statsFor(t)
+	if stats["tls_mode"] != "off" {
+		t.Errorf("tls_mode = %v, want off", stats["tls_mode"])
+	}
+	if _, present := stats["certificate_fingerprint"]; present {
+		t.Error("TLS off must omit the fingerprint")
 	}
 }

@@ -1351,29 +1351,259 @@ describe("API Client", () => {
 
 describe("errorText (B9-20, Q7)", () => {
   it("shows catalog text for a mapped server code, not the server's message", () => {
-    const err = new ApiClientError(
-      429,
-      "RATE_LIMITED",
-      "too many failed attempts, try again later",
-    );
+    const err = new ApiClientError(429, "RATE_LIMITED", "rate limit exceeded");
     expect(errorText(err, "Failed to change password.")).toBe(
       "Too many requests. Try again later.",
     );
   });
 
   it("shows the caller's catalog text for an internal server failure", () => {
-    const err = new ApiClientError(500, "INTERNAL_ERROR", "failed to delete account");
+    const err = new ApiClientError(500, "INTERNAL_ERROR", "internal error");
     expect(errorText(err, "Failed to delete account.")).toBe("Failed to delete account.");
   });
 
-  it("shows the server's message only when its code has no mapping", () => {
+  it("shows the server's message only when its code has no mapping, capitalised", () => {
     const err = new ApiClientError(400, "INVALID_INPUT", "incorrect password");
-    expect(errorText(err, "Failed to delete account.")).toBe("incorrect password");
+    expect(errorText(err, "Failed to delete account.")).toBe("Incorrect password");
     expect(errorText(new ApiClientError(400, "INVALID_INPUT", ""), "Fallback")).toBe("Fallback");
   });
 
   it("keeps a non-server error's own message and falls back for a non-error", () => {
     expect(errorText(new Error("offline"), "Fallback")).toBe("offline");
     expect(errorText("nope", "Fallback")).toBe("Fallback");
+  });
+
+  it("maps auth, permission and capacity codes to plain capitalised copy", () => {
+    expect(
+      errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid or expired session"), "F"),
+    ).toBe("Your session has expired — sign in again.");
+    expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid credentials"), "F")).toBe(
+      "Incorrect username or password.",
+    );
+    expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "not authenticated"), "F")).toBe(
+      "Your session has expired — sign in again.",
+    );
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "missing CONNECT_VOICE permission"), "F"),
+    ).toBe("You don't have permission to do that.");
+    expect(errorText(new ApiClientError(404, "NOT_FOUND", "channel not found"), "F")).toBe(
+      "That item no longer exists.",
+    );
+    expect(
+      errorText(new ApiClientError(403, "BANNED", "your account has been suspended"), "F"),
+    ).toBe("Your account has been suspended.");
+    expect(
+      errorText(new ApiClientError(503, "SERVICE_UNAVAILABLE", "backend unavailable"), "F"),
+    ).toBe("The server is temporarily unavailable. Try again.");
+    expect(
+      errorText(
+        new ApiClientError(
+          507,
+          "STORAGE_QUOTA_EXCEEDED",
+          "upload rejected: your storage quota is full",
+        ),
+        "F",
+      ),
+    ).toBe("Your storage is full — delete files or ask a server admin.");
+    expect(
+      errorText(
+        new ApiClientError(400, "GIF_DISABLED", "GIF search is not configured on this server"),
+        "F",
+      ),
+    ).toBe("GIF search is not configured on this server.");
+  });
+
+  it("keeps the server's own sentence for an auth refusal that is not a session or permission", () => {
+    expect(errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid two-factor code"), "F")).toBe(
+      "Invalid two-factor code",
+    );
+    expect(
+      errorText(new ApiClientError(401, "UNAUTHORIZED", "invalid username or recovery kit"), "F"),
+    ).toBe("Invalid username or recovery kit");
+    expect(
+      errorText(
+        new ApiClientError(400, "INVALID_CREDENTIALS", "invalid invite or credentials"),
+        "F",
+      ),
+    ).toBe("Invalid invite or credentials");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "your account has been suspended"), "F"),
+    ).toBe("Your account has been suspended.");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "account is awaiting approval"), "F"),
+    ).toBe("Account is awaiting approval");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "cannot delete the last admin account"), "F"),
+    ).toBe("Cannot delete the last admin account");
+    expect(errorText(new ApiClientError(403, "FORBIDDEN", "insufficient permissions"), "F")).toBe(
+      "You don't have permission to do that.",
+    );
+  });
+
+  it.each([
+    [
+      "RATE_LIMITED",
+      "account temporarily locked due to too many failed attempts",
+      "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "recovery temporarily locked due to too many failed attempts",
+      "Account recovery is temporarily locked after too many failed attempts. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many failed attempts, try again later",
+      "Too many failed attempts. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "registration queue is full, try again later",
+      "This server is not accepting new applications right now. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many registrations from this address, try again later",
+      "Too many accounts have been created from this network. Try again later.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many authentication attempts in progress, try again later",
+      "The server is busy right now. Try again in a moment.",
+    ],
+    [
+      "RATE_LIMITED",
+      "too many recovery credentials issued; try again later",
+      "Too many recovery credentials have been issued. Try again later.",
+    ],
+    ["RATE_LIMITED", "slow down, try again later", "Too many requests. Try again later."],
+    [
+      "INTERNAL_ERROR",
+      "login temporarily unavailable",
+      "Sign-in is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to load authentication policy",
+      "The server could not complete that right now. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to load registration policy",
+      "Registration is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "registration failed — please try again",
+      "Registration failed. Please try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to process registration",
+      "The server could not complete that right now. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to create session",
+      "Could not start your session. Try signing in again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "registration succeeded but user fetch failed",
+      "Your account was created, but signing in failed. Sign in to continue.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to start two-factor challenge",
+      "Two-factor verification is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to verify two-factor code",
+      "Two-factor verification is temporarily unavailable. Try again shortly.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "two-factor verification temporarily unavailable",
+      "Two-factor verification is temporarily unavailable. Try again shortly.",
+    ],
+    ["INTERNAL_ERROR", "failed to logout", "Could not sign out. Try again."],
+    ["INTERNAL_ERROR", "failed to delete account", "Could not delete your account. Try again."],
+    [
+      "INTERNAL_ERROR",
+      "failed to generate two-factor secret",
+      "Could not turn on two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to stage two-factor enrolment",
+      "Could not turn on two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to enable two-factor authentication",
+      "Could not turn on two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to disable two-factor authentication",
+      "Could not turn off two-factor authentication. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to issue recovery codes",
+      "Could not create new recovery codes. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "recovery failed — please try again",
+      "Account recovery failed. Please try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to issue the recovery kit",
+      "Could not create a recovery kit. Try again.",
+    ],
+    [
+      "INTERNAL_ERROR",
+      "failed to issue the recovery credential",
+      "Could not issue a recovery credential. Try again.",
+    ],
+    ["INTERNAL_ERROR", "internal error", "F"],
+  ])("maps the auth slice's %s %j to its own copy", (code, message, shown) => {
+    expect(
+      errorText(new ApiClientError(code === "RATE_LIMITED" ? 429 : 500, code, message), "F"),
+    ).toBe(shown);
+  });
+
+  it("keeps the server's text for a FORBIDDEN fault that is not a missing permission", () => {
+    expect(
+      errorText(
+        new ApiClientError(403, "FORBIDDEN", "forbidden: permission service unavailable"),
+        "F",
+      ),
+    ).toBe("Forbidden: permission service unavailable");
+    expect(
+      errorText(
+        new ApiClientError(403, "FORBIDDEN", "forbidden: missing MANAGE_MESSAGES permission"),
+        "F",
+      ),
+    ).toBe("You don't have permission to do that.");
+    expect(
+      errorText(new ApiClientError(403, "FORBIDDEN", "moderation permission required"), "F"),
+    ).toBe("You don't have permission to do that.");
+    expect(errorText(new ApiClientError(403, "FORBIDDEN", "owner role required"), "F")).toBe(
+      "You don't have permission to do that.",
+    );
+    expect(errorText(new ApiClientError(403, "FORBIDDEN", "access denied"), "F")).toBe(
+      "You don't have permission to do that.",
+    );
+  });
+
+  it("keeps the server's own message for an unmapped code, capitalising it", () => {
+    expect(errorText(new ApiClientError(400, "INVALID_INPUT", "name already exists"), "F")).toBe(
+      "Name already exists",
+    );
+    expect(errorText(new ApiClientError(400, "INVALID_INPUT", ""), "Fallback")).toBe("Fallback");
   });
 });

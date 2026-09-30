@@ -562,7 +562,7 @@ func docSections(doc string) map[string]string {
 // reason: config.Config's tags are the only enumeration of the keys, and
 // config.defaults() is unexported.
 func configKeys(t reflect.Type, prefix string) []string {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
@@ -579,7 +579,7 @@ func configKeys(t reflect.Type, prefix string) []string {
 			key = prefix + "." + tag
 		}
 		ft := f.Type
-		for ft.Kind() == reflect.Ptr {
+		for ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct {

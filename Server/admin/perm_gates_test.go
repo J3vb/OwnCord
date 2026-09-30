@@ -168,6 +168,9 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 		{http.MethodPatch, "/settings"},
 		{http.MethodGet, "/config"},
 		{http.MethodPost, "/logs/ticket"},
+		{http.MethodGet, "/logs/level"},
+		{http.MethodPatch, "/logs/level"},
+		{http.MethodDelete, "/logs/level"},
 	} {
 		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {
 			t.Errorf("%s %s = %d, want 403; body: %s", tc.method, tc.path, w.Code, w.Body.String())
@@ -240,6 +243,8 @@ var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
 	{Method: http.MethodGet, Pattern: "/backups"},
 	{Method: http.MethodDelete, Pattern: "/backups/{name}"},
 	{Method: http.MethodPost, Pattern: "/backups/{name}/restore"},
+	{Method: http.MethodGet, Pattern: "/archive"},
+	{Method: http.MethodPost, Pattern: "/archive/link"},
 	{Method: http.MethodGet, Pattern: "/updates"},
 	{Method: http.MethodPost, Pattern: "/updates/apply"},
 }

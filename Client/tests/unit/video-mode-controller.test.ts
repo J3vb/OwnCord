@@ -4,12 +4,17 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mocks
 // ---------------------------------------------------------------------------
 
-const { mockVoiceStoreGetState, mockGetLocalCameraStream, mockGetLocalScreenshareStream } =
-  vi.hoisted(() => ({
-    mockVoiceStoreGetState: vi.fn(),
-    mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
-    mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
-  }));
+const {
+  mockVoiceStoreGetState,
+  mockGetLocalCameraStream,
+  mockGetLocalScreenshareStream,
+  mockHasLocalScreenshareAudio,
+} = vi.hoisted(() => ({
+  mockVoiceStoreGetState: vi.fn(),
+  mockGetLocalCameraStream: vi.fn((): MediaStream | null => null),
+  mockGetLocalScreenshareStream: vi.fn((): MediaStream | null => null),
+  mockHasLocalScreenshareAudio: vi.fn(() => false),
+}));
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
@@ -18,6 +23,7 @@ vi.mock("@stores/voice.store", () => ({
 vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: mockGetLocalCameraStream,
   getLocalScreenshareStream: mockGetLocalScreenshareStream,
+  hasLocalScreenshareAudio: mockHasLocalScreenshareAudio,
   setScreenshareAudioVolume: vi.fn(),
 }));
 
@@ -320,6 +326,7 @@ describe("createVideoModeController", () => {
       isSelf: true,
       audioUserId: 1,
       isScreenshare: true,
+      hasAudio: false,
     });
   });
 
@@ -348,6 +355,7 @@ describe("createVideoModeController", () => {
       isSelf: true,
       audioUserId: 1,
       isScreenshare: true,
+      hasAudio: false,
     });
 
     // Second call: screenshare off — tile removed
@@ -417,6 +425,7 @@ describe("createVideoModeController", () => {
   it("checkVideoMode passes isSelf:true and isScreenshare:true for local screenshare tile", () => {
     const fakeStream = {} as MediaStream;
     mockGetLocalScreenshareStream.mockReturnValue(fakeStream);
+    mockHasLocalScreenshareAudio.mockReturnValueOnce(true);
     const users = new Map([[5, { userId: 5, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -439,7 +448,12 @@ describe("createVideoModeController", () => {
       1_000_005,
       "me (Screen)",
       fakeStream,
-      expect.objectContaining({ isSelf: true, audioUserId: 5, isScreenshare: true }),
+      expect.objectContaining({
+        isSelf: true,
+        audioUserId: 5,
+        isScreenshare: true,
+        hasAudio: true,
+      }),
     );
   });
 
@@ -756,6 +770,173 @@ describe("createVideoModeController", () => {
       // Without this, the grid reopens later still pinned in focus mode on
       // tile 42 even though the controller's own focusedTileId was reset.
       expect(vg.setFocusedTile).toHaveBeenCalledWith(null);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The DM call panel as the video surface
+  // -------------------------------------------------------------------------
+
+  describe("DM call panel host", () => {
+    const DM = 50;
+
+    function mountedSlots() {
+      const slots = makeSlots();
+      const chatArea = document.createElement("div");
+      chatArea.append(slots.messagesSlot, slots.typingSlot, slots.inputSlot, slots.videoGridSlot);
+      return { slots, chatArea };
+    }
+
+    function panelHost(opts: { owns?: boolean; element?: HTMLElement | null } = {}) {
+      const state = {
+        owns: opts.owns ?? true,
+        element: opts.element === undefined ? document.createElement("div") : opts.element,
+      };
+      const host = {
+        ownsCall: vi.fn((channelId: number) => state.owns && channelId === DM),
+        element: vi.fn(() => state.element),
+        setActive: vi.fn(),
+      };
+      return { host, state };
+    }
+
+    function inDmCall(
+      extra: Partial<VoiceStateStub> = {},
+      remote = { camera: false, screenshare: false },
+    ) {
+      const users = new Map([
+        [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
+        [2, { userId: 2, ...remote, username: "otto" }],
+      ]);
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({ currentChannelId: DM, voiceUsers: new Map([[DM, users]]), ...extra }),
+      );
+    }
+
+    it("shows a remote stream in the panel on its own, with the chat still visible", () => {
+      inDmCall({}, { camera: false, screenshare: true });
+      const { slots, chatArea } = mountedSlots();
+      const { host, state } = panelHost();
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+
+      ctrl.checkVideoMode();
+
+      expect(state.element!.contains(slots.videoGridSlot)).toBe(true);
+      expect(chatArea.contains(slots.videoGridSlot)).toBe(false);
+      expect(slots.videoGridSlot.style.display).not.toBe("none");
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(slots.inputSlot.style.display).toBe("");
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(host.setActive).toHaveBeenLastCalledWith(true);
+    });
+
+    it("puts your own camera in the panel instead of over the chat", () => {
+      inDmCall({ localCamera: true });
+      mockGetLocalCameraStream.mockReturnValue({} as MediaStream);
+      const { slots } = mountedSlots();
+      const { host, state } = panelHost();
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+
+      ctrl.checkVideoMode();
+
+      expect(state.element!.contains(slots.videoGridSlot)).toBe(true);
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(vg.addStream).toHaveBeenCalledWith(1, expect.any(String), expect.anything(), {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: false,
+      });
+    });
+
+    it("never takes over the chat while the panel is collapsed, but tells it video is on", () => {
+      inDmCall({ localCamera: true });
+      const { slots, chatArea } = mountedSlots();
+      const { host } = panelHost({ element: null });
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+
+      ctrl.checkVideoMode();
+
+      expect(chatArea.contains(slots.videoGridSlot)).toBe(true);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+      expect(slots.messagesSlot.style.display).toBe("");
+      expect(ctrl.isVideoMode()).toBe(false);
+      expect(host.setActive).toHaveBeenLastCalledWith(true);
+    });
+
+    it("draws no grid in the panel when nobody is streaming", () => {
+      inDmCall();
+      const { slots, chatArea } = mountedSlots();
+      const { host } = panelHost();
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+
+      ctrl.checkVideoMode();
+
+      expect(chatArea.contains(slots.videoGridSlot)).toBe(true);
+      expect(host.setActive).toHaveBeenLastCalledWith(false);
+    });
+
+    it("hands the grid back to the chat column once the DM is not on screen", () => {
+      inDmCall({}, { camera: false, screenshare: true });
+      const { slots, chatArea } = mountedSlots();
+      const { host, state } = panelHost();
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+      ctrl.checkVideoMode();
+      expect(state.element!.contains(slots.videoGridSlot)).toBe(true);
+
+      state.owns = false;
+      ctrl.checkVideoMode();
+
+      expect(chatArea.lastElementChild).toBe(slots.videoGridSlot);
+      expect(slots.videoGridSlot.style.display).toBe("none");
+      expect(host.setActive).toHaveBeenLastCalledWith(false);
+      // A remote-only stream outside the DM is back to BUG-105: no auto-open.
+      expect(ctrl.isVideoMode()).toBe(false);
+    });
+
+    it("hands the grid back when the call ends", () => {
+      inDmCall({}, { camera: true, screenshare: false });
+      const { slots, chatArea } = mountedSlots();
+      const { host } = panelHost();
+      const ctrl = createVideoModeController({
+        slots,
+        videoGrid: makeVideoGrid(),
+        getCurrentUserId: () => 1,
+        panelHost: () => host,
+      });
+      ctrl.checkVideoMode();
+
+      mockVoiceStoreGetState.mockReturnValue(makeVoiceState());
+      ctrl.checkVideoMode();
+
+      expect(chatArea.contains(slots.videoGridSlot)).toBe(true);
+      expect(host.setActive).toHaveBeenLastCalledWith(false);
     });
   });
 });

@@ -73,20 +73,40 @@ through OwnCord's own `:8443/livekit` proxy (see
 LiveKit's API endpoint unnecessarily.
 
 **This is where port forwarding actually goes wrong.** Chat needs one TCP port
-and is easy to get right. Voice needs a 10,000-port UDP range, and forgetting it
+and is easy to get right. Voice needs a UDP port for media, and forgetting it
 produces the most confusing failure in the whole system: joining a voice channel
 **succeeds**, because signalling travels over OwnCord's own port — and then
 nobody hears anything, because the media never arrives.
 
+By default that is the 10,000-port range `50000-60000/UDP`. If your firewall or
+router makes a range awkward, set **`voice.udp_port`** in `config.yaml` (for
+example `7882`) to carry all media on a **single** UDP port: OwnCord writes
+`rtc.udp_port: 7882` into the generated `livekit.yaml`, and you forward just
+that one port. On the Docker stack, edit `livekit.yaml` directly — replace
+`port_range_start`/`port_range_end` with `udp_port: 7882` and publish
+`7882/udp` in `docker-compose.yml` in place of the range, then set
+`OWNCORD_VOICE_UDP_PORT: "7882"` on the `owncord` service (the commented line in
+its `environment:` block) so the admin connectivity report names that port
+rather than the range. LiveKit ignores the range once `udp_port` is set, so use
+one form or the other, never both.
+
 Two things are needed together:
 
-1. Forward `50000-60000/UDP` (and `7881/TCP`) to the server.
-2. Set `voice.node_ip` to your **public** address. It is the address LiveKit
-   advertises in its ICE candidates, so a private value hands remote clients
-   something they cannot route to. The server warns at start-up if it is not a
-   public address.
+1. Forward the media port(s) — `50000-60000/UDP` by default, or your single
+   `udp_port` — plus `7881/TCP` to the server.
+2. Give LiveKit a routable media address. With `voice.node_ip` **left empty**,
+   OwnCord's generated `livekit.yaml` sets `use_external_ip: true` and LiveKit
+   detects the public address itself when it starts — the right choice on a
+   dynamic IP (see [Dynamic public IP](#dynamic-public-ip)). On the Docker
+   stack LiveKit reads your own `livekit.yaml` instead: keep the example's
+   `rtc.use_external_ip: true` there. Set `voice.node_ip` (Docker: replace
+   `rtc.use_external_ip` with `rtc.node_ip`, since LiveKit overwrites a
+   `node_ip` while detection is on) only when auto-detection cannot work (a tailnet-only host, or a NAT where
+   LiveKit's lookup is blocked): it is the address LiveKit advertises in its
+   ICE candidates, so a private value hands remote clients something they
+   cannot route to. The server warns at start-up if it is not a public address.
 
-A reverse proxy cannot carry the UDP range. No HTTP proxy can.
+A reverse proxy cannot carry UDP media. No HTTP proxy can.
 
 ## Router Steps
 
@@ -95,7 +115,8 @@ A reverse proxy cannot carry the UDP range. No HTTP proxy can.
    firewall rules).
 3. Set a static/reserved LAN IP for your server machine.
 4. Add a forwarding rule for `8443/TCP` to that LAN IP.
-5. If using voice/video, add `7881/TCP` and `50000-60000/UDP`.
+5. If using voice/video, add `7881/TCP` and `50000-60000/UDP` (or your single
+   `voice.udp_port` instead of the range).
 6. Save and apply rules.
 
 ## Connect Address to Share
@@ -152,12 +173,27 @@ address. The router will not route a packet back into the network it came from.
 ### Dynamic public IP
 
 Most residential connections get a new public address periodically — after a
-reboot, an outage, or on the ISP's own schedule. Every client that saved the old
-address stops connecting, all at once, for no visible reason.
+reboot, an outage, or on the ISP's own schedule. Two things can break at once:
+the address clients type, and the media address LiveKit advertises.
 
-- **Fix:** use dynamic DNS and share a hostname rather than an IP literal.
+- **Clients:** use dynamic DNS and share a hostname rather than an IP literal.
+- **Media (`voice.node_ip`):** leave it **empty** on a dynamic address. OwnCord's
+  auto-generated `livekit.yaml` then sets `use_external_ip: true`, so LiveKit detects
+  its public address itself — but only when it starts. After an IP change,
+  restart the OwnCord server so LiveKit picks up the new address; until then
+  it keeps advertising the old one. A pinned `voice.node_ip` goes stale
+  silently when the address changes: the call connects — signalling still works
+  — and then nobody hears anything, because the ICE candidate names an address
+  no longer yours. If you did pin it, clear it (or update it) after an IP
+  change and restart the server so `livekit.yaml` is rewritten.
+- **Media on the Docker stack:** LiveKit runs from your own `livekit.yaml` and
+  never reads `voice.node_ip`. Use `rtc.use_external_ip: true` there (the
+  example's default) rather than a pinned `rtc.node_ip`, then
+  `docker compose restart livekit` after an IP change.
 - **The server cannot detect this for you.** It never learns its public address,
-  so it cannot notice the address changing.
+  so it cannot notice the address changing and will not restart LiveKit for
+  you. The restart above is what makes an address change recoverable without
+  editing any config.
 
 ### Firewalls
 
@@ -220,7 +256,8 @@ operator switched on, an admin action, or the LiveKit server's own behaviour.
 - Confirm you are not behind CGNAT — compare the router WAN address with a
   what-is-my-IP page.
 - Test from a different network (mobile hotspot), never from the same LAN.
-- For voice, confirm `50000-60000/UDP` is forwarded **and** `voice.node_ip` is
+- For voice, confirm `50000-60000/UDP` (or your single `voice.udp_port`) is
+  forwarded **and** `voice.node_ip` is
   your public address. "Joins but no audio" is almost always one of these two.
 
 ## See Also

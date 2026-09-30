@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -519,8 +520,9 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 }
 
 // bumpVisibilityWatermark ratchets visibilityChangeSeq up to the current seq,
-// never down. All three writers (RefreshChannelVisibility,
-// revokeUnreadableChannels, DMChannelOpenEvent in emit.go) must go through
+// never down. Every writer (RefreshChannelVisibility,
+// revokeUnreadableChannels, DMChannelOpenEvent in emit.go, and SRV-03's
+// content-shed paths in hub_stats.go) must go through
 // this instead of a plain Store: a plain Store(Load(&h.seq)) lets a writer
 // that read an older h.seq — e.g. one that spent time in a per-topic DB loop
 // — finish and overwrite a concurrently stored higher watermark with its
@@ -564,6 +566,8 @@ func (h *Hub) bumpVisibilityWatermark() {
 // seqMu — nothing in the hub's own broadcast/purge/reconnect paths does.
 func (h *Hub) MarkVisibilityChanged() {
 	h.seqMu.Lock()
+	start := time.Now()
 	defer h.seqMu.Unlock()
+	defer h.observeSeqMuHold(start)
 	h.bumpVisibilityWatermark()
 }

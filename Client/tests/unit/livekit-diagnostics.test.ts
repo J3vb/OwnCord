@@ -355,7 +355,10 @@ describe("buildSessionDebugInfo", () => {
   it("returns the minimal shape when there is no room", () => {
     const got = buildSessionDebugInfo({ ...baseDeps, room: null });
 
-    expect(got).toEqual({ hasRoom: false, hasRNNoiseProcessor: false, currentChannelId: 12 });
+    expect(got).toMatchObject({ hasRoom: false, hasRNNoiseProcessor: false, currentChannelId: 12 });
+    // SRE-M2: the join timeline rides a room-less read too, which is exactly
+    // the failed-join case a report needs.
+    expect(got.voiceJoin).toMatchObject({ lastJoins: expect.any(Array) });
   });
 
   it("summarises an active room", () => {
@@ -385,6 +388,7 @@ describe("buildSessionDebugInfo", () => {
     expect(got.vadGated).toBe(false);
     expect(got.currentInputGain).toBe(1);
     expect(got.hasRNNoiseProcessor).toBe(false);
+    expect(got.voiceJoin).toMatchObject({ lastJoins: expect.any(Array) });
   });
 
   it("reports hasRNNoiseProcessor when the mic track carries a processor", () => {

@@ -34,6 +34,30 @@ describe("noise-suppression (real AudioContext)", () => {
     vi.restoreAllMocks();
   });
 
+  it("loads the AudioWorklet pipeline with the shipped minified RNNoise WASM", async () => {
+    const audioContext = new AudioContext();
+    const scriptProcessorSpy = vi.spyOn(audioContext, "createScriptProcessor");
+    const inputTrack = audioContext.createMediaStreamDestination().stream.getAudioTracks()[0]!;
+
+    try {
+      const processor = createRNNoiseProcessor();
+      await processor.init({
+        kind: Track.Kind.Audio,
+        track: inputTrack,
+        audioContext,
+      });
+
+      // The ScriptProcessor fallback is the only thing that calls this; the
+      // worklet path resolving proves the minified export mapping worked.
+      expect(scriptProcessorSpy).not.toHaveBeenCalled();
+      expect(processor.processedTrack).toBeInstanceOf(MediaStreamTrack);
+
+      await processor.destroy();
+    } finally {
+      await audioContext.close();
+    }
+  });
+
   it("falls back to a ScriptProcessorNode pipeline when AudioWorklet is unsupported", async () => {
     const originalAudioWorkletNode = window.AudioWorkletNode;
     // @ts-expect-error -- deleting a required DOM global to force the

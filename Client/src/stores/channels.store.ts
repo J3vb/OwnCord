@@ -282,20 +282,31 @@ export function removeChannel(id: number): void {
  * Set the active channel by id (or null to deselect). Clears the unread and
  * mention counts for the activated channel — the server's channel_focus does
  * the same server-side, so the badges must not survive the visit locally.
+ *
+ * `clearUnread: false` selects without zeroing the badge: UX-8's ready-time
+ * auto-select (and the last-channel restore) is not the user opening the
+ * channel, so a channel they never looked at keeps its unread count until it
+ * is actually mounted. The `unreadOnOpen` snapshot is taken either way, so the
+ * NEW divider still lands above the first unseen message on the real visit.
  */
-export function setActiveChannel(id: number | null): void {
+export function setActiveChannel(id: number | null, options?: { clearUnread?: boolean }): void {
   // Snapshot before clearing — this is the last moment the reader's position is
   // knowable (see unreadOnOpen). Done outside setState so the updater stays a
   // pure function of previous state.
   if (id !== null) {
     unreadOnOpen.set(id, channelsStore.getState().channels.get(id)?.unreadCount ?? 0);
   }
+  const clear = options?.clearUnread ?? true;
   channelsStore.setState((prev) => {
     if (id === null) {
       return { ...prev, activeChannelId: null };
     }
     const existing = prev.channels.get(id);
-    if (existing === undefined || (existing.unreadCount === 0 && existing.mentionCount === 0)) {
+    if (
+      !clear ||
+      existing === undefined ||
+      (existing.unreadCount === 0 && existing.mentionCount === 0)
+    ) {
       return { ...prev, activeChannelId: id };
     }
     const updated: Channel = { ...existing, unreadCount: 0, mentionCount: 0 };

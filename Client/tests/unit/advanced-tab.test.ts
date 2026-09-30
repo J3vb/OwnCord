@@ -131,6 +131,13 @@ vi.stubGlobal("indexedDB", {
 });
 
 import { buildAdvancedTab } from "@components/settings/AdvancedTab";
+import { setChannelMutesHost } from "@lib/channel-mutes";
+import {
+  getGlobalNotificationLevel,
+  getServerNotificationLevel,
+  setServerNotificationLevel,
+  settleNotificationLevelDefault,
+} from "@lib/notificationLevel";
 
 describe("AdvancedTab — Clear All Cache", () => {
   let container: HTMLDivElement;
@@ -243,6 +250,24 @@ describe("AdvancedTab — Clear All Cache", () => {
     expect(localStorage.getItem("owncord:theme:active")).toBe("custom-sunrise");
     expect(localStorage.getItem("owncord:theme:custom:custom-sunrise")).not.toBeNull();
     expect(localStorage.getItem("owncord:settings:accentColor")).toBeNull();
+  });
+
+  it("keeps the notification level across Clear All so the next launch does not reset it to All", async () => {
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+    setChannelMutesHost("a.example");
+    setServerNotificationLevel("nothing");
+    localStorage.setItem("owncord:theme:active", "neon-glow");
+
+    const btn = getClearAllBtn();
+    btn.click();
+    btn.click();
+    await flush();
+
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+    expect(getServerNotificationLevel()).toBe("nothing");
+    setChannelMutesHost(null);
   });
 
   it("renders two-step confirmation for Clear All", () => {
@@ -484,6 +509,45 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(titleTexts).toContain("Storage & Cache");
   });
 
+  it("shows no Debug heading or separator in a production build", () => {
+    vi.stubEnv("DEV", false);
+    try {
+      const section = buildAdvancedTab(ac.signal);
+      container.appendChild(section);
+
+      const titleTexts = Array.from(container.querySelectorAll(".settings-section-title")).map(
+        (t) => t.textContent,
+      );
+      expect(titleTexts).toEqual(["Storage & Cache"]);
+      expect(container.querySelectorAll(".settings-separator")).toHaveLength(1);
+      expect(container.textContent).not.toContain("Open DevTools");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("makes the cache actions secondary and marks clear-and-restart destructive", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const byText = (text: string): HTMLButtonElement =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>("button.ac-btn")).find(
+        (b) => b.textContent === text,
+      )!;
+    const clears = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button.ac-btn"),
+    ).filter((b) => b.textContent === "Clear");
+    expect(clears).toHaveLength(2);
+    for (const b of clears) {
+      expect(b.classList.contains("secondary")).toBe(true);
+      expect(b.classList.contains("destructive")).toBe(false);
+    }
+    const restart = byText("Clear & Restart");
+    expect(restart.classList.contains("secondary")).toBe(true);
+    expect(restart.classList.contains("destructive")).toBe(true);
+    expect(restart.classList.contains("ac-btn-danger")).toBe(false);
+  });
+
   it("renders separators between sections", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);
@@ -601,6 +665,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     await vi.waitFor(() => {
       expect(btn.textContent).toBe("Failed");
     });
+    expect(btn.classList.contains("ac-btn-danger")).toBe(false);
   });
 
   it("deletes only .jsonl files when clearing log files, skips directories", async () => {

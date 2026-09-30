@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/internal/app"
 	"github.com/J3vb/OwnCord/Server/logctx"
 )
@@ -32,6 +33,9 @@ Usage:
   chatserver healthcheck     Probe the running server's /health and exit 0/1.
   chatserver token <cmd>     Mint, list or revoke API tokens (run
                              "chatserver token" for its own usage).
+  chatserver restore <file>  Put a database backup back on a server that will
+                             not boot (run "chatserver restore" for its own
+                             usage; --force to replace the live database).
 `
 
 // infoOutput returns the text `args[0]` asks for and true when it is an
@@ -70,6 +74,13 @@ func main() {
 	// handled before any server/logging setup so it stays quiet and standalone.
 	if len(os.Args) > 1 && os.Args[1] == "token" {
 		os.Exit(runTokenCLI(os.Args[2:]))
+	}
+	// `server restore <file>` is the offline counterpart to the admin restore
+	// endpoint (B11-7): put a database backup back on a server that will not
+	// boot. Handled before logging setup so it stays quiet and standalone, and
+	// it takes the database's process lock so a running server stops it.
+	if len(os.Args) > 1 && os.Args[1] == "restore" {
+		os.Exit(runRestoreCLI(config.DefaultPath, os.Args[2:]))
 	}
 
 	// Create ring buffer for admin log viewer, then build a multi-handler
@@ -125,11 +136,14 @@ func main() {
 // and run until it stops and has closed every stage it started. Split out of
 // main() only so the restart handoff above runs on every return path.
 func runServer(log *slog.Logger, logBuf *admin.RingBuffer, levelVar *slog.LevelVar, rc *app.RestartCoordinator) error {
-	cfg, err := app.LoadConfig(log, levelVar, rc)
+	cfg, baseLevel, err := app.LoadConfig(log, levelVar, rc)
 	if err != nil {
 		return err
 	}
-	a, err := app.New(cfg, app.Deps{Version: version, Log: log, LogBuf: logBuf, Restart: rc})
+	a, err := app.New(cfg, app.Deps{
+		Version: version, Log: log, LogBuf: logBuf, Restart: rc,
+		LogLevelVar: levelVar, LogBaseLevel: baseLevel,
+	})
 	if err != nil {
 		return err
 	}

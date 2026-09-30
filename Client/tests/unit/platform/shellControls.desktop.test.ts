@@ -51,6 +51,7 @@ describeDevToolsSuite(async () => {
 
 describeAppProcessSuite(async () => {
   relaunch.mockReset().mockResolvedValue(undefined);
+  invoke.mockReset().mockResolvedValue(undefined);
   const desktopBinding: AppProcess = (await import("../../../src/platform/desktop/appProcess"))
     .appProcess;
   return {
@@ -58,8 +59,10 @@ describeAppProcessSuite(async () => {
     native: {
       failWith(error: unknown) {
         relaunch.mockRejectedValue(error);
+        invoke.mockRejectedValue(error);
       },
       relaunches: () => relaunch.mock.calls.length,
+      readyReports: () => invoke.mock.calls.filter((call) => call[0] === "frontend_ready").length,
     },
   };
 });

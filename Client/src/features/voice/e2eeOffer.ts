@@ -9,6 +9,7 @@
 import type { WsClient } from "../../lib/ws";
 import { wrapRoomKey, unwrapRoomKey } from "../../lib/e2eeCrypto";
 import { createLogger } from "../../lib/logger";
+import { markJoinMilestone } from "../../lib/voiceJoinTrace";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.
 const log = createLogger("livekitE2EE");
@@ -157,6 +158,8 @@ export class E2EEOffer {
         return;
       }
 
+      markJoinMilestone("e2ee key holder offer received");
+
       // Capture epoch before async work — if a key rotation occurs during
       // unwrap, the epoch will have advanced and we discard this stale result.
       const epochBefore = this._e2eeEpoch;
@@ -209,6 +212,7 @@ export class E2EEOffer {
       this._roomKey = unwrapped;
       if (!(await this.applyRoomKey(unwrapped, isCurrent))) return;
       log.info("E2EE: room key received and applied", { fromUserId, epoch });
+      markJoinMilestone("e2ee room key applied");
 
       // Re-check after the setKey await too: the guard above only covers the
       // window up to unwrap, not this call. A teardown-and-rejoin-as-holder

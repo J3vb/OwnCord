@@ -5,6 +5,8 @@
 
 import { createStore } from "@lib/store";
 import { channelsStore, removeChannel } from "@stores/channels.store";
+import type { Channel } from "@stores/channels.store";
+import type { DmChannelPayload } from "@lib/types";
 import { connectText } from "../i18n/connect";
 
 export interface DmUser {
@@ -96,6 +98,88 @@ export function removeDmChannel(channelId: number): void {
   dmStore.setState((prev) => ({
     channels: prev.channels.filter((c) => c.channelId !== channelId),
   }));
+}
+
+/**
+ * Ensure a DM channel exists in channelsStore so ChannelController can switch
+ * to it. Moved down from `pages/main-page/SidebarDmHelpers` (ARCH-06): it is
+ * the only place the DM → channelsStore mirror row is synthesized, and every
+ * caller — the sidebar, `lib/channel-navigation`, the DM and message-request
+ * handlers — needs the same behaviour, so it lives with the store it writes.
+ */
+export function addDmToChannelsStore(dmChannel: DmChannel): void {
+  const existing = channelsStore.getState().channels.get(dmChannel.channelId);
+
+  // Re-synthesise when the stored name has gone stale as well as when it is
+  // empty: a group rename or a member leaving changes what the DM is called,
+  // and the channels-store copy is what the chat header reads.
+  if (existing !== undefined && existing.name === dmDisplayName(dmChannel)) return;
+
+  const newChannel: Channel = {
+    id: dmChannel.channelId,
+    name: dmDisplayName(dmChannel),
+    type: "dm",
+    category: null,
+    position: 0,
+    unreadCount: dmChannel.unreadCount,
+    // The DM's own mention count, not a hardcoded 0: the ready payload now
+    // carries it, so a DM mention badge survives a reconnect.
+    mentionCount: dmChannel.mentionCount,
+    lastMessageId: dmChannel.lastMessageId,
+    // Channel-level permission is always true for DMs; block state is layered on
+    // top by the composer via blocks.store (see ChannelController), not canSend.
+    canSend: true,
+    slowMode: 0,
+    topic: "",
+    // A DM is never age-gated and has no voice capacity: the flags exist on
+    // guild channels, and a DM row is synthesised here rather than coming from
+    // the server's channel list.
+    nsfw: false,
+    voiceMaxUsers: 0,
+    voiceMaxVideo: 0,
+  };
+  channelsStore.setState((prev) => {
+    const next = new Map(prev.channels);
+    next.set(newChannel.id, newChannel);
+    return { ...prev, channels: next };
+  });
+}
+
+/**
+ * Map a server DM summary (the shape `POST /dms/group`, `PATCH /dms/{id}`,
+ * `GET /dms` and `dm_channel_open` all share) into the store's DmChannel.
+ *
+ * The dispatcher has its own copy of this for the WS path; this one exists so
+ * the REST responses land in exactly the same shape without importing the
+ * dispatcher's internals into the sidebar. Moved down from SidebarDmHelpers
+ * (ARCH-06) so feature and lib callers can share it without a page import.
+ */
+export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
+  const participants: DmUser[] = (p.recipients ?? [p.recipient]).map((u) => ({
+    id: u.id,
+    username: u.username,
+    avatar: u.avatar,
+    status: u.status,
+    displayName: u.display_name ?? "",
+  }));
+  return {
+    channelId: p.channel_id,
+    recipient: participants[0] ?? {
+      id: p.recipient.id,
+      username: p.recipient.username,
+      avatar: p.recipient.avatar,
+      status: p.recipient.status,
+      displayName: p.recipient.display_name ?? "",
+    },
+    participants,
+    name: p.name ?? "",
+    isGroup: p.is_group ?? false,
+    lastMessageId: p.last_message_id,
+    lastMessage: p.last_message,
+    lastMessageAt: p.last_message_at,
+    unreadCount: p.unread_count,
+    mentionCount: p.mention_count ?? 0,
+  };
 }
 
 /**
@@ -246,8 +330,8 @@ export function dmDisplayName(dm: DmChannel): string {
  * showing stale status/name for the rest of the session.
  */
 export function updateDmParticipant(userId: number, patch: Partial<DmUser>): void {
+  const patchUser = (u: DmUser): DmUser => (u.id === userId ? { ...u, ...patch } : u);
   dmStore.setState((prev) => {
-    const patchUser = (u: DmUser): DmUser => (u.id === userId ? { ...u, ...patch } : u);
     let changed = false;
     const channels = prev.channels.map((c) => {
       if (c.recipient.id !== userId && c.participants.every((p) => p.id !== userId)) {

@@ -51,7 +51,7 @@ func handleVoiceLeaveV2(_ context.Context, cmd Command, _ ClientInfo, deps any) 
 		// handleVoiceLeave whenever LeaveVoice is set, and handleVoiceLeave is
 		// a documented no-op when the client isn't actually in voice, so a
 		// burst of spurious refusals costs nothing.
-		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"}, LeaveVoice: true}
+		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice leave attempts"}, LeaveVoice: true, LeaveVoiceReason: voiceLeaveReasonClient}
 	}
-	return Result{LeaveVoice: true}
+	return Result{LeaveVoice: true, LeaveVoiceReason: voiceLeaveReasonClient}
 }

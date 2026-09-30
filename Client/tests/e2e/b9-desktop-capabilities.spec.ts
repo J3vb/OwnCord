@@ -197,7 +197,10 @@ test.describe("B9-25 notification limitations are actionable", () => {
     await switchSettingsTab(page, "Notifications");
 
     const row = page.locator("[data-testid='notification-permission-row']");
-    await expect(row).toContainText("OwnCord can't read your system notification setting");
+    await expect(row.locator("[data-testid='notification-permission-status']")).toHaveText(
+      "Unknown",
+    );
+    await expect(row).toContainText("check your system notification settings");
     await expect(row).not.toContainText("Your system allows OwnCord");
     await expect(page.locator("[data-testid='notification-permission-allow']")).toBeHidden();
   });

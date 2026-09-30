@@ -10,7 +10,7 @@
 // analyser that's independent of LiveKit's track lifecycle.
 
 import { Track, type Room, type LocalAudioTrack } from "livekit-client";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { createRNNoiseProcessor } from "@lib/noise-suppression";
 import { voiceText } from "../i18n/voice";
@@ -69,6 +69,8 @@ export class AudioPipeline {
   private vadGated = false;
   /** The user's input volume gain (0-2.0). VAD multiplies this by 0 or 1. */
   private currentInputGain = 1.0;
+  /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
+  private voiceSensitivity: number | null = null;
 
   setRoom(room: Room | null): void {
     this.room = room;
@@ -101,11 +103,16 @@ export class AudioPipeline {
 
   // --- RNNoise processor (LiveKit TrackProcessor API) ---
 
-  /** Attach RNNoise processor to the local mic track. Safe to call if already attached. */
+  /**
+   * Attach RNNoise processor to the local mic track. Safe to call if already
+   * attached. A no-op while the track is muted (its capture is stopped); the
+   * unmute path in MediaControl.applyMicMuteState attaches it instead.
+   */
   async applyNoiseSuppressor(): Promise<void> {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
+    if (micPub.track.isMuted) return;
     if (micPub.track.getProcessor() !== undefined) return;
     const processor = createRNNoiseProcessor();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
@@ -138,6 +145,11 @@ export class AudioPipeline {
     if (this.room === null) return;
     const micPub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone);
     if (micPub?.track === undefined) return;
+    // OC-0474: the pipeline only exists when unmuted. Muting stops the capture
+    // track, so building here (a device switch, a permission retry, a
+    // reconnect while muted) would run a context and VAD over an ended track
+    // until the next unmute, which rebuilds it on the fresh track anyway.
+    if (micPub.track.isMuted) return;
 
     try {
       // Source from the NS processor's output when one is attached, not the
@@ -280,6 +292,8 @@ export class AudioPipeline {
    */
   setVoiceSensitivity(sensitivity: number): void {
     const clamped = Math.max(0, Math.min(100, sensitivity));
+    if (clamped === this.voiceSensitivity) return;
+    this.voiceSensitivity = clamped;
     savePref("voiceSensitivity", clamped);
     // Restart VAD polling with the new threshold (pipeline stays intact)
     this.stopVadPolling();

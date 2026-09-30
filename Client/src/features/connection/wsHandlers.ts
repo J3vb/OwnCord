@@ -8,12 +8,14 @@ import {
   setSessionReplaced,
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
-import { voiceStore, leaveVoiceChannel } from "../../stores/voice.store";
-import { PROTOCOL_EPOCH } from "../../lib/protocolTypes";
+import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
+import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
+import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";
 import { connectText } from "../../i18n/connect";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
+import type { ConnectionState } from "../../lib/ws";
 
 export function handleAuthOk(
   ws: DispatchWs,
@@ -62,33 +64,103 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
-export function handleServerRestart(payload: Payload<"server_restart">): void {
+const REJOIN_REASONS: ReadonlySet<ServerRestartReasonValue> = new Set([
+  ServerRestartReason.UPDATE,
+  ServerRestartReason.BACKUP_RESTORE,
+  ServerRestartReason.SETUP,
+]);
+
+/** A ready later than this after the notice does not rejoin: the call is over. */
+const REJOIN_WINDOW_MS = 10 * 60_000;
+
+export function handleServerRestart(
+  clock: ReconnectClock,
+  payload: Payload<"server_restart">,
+): void {
   log.warn("Server restarting", {
     reason: payload.reason,
     delaySeconds: payload.delay_seconds,
   });
-  if (payload.reason === "shutdown") {
-    // GracefulStop broadcast: the server is going down, not briefly
-    // restarting in place. Kick back to the login screen instead of
-    // spinning the reconnect loop against a dead host. clearAuth also
-    // leaves voice — stopping any live camera/screenshare tracks and
-    // resetting their toggles to off. "server_shutdown" keeps the saved
-    // credential (the token is still valid), so auto-login can resume
-    // when the server comes back.
-    setTransientError(connectText("session.serverShutdown"));
-    clearAuth("server_shutdown");
-    return;
-  }
-  setTransientError(
-    connectText("session.serverRestarting", {
-      reason: payload.reason ?? connectText("session.restartReasonDefault"),
-    }),
-  );
+  // Every announced restart keeps the session (Q4): the token stays valid,
+  // ws.ts reconnects on its own once the socket drops and resumes into the
+  // same channel, and MainPage's banner counts down. A zero delay
+  // (update_aborted) withdraws the announcement.
+  clock.restartAnnounced = payload.delay_seconds > 0;
+  // RT-12: mark whether the coming drop may put us back in our call. The hub
+  // wipes voice_states on boot, so the resume cannot restore the membership
+  // the way it restores chat; the drop records the channel and a later ready
+  // sends one voice_join. A shutdown (a stop from outside the server) may last
+  // hours, so it never allows a rejoin.
+  clock.voiceRejoinNoticeAt =
+    clock.restartAnnounced && REJOIN_REASONS.has(payload.reason) ? Date.now() : null;
 }
 
 /**
- * The `BANNED` and `SESSION_REPLACED` branches of `error`. Returns true when
- * the frame was one of them and the error chain must stop.
+ * The socket's state changed. When it drops while a restart is announced, the
+ * server is really going away and its voice state (and a managed LiveKit)
+ * goes with the process, so end the call. Keyed on the drop rather than the
+ * notice: the notice names the restart's intent, and an announced update can
+ * still be aborted before anything drops.
+ */
+export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState): void {
+  if (!clock.restartAnnounced || (state !== "reconnecting" && state !== "disconnected")) return;
+  clock.restartAnnounced = false;
+  // RT-12: record the call we are in now, before leaveVoiceChannel clears it,
+  // so a switch, join, kick or leave during the countdown is already settled.
+  const channelId = voiceStore.getState().currentChannelId;
+  clock.voiceRejoinChannelId = clock.voiceRejoinNoticeAt === null ? null : channelId;
+  if (channelId !== null) {
+    void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
+    leaveVoiceChannel();
+  }
+}
+
+/**
+ * RT-12: put the user back in the voice channel a planned restart took them
+ * out of. The hub wipes voice_states on boot, so the resume cannot restore the
+ * membership the way it restores chat; `handleRestartDrop` recorded the
+ * channel, and this runs once from `ready`. It sends one ordinary voice_join —
+ * never after a kick, move, ban or leave, which clear the recorded channel —
+ * and only when the channel still exists as a joinable voice channel.
+ */
+export function rejoinVoiceAfterRestart(
+  clock: ReconnectClock,
+  ws: DispatchWs,
+  payload: Payload<"ready">,
+): void {
+  const channelId = clock.voiceRejoinChannelId;
+  const noticeAt = clock.voiceRejoinNoticeAt;
+  clock.voiceRejoinChannelId = null;
+  if (channelId === null || noticeAt === null) return;
+  if (Date.now() - noticeAt > REJOIN_WINDOW_MS) {
+    log.info("Not rejoining voice after restart — the server was down too long", { channelId });
+    return;
+  }
+  const isDmCall = (payload.dm_channels ?? []).some((dm) => dm.channel_id === channelId);
+  const channel = payload.channels.find((c) => c.id === channelId);
+  if (!isDmCall && (channel === undefined || channel.type !== "voice")) {
+    log.info("Not rejoining voice after restart — channel is gone or no longer a voice channel", {
+      channelId,
+    });
+    return;
+  }
+  // A live membership already in the payload means the rejoin is unnecessary
+  // (or the user re-joined manually while ready was in flight).
+  const currentUserId = authStore.getState().user?.id ?? 0;
+  if (
+    payload.voice_states.some((vs) => vs.user_id === currentUserId && vs.channel_id === channelId)
+  ) {
+    return;
+  }
+  log.info("Rejoining voice channel after planned restart", { channelId });
+  joinVoiceChannel(channelId);
+  ws.send({ type: "voice_join", payload: { channel_id: channelId } });
+}
+
+/**
+ * The `BANNED`, `SESSION_REPLACED` and `ANOTHER_DEVICE_ACTIVE` branches of
+ * `error`. Returns true when the frame was one of them and the error chain
+ * must stop.
  */
 export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">): boolean {
   if (payload.code === "BANNED") {
@@ -107,12 +179,15 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     clearAuth();
     return true;
   }
-  if (payload.code === "SESSION_REPLACED") {
-    // The same account connected from another device and the server
-    // closed this socket. Reconnecting would kick that device, which
-    // would reconnect and kick this one, forever — so stop like BANNED.
-    // Unlike BANNED this device is still signed in: keep the credential
-    // and auth, and let the user take the connection back ("Use here").
+  if (payload.code === "SESSION_REPLACED" || payload.code === "ANOTHER_DEVICE_ACTIVE") {
+    // The same account is live on another device. SESSION_REPLACED is the
+    // server closing this socket because a new device took it;
+    // ANOTHER_DEVICE_ACTIVE is the server refusing this device's wake
+    // reconnect because the other device still holds it (U4). In both cases
+    // reconnecting would kick that device, which would reconnect and kick
+    // this one, forever — so stop like BANNED. Unlike BANNED this device is
+    // still signed in: keep the credential and auth, and let the user take
+    // the connection back ("Use here").
     // The voice session moves with the connection, so leave it here.
     ws.disconnect();
     if (voiceStore.getState().currentChannelId !== null) {

@@ -6,6 +6,45 @@ import (
 	"time"
 )
 
+// Voice leave reasons (SRE-M2): the machine-readable cause recorded on every
+// "voice leave" log line, so an operator can tell one teardown path from
+// another. Every caller of handleVoiceLeave / handleVoiceLeaveIfStillIn must
+// pass exactly one of these — never an empty string.
+const (
+	// voiceLeaveReasonClient is an explicit client-sent voice_leave message.
+	voiceLeaveReasonClient = "client"
+	// voiceLeaveReasonSwitch is the destructive leave a channel switch runs
+	// before joining the destination channel (voiceJoinLeaveCurrent).
+	voiceLeaveReasonSwitch = "switch"
+	// voiceLeaveReasonDisconnect is the readPump teardown after the socket
+	// dropped (serve_pumps.go).
+	voiceLeaveReasonDisconnect = "disconnect"
+	// voiceLeaveReasonHandshake is the post-auth handshake write failure path
+	// (unregisterFailedHandshake, serve_auth.go).
+	voiceLeaveReasonHandshake = "handshake"
+	// voiceLeaveReasonModerator is a server-driven eviction: moderator kick,
+	// move, or timeout (DisconnectFromVoice / disconnectFromVoiceIn).
+	voiceLeaveReasonModerator = "moderator"
+	// VoiceLeaveReasonDMLeave is a user leaving a group DM whose call they
+	// are in, including the last participant closing it (api DM handler).
+	VoiceLeaveReasonDMLeave = "dm_leave"
+	// VoiceLeaveReasonBlocked is a user evicted from a 1:1 DM call because
+	// the other participant blocked them (api block handler).
+	VoiceLeaveReasonBlocked = "blocked"
+	// voiceLeaveReasonTokenRefresh is a refused voice_token_refresh whose
+	// permission was revoked, which evicts rather than merely denying a token.
+	voiceLeaveReasonTokenRefresh = "token_refresh"
+	// voiceLeaveReasonRevoked is the CONNECT_VOICE revocation sweep
+	// (sweepStaleVoiceEvictRevoked, hub_sweep.go).
+	voiceLeaveReasonRevoked = "revoked"
+	// voiceLeaveReasonReconciled is RT-3's polling reconciler removing a
+	// membership whose SFU participant no longer exists (voice_reconcile.go).
+	voiceLeaveReasonReconciled = "reconciled"
+	// voiceLeaveReasonGraceExpired is RT-8's reconnect grace window elapsing
+	// before a replacement socket arrived (voice_grace.go).
+	voiceLeaveReasonGraceExpired = "grace_expired"
+)
+
 // clearVoiceAndUnsubscribe clears c's voice state and drops its voice-topic
 // subscription, returning the cleared channel ID and join token. Every path
 // that takes a client out of voice while its WS stays up must use this pair:
@@ -24,13 +63,16 @@ func (h *Hub) clearVoiceAndUnsubscribe(c *Client) (int64, string) {
 // 1. Gets old voiceChID from clearVoiceAndUnsubscribe.
 // 2. If was in voice: remove from DB (with retry), broadcast voice_leave.
 // 3. Remove the LiveKit participant in the background (best-effort).
-func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
+//
+// reason is the machine-readable cause, logged on the "voice leave" line; it is
+// one of the voiceLeaveReason* constants (SRE-M2). Callers must never pass "".
+func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client, reason string) {
 	oldChID, oldJoinToken := h.clearVoiceAndUnsubscribe(c)
 	if oldChID == 0 {
-		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID)
+		slog.Debug("handleVoiceLeave no-op (already cleared)", "user_id", c.userID, "reason", reason)
 		return
 	}
-	h.finishVoiceLeave(ctx, c, oldChID, oldJoinToken)
+	h.finishVoiceLeave(ctx, c, oldChID, oldJoinToken, reason)
 }
 
 // handleVoiceLeaveIfStillIn is handleVoiceLeave conditioned on the channel: it
@@ -39,13 +81,13 @@ func (h *Hub) handleVoiceLeave(ctx context.Context, c *Client) {
 // revocation sweep's DB-backed permission check) must not clear a newer
 // membership committed while the decision was in flight — the same rule
 // LeaveVoiceChannelIfMatch applies to the DB row.
-func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int64) bool {
+func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int64, reason string) bool {
 	oldJoinToken, ok := c.clearVoiceStateIfMatch(chID)
 	if !ok {
 		return false
 	}
 	h.pubsub.Unsubscribe(c, VoiceTopic(chID))
-	h.finishVoiceLeave(ctx, c, chID, oldJoinToken)
+	h.finishVoiceLeave(ctx, c, chID, oldJoinToken, reason)
 	return true
 }
 
@@ -53,7 +95,7 @@ func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, c *Client, chID int
 // client's voice state and topic subscription are cleared: DB row removal
 // (with retry), voice_leave broadcast, key-holder re-election and LiveKit
 // participant removal.
-func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, oldJoinToken string) {
+func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, oldJoinToken, reason string) {
 	username := ""
 	if c.user != nil {
 		username = c.user.Username
@@ -62,6 +104,7 @@ func (h *Hub) finishVoiceLeave(ctx context.Context, c *Client, oldChID int64, ol
 		"user_id", c.userID,
 		"username", username,
 		"channel_id", oldChID,
+		"reason", reason,
 		"remote", c.remoteAddr,
 	)
 
@@ -109,8 +152,8 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 		default:
 		}
 		if err := h.livekit.RemoveParticipant(lkCtx, channelID, userID, joinToken); err != nil {
-			slog.Warn(caller+" RemoveParticipant failed (may already be gone)",
-				"err", err, "user_id", userID, "channel_id", channelID)
+			slog.Warn("RemoveParticipant failed (may already be gone)",
+				"caller", caller, "err", err, "user_id", userID, "channel_id", channelID)
 		}
 	}()
 }

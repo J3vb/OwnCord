@@ -5,6 +5,8 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
+import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/b9-zoom";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure
@@ -97,8 +99,10 @@ test.describe("Settings — Account Tab", () => {
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
-  test("has Change Password button", async ({ page }) => {
+  test("opens the Change Password form on demand", async ({ page }) => {
     const changePwBtn = page.locator(".ac-btn", { hasText: "Change Password" });
+    await expect(changePwBtn).toBeHidden();
+    await page.getByTestId("password-change-toggle").click();
     await expect(changePwBtn).toBeVisible();
   });
 });
@@ -217,12 +221,29 @@ test.describe("Settings — Voice & Audio Tab", () => {
     // input and output device pickers.
     const pane = page.locator(".settings-pane", { hasText: "Input Device" });
     await expect(pane).toBeVisible();
-    await expect(page.locator("h3", { hasText: "Output Device" })).toBeVisible();
+    await expect(page.locator(".settings-field-label", { hasText: "Output Device" })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Output Device" })).toBeVisible();
 
     const selects = page.locator("select.form-input");
     await expect(selects.first()).toBeVisible();
     // Each selector has at least a Default option to choose.
     await expect(selects.first().locator("option", { hasText: "Default" })).toHaveCount(1);
+  });
+
+  test("names every control and keeps the card text readable", async ({ page }) => {
+    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+    expect(await findUnnamedControls(pane)).toEqual([]);
+    const failures: string[] = [];
+    for (const selector of [
+      ".settings-card-head h3",
+      ".settings-field-label",
+      "[data-testid='sensitivity-value']",
+      ".camera-preview-label",
+    ]) {
+      const { ratio } = await textContrast(pane.locator(selector).first());
+      if (ratio < Q1.text) failures.push(`${selector} ${ratio.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
   });
 
   test("shows voice sensitivity slider", async ({ page }) => {
@@ -260,13 +281,23 @@ test.describe("Settings — Keybinds Tab", () => {
     const kbd = pttRow.locator(".kbd");
     await expect(kbd).not.toBeEmpty();
   });
+
+  test("states the unfocused-shortcut support plainly, matching the platform (U6)", async ({
+    page,
+  }) => {
+    // The mocked host answers voice_shortcuts_supported=false, so the tab must
+    // disclose the gap rather than promise a global shortcut it cannot deliver.
+    const hint = page.getByTestId("keybinds-global-hint");
+    await expect(hint).toContainText("tray menu");
+    await expect(hint).toContainText("does not support global mute/deafen shortcuts");
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Settings — Logs tab
+// Tests: Settings — Diagnostics & logs tab
 // ---------------------------------------------------------------------------
 
-test.describe("Settings — Logs Tab", () => {
+test.describe("Settings — Diagnostics & logs Tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
@@ -275,8 +306,83 @@ test.describe("Settings — Logs Tab", () => {
     await switchSettingsTab(page, "Logs");
   });
 
-  test("shows log viewer", async ({ page }) => {
+  test("names every control, rings the disclosure summaries and keeps status text readable", async ({
+    page,
+  }) => {
+    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+    await pane
+      .getByRole("checkbox", { name: "Include a brief microphone permission check" })
+      .uncheck();
+    await page.getByTestId("diagnostics-start").click();
+    await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
+      timeout: 15_000,
+    });
+    expect(await findUnnamedControls(pane)).toEqual([]);
+
+    const failures: string[] = [];
+    for (const selector of [
+      ".summary-line .disclose-count",
+      ".diag-step-btn[aria-pressed='true'] .diag-step-label",
+      ".diag-step-btn[aria-pressed='false'] .diag-step-label",
+      ".diag-step-detail",
+      "summary .disclose-count",
+    ]) {
+      const { ratio } = await textContrast(pane.locator(selector).first());
+      if (ratio < Q1.text) failures.push(`${selector} ${ratio.toFixed(2)}`);
+    }
+    expect(failures).toEqual([]);
+
+    // Keyboard focus on a disclosure summary draws the shared focus ring.
+    const summary = pane.locator("summary", { hasText: "Client logs" });
+    await summary.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(summary).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".log-viewer")).toBeVisible();
+  });
+
+  test("steps through the connection stages by keyboard and reflows at 200 % zoom", async ({
+    page,
+  }, testInfo) => {
+    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+    await pane
+      .getByRole("checkbox", { name: "Include a brief microphone permission check" })
+      .uncheck();
+    await page.getByTestId("diagnostics-start").click();
+    await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
+      timeout: 15_000,
+    });
+    const stages = pane.locator("ol.diag-stepper > li");
+    await expect(stages).toHaveCount(6);
+
+    const server = pane.getByRole("button", { name: /^Server — Server connection, / });
+    await server.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    await expect(server).toBeFocused();
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    await page.keyboard.press("Enter");
+    await expect(server).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("diagnostics-detail")).toContainText("Server connection");
+
+    await page.setViewportSize(ZOOM_VIEWPORT);
+    await expectScreenReflows(
+      page,
+      {
+        name: "diagnostics-stepper-640x400.png",
+        root: page.locator("[data-testid='settings-overlay'] .settings-content"),
+        actions: [stages.last().locator("button")],
+      },
+      testInfo,
+    );
+  });
+
+  test("shows log viewer once the client logs disclosure is opened", async ({ page }) => {
     const logViewer = page.locator(".log-viewer");
+    await expect(logViewer).toBeHidden();
+    await page.locator("summary", { hasText: "Client logs" }).click();
     await expect(logViewer).toBeVisible();
   });
 });

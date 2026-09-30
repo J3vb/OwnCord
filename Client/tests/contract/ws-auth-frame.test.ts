@@ -2,9 +2,10 @@
 // Client/src/lib/ws.ts sends as the first message after the WebSocket opens
 // (ws.ts:441-453) -- the client side of the same wire contract a sibling Go
 // test freezes for the server. B2-2 added the `epoch` field (the wire epoch
-// this client speaks, PROTOCOL_EPOCH from protocolTypes.ts); the key sets
-// below include it deliberately. Any further field MUST fail here until it is
-// added on purpose. Extend this file, do not replace or delete it.
+// this client speaks, PROTOCOL_EPOCH from protocolTypes.ts); the U4 follow-up
+// added the optional `wake` field (a dial after a process suspend). The key
+// sets below include them deliberately. Any further field MUST fail here until
+// it is added on purpose. Extend this file, do not replace or delete it.
 //
 // Assertions compare exact key sets (sorted Object.keys -- key order has no
 // wire meaning), never toHaveProperty, so an unexpected added key fails just
@@ -147,5 +148,35 @@ describe("contract: auth frame key set (epoch 1)", () => {
     const frame = getAuthFrame();
     expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token"]);
     expect(frame.payload.last_seq).toBe(3);
+  });
+
+  it("wake reconnect: payload keys are exactly [token, last_seq, epoch, wake]", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        seq: 3,
+        payload: {
+          user: { id: 1, username: "a", avatar: null, role: "admin" },
+          server_name: "S",
+          motd: "",
+        },
+      }),
+    );
+
+    // The socket closed, then the process slept: the wall clock jumps with no
+    // timer running, so the next dial is marked a wake (U4).
+    emitTauriEvent("ws-state", "closed");
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    mockInvoke.mockClear();
+    await vi.advanceTimersByTimeAsync(2_000);
+    emitTauriEvent("ws-state", "open");
+
+    const frame = getAuthFrame();
+    expect(Object.keys(frame.payload).sort()).toEqual(["epoch", "last_seq", "token", "wake"]);
+    expect(frame.payload.wake).toBe(true);
   });
 });

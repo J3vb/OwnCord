@@ -55,19 +55,19 @@ stateDiagram-v2
     securing --> failed: e2ee_timeout (no key within ~15s)
     joining --> reconnecting: transient connect failure (retry ≤3)
     connected --> reconnecting: socket/room drop
-    reconnecting --> connected: re-announce key + rejoin (≤2 attempts)
+    reconnecting --> connected: re-announce key + rejoin (backoff ladder ≈27s, outlasts a companion restart)
     reconnecting --> failed: attempts exhausted
     connected --> idle: leave
     failed --> idle: auto-leave + error
 ```
 
-| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                          |
-| -------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                         |
-| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`)) |
-| `connected`    | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`)       | E2EE active; per-user tiles live                                                                                                                                                                                               |
-| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`)                                                                                                       |
-| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                        |
+| Status         | Presentation                                                           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `joining`      | Voice widget shows "Connecting…"; channel roster shows self pending    | `handleVoiceToken` → `connectAndSetup`                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `securing`     | "Securing connection…" indicator (lock, in-progress)                   | Non-key-holders block here until a room key arrives (10 s + 5 s retry, the "securing" key-exchange block in `connectAndSetup` (`features/voice/joinOrchestration.ts`) / `E2EEManager.setupKeyExchange` (`lib/livekitE2EE.ts`))                                                                                                                                                                                                         |
+| `connected`    | "Voice connected · secured 🔒" + elapsed timer (from `joinedAt`)       | E2EE active; per-user tiles live                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `reconnecting` | "Reconnecting voice…"; controls frozen, not torn down                  | Keypair regenerated for forward secrecy (`attemptAutoReconnect()` → `reannounceForReconnect()`, `lib/livekitSession.ts`). RT-9: five attempts with a 3 s-doubling backoff capped at 6 s (about 27 s) so the loop outlasts a companion LiveKit restart instead of ejecting the call. Also shown while livekit-client retries on its own (`RoomEvent.SignalReconnecting`/`Reconnecting` until `Reconnected`, `lib/roomEventHandlers.ts`) |
+| `failed`       | Toast "Voice connection lost" / "Couldn't secure the call"; auto-leave | `onErrorCallback` fires                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 **Target rules:**
 
@@ -108,14 +108,39 @@ switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
 the OS capture rather than only mute the publication, so the profile switch is
 the accepted cost.
 
-| Control state  | Presentation                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| mic muted      | Mic-slash icon on self tile + control bar                                                  |
-| deafened       | Headphone-slash; implies muted styling                                                     |
-| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`) |
-| camera on      | Self video tile in the grid                                                                |
-| screenshare on | Screen tile; a stop-share affordance always visible                                        |
-| speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)              |
+| Control state  | Presentation                                                                                                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                        |
+| deafened       | Headphone-slash; implies muted styling                                                                                                                                                                                                           |
+| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the widget's own mute/deafen controls are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `components/ChannelSidebar.ts`, `components/VoiceWidget.ts` |
+| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`)                                                                                                                                                       |
+| camera on      | Self video tile in the grid                                                                                                                                                                                                                      |
+| screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                              |
+| speaking       | Green ring on the speaking user's tile/avatar (from LiveKit's ActiveSpeakers)                                                                                                                                                                    |
+
+**Video tiles** (`components/VideoGrid.ts`, in guild voice and DM calls alike):
+each tile is a button (click, Enter, Space) that opens it in focus view, with a
+filmstrip for the rest and **Back to grid** to leave. Screen shares carry a
+**LIVE** badge, and the speaking ring (`--text-positive`) is on camera tiles.
+A remote tile's volume slider is named for whose it is ("Otto stream volume"
+for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %) and
+shows its value. The tile menu (right-click, the Menu key, Shift+F10;
+`components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
+volumes apart and offers Mute stream and **Stop watching**, which hides the
+stream locally behind a **Watch stream** card (the track stays subscribed;
+opt-in watching is open question Q3). Your own screen share is covered by what
+is going out (surface, resolution, fps, audio) with **Stop sharing** and
+**Hide preview**. In a DM call, focus view stays inside the call panel and the
+chat remains visible below it. **Full screen** (the button, F, or a
+double-click) puts the tile in HTML full screen and the window with it
+(`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
+WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
+theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
+is the platform's picture-in-picture, hidden where it is unavailable. The
+stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
+(resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
+the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
+stats, so it shows the resolution only.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
@@ -156,25 +181,45 @@ Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store
 
 ## 6. Token refresh & reconnect (invisible)
 
-Token refresh (23 h timer) and voice reconnect (≤2 attempts, 3 s apart) should be
-**invisible on success**. Only exhaustion surfaces: "Voice connection lost —
-failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
+Token refresh (23 h timer) and voice reconnect (five attempts, 3 s-doubling
+backoff capped at 6 s, about 27 s) should be **invisible on success** beyond the
+"Reconnecting voice…" badge while a reconnect runs. Only exhaustion surfaces:
+"Voice connection lost — failed to reconnect" + auto-leave. The 60 s token-refresh response guard and the
 forward-secrecy keypair rotation on reconnect are mechanics the user never sees.
+
+**A planned restart returns the call (RT-12).** The hub wipes `voice_states` on
+boot, so a client resumes chat but not voice. `handleRestartDrop`
+(`features/connection/wsHandlers.ts`) records the channel the user is in when
+the socket drops, and `ready` then sends one ordinary `voice_join` if that
+channel is still a joinable voice channel or DM call. Only an `update`,
+`backup_restore` or `setup` notice allows it (never a `shutdown` from outside
+the server), and a `ready` more than ten minutes after the notice discards it. A kick, move, ban or
+leave cancels the pending rejoin, so the user is never put back into a call that
+was deliberately ended.
 
 ---
 
 ## 7. E2EE identity verification surface
 
 Peer identity state lives in `voice.store` (per-participant
-`status: verified | unverified | mismatch` + `safetyNumber`), written by
+`status: verified | changed | unverified | mismatch | unknown` + `safetyNumber`), written by
 `features/voice/e2eePeerState.ts` (driven by `lib/livekitE2EE.ts`) as
 announces are verified against the pinned identity keys (`lib/identity.ts`).
 
-| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)       | Interaction                              |
-| ------------ | --------------------------------------------------------------------------- | ---------------------------------------- |
-| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                | none needed                              |
-| `unverified` | Neutral shield; no pinned key yet                                           | none — pins on first verified announce   |
-| `mismatch`   | Red shield-alert; title "Identity key changed — click to review and re-pin" | Click → blocking identity-mismatch modal |
+| State        | Roster badge (`verifyPresentation()`, `components/ChannelSidebar.ts`)                                                          | Interaction                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| `verified`   | Green shield; title "Identity verified · Safety number: {n}"                                                                   | none needed                               |
+| `changed`    | Amber shield-alert; title "Security key changed · Safety number: {n}"                                                          | none — the change already raised a notice |
+| `unverified` | Neutral shield; no pinned key yet                                                                                              | none — pins on first verified announce    |
+| `mismatch`   | Red shield-alert; title "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review" | Click → blocking identity-mismatch modal  |
+
+A pinned peer whose published key changed is accepted automatically when the
+announce verifies against the new key (`verifyPeerAnnounce` in
+`features/voice/e2eePeerState.ts`): the pin is replaced, the change is logged
+at warn, and a warning toast naming the peer stays until dismissed
+(`showToast(…, "warning", Infinity)`). The peer keeps the `changed` badge
+for the rest of the call. `mismatch` is now only a pinned peer whose key is no
+longer delivered, or an announce that fails verification.
 
 The mismatch modal (`createIdentityMismatchModal()`, `components/CertMismatchModal.ts`;
 opened from `openIdentityMismatchModal()` in `components/ChannelSidebar.ts`) shows the **new key's fingerprint** so
@@ -198,8 +243,9 @@ trust action entirely (a blind accept is refused).
 - **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview
   of a **remote** participant's camera or screenshare in the voice channel
   sidebar (300 ms debounce, attached from `components/ChannelSidebar.ts`). There
-  is no pre-share preview of your own stream anywhere — that step is the OS
-  `getDisplayMedia` picker dialog.
+  is no pre-share preview of your own stream in the app on Windows — that step
+  is the OS `getDisplayMedia` picker dialog; on Linux it is the "Share your
+  screen" dialog (`components/ScreenSharePicker.ts`).
 
 ## 9. DM calls (ring)
 
@@ -207,13 +253,34 @@ DM voice is the same voice machinery on the DM's voice channel, plus a ring
 layer (no server-side call state — presence in the DM voice channel _is_ the
 call):
 
-| Event                      | Reaction                                                                                                                                            |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Outgoing: user clicks Call | `call_ring` sent (rate-limited 1/3 s server-side); caller joins the DM voice channel                                                                |
-| Incoming: `call_incoming`  | `components/IncomingCallBanner.ts` banner + ring chime (`lib/notifications.ts`), driven by the `lib/call-ring.ts` state machine (30 s auto-timeout) |
-| Accept                     | Join the DM voice channel; banner clears                                                                                                            |
-| Decline                    | `call_decline` sent → other participants' ringing stops via `call_declined`                                                                         |
-| Timeout / caller leaves    | Banner clears silently                                                                                                                              |
+| Event                      | Reaction                                                                                                                                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Outgoing: user clicks Call | Caller joins the DM voice channel, then `call_ring` is sent (rate-limited 1/3 s server-side); the call panel shows "Calling…" and a 30 s no-answer window (`createOutgoingCall`, `lib/call-ring.ts`), except on a redial into a call someone else is already in, which only re-rings |
+| Incoming: `call_incoming`  | Ring chime (`lib/notificationSound.ts`) driven by the `lib/call-ring.ts` state machine (30 s auto-timeout). With the ringing DM open, the call panel is the answer surface and the banner stays hidden; anywhere else, `components/IncomingCallBanner.ts`                            |
+| Accept                     | Join the DM voice channel; ring clears. "Join with video" also turns the camera on once connected. Being in the room answers the ring however you got there: joining it another way clears the ring, and a `call_incoming` for the channel you are already in is ignored             |
+| Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops only when its own ringer declines or leaves (`call_declined` / `voice_leave` from the ringer)                                  |
+| Timeout / caller leaves    | Timeout: the callee's ring clears silently, and the caller's panel says "didn't answer" and stays in the call with Ring again / Leave call. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty              |
+
+Call is on the DM chat header and in another member's profile popup. The
+popup's Call opens the 1:1 DM with that member (creating it if needed) and then
+starts the call there through the same `startCall` (`onCallUser` in
+`pages/main-page/SidebarArea.ts`).
+
+The DM call panel (`components/DmCallPanel.ts`, between the chat header and the
+messages) shows while the open DM has a ring in flight, an outgoing ring, or
+anyone in its voice channel: outgoing, declined/no answer, incoming, a "Join
+call" strip for a call you are not in, and the connected stage (collapsible to
+one row). Its controls are the voice widget's callbacks; the widget's call name
+links back to the DM, and the DM list shows a phone glyph on a DM with a live call.
+
+While the open DM is the current call's DM, the panel is the call's only video
+surface: `VideoModeController` moves the shared `VideoGrid` into the panel's
+stage as soon as any camera or screen share is on (remote ones too, unlike the
+guild-channel rule that only your own video opens the grid; your own also while
+the call is still ringing or went unanswered), the chat stays visible below, and
+everyone without a camera is an avatar tile. Collapsed, the panel never reopens
+on its own; Expand shows the video. Anywhere else the grid behaves as in guild
+voice.
 
 `call_incoming` / `call_declined` are page-scoped listeners in `MainPage.ts`,
 not dispatcher handlers (see [README §4](README.md)).

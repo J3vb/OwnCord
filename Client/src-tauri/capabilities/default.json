@@ -12,6 +12,7 @@
     "core:window:allow-maximize",
     "core:window:allow-center",
     "core:window:allow-request-user-attention",
+    "core:window:allow-set-fullscreen",
     "notification:default",
     {
       "identifier": "http:allow-fetch",

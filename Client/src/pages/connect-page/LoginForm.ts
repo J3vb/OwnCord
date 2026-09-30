@@ -3,6 +3,8 @@
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { ApiClientError, errorText } from "@lib/api";
+import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
@@ -936,7 +938,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // `invite` and an unknown mode (older server / failed read) both require
       // a code. Never widen registration because the mode could not be read.
       if (mode === "invite" || mode === null) {
-        const inviteCode = inviteInput.value.trim();
+        const inviteCode = normaliseInviteCode(inviteInput.value);
         if (!inviteCode) {
           return { message: connectText("validation.inviteRequired"), field: "invite" };
         }
@@ -972,14 +974,18 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
           await onLogin(host, username, password);
         }
       } else {
-        const inviteCode = inviteInput.value.trim();
+        const inviteCode = normaliseInviteCode(inviteInput.value);
         await onRegister(host, username, password, inviteCode);
       }
       // If the callback didn't throw, the caller handles navigation.
       // The caller may also call showTotp() or showError() on this page.
     } catch (err: unknown) {
       let message: string;
-      if (err instanceof Error) {
+      if (err instanceof ApiClientError) {
+        // A server refusal: plain catalog copy for a known code, the
+        // capitalised server message otherwise.
+        message = errorText(err, connectText("error.serverFallback"));
+      } else if (err instanceof Error) {
         message = err.message;
       } else if (typeof err === "string") {
         message = err;
@@ -1034,7 +1040,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // partial token has already been consumed by main.ts.
       totpPending = false;
     } catch (err) {
-      const message = err instanceof Error ? err.message : connectText("totp.failed");
+      const message =
+        err instanceof ApiClientError &&
+        err.code === "RATE_LIMITED" &&
+        err.message === "too many failed attempts, try again later"
+          ? connectText("error.totpTooManyAttempts")
+          : errorText(err, connectText("totp.failed"));
       transitionTo("error", message);
     } finally {
       totpSubmitBtn.disabled = false;

@@ -79,7 +79,8 @@ The wire flow (`voice_e2ee_announce` / `voice_e2ee_offer`)
 is specified in [protocol.md](../protocol.md) (Voice End-to-End Encryption
 section). Long-term identity: each user publishes an ECDSA identity public key
 (`users.identity_public_key`, migration 017); peers pin it on first contact
-and surface a blocking mismatch modal if it later changes (see
+and, if it later changes, accept the new key once the announce verifies
+against it, replacing the pin and showing a persistent notice (see
 [ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
@@ -136,7 +137,10 @@ and `tests/unit/platform/nativeVoice.suite.ts` pins the host contract.
 see Audio parity below), `native_voice_debug_info`. Room events
 arrive on one Tauri event, `native-voice`, tagged with the session id; the
 adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
-`EncryptionError` for a non-`Ok` frame-cryptor state, participant join/leave).
+`EncryptionError` for a non-`Ok` frame-cryptor state — at once for the local
+identity, and for a remote peer only if no `Ok` follows within the web path's
+3 s decrypt grace, since the backend reports each transition once —
+participant join/leave).
 No audio `TrackSubscribed` is raised: there is no browser track. Capture and
 playout run in the Rust process on the session's own streams, with
 libwebrtc's APM (AEC/NS/AGC from the same preferences the web path uses) and
@@ -383,15 +387,19 @@ the backend captures with libwebrtc's `DesktopCapturer`
   PipeWire. The app cannot enumerate or choose anything; the portal's dialog is
   both the picker and the consent, and it is never bypassed.
   `native_voice_screen_sources` answers `portal: true`, the
-  webview shows no picker of its own, and `native_voice_start_screen("portal")`
-  raises the dialog. The portal's D-Bus replies complete on the default GLib
-  main context, which the app's GTK loop runs, so livekit's `glib-main-loop`
-  feature (a second loop on that context) stays off.
+  webview's dialog shows only its quality step (no sources), and
+  `native_voice_start_screen("portal")` raises the portal dialog after Go
+  Live. The portal's D-Bus replies complete on the default GLib main context,
+  which the app's GTK loop runs, so livekit's `glib-main-loop` feature (a
+  second loop on that context) stays off.
 - **X11**: `native_voice_screen_sources` enumerates screens (XRandR monitors)
   and titled top-level windows, each with a thumbnail captured on the spot (a
   PNG at most 120×68, which keeps even an incompressible one under 33 KB as a
-  data URL, so 30 sources cost about 1 MB of IPC), and the webview's picker
-  (`features/voice/native/screenPicker.ts`) shows them, so what will be shared is visible before sharing starts.
+  data URL, so 30 sources cost about 1 MB of IPC), and the webview's "Share
+  your screen" dialog (`components/ScreenSharePicker.ts`, adapted by
+  `features/voice/native/screenPicker.ts`) shows them in Screens and
+  Applications tabs, so what will be shared is visible before sharing starts.
+  Nothing is captured until the user presses Go Live.
 
 **The shared path runs unchanged.** `lib/screenShare.ts`'s
 `enableScreenshare` makes one Linux-only call: instead of
@@ -405,9 +413,12 @@ returned `NativeScreenTrack` stands in for the browser track: its
 `mediaStreamTrack` is the local preview (the frame socket's `/screen` route,
 drawn by the same WebGL renderer as remote video), `publishTrack` publishes
 the capture (`native_voice_publish_screen`, `TrackSource::Screenshare`,
-screencast content, the web path's bitrate and frame rate), and `stop()` or
-unpublish ends it (`native_voice_stop_screen`). The capture's frame rate and
-size cap come from the same stream-quality presets as the web path. When the
+screencast content, the bitrate and frame rate on the track's
+`publishEncoding`), and `stop()` or unpublish ends it
+(`native_voice_stop_screen`). The capture's frame rate and size cap, and the
+publish encoding, come from the same stream-quality presets as the web path,
+at the quality and frame rate picked in the dialog for this share (defaulted
+from the saved settings) rather than the saved settings alone. When the
 capture ends on its own (the user pressed stop on the desktop's sharing
 indicator, or the shared window closed), the backend sends
 `screenCaptureEnded` and the track raises `ended`, which the shared code
@@ -494,8 +505,8 @@ within the Ubuntu 22.04 floor of 2.35.
 ### Audio parity: per-user volume
 
 **Why an own mixer.** Per-user volume on the web path is livekit-client's
-`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.1,
-libwebrtc 0.3.48, and still 0.9.2 / 0.3.49) exposes no per-track gain: the
+`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.3,
+libwebrtc 0.3.50) exposes no per-track gain: the
 device module mixes every remote track itself, and libwebrtc's own per-receiver
 `AudioSourceInterface::SetVolume` is not bound. So the device module's playout
 stays in its synthetic mode (the module is never acquired since the capture

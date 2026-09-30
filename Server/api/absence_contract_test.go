@@ -199,7 +199,7 @@ func TestAbsenceContract_NoFederationDirectoryOrListingConfigKeys(t *testing.T) 
 // configKeys returns every dotted yaml key reachable from t, recursing into
 // nested structs the same way yaml.v3 unmarshals them.
 func configKeys(t reflect.Type, prefix string) []string {
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
@@ -216,7 +216,7 @@ func configKeys(t reflect.Type, prefix string) []string {
 			key = prefix + "." + tag
 		}
 		ft := f.Type
-		for ft.Kind() == reflect.Ptr {
+		for ft.Kind() == reflect.Pointer {
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct {

@@ -13,10 +13,16 @@ import {
   setSpeakers,
   leaveVoiceChannel,
   setEncryptionDegraded,
+  setVoiceStatus,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
 import { detachRoom } from "../features/voice/releaseRoom";
+import {
+  markFirstRemoteTrackSubscribed,
+  markLocalTrackPublished,
+  recordDecryptError,
+} from "@lib/voiceJoinTrace";
 import type { AudioElements } from "@lib/audioElements";
 import { voiceText } from "../i18n/voice";
 
@@ -29,6 +35,18 @@ const log = createLogger("roomEventHandlers");
  *  races a few seconds apart each start a fresh streak. */
 const DECRYPT_GRACE_MS = 3000;
 const DECRYPT_STREAK_RESET_MS = 2500;
+
+/** RT-9: the status a room that has just finished joining reports. The key
+ *  can arrive over WS after the SFU dropped and livekit-client is already
+ *  retrying on its own; that room reads "reconnecting" until
+ *  RoomEvent.Reconnected clears it (handleSdkReconnected). */
+export function setJoinedVoiceStatus(room: import("livekit-client").Room): void {
+  setVoiceStatus(
+    room.state === "reconnecting" || room.state === "signalReconnecting"
+      ? "reconnecting"
+      : "connected",
+  );
+}
 
 // --- Callback types ---
 
@@ -81,6 +99,8 @@ export interface RoomEventHandlers {
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;
+  readonly handleSdkReconnecting: () => void;
+  readonly handleSdkReconnected: () => void;
   readonly handleEncryptionError: (error: Error, participant?: Participant) => void;
   readonly removeAutoplayUnlock: () => void;
 }
@@ -96,6 +116,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   }
 
   const handleLocalTrackPublished = (publication: LocalTrackPublication): void => {
+    // SRE-M2: join-relative ms for the first local track publication.
+    markLocalTrackPublished();
     if (publication.source === Track.Source.Microphone) {
       const { localMuted, localDeafened } = voiceStore.getState();
       if (localMuted || localDeafened) {
@@ -110,6 +132,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     publication: RemoteTrackPublication,
     participant: RemoteParticipant,
   ): void => {
+    // SRE-M2: join-relative ms for the first remote track subscription.
+    markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
       deps.getAudioElements().handleTrackSubscribedAudio(track, publication, participant);
@@ -217,6 +241,21 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (isUnexpected) deps.getOnErrorCallback()?.(voiceText("event.voiceDisconnected"));
   };
 
+  /** RT-9: livekit-client (and the native room) retry a dropped signal socket
+   *  on their own — RoomEvent.SignalReconnecting / Reconnecting — before they
+   *  give up with Disconnected, and an SFU restart spends most of its window
+   *  there. Only the connected session room moves the badge, and only between
+   *  "connected" and "reconnecting", so a join still securing its key and the
+   *  retry loop's own attempt rooms are left alone. */
+  const handleSdkReconnecting = (): void => {
+    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "connected")
+      setVoiceStatus("reconnecting");
+  };
+  const handleSdkReconnected = (): void => {
+    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "reconnecting")
+      setVoiceStatus("connected");
+  };
+
   /** OC-0002: livekit-client's E2eeManager emits RoomEvent.EncryptionError
    *  when the per-room E2EE worker dies (onWorkerError — CSP blocking a
    *  lazily-loaded chunk, WASM load failure, WebView2 quirk) or when an
@@ -235,6 +274,11 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    */
   const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
+    // SRE-M2: every receive-side decrypt failure (any error attributed to a
+    // remote sender, native or web) counts toward the diagnostics total — a
+    // tolerated rotation race is still a dropped frame and the count is what
+    // tells a report whether the grace window is being hit constantly.
+    if (participant && !participant.isLocal) recordDecryptError();
     if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
       const now = Date.now();
       const prev = decryptStreaks.get(participant);
@@ -262,6 +306,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleActiveSpeakersChanged,
     handleAudioPlaybackChanged,
     handleDisconnected,
+    handleSdkReconnecting,
+    handleSdkReconnected,
     handleEncryptionError,
     removeAutoplayUnlock,
   };

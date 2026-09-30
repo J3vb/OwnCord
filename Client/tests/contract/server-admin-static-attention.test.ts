@@ -41,12 +41,13 @@ async function boot(paths: string[], respond: Responder): Promise<{ dom: JSDOM; 
   return { dom, bridge: (dom.window as unknown as { __test: Bridge }).__test };
 }
 
+// The dashboard: #attentionPanel holds the headline and the warning cards,
+// #healthChecks every signal; the stat cards sit between them.
 function render(dom: JSDOM, html: string): Element {
   const host = dom.window.document.createElement("div");
   host.innerHTML = html;
-  const panel = host.querySelector("#attentionPanel");
-  expect(panel).toBeTruthy();
-  return panel as Element;
+  expect(host.querySelector("#attentionPanel")).toBeTruthy();
+  return host;
 }
 
 const REPORT = {
@@ -72,6 +73,21 @@ const REPORT = {
       status: "warning",
       value: "9000.0 ms/min",
       threshold: "raise at 5000.0 ms/min",
+      observed_at: "2026-09-23T12:00:00Z",
+    },
+    {
+      id: "voice",
+      label: "Voice (LiveKit)",
+      status: "critical",
+      value: "gave up",
+      detail: "the companion exited 10 time(s) and the supervisor stopped restarting it",
+      observed_at: "2026-09-23T12:00:00Z",
+    },
+    {
+      id: "job:Backups",
+      label: "Maintenance: Backups",
+      status: "unknown",
+      detail: "no completed run since the server started",
       observed_at: "2026-09-23T12:00:00Z",
     },
   ],
@@ -116,7 +132,9 @@ describe("Server/admin/static — attention panel (RI-07)", () => {
     const panel = render(dom, await booted.bridge.renderDashboard());
     expect(paths).toContain("/attention");
 
-    expect(panel.querySelector("h3")?.textContent).toBe("Attention (1)");
+    expect(panel.querySelector("#attentionPanel #attnTitle")?.textContent).toBe(
+      "1 problem needs your attention",
+    );
     const [active, recovered] = Array.from(panel.querySelectorAll(".attn-warning"));
     if (!active || !recovered) throw new Error("expected an active and a recovered warning");
     expect(active.getAttribute("data-id")).toBe("db_writer_wait");
@@ -136,21 +154,67 @@ describe("Server/admin/static — attention panel (RI-07)", () => {
     expect(recovered.textContent).toContain("recovered ");
 
     const badge = (id: string) =>
-      panel.querySelector(`tr[data-signal="${id}"] .badge`)?.textContent;
+      panel.querySelector(`#healthChecks [data-signal="${id}"] .st-word`)?.textContent;
     expect(badge("disk")).toBe("Unknown");
     expect(badge("backup")).toBe("Healthy");
     expect(badge("db_writer_wait")).toBe("Warning");
-    expect(panel.querySelector('tr[data-signal="disk"]')?.textContent).toContain("not measured");
+    expect(badge("voice")).toBe("Critical");
+    expect(panel.querySelector('[data-signal="voice"]')?.textContent).toContain("gave up");
+    expect(panel.querySelector('[data-signal="disk"]')?.textContent).toContain("not measured");
+
+    // Maintenance jobs collapse into one row; a job that has not run is
+    // unknown, and unknown is never counted as healthy.
+    expect(panel.querySelector('.job-list [data-signal="job:Backups"] .st-word')?.textContent).toBe(
+      "Unknown",
+    );
+    expect(panel.querySelector(".check-grid [data-signal^='job:']")).toBeNull();
+    const counts = panel.querySelector(".health-hero-counts")?.textContent;
+    expect(counts).toContain("1 healthy");
+    expect(counts).toContain("2 not measured");
+    // Something is not healthy, so the checks start open.
+    expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(true);
   });
 
   it("says so when nothing is active, and when the server has not evaluated yet", async () => {
     const paths: string[] = [];
-    let report: unknown = { ...REPORT, warnings: [] };
+    // Unknown signals alone do not need attention: the headline stays
+    // normal, they show as a "not measured" chip, not as healthy, and the
+    // checks stay shut.
+    let report: unknown = {
+      ...REPORT,
+      warnings: [],
+      signals: REPORT.signals.map((g) => (g.status === "unknown" ? g : { ...g, status: "ok" })),
+    };
     const booted = await boot(paths, (p) => (p === "/attention" ? { json: report } : { json: {} }));
     dom = booted.dom;
     booted.bridge.state.me = { permissions: ADMINISTRATOR };
     let panel = render(dom, await booted.bridge.renderDashboard());
-    expect(panel.querySelector(".attn-none")?.textContent).toBe("No active warnings.");
+    expect(panel.querySelector(".attn-none")?.textContent).toBe("Everything is running normally");
+    const counts = panel.querySelector(".health-hero-counts")?.textContent;
+    expect(counts).toContain("3 healthy");
+    expect(counts).toContain("2 not measured");
+    expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(false);
+
+    // A warning stays active when its signal turns unknown, so the checks
+    // still open.
+    report = {
+      ...REPORT,
+      signals: REPORT.signals.map((g) => (g.status === "ok" ? g : { ...g, status: "unknown" })),
+    };
+    panel = render(dom, await booted.bridge.renderDashboard());
+    expect(panel.querySelector(".attn-problems")?.textContent).toBe(
+      "1 problem needs your attention",
+    );
+    expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(true);
+
+    report = {
+      ...REPORT,
+      warnings: [],
+      signals: REPORT.signals.map((g) => ({ ...g, status: "ok" })),
+    };
+    panel = render(dom, await booted.bridge.renderDashboard());
+    expect(panel.querySelector(".attn-none")?.textContent).toBe("Everything is running normally");
+    expect(panel.querySelector("#healthChecks")?.hasAttribute("open")).toBe(false);
 
     report = { evaluated_at: null, signals: [], warnings: [] };
     panel = render(dom, await booted.bridge.renderDashboard());
@@ -179,5 +243,6 @@ describe("Server/admin/static — attention panel (RI-07)", () => {
     const html = await booted.bridge.renderDashboard();
     expect(paths).not.toContain("/attention");
     expect(html).not.toContain("attentionPanel");
+    expect(html).not.toContain("healthChecks");
   });
 });

@@ -251,13 +251,6 @@ func validateActionReason(reason string) error {
 	return nil
 }
 
-// minTimeoutDuration and maxTimeoutDuration bound Timeout's duration
-// (decision 6): 1 minute to 28 days.
-const (
-	minTimeoutDuration = time.Minute
-	maxTimeoutDuration = 28 * 24 * time.Hour
-)
-
 // requireHumanActor is workstream 10's absence-proof guard, repeated at the
 // top of every ModerationService action method before any other check: no
 // plugin capability or automated caller can pass a non-positive actor id and
@@ -613,7 +606,11 @@ func (s *ModerationService) ActOnReport(ctx context.Context, p ActOnReportParams
 		}
 		return &ActOnReportResult{Kind: p.Kind, TargetID: p.TargetID}, nil
 	case "timeout":
-		result, err := s.Timeout(ctx, p.ActorID, p.TargetID, p.Reason, time.Duration(p.DurationSeconds)*time.Second, &reportID)
+		duration, err := TimeoutDurationFromSeconds(p.DurationSeconds)
+		if err != nil {
+			return nil, err
+		}
+		result, err := s.Timeout(ctx, p.ActorID, p.TargetID, p.Reason, duration, &reportID)
 		if err != nil {
 			return nil, err
 		}

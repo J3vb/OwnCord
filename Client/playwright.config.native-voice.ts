@@ -4,16 +4,25 @@
 // livekit-client peer, the way a Windows client encrypts. Run by ci.yml's
 // rust-tests job after the crate is built; locally see Client/CLAUDE.md.
 import { defineConfig, devices } from "@playwright/test";
+import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
 
 export default defineConfig({
   outputDir: "test-results/native-voice",
   testDir: "./tests/e2e/native-voice",
+  // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
+  // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
+  // docs/testing-behavior.md, scripts/check-quarantine.mjs.
+  grepInvert: quarantineGrepInvert(),
   timeout: 180_000,
   expect: { timeout: 30_000 },
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  // A retry hides a flaky interop run, which is exactly what this proof must
+  // not do: the same gate the other configs carry, so a run that needs its
+  // retry still turns the job red.
+  failOnFlakyTests: !!process.env.CI,
   reporter: [["list"], ["junit", { outputFile: "test-results/native-voice.xml" }]],
   use: {
     ...devices["Desktop Chrome"],

@@ -1,7 +1,7 @@
 import { childPids, processIsAlive } from "../support/process";
 import { createHash } from "node:crypto";
 import { readFile, access } from "node:fs/promises";
-import { test as base, expect, login } from "./fixtures";
+import { test as base, expect } from "./fixtures";
 import { preparePackagedServer } from "../support/packaged-server";
 import { startTestServer, TEST_PASSWORD } from "../support/server";
 import { expectDecodedMedia, joinVoice } from "../support/media";
@@ -43,11 +43,17 @@ for (const media of [false, true]) {
     test("signed update rejects broken downloads, replaces the running executable and restores clients", async ({
       alice,
       bob,
+      bobTransport,
       browser,
       server,
       release,
     }) => {
       test.setTimeout(360_000);
+      const notices: Array<Record<string, unknown> | undefined> = [];
+      bobTransport.filterServerMessages((message) => {
+        if (message.type === "server_restart") notices.push(message.payload);
+        return true;
+      });
       const text = `persist-through-update-${crypto.randomUUID()}`;
       const input = alice.locator("[data-testid='message-input'] textarea");
       await input.fill(text);
@@ -106,7 +112,19 @@ for (const media of [false, true]) {
       }
       release.fault("none");
       const admin = await browser.newPage();
+      // An operator watching the update from the admin Logs tab: its stream
+      // stays open through the whole restart (SRV-06).
+      const logs = await browser.newPage();
       try {
+        await logs.goto(`${server.origin}/admin/`);
+        await logs.locator("#loginUser").fill("alice");
+        await logs.locator("#loginPass").fill(TEST_PASSWORD);
+        await logs.locator("#loginBtn").click();
+        await logs
+          .getByRole("navigation", { name: "Admin sections" })
+          .getByRole("button", { name: /^Server logs\b/ })
+          .click();
+        await expect(logs.locator("#logStatusText")).toHaveText("Connected");
         await admin.goto(`${server.origin}/admin/`);
         await admin.locator("#loginUser").fill("alice");
         await admin.locator("#loginPass").fill(TEST_PASSWORD);
@@ -115,7 +133,7 @@ for (const media of [false, true]) {
           .getByRole("navigation", { name: "Admin sections" })
           .getByRole("button", { name: /^Updates\b/ })
           .click();
-        await admin.getByRole("button", { name: /^Update to v/ }).click();
+        await admin.getByRole("button", { name: /^Update now/ }).click();
         const applied = admin.waitForResponse(
           (response) =>
             response.url().endsWith("/updates/apply") && response.request().method() === "POST",
@@ -123,6 +141,19 @@ for (const media of [false, true]) {
         // The dialog backs the database up first by default (OP-11).
         await admin.getByRole("button", { name: "Back up and update", exact: true }).click();
         expect((await applied).status()).toBe(200);
+        // ARCH-13: the busy dialog cannot be dismissed while the server
+        // restarts (CLI-02) — Escape leaves the restart wait on screen.
+        await expect(admin.locator("#restartWait")).toBeVisible();
+        await admin.keyboard.press("Escape");
+        await expect(admin.locator("#modal")).toHaveClass(/visible/);
+        await expect(admin.locator("#restartWait")).toBeVisible();
+        // ARCH-13 (ii): the stop is bounded even with the Logs stream open —
+        // the 5 s update countdown, the swap, then a drain the stream no
+        // longer holds and the hub's 5 s notice. Before SRV-06 the stream
+        // held the drain for the whole 30 s shutdown budget.
+        const appliedAt = Date.now();
+        await expect.poll(() => server.exited(), { timeout: 45_000 }).toBe(true);
+        expect(Date.now() - appliedAt).toBeLessThan(20_000);
         await expect
           .poll(
             async () => {
@@ -135,7 +166,16 @@ for (const media of [false, true]) {
             { timeout: 60_000 },
           )
           .toBe(`v${release.version}`);
-        expect(server.exited()).toBe(true);
+        // ARCH-13 (i): the hub's own teardown notice reached the client after
+        // the admin's announcement, and names the update rather than a stop
+        // (CLI-02); (v): the drain ran on a live budget, so no audit row was
+        // dropped.
+        expect(notices).toEqual([
+          { reason: "update", delay_seconds: 5 },
+          { reason: "update", delay_seconds: 5 },
+        ]);
+        expect(server.log()).not.toContain("audit log dropped");
+        expect(server.log()).not.toContain("flush lost audit entries");
         const pids = await release.pids();
         expect(pids).toHaveLength(2);
         expect(new Set(pids).size).toBe(2);
@@ -150,18 +190,40 @@ for (const media of [false, true]) {
             .update(await readFile(release.binary))
             .digest("hex"),
         ).not.toEqual(original);
-        // Restart broadcasts can intentionally sign out clients. Re-authenticate
-        // through the UI, then verify stored data and a new real WS delivery.
-        await login(alice, server, "alice");
-        await login(bob, server, "bob");
+        // ARCH-13 (iii): a planned restart keeps the session (Q4). Neither
+        // client signed in with auto-connect, yet each reconnects on its own
+        // into the channel it was in, never through the login form.
+        for (const page of [alice, bob]) {
+          await expect(page.locator(".reconnecting-banner")).not.toHaveClass(/visible/, {
+            timeout: 60_000,
+          });
+          await expect(page.getByTestId("app-layout")).toBeVisible();
+          await expect(page.locator("#password")).toHaveCount(0);
+          await expect(
+            page.locator(".channel-item.active:not(.voice)").filter({ hasText: "general" }),
+          ).toBeVisible();
+        }
         await expect(bob.locator(".msg-text", { hasText: text })).toHaveCount(1);
         const next = `new-process-${crypto.randomUUID()}`;
         await input.fill(next);
         await input.press("Enter");
         await expect(bob.locator(".msg-text", { hasText: next })).toHaveCount(1);
         if (media) {
-          await joinVoice(alice);
-          await joinVoice(bob);
+          // RT-12: both callers were in the call before the update; after the
+          // restart they come back on their own — no channel click — with
+          // decoded media. The manual joinVoice calls are gone on purpose: a
+          // click would pass even if the automatic rejoin never fired.
+          for (const page of [alice, bob]) {
+            await expect(page.locator(".voice-widget.visible .vw-channel")).toHaveText(
+              "voice-one",
+              {
+                timeout: 60_000,
+              },
+            );
+            await expect(page.locator(".voice-widget.visible")).toContainText("Voice Connected", {
+              timeout: 60_000,
+            });
+          }
           await expectDecodedMedia(alice);
           await expectDecodedMedia(bob);
         }
@@ -170,6 +232,7 @@ for (const media of [false, true]) {
           true,
         );
       } finally {
+        await logs.close();
         await admin.close();
       }
     });

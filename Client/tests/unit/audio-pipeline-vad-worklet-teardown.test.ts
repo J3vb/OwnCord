@@ -9,7 +9,7 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -159,6 +159,27 @@ describe("AudioPipeline VAD worklet teardown (OC-0231)", () => {
     // And the pipeline gain must not have been driven to 0 by the stale message.
     mockGainNode.gain.setTargetAtTime.mockClear();
   });
+  it("rebuilds the VAD worklet only when the sensitivity actually changes", async () => {
+    pipeline.setRoom(mockRoom);
+    pipeline.setupAudioPipeline();
+    await vi.waitFor(() => {
+      expect(pipeline.vadUsingWorklet).toBe(true);
+    });
+    const ctx = (globalThis as any).AudioContext.mock.results[0].value;
+    ctx.audioWorklet.addModule.mockClear();
+    mockSavePref.mockClear();
+
+    pipeline.setVoiceSensitivity(40);
+    pipeline.setVoiceSensitivity(40);
+    pipeline.setVoiceSensitivity(40);
+
+    expect(ctx.audioWorklet.addModule).toHaveBeenCalledTimes(1);
+    expect(mockSavePref).toHaveBeenCalledTimes(1);
+
+    pipeline.setVoiceSensitivity(60);
+    expect(ctx.audioWorklet.addModule).toHaveBeenCalledTimes(2);
+  });
+
   it("closes the AudioContext only once the VAD processor acknowledges stop", async () => {
     // Chromium keeps an AudioWorkletNode, and so its AudioContext, alive until
     // its processor's process() returns false. Closing the context in the same

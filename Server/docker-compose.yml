@@ -1,17 +1,20 @@
 # OwnCord server stack — chat server + LiveKit voice/video
 #
 # Quick start:
-#   1. cp .env.example .env  && edit .env (set secrets + public IP)
+#   1. cp .env.example .env  && edit .env (set secrets)
 #   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
-#   3. cp config.yaml.example config.yaml  && set voice.livekit_url to
-#      ws://livekit:7880 (the service below; the copied default is localhost)
-#      and voice.auto_download_livekit to false (LiveKit is its own container)
+#   3. cp config.yaml.example config.yaml  && edit as needed
 #   4. docker compose up -d
 #
 # LiveKit runs as a separate container on the same internal network.
 # The OwnCord server reaches it at ws://livekit:7880 (Docker DNS), and it
 # proxies signalling to clients at :8443/livekit — so 7880 need not be
-# published or forwarded. Firewall TCP 7881 and UDP 50000-60000 for media.
+# published or forwarded. Firewall TCP 7881 and UDP 50000-60000 for media
+# (or a single UDP port — see the livekit service's ports below).
+#
+# The environment block below already points the server at that service and
+# keeps its own auto-download off (LiveKit is its own container here), so
+# config.yaml needs no voice.livekit_url or voice.auto_download_livekit edit.
 
 # Log rotation shared by both services: without a cap the default json-file
 # driver grows unbounded on the host disk.
@@ -25,8 +28,9 @@ services:
   owncord:
     image: ghcr.io/j3vb/owncord-server:latest
     restart: unless-stopped
-    # The server's own drain budget is 30s with a ≈55s worst case; Compose's
-    # default 10s would SIGKILL an ordinary `docker compose down` mid-flush.
+    # The server's HTTP drain takes up to 30s and its whole teardown is capped
+    # at 50s; Compose's default 10s would SIGKILL an ordinary
+    # `docker compose down` mid-flush.
     stop_grace_period: 60s
     ports:
       - "8443:8443"
@@ -34,6 +38,16 @@ services:
       # Secrets injected from .env — never hardcode these
       OWNCORD_VOICE_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       OWNCORD_VOICE_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      # Voice wiring for this stack: reach LiveKit by its compose service name
+      # and leave the server's own auto-download off, so it never starts a
+      # second LiveKit inside this container on media ports nothing publishes.
+      # Set here rather than in config.yaml so the operator's mounted config
+      # stays free of Docker-specific values.
+      OWNCORD_VOICE_LIVEKIT_URL: ws://livekit:7880
+      OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT: "false"
+      # Single-port UDP media: match livekit.yaml's `rtc.udp_port` so the
+      # admin connectivity report and boot warning name that one port.
+      # OWNCORD_VOICE_UDP_PORT: "7882"
     volumes:
       # Mount your config.yaml for non-secret settings (server name, TLS, etc.)
       # See the example config at: https://github.com/J3vb/OwnCord#configuration
@@ -72,7 +86,7 @@ services:
     # Must move together with DefaultLiveKitVersion in Server/ws/livekit_download.go:
     # this file is what an operator runs without the server's own pin, so a
     # version skew here is invisible until voice fails.
-    image: livekit/livekit-server:v1.13.5
+    image: livekit/livekit-server:v1.13.7
     restart: unless-stopped
     # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
     command: --config /etc/livekit/livekit.yaml
@@ -83,6 +97,10 @@ services:
       # the host network for no benefit — and would let anyone who knows the
       # credentials in your .env mint room tokens directly.
       - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
+      # WebRTC UDP media. The default is the 50000-60000 range; to forward a
+      # single port instead, set `rtc.udp_port: 7882` in livekit.yaml,
+      # replace the range below with `- "7882:7882/udp"`, and uncomment
+      # OWNCORD_VOICE_UDP_PORT on the owncord service above.
       - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro

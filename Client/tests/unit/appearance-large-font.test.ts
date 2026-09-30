@@ -14,15 +14,14 @@
 // 19 or 20 — an accessibility toggle that makes text smaller.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockGetActiveThemeName, mockApplyThemeByName } = vi.hoisted(() => ({
+const { mockGetActiveThemeName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
-  mockApplyThemeByName: vi.fn(),
 }));
-vi.mock("@lib/themes", () => ({
+vi.mock("@lib/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreAccent: vi.fn(),
   restoreTheme: vi.fn(),
-  applyThemeByName: mockApplyThemeByName,
 }));
 vi.mock("@lib/os-motion", () => ({ SYNC_OS_MOTION_DEFAULT: true, syncOsMotionListener: vi.fn() }));
 
@@ -88,11 +87,11 @@ describe("Large Font raises the effective font size (OC-0319)", () => {
     const ac = new AbortController();
     container.appendChild(buildAccessibilityTab(ac.signal));
 
-    // Index 4 is the Large Font toggle (see accessibility-tab.test.ts).
-    (container.querySelectorAll(".toggle")[4] as HTMLElement).click();
+    const largeFont = container.querySelector<HTMLElement>('.toggle[aria-label="Large Font"]')!;
+    largeFont.click();
     expect(fontSize()).toBe("18px");
 
-    (container.querySelectorAll(".toggle")[4] as HTMLElement).click();
+    largeFont.click();
     expect(fontSize()).toBe("14px");
 
     ac.abort();

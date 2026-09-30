@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -24,6 +26,7 @@ type attentionFixture struct {
 	alive    bool
 	schedule string
 	last     time.Time
+	voice    *VoiceHealth
 }
 
 func newAttentionFixture(t *testing.T) *attentionFixture {
@@ -44,6 +47,12 @@ func newAttentionFixture(t *testing.T) *attentionFixture {
 		DispatchAlive:  func() bool { return f.alive },
 		BackupSchedule: func(context.Context) (string, error) { return f.schedule, nil },
 		LastBackup:     func() (time.Time, error) { return f.last, nil },
+		VoiceHealth: func(context.Context) VoiceHealth {
+			if f.voice == nil {
+				return VoiceHealth{Managed: false}
+			}
+			return *f.voice
+		},
 	})
 	return f
 }
@@ -530,4 +539,166 @@ func TestBackupScheduleInterval(t *testing.T) {
 			t.Errorf("BackupScheduleInterval(%q) = %v, want %v", schedule, got, want)
 		}
 	}
+}
+
+// SRE-04: a managed companion that is not running raises, and a stopped one
+// warns; an externally managed LiveKit is unknown, never healthy.
+func TestAttention_VoiceSignal(t *testing.T) {
+	f := newAttentionFixture(t)
+
+	// No source at all (bare service) is unknown, never healthy.
+	bare := NewAttentionService(AttentionThresholds{}, AttentionSources{})
+	bare.Evaluate(context.Background(), f.now)
+	wantStatus(t, bare.Report(), "voice", AttentionStatusUnknown)
+
+	// External LiveKit with no probe (unconfigured) is unknown.
+	f.voice = &VoiceHealth{}
+	wantStatus(t, f.step(), "voice", AttentionStatusUnknown)
+
+	// External LiveKit that answered its health probe: ok.
+	reachable := true
+	f.voice = &VoiceHealth{Reachable: &reachable}
+	wantStatus(t, f.step(), "voice", AttentionStatusOK)
+
+	// External LiveKit that did not answer: warning after two samples.
+	unreachable := false
+	f.voice = &VoiceHealth{Reachable: &unreachable}
+	f.step()
+	rep := f.step()
+	wantStatus(t, rep, "voice", AttentionStatusWarning)
+
+	// Recovery needs two samples too.
+	unreachable = true
+	f.step()
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusOK)
+
+	// Managed and running with no restarts: ok.
+	f.voice = &VoiceHealth{Managed: true, Running: true}
+	wantStatus(t, f.step(), "voice", AttentionStatusOK)
+
+	// Managed, running, but it restarted after an unexpected exit: still ok,
+	// the restart count is in the detail.
+	f.voice = &VoiceHealth{Managed: true, Running: true, Restarts: 2}
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusOK)
+	if got := signal(t, rep, "voice").Detail; !strings.Contains(got, "restarted 2") {
+		t.Fatalf("voice detail = %q, want the restart count", got)
+	}
+
+	// Managed and not running: warning after two samples.
+	f.voice = &VoiceHealth{Managed: true, Running: false}
+	f.step() // one sample holds the ok level (attentionSustain)
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusWarning)
+	if w := warning(rep, "voice"); w == nil {
+		t.Fatal("not-running companion raised no warning")
+	}
+
+	// Managed and gave up: critical after two samples.
+	f.voice = &VoiceHealth{Managed: true, Running: false, Restarts: 10, GaveUp: true}
+	f.step()
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusCritical)
+
+	// Recovery clears it after two samples.
+	f.voice = &VoiceHealth{Managed: true, Running: true}
+	f.step()
+	rep = f.step()
+	wantStatus(t, rep, "voice", AttentionStatusOK)
+	if w := warning(rep, "voice"); w == nil || w.RecoveredAt == nil {
+		t.Fatalf("voice warning did not recover: %+v", warning(rep, "voice"))
+	}
+}
+
+// The served TLS certificate's expiry. A self-signed or manual certificate
+// warns inside 21 days and is critical inside 7. An ACME certificate is
+// renewed min(lifetime/3, 30 days) before expiry, so it warns only once that
+// renewal is a third overdue and is critical two thirds in: 20 and 10 days
+// for a 90-day certificate, 10 and 5 for a 45-day one, so a healthy
+// short-lived certificate never raises. Nothing to read (no source, TLS off
+// behind a proxy, ACME before its first handshake) is unknown, never healthy.
+func TestAttention_CertificateExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	days := func(n int) time.Time { return now.Add(time.Duration(n) * 24 * time.Hour) }
+	evalLife := func(mode string, lifetimeDays, leftDays int) AttentionReport {
+		t.Helper()
+		var cert auth.ServedCert
+		if lifetimeDays > 0 {
+			cert.NotAfter = days(leftDays)
+			cert.NotBefore = cert.NotAfter.Add(-time.Duration(lifetimeDays) * 24 * time.Hour)
+		}
+		s := NewAttentionService(AttentionThresholds{}, AttentionSources{
+			Certificate: func() (string, auth.ServedCert) { return mode, cert },
+		})
+		s.Evaluate(context.Background(), now)
+		return s.Report()
+	}
+	eval := func(mode string, leftDays int) AttentionReport { t.Helper(); return evalLife(mode, 90, leftDays) }
+
+	bare := NewAttentionService(AttentionThresholds{}, AttentionSources{})
+	bare.Evaluate(context.Background(), now)
+	wantStatus(t, bare.Report(), "certificate", AttentionStatusUnknown)
+
+	rep := evalLife("off", 0, 0)
+	wantStatus(t, rep, "certificate", AttentionStatusUnknown)
+	if d := signal(t, rep, "certificate").Detail; !strings.Contains(d, "reverse proxy") {
+		t.Errorf("TLS off detail = %q, want it to point at the reverse proxy", d)
+	}
+	wantStatus(t, evalLife("acme", 0, 0), "certificate", AttentionStatusUnknown)
+
+	rep = eval("acme", 60)
+	wantStatus(t, rep, "certificate", AttentionStatusOK)
+	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "2026-11-22") {
+		t.Errorf("value = %q, want the expiry date", v)
+	}
+	if len(rep.Warnings) != 0 {
+		t.Errorf("a healthy certificate raised %+v", rep.Warnings)
+	}
+	wantStatus(t, eval("acme", 21), "certificate", AttentionStatusOK)
+
+	rep = eval("acme", 19)
+	wantStatus(t, rep, "certificate", AttentionStatusWarning)
+	w := warning(rep, "certificate")
+	if w == nil {
+		t.Fatal("an overdue renewal raised no warning")
+	}
+	if !strings.Contains(w.Action, "port 80") || !strings.Contains(w.Action, "publish it to members") {
+		t.Errorf("acme action = %q, want the renewal's port 80 and the owner publishing the fingerprint", w.Action)
+	}
+	if strings.Contains(w.Action, "Server Logs") {
+		t.Errorf("acme action = %q sends the owner to logs a background renewal never writes", w.Action)
+	}
+	if w.Title != "The TLS certificate expires soon" {
+		t.Errorf("expiring title = %q", w.Title)
+	}
+	if th := signal(t, rep, "certificate").Threshold; th != "warn under 20 days, critical under 10" {
+		t.Errorf("90-day acme threshold = %q", th)
+	}
+	wantStatus(t, eval("acme", 9), "certificate", AttentionStatusCritical)
+
+	// A 45-day certificate renews with 15 days left: healthy at 12.
+	wantStatus(t, evalLife("acme", 45, 12), "certificate", AttentionStatusOK)
+	wantStatus(t, evalLife("acme", 45, 9), "certificate", AttentionStatusWarning)
+	wantStatus(t, evalLife("acme", 45, 4), "certificate", AttentionStatusCritical)
+
+	rep = eval("self_signed", -1)
+	wantStatus(t, rep, "certificate", AttentionStatusCritical)
+	if v := signal(t, rep, "certificate").Value; !strings.Contains(v, "expired") {
+		t.Errorf("value = %q, want it to say expired", v)
+	}
+	if ti := warning(rep, "certificate").Title; ti != "The TLS certificate has expired" {
+		t.Errorf("expired title = %q", ti)
+	}
+
+	rep = evalLife("self_signed", 730, 20)
+	wantStatus(t, rep, "certificate", AttentionStatusWarning)
+	if a := warning(rep, "certificate").Action; !strings.Contains(a, "Rotating the self-signed certificate") {
+		t.Errorf("self_signed action = %q, want the rotation guide", a)
+	}
+	if th := signal(t, rep, "certificate").Threshold; th != "warn under 21 days, critical under 7" {
+		t.Errorf("self_signed threshold = %q", th)
+	}
+	wantStatus(t, evalLife("manual", 90, 22), "certificate", AttentionStatusOK)
+	wantStatus(t, evalLife("manual", 90, 6), "certificate", AttentionStatusCritical)
 }

@@ -21,7 +21,7 @@ In mount order (`Server/api/router.go`):
 1. **boundRequestID** -- drops an oversized (>128 bytes) or non-printable client-supplied `X-Request-Id` before chi adopts it.
 2. **RequestID** (chi) -- assigns the request ID used in logs.
 3. **setRequestIDHeader** -- echoes the request ID into the `X-Request-Id` response header.
-4. **Recoverer** -- catches panics, logs them through `slog` with a stack capture, returns 500.
+4. **Recoverer** -- catches panics, logs them through `slog` with a stack capture, returns 500. On Windows a nil-dereference or invalid-address fault exits the process for a supervisor restart instead (SRE-08, [server-boundaries.md](architecture/server-boundaries.md)).
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
@@ -36,12 +36,15 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 167 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 174 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
+| GET     | `/admin/api/archive`                                                 |
+| GET     | `/admin/api/archive/download`                                        |
+| POST    | `/admin/api/archive/link`                                            |
 | GET     | `/admin/api/attention`                                               |
 | GET     | `/admin/api/audit-log`                                               |
 | POST    | `/admin/api/backup`                                                  |
@@ -62,6 +65,9 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | GET     | `/admin/api/config`                                                  |
+| DELETE  | `/admin/api/logs/level`                                              |
+| GET     | `/admin/api/logs/level`                                              |
+| PATCH   | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/stream`                                             |
 | POST    | `/admin/api/logs/ticket`                                             |
 | GET     | `/admin/api/me`                                                      |
@@ -145,6 +151,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/invites/`                                                   |
 | POST    | `/api/v1/invites/`                                                   |
 | DELETE  | `/api/v1/invites/{code}`                                             |
+| GET     | `/api/v1/invites/{code}/redemptions`                                 |
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
@@ -1954,6 +1961,26 @@ Revoke an invite by its code string.
 
 ---
 
+### GET /api/v1/invites/{code}/redemptions
+
+List who redeemed an invite, newest first (at most 200 rows). An unknown code is `404 NOT_FOUND`.
+
+**Auth:** Required
+**Permission:** `MANAGE_INVITES`
+
+#### Response 200 OK
+
+```json
+[
+  { "user_id": 42, "username": "alice", "redeemed_at": "2026-09-29 10:30:00" },
+  { "user_id": null, "username": "", "redeemed_at": "2026-09-28 18:02:11" }
+]
+```
+
+`user_id` is `null` (and `username` empty) once the redeemer's account has been erased. Uses from before migration 055 have no row, so the list can be shorter than the invite's `uses`.
+
+---
+
 ## File Upload and Serving
 
 ### POST /api/v1/uploads
@@ -1961,7 +1988,7 @@ Revoke an invite by its code string.
 Upload a file as multipart form data.
 
 **Auth:** Required
-**Rate limit:** 10 requests/minute
+**Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
 **Body size limit:** 100 MiB
 **Content-Type:** `multipart/form-data`
 
@@ -2792,7 +2819,10 @@ Each reversal that actually changes something writes its own audit row
 (`user_untimeout`, `user_unban`, or a warning-acknowledged equivalent),
 actor `0` (a mechanical consequence of the decision, not a second
 moderation action by the human decider), alongside the decision's own
-`appeal_decide` row.
+`appeal_decide` row. A ban that is actually undone also broadcasts
+`member_join` for the target after the commit, exactly as the admin unban
+does, so every connected client re-adds the member it dropped on the ban's
+`member_ban`.
 
 **Voice**, for a live target server-muted by the overturned timeout: lifts
 alongside the ledger reversal above, through
@@ -2926,6 +2956,20 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "connected_users": 8,
   "voice_sessions": 2,
   "broadcast_drops": 0,
+  "topic_sheds_total": 0,
+  "ws_broadcast_ms": { "count": 1204, "p50": 1, "p95": 5, "p99": 20, "max": 210 },
+  "ws_dispatch_lag_ms": { "count": 1204, "p50": 0.5, "p95": 2, "p99": 10, "max": 90 },
+  "chat_send_ack_ms": { "count": 340, "p50": 2, "p95": 10, "p99": 50, "max": 60 },
+  "voice_join_ms": {
+    "precheck": { "count": 12, "p50": 1, "p95": 1.4, "p99": 1.4, "max": 1.4 },
+    "leave": { "count": 12, "p50": 0.5, "p95": 3.1, "p99": 3.1, "max": 3.1 },
+    "persist": { "count": 12, "p50": 2, "p95": 4.2, "p99": 4.2, "max": 4.2 },
+    "token": { "count": 12, "p50": 0.5, "p95": 0.8, "p99": 0.8, "max": 0.8 },
+    "complete": { "count": 12, "p50": 2, "p95": 4.9, "p99": 4.9, "max": 4.9 },
+    "total": { "count": 12, "p50": 5, "p95": 12.6, "p99": 12.6, "max": 12.6 }
+  },
+  "hub_broadcast_queue_depth": 0,
+  "hub_seqmu_max_hold_ms": 12,
   "livekit_healthy": true,
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
@@ -2953,7 +2997,14 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
 `voice_sessions` is the number of active voice connections. `broadcast_drops`
 is the cumulative count of events dropped because the **hub-wide broadcast
 queue** was full — sequenced events lost before delivery, worth alerting on
-if it ever grows. Per-client send-queue pressure is reported separately:
+if it ever grows. `topic_sheds_total` counts frames the **per-channel topic
+limiter** dropped before a sequence was assigned; like `broadcast_drops`, replay
+cannot recover them, so alert on any growth. A **content** frame (a message
+body, or one that discloses it) lost to either counter additionally forces the
+next reconnect of a client at or behind the loss onto the full-ready path,
+which rebuilds state from the database and so recovers the message; a metadata
+frame does not.
+Per-client send-queue pressure is reported separately:
 `backpressure_queue_disconnects` (clients disconnected to force a
 replay-recovering reconnect), `backpressure_high_fallbacks` (high-priority
 sends that fell back to the normal queue), and `backpressure_low_drops`
@@ -2973,6 +3024,25 @@ database). `ws_conn_rejects` counts upgrades refused by the
 volume (omitted when the platform can't report it). `livekit_healthy` is
 omitted when no LiveKit health check is wired; `event_persister` is omitted
 when event persistence is disabled.
+
+The distribution objects (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
+`chat_send_ack_ms`, `voice_join_ms`) and the two gauges (`hub_broadcast_queue_depth`,
+`hub_seqmu_max_hold_ms`) are the shipped, in-process metrics surface: they
+exist in **every** build, unlike the OpenTelemetry instruments below, which
+compile only with `-tags otel`. Each distribution reports `p50`, `p95`, `p99`
+(the upper bound of the fixed bucket the quantile falls into, capped at `max` —
+a coarse but comparable estimate; buckets are 0.5 ms through 5 s, anything
+larger is exact max), `max` (exact) and `count`. `ws_broadcast_ms` is enqueue→fanout-done;
+`ws_dispatch_lag_ms` is enqueue→dispatch-start, the direct signal for a
+contended dispatch loop; `chat_send_ack_ms` is a `chat_send` frame's arrival
+to its `chat_send_ok` being queued. `voice_join_ms` holds one such
+distribution per phase of a completed `voice_join` — `precheck` (rate limit,
+permission and channel gates), `leave` (leaving the previous channel on a
+switch), `persist` (the `voice_states` write and moderator-flag restore),
+`token` (minting and sending `voice_token`), `complete` (the voice topic
+subscription, `voice_state` fan-out, existing states and `voice_config`) and
+`total`; a refused or rolled-back join is not counted. A
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating; the retention purge holds `seqMu` across a full scan.
 
 ### GET /metrics (Prometheus)
 
@@ -3019,6 +3089,7 @@ Authorization is two-layered:
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                        | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
 | `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
 | `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
@@ -3119,7 +3190,8 @@ a missing or different value is `403 FORBIDDEN`. The server makes a fresh token 
     "tls_domain": "",
     "upload_max_size_mb": 100,
     "voice_quality": "medium",
-    "voice_auto_download": true
+    "voice_auto_download": true,
+    "recovery_kit": true
   }
 }
 ```
@@ -3127,7 +3199,11 @@ a missing or different value is `403 FORBIDDEN`. The server makes a fresh token 
 All `wizard` fields are optional; `server_name`, `motd` and
 `registration_mode` (`closed` / `invite` / `approval` / `open`, default
 `invite`) are stored in the settings table (live), the rest are written back
-to `config.yaml` (consumed at startup).
+to `config.yaml` (consumed at startup). `recovery_kit` (default `true`, also
+when `wizard` is absent) asks the server to generate the owner's recovery kit
+during the first run (B11-8); the secret is returned once as
+`recovery_kit_secret` and only its verifier is stored. Pass
+`"recovery_kit": false` to skip it.
 
 #### Response 200 OK
 
@@ -3140,7 +3216,8 @@ to `config.yaml` (consumed at startup).
   "restart_required": false,
   "restart_url": "",
   "warnings": [],
-  "certificate_fingerprint": "3f:a1:...:9c"
+  "certificate_fingerprint": "3f:a1:...:9c",
+  "recovery_kit_secret": "ABCD-EFGH-IJKL-MNOP"
 }
 ```
 
@@ -3151,7 +3228,9 @@ afterwards. `warnings` lists non-fatal problems (e.g. `config.yaml` not
 writable) — the account exists whenever this response is returned.
 `certificate_fingerprint` is as in [`GET /admin/api/stats`](#get-adminapistats),
 and is also omitted when `wizard.tls_mode` differs from the running mode —
-the restarted server serves a different certificate.
+the restarted server serves a different certificate. `recovery_kit_secret` is
+present unless `wizard.recovery_kit` was false or the kit could not be issued:
+it is shown once and can never be retrieved again.
 
 ---
 
@@ -3173,14 +3252,19 @@ Aggregate counts for the admin dashboard.
   "invite_count": 2,
   "db_size_bytes": 1048576,
   "online_count": 3,
+  "tls_mode": "acme",
   "certificate_fingerprint": "3f:a1:...:9c"
 }
 ```
 
-`certificate_fingerprint` is the served TLS leaf certificate's SHA-256 in the
-lower-case colon-hex form the desktop client shows before its trust prompt —
-the value users compare out of band. Omitted when there is no statically
-loaded certificate (TLS off, or ACME before its first handshake).
+`tls_mode` is the configured `tls.mode`. `certificate_fingerprint` is the
+served TLS leaf certificate's SHA-256 in the lower-case colon-hex form the
+desktop client shows before its trust prompt — the value users compare out of
+band. In `acme` mode it is read on the first handshake and follows each
+renewal. It is omitted when the server serves no certificate it can read (TLS
+off, where a reverse proxy serves it, or ACME before its first handshake). The
+certificate's expiry is on the `certificate` signal of
+[GET /admin/api/attention](#get-adminapiattention).
 
 ---
 
@@ -3189,9 +3273,9 @@ loaded certificate (TLS off, or ACME before its first handshake).
 The dashboard's attention panel (RI-07): server-side health signals and the
 deduplicated warnings raised from them. The server samples once a minute
 (the free space on the data volume, the SQLite writer pool's cumulative wait,
-reconnect resumes, hub broadcast drops plus send-queue overflow disconnects, the newest
-backup file and each maintenance job's last run); this route only reads that
-state. Thresholds and hysteresis are in
+reconnect resumes, hub broadcast drops, per-channel topic sheds and
+send-queue overflow disconnects, the newest backup file, the LiveKit voice path's state, the served TLS certificate's expiry and each maintenance job's last
+run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.
 
@@ -3242,10 +3326,33 @@ Nothing here is exported off the host.
   disk space with `attention.disk_warn_free_mb` and `server.min_free_disk_mb`
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
-- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `backup`,
-  and `job:<name>` for each maintenance step.
-- The first disk level is reported at once, and a stopped dispatch loop as
-  soon as it is seen; every other level change, including a rate's first
+- `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
+  `certificate`, `last_exit`, `backup`, and `job:<name>` for each maintenance
+  step.
+- `certificate` reports the served TLS certificate's expiry. A `self_signed`
+  or `manual` certificate is `ok` with 21 days or more left, `warning` inside
+  21 days and `critical` inside 7 days or once expired. An `acme` certificate
+  is measured against its renewal point, min(lifetime/3, 30 days) before
+  expiry: `warning` once a third of that window has passed unrenewed and
+  `critical` two thirds in (20 and 10 days for a 90-day certificate, 10 and 5
+  for a 45-day one), so a healthy certificate with a shorter lifetime does not
+  warn. `threshold` states the bounds in use. It is `unknown` with TLS off (a
+  reverse proxy serves the certificate) and in `acme` mode before the first
+  handshake.
+- `last_exit` reports how the previous run ended (SRE-08): `ok` after a clean
+  shutdown, `warning` when the run before this one left its boot marker armed
+  (a `kill -9`, a crash, or a hardware-fault exit), with the previous run's
+  start time as `value` and the last panic it recovered, if any, in `detail`;
+  `unknown` on a first start, when there was no marker to read. A planned
+  (clean) restart clears the marker, so it recovers this warning.
+- `voice` reports LiveKit. An OwnCord-managed companion reports its
+  supervisor's local state — `running`, plus a `not running` warning when it is
+  down and a `gave up` critical when the backoff stopped restarting it; a
+  restart count appears in the detail. An externally managed LiveKit is
+  probed over HTTP and reports `unreachable` as a warning when it does not
+  answer; an unconfigured voice path is `unknown`.
+- The first disk or voice level is reported at once, and a stopped dispatch
+  loop as soon as it is seen; every other level change, including a rate's first
   warning, holds for two samples.
   A rate's `threshold` is its `attention.*` floor until it has learned a
   baseline, then the higher of the floor and three times that baseline.
@@ -3562,13 +3669,16 @@ Remove a channel's override so the server window applies again. Audited as
 Read the audit trail, newest first.
 
 **Auth:** `VIEW_AUDIT_LOG`
-**Query params:** `limit` (default 50, 1–500), `offset` (default 0), and two
+**Query params:** `limit` (default 50, 1–500), `offset` (default 0), and three
 optional filters that narrow the whole log before paging:
 
 - `q`: case-insensitive (ASCII) substring of the actor's name, the action, the
   target type or the detail. Surrounding whitespace is trimmed; at most 100
   characters.
 - `action`: one exact action name, such as `channel_delete`; at most 64 bytes.
+- `hide_signins`: `1` drops the sign-in and connection rows (`user_login`,
+  `ws_connect`); any other value keeps them. The admin panel sends it while
+  its Sign-ins filter is off, which is the default.
 
 An over-long or non-UTF-8 `q` or `action` is `400 BAD_REQUEST`.
 
@@ -3708,8 +3818,7 @@ Because they control which of the owner's backups survive, they are the one
 pair of settings a PATCH may not change without the **Owner** role: a request
 carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
 even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
-does not bypass it. Retention pruning never removes the `pre_restore_*`
-safety copies.
+does not bypass it.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
@@ -3746,12 +3855,33 @@ user has TOTP enabled.
 The config.yaml values the admin panel's Settings page shows as read-only
 facts, taken from the configuration the server booted with — so an edit to
 config.yaml shows here only after a restart, which is also when it takes
-effect.
+effect. Secrets appear only as `gif_configured` / `github_configured`
+booleans. `tls_domain`, `voice_url` and `backup_dir` are included only when
+the caller holds `ADMINISTRATOR` or is the owner. `logging_level` is the
+level the server booted at, normalised (an unrecognised value reads `info`,
+an unset one `""`); a debug boost in force shows in
+`GET /admin/api/logs/level`, not here.
 
 #### Response 200 OK
 
 ```json
-{ "upload_max_size_mb": 100, "voice_quality": "medium" }
+{
+  "upload_max_size_mb": 100,
+  "voice_quality": "medium",
+  "server_port": 8443,
+  "min_free_disk_mb": 256,
+  "max_ws_connections": 1000,
+  "tls_mode": "acme",
+  "tls_domain": "chat.example.com",
+  "user_quota_mb": 0,
+  "backup_dir": "data/backups",
+  "logging_level": "info",
+  "voice_url": "ws://localhost:7880",
+  "moderation_report_retention_days": 30,
+  "moderation_action_retention_days": 90,
+  "gif_configured": true,
+  "github_configured": false
+}
 ```
 
 #### Errors
@@ -3902,6 +4032,62 @@ itself.
 
 ---
 
+### GET /admin/api/archive
+
+Download the full archive: a `VACUUM INTO` snapshot of the database, the data
+directory and `config.yaml` in one zip. What it carries and leaves out is in
+[deployment.md](deployment.md#the-full-archive).
+
+The admin panel does not call this route; it asks for a single-use link
+(`POST /admin/api/archive/link`) and opens that, so a large archive streams to
+disk instead of being buffered in the page. This route stays for direct API
+callers that send the `Authorization` header themselves.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+`application/zip`, sent as `attachment; filename="owncord-archive.zip"`. The
+zip is built before the status is written, so a failed build is a JSON error:
+`507 STORAGE_LOW_DISK` when building it would leave the backup directory's
+volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
+`409 ARCHIVE_IN_PROGRESS` while another archive is being built or sent.
+
+---
+
+### POST /admin/api/archive/link
+
+Issue a short-lived, single-use link to the full archive, for the panel to
+open as a plain browser download.
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "path": "/admin/api/archive/download?token=…"
+}
+```
+
+The token is random, bound to the requesting owner, valid for about a minute
+and consumable once. It is never logged. `409 ARCHIVE_IN_PROGRESS` while
+another archive is being built or sent.
+
+---
+
+### GET /admin/api/archive/download
+
+Redeem a single-use archive link. **Auth:** the `token` query parameter (a
+browser download cannot send an `Authorization` header); the token IS the
+authorisation, and the credential that asked for it must still be a signed-in,
+non-banned Owner. `200 application/zip` on success, `403 FORBIDDEN` for an
+unknown, expired or already-used token or a principal that no longer
+qualifies, `409 ARCHIVE_IN_PROGRESS` while another archive is being built or
+sent.
+
+---
+
 ## Server Updates
 
 Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
@@ -3997,6 +4183,8 @@ ring buffer (capacity 2000) is replayed as backfill, then new entries stream
 live, with a keepalive every 15 s. The ticket is consumed on connect; the
 `ADMINISTRATOR` bit is re-checked throughout the stream, and revoking the
 underlying session or API token (or banning the user) mid-stream cuts it.
+The server ends every open stream as its shutdown begins, so an open stream
+does not hold up a restart; reconnect with a fresh ticket once it is back.
 
 **Auth:** single-use ticket (from `POST /admin/api/logs/ticket`)
 
@@ -4005,6 +4193,73 @@ Each event's data is one JSON record:
 ```json
 { "ts": "2026-08-04T12:00:00Z", "level": "INFO", "msg": "…", "source": "…", "attrs": "…" }
 ```
+
+---
+
+### GET /admin/api/logs/level
+
+The log level the server is running at, the level it started with (and
+reverts to), and when a debug boost reverts.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK
+
+```json
+{ "level": "debug", "base_level": "info", "reverts_at": "2026-09-28T12:15:00Z" }
+```
+
+`reverts_at` is absent when no boost is pending.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
+
+---
+
+### PATCH /admin/api/logs/level
+
+Raise the server's log level to `debug` for 15 minutes. The server reverts to
+`base_level` on its own when the window ends; a second PATCH restarts the
+window. Recorded in the audit log as `log_level_debug_on`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Request
+
+```json
+{ "level": "debug", "duration_seconds": 900 }
+```
+
+Both fields are required and only these values are accepted.
+
+#### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 400    | `BAD_REQUEST`        | Invalid body, or any level or window other than above    |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
+
+---
+
+### DELETE /admin/api/logs/level
+
+Revert to `base_level` at once and cancel a pending boost. Recorded in the
+audit log as `log_level_reverted`.
+
+**Auth:** `ADMINISTRATOR`
+
+#### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
+
+#### Errors
+
+| Status | Code                 | Cause                                                    |
+| ------ | -------------------- | -------------------------------------------------------- |
+| 503    | `CONFIG_UNAVAILABLE` | The admin API was built without the log-level controller |
 
 ---
 

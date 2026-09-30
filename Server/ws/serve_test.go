@@ -555,6 +555,40 @@ func TestGetCachedSettings_ReflectsDBValues(t *testing.T) {
 
 // ─── Broadcast* hub methods ───────────────────────────────────────────────────
 
+// TestHub_GracefulStopContext_NoticeCarriesTheRestartReason is CLI-02's
+// server half: the teardown notice used to say "shutdown" whatever the
+// restart was, so an admin update reached clients as a stop. It now names
+// the reason the caller passes.
+func TestHub_GracefulStopContext_NoticeCarriesTheRestartReason(t *testing.T) {
+	hub, database := newServeHub(t)
+	send := make(chan []byte, 8)
+	c := ws.NewTestClient(hub, seedTestUser(t, database, "restart-reason"), send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	hub.GracefulStopContext(ctx, ws.RestartReasonUpdate)
+
+	for frame := range send {
+		var env struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Reason       ws.RestartReason `json:"reason"`
+				DelaySeconds int              `json:"delay_seconds"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(frame, &env) != nil || env.Type != ws.MsgTypeServerRestart {
+			continue
+		}
+		if env.Payload.Reason != ws.RestartReasonUpdate || env.Payload.DelaySeconds != 5 {
+			t.Fatalf("notice = %+v, want reason %q with a 5 s delay", env.Payload, ws.RestartReasonUpdate)
+		}
+		return
+	}
+	t.Fatal("the socket closed without a server_restart notice")
+}
+
 func TestHub_BroadcastServerRestart_DeliversToAllClients(t *testing.T) {
 	hub, database := newServeHub(t)
 

@@ -38,6 +38,19 @@ It works behind CGNAT and strict home routers, so setup is usually faster than m
 
 - Tailscale handles device-to-device reachability, but LiveKit still needs correct runtime config.
 - Follow [livekit-setup.md](livekit-setup.md) for LiveKit key/secret and port behavior.
+- **Set `voice.node_ip` to the server's Tailscale address** (`100.x.y.z`; on the
+  Docker stack, `rtc.node_ip` in `livekit.yaml` in place of `use_external_ip`). It is
+  the address LiveKit advertises in its ICE candidates, and OwnCord's generated
+  `livekit.yaml` writes it in place of `use_external_ip` (leave
+  `voice.advertise_internal_ip` off: it keeps discovery on and the pin is
+  ignored). Without it, LiveKit
+  detects a public address over STUN — never the `100.x` address your peers
+  route to — so the call connects and then nobody hears anything. The server warns at start-up whenever `node_ip` is not
+  a public address; on a tailnet that warning is expected and the `100.x`
+  address is the correct value.
+- **Do not forward the media ports.** The tailnet carries the WebRTC media
+  directly, so `7881/TCP` and the UDP media port(s) — the `50000-60000` range,
+  or a single `voice.udp_port` — stay closed.
 
 ## Benefits
 

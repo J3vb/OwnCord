@@ -21,7 +21,7 @@ import {
   submitLogin,
   waitForWsReady,
 } from "./helpers";
-import { findUnnamedControls, keyboardReachable } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/b9-accessibility";
 
 const DM_CHANNELS = [
   {
@@ -58,6 +58,7 @@ test.describe("B9-4 shared navigation", () => {
           { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
           { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
           { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          { pattern: "/api/v1/invites", status: 200, body: [] },
         ],
         simulateWsFlow: true,
         // The mock signs in as "admin", whose role holds ADMINISTRATOR and so
@@ -76,7 +77,7 @@ test.describe("B9-4 shared navigation", () => {
     await expect(audit).toBeVisible();
     const moderation = page.locator("[data-testid='moderation-btn']");
     await expect(moderation).toBeVisible();
-    await expect(moderation).toHaveText("Moderation");
+    await expect(moderation).toHaveAccessibleName("Moderation");
     expect(
       await moderation.evaluate(
         (btn, a) => btn.previousElementSibling === a,
@@ -122,6 +123,39 @@ test.describe("B9-4 shared navigation", () => {
     await moderation.focus();
     expect(await sidebar.evaluate((el) => el.scrollLeft)).toBe(0);
     expect(await header.evaluate((el) => el.scrollLeft)).toBe(0);
+  });
+
+  test("the header actions are one named row of icon buttons, in Tab order", async ({ page }) => {
+    const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
+    const actions = header.locator(".sidebar-header-actions > button");
+    await expect(actions).toHaveCount(3);
+    const names = ["Invite", "Audit Log", "Moderation"];
+    for (const [i, name] of names.entries()) {
+      await expect(actions.nth(i)).toHaveAccessibleName(name);
+      await expect(actions.nth(i)).toHaveText("");
+    }
+    expect(await findUnnamedControls(header)).toEqual([]);
+
+    // One row: every button shares a top edge.
+    const tops = await actions.evaluateAll((els) =>
+      els.map((el) => el.getBoundingClientRect().top),
+    );
+    expect(new Set(tops).size).toBe(1);
+
+    // Tab walks them in order, each with the shared focus ring.
+    const invite = actions.nth(0);
+    expect(await keyboardReachable(page, invite)).toBe(true);
+    for (const [i, name] of names.entries()) {
+      if (i > 0) await page.keyboard.press("Tab");
+      await expect(actions.nth(i)).toBeFocused();
+      const ring = await focusIndicator(page);
+      expect(ring.problems, `${name}: ${ring.problems.join("; ")}`).toEqual([]);
+    }
+
+    // Enter on Invite opens the invite manager.
+    await invite.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog", { name: "Server Invites" })).toBeVisible();
   });
 
   test("channel → DM → back → settings → logout → sign in again keeps the shell whole", async ({

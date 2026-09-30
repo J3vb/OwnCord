@@ -190,7 +190,7 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), nil)
 	got := make([]string, 0, len(m.steps()))
 	for _, step := range m.steps() {
-		got = append(got, step.job+": "+step.name)
+		got = append(got, step.job+": "+step.failLog)
 	}
 	want := []string{
 		"Expired sessions: failed to delete expired sessions",

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -22,11 +23,12 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 // disconnect-triggered cleanup without an explicit voice_leave message.
 // Exported for ws_test package use only.
 func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
-	h.handleVoiceLeave(context.Background(), c)
+	h.handleVoiceLeave(context.Background(), c, voiceLeaveReasonDisconnect)
 }
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
 func (h *Hub) handleMessage(c *Client, raw []byte) {
+	receivedAt := time.Now()
 	// kickClient (hub_sweep.go and the ban/expiry paths below) removes c from
 	// the hub and closes its send channels, but never touches the underlying
 	// connection or signals readPump — readPump keeps calling handleMessage
@@ -97,8 +99,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		return
 	}
 	if result.Error != nil {
-		var ce ClientError
-		if errors.As(result.Error, &ce) {
+		if ce, ok := errors.AsType[ClientError](result.Error); ok {
 			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
 		} else {
 			slog.Error("ws handler internal error",
@@ -109,12 +110,12 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		// LeaveVoice alongside its error when CONNECT_VOICE was revoked, so the
 		// user is removed from the SFU rather than merely denied a new token.
 		if result.LeaveVoice {
-			h.handleVoiceLeave(c.ctx, c)
+			h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
 		}
 		return
 	}
 
-	h.handleMessageApply(c, env, result)
+	h.handleMessageApply(c, env, reqID, result, receivedAt)
 }
 
 // handleMessageSessionRecheck performs handleMessage's periodic session
@@ -147,14 +148,14 @@ func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
 		}
 		if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 			slog.Info("ws session expired, closing connection", "user_id", c.userID)
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 			return true
 		}
 		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
 		if auth.IsEffectivelyBanned(tempUser) {
 			slog.Info("ws user banned, closing connection", "user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClient(c)
+			h.kickClientTerminal(c)
 			return true
 		}
 	}
@@ -208,8 +209,9 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 }
 
 // handleMessageApply applies the client state mutations and side effects that a
-// successful V2 Result asks for.
-func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
+// successful V2 Result asks for. receivedAt is when handleMessage read the
+// frame, used to time the send→ack round trip (chat_send_ok).
+func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applySetChannelID(c, *result.SetChannelID)
@@ -229,6 +231,12 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
 	}
 	if result.Reply != nil {
 		c.sendMsg(result.Reply)
+		// chat_send_ack_ms measures the send→ack round trip for chat_send
+		// only; other reply kinds (command replies) are not the figure the
+		// load run compares against k6.
+		if env.Type == MsgTypeChatSend {
+			h.latency.chatAck.Observe(float64(time.Since(receivedAt)) / float64(time.Millisecond))
+		}
 	}
 	if len(result.Events) > 0 {
 		h.EmitEvents(c.ctx, result.Events)
@@ -237,10 +245,10 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, result Result) {
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id
 	// from the already-validated envelope payload.
 	if result.LeaveVoice {
-		h.handleVoiceLeave(c.ctx, c)
+		h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
 	}
 	if result.JoinVoice {
-		h.handleVoiceJoin(c.ctx, c, env.Payload)
+		h.handleVoiceJoin(c.ctx, c, env.Payload, reqID)
 	}
 }
 

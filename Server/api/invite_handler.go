@@ -39,6 +39,7 @@ func MountInviteRoutes(r chi.Router, database *db.DB, svc *service.Services) {
 		r.Post("/", handleCreateInvite(svc))
 		r.Get("/", handleListInvites(svc))
 		r.Delete("/{code}", handleRevokeInvite(svc))
+		r.Get("/{code}/redemptions", handleListInviteRedemptions(svc))
 	})
 }
 
@@ -104,6 +105,36 @@ func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// inviteRedemptionResponse is the API shape for one recorded redemption (O1).
+type inviteRedemptionResponse struct {
+	// UserID is null once the redeemer's account has been erased; Username is
+	// then empty. A leaked invite can still be traced to when it was spent.
+	UserID     *int64 `json:"user_id"`
+	Username   string `json:"username"`
+	RedeemedAt string `json:"redeemed_at"`
+}
+
+// handleListInviteRedemptions processes GET /api/v1/invites/{code}/redemptions.
+func handleListInviteRedemptions(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		code := chi.URLParam(r, "code")
+		reds, err := svc.Invites.ListInviteRedemptions(r.Context(), code)
+		if err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		resp := make([]inviteRedemptionResponse, 0, len(reds))
+		for _, red := range reds {
+			resp = append(resp, inviteRedemptionResponse{
+				UserID:     red.UserID,
+				Username:   red.Username,
+				RedeemedAt: red.RedeemedAt,
+			})
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

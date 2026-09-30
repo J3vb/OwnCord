@@ -9,7 +9,8 @@ import { createElement, setText, appendChildren, clearChildren } from "@lib/dom"
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp, resolveAuthor } from "@lib/formatting";
+import { resolveDisplayName } from "@lib/avatar";
 import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
@@ -88,11 +89,19 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const channel = createElement("span", { class: "search-result-channel" });
       const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id);
       setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);
+      const who = resolveAuthor(r.user);
+      const authorName = resolveDisplayName(who);
       const author = createElement("span", { class: "search-result-author" });
-      setText(author, r.user.username);
+      setText(author, authorName);
+      appendChildren(header, channel, author);
+      if (authorName !== who.username) {
+        const handle = createElement("span", { class: "search-result-handle" });
+        setText(handle, messagingText("search.authorHandle", { username: who.username }));
+        header.appendChild(handle);
+      }
       const time = createElement("span", { class: "search-result-time" });
       setText(time, formatTimestamp(r.timestamp));
-      appendChildren(header, channel, author, time);
+      header.appendChild(time);
 
       const content = createElement("div", { class: "search-result-content" });
       setText(content, r.content.length > 200 ? r.content.slice(0, 200) + "..." : r.content);

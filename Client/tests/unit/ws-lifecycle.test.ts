@@ -752,10 +752,14 @@ describe("connect() catch guards against a superseded ws_connect rejection", () 
     expect(client.getState()).toBe("connected");
 
     // No reconnect timer should have been armed by the stale catch —
-    // advancing well past any backoff must not trigger a redial of the
-    // still-healthy connection.
+    // advancing past any backoff must not trigger a redial of the
+    // still-healthy connection. Pongs keep the CLI-01 silence deadline from
+    // firing, as a live server's traffic would.
     mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
+    await vi.advanceTimersByTimeAsync(30_000);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
     const reconnectCalls = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
     expect(reconnectCalls).toHaveLength(0);
   });

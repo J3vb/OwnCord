@@ -127,6 +127,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
 	"admin.requirePerm":                        {classServerScoped, "per-route server permission for the admin mux", calls{"HasServerPerm": 1}},
+	"admin.handleGetConfigFacts":               {classServerScoped, "ADMINISTRATOR is server-wide; gates the host path and endpoint fields of GET /config", calls{"HasServerPerm": 1}},
 	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
 	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
 	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},

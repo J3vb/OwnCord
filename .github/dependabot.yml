@@ -59,8 +59,10 @@ updates:
         update-types: ["version-update:semver-minor"]
 
   # Server container base images (Server/Dockerfile). The builder's
-  # `golang:1.26-bookworm` tracks the toolchain in Server/go.mod and every
-  # `actions/setup-go` in CI, so a minor bump here is a signal to move all three
+  # `golang:1.27-bookworm` tracks the toolchain in Server/go.mod, every
+  # `actions/setup-go` in CI, the golangci-lint pin (a linter built with an
+  # older Go refuses the module) and the govulncheck pin (an old one panics on
+  # newer Go source), so a minor bump here is a signal to move all five
   # together — not a standalone merge.
   - package-ecosystem: docker
     directory: /Server
@@ -129,7 +131,7 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # Held at an exact version by Client/patches/@tauri-apps+plugin-http+2.5.9.patch.
+      # Held at an exact version by Client/patches/@tauri-apps+plugin-http+2.7.0.patch.
       # postinstall runs patch-package --error-on-fail --error-on-warn, so any bump
       # fails npm ci on a patch-version mismatch before a single test runs. Client/patches/README.md
       # says the pin lifts only when an upstream release passes the SDK boundary

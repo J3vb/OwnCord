@@ -46,6 +46,52 @@ async function timeJoin(page: Page): Promise<number> {
   return Date.now() - start;
 }
 
+/** The client's own join timeline for the join started at `since`, from the
+ *  production `__owncord.lkDebug()` introspection (SRE-M2). "Voice Connected"
+ *  shows before the activate phase ends, so wait until that join is recorded
+ *  rather than read the previous sample's. */
+async function joinTimings(page: Page, since: number): Promise<Record<string, number | null>> {
+  let timings: Record<string, number | null> = {};
+  await expect
+    .poll(
+      async () => {
+        const voiceJoin = await page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __owncord: {
+                  lkDebug: () => {
+                    voiceJoin?: {
+                      active: unknown;
+                      lastJoins: Array<{
+                        startedAt: number;
+                        timings: Record<string, number | null>;
+                      }>;
+                    };
+                  };
+                };
+              }
+            ).__owncord.lkDebug().voiceJoin,
+        );
+        const last = voiceJoin?.lastJoins[0];
+        if (voiceJoin?.active !== null || last === undefined || last.startedAt < since) {
+          return false;
+        }
+        timings = last.timings;
+        return true;
+      },
+      { intervals: [50], timeout: 10_000 },
+    )
+    .toBe(true);
+  return timings;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)]!;
+}
+
 test("voice join reaches decoded remote media within the budget", async ({
   alice,
   bob,
@@ -54,6 +100,7 @@ test("voice join reaches decoded remote media within the budget", async ({
   await joinVoice(bob);
 
   const samples: number[] = [];
+  const phaseSamples: Record<string, number[]> = {};
   for (let i = 0; i < SAMPLES; i++) {
     if (i > 0) {
       await alice.locator(".voice-widget.visible button[aria-label='Disconnect']").click();
@@ -67,17 +114,25 @@ test("voice join reaches decoded remote media within the budget", async ({
     }
     // No open peer is still decoding, so any audio counted is this join's.
     await expect.poll(async () => (await mediaStats(alice)).audioSamples).toBe(0);
+    const sampleStart = Date.now();
     samples.push(await timeJoin(alice));
+    for (const [phase, ms] of Object.entries(await joinTimings(alice, sampleStart))) {
+      if (typeof ms === "number") (phaseSamples[phase] ??= []).push(ms);
+    }
   }
 
-  const median = [...samples].sort((a, b) => a - b)[Math.floor(SAMPLES / 2)]!;
-  const result = { samplesMs: samples, medianMs: median, budgetMs };
+  const phaseMedians = Object.fromEntries(
+    Object.entries(phaseSamples).map(([phase, values]) => [phase, median(values)]),
+  );
+  const medianMs = median(samples)!;
+  const result = { samplesMs: samples, medianMs, budgetMs, phaseMedians };
   console.log(`voice-join: ${JSON.stringify(result)}`);
   await info.attach("voice-join", {
     body: JSON.stringify(result, null, 2),
     contentType: "application/json",
   });
-  expect(median, `median voice join ${median} ms over budget ${budgetMs} ms`).toBeLessThanOrEqual(
-    budgetMs,
-  );
+  expect(
+    medianMs,
+    `median voice join ${medianMs} ms over budget ${budgetMs} ms`,
+  ).toBeLessThanOrEqual(budgetMs);
 });

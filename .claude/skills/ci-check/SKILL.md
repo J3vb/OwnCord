@@ -30,15 +30,23 @@ default-build pass proves nothing about the others:
 ```bash
 go build ./... && go build -tags otel ./... && go build -tags wazero ./... && go build -tags otel,wazero ./...
 go vet ./...
-go test -race ./...
+go test -race -timeout 20m ./...          # -timeout 20m matches CI; ws alone took 431 s here
 go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml), not just ./ws/
 go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/...  # plain leg: logstream_alloc_test.go is !race && !deadlock
-golangci-lint run                        # CI pins v2.11.3 — check `golangci-lint --version` first
+golangci-lint run                        # CI pins v2.13.2 — check `golangci-lint --version` first
 
-# Generated output must not be stale. These are what `make sqlc-verify` and
-# `make protocol-verify` reduce to — make is not on PATH on a stock Windows box.
+# `ci.yml` also runs these three first, in `Server Lint & Invariants`, so they
+# report in seconds rather than after the race run. Mirroring them locally is
+# the fast path when iterating on a rule or a lint.
+go test ./invariants/...
+go test -count=1 ./cmd/dbinventory/ ./migrations/
+
+# Generated output must not be stale. These are what `make sqlc-verify`,
+# `make protocol-verify` and `make docs-verify` reduce to — make is not on PATH
+# on a stock Windows box.
 sqlc generate && git diff --exit-code db/dbgen
 go run ./cmd/genprotocol && git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts
+go run -tags otel,wazero ./cmd/gendocs && git diff --exit-code ../docs/api.md ../docs/schema.md ../docs/server-configuration.md
 ```
 
 Add `-tags wazero` to `go vet`/`go test` when you touched `plugin/`.
@@ -55,16 +63,16 @@ the thing to call green before pushing.
 confusingly.** A build older than this module's Go target refuses outright:
 
 ```
-can't load config: the Go language version (go1.25) used to build
-golangci-lint is lower than the targeted Go version (1.26.7)
+can't load config: the Go language version (go1.26) used to build
+golangci-lint is lower than the targeted Go version (1.27.1)
 ```
 
 That is the binary's age, not a missing gate — it reads like "cannot run
 here" and is not. Fetch the pinned version rather than skipping the step:
 
 ```bash
-curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.11.3/golangci-lint-2.11.3-linux-amd64.tar.gz
-tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.11.3-linux-amd64/golangci-lint --version
+curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.13.2/golangci-lint-2.13.2-linux-amd64.tar.gz
+tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.13.2-linux-amd64/golangci-lint --version
 ```
 
 A `windows-latest` `-race` failure inside `ws` that matches `runtime.scanstack`
@@ -85,6 +93,7 @@ npm test
 npm run typecheck
 npm run typecheck:build   # tsconfig.build.json — the shipped app graph
 npm run typecheck:e2e     # tsconfig.e2e.json — tests/e2e, EXCLUDED from the main tsconfig
+npm run check:admin-types # Server/admin/static/js checkJs, shrink-only baseline
 npm run lint
 npm run build:budget && npm run check:budgets   # B7-7 gzip budgets; see bundle-budgets.json
 ```
@@ -113,10 +122,12 @@ the only ones present, and `tests/setup.ts` throws if the flag did not reach
 the worker (OC-0415). There is no shim; an earlier in-memory shim was
 removed because it left Node's `Storage` class shadowing jsdom's and twelve
 storage tests asserting nothing. CI runs Node 26 without setting the variable
-(`ci.yml`), and the full suite was measured passing that way — 192 files / 5257
-tests, identical to the flagged run.
-
-`npm audit --audit-level=high` and `knip` also run in CI but are advisory.
+(`ci.yml`), and the full suite was measured passing that way — 337 files /
+7250 passed + 154 expected fail (7405 total) on 2026-09-27.
+`npm audit --audit-level=high` (scoped to shipped deps, via
+`scripts/npm-audit-gate.sh`) and `knip` both run in `Client Static Checks` and
+both **block** — they are not advisory. The audit gate forgives only a
+recognised registry outage, fail-closed on every real finding.
 
 ## Docs and ledger (from the repository root)
 
@@ -151,7 +162,7 @@ npm run check:hygiene
 Which is:
 
 ```bash
-npx prettier --check .          # every material tracked source, not just client TS
+git ls-files -z | xargs -0 npx prettier --check --ignore-unknown   # tracked material sources, not the filesystem
 shellcheck <tracked *.sh + .githooks/pre-commit + .githooks/pre-push>
 actionlint .github/workflows/*.yml
 ```
@@ -160,9 +171,12 @@ actionlint .github/workflows/*.yml
 them optional and prints `--- SKIP` instead of failing; CI runs them for real.
 Prettier is not optional and runs everywhere.
 
-The file lists come from `git ls-files`, never a filesystem glob:
-`.claude/worktrees/` holds gitignored copies of the tree that a glob would
-happily lint.
+Every file list comes from `git ls-files`, never a filesystem glob: `.opencode/`
+holds git-excluded scratch a glob would happily lint, and
+`Client/src-tauri/target/` is ~23 GB excluded only by a nested `.gitignore`.
+`run.mjs` chunks the tracked list on Windows, where the command line is capped
+at ~8 KB; in `check:hygiene` the prettier step is labelled `Prettier (chunk n/m)`
+for that reason.
 
 Go formatting is not here. `gofmt -l` prints offenders and still exits 0, so it
 cannot fail a build; the `formatters` block in `Server/.golangci.yml` enforces
@@ -182,7 +196,7 @@ an advisory published upstream breaks a branch that was clean yesterday. Check t
 advisory date before hunting your diff. It is skipped on Dependabot PRs by design
 (it overlaps the scanning that opened them), so a clean Dependabot run does not
 mean the advisory set is clean. The client equivalents, `npm audit --omit=dev
---audit-level=high` and `knip`, are advisory in CI.
+--audit-level=high` and `knip`, **block** in `Client Static Checks`.
 
 `fallback_crypto` is `cfg(not(windows))`, so its tests compile to nothing on a
 Windows box and only run on the Linux/macOS runners.

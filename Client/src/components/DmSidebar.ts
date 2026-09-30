@@ -19,13 +19,14 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
 import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
-import { isRenderableAvatar } from "@lib/avatar";
+import { isRenderableAvatar } from "./message-list/avatar";
 import {
   fetchImageAsDataUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
+import { voiceText } from "../i18n/voice";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -61,6 +62,8 @@ export interface DmConversation {
    *  a mute silences chatter, never something addressed to you. */
   readonly muted?: boolean;
   readonly active?: boolean;
+  /** Someone is in this DM's call: the row shows a phone glyph. */
+  readonly inCall?: boolean;
 }
 
 export interface DmSidebarOptions {
@@ -186,6 +189,20 @@ function renderDmItem(
     );
     countEl.title = requestsText("members.count", { count: String(count) });
     item.appendChild(countEl);
+  }
+
+  // A live call is visible without opening the DM. The glyph has a name so
+  // it is not colour or shape alone.
+  if (convo.inCall === true) {
+    const glyph = createElement("span", {
+      class: "dm-in-call",
+      role: "img",
+      "aria-label": voiceText("call.inProgress"),
+      title: voiceText("call.inProgress"),
+      "data-testid": `dm-in-call-${convo.channelId}`,
+    });
+    glyph.appendChild(createIcon("phone", 14));
+    item.appendChild(glyph);
   }
 
   // Close / leave button (hidden by default, shown on hover via CSS)
@@ -335,6 +352,7 @@ function convoSignature(convo: DmConversation): string {
     convo.unread === true ? "u" : "",
     convo.unreadCount ?? 0,
     convo.mentionCount ?? 0,
+    convo.inCall === true ? "c" : "",
   ].join("|");
 }
 

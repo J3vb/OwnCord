@@ -5,7 +5,7 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -320,6 +320,19 @@ describe("AudioPipeline", () => {
       expect(mockGainNode.connect).toHaveBeenCalledWith(mockDestNode);
     });
 
+    it("OC-0474: builds nothing while the mic track is muted", () => {
+      // Muting stops the capture track (stopMicTrackOnMute); a pipeline built
+      // now would run an AudioContext and VAD over the ended track and move
+      // the muted sender onto a live track until the next unmute rebuilds it.
+      mockRoom.localParticipant.getTrackPublication().track.isMuted = true;
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+
+      expect(pipeline.isActive).toBe(false);
+      expect(AudioContext).not.toHaveBeenCalled();
+      expect(mockSender.replaceTrack).not.toHaveBeenCalledWith({ id: "adjusted-track" });
+    });
+
     it("replaces WebRTC sender track with pipeline output", () => {
       pipeline.setRoom(mockRoom);
       pipeline.setupAudioPipeline();
@@ -512,6 +525,24 @@ describe("AudioPipeline", () => {
       pipeline.setRoom(mockRoom);
       await pipeline.applyNoiseSuppressor();
       expect(setProcessor).toHaveBeenCalled();
+    });
+
+    it("OC-0474: attaches nothing while the mic track is muted", async () => {
+      const setProcessor = vi.fn().mockResolvedValue(undefined);
+      const mockRoom = {
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              isMuted: true,
+              getProcessor: vi.fn().mockReturnValue(undefined),
+              setProcessor,
+            },
+          }),
+        },
+      } as any;
+      pipeline.setRoom(mockRoom);
+      await pipeline.applyNoiseSuppressor();
+      expect(setProcessor).not.toHaveBeenCalled();
     });
   });
 

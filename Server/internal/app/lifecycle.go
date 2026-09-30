@@ -24,13 +24,25 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// shutdownBudget is the total time Close is given, and the same 30 seconds
-// the operator is told about in the "draining connections" log line. The
-// per-stage timeouts inside the individual stop steps are budgets of their
-// own and are unchanged by the move.
-const shutdownBudget = 30 * time.Second
+// closeStepBudget bounds each close step on its own, except the HTTP drain —
+// the figures the operator is told about in the "draining connections" log
+// line. The shorter timeouts inside some stop steps (the audit drain, the
+// event flush, plugins, telemetry) sit within it.
+const closeStepBudget = 10 * time.Second
+
+// httpDrainBudget bounds the "http" close step. It matches the server's
+// ReadTimeout and WriteTimeout, so a request the server legitimately allows
+// (a slow upload or export download) finishes before the hub, the audit
+// writer and the database stop under it.
+const httpDrainBudget = 30 * time.Second
+
+// teardownBudget caps the whole close walk, whatever the step budgets add up
+// to, so a teardown finishes inside systemd's TimeoutStopSec=60 — which an
+// installed unit file keeps even after an update raises it.
+const teardownBudget = 50 * time.Second
 
 // stage is one start step, in start order. The name is what a failure is
 // reported as, so an operator reading `starting audit-writer: ...` knows
@@ -60,6 +72,7 @@ func (a *App) stages() []stage {
 		{"data-dir", a.startDataDir},
 		{"tls", a.startTLS},
 		{"database", a.startDatabase},
+		{"boot-marker", a.startBootMarker},
 		{"migrate", a.startMigrate},
 		{"erasure-markers", a.startErasureMarkers},
 		{"push-vapid-key", a.startPushVAPIDKey},
@@ -70,6 +83,7 @@ func (a *App) stages() []stage {
 		{"event-persistence", a.startEventPersistence},
 		{"audit-writer", a.startAuditWriter},
 		{"maintenance", a.startMaintenance},
+		{"pprof", a.startPprof},
 		{"acme", a.startACME},
 		{"signals", a.startSignals},
 		{"http", a.startHTTP},
@@ -108,12 +122,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 	})
 
 	defer func() {
-		// WithoutCancel, not Background: teardown must run its full budget
-		// even when the caller's context is what ended the server, while
-		// still carrying whatever values that context holds.
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownBudget)
-		defer cancel()
-		if closeErr := a.Close(closeCtx); closeErr != nil && err == nil {
+		// Close gives every step its own budget and ignores ctx's cancellation,
+		// so teardown runs in full even when the caller's context is what ended
+		// the server, while still carrying whatever values that context holds.
+		if closeErr := a.Close(ctx); closeErr != nil && err == nil {
 			err = closeErr
 		}
 	}()
@@ -145,6 +157,9 @@ func (a *App) start() error {
 	// copy through every start-up refusal; the schema-ahead check in
 	// db.MigrateFS stops that copy from then booting on a newer schema.
 	removeOldBinaryFn(a.log)
+	if a.bootMarker != nil {
+		a.bootMarker.reported()
+	}
 	return nil
 }
 
@@ -173,10 +188,10 @@ func (a *App) startTLS() error {
 	}
 	a.tlsCfg = tlsResult.TLSConfig
 	a.httpHandler = tlsResult.HTTPHandler
-	// The admin dashboard and the setup wizard's finish step surface the same
-	// fingerprint the banner prints, so an operator does not have to watch
-	// stderr. Set before the router mounts the admin handler.
-	admin.SetLeafFingerprint(tlsResult.Fingerprint)
+	// The admin dashboard and the setup wizard's finish step surface the served
+	// certificate (acme's after its first handshake), so an operator does not
+	// have to watch stderr. Set before the router mounts the admin handler.
+	admin.SetServedCertificate(tlsCfg.Mode, tlsResult.Served.Current)
 
 	printBanner(a.cfg, a.deps.Version, a.tlsCfg != nil, tlsResult.Fingerprint)
 	return nil
@@ -270,9 +285,10 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 //
 // Its close step is stopHub: GracefulStopContext, which calls StopLiveKit,
 // the sole caller of LiveKitProcess.Stop, then a join on the dispatch
-// goroutine. gracefulOnce makes it idempotent alongside the stop the http
-// step performs on the normal path, so it is reached on every return from Run
-// and a supervised livekit-server process is never orphaned (OC-0027).
+// goroutine. gracefulOnce makes it idempotent alongside the stop the
+// hub-notice step performs on the normal path, so it is reached on every
+// return from Run and a supervised livekit-server process is never orphaned
+// (OC-0027).
 func (a *App) startHub() error {
 	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
 	if err != nil {
@@ -280,6 +296,7 @@ func (a *App) startHub() error {
 	}
 	a.runtime = rt
 	a.hub = a.runtime.Hub
+	a.afterHubStart(rt.Services)
 	// The emergency restart path must stop LiveKit even when an earlier
 	// shutdown step wedges before the hub's closer can run.
 	a.deps.Restart.setCompanionStop(a.hub.StopLiveKit)
@@ -312,14 +329,14 @@ func (a *App) startHub() error {
 		rt.Services.PushDispatch = dispatcher
 	}
 	a.onClose("hub", func(ctx context.Context) error {
-		return stopHub(ctx, a.runtime.Hub)
+		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
 	return nil
 }
 
 // dispatchHub is the slice of *ws.Hub the hub close step drives.
 type dispatchHub interface {
-	GracefulStopContext(ctx context.Context)
+	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
 	Done() <-chan struct{}
 }
 
@@ -328,8 +345,8 @@ type dispatchHub interface {
 // loop, and on an early start failure the goroutine StartRuntime spawned may
 // not even have been scheduled yet — without the join, Run returned with the
 // loop still alive and Close went on to release what it reads.
-func stopHub(ctx context.Context, hub dispatchHub) error {
-	hub.GracefulStopContext(ctx)
+func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
+	hub.GracefulStopContext(ctx, reason)
 	select {
 	case <-hub.Done():
 		return nil
@@ -408,7 +425,8 @@ func (a *App) startACME() error {
 }
 
 // startHTTP builds the main server and registers the ordered graceful
-// shutdown — ACME, then in-flight HTTP handlers, then the hub. It starts last
+// shutdown — the http step (ACME, then in-flight HTTP handlers, within
+// httpDrainBudget), then the hub-notice step. It starts last
 // of the real stages so that shutdown is the FIRST thing the reverse walk
 // does: in-flight handlers' broadcasts must still reach a live hub and event
 // persister, or the frames vanish from the replay store across the restart.
@@ -432,9 +450,24 @@ func (a *App) startHTTP() error {
 		}
 		return nil
 	})
-	a.onClose("http", func(ctx context.Context) error {
-		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv, a.hub)
+	// The hub stops right after the drain — it notifies clients, closes
+	// every socket once the notice window ends and then stops LiveKit — as a
+	// step of its own, so its notice window keeps its budget however long the
+	// drain took (SRV-06). The later "hub" step then only joins the dispatch
+	// loop. The notice names the restart's intent, so clients hear "update"
+	// rather than "shutdown".
+	a.onClose("hub-notice", func(ctx context.Context) error {
+		a.hub.GracefulStopContext(ctx, a.deps.Restart.noticeReason())
+		return nil
 	})
+	a.onCloseWithin("http", httpDrainBudget, func(ctx context.Context) error {
+		return shutdownServers(ctx, a.log, a.srv, a.acmeSrv)
+	})
+	// An open admin log stream never returns on its own and Shutdown waits for
+	// every active handler, so end the streams as soon as Shutdown begins.
+	if a.deps.LogBuf != nil {
+		a.srv.RegisterOnShutdown(a.deps.LogBuf.EndStreams)
+	}
 	// Bind here, not in serve(): a port that cannot be bound must fail start()
 	// before the previous binary is removed (REL-01).
 	return serveWithBindRetry(a.log, "server", func() (err error) {

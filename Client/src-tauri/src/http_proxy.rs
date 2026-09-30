@@ -29,9 +29,10 @@
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
 
 use log::{debug, info, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -42,6 +43,14 @@ use crate::tofu::{self, TofuOutcome};
 /// Tauri-managed state: one running tunnel per remote host.
 pub struct HttpProxyState {
     inner: Mutex<HashMap<String, ProxyEntry>>,
+    /// Hosts already reported as pinned this app session. Every request opens
+    /// its own tunnel connection and re-runs the TOFU check, so a trusted
+    /// outcome would otherwise emit a `cert-tofu` event (and the webview a log
+    /// line) once per request. CLI-04(a): emit the trusted event for a host once
+    /// until a `first_use` or `mismatch` is emitted for it, which clears the
+    /// claim. Those actionable statuses are never gated — the first-use ceremony
+    /// must be able to prompt again after the user dismisses it.
+    trusted_reported: std::sync::Mutex<HashSet<String>>,
 }
 
 struct ProxyEntry {
@@ -53,7 +62,28 @@ impl HttpProxyState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            trusted_reported: std::sync::Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Whether this host has not been reported as pinned yet, marking it
+    /// reported. A poisoned lock is not fatal — the worst case is one repeated
+    /// log line, never a trust decision — so recover the guard.
+    fn claim_trusted_report(&self, host: &str) -> bool {
+        let mut reported = self
+            .trusted_reported
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        reported.insert(host.to_string())
+    }
+
+    /// Clear this host's trusted claim after a `first_use` or `mismatch`, so the
+    /// next trusted outcome (a re-accepted or re-pinned cert) is reported again.
+    fn clear_trusted_report(&self, host: &str) {
+        self.trusted_reported
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(host);
     }
 
     /// Remove the `remote_host` entry, but only if it still points at `port`.
@@ -73,8 +103,9 @@ impl HttpProxyState {
 }
 
 use crate::proxy_common::{
-    connect_tls, copy_with_deadline, read_request_headers, resolve_remote_target, rewrite_headers,
-    run_accept_loop, spawn_watched, validate_remote_host,
+    connect_tls, content_length, copy_with_deadline, header_value, read_request_headers,
+    resolve_remote_target, rewrite_headers, run_accept_loop, spawn_watched, validate_remote_host,
+    CountingStream,
 };
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return the
@@ -228,26 +259,35 @@ async fn handle_connection<R: Runtime>(
     )
     .await?;
 
-    let fingerprint = captured_fp
+    let observed = captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
-        .unwrap_or_default();
-    if fingerprint.is_empty() {
-        return Err("TLS handshake completed but no certificate fingerprint was captured".into());
-    }
+        .filter(|o| !o.fingerprint.is_empty())
+        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    let fingerprint = observed.fingerprint.clone();
 
     let store_key = tofu::cert_store_key(remote_host);
-    match tofu::evaluate(&app, &store_key, &fingerprint)? {
-        TofuOutcome::Trusted => {
-            crate::ws_proxy::emit_cert_tofu(
-                &app,
-                serde_json::json!({
-                    "host": store_key,
-                    "fingerprint": fingerprint,
-                    "status": "trusted",
-                }),
-            );
+    match tofu::evaluate(&app, &store_key, &observed)? {
+        // A routine public-CA renewal was re-pinned by evaluate: as trusted.
+        TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
+            // CLI-04(a): one trusted event per host until its status changes.
+            // Each request is its own tunnel connection and re-runs this check,
+            // so without the gate a busy server emits (and the webview logs) one
+            // line per REST call. Unmanaged state (a test harness) reports every time.
+            let first_report = app
+                .try_state::<HttpProxyState>()
+                .is_none_or(|state| state.claim_trusted_report(&store_key));
+            if first_report {
+                crate::ws_proxy::emit_cert_tofu(
+                    &app,
+                    serde_json::json!({
+                        "host": store_key,
+                        "fingerprint": fingerprint,
+                        "status": "trusted",
+                    }),
+                );
+            }
         }
         // F4/F8: a first-use cert is NOT silently pinned or forwarded to. Reject
         // the request (502) and surface the fingerprint so the user can confirm
@@ -258,6 +298,9 @@ async fn handle_connection<R: Runtime>(
                 "[http_proxy] first-use cert for {} — awaiting user confirmation",
                 store_key
             );
+            if let Some(state) = app.try_state::<HttpProxyState>() {
+                state.clear_trusted_report(&store_key);
+            }
             crate::ws_proxy::emit_cert_tofu(
                 &app,
                 serde_json::json!({
@@ -279,6 +322,9 @@ async fn handle_connection<R: Runtime>(
                 "[http_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch",
                 store_key
             );
+            if let Some(state) = app.try_state::<HttpProxyState>() {
+                state.clear_trusted_report(&store_key);
+            }
             crate::ws_proxy::emit_cert_tofu(
                 &app,
                 serde_json::json!({
@@ -301,7 +347,8 @@ async fn handle_connection<R: Runtime>(
 
     // ── 3. Forward request + bidirectional copy ──────────────────────────
     tls.write_all(modified.as_bytes()).await?;
-    match copy_with_deadline(&mut local, &mut tls, DATA_PHASE_TIMEOUT).await {
+    let result = run_data_phase(&app, &buf, &mut local, &mut tls).await;
+    match result {
         Ok((to_remote, from_remote)) => {
             debug!(
                 "[http_proxy] connection closed: {}B sent, {}B received",
@@ -313,6 +360,79 @@ async fn handle_connection<R: Runtime>(
         }
     }
     Ok(())
+}
+
+/// The upload an in-flight request belongs to: the webview-generated
+/// correlation id plus the request's declared body length. Both must be
+/// present for the proxy to report progress; every other request takes the
+/// plain copy path with no extra work.
+struct UploadTarget {
+    id: String,
+    total: u64,
+}
+
+/// Bound on the correlation id the webview sends, so a malformed request head
+/// cannot make the proxy hold or re-emit an unbounded value.
+const MAX_UPLOAD_PROGRESS_ID_LEN: usize = 128;
+
+fn upload_progress_target(raw: &[u8]) -> Option<UploadTarget> {
+    let id = header_value(raw, "x-upload-id")?;
+    if id.is_empty() || id.len() > MAX_UPLOAD_PROGRESS_ID_LEN {
+        return None;
+    }
+    let total = content_length(raw)?;
+    if total == 0 {
+        return None;
+    }
+    Some(UploadTarget { id, total })
+}
+
+/// Emit one `upload-progress` event. The payload shape is the webview's
+/// `UploadProgress` (`src/platform/contracts/http.ts`); keep the two in step.
+fn emit_upload_progress<R: Runtime>(app: &AppHandle<R>, id: &str, sent: u64, total: u64) {
+    let _ = app.emit(
+        "upload-progress",
+        serde_json::json!({ "id": id, "sent": sent, "total": total }),
+    );
+}
+
+/// Emit interval for upload progress. A UI progress bar does not need a tick
+/// per socket chunk, and `copy_bidirectional` can move many small reads.
+const UPLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
+
+/// Copy the request/response data phase, reporting bytes read from the
+/// loopback side to `upload-progress` while an upload is in flight. An upload
+/// is any request carrying both `X-Upload-Id` and `Content-Length`; every
+/// other request is copied exactly as before.
+async fn run_data_phase<R: Runtime>(
+    app: &AppHandle<R>,
+    request_head: &[u8],
+    local: &mut TcpStream,
+    tls: &mut tokio_rustls::client::TlsStream<TcpStream>,
+) -> std::io::Result<(u64, u64)> {
+    let Some(target) = upload_progress_target(request_head) else {
+        return copy_with_deadline(local, tls, DATA_PHASE_TIMEOUT).await;
+    };
+    let counter = Arc::new(AtomicU64::new(0));
+    let mut counted = CountingStream::new(&mut *local, Arc::clone(&counter));
+    let ticker = tokio::spawn({
+        let app = app.clone();
+        let counter = Arc::clone(&counter);
+        async move {
+            loop {
+                tokio::time::sleep(UPLOAD_PROGRESS_INTERVAL).await;
+                emit_upload_progress(
+                    &app,
+                    &target.id,
+                    counter.load(Ordering::Relaxed),
+                    target.total,
+                );
+            }
+        }
+    });
+    let result = copy_with_deadline(&mut counted, tls, DATA_PHASE_TIMEOUT).await;
+    ticker.abort();
+    result
 }
 
 /// Bound for the data-copy phase of a tunneled connection (step 3 above).
@@ -404,6 +524,75 @@ mod tests {
         assert!(out.ends_with("\r\n\r\n"));
     }
 
+    #[test]
+    fn upload_target_requires_both_id_and_length() {
+        let with_both =
+            b"POST /api/v1/uploads HTTP/1.1\r\nX-Upload-Id: u-1\r\nContent-Length: 2048\r\n\r\n";
+        let target = upload_progress_target(with_both).expect("id + length is an upload");
+        assert_eq!(target.id, "u-1");
+        assert_eq!(target.total, 2048);
+
+        let no_id = b"POST /api/v1/uploads HTTP/1.1\r\nContent-Length: 2048\r\n\r\n";
+        assert!(
+            upload_progress_target(no_id).is_none(),
+            "a request without the correlation header is not reported"
+        );
+
+        let no_length = b"POST /api/v1/uploads HTTP/1.1\r\nX-Upload-Id: u-1\r\n\r\n";
+        assert!(
+            upload_progress_target(no_length).is_none(),
+            "a chunked or bodyless request has no total to report against"
+        );
+
+        let empty_length =
+            b"POST /api/v1/uploads HTTP/1.1\r\nX-Upload-Id: u-1\r\nContent-Length: 0\r\n\r\n";
+        assert!(upload_progress_target(empty_length).is_none());
+    }
+
+    #[test]
+    fn upload_target_rejects_an_overlong_id() {
+        let mut raw = b"POST /api/v1/uploads HTTP/1.1\r\nX-Upload-Id: ".to_vec();
+        raw.extend(std::iter::repeat_n(b'x', MAX_UPLOAD_PROGRESS_ID_LEN + 1));
+        raw.extend_from_slice(b"\r\nContent-Length: 10\r\n\r\n");
+        assert!(
+            upload_progress_target(&raw).is_none(),
+            "an unbounded id must not be echoed back in an event"
+        );
+    }
+
     // OC-0218 note: the copy_with_deadline stall test lives in
     // proxy_common.rs now, next to the shared helper.
+
+    // CLI-04(a): the trusted `cert-tofu` report is one per host until a
+    // first_use or mismatch for that host clears the claim.
+    // A busy server's every REST call re-runs the TOFU check on its own tunnel
+    // connection, and a report per call is the log noise the item named.
+    #[test]
+    fn trusted_report_is_claimed_once_per_host() {
+        let state = HttpProxyState::new();
+        assert!(
+            state.claim_trusted_report("chat.example:8443"),
+            "the first trusted report for a host must be emitted"
+        );
+        assert!(
+            !state.claim_trusted_report("chat.example:8443"),
+            "a repeat report for the same host must be suppressed"
+        );
+        assert!(
+            state.claim_trusted_report("other.example:8443"),
+            "a different host is its own first report"
+        );
+
+        // A mismatch (or first use) clears the claim: once the user re-accepts,
+        // the next trusted outcome is reported again.
+        state.clear_trusted_report("chat.example:8443");
+        assert!(
+            state.claim_trusted_report("chat.example:8443"),
+            "trusted after a cleared claim must be emitted again"
+        );
+        assert!(
+            !state.claim_trusted_report("other.example:8443"),
+            "clearing one host leaves another host's claim in place"
+        );
+    }
 }

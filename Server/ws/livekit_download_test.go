@@ -25,16 +25,16 @@ func TestLivekitAssetName(t *testing.T) {
 		want         string
 		wantErr      bool
 	}{
-		{"linux", "amd64", "livekit_1.13.5_linux_amd64.tar.gz", false},
-		{"linux", "arm64", "livekit_1.13.5_linux_arm64.tar.gz", false},
-		{"linux", "arm", "livekit_1.13.5_linux_armv7.tar.gz", false},
-		{"windows", "amd64", "livekit_1.13.5_windows_amd64.zip", false},
-		{"windows", "arm64", "livekit_1.13.5_windows_arm64.zip", false},
+		{"linux", "amd64", "livekit_1.13.7_linux_amd64.tar.gz", false},
+		{"linux", "arm64", "livekit_1.13.7_linux_arm64.tar.gz", false},
+		{"linux", "arm", "livekit_1.13.7_linux_armv7.tar.gz", false},
+		{"windows", "amd64", "livekit_1.13.7_windows_amd64.zip", false},
+		{"windows", "arm64", "livekit_1.13.7_windows_arm64.zip", false},
 		{"darwin", "arm64", "", true},
 		{"linux", "riscv64", "", true},
 	}
 	for _, tc := range cases {
-		got, err := livekitAssetName("1.13.5", tc.goos, tc.goarch)
+		got, err := livekitAssetName("1.13.7", tc.goos, tc.goarch)
 		if tc.wantErr {
 			if err == nil {
 				t.Errorf("%s/%s: expected error, got %q", tc.goos, tc.goarch, got)
@@ -53,8 +53,8 @@ func TestLivekitAssetName(t *testing.T) {
 
 func TestParseChecksumLine(t *testing.T) {
 	hash := strings.Repeat("ab", 32)
-	data := []byte("# comment\n" + hash + "  livekit_1.13.5_linux_amd64.tar.gz\ndeadbeef  other.txt\n")
-	got, err := parseChecksumLine(data, "livekit_1.13.5_linux_amd64.tar.gz")
+	data := []byte("# comment\n" + hash + "  livekit_1.13.7_linux_amd64.tar.gz\ndeadbeef  other.txt\n")
+	got, err := parseChecksumLine(data, "livekit_1.13.7_linux_amd64.tar.gz")
 	if err != nil {
 		t.Fatalf("parseChecksumLine: %v", err)
 	}

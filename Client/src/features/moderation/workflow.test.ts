@@ -14,6 +14,7 @@ import { setMembers } from "@stores/members.store";
 import type { FeatureViewContext } from "../navigation/destinations";
 import { renderModerationCenter } from "./Queue";
 import { noteQueueChange } from "./store";
+import { pinZone } from "../../../tests/helpers/tz-pin";
 
 const ME = 7;
 const OTHER = 8;
@@ -28,6 +29,7 @@ let lists: Call<ModerationQueueRow[]>[];
 let details: Call<ModerationReportDetail>[];
 let writes: (Call<void> & { readonly op: string; readonly body: unknown })[];
 let view: AbortController;
+let restoreTZ: () => void;
 
 function deferred<T>(bucket: Call<T>[], arg: string): Promise<T> {
   return new Promise<T>((resolve, reject) => bucket.push({ arg, resolve, reject }));
@@ -145,6 +147,7 @@ function submit(el: Element | null): void {
 }
 
 beforeEach(() => {
+  restoreTZ = pinZone("UTC");
   lists = [];
   details = [];
   writes = [];
@@ -164,6 +167,7 @@ beforeEach(() => {
 afterEach(() => {
   view.abort();
   document.body.replaceChildren();
+  restoreTZ();
 });
 
 describe("what the review offers", () => {
@@ -419,6 +423,20 @@ describe("conflicts and refusals", () => {
     await flush();
     expect(alerts(root)).toContain("This report was already closed by another moderator.");
     await reread(null);
+    expect(root.querySelector("[data-testid=mod-report]")).toBeNull();
+  });
+
+  it("keeps saying a closed report refused the note when its re-read beats the queue's", async () => {
+    const root = await opened(mine("r1"));
+    type(root, "loses the race");
+    submit(note(root));
+    writes[0]!.reject(new ApiClientError(409, "CONFLICT", "report is closed"));
+    await flush();
+    details.at(-1)!.resolve(mine("r1", { state: "closed", outcome: "actioned" }));
+    await flush();
+    lists.at(-1)!.resolve([]);
+    await flush();
+    expect(alerts(root)).toBe("Your note wasn't saved: this report was closed.");
     expect(root.querySelector("[data-testid=mod-report]")).toBeNull();
   });
 

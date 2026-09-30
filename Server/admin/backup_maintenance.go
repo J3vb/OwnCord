@@ -53,7 +53,47 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 			firstErr = err
 		}
 	}
+	pruneStaleBackupTemps()
 	return firstErr
+}
+
+// staleBackupTempAge is how long a backup's ".tmp" file must sit untouched
+// before the sweep treats it as the leftover of a killed run: the shortest
+// schedule interval, far longer than any VACUUM INTO keeps a temp unwritten.
+const staleBackupTempAge = 24 * time.Hour
+
+// pruneStaleBackupTemps removes the ".tmp" files killed backups left behind,
+// along with SQLite's ".tmp-journal" sidecar VACUUM INTO writes beside each,
+// and the work dirs of archive builds a killed process never cleaned up.
+// BackupToSafe removes its temp on every error it returns, so only a process
+// that died mid-VACUUM leaves one, and no *.db scan would ever reclaim it.
+func pruneStaleBackupTemps() {
+	entries, err := os.ReadDir(backupBaseDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-staleBackupTempAge)
+	removed := 0
+	for _, e := range entries {
+		ext := filepath.Ext(e.Name())
+		archiveWork := e.IsDir() && strings.HasPrefix(e.Name(), archiveWorkPrefix)
+		if !archiveWork && (e.IsDir() || (ext != ".tmp" && ext != ".tmp-journal")) {
+			continue
+		}
+		info, infoErr := e.Info()
+		if infoErr != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		path := filepath.Join(backupBaseDir, e.Name())
+		if rmErr := os.RemoveAll(path); rmErr != nil {
+			slog.Warn("backup maintenance: failed to remove stale backup temp", "path", path, "error", rmErr)
+			continue
+		}
+		removed++
+	}
+	if removed > 0 {
+		slog.Info("backup maintenance: removed stale backup temp files", "count", removed)
+	}
 }
 
 // runScheduledBackup takes a backup when the newest existing one is older
@@ -110,9 +150,23 @@ func runScheduledBackup(ctx context.Context, database *db.DB, interval time.Dura
 // retention window, so pruning never removes them.
 const preRestoreBackupPrefix = "pre_restore_"
 
+// PreMigrateBackupPrefix names the safety copy the boot path writes before a
+// pending migration moves the schema (internal/app/database.go). Like the
+// pre_restore_ copies it is not retention history — it is the rollback target
+// for a schema move — so pruning never removes it.
+const PreMigrateBackupPrefix = "pre_migrate_"
+
+// isSafetyCopy reports whether a backup file name is a safety copy rather
+// than retention history. Both the pre-restore and pre-migration prefixes
+// count; retention must never prune either.
+func isSafetyCopy(name string) bool {
+	base := filepath.Base(name)
+	return strings.HasPrefix(base, preRestoreBackupPrefix) || strings.HasPrefix(base, PreMigrateBackupPrefix)
+}
+
 // pruneExpiredBackups deletes *.db backups whose mtime is older than the
 // backup_retention window (in days), always keeping the newest one and never
-// touching the pre_restore_* safety copies.
+// touching the pre_restore_* or pre_migrate_* safety copies.
 func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService) error {
 	retStr, err := settings.Setting(ctx, "backup_retention")
 	if err != nil {
@@ -141,7 +195,7 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	pruned := 0
 	for _, e := range entries {
-		if strings.HasPrefix(filepath.Base(e.path), preRestoreBackupPrefix) {
+		if isSafetyCopy(e.path) {
 			continue
 		}
 		if e.mtime.Before(cutoff) && !e.mtime.Equal(newest) {

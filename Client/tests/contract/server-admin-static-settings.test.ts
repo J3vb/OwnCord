@@ -39,7 +39,8 @@ window.__test = {
   renderUpdates: renderUpdates,
   applyUpdate: applyUpdate,
   syncUpdateConfirm: syncUpdateConfirm,
-  confirmApplyUpdate: confirmApplyUpdate
+  confirmApplyUpdate: confirmApplyUpdate,
+  renderPlugins: renderPlugins
 };
 </script>`;
 if (!ADMIN_HTML_SOURCE.includes("</body>")) {
@@ -53,7 +54,10 @@ interface FetchCall {
   body: unknown;
 }
 
-type Responder = (path: string, method: string) => { status?: number; json?: unknown };
+type Responder = (
+  path: string,
+  method: string,
+) => { status?: number; json?: unknown; headers?: Record<string, string> };
 
 function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
   return new JSDOM(ADMIN_HTML, {
@@ -78,7 +82,9 @@ function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
         return {
           ok: status >= 200 && status < 300,
           status,
+          headers: new Headers(r.headers),
           json: async () => r.json ?? {},
+          text: async () => JSON.stringify(r.json ?? {}),
         } as Response;
       }) as typeof fetch;
     },
@@ -103,6 +109,7 @@ interface Bridge {
   applyUpdate: () => Promise<void>;
   syncUpdateConfirm: () => void;
   confirmApplyUpdate: () => Promise<void>;
+  renderPlugins: () => Promise<string>;
 }
 
 async function boot(
@@ -180,7 +187,28 @@ describe("Server/admin/static — Settings save (OC-0422)", () => {
   });
 });
 
-const CONFIG_FACTS = { upload_max_size_mb: 100, voice_quality: "medium" };
+const CONFIG_FACTS = {
+  upload_max_size_mb: 100,
+  voice_quality: "medium",
+  server_port: 8443,
+  min_free_disk_mb: 256,
+  max_ws_connections: 1000,
+  tls_mode: "acme",
+  tls_domain: "chat.example",
+  user_quota_mb: 50,
+  backup_dir: "/var/backups",
+  logging_level: "warn",
+  voice_url: "wss://voice.example",
+  moderation_report_retention_days: 30,
+  moderation_action_retention_days: 90,
+  gif_configured: true,
+  github_configured: false,
+  // A field the card does not know must not be rendered: were the server
+  // ever to send a secret, the card still would not show it.
+  gif_api_key: "klipy-secret",
+  github_token: "ghp_secret",
+};
+const LOG_LEVEL = { level: "warn", base_level: "warn" };
 const BACKUP = "chatserver_20260926_055335.db";
 
 function respondWith(
@@ -192,6 +220,7 @@ function respondWith(
     if (p === "/setup/status") return { json: { needs_setup: false } };
     if (p === "/settings") return { json: LOADED_SETTINGS };
     if (p === "/config") return { json: CONFIG_FACTS };
+    if (p === "/logs/level") return { json: LOG_LEVEL };
     if (p === "/backups")
       return { json: [{ name: BACKUP, size: 1024, date: "2026-09-26T05:53:35Z" }] };
     return { json: {} };
@@ -229,7 +258,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "General",
       "Access & registration",
       "Security",
-      "Set in config.yaml",
+      "Running configuration",
     ]);
     // Config-file values are facts from GET /config, not inputs that do nothing.
     for (const id of ["s-max_upload_bytes", "s-voice_quality", "s-server_icon"]) {
@@ -239,16 +268,161 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     expect(facts).toContain("100 MB");
     expect(facts).toContain("upload.max_size_mb");
     expect(facts).toContain("Medium");
+    // The running-config card shows the effective server config (SRE-07).
+    expect(facts).toContain("8443");
+    expect(facts).toContain("acme");
+    expect(facts).toContain("chat.example");
+    expect(facts).toContain("/var/backups");
+    // Secrets cross the boundary as booleans only.
+    expect(facts).toContain("configured");
+    expect(facts).not.toContain("klipy-secret");
+    expect(facts).not.toContain("ghp_secret");
     // The owner-only backup policy moved to Backups & restore.
     expect(content.querySelector("#s-backup_schedule")).toBeNull();
     expect(content.querySelector("#s-backup_retention")).toBeNull();
-    // Every control has an accessible name.
+    // Every control has an accessible name: a label pointing at it, or (the
+    // registration radio cards) a label wrapping it.
     for (const el of content.querySelectorAll("input, select")) {
-      expect(content.querySelector(`label[for="${el.id}"]`), el.id).not.toBeNull();
+      const named = el.id ? content.querySelector(`label[for="${el.id}"]`) : el.closest("label");
+      expect(named, el.id || (el as HTMLInputElement).value).not.toBeNull();
     }
     expect(content.querySelector("#s-require_2fa")?.getAttribute("aria-labelledby")).toBe(
       "s-require_2fa-name",
     );
+  });
+
+  // A MANAGE_SERVER-only caller gets GET /config without the host path and
+  // endpoints; the card drops those rows instead of printing "undefined".
+  it("leaves out the admin-only rows when GET /config omits them", async () => {
+    const managerFacts = Object.fromEntries(
+      Object.entries(CONFIG_FACTS).filter(
+        ([k]) => !["tls_domain", "voice_url", "backup_dir"].includes(k),
+      ),
+    );
+    const booted = await boot([], respondWith({ "GET /config": { json: managerFacts } }));
+    dom = booted.dom;
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const facts = content.querySelector(".fact-list")?.textContent ?? "";
+    expect(facts).toContain("8443");
+    expect(facts).toContain("acme");
+    for (const hidden of ["tls.domain", "voice.livekit_url", "backup.dir", "undefined"]) {
+      expect(facts).not.toContain(hidden);
+    }
+  });
+
+  // An empty value reads "Not set", and a zero that switches a feature off
+  // reads as its meaning, never a blank or a bare "0".
+  it("shows what an empty or disabling value means", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /config": {
+          json: {
+            ...CONFIG_FACTS,
+            tls_domain: "",
+            logging_level: "",
+            min_free_disk_mb: 0,
+            moderation_report_retention_days: 0,
+            moderation_action_retention_days: 0,
+          },
+        },
+      }),
+    );
+    dom = booted.dom;
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const rows = Object.fromEntries(
+      [...content.querySelectorAll(".fact-row")].map((row) => [
+        row.querySelector("dt")?.textContent,
+        row.querySelector(".fact-value")?.textContent,
+      ]),
+    );
+    expect(rows["TLS domain"]).toBe("Not set");
+    expect(rows["Log level"]).toBe("Not set");
+    expect(rows["Reserved disk headroom"]).toBe("Off");
+    expect(rows["Report retention"]).toBe("Never");
+    expect(rows["Action retention"]).toBe("Never");
+  });
+
+  // UX clarity: registration is four radio cards with what each means, fed
+  // into the same change tracking as every other field.
+  it("edits registration through radio cards that drive the save bar", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const group = document.getElementById("s-registration_mode")!;
+    expect(group.tagName).toBe("FIELDSET");
+    expect(group.querySelector("legend")?.textContent).toBe("Who can join");
+    const radios = [...group.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map((r) => r.value)).toEqual(["closed", "invite", "approval", "open"]);
+    expect(radios.find((r) => r.checked)?.value).toBe("closed");
+    expect(radios[2]!.closest("label")?.textContent).toContain("wait in Members");
+
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    radios[3]!.checked = true;
+    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(save.disabled).toBe(false);
+    expect(booted.bridge.state.settingsChanged).toBe(true);
+    radios[0]!.checked = true;
+    radios[0]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    expect(save.disabled).toBe(true);
+
+    radios[3]!.checked = true;
+    radios[3]!.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      registration_mode: "open",
+    });
+  });
+
+  it("shows the Members › Pending link only while Approval is the checked mode", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const group = document.getElementById("s-registration_mode")!;
+    const hint = document.getElementById("s-registration_mode-desc")!;
+    const pick = (value: string) => {
+      const radio = group.querySelector<HTMLInputElement>(`input[value="${value}"]`)!;
+      radio.checked = true;
+      radio.dispatchEvent(new dom!.window.Event("change", { bubbles: true }));
+    };
+    expect(hint.hidden).toBe(true);
+    expect(group.hasAttribute("aria-describedby")).toBe(false);
+
+    pick("approval");
+    expect(hint.hidden).toBe(false);
+    expect(hint.querySelector("button")?.textContent).toBe("Members › Pending");
+    expect(group.getAttribute("aria-describedby")).toBe("s-registration_mode-desc");
+
+    await booted.bridge.saveSettings();
+    expect(hint.hidden).toBe(false);
+
+    pick("open");
+    expect(hint.hidden).toBe(true);
+    expect(group.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("keeps the Members tab when leaving for Members › Pending is cancelled", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "settings";
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const approval = document.querySelector<HTMLInputElement>(
+      '#s-registration_mode input[value="approval"]',
+    )!;
+    approval.checked = true;
+    approval.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    dom.window.confirm = () => false;
+
+    document.querySelector<HTMLButtonElement>("#s-registration_mode-desc button")!.click();
+    expect(booted.bridge.state.section).toBe("settings");
+    expect(booted.bridge.state.membersTab).toBe("all");
   });
 
   it("drives the save bar from the actual difference, so reverting an edit clears it", async () => {
@@ -311,8 +485,15 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
     (document.getElementById("s-motd") as HTMLInputElement).value = "Draft MOTD";
     booted.bridge.markSettingsChanged();
     expect(booted.bridge.state.settingsChanged).toBe(true);
+    const asked: string[] = [];
+    dom.window.confirm = (message?: string) => {
+      asked.push(String(message ?? ""));
+      return true;
+    };
 
     booted.bridge.navigateTo("backups");
+    expect(asked).toEqual(["Discard your unsaved changes?"]);
+    expect(booted.bridge.state.section).toBe("backups");
     expect(booted.bridge.state.settingsChanged).toBe(false);
   });
 });
@@ -345,6 +526,112 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
     expect(patch).toMatchObject({ path: "/settings", body: { backup_schedule: "weekly" } });
   });
 
+  async function backupStatus(
+    backups: unknown[],
+    schedule: string,
+    signal: Record<string, unknown>,
+  ): Promise<{ title: string; sub: string }> {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /backups": { json: backups },
+        "GET /settings": { json: { ...LOADED_SETTINGS, backup_schedule: schedule } },
+        "GET /attention": { json: { signals: [{ id: "backup", ...signal }] } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderBackups);
+    return {
+      title: content.querySelector("#backupStatus .status-line-title")?.textContent ?? "",
+      sub: content.querySelector("#backupStatus .status-line-sub")?.textContent ?? "",
+    };
+  }
+
+  it("ignores a backup signal observed before the newest backup", async () => {
+    const status = await backupStatus(
+      [{ name: BACKUP, size: 1024, date: new Date().toISOString() }],
+      "off",
+      {
+        status: "warning",
+        detail: "no backup exists and scheduled backups are off",
+        observed_at: new Date(Date.now() - 30_000).toISOString(),
+      },
+    );
+    expect(status.title).toBe("Last backup just now (Healthy)");
+    expect(status.sub).toBe("1 backup kept · Automatic backups are off");
+  });
+
+  it("still warns from a backup signal observed after the newest backup", async () => {
+    const taken = new Date(Date.now() - 3 * 86_400_000);
+    const status = await backupStatus(
+      [{ name: BACKUP, size: 1024, date: taken.toISOString() }],
+      "daily",
+      {
+        status: "critical",
+        detail: "72h0m0s old",
+        value: taken.toISOString(),
+        threshold: "daily schedule: warn after 36h0m0s",
+        observed_at: new Date().toISOString(),
+      },
+    );
+    expect(status.title).toBe("Last backup 3 days ago (Critical)");
+    expect(status.sub).toBe("1 backup kept · Automatic backups run daily · 72h0m0s old");
+  });
+
+  it("does not promise a first automatic backup once the scheduled run has failed", async () => {
+    const status = await backupStatus([], "daily", {
+      status: "warning",
+      detail: "no successful backup yet",
+      threshold: "daily schedule: warn after 36h0m0s",
+      observed_at: new Date().toISOString(),
+    });
+    expect(status.title).toBe("No backups yet (Warning)");
+    expect(status.sub).toBe("Automatic backups run daily · no successful backup yet");
+  });
+
+  it("re-renders the status line from the schedule just saved, dropping a signal evaluated under the old one", async () => {
+    let schedule = "off";
+    const booted = await boot([], (p, method) => {
+      if (p === "/settings") {
+        if (method === "PATCH") schedule = "daily";
+        return { json: { ...LOADED_SETTINGS, backup_schedule: schedule } };
+      }
+      if (p === "/backups") return { json: [] };
+      if (p === "/attention")
+        return {
+          json: {
+            signals: [
+              {
+                id: "backup",
+                status: "warning",
+                detail: "no backup exists and scheduled backups are off",
+                observed_at: new Date().toISOString(),
+              },
+            ],
+          },
+        };
+      return respondWith()(p, method);
+    });
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.section = "backups";
+    await render(booted.bridge, dom.window, booted.bridge.renderBackups);
+    const sub = () => document.querySelector("#backupStatus .status-line-sub")?.textContent;
+    expect(sub()).toBe(
+      "Automatic backups are off · no backup exists and scheduled backups are off",
+    );
+
+    (document.getElementById("s-backup_schedule") as HTMLSelectElement).value = "daily";
+    booted.bridge.markBackupPolicyChanged();
+    await booted.bridge.saveBackupPolicy();
+    await expect.poll(sub).toBe("Automatic backups run daily");
+    expect(document.querySelector("#backupStatus .status-line-title")?.textContent).toBe(
+      "No backup yet; the first automatic one is still to come (Unknown)",
+    );
+  });
+
   it("restores only after the backup's name is typed, then waits for the restart", async () => {
     const fetchCalls: FetchCall[] = [];
     const booted = await boot(fetchCalls, respondWith());
@@ -369,6 +656,32 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
       `/backups/${BACKUP}/restore`,
     ]);
     expect(document.getElementById("restartWait")?.textContent).toContain("Waiting for the server");
+
+    // CLI-02: once the restore is sent the dialog cannot be dismissed, by
+    // Escape, the scrim or a close call, until the server is back.
+    const modal = document.getElementById("modal") as HTMLElement;
+    booted.bridge.closeModal();
+    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" }));
+    modal.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    expect(modal.classList.contains("visible")).toBe(true);
+  });
+
+  it("lets a failed restore close again", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        [`POST /backups/${BACKUP}/restore`]: { status: 409, json: { message: "busy" } },
+      }),
+    );
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.openRestoreModal(BACKUP, "2026-09-26T05:53:35Z");
+    (document.getElementById("restoreConfirm") as HTMLInputElement).value = BACKUP;
+    booted.bridge.checkRestoreConfirm(BACKUP);
+    await booted.bridge.confirmRestore(BACKUP);
+    expect(document.getElementById("restoreErr")?.textContent).toContain("busy");
+    booted.bridge.closeModal();
+    expect(document.getElementById("modal")?.classList.contains("visible")).toBe(false);
   });
 });
 
@@ -461,10 +774,91 @@ describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
     ]);
   });
 
+  it("cannot be closed once the update is sent, and its close buttons are disabled (CLI-02)", async () => {
+    const fetchCalls: FetchCall[] = [];
+    let release: (() => void) | undefined;
+    const { bridge, document } = await openDialog(fetchCalls);
+    (document.getElementById("updateBackupFirst") as HTMLInputElement).checked = false;
+    bridge.syncUpdateConfirm();
+    const closers = [
+      ...document.querySelectorAll<HTMLButtonElement>('#modalInner [data-action="closeModal"]'),
+    ];
+    expect(closers.length).toBeGreaterThan(0);
+    // Hold the apply in flight to look at the dialog mid-request.
+    const win = dom!.window as unknown as { fetch: typeof fetch };
+    const realFetch = win.fetch;
+    win.fetch = (input, init) =>
+      String(input).endsWith("/updates/apply")
+        ? new Promise<void>((resolve) => (release = resolve)).then(() => realFetch(input, init))
+        : realFetch(input, init);
+    const pending = bridge.confirmApplyUpdate();
+    await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
+    const modal = document.getElementById("modal") as HTMLElement;
+    bridge.closeModal();
+    document.dispatchEvent(new dom!.window.KeyboardEvent("keydown", { key: "Escape" }));
+    expect(modal.classList.contains("visible")).toBe(true);
+    expect(closers.every((b) => b.disabled)).toBe(true);
+    expect(document.getElementById("modalInner")?.getAttribute("aria-busy")).toBe("true");
+
+    release?.();
+    await pending;
+    expect(document.getElementById("restartWait")).not.toBeNull();
+    bridge.closeModal();
+    expect(modal.classList.contains("visible")).toBe(true);
+  });
+
+  it("lets a failed update close again", async () => {
+    const { bridge, document } = await openDialog([], {
+      "POST /updates/apply": { status: 502, json: { message: "download failed" } },
+    });
+    (document.getElementById("updateBackupFirst") as HTMLInputElement).checked = false;
+    bridge.syncUpdateConfirm();
+    await bridge.confirmApplyUpdate();
+    expect(document.getElementById("updateErr")?.textContent).toContain("download failed");
+    bridge.closeModal();
+    expect(document.getElementById("modal")?.classList.contains("visible")).toBe(false);
+  });
+
   it("links only an https release page", async () => {
     const { document } = await openDialog([], {
       "GET /updates": { json: { ...UPDATE, release_url: "javascript:alert(1)" } },
     });
     expect(document.getElementById("modalInner")?.querySelector("a")).toBeNull();
+  });
+});
+
+describe("Server/admin/static — Plugins empty state (A6)", () => {
+  let dom: JSDOM | undefined;
+  afterEach(() => dom?.window.close());
+
+  async function renderEmptyPlugins(runtime: string): Promise<Document> {
+    const booted = await boot([], (p) =>
+      p === "/api/v1/admin/plugins/"
+        ? { json: [], headers: { "X-Plugin-Runtime": runtime } }
+        : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = booted.dom.window.document;
+    doc.body.innerHTML = await booted.bridge.renderPlugins();
+    return doc;
+  }
+
+  it("explains what a plugin is and offers the install when the runtime is on", async () => {
+    const doc = await renderEmptyPlugins("enabled");
+    expect(doc.querySelector(".empty-state h3")?.textContent).toBe("No plugins installed yet");
+    expect(doc.querySelector(".empty-state p")?.textContent).toMatch(/^A plugin is /);
+    expect(doc.querySelector(".empty-state #pluginFile")).not.toBeNull();
+    expect(doc.querySelector(".empty-state #pluginInstallBtn")).not.toBeNull();
+    expect(doc.querySelectorAll("#pluginFile")).toHaveLength(1);
+    expect(doc.querySelector(".tbl")).toBeNull();
+    expect(doc.querySelector(".empty-line")).toBeNull();
+  });
+
+  it("keeps one line and no install when the runtime is off", async () => {
+    const doc = await renderEmptyPlugins("disabled");
+    expect(doc.querySelector(".empty-line")?.textContent).toBe("No plugins installed.");
+    expect(doc.querySelector(".empty-state")).toBeNull();
+    expect(doc.querySelector("#pluginFile")).toBeNull();
+    expect(doc.querySelector(".tbl")).toBeNull();
   });
 });

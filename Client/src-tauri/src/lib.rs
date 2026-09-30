@@ -4,21 +4,29 @@ mod commands;
 mod config_gates;
 mod constants;
 mod credentials;
+mod diagnostics;
 #[cfg(windows)]
 mod dpapi;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
 mod http_proxy;
+mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
 mod livekit_proxy;
+// Message notifications that open their message on click (the plugin's desktop
+// backend drops clicks). Desktop-only: the plugin's mobile backend has its own
+// action callback.
+#[cfg(desktop)]
+mod message_notification;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
 #[cfg(target_os = "linux")]
 pub mod native_voice;
 mod proxy_common;
 mod ptt;
 mod secret_store;
+mod shortcuts;
 mod text;
 mod tofu;
 mod tray;
@@ -59,9 +67,6 @@ fn native_voice_state() -> NoNativeVoice {
     NoNativeVoice
 }
 
-// Used by the single-instance closure and the startup log below.
-use tauri::Manager;
-
 /// Whether a forwarded single-instance launch should restore the main window.
 ///
 /// Once an installer is launching the old process must not take handoffs: the
@@ -75,6 +80,8 @@ fn should_restore_on_second_launch(installer_launching: bool) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First, so a panic anywhere after the log plugin starts reaches the log.
+    diagnostics::install_panic_hook();
     let builder = tauri::Builder::default();
 
     // The single-instance plugin MUST be registered first: a second launch is
@@ -89,11 +96,7 @@ pub fn run() {
             update_commands::update_in_progress()
         );
         if should_restore_on_second_launch(launching) {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            message_notification::focus_main_window(app);
         }
     }));
 
@@ -114,9 +117,11 @@ pub fn run() {
                 ))
                 .level(log_level_from_env())
                 .max_file_size(10_000_000) // 10 MB rolling file (default 40 KB is too small)
+                // Keep the two previous files (owncord-client_<date>.log): the
+                // default KeepOne deletes the whole log at each rollover.
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(2))
                 .build(),
         )
-        .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
@@ -138,15 +143,20 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init());
 
     match builder
+        .manage(json_store::JsonStores::default())
+        .manage(diagnostics::FrontendReady::new())
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
         .manage(external_content::ExternalContentState::new())
         .manage(native_voice_state())
         .invoke_handler(tauri::generate_handler![
+            diagnostics::frontend_ready,
             commands::get_settings,
             commands::save_settings,
             commands::get_cert_fingerprint,
+            #[cfg(desktop)]
+            message_notification::notify_message,
             commands::store_identity_pin,
             commands::get_identity_pin,
             ws_proxy::ws_connect,
@@ -170,6 +180,9 @@ pub fn run() {
             ptt::ptt_set_key,
             ptt::ptt_polling_supported,
             ptt::ptt_listen_for_key,
+            shortcuts::voice_shortcuts_start,
+            shortcuts::voice_shortcuts_supported,
+            shortcuts::voice_shortcuts_set_keys,
             livekit_proxy::start_livekit_proxy,
             livekit_proxy::stop_livekit_proxy,
             http_proxy::start_http_proxy,
@@ -228,6 +241,7 @@ pub fn run() {
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();
+            diagnostics::spawn_frontend_watchdog(app.handle());
             tray::create_tray(app.handle())?;
             // WebKitGTK denies mic/camera access by default — grant it so
             // voice/video works on Linux (no-op elsewhere; see linux_media).
@@ -244,6 +258,8 @@ pub fn run() {
                     // This ensures the AppHandle held inside the thread is released
                     // cleanly and the thread does not call app.emit on a dead runtime.
                     ptt::ptt_stop_internal();
+                    // Same for the global voice-shortcut poller.
+                    shortcuts::voice_shortcuts_stop_internal();
                 }
             });
         }

@@ -66,10 +66,12 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `ChannelController.ts` — ringing, overlays, slow-mode timers); that is fine
   as long as they only _read_ store state. Writing a store from one of those
   handlers is the violation. `local/no-store-write-in-ws-on` flags the common
-  form of it — a prefix-named mutator (`set*`/`add*`/…) imported from a
-  `stores/` module — which is a lint guard, not the whole invariant: it does
-  not see the `src/features/*/store.ts` domain stores, so keep the dispatcher
-  the only writer by hand.
+  form of it — a named mutator (`set*`/`add*`/`apply*`/… imported from a
+  `stores/` module **or** a `src/features/*/store.ts` domain store, OC-0478) —
+  which is a lint guard, not the whole invariant: keep the dispatcher the only
+  writer by hand. Every custom rule has a canary in
+  `tests/unit/eslint-rules-canary.test.ts` that fails if its scope stops
+  covering the module it guards (ARCH-06).
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than
@@ -152,7 +154,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   runs over WebView2 in `client-native` and at length through
   `npm run test:e2e:soak`. Its bars hold within one page as well as across
   logins, so a leak the re-login navigation would release still fails (bar a
-  within-page node move of at most 2, a known blind spot). A native
+  nodes net move of at most 2 in either series, a known blind spot; a real
+  leak past it still fails). A native
   voice backend keeps these rules plus three IPC ones (owned `listen()` with a
   late-unlisten, native handles released in the web room's teardown, native
   counts reported through `getSessionDebugInfo`):

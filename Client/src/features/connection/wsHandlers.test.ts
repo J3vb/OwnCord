@@ -73,6 +73,16 @@ describe("handleConnectionError", () => {
     expect(authStore.getState().isAuthenticated).toBe(true);
   });
 
+  it("disconnects but stays signed in on ANOTHER_DEVICE_ACTIVE (U4)", () => {
+    const ws = socketStub();
+
+    expect(handleConnectionError(ws, { code: "ANOTHER_DEVICE_ACTIVE", message: "" })).toBe(true);
+
+    expect(ws.disconnect).toHaveBeenCalledTimes(1);
+    expect(uiStore.getState().sessionReplaced).toBe(true);
+    expect(authStore.getState().isAuthenticated).toBe(true);
+  });
+
   it("leaves every other code to the rest of the chain", () => {
     const ws = socketStub();
 

@@ -11,11 +11,12 @@ import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { sessionDeviceLabel } from "@lib/session-notice";
-import { formatMessageTimestamp } from "@components/message-list/formatting";
+import { formatMessageTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
-import { avatarInitial, isRenderableAvatar, resolveDisplayName } from "@lib/avatar";
+import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
   fetchImageAsDataUrl,
   recoverEvictedImage,
@@ -24,6 +25,14 @@ import {
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
 import { outcomeEl, showOutcome } from "./helpers";
+import {
+  createDisclosure,
+  createRevealToggle,
+  createStatusRow,
+  setStatusIcon,
+  statusIcon,
+  type StatusKind,
+} from "../../features/settings/status";
 import { accountText as t } from "../../i18n/account";
 
 const log = createLogger("AccountTab");
@@ -44,18 +53,24 @@ const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp";
 interface ProfileCardResult {
   readonly card: HTMLDivElement;
   readonly headerName: HTMLDivElement;
+  readonly headerHandle: HTMLDivElement;
   readonly usernameValue: HTMLDivElement;
-  readonly editUserProfileBtn: HTMLButtonElement;
   readonly editUsernameBtn: HTMLButtonElement;
   /** The big avatar; the uploader swaps its contents on success. */
   readonly avatarLarge: HTMLDivElement;
+  /** Opened by Edit profile: avatar, display name, about and username. */
+  readonly editor: HTMLDivElement;
 }
 
 // ---------------------------------------------------------------------------
 // Profile card builder
 // ---------------------------------------------------------------------------
 
-function buildProfileCard(displayName: string, username: string): ProfileCardResult {
+function buildProfileCard(
+  displayName: string,
+  username: string,
+  signal: AbortSignal,
+): ProfileCardResult {
   const card = createElement("div", { class: "account-card" });
   const banner = createElement("div", { class: "account-banner" });
 
@@ -72,12 +87,28 @@ function buildProfileCard(displayName: string, username: string): ProfileCardRes
   // Header row
   const accountHeader = createElement("div", { class: "account-header" });
   const headerName = createElement("div", { class: "account-header-name" }, displayName);
-  const editUserProfileBtn = createElement(
-    "button",
-    { class: "ac-btn" },
-    t("profile.editUserProfile"),
+  const headerHandle = createElement(
+    "div",
+    { class: "account-header-handle" },
+    t("profile.handle", { username }),
   );
-  appendChildren(accountHeader, headerName, editUserProfileBtn);
+  const headerIdentity = createElement("div", { class: "account-header-identity" });
+  appendChildren(headerIdentity, headerName, headerHandle);
+  const editor = createElement("div", { class: "account-editor" });
+  const editProfileBtn = createRevealToggle(
+    t("profile.editProfile"),
+    editor,
+    signal,
+    "profile-edit-toggle",
+  );
+  // The card's one accent action while closed; once open, Save Profile has it.
+  editProfileBtn.classList.remove("secondary");
+  editProfileBtn.addEventListener(
+    "click",
+    () => editProfileBtn.classList.toggle("secondary", !editor.hidden),
+    { signal },
+  );
+  appendChildren(accountHeader, headerIdentity, editProfileBtn);
 
   // Username field row
   const fieldsContainer = createElement("div", { class: "account-fields" });
@@ -97,10 +128,11 @@ function buildProfileCard(displayName: string, username: string): ProfileCardRes
   );
   appendChildren(usernameField, usernameLeft, editUsernameBtn);
   fieldsContainer.appendChild(usernameField);
+  editor.appendChild(fieldsContainer);
 
-  appendChildren(card, banner, avatarWrap, accountHeader, fieldsContainer);
+  appendChildren(card, banner, avatarWrap, accountHeader, editor);
 
-  return { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn, avatarLarge };
+  return { card, headerName, headerHandle, usernameValue, editUsernameBtn, avatarLarge, editor };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +233,7 @@ function buildAvatarUploader(
   });
   const uploadBtn = createElement(
     "button",
-    { class: "ac-btn", "data-testid": "avatar-upload-btn" },
+    { class: "ac-btn secondary", "data-testid": "avatar-upload-btn" },
     t("profile.changeAvatar"),
   );
   const errorEl = outcomeEl("error", "avatar-error");
@@ -372,18 +404,20 @@ function passwordField(
   return { wrapper, input };
 }
 
-function buildPasswordSection(
-  options: SettingsOverlayOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", {});
-
-  const separator = createElement("div", { class: "settings-separator" });
-  const pwHeader = createElement(
-    "div",
-    { class: "settings-section-title" },
+function buildPasswordSection(options: SettingsOverlayOptions, signal: AbortSignal): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(
     t("password.sectionTitle"),
+    "password-section",
   );
+  setStatusIcon(icon, "ok");
+  setText(result, t("password.set"));
+  // The form opens on demand: changing a password is rare.
+  const wrapper = createElement("div", {});
+  row.insertBefore(
+    createRevealToggle(t("password.changeToggle"), wrapper, signal, "password-change-toggle"),
+    body,
+  );
+  body.appendChild(wrapper);
 
   const oldField = passwordField("pw-old", t("password.old"), t("password.old"));
   const newField = passwordField("pw-new", t("password.new"), t("password.new"));
@@ -460,17 +494,8 @@ function buildPasswordSection(
     { signal },
   );
 
-  appendChildren(
-    wrapper,
-    separator,
-    pwHeader,
-    oldField.wrapper,
-    newField.wrapper,
-    confirmField.wrapper,
-    pwError,
-    pwBtn,
-  );
-  return wrapper;
+  appendChildren(wrapper, oldField.wrapper, newField.wrapper, confirmField.wrapper, pwError, pwBtn);
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -687,7 +712,7 @@ function buildTotpDisableView(
   const disableBtn = createElement(
     "button",
     {
-      class: "ac-btn account-delete-btn",
+      class: "ac-btn secondary destructive",
       "data-testid": "totp-disable-btn",
     },
     t("totp.disable"),
@@ -709,14 +734,7 @@ function buildTotpDisableView(
     { class: "ac-btn account-delete-btn" },
     t("totp.confirmDisable"),
   );
-  const cancelBtn = createElement(
-    "button",
-    {
-      class: "ac-btn",
-      style: "background:var(--bg-active)",
-    },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, pwInput, errorEl, btnRow);
 
@@ -779,28 +797,19 @@ function buildTotpDisableView(
   return wrapper;
 }
 
-function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "totp-section" });
-
-  const separator = createElement("div", { class: "settings-separator" });
-  const headerRow = createElement("div", {
-    style: "display:flex;align-items:center;gap:8px;margin-bottom:4px",
-  });
-  const header = createElement(
-    "div",
-    {
-      class: "settings-section-title",
-      style: "margin-bottom:0",
-    },
-    t("totp.sectionTitle"),
-  );
-
+function buildTotpSection(
+  options: SettingsOverlayOptions,
+  signal: AbortSignal,
+  onState: (state: StatusKind) => void,
+): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(t("totp.sectionTitle"), "totp-section");
+  // The state word keeps its test hook; the hint says what "off" means.
   const statusBadge = createElement("span", {
+    class: "status-state",
     "data-testid": "totp-status-badge",
-    style: "font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600",
   });
-
-  appendChildren(headerRow, header, statusBadge);
+  const offHint = createElement("span", {}, t("totp.offHint"));
+  result.append(statusBadge, " ", offHint);
 
   const contentArea = createElement("div", {});
 
@@ -811,12 +820,12 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
     // elsewhere, move it to the first rebuilt control instead.
     const restoreFocus = afterSubmit && focusIsOurs(contentArea);
 
-    // Status text uses the qualified --text-* tokens, not white on the
-    // --green fill (3.2:1, below Q1's 4.5:1 for this 12px bold text); the
-    // words "Enabled"/"Disabled" carry the state, colour is not the signal.
+    // The words "Enabled"/"Disabled" carry the state; the icon only repeats it.
     statusBadge.textContent = enabled ? t("totp.enabled") : t("totp.disabled");
-    statusBadge.style.background = "var(--bg-tertiary)";
-    statusBadge.style.color = enabled ? "var(--text-positive)" : "var(--text-muted)";
+    offHint.hidden = enabled;
+    const state: StatusKind = enabled ? "ok" : "warn";
+    setStatusIcon(icon, state);
+    onState(state);
 
     while (contentArea.firstChild) {
       contentArea.removeChild(contentArea.firstChild);
@@ -849,103 +858,57 @@ function buildTotpSection(options: SettingsOverlayOptions, signal: AbortSignal):
       log.warn("Failed to refresh TOTP status — showing cached state", err);
     });
 
-  appendChildren(wrapper, separator, headerRow, contentArea);
-  return wrapper;
+  body.appendChild(contentArea);
+  return row;
 }
 
 // ---------------------------------------------------------------------------
 // Status selector builder
 // ---------------------------------------------------------------------------
 
-interface StatusOption {
-  readonly value: UserStatus;
-  readonly label: string;
-  readonly description: string;
-  readonly color: string;
-}
-
-const STATUS_OPTIONS: readonly StatusOption[] = [
-  { value: "online", label: t("status.online"), description: "", color: "#3ba55d" },
-  { value: "idle", label: t("status.idle"), description: t("status.idleDesc"), color: "#faa61a" },
-  {
-    value: "dnd",
-    label: t("status.dnd"),
-    description: t("status.dndDesc"),
-    color: "#ed4245",
-  },
-  {
-    // Its own status now, not "offline" relabeled: the server stores it as
-    // chosen, shows everyone else offline, and honours it across reconnects.
-    value: "invisible",
-    label: t("status.invisible"),
-    description: t("status.invisibleDesc"),
-    color: "#747f8d",
-  },
+const STATUS_OPTIONS: readonly { readonly value: UserStatus; readonly label: string }[] = [
+  { value: "online", label: t("status.online") },
+  { value: "idle", label: t("status.idle") },
+  { value: "dnd", label: t("status.dnd") },
+  // Its own status now, not "offline" relabeled: the server stores it as
+  // chosen, shows everyone else offline, and honours it across reconnects.
+  { value: "invisible", label: t("status.invisible") },
 ];
 
+/** One labelled select; only Do Not Disturb's side effect needs saying. */
 function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSignal): HTMLDivElement {
   const wrapper = createElement("div", {});
-  const separator = createElement("div", { class: "settings-separator" });
-  const sectionTitle = createElement(
-    "div",
-    { class: "settings-section-title" },
-    t("status.sectionTitle"),
+  const row = createElement("div", { class: "setting-row" });
+  const info = createElement("div", {});
+  appendChildren(
+    info,
+    createElement("label", { class: "setting-label", for: "status-select" }, t("status.showMeAs")),
+    createElement("div", { class: "setting-desc" }, t("status.hint")),
   );
-  const optionsList = createElement("div", { class: "settings-status-options" });
-
-  const currentStatus = loadUserStatus();
-  const rowElements = new Map<UserStatus, HTMLDivElement>();
-
+  const select = createElement("select", {
+    class: "settings-select",
+    id: "status-select",
+    "data-testid": "status-select",
+  });
   for (const opt of STATUS_OPTIONS) {
-    const isActive = opt.value === currentStatus;
-    const row = createElement("div", {
-      class: `settings-status-option${isActive ? " active" : ""}`,
-      role: "button",
-      tabindex: "0",
-      "aria-pressed": isActive ? "true" : "false",
-    });
-
-    const dot = createElement("div", { class: "settings-status-dot" });
-    dot.style.background = opt.color;
-
-    const labelWrap = createElement("div", {});
-    const labelEl = createElement("div", { class: "settings-status-label" }, opt.label);
-    appendChildren(labelWrap, labelEl);
-    if (opt.description.length > 0) {
-      const descEl = createElement("div", { class: "settings-status-desc" }, opt.description);
-      labelWrap.appendChild(descEl);
-    }
-
-    appendChildren(row, dot, labelWrap);
-
-    const selectStatus = (): void => {
-      for (const [, el] of rowElements) {
-        el.classList.remove("active");
-        el.setAttribute("aria-pressed", "false");
-      }
-      row.classList.add("active");
-      row.setAttribute("aria-pressed", "true");
-      saveUserStatus(opt.value);
-      options.onStatusChange(opt.value);
-    };
-
-    row.addEventListener("click", selectStatus, { signal });
-    row.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          selectStatus();
-        }
-      },
-      { signal },
-    );
-
-    rowElements.set(opt.value, row);
-    optionsList.appendChild(row);
+    select.appendChild(createElement("option", { value: opt.value }, opt.label));
   }
-
-  appendChildren(wrapper, separator, sectionTitle, optionsList);
+  select.value = loadUserStatus();
+  select.addEventListener(
+    "change",
+    () => {
+      const status = select.value as UserStatus;
+      saveUserStatus(status);
+      options.onStatusChange(status);
+    },
+    { signal },
+  );
+  appendChildren(row, info, select);
+  appendChildren(
+    wrapper,
+    createElement("div", { class: "settings-section-title" }, t("status.sectionTitle")),
+    row,
+  );
   return wrapper;
 }
 
@@ -957,6 +920,7 @@ function buildSessionRow(
   s: SessionInfo,
   options: SettingsOverlayOptions,
   signal: AbortSignal,
+  onListChanged: () => void,
 ): HTMLDivElement {
   const row = createElement("div", {
     class: "session-row",
@@ -984,7 +948,7 @@ function buildSessionRow(
 
   const revokeBtn = createElement(
     "button",
-    { class: "ac-btn", "data-testid": "session-revoke" },
+    { class: "ac-btn secondary", "data-testid": "session-revoke" },
     t("devices.signOut"),
   );
   revokeBtn.addEventListener(
@@ -996,6 +960,7 @@ function buildSessionRow(
       void options
         .onRevokeSession(s.id)
         .then(() => {
+          onListChanged();
           showToast(
             uiStore.getState().sessionReplaced
               ? t("devices.signedOutReplaced")
@@ -1007,6 +972,7 @@ function buildSessionRow(
           // The server kept the session, so the row comes back.
           if (next?.parentNode === list) list?.insertBefore(row, next);
           else list?.appendChild(row);
+          onListChanged();
           showToast(errorText(err, t("devices.signOutFailed")), "error");
         });
     },
@@ -1016,22 +982,15 @@ function buildSessionRow(
   return row;
 }
 
-function buildSessionsSection(
-  options: SettingsOverlayOptions,
-  signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "sessions-section" });
-  const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement(
-    "div",
-    { class: "settings-section-title" },
+function buildSessionsSection(options: SettingsOverlayOptions, signal: AbortSignal): HTMLLIElement {
+  const { row, icon, result, body } = createStatusRow(
     t("devices.sectionTitle"),
+    "sessions-section",
   );
-  const description = createElement(
-    "div",
-    { style: "color:var(--text-muted);font-size:13px;margin-bottom:12px" },
-    t("devices.description"),
-  );
+  const panel = createElement("div", {});
+  row.insertBefore(createRevealToggle(t("devices.manage"), panel, signal, "sessions-manage"), body);
+  body.appendChild(panel);
+  const description = createElement("div", { class: "setting-desc" }, t("devices.description"));
   const list = createElement("div", { class: "session-list", "data-testid": "sessions-list" });
   const status = createElement(
     "div",
@@ -1039,26 +998,36 @@ function buildSessionsSection(
     t("devices.loading"),
   );
 
+  const recount = (): void => {
+    setText(result, t("devices.count", { count: list.childElementCount }));
+  };
+
   function load(): void {
     list.replaceChildren(status);
     setText(status, t("devices.loading"));
+    setText(result, t("devices.loading"));
+    setStatusIcon(icon, "pending");
     void options
       .onListSessions()
       .then((sessions) => {
         if (signal.aborted) return;
-        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal)));
+        list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal, recount)));
+        recount();
+        setStatusIcon(icon, "ok");
       })
       .catch((err: unknown) => {
         if (signal.aborted) return;
         log.warn("Failed to list sessions", err);
         setText(status, t("devices.loadFailed"));
+        setText(result, t("devices.loadFailed"));
+        setStatusIcon(icon, "warn");
       });
   }
 
   const revokeAllBtn = createElement(
     "button",
     {
-      class: "ac-btn account-delete-btn",
+      class: "ac-btn secondary destructive",
       style: "margin-top:12px",
       "data-testid": "sessions-revoke-all",
     },
@@ -1081,11 +1050,7 @@ function buildSessionsSection(
     { class: "ac-btn account-delete-btn", "data-testid": "sessions-revoke-all-confirm" },
     t("devices.signOutEverywhere"),
   );
-  const cancelBtn = createElement(
-    "button",
-    { class: "ac-btn", style: "background:var(--bg-active)" },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warning, errorEl, btnRow);
 
@@ -1112,10 +1077,10 @@ function buildSessionsSection(
       setText(errorEl, "");
       void options
         .onRevokeAllSessions()
-        .then((result) => {
+        .then((revoked) => {
           // A revoked current session is handled by the page: auth is
           // cleared and the app leaves. Otherwise refresh what is left.
-          if (result.current_session_revoked || signal.aborted) return;
+          if (revoked.current_session_revoked || signal.aborted) return;
           closeConfirm();
           load();
         })
@@ -1131,9 +1096,9 @@ function buildSessionsSection(
     { signal },
   );
 
-  appendChildren(wrapper, separator, header, description, list, revokeAllBtn, confirmArea);
+  appendChildren(panel, description, list, revokeAllBtn, confirmArea);
   load();
-  return wrapper;
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,18 +1124,10 @@ function buildRetentionSection(notice: string): HTMLDivElement {
 function buildDeleteAccountSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", {});
-
-  const separator = createElement("div", { class: "settings-separator" });
-  const header = createElement(
-    "div",
-    {
-      class: "settings-section-title",
-      style: "color:var(--text-danger)",
-    },
-    t("delete.sectionTitle"),
-  );
+): HTMLDetailsElement {
+  // Rarely needed and irreversible: behind a closed disclosure, last.
+  const { details: wrapper } = createDisclosure(t("delete.sectionTitle"));
+  wrapper.classList.add("danger-zone");
 
   const description = createElement(
     "div",
@@ -1183,7 +1140,7 @@ function buildDeleteAccountSection(
   const deleteBtn = createElement(
     "button",
     {
-      class: "ac-btn account-delete-btn",
+      class: "ac-btn secondary destructive",
       "data-testid": "delete-account-trigger",
     },
     t("delete.button"),
@@ -1237,14 +1194,7 @@ function buildDeleteAccountSection(
     },
     t("delete.confirm"),
   );
-  const cancelBtn = createElement(
-    "button",
-    {
-      class: "ac-btn",
-      style: "background:var(--bg-active)",
-    },
-    t("recovery.cancel"),
-  );
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
 
   appendChildren(btnRow, confirmBtn, cancelBtn);
   appendChildren(confirmArea, warningText, passwordLabel, passwordInput, errorEl, btnRow);
@@ -1303,8 +1253,65 @@ function buildDeleteAccountSection(
     { signal },
   );
 
-  appendChildren(wrapper, separator, header, description, deleteBtn, confirmArea);
+  appendChildren(wrapper, description, deleteBtn, confirmArea);
   return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// Security card: the account's protection at a glance, forms on demand
+// ---------------------------------------------------------------------------
+
+function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal): HTMLElement {
+  const card = createElement("section", {
+    class: "settings-card account-security",
+    "data-testid": "security-card",
+    "aria-labelledby": "account-security-title",
+  });
+  const head = createElement("div", { class: "settings-card-head" });
+  const pill = createElement("span", { class: "status-pill", "data-testid": "security-summary" });
+  const pillIcon = statusIcon("pending");
+  const pillText = createElement("span", {});
+  pill.append(pillIcon, pillText);
+  appendChildren(
+    head,
+    createElement("h3", { id: "account-security-title" }, t("security.title")),
+    pill,
+  );
+
+  const list = createElement("ul", { class: "status-list" });
+
+  // Two-factor and the recovery kit are the recommended steps; the pill
+  // counts the ones still open. The next open step holds the card's accent:
+  // Enable 2FA while two-factor is off, then the recovery-kit trigger.
+  const states = new Map<string, StatusKind>();
+  const paintNextStep = (): void => {
+    const kitIsNext = states.get("totp") === "ok" && states.get("recovery") === "warn";
+    list
+      .querySelector("[data-testid='recovery-kit-btn']")
+      ?.classList.toggle("secondary", !kitIsNext);
+  };
+  const report =
+    (key: string) =>
+    (state: StatusKind): void => {
+      states.set(key, state);
+      const open = [...states.values()].filter((s) => s === "warn").length;
+      const known = states.size === 2 && ![...states.values()].includes("pending");
+      pill.hidden = open === 0 && !known;
+      setStatusIcon(pillIcon, open > 0 ? "warn" : "ok");
+      setText(pillText, open > 0 ? t("security.steps", { count: open }) : t("security.allSet"));
+      paintNextStep();
+    };
+
+  appendChildren(
+    list,
+    buildTotpSection(options, signal, report("totp")),
+    buildRecoveryKitSection(options, signal, report("recovery")),
+    buildPasswordSection(options, signal),
+    buildSessionsSection(options, signal),
+  );
+  paintNextStep();
+  appendChildren(card, head, list);
+  return card;
 }
 
 // ---------------------------------------------------------------------------
@@ -1326,8 +1333,8 @@ export function buildAccountTab(
   });
 
   // Profile card
-  const { card, headerName, usernameValue, editUserProfileBtn, editUsernameBtn, avatarLarge } =
-    buildProfileCard(displayName, username);
+  const { card, headerName, headerHandle, usernameValue, editUsernameBtn, avatarLarge, editor } =
+    buildProfileCard(displayName, username, signal);
   section.appendChild(card);
 
   // Existing avatar, if any — the letter is only a fallback now.
@@ -1339,10 +1346,9 @@ export function buildAccountTab(
       avatarInitial({ username, displayName: user?.display_name ?? null }),
     );
   }
-  section.appendChild(buildAvatarUploader(options, avatarLarge, signal));
-
-  // Display name + about
-  section.appendChild(
+  // Avatar, display name and about lead the editor; the username row follows.
+  editor.prepend(
+    buildAvatarUploader(options, avatarLarge, signal),
     buildProfileFields(
       options,
       (name) => {
@@ -1351,9 +1357,6 @@ export function buildAccountTab(
       signal,
     ),
   );
-
-  // Status selector
-  section.appendChild(buildStatusSelector(options, signal));
 
   // Inline edit form
   const editForm = createElement("div", {
@@ -1368,12 +1371,8 @@ export function buildAccountTab(
     "aria-label": t("profile.newUsername"),
     "aria-describedby": "username-edit-error",
   });
-  const saveBtn = createElement("button", { class: "ac-btn" }, t("common.save"));
-  const cancelBtn = createElement(
-    "button",
-    { class: "ac-btn", style: "background:var(--bg-active)" },
-    t("recovery.cancel"),
-  );
+  const saveBtn = createElement("button", { class: "ac-btn secondary" }, t("common.save"));
+  const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
 
   const usernameError = outcomeEl("error");
@@ -1381,9 +1380,7 @@ export function buildAccountTab(
   usernameError.style.marginTop = "4px";
   editForm.appendChild(usernameError);
 
-  let editOpener: HTMLElement = editUsernameBtn;
-  const openEditForm = (e: Event) => {
-    editOpener = e.currentTarget as HTMLElement;
+  const openEditForm = () => {
     editForm.style.display = "flex";
     editInput.value = authStore.getState().user?.username ?? "";
     editInput.focus();
@@ -1391,10 +1388,9 @@ export function buildAccountTab(
   const closeEditForm = () => {
     editForm.style.display = "none";
     setText(usernameError, "");
-    if (focusIsOurs(editForm)) editOpener.focus();
+    if (focusIsOurs(editForm)) editUsernameBtn.focus();
   };
 
-  editUserProfileBtn.addEventListener("click", openEditForm, { signal });
   editUsernameBtn.addEventListener("click", openEditForm, { signal });
 
   cancelBtn.addEventListener("click", closeEditForm, { signal });
@@ -1424,6 +1420,7 @@ export function buildAccountTab(
             }),
           );
           setText(usernameValue, newName);
+          setText(headerHandle, t("profile.handle", { username: newName }));
           closeEditForm();
         })
         .catch((err: unknown) => {
@@ -1433,19 +1430,11 @@ export function buildAccountTab(
     { signal },
   );
 
-  section.appendChild(editForm);
+  editor.appendChild(editForm);
 
-  // Password section
-  section.appendChild(buildPasswordSection(options, signal));
-
-  // Two-factor authentication section
-  section.appendChild(buildTotpSection(options, signal));
-
-  // Recovery kit
-  section.appendChild(buildRecoveryKitSection(options, signal));
-
-  // Signed-in devices
-  section.appendChild(buildSessionsSection(options, signal));
+  // Security state first, then status, retention and the danger zone.
+  section.appendChild(buildSecurityCard(options, signal));
+  section.appendChild(buildStatusSelector(options, signal));
 
   const retention = options.getRetentionNotice?.() ?? null;
   if (retention !== null) section.appendChild(buildRetentionSection(retention));

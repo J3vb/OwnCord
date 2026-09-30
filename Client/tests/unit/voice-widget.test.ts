@@ -37,6 +37,7 @@ import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
+import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 
@@ -447,6 +448,51 @@ describe("VoiceWidget", () => {
     expect(cameraBtn.getAttribute("aria-pressed")).toBe("true");
 
     widget.destroy?.();
+  });
+
+  it("links a DM call's name back to the DM, and keeps a guild channel's name as text", () => {
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 100,
+          recipient: { id: 2, username: "otto", avatar: "", status: "online" },
+          participants: [{ id: 2, username: "otto", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    setVoiceChannel(100, []);
+    const onOpenCall = vi.fn();
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+      onOpenCall,
+    });
+    widget.mount(container);
+
+    const link = container.querySelector<HTMLButtonElement>("[data-testid='vw-channel-link']");
+    expect(link?.textContent).toBe("otto");
+    expect(link?.title).toBe("Go to the call");
+    link!.click();
+    expect(onOpenCall).toHaveBeenCalledWith(100);
+
+    // A guild voice channel is not a DM: its name stays plain text.
+    setVoiceChannel(999, []);
+    voiceStore.flush();
+    expect(container.querySelector("[data-testid='vw-channel-link']")).toBeNull();
+    expect(container.querySelectorAll(".vw-channel")).toHaveLength(1);
+
+    widget.destroy?.();
+    dmStore.setState(() => ({ channels: [] }));
   });
 
   it("falls back to 'Voice Channel' when channel is not in store", () => {

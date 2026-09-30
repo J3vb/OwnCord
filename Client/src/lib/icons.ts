@@ -25,6 +25,7 @@ export type IconName =
   | "monitor"
   | "monitor-off"
   | "phone"
+  | "phone-off"
   | "volume-2"
   | "volume-x"
   | "megaphone"
@@ -40,13 +41,21 @@ export type IconName =
   | "file-text"
   | "download"
   | "chevron-down"
+  | "chevron-up"
   | "chevron-right"
   | "x"
   | "eye"
   | "eye-off"
+  | "layout-grid"
+  | "maximize"
+  | "minimize"
+  | "picture-in-picture-2"
   | "play"
   | "pause"
   | "check"
+  | "circle-check"
+  | "circle-x"
+  | "circle-dashed"
   | "external-link"
   | "link"
   | "loader"
@@ -54,6 +63,7 @@ export type IconName =
   | "hash"
   | "triangle-alert"
   | "user"
+  | "user-plus"
   | "palette"
   | "bell"
   | "keyboard"
@@ -100,6 +110,9 @@ const ICON_PATHS: Record<IconName, string> = {
   // Phone handset (disconnect — styled red via CSS)
   phone: `<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>`,
 
+  // Phone handset with slash (hang up / decline)
+  "phone-off": `<path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" x2="2" y1="2" y2="22"/>`,
+
   // Speaker with sound waves
   "volume-2": `<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>`,
   megaphone: `<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>`,
@@ -144,6 +157,8 @@ const ICON_PATHS: Record<IconName, string> = {
   "chevron-down": `<path d="m6 9 6 6 6-6"/>`,
 
   // Right chevron
+  "chevron-up": `<path d="m18 15-6-6-6 6"/>`,
+
   "chevron-right": `<path d="m9 18 6-6-6-6"/>`,
 
   // X / close
@@ -156,6 +171,11 @@ const ICON_PATHS: Record<IconName, string> = {
   "eye-off": `<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/>`,
 
   // Play triangle
+  maximize: `<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>`,
+  minimize: `<path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>`,
+  "picture-in-picture-2": `<path d="M21 9V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10c0 1.1.9 2 2 2h4"/><rect width="10" height="7" x="12" y="13" rx="2"/>`,
+  "layout-grid": `<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>`,
+
   play: `<polygon points="5 3 19 12 5 21 5 3"/>`,
 
   // Pause bars
@@ -163,6 +183,11 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Checkmark
   check: `<path d="M20 6 9 17l-5-5"/>`,
+  // Status icons (settings): passed, failed, not yet known
+  "circle-check": `<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>`,
+  "circle-x": `<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>`,
+  // Eight dashes round r=10 (circumference 62.8), Lucide's circle-dashed look in one element.
+  "circle-dashed": `<circle cx="12" cy="12" r="10" stroke-dasharray="3.8 4.05"/>`,
 
   // External link arrow out of box
   "external-link": `<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>`,
@@ -184,6 +209,7 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Single person / user
   user: `<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`,
+  "user-plus": `<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>`,
 
   // Artist palette
   palette: `<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>`,

@@ -75,7 +75,7 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 	defer func() { voiceJoinPostTokenRaceHook = nil }()
 
 	payload, _ := json.Marshal(map[string]any{"channel_id": chID})
-	h.handleVoiceJoin(context.Background(), c, json.RawMessage(payload))
+	h.handleVoiceJoin(context.Background(), c, json.RawMessage(payload), "")
 
 	if !hookRan {
 		t.Fatal("voiceJoinPostTokenRaceHook never fired — test setup is broken, not exercising the join path")

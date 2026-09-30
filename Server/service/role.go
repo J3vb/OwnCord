@@ -356,16 +356,16 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 	slog.Info("role updated", "actor_id", actorID, "role_id", role.ID, "name", name)
 
 	return &db.Role{
-			ID:          role.ID,
-			Name:        name,
-			Color:       color,
-			Permissions: perms,
-			Position:    position,
-			IsDefault:   role.IsDefault,
-		}, RoleUpdateResult{
-			PermsChanged: perms != role.Permissions,
-			Renamed:      name != role.Name,
-		}, nil
+		ID:          role.ID,
+		Name:        name,
+		Color:       color,
+		Permissions: perms,
+		Position:    position,
+		IsDefault:   role.IsDefault,
+	}, RoleUpdateResult{
+		PermsChanged: perms != role.Permissions,
+		Renamed:      name != role.Name,
+	}, nil
 }
 
 // AllRoles is the unscoped role list — every role, highest position first, with

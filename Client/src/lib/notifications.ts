@@ -4,7 +4,8 @@
  */
 
 import { loadPref } from "./preferences";
-import { notificationAllowed } from "./channel-mutes";
+import { getChannelMutesHost, notificationAllowed } from "./channel-mutes";
+import { effectiveNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
@@ -12,10 +13,13 @@ import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import type { ChatMessagePayload } from "./types";
 import { mentionsCurrentUser } from "./mentions";
+import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
-import { resolveAuthor } from "@components/message-list/formatting";
+import { playNotificationSound } from "./notificationSound";
+import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
+import type { NotificationTarget } from "../platform/contracts/notifications";
 import { connectText } from "../i18n/connect";
 
 const log = createLogger("notifications");
@@ -23,6 +27,38 @@ const log = createLogger("notifications");
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {
   return document.hasFocus();
+}
+
+/**
+ * Coalescing window (U1c): messages arriving within this long after the last
+ * notification for the same channel are folded into that one alert, so a burst
+ * of twenty lines is one popup, not twenty; a DM burst folds the same way. A
+ * mention is never folded — it is addressed to the reader, and dropping it
+ * would hide the thing the alert exists for.
+ */
+const COALESCE_WINDOW_MS = 5000;
+
+/** Last time (ms) a notification fired, by channel id. */
+const lastNotifiedAt = new Map<number, number>();
+
+/**
+ * Whether this message is part of a burst already announced for its channel.
+ * Records the new time when it is not, so the window measures from the alert
+ * the reader actually saw. `alwaysNotify` (a mention) both bypasses the
+ * check and refreshes the window.
+ */
+function shouldCoalesce(channelId: number, alwaysNotify: boolean, now: number): boolean {
+  const last = lastNotifiedAt.get(channelId);
+  if (alwaysNotify || last === undefined || now - last >= COALESCE_WINDOW_MS) {
+    lastNotifiedAt.set(channelId, now);
+    return false;
+  }
+  return true;
+}
+
+/** Forget coalescing state. Exported for tests and for logout. */
+export function resetNotificationCoalescing(): void {
+  lastNotifiedAt.clear();
 }
 
 /**
@@ -93,6 +129,13 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 
   const mentioned = directMention || everyoneMention;
 
+  // How much this server may interrupt (U1b): All / Mentions only / Nothing,
+  // a global preference with a per-server override. This is the first gate
+  // because `nothing` must silence the popup, the chime AND the taskbar flash —
+  // unlike a channel mute, which deliberately lets a direct mention through.
+  const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
+  if (!shouldNotifyForLevel(effectiveNotificationLevel(), { mentioned, isDm })) return;
+
   // A muted channel stops making noise entirely — popup, chime AND taskbar
   // flash, because a flashing taskbar is exactly the interruption the mute was
   // asked for. The unread badge is untouched (it is drawn from the store, not
@@ -105,7 +148,11 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
 
-  const { name: channelName, isDm } = resolveNotificationChannel(payload.channel_id);
+  // A burst of messages in one channel is one alert, not twenty (U1c); a DM is
+  // a channel like any other. A mention is always announced — it is what the
+  // reader might otherwise miss.
+  if (shouldCoalesce(payload.channel_id, mentioned, Date.now())) return;
+
   const channelLabel = isDm ? channelName : `#${channelName}`;
 
   // The name to show for the author, resolved the same way the message list
@@ -115,24 +162,24 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // names the sender differently from the message row it points at.
   const authorName = resolveDisplayName(resolveAuthor(payload.user));
 
-  // oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
-  function sanitizeNotif(s: string, maxLen: number): string {
-    // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
-    const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
-    return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
-  }
-
   const title = sanitizeNotif(
     mentioned
       ? connectText("notifications.mentioned", { author: authorName, channel: channelLabel })
       : connectText("notifications.inChannel", { author: authorName, channel: channelLabel }),
     80,
   );
-  const body = sanitizeNotif(payload.content, 100);
 
-  // Desktop notification
+  // Desktop notification. The body (the message's visible words, spoiler
+  // label instead of hidden text) is computed inside the async path through a
+  // dynamic import of the markdown tokenizer: this module is in the startup
+  // closure, so a static import would drag the tokenizer in with it
+  // (bundle-budget's startup-closure gate).
   if (!dnd && loadPref<boolean>("desktopNotifications", true)) {
-    fireDesktopNotification(title, body);
+    fireDesktopNotification(title, payload.content, {
+      host: currentHost(),
+      channelId: payload.channel_id,
+      messageId: payload.id,
+    });
   }
 
   // Flash taskbar
@@ -146,8 +193,64 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 }
 
-/** Fire a Tauri desktop notification. Falls back to Web Notification API. */
-function fireDesktopNotification(title: string, body: string): void {
+/** Strip control characters from user-provided text and cap its length. */
+function sanitizeNotif(s: string, maxLen: number): string {
+  // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
+  const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
+}
+
+/**
+ * The popup body for `rawContent`: its visible words, with a spoiler replaced
+ * by its label rather than the hidden text, which would otherwise land verbatim
+ * on a lock screen before anyone clicked to reveal it. A dynamic import of the
+ * markdown tokenizer keeps it out of the startup closure.
+ */
+async function plainBody(rawContent: string): Promise<string> {
+  const { markdownToPlainText } = await import("./markdown");
+  return sanitizeNotif(markdownToPlainText(rawContent, connectText("notifications.spoiler")), 100);
+}
+
+/** The server the client is signed into now, as a notification target names it. */
+function currentHost(): string {
+  return getChannelMutesHost() ?? "";
+}
+
+/**
+ * Open `channelId`/`messageId` from a notification or an `owncord://message/…`
+ * link. When the source named a `host` and it is not the server signed into
+ * now, the ids would name an unrelated channel and message here, so it is
+ * ignored (a link that named no server — a permalink pasted into chat — is
+ * always opened). One guard for both sources, so they cannot drift.
+ */
+export function openMessageTarget(channelId: number, messageId: number, host?: string): void {
+  if (host !== undefined && host !== currentHost()) {
+    log.debug("Message target from another server ignored", { host });
+    return;
+  }
+  jumpToMessage(channelId, messageId);
+}
+
+/**
+ * Open the message a clicked notification was for, through the same
+ * cross-server guard as a deep link.
+ */
+export function openNotificationTarget(target: NotificationTarget): void {
+  openMessageTarget(target.channelId, target.messageId, target.host);
+}
+
+/**
+ * Fire a Tauri desktop notification. Falls back to Web Notification API.
+ *
+ * The native host shows a message notification through its own command so a
+ * click can open `target` (the plugin's desktop backend drops clicks); the Web
+ * Notification fallback keeps its own `onclick`, which works in the browser.
+ */
+function fireDesktopNotification(
+  title: string,
+  rawContent: string,
+  target: NotificationTarget,
+): void {
   void (async () => {
     try {
       let permitted = await desktop.notifier.permissionGranted();
@@ -156,18 +259,24 @@ function fireDesktopNotification(title: string, body: string): void {
       }
 
       if (permitted) {
-        await desktop.notifier.show(title, body);
+        await desktop.notifier.showMessage(title, await plainBody(rawContent), target);
       }
     } catch (err) {
       log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
-      // Fallback to Web Notification API (dev mode / non-Tauri)
+      // Fallback to Web Notification API (dev mode / non-Tauri). Clicking it
+      // focuses the window and opens the target as the native activation does.
       try {
+        const body = await plainBody(rawContent);
+        const onClick = (): void => {
+          window.focus();
+          openNotificationTarget(target);
+        };
         if (Notification.permission === "granted") {
-          void new Notification(title, { body });
+          new Notification(title, { body }).addEventListener("click", onClick);
         } else if (Notification.permission !== "denied") {
           const result = await Notification.requestPermission();
           if (result === "granted") {
-            void new Notification(title, { body });
+            new Notification(title, { body }).addEventListener("click", onClick);
           }
         }
       } catch (fallbackErr) {
@@ -186,66 +295,4 @@ function flashTaskbar(): void {
       log.debug("Taskbar flash not available", err);
     }
   })();
-}
-
-// Simple notification sound using Web Audio API
-let notifAudioCtx: AudioContext | null = null;
-
-/** Close and release the notification AudioContext. Call on logout/cleanup. */
-export function cleanupNotificationAudio(): void {
-  stopRingChime();
-  if (notifAudioCtx !== null) {
-    notifAudioCtx.close().catch((err) => {
-      log.warn("Failed to close notification AudioContext", err);
-    });
-    notifAudioCtx = null;
-  }
-}
-
-// The ring chime repeats until the call is answered, declined or times out —
-// unlike a message chime, which fires once. It reuses playNotificationSound so
-// a call sounds like the app rather than like a second app.
-let ringInterval: ReturnType<typeof setInterval> | null = null;
-
-/** Start the repeating incoming-call chime. Idempotent. */
-export function startRingChime(): void {
-  if (ringInterval !== null) return;
-  // DND silences a call chime for the same reason it silences a message one:
-  // the settings panel promises no notification sounds, and a ringing phone is
-  // the loudest possible violation of that. The banner still appears.
-  if (loadUserStatus() === "dnd") return;
-  if (!loadPref<boolean>("notificationSounds", true)) return;
-  playNotificationSound();
-  ringInterval = setInterval(() => playNotificationSound(), 2000);
-}
-
-/** Stop the repeating incoming-call chime. Idempotent. */
-export function stopRingChime(): void {
-  if (ringInterval === null) return;
-  clearInterval(ringInterval);
-  ringInterval = null;
-}
-
-/** Play a brief notification chime. */
-function playNotificationSound(): void {
-  try {
-    if (notifAudioCtx === null) {
-      notifAudioCtx = new AudioContext();
-    }
-    const ctx = notifAudioCtx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.frequency.setValueAtTime(800, ctx.currentTime);
-    osc.frequency.setValueAtTime(600, ctx.currentTime + 0.1);
-    gain.gain.setValueAtTime(0.3, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.2);
-
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.2);
-  } catch (err) {
-    log.debug("Notification sound not available", err);
-  }
 }

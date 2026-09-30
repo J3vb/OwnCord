@@ -21,4 +21,11 @@ export interface LogFiles {
   /** Every persisted log file, oldest first, read verbatim — the support
    *  bundle's log half (B7-15c). Empty when no log directory exists yet. */
   readAll(): Promise<readonly { readonly name: string; readonly text: string }[]>;
+  /**
+   * The Rust log (`owncord-client.log`, plus any rotated
+   * `owncord-client_<date>.log`), newest first, each tail-capped — the support
+   * bundle's native-log half (CLI-03). Empty when the app log directory does
+   * not exist yet.
+   */
+  readNative(): Promise<readonly { readonly name: string; readonly text: string }[]>;
 }

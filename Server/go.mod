@@ -1,8 +1,8 @@
 module github.com/J3vb/OwnCord/Server
 
-go 1.26.0
+go 1.27.0
 
-toolchain go1.26.7
+toolchain go1.27.1
 
 require (
 	aead.dev/minisign v0.3.0
@@ -14,6 +14,7 @@ require (
 	github.com/livekit/protocol v1.50.4
 	github.com/livekit/server-sdk-go/v2 v2.18.1
 	github.com/microcosm-cc/bluemonday v1.0.27
+	github.com/pion/webrtc/v4 v4.2.15
 	github.com/prometheus/client_golang v1.24.1
 	github.com/sasha-s/go-deadlock v0.3.9
 	github.com/tetratelabs/wazero v1.12.0
@@ -102,7 +103,6 @@ require (
 	github.com/pion/stun/v3 v3.1.5 // indirect
 	github.com/pion/transport/v4 v4.0.2 // indirect
 	github.com/pion/turn/v5 v5.0.9 // indirect
-	github.com/pion/webrtc/v4 v4.2.15 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect

@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -159,6 +160,33 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			}
 			return rec, []string{token}
 		}},
+		{"backup archive download", "backup_archive", func(t *testing.T) (*audittest.Recorder, []string) {
+			f := newArchiveFixture(t)
+			rec := audittest.Install(t, f.database)
+			w := doRequest(t, f.handler, http.MethodGet, "/archive", f.token, nil)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			return rec, nil
+		}},
+		{"log level debug on", "log_level_debug_on", func(t *testing.T) (*audittest.Recorder, []string) {
+			handler, database, token := logLevelFixture(t)
+			rec := audittest.Install(t, database)
+			w := doRequest(t, handler, http.MethodPatch, "/logs/level", token,
+				map[string]any{"level": "debug", "duration_seconds": 900})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			return rec, []string{token}
+		}},
+		{"log level reverted", "log_level_reverted", func(t *testing.T) (*audittest.Recorder, []string) {
+			handler, database, token := logLevelFixture(t)
+			rec := audittest.Install(t, database)
+			if w := doRequest(t, handler, http.MethodDelete, "/logs/level", token, nil); w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			return rec, []string{token}
+		}},
 		{"config write (setup wizard)", "config_write", func(t *testing.T) (*audittest.Recorder, []string) {
 			database := openAdminTestDB(t)
 			cfgPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -197,4 +225,16 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 		}
 		audittest.AssertSafeDetails(t, corpus, secrets...)
 	})
+}
+
+// logLevelFixture builds the admin API with a runtime log-level controller.
+func logLevelFixture(t *testing.T) (http.Handler, *db.DB, string) {
+	t.Helper()
+	database := openAdminTestDB(t)
+	var lv slog.LevelVar
+	lvl := admin.NewLogLevelController(&lv, slog.LevelInfo)
+	t.Cleanup(lvl.Close)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{LogLevel: lvl})
+	return handler, database, createAdminUser(t, database)
 }

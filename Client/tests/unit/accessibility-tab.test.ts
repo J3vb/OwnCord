@@ -18,18 +18,30 @@ vi.mock("@lib/os-motion", () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Click a toggle by its 0-based index in the rendered section. */
+/** The tests name toggles by their original index; the tab groups them now. */
+const TOGGLE_LABELS = [
+  "Reduce Motion",
+  "High Contrast",
+  "Role Colors",
+  "Sync with OS",
+  "Large Font",
+] as const;
+
+/** Return the toggle named by the label at `index` in TOGGLE_LABELS. */
+function getToggle(container: HTMLElement, index: number): HTMLElement {
+  return container.querySelector(`.toggle[aria-label="${TOGGLE_LABELS[index]}"]`) as HTMLElement;
+}
+
+/** Click that toggle. */
 function clickToggle(container: HTMLElement, index: number): HTMLElement {
-  const toggles = container.querySelectorAll(".toggle");
-  const toggle = toggles[index] as HTMLElement;
+  const toggle = getToggle(container, index);
   toggle.click();
   return toggle;
 }
 
-/** Return the toggle element at a given index. */
-function getToggle(container: HTMLElement, index: number): HTMLElement {
-  return container.querySelectorAll(".toggle")[index] as HTMLElement;
-}
+/** The rows that hold a switch (the text-size readout has none). */
+const toggleRows = (container: HTMLElement) =>
+  container.querySelectorAll(".setting-row:not(.setting-readout)");
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -77,15 +89,17 @@ describe("AccessibilityTab", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
-      const labels = container.querySelectorAll(".setting-label");
-      const labelTexts = Array.from(labels).map((l) => l.textContent);
+      const labelTexts = Array.from(toggleRows(container)).map(
+        (r) => r.querySelector(".setting-label")!.textContent,
+      );
 
+      // Grouped: Motion, Readability, Chat.
       expect(labelTexts).toEqual([
         "Reduce Motion",
-        "High Contrast",
-        "Role Colors",
         "Sync with OS",
+        "High Contrast",
         "Large Font",
+        "Role Colors",
       ]);
     });
 
@@ -93,26 +107,88 @@ describe("AccessibilityTab", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
-      const descs = container.querySelectorAll(".setting-desc");
-      expect(descs.length).toBe(5);
+      const desc = (label: string) =>
+        Array.from(toggleRows(container))
+          .find((r) => r.querySelector(".setting-label")!.textContent === label)!
+          .querySelector(".setting-desc")!.textContent;
 
-      expect(descs[0]?.textContent).toBe("Disable animations and transitions");
-      expect(descs[1]?.textContent).toBe("Increase contrast for better readability");
-      expect(descs[2]?.textContent).toBe("Show colored usernames based on role in chat");
-      expect(descs[3]?.textContent).toBe(
-        "Automatically enable reduced motion based on your OS accessibility settings",
+      expect(desc("Reduce Motion")).toBe("Disable animations and transitions");
+      expect(desc("High Contrast")).toBe("Increase contrast for better readability");
+      expect(desc("Role Colors")).toBe("Show colored usernames based on role in chat");
+      // The OS row says what the system is asking for right now.
+      expect(desc("Sync with OS")).toBe(
+        "Follow your system setting. It is not asking for less motion right now.",
       );
-      expect(descs[4]?.textContent).toBe(
-        "Use larger text throughout the app for better readability",
-      );
+      expect(desc("Large Font")).toBe("Use larger text throughout the app for better readability");
     });
 
     it("renders each row with setting-row class", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
-      const rows = container.querySelectorAll(".setting-row");
+      const rows = toggleRows(container);
       expect(rows.length).toBe(5);
+    });
+
+    it("groups the toggles under Motion, Readability and Chat headings", () => {
+      const section = buildAccessibilityTab(ac.signal);
+      container.appendChild(section);
+
+      const titles = Array.from(container.querySelectorAll("h3.setting-group-title")).map(
+        (h) => h.textContent,
+      );
+      expect(titles).toEqual(["Motion", "Readability", "Chat"]);
+      const groupOf = (label: string) => {
+        const row = container
+          .querySelector(`.toggle[aria-label="${label}"]`)!
+          .closest(".setting-group")!;
+        return row.querySelector("h3")!.textContent;
+      };
+      expect(groupOf("Reduce Motion")).toBe("Motion");
+      expect(groupOf("Sync with OS")).toBe("Motion");
+      expect(groupOf("High Contrast")).toBe("Readability");
+      expect(groupOf("Large Font")).toBe("Readability");
+      expect(groupOf("Role Colors")).toBe("Chat");
+    });
+
+    it("nests the OS setting under Reduce Motion, which it only affects", () => {
+      const section = buildAccessibilityTab(ac.signal);
+      container.appendChild(section);
+
+      const row = getToggle(container, 3).closest(".setting-row")!;
+      expect(row.classList.contains("nested")).toBe(true);
+      expect(row.previousElementSibling!.querySelector(".setting-label")!.textContent).toBe(
+        "Reduce Motion",
+      );
+    });
+
+    it("says when the system is asking for less motion", () => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn() }),
+      );
+      try {
+        const section = buildAccessibilityTab(ac.signal);
+        container.appendChild(section);
+        const row = getToggle(container, 3).closest(".setting-row")!;
+        expect(row.querySelector(".setting-desc")!.textContent).toBe(
+          "Follow your system setting. It is asking for less motion right now.",
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("shows the effective text size, set in Appearance, and follows Large Font", () => {
+      const section = buildAccessibilityTab(ac.signal);
+      container.appendChild(section);
+
+      const readout = container.querySelector<HTMLElement>(".setting-readout")!;
+      expect(readout.querySelector(".setting-label")!.textContent).toBe("Text size");
+      expect(readout.querySelector(".setting-desc")!.textContent).toBe("Set in Appearance");
+      expect(readout.querySelector(".setting-value")!.textContent).toBe("16px");
+      clickToggle(container, 4);
+      expect(readout.querySelector(".setting-value")!.textContent).toBe("18px");
     });
   });
 
@@ -362,7 +438,7 @@ describe("AccessibilityTab", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
-      const rows = container.querySelectorAll(".setting-row");
+      const rows = toggleRows(container);
       expect(rows.length).toBe(5);
       for (const row of rows) {
         const label = row.querySelector(".setting-label")?.textContent;

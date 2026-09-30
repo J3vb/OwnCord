@@ -9,6 +9,8 @@ export interface NativeControl {
   failWith(error: unknown): void;
   /** How many times the native host was asked to relaunch the app. */
   relaunches(): number;
+  /** How many times the native host was told the frontend is ready. */
+  readyReports(): number;
 }
 
 export interface AppProcessSubject {
@@ -36,6 +38,17 @@ export function describeAppProcessSuite(
     check("rejects when the relaunch fails", async () => {
       ctx.native.failWith(new Error("relaunch failed"));
       await expect(ctx.subject.relaunch()).rejects.toThrow("relaunch failed");
+    });
+
+    check("tells the native host the frontend is ready", async () => {
+      await ctx.subject.reportReady();
+      expect(ctx.native.readyReports()).toBe(1);
+    });
+
+    // main.ts logs a rejection; startup does not wait on it.
+    check("rejects when the ready report fails", async () => {
+      ctx.native.failWith(new Error("invoke failed"));
+      await expect(ctx.subject.reportReady()).rejects.toThrow("invoke failed");
     });
   });
 }

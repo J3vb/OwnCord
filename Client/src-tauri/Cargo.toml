@@ -1,11 +1,11 @@
 [package]
 name = "owncord-client"
-version = "2.0.0-beta.1"
+version = "2.0.1-beta.1"
 edition = "2021"
-# Effective minimum: tauri 2.11 declares rust-version = "1.77.2", so the crate
+# Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
 # warning instead of silently following whatever toolchain is installed.
-rust-version = "1.77.2"
+rust-version = "1.90"
 description = "OwnCord Desktop Client"
 # Not published to any registry: this crate is built in place by `tauri build`.
 # cargo-deny reads this with licenses.private.ignore below, so its absent
@@ -31,8 +31,7 @@ default = []
 devtools = ["tauri/devtools"]
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-store = "2"
+tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -42,7 +41,7 @@ serde_json = "1"
 # the trust-on-first-use fingerprint. The plugin's capability is scoped to
 # those loopback proxies only: external content (previews, images, YouTube) is
 # fetched by the external-content broker (external_content.rs), not the plugin.
-tauri-plugin-http = { version = "2.5.7", features = ["rustls-tls"] }
+tauri-plugin-http = { version = "=2.7.0", features = ["rustls-tls"] }
 # The external-content broker's client (external_content.rs). Already in the
 # tree via tauri-plugin-http with these same features, so this adds no build:
 # the broker needs it directly for what the plugin's fetch cannot do — a
@@ -121,9 +120,24 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
+# Message notifications that open their message on click (message_notification.rs).
+# The notification plugin's desktop backend drops the click/action callback, so
+# this calls notify-rust — already in the tree as the plugin's own desktop
+# backend — directly to wait for the activation.
+notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+# Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs).
+# Data_Xml_Dom + UI_Notifications: the protocol-activation message toast
+# (message_notification.rs), whose click must survive a banner timeout by
+# launching the owncord:// handler. These are features on the existing 0.58
+# direct dependency, so no new crate version; tauri-winrt-notification builds
+# its own separate windows 0.61 copy, so nothing here is shared with it.
+windows = { version = "0.58", features = [
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Data_Xml_Dom",
+    "UI_Notifications",
+] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store. Version tracks keyring's own windows-sys dep so the
 # two share one build of the crate.
@@ -147,9 +161,14 @@ device_query = "2"
 # Exact-pinned on purpose: the SDK is 0.x, its API churns, and webrtc-sys
 # downloads a prebuilt libwebrtc (webrtc-89d790b) whose C++ ABI is tied to the
 # crate version, so a patch bump must be a deliberate, re-verified change.
+# 0.9.1 -> 0.9.3, NOT the 0.9.2 Dependabot proposed: 0.9.2 pairs an older
+# livekit-protocol 0.7.13/pbjson 0.6 (prost 0.12) with its newer sub-crates,
+# splitting prost into a 0.12/0.14 pair and breaking livekit-data-stream's
+# build ("no method named encoded_len" — rust-sdks #1447). 0.9.3 resolves the
+# whole family on prost 0.14 uniformly, which is why it compiles.
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
-livekit = "=0.9.1"
+livekit = "=0.9.3"
 # Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
 # the tree via tauri's tray-icon, so this costs no extra build.
 png = "0.18"
@@ -172,3 +191,8 @@ nnnoiseless = { version = "0.5", default-features = false }
 # wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
 # enable-webrtc setting.
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
+[dev-dependencies]
+# Paused virtual time for tests of real-time deadlines (the ws_proxy liveness
+# timeout), so they run instantly and cannot flake on a slow runner.
+tokio = { version = "1", features = ["test-util"] }

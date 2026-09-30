@@ -118,6 +118,19 @@ const RUST_READS_OUTSIDE = new Set([
 ]);
 
 /**
+ * The native-voice interop suite. Its only runner is the rust-tests job
+ * (`npm run test:e2e:native-voice`, after the crate is built), and the generic
+ * `Client/` prefix selects client/browser/integration/native but NOT rust — so
+ * a change here would merge with the one job that runs it skipped, a fix that
+ * looks tested and never ran. A prefix rather than exact paths: a new spec or
+ * support file under the directory must select the job too.
+ */
+const RUST_HARNESS_PREFIXES = [
+  "Client/tests/e2e/native-voice/",
+  "Client/playwright.config.native-voice.ts",
+];
+
+/**
  * Dependency manifests and lockfiles, and the two policy files the scanners
  * read. A change to any of these can add, remove or re-pin a dependency, so it
  * is the set that selects the Supply-chain Scan job. Source-only changes under
@@ -234,6 +247,7 @@ export function classify(paths) {
     if (SERVER_READS_OUTSIDE.has(path)) add("server", "integration");
     if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
     if (RUST_READS_OUTSIDE.has(path)) add("rust");
+    if (RUST_HARNESS_PREFIXES.some((p) => path.startsWith(p))) add("rust");
     if (K6_HARNESS_PATHS.has(path)) add("server");
     if (DEPS_FILES.has(path)) add("deps");
     if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {

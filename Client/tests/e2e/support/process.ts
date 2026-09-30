@@ -2,16 +2,47 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { createSocket } from "node:dgram";
+import { networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 
-export async function freePort(): Promise<number> {
-  const listener = createServer();
-  listener.listen(0, "127.0.0.1");
-  await once(listener, "listening");
-  const address = listener.address();
-  if (!address || typeof address === "string") throw new Error("No test port allocated");
-  await new Promise<void>((resolve, reject) => listener.close((e) => (e ? reject(e) : resolve())));
-  return address.port;
+/** The first non-internal IPv4 address from `interfaces`, or null when the
+ *  host has only loopback. The RT-11 Linux voice journey (artifact-smoke)
+ *  dials the test server by this address so the client takes its remote
+ *  tunnel path instead of the loopback `direct_url` shortcut. Pure, so the
+ *  selection is unit-tested without a real NIC. */
+export function pickNonLoopbackIPv4(
+  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>,
+): string | null {
+  for (const list of Object.values(interfaces)) {
+    for (const info of list ?? []) {
+      if (info.family === "IPv4" && !info.internal) return info.address;
+    }
+  }
+  return null;
+}
+
+/** The host's first non-loopback IPv4, or null. */
+export function nonLoopbackIPv4(): string | null {
+  return pickNonLoopbackIPv4(networkInterfaces());
+}
+
+/** Distinct free TCP ports, one per name: every listener stays open until all are allocated, so the OS cannot hand one port out twice. */
+export async function freePorts<K extends string>(...names: K[]): Promise<Record<K, number>> {
+  const listeners = names.map(() => createServer().listen(0, "127.0.0.1"));
+  try {
+    await Promise.all(listeners.map((listener) => once(listener, "listening")));
+    const ports = {} as Record<K, number>;
+    names.forEach((name, i) => {
+      const address = listeners[i]!.address();
+      if (!address || typeof address === "string") throw new Error("No test port allocated");
+      ports[name] = address.port;
+    });
+    return ports;
+  } finally {
+    await Promise.all(
+      listeners.map((listener) => new Promise((resolve) => listener.close(resolve))),
+    );
+  }
 }
 
 /** TCP availability does not imply UDP availability (notably Windows exclusions). */

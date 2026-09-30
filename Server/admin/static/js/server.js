@@ -8,7 +8,11 @@ const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa'];
 function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):(v||'')}
 function settingsFormValues(keys){
   const out={};
-  keys.forEach(k=>{const el=document.getElementById('s-'+k);if(el)out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):el.value});
+  keys.forEach(k=>{
+    const el=document.getElementById('s-'+k);if(!el)return;
+    if(el instanceof HTMLFieldSetElement){const r=el.querySelector('input:checked');out[k]=r instanceof HTMLInputElement?r.value:'';return}
+    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):/** @type {HTMLInputElement} */(el).value;
+  });
   return out;
 }
 /* Only what actually changed. The server's require_2fa enrollment
@@ -39,21 +43,70 @@ async function renderSettings(){
   html+=settingsCard('General',
     settingsRow('server_name','Server name','Shown in the client and at the top of this panel','<input class="form-input" id="s-server_name" value="'+esc(v('server_name'))+'" aria-describedby="s-server_name-desc" data-input-action="markSettingsChanged">')
     +settingsRow('motd','Message of the day','Shown to members when they connect','<input class="form-input" id="s-motd" value="'+esc(v('motd'))+'" aria-describedby="s-motd-desc" data-input-action="markSettingsChanged">'));
-  html+=settingsCard('Access & registration',
-    settingsRow('registration_mode','Registration','Closed: nobody can register. Invite: a valid invite code is required. Approval: new accounts wait in Members until you approve them. Open: anyone can register.','<select class="filter-select" id="s-registration_mode" aria-describedby="s-registration_mode-desc" data-change-action="markSettingsChanged">'+regModeOptions(v('registration_mode')||'invite')+'</select>'));
+  html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
   /* Facts, not inputs: these take effect from config.yaml at start-up, so
-     an editable-looking field here would change nothing. */
+     an editable-looking field here would change nothing. The running-config
+     card shows the effective values an operator would otherwise read
+     config.yaml for (SRE-07). Secrets only ever cross as a configured flag,
+     and the server leaves out the host path and endpoints for a caller that
+     is not an administrator, so those rows drop out. A value left empty in
+     config.yaml reads "Not set", and a zero that switches a feature off reads
+     as what it means. */
   let factRows;
-  if(facts)factRows=[['Max upload size',facts.upload_max_size_mb+' MB','upload.max_size_mb'],['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality']]
-    .map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val)+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
-  html+=settingsCard('Set in config.yaml','<p class="setting-desc">These values come from the server\'s config file. Change them there and restart the server.</p>'
+  if(facts)factRows=[
+    ['Port',facts.server_port,'server.port'],
+    ['TLS',facts.tls_mode,'tls.mode'],
+    ['TLS domain','tls_domain' in facts?facts.tls_domain:undefined,'tls.domain'],
+    ['Max upload size',facts.upload_max_size_mb+' MB','upload.max_size_mb'],
+    ['Per-user quota',facts.user_quota_mb?facts.user_quota_mb+' MB':'Unlimited','upload.user_quota_mb'],
+    ['Voice quality',voiceQualityLabel(facts.voice_quality),'voice.quality'],
+    ['Voice URL','voice_url' in facts?facts.voice_url:undefined,'voice.livekit_url'],
+    ['Max connections',facts.max_ws_connections||'Unlimited','server.max_ws_connections'],
+    ['Reserved disk headroom',facts.min_free_disk_mb?facts.min_free_disk_mb+' MB':'Off','server.min_free_disk_mb'],
+    ['Backup directory','backup_dir' in facts?facts.backup_dir:undefined,'backup.dir'],
+    ['Log level',facts.logging_level,'logging.level'],
+    ['GIF',facts.gif_configured?'Configured':'Not configured','gif.api_key'],
+    ['GitHub updates',facts.github_configured?'Configured':'Not configured','github.token'],
+    ['Report retention',facts.moderation_report_retention_days?facts.moderation_report_retention_days+' days':'Never','moderation.report_retention_days'],
+    ['Action retention',facts.moderation_action_retention_days?facts.moderation_action_retention_days+' days':'Never','moderation.action_retention_days'],
+  ].filter(([,val])=>val!==undefined).map(([n,val,key])=>'<div class="fact-row"><dt>'+n+'</dt><dd><span class="fact-value">'+esc(val===''?'Not set':String(val))+'</span><code class="fact-key">'+key+'</code></dd></div>').join('');
+  html+=settingsCard('Running configuration','<p class="setting-desc">The values this server started with. Change config.yaml and restart the server to change them; use the Logs page to raise the log level for a while.</p>'
     +(facts?'<dl class="fact-list">'+factRows+'</dl>':'<p class="setting-desc" style="margin-top:8px">The running configuration could not be read.</p>'));
   html+='<div class="save-bar" id="settingsSaveBar" role="region" aria-label="Save settings"><span class="save-bar-status" id="settingsSaveState" role="status">All changes saved</span>'
     +'<button class="btn btn-ghost" id="discardSettingsBtn" data-action="discardSettings" disabled>Discard</button>'
     +'<button class="btn btn-accent" id="saveSettingsBtn" data-action="saveSettings" disabled>Save changes</button></div>';
   return html;
+}
+
+/* Registration as four radio cards, each with what it means for someone
+   trying to join; only the chosen one's line is at full contrast. A change
+   feeds the same markSettingsChanged tracking as every other field, so the
+   save bar, the nav's unsaved dot and B5's unload guard all see it. */
+const REG_MODE_EFFECT={
+  closed:'Nobody can create an account.',
+  invite:'People need a valid invite code to join.',
+  approval:'New accounts wait in Members until you approve them.',
+  open:'Anyone who can reach the server can join.',
+};
+function regModeCards(cur){
+  const cards=REG_MODES.map(([val,label])=>'<label class="radio-card"><input type="radio" name="registration_mode" value="'+val+'"'+(cur===val?' checked':'')+' data-change-action="markSettingsChanged">'
+    +'<span class="radio-card-text"><span class="radio-card-title">'+esc(label)+'</span><span class="radio-card-desc">'+esc(REG_MODE_EFFECT[val]||'')+'</span></span></label>').join('');
+  return'<fieldset class="radio-cards" id="s-registration_mode"'+(cur==='approval'?' aria-describedby="s-registration_mode-desc"':'')+'><legend class="setting-name">Who can join</legend>'
+    +'<div class="radio-card-grid">'+cards+'</div>'
+    +'<p class="setting-desc" id="s-registration_mode-desc"'+(cur==='approval'?'':' hidden')+'>Waiting accounts are under <button type="button" class="link-btn" data-action="showPendingMembers">Members › Pending</button>.</p></fieldset>';
+}
+function syncRegModeHint(){
+  const approval=!!document.querySelector('input[name="registration_mode"][value="approval"]:checked');
+  const hint=document.getElementById('s-registration_mode-desc');if(hint)hint.hidden=!approval;
+  const set=document.getElementById('s-registration_mode');
+  if(set){if(approval)set.setAttribute('aria-describedby','s-registration_mode-desc');else set.removeAttribute('aria-describedby')}
+}
+function showPendingMembers(){
+  const prev=state.membersTab;state.membersTab='pending';
+  navigateTo('users');
+  if(state.section!=='users')state.membersTab=prev;
 }
 
 function setSettingsChanged(changed){
@@ -64,6 +117,7 @@ function setSettingsChanged(changed){
 }
 
 function markSettingsChanged(){
+  syncRegModeHint();
   setSettingsChanged(Object.keys(settingsDiff(settingsFormValues(SETTINGS_KEYS))).length>0);
 }
 
@@ -97,7 +151,7 @@ function retentionLabel(days){return days>0?days+' day'+(days===1?'':'s'):'Kept 
 async function renderRetention(){
   let policy,preview;
   try{policy=await api('GET','/retention');preview=await api('GET','/retention/preview')}
-  catch(e){return'<div class="page-title">Message Retention</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  catch(e){return'<div class="page-title">Message retention</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   /* The channel list is MANAGE_CHANNELS while this page is MANAGE_SERVER, so
      a principal holding only the latter cannot read it. Degrade to the
      channels the policy and the preview already name rather than failing the
@@ -124,36 +178,50 @@ async function renderRetention(){
   });
   rows.sort((a,b)=>String(a.name).localeCompare(String(b.name)));
 
-  let html='<div class="page-title">Message Retention</div><div class="page-desc">Messages older than the window are deleted permanently on every maintenance sweep. Pinned messages are exempt, and direct messages are never in scope.</div>';
+  const plural=(n,w)=>n.toLocaleString()+' '+w+(n===1?'':'s');
+  const excepted=rows.filter(r=>Object.prototype.hasOwnProperty.call(overrides,r.id));
+  const following=rows.length-excepted.length;
+  const own=plural(excepted.length,'channel')+(excepted.length===1?' has its own rule':' have their own rules');
+  const shown=channels?'Show all '+plural(rows.length,'channel'):'Show listed channels';
+  const sweep=!preview||!preview.length||totalDue===0
+    ?'Nothing will be deleted on the next sweep.'
+    :'The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> '+(totalDue===1?'message':'messages')+' across '+plural(preview.length,'channel')+'. This cannot be undone.';
+  const follow=!channels?(excepted.length?own+'; every other channel follows this.':'Every channel follows this.')
+    :!rows.length?'':excepted.length?plural(following,'channel')+(following===1?' follows':' follow')+' this; '+own+'.':(rows.length===1?'The one channel follows this.':'All '+rows.length+' channels follow this.');
 
-  html+='<div class="section-card"><div class="section-card-header"><h3>Server-wide window</h3></div><div class="section-card-body">';
-  html+='<div class="setting-row"><div class="setting-info"><label class="setting-name" for="retentionDays">Keep messages for</label><div class="setting-desc">Applies to every channel without its own override. 0 keeps everything indefinitely, which is the default; otherwise between 1 and 3650 days.</div></div>';
-  html+='<div class="setting-ctrl" style="display:flex;gap:8px;align-items:center"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" style="width:110px" value="'+esc(serverDays)+'"><button class="btn btn-accent" data-action="openApplyRetention">Preview change</button></div></div>';
-  html+='<div style="color:var(--text-muted);font-size:12px;margin-top:4px">Currently: <strong style="color:var(--text-normal)">'+esc(retentionLabel(serverDays))+'</strong></div>';
-  html+='</div></div>';
+  let html='<div class="page-title">Message retention</div><div class="page-desc">How long messages are kept before they are deleted permanently. Pinned messages and direct messages are never deleted.</div>';
 
-  html+='<div class="section-card"><div class="section-card-header"><h3>Effect preview</h3><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Refresh</button></div><div class="section-card-body">';
-  if(!preview||!preview.length)html+='<div style="color:var(--text-muted);font-size:13px">No channel has a retention window, so the next sweep removes nothing.</div>';
-  else if(totalDue===0)html+='<div style="color:var(--text-muted);font-size:13px">A window applies to '+preview.length+' channel'+(preview.length===1?'':'s')+', but nothing is past it yet — the next sweep removes nothing.</div>';
-  else html+='<div style="color:var(--text-warning);font-size:13px">The next sweep permanently deletes <strong>'+totalDue.toLocaleString()+'</strong> message'+(totalDue===1?'':'s')+' across '+preview.length+' channel'+(preview.length===1?'':'s')+'. This cannot be undone.</div>';
-  html+='</div></div>';
+  /* The policy in words first; the number field waits behind Change…, with
+     the preview-then-confirm flow unchanged. */
+  html+='<section class="section-card" aria-labelledby="ret-policy-h"><div class="section-card-header"><h3 id="ret-policy-h">Server-wide policy</h3></div><div class="section-card-body">';
+  html+='<div class="ret-policy">'+statusIcon('ok')+'<div class="ret-policy-text"><div class="ret-policy-big">'+(serverDays>0?'Messages are deleted after '+esc(retentionLabel(serverDays)):'Messages are kept forever')+'</div>'
+    +(follow?'<div class="ret-policy-sub">'+follow+'</div>':'')+'</div>'
+    +'<button class="btn btn-outline" id="retentionChangeBtn" aria-expanded="false" aria-controls="retentionEdit" data-action="toggleRetentionEdit">Change…</button></div>';
+  html+='<div id="retentionEdit" class="ret-edit" hidden><div class="setting-row"><div class="setting-info"><label class="setting-name" for="retentionDays">Keep messages for (days)</label><div class="setting-desc">0 keeps everything forever, which is the default; otherwise between 1 and 3650 days. The next step shows what would be deleted before anything changes.</div></div>'
+    +'<div class="setting-ctrl ret-edit-ctrl"><input class="form-input" id="retentionDays" type="number" min="0" max="3650" value="'+esc(serverDays)+'"><button class="btn btn-accent" data-action="openApplyRetention">Preview change</button></div></div>'
+    +'<p class="ret-sweep">'+(totalDue>0?statusIcon('warning'):'')+'<span>'+sweep+'</span></p></div>';
+  html+='</div></section>';
 
-  html+='<div class="section-card"><div class="section-card-header"><h3>Channels</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>Channel</th><th>Window</th><th>Source</th><th>Next sweep removes</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!rows.length)html+='<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px">No channels</td></tr>';
-  rows.forEach(r=>{
-    const w=windows[r.id];
-    const has=Object.prototype.hasOwnProperty.call(overrides,r.id);
-    const days=has?overrides[r.id]:serverDays;
-    const due=w?(w.would_delete||0):0;
-    html+='<tr><td><strong>'+esc(r.name)+'</strong></td>';
-    html+='<td>'+esc(retentionLabel(days))+'</td>';
-    html+='<td>'+(has?'<span class="badge badge-yellow">channel</span>':'<span class="badge badge-muted">server</span>')+'</td>';
-    html+='<td'+(due?' style="color:var(--text-danger)"':' style="color:var(--text-muted)"')+'>'+due.toLocaleString()+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">'+(has?'Edit override':'Override')+'</button>';
-    if(has)html+='<button class="btn btn-ghost" data-action="clearChannelRetention" data-args="'+actArgs(r.id)+'">Use server policy</button>';
-    html+='</div></td></tr>';
+  /* Only channels with their own window are listed; the full list waits
+     behind a disclosure. */
+  html+='<section class="section-card" aria-labelledby="ret-exc-h"><div class="section-card-header"><h3 id="ret-exc-h">Channel exceptions</h3></div>';
+  if(!excepted.length)html+='<div class="empty-line">'+I.channels+'<span>No channel has its own rule.'+(rows.length?' To keep a channel\'s messages for a different time, open '+shown+' below.':'')+'</span></div>';
+  excepted.forEach(r=>{
+    html+='<div class="ret-row" data-channel="'+esc(r.id)+'">'+I.channels+'<strong>'+esc(r.name)+'</strong><span class="muted">'+esc(retentionLabel(overrides[r.id]))+'</span>'
+      +'<div class="act-group"><button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">Edit</button><button class="btn btn-ghost" data-action="clearChannelRetention" data-args="'+actArgs(r.id)+'">Use server policy</button></div></div>';
   });
-  html+='</tbody></table></div></div>';
+  if(rows.length){
+    let all='';
+    rows.forEach(r=>{
+      const has=Object.prototype.hasOwnProperty.call(overrides,r.id);
+      all+='<div class="ret-row" data-channel="'+esc(r.id)+'">'+I.channels+'<strong>'+esc(r.name)+'</strong>'
+        +(has?'<span class="badge badge-yellow">channel</span>':'<span class="badge badge-muted">server</span>')
+        +'<span class="muted">'+esc(retentionLabel(has?overrides[r.id]:serverDays))+'</span>'
+        +'<button class="btn btn-ghost" data-action="openChannelRetention" data-args="'+actArgs(r.id,r.name)+'">'+(has?'Edit exception':'Set exception')+'</button></div>';
+    });
+    html+=disclosure(shown,all,false,'ret-all');
+  }
+  html+='</section>';
   return html;
 }
 
@@ -248,6 +316,15 @@ async function clearChannelRetention(id){
   await previewRetentionChange({scope:'channel',channel_id:id,days:null});
 }
 
+/* Change… reveals the server-wide field in place and moves focus to it. */
+function toggleRetentionEdit(){
+  const panel=document.getElementById('retentionEdit'),btn=document.getElementById('retentionChangeBtn');
+  if(!panel||!btn)return;
+  const open=panel.hidden;
+  panel.hidden=!open;btn.setAttribute('aria-expanded',String(open));
+  if(open){const input=document.getElementById('retentionDays');if(input)input.focus()}
+}
+
 /* ═══ Restart wait ═══ */
 /* Restoring a backup and applying an update both end in a self-restart.
    Poll the unauthenticated setup-status route until the old process has
@@ -262,6 +339,8 @@ function waitForRestart(statusId){
     const elapsed=Date.now()-started;
     if(up&&(sawDown||elapsed>20000)){location.reload();return}
     if(elapsed>120000){
+      /* Nothing left to wait for: let the dialog close again. */
+      lockModal(false);
       const el=document.getElementById(statusId);
       if(el)el.innerHTML='The server has not come back after two minutes. Check it on the host, then <button class="link-btn" data-action="reloadPage">reload this page</button>.';
       return;
@@ -285,7 +364,10 @@ async function renderBackups(){
   try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}
   const v=k=>(state._settings||{})[k]||'';
   let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
-    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div>';
+    +'<div class="btn-row"><button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>'
+    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div></div>';
+  html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
+  html+=backupStatusLine(backups||[],policyErr?'':(v('backup_schedule')||'off'),await backupSignal());
   let sched;
   if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
   else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
@@ -294,7 +376,7 @@ async function renderBackups(){
     +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
   html+=settingsCard('Schedule',sched);
   html+='<section class="section-card" aria-labelledby="sc-history"><div class="section-card-header"><h3 id="sc-history">Backup history</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>File</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!backups||!backups.length)html+='<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px">No backups yet</td></tr>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet. Create one now, or turn on automatic backups above.</td></tr>';
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
@@ -302,6 +384,39 @@ async function renderBackups(){
   });
   html+='</tbody></table></div></section>';
   return html;
+}
+
+/* The answer first: when the last backup was taken and what happens next.
+   The server's own backup health signal (GET /attention, ADMINISTRATOR)
+   sets the icon when it is readable, so this line and the dashboard agree. */
+async function backupSignal(){
+  if(!can(PERM.ADMINISTRATOR))return null;
+  try{const rep=await api('GET','/attention');return((rep&&rep.signals)||[]).find(g=>g.id==='backup')||null}catch(e){return null}
+}
+function relTime(d){
+  const mins=Math.round((Date.now()-d.getTime())/60000);
+  if(mins<1)return'just now';
+  if(mins<60)return mins+' min ago';
+  const h=Math.round(mins/60);if(h<48)return h+' h ago';
+  return Math.round(h/24)+' days ago';
+}
+function backupStatusLine(backups,schedule,signal){
+  const dated=backups.filter(b=>b.date&&!isNaN(new Date(b.date).getTime())).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime());
+  const latest=dated[0];
+  const auto={daily:'Automatic backups run daily',weekly:'Automatic backups run weekly',off:'Automatic backups are off'}[schedule]||'';
+  if(signal&&schedule&&((signal.threshold||'').split(' ')[0]||'off')!==schedule)signal=null;
+  if(latest&&signal&&(!signal.value||new Date(signal.observed_at).getTime()<new Date(latest.date).getTime()))signal=null;
+  const alarm=!!signal&&(signal.status==='warning'||signal.status==='critical');
+  let tone,title;
+  if(latest){tone='ok';title='Last backup '+relTime(new Date(latest.date))}
+  else if(schedule&&schedule!=='off'&&!alarm){tone='unknown';title='No backup yet; the first automatic one is still to come'}
+  else{tone='warning';title='No backups yet'}
+  if(alarm)tone=signal.status;
+  const parts=[];
+  if(latest)parts.push(backups.length+(backups.length===1?' backup kept':' backups kept'));
+  if(auto)parts.push(auto);
+  if(alarm&&signal.detail)parts.push(signal.detail);
+  return'<div class="status-line" id="backupStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+esc(title)+'<span class="sr-only"> ('+esc(attnWord(tone))+')</span></div>'+(parts.length?'<div class="status-line-sub">'+esc(parts.join(' · '))+'</div>':'')+'</div></div>';
 }
 
 function markBackupPolicyChanged(){
@@ -314,13 +429,35 @@ async function saveBackupPolicy(){
   if(btn){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
   if(!Object.keys(body).length)return;
-  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved')}
+  try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved');renderContent()}
   catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 
 async function createBackup(){
   state.backupRunning=true;renderContent();
   try{await api('POST','/backup');state.backupRunning=false;showToast('Backup created');renderContent()}catch(e){state.backupRunning=false;showToast(e.message,'error');renderContent()}
+}
+
+/* The archive can be tens of gigabytes, so it is NOT fetched into a Blob
+   (which would live in the page's memory). The panel asks for a short-lived
+   single-use link with its normal Bearer auth, then opens that link as a
+   plain navigation: the browser streams it straight to disk, and the link
+   cannot be reused or reached without the token. */
+async function downloadArchive(){
+  if(state.archiveRunning)return;
+  const token=state.token;state.archiveRunning=true;renderContent();
+  try{
+    const r=await api('POST','/archive/link',{});
+    const a=document.createElement('a');a.href=r.path;a.download='owncord-archive.zip';document.body.appendChild(a);a.click();a.remove();
+    showToast('Preparing the archive. The download starts when it is ready; this can take a few minutes for large servers.');
+  }catch(e){
+    /* The link endpoint answers only for the link itself (and refuses while
+       another archive is being prepared). The build, and its free-space and
+       configuration checks, run when the browser opens the link, so their
+       failures surface as a failed download rather than a toast. */
+    if(state.token===token)showToast(e.message,'error')
+  }
+  finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}
 }
 
 /* Restore overwrites the live database and restarts the server, so it asks
@@ -344,6 +481,7 @@ function checkRestoreConfirm(name){
 async function confirmRestore(name){
   if((document.getElementById('restoreConfirm')?.value||'').trim()!==name)return;
   const b=document.getElementById('restoreConfirmBtn');if(b)b.disabled=true;
+  lockModal(true);
   try{
     await api('POST','/backups/'+encodeURIComponent(name)+'/restore');
     setModalHTML(restartingHTML('Restoring backup','The database was restored from '+name+' and the server is restarting.'));
@@ -352,6 +490,7 @@ async function confirmRestore(name){
     /* Some failures still restart the server (its database is already
        closed); the message says so, and then waiting is the right thing. */
     if(/restarting/i.test(e.message)){setModalHTML(restartingHTML('Restore failed',e.message));waitForRestart('restartWait');return}
+    lockModal(false);
     const err=document.getElementById('restoreErr');if(err)err.textContent=e.message;
     if(b)b.disabled=false;
   }
@@ -381,27 +520,32 @@ async function renderUpdates(){
   let info,checkError='';
   try{info=await api('GET','/updates')}catch(e){checkError=e.message||'Update check failed'}
   state.updateInfo=info||null;
-  let html='<div class="page-title">Updates</div><div class="page-desc">Server version management</div>';
-  html+='<div class="update-grid">';
-  html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">'+(info?esc(info.current):'unknown')+'</div><div class="update-notes">Current version</div></div></div>';
-  if(checkError)html+='<div class="update-card" style="border-color:var(--red)"><div class="update-icon" style="background:rgba(255,143,146,.15);color:var(--text-danger)">'+I.ban+'</div><div class="update-info"><div class="update-ver">Check failed</div><div class="update-notes">'+esc(checkError)+'</div></div></div>';
-  else if(info&&info.update_available)html+='<div class="update-card" style="border-color:var(--accent)"><div class="update-icon" style="background:var(--accent-glow);color:var(--accent-text)">'+I.updates+'</div><div class="update-info"><div class="update-ver">'+esc(info.latest)+' <span class="badge badge-accent">New</span></div><div class="update-notes">Available. '+releaseNotesLink(info,'Release notes')+'</div></div></div>';
-  else html+='<div class="update-card"><div class="update-icon" style="background:rgba(92,195,137,.15);color:var(--text-positive)">'+I.check+'</div><div class="update-info"><div class="update-ver">Up to date</div><div class="update-notes">You\'re running the latest version</div></div></div>';
-  html+='</div>';
+  /* One line answers "am I current?": the running version, then what the
+     check found, with one primary action. */
+  const cur=info?verLabel(info.current):'an unknown version';
+  let tone,title,sub='';
+  if(checkError){tone='critical';title='Could not check for updates';sub=checkError}
+  else if(info&&info.update_available){tone='warning';title=esc(verLabel(info.latest))+' is available';sub='You are running '+esc(cur)+'.'+(releaseNotesLink(info,'Release notes')?' '+releaseNotesLink(info,'Release notes'):'')}
+  else{tone='ok';title='You are on the latest version';sub='Running '+esc(cur)+'.'}
+  let html='<div class="page-title">Updates</div><div class="page-desc">Which version this server runs, and whether a newer one is out.</div>';
+  html+='<div class="status-line" id="updateStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+(checkError?esc(title):title)+'</div><div class="status-line-sub">'+(checkError?esc(sub):sub)+'</div></div></div>';
   if(info&&info.update_available&&info.can_apply===false){
     /* Container deployments: the binary is image content, so in-place apply is
        refused server-side (503 CONTAINER_DEPLOYMENT) — say so instead of
        offering a button that can only fail. */
-    html+='<div class="update-card"><div class="update-info"><div class="update-notes">In-place update is unavailable in container deployments — upgrade by pulling the new image and recreating the container.</div></div></div>';
-    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
+    html+='<p class="card-note">In-place update is unavailable in container deployments. Upgrade by pulling the new image and recreating the container.</p>';
+    html+='<div class="btn-row"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else if(info&&info.update_available){
-    html+='<div class="btn-row"><button class="btn btn-accent" data-action="applyUpdate"'+(state.updateApplying?' disabled':'')+'>'+(state.updateApplying?'<span class="spinner" aria-hidden="true"></span> Updating…':'Update to '+esc(info.latest)+'…')+'</button>';
+    html+='<div class="btn-row"><button class="btn btn-accent" data-action="applyUpdate"'+(state.updateApplying?' disabled':'')+'>'+(state.updateApplying?'<span class="spinner" aria-hidden="true"></span> Updating…':'Update now…')+'</button>';
     html+='<button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check again</button></div>';
   }else{
-    html+='<div style="margin-top:16px"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check for updates</button></div>';
+    html+='<div class="btn-row"><button class="btn btn-ghost" data-action="renderContent">'+I.refresh+' Check for updates</button></div>';
   }
   return html;
 }
+/* A version as the top bar shows it: "v" only before a number, so a dev
+   build reads "dev", not "vdev". */
+function verLabel(v){const s=String(v||'').replace(/^v(?=\D)/,'');return/^\d/.test(s)?'v'+s:s}
 
 /* OP-11: an update migrates the database forward only, so the dialog leads
    with a backup (on by default), the release notes, and the latest backup. */
@@ -442,17 +586,19 @@ async function confirmApplyUpdate(){
   }
   if(btn)btn.textContent='Updating…';
   state.updateApplying=true;
+  lockModal(true);
   try{
     await api('POST','/updates/apply');
     setModalHTML(restartingHTML('Updating to '+((state.updateInfo||{}).latest||'the latest version'),'The update was applied and the server is restarting.'));
     waitForRestart('restartWait');
   }catch(e){
+    lockModal(false);
     state.updateApplying=false;syncUpdateConfirm();fail(e.message);
   }
 }
 
-Object.assign(ACTIONS,{applyRetention,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
-  confirmDeleteBackup,confirmRestore,createBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
+Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
+  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,
   reloadPage(){location.reload()},

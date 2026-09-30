@@ -13,11 +13,18 @@
  *   section says so instead of offering a path that does not exist.
  */
 
-import { ApiClientError, type ApiClient, type MyAppeal, type OwnModerationAction } from "@lib/api";
+import {
+  ApiClientError,
+  serverErrorText,
+  type ApiClient,
+  type MyAppeal,
+  type OwnModerationAction,
+} from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { appealsText as at } from "../../i18n/appeals";
 import { formatWhen, safetyText as t } from "../../i18n/safety";
 import { refreshOwnModeration, safetyStore } from "./store";
+import { createDisclosure } from "../settings/status";
 
 export type AppealsApi = Pick<ApiClient, "fileAppeal" | "withdrawAppeal">;
 
@@ -144,16 +151,13 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
   actions.append(primary, cancel);
   panel.append(panelTitle, panelReason, fields, warning, panelStatus, actions);
 
-  root.append(
-    heading,
+  // The rules matter when appealing, not on every visit: behind a disclosure.
+  const rules = createDisclosure(at("appeals.rulesSummary"));
+  rules.details.append(
     createElement("p", { class: "setting-desc" }, at("appeals.hint")),
     createElement("p", { class: "setting-desc" }, t("appeals.unavailable")),
-    panel,
-    status,
-    retry,
-    list,
-    announcer,
   );
+  root.append(heading, rules.details, panel, status, retry, list, announcer);
 
   let open: Panel | null = null;
   let pending = false;
@@ -406,6 +410,9 @@ function fileError(err: unknown): string {
   if (err.code === "ALREADY_APPEALED") return at("form.alreadyAppealed");
   if (err.status === 429) return at("form.rateLimited");
   if (err.status === 404 || err.status === 403) return at("form.gone");
-  if (err.status === 400) return at("form.invalid", { message: err.message });
+  if (err.status === 400) {
+    const text = serverErrorText(err.code, err.message, "");
+    if (text !== "") return at("form.invalid", { message: text });
+  }
   return at("form.failed");
 }

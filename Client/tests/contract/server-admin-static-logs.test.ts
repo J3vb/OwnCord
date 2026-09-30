@@ -29,6 +29,7 @@ const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
 interface FetchCall {
   method: string;
   path: string;
+  body?: unknown;
 }
 
 class FakeEventSource {
@@ -47,7 +48,17 @@ class FakeEventSource {
   }
 }
 
-function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
+interface LogLevelState {
+  level: string;
+  base_level: string;
+  reverts_at?: string;
+}
+
+function loadAdminPanel(
+  fetchCalls: FetchCall[],
+  serverLevel: LogLevelState = { level: "info", base_level: "info" },
+): JSDOM {
+  const logLevel = { ...serverLevel };
   return new JSDOM(ADMIN_HTML, {
     url: "http://localhost:8080/admin",
     runScripts: "dangerously",
@@ -57,7 +68,15 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
       window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
         const method = String((opts.method as string) || "GET").toUpperCase();
         const p = String(input).replace(/^\/admin\/api/, "");
-        fetchCalls.push({ method, path: p });
+        const call: FetchCall = { method, path: p };
+        if (typeof opts.body === "string") {
+          try {
+            call.body = JSON.parse(opts.body);
+          } catch {
+            /* non-JSON body, leave undefined */
+          }
+        }
+        fetchCalls.push(call);
         if (p === "/setup/status") {
           return { ok: true, status: 200, json: async () => ({ needs_setup: false }) } as Response;
         }
@@ -67,6 +86,19 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
             status: 200,
             json: async () => ({ ticket: "t-" + fetchCalls.length }),
           } as Response;
+        }
+        if (p === "/logs/level") {
+          if (method === "PATCH") {
+            const body = call.body as { level: string; duration_seconds: number };
+            logLevel.level = body.level;
+            logLevel.reverts_at = new Date(Date.now() + body.duration_seconds * 1000).toISOString();
+          }
+          if (method === "DELETE") {
+            logLevel.level = logLevel.base_level;
+            delete logLevel.reverts_at;
+          }
+          const snapshot = { ...logLevel };
+          return { ok: true, status: 200, json: async () => snapshot } as Response;
         }
         return { ok: true, status: 200, json: async () => ({}) } as Response;
       }) as typeof fetch;
@@ -266,5 +298,208 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     const out = doc.getElementById("logOutput")!;
     expect(out.getAttribute("tabindex")).toBe("0");
     expect(out.getAttribute("role")).toBe("region");
+  });
+
+  // SRE-07: the timed log-level toggle raises the server's own level for a
+  // bounded window, then the server reverts it. The client mirrors the window
+  // so the switch does not sit "on" past it.
+  it("toggles the server log level for a bounded window, admin-gated", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    // A non-admin sees the switch disabled with the reason.
+    bridge.state.me = { permissions: 0, is_owner: false };
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    const toggle = doc.getElementById("logLevelToggle") as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    expect(doc.getElementById("logLevelDesc")!.textContent).toContain("administrator");
+
+    // An administrator can raise it; the PATCH carries a positive window.
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    const adminToggle = doc.getElementById("logLevelToggle") as HTMLButtonElement;
+    expect(adminToggle.disabled).toBe(false);
+    expect(adminToggle.getAttribute("role")).toBe("switch");
+    fetchCalls.length = 0;
+    adminToggle.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const patch = fetchCalls.find((c) => c.path === "/logs/level" && c.method === "PATCH");
+    expect(patch).toBeTruthy();
+    expect(patch!.body).toMatchObject({ level: "debug", duration_seconds: 900 });
+    expect(bridge.state.logLevel).toBe("debug");
+    expect(adminToggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  // The countdown belongs to the Logs page and the session: signing out during
+  // a boost stops it, so it cannot poll later with no token.
+  it("stops the log-level countdown on sign-out", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.token = "admin-token";
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(bridge.state.logLevelTimer).toBeTruthy();
+
+    (window as unknown as { doLogout: () => void }).doLogout();
+    expect(bridge.state.logLevelTimer).toBeNull();
+  });
+
+  // A boost response that lands after sign-out must not re-arm the countdown.
+  it("does not start the countdown from a response that lands after sign-out", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.token = "admin-token";
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
+    (window as unknown as { doLogout: () => void }).doLogout();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "PATCH")).toBe(true);
+    expect(bridge.state.logLevelTimer).toBeNull();
+  });
+
+  // A reload (or a second admin) during a boost must see the server's real
+  // level, and turning it off must go back to the server's base level, not
+  // an assumed "info".
+  it("shows the server's running level on load and turns off to its base level", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls, {
+      level: "debug",
+      base_level: "warn",
+      reverts_at: new Date(Date.now() + 600000).toISOString(),
+    });
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.me = { permissions: 0x40000000, is_owner: true };
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const toggle = doc.getElementById("logLevelToggle") as HTMLButtonElement;
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "GET")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(doc.getElementById("logLevelStatus")!.textContent).toBe("Debug for 10 more min");
+    expect(doc.getElementById("logLevelWindow")).toBeNull();
+
+    fetchCalls.length = 0;
+    toggle.click();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "DELETE")).toBe(true);
+    expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "PATCH")).toBe(false);
+    expect(bridge.state.logLevel).toBe("warn");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(doc.getElementById("logLevelStatus")!.textContent).toBe("");
+  });
+  // UX clarity: attrs read as chips, an http request as "METHOD path ·
+  // status · ms" with the status class carried by a class and the number,
+  // and the full attrs behind a per-line details; the filter still searches
+  // the raw text.
+  it("renders structured log lines with the full attrs behind details", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const es = FakeEventSource.instances[0]!;
+    const attrs = JSON.stringify({
+      method: "GET",
+      path: "/admin/api/channels",
+      status: 404,
+      duration_ms: 3,
+      client_ip: "10.0.0.<b>1</b>",
+    });
+    es.onmessage?.({ data: JSON.stringify({ ...backfillEntry(1), msg: "http request", attrs }) });
+    es.onmessage?.({ data: JSON.stringify({ ...backfillEntry(2), attrs: "not json" }) });
+
+    const [req, raw] = [...doc.querySelectorAll("#logOutput .log-line")];
+    const chips = [...req!.querySelectorAll(".log-chips > .log-chip")].map((c) => c.textContent);
+    expect(chips).toEqual(["GET /admin/api/channels", "404", "3 ms"]);
+    expect(req!.querySelector(".log-status-4xx")?.textContent).toBe("404");
+    // The rest of an http line's attrs wait in its details, escaped.
+    expect(req!.querySelector(".log-more pre")?.textContent).toContain("10.0.0.<b>1</b>");
+    expect(req!.querySelector(".log-more b")).toBeNull();
+    expect(JSON.parse(req!.querySelector(".log-more pre")!.textContent!)).toEqual(
+      JSON.parse(attrs),
+    );
+    // Any other line reads as key=value chips; unparseable attrs still show, as text.
+    es.onmessage?.({
+      data: JSON.stringify({ ...backfillEntry(3), msg: "setup", attrs: '{"owner":"alice"}' }),
+    });
+    expect(
+      doc.querySelectorAll("#logOutput .log-line")[2]!.querySelector(".log-chip")?.textContent,
+    ).toBe("owner=alice");
+    expect(raw!.querySelector(".log-raw")?.textContent).toBe("not json");
+
+    // The filter matches the raw attrs, including keys no chip shows.
+    const search = doc.querySelector<HTMLInputElement>(".log-filter")!;
+    search.value = "client_ip";
+    search.dispatchEvent(new window.Event("input", { bubbles: true }));
+    expect(doc.querySelectorAll("#logOutput .log-line")).toHaveLength(1);
+  });
+
+  // Waiting is grey and never healthy: the dot turns live only once the
+  // stream opens, on first connect, after an error, and on resume.
+  it("shows a grey dot while connecting or reconnecting and a live dot only once open", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls);
+    const { window } = dom;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    const conn = () => [
+      doc.getElementById("logDot")!.className,
+      doc.getElementById("logStatusText")!.textContent,
+    ];
+    const tick = () => new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(conn()).toEqual(["dot-wait", "Connecting..."]);
+    await tick();
+    await tick();
+    FakeEventSource.instances[0]!.onopen?.();
+    expect(conn()).toEqual(["dot-live", "Connected"]);
+
+    FakeEventSource.instances[0]!.onerror?.();
+    expect(conn()).toEqual(["dot-wait", "Reconnecting..."]);
+
+    const pause = doc.getElementById("pauseBtn")!;
+    pause.click();
+    expect(conn()).toEqual(["dot-off", "Paused"]);
+    pause.click();
+    expect(conn()).toEqual(["dot-wait", "Connecting..."]);
+    await tick();
+    await tick();
+    FakeEventSource.instances.at(-1)!.onopen?.();
+    expect(conn()).toEqual(["dot-live", "Connected"]);
   });
 });

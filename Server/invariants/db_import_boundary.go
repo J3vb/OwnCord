@@ -80,10 +80,13 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/api.go":                    {Disposition: "boundary", Note: "passes the handle to the handlers and services it builds; no calls of its own", Hands: calls{"service.NewDiagnosticsService": 1, "service.NewSessionService": 1, "service.NewSetupService": 1, "service.NewTokenService": 1, "service.NewUserService": 1}},
 	"admin/backup_maintenance.go":     {Disposition: "boundary", Note: "scheduled backup mechanics on the maintenance tick; settings via the service", Calls: calls{"BackupToSafe": 1}},
 	"admin/handlers_backup.go":        {Disposition: "boundary", Note: "backup create/list/delete/restore owns the handle: VACUUM INTO, WAL checkpoint, close-and-swap", Calls: calls{"BackupToSafe": 2, "Close": 1, "LogAudit": 1, "SQLDb": 1}},
+	"admin/handlers_archive.go":       {Disposition: "boundary", Note: "full-archive download: VACUUM INTO snapshot, then zip the data dir and config", Calls: calls{"BackupToSafe": 1}},
+	"admin/archive_link.go":           {Disposition: "boundary", Note: "issues and redeems the single-use archive link; the handle re-resolves the link's credential and is threaded through to serveArchive", Hands: calls{"auth.ResolveTokenHash": 1}},
 	"admin/handlers_channel_perms.go": {Disposition: "adapter", Note: "override response shapes; the service owns the policy and the calls"},
 	"admin/handlers_channels.go":      {Disposition: "adapter", Note: "db.Channel in the resolver and response shapes; the service owns the calls"},
 	"admin/handlers_users.go":         {Disposition: "adapter", Note: "UserWithRole/User/Role types in the panel response shapes; UserService owns the reads"},
 	"admin/helpers.go":                {Disposition: "adapter", Note: "Role/User types in response helpers"},
+	"admin/loglevel.go":               {Disposition: "boundary", Note: "audits the log-level boost and revert with WriteAudit; no other calls"},
 	"admin/logstream.go":              {Disposition: "boundary", Note: "handle threaded to the SSE stream's auth check; no calls of its own", Hands: calls{"auth.ResolveTokenHash": 2}},
 	"admin/middleware.go":             {Disposition: "adapter", Note: "Role/User/Session types in the request context; SessionService resolves the bearer token"},
 	"admin/types.go":                  {Disposition: "adapter", Note: "response DTOs only — its GetRoleByID went with the user family"},
@@ -112,7 +115,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// B3-3 moved the process composition root out of main.go: internal/app
 	// owns the handle from open to close, and main.go no longer imports db.
 	"internal/app/app.go":      {Disposition: "boundary", Note: "the App holds the handle for its lifetime; no calls"},
-	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot", Calls: calls{"ClearAllVoiceStates": 1, "ResetAllUserStatuses": 1}},
+	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "ResetAllUserStatuses": 1}},
 	"internal/app/erasure.go":  {Disposition: "boundary", Note: "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)", Calls: calls{"CheckpointErasureWAL": 1, "Close": 2}, Hands: calls{"service.NewErasureService": 1, "service.NewRetentionService": 1}},
 	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "service.WriterWaitSource": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
 	// B6-14: no import of its own — the start/stop sequence opens the handle
@@ -125,6 +128,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"internal/app/persistence.go": {Disposition: "boundary", Note: "event persister, audit writer and the boot seq seed own the handle", Calls: calls{"GetMaxEventSeq": 1, "GetSetting": 1, "SetAuditWriter": 1, "SetSetting": 1}, Hands: calls{"ws.NewEventPersister": 1, "ws.StartEventPruner": 1}},
 	"internal/app/plugins.go":     {Disposition: "boundary", Note: "passes the handle to the plugin registry as its store; no calls of its own", Hands: calls{"plugin.Config": 1}},
 	"token_cli.go":                {Disposition: "boundary", Note: "the token CLI opens, migrates and closes its own handle for the bootstrap path; TokenService owns every query", Calls: calls{"Close": 1}, Hands: calls{"service.NewTokenService": 1}},
+	"restore_cli.go":              {Disposition: "boundary", Note: "the restore CLI owns the handle for the offline path: it verifies a backup, takes a pre-restore safety copy, holds the process lock and swaps the file", Calls: calls{"BackupToSafe": 1, "Close": 1}},
 	"cmd/seed/main.go":            {Disposition: "boundary", Note: "developer seeding tool owns its handle", Calls: calls{"Close": 1, "CreateChannel": 1, "CreateMessage": 2, "CreateUser": 1, "GetOrCreateDMChannel": 1, "GetUserByUsername": 1, "ListChannels": 1, "QueryRowContext": 1}},
 	"cmd/seed/profile_alpha.go":   {Disposition: "boundary", Note: "the alpha profile writes through the handle main.go owns", Calls: calls{"BeginTx": 1, "ExecContext": 2, "QueryRowContext": 1}},
 	"cmd/gendocs/main.go":         {Disposition: "boundary", Note: "docs generator migrates its own in-memory catalog", Calls: calls{"Close": 2, "QueryContext": 2}, Hands: calls{"api.NewRouter": 1, "app.StartRuntime": 1}},

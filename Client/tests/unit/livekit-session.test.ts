@@ -21,6 +21,7 @@ const mockVoiceState = vi.hoisted(() => ({
   // the server's voice_config event. Empty by default; tests exercising the
   // audio-bitrate publish path populate an entry for the channel under test.
   voiceConfigs: new Map<number, { bitrate: number }>(),
+  voiceStatus: "idle",
 }));
 
 /** Backing cell for the mocked voice.store PTT-poller-live flag. Boxed so the
@@ -59,6 +60,9 @@ vi.mock("livekit-client", () => ({
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
     Disconnected: "disconnected",
+    Reconnecting: "reconnecting",
+    SignalReconnecting: "signalReconnecting",
+    Reconnected: "reconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
     AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
     EncryptionError: "encryptionError",
@@ -151,7 +155,7 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -340,6 +344,7 @@ describe("LiveKitSession", () => {
     mockVoiceState.pttGated = false;
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
+    mockVoiceState.voiceStatus = "idle";
     session = new LiveKitSession();
     // Reset mockRoom state
     mockRoom.state = "connected";
@@ -1263,6 +1268,76 @@ describe("LiveKitSession", () => {
       expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
     });
 
+    // RT-9: livekit-client (and the native room) retry a dropped signal
+    // socket on their own before any Disconnected, so the SDK's reconnecting
+    // phase must reach the widget too.
+    it.each(["reconnecting", "signalReconnecting"])(
+      "writes reconnecting while the SDK retries (%s), then connected once it recovers",
+      async (event) => {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        const handlers = new Map<string, Array<() => void>>();
+        mockRoom.on.mockImplementation((name: string, handler: () => void) => {
+          handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+          return mockRoom;
+        });
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+        mockVoiceState.voiceStatus = "connected";
+        (setVoiceStatus as any).mockClear();
+
+        for (const h of handlers.get(event) ?? []) h();
+        expect(statusCalls()).toEqual(["reconnecting"]);
+
+        mockVoiceState.voiceStatus = "reconnecting";
+        for (const h of handlers.get("reconnected") ?? []) h();
+        expect(statusCalls()).toEqual(["reconnecting", "connected"]);
+        expect((session as any)._state.type).toBe("connected");
+      },
+    );
+
+    // RT-9: the key can arrive over WS while the SFU is already gone and the
+    // SDK is retrying on its own; the join must not then claim "connected".
+    it.each(["reconnecting", "signalReconnecting"])(
+      "writes reconnecting, not connected, when the joined room is already SDK-%s",
+      async (roomState) => {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        mockRoom.state = roomState;
+        (setVoiceStatus as any).mockClear();
+
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+        expect(statusCalls()).not.toContain("connected");
+        expect(statusCalls().at(-1)).toBe("reconnecting");
+      },
+    );
+
+    it("writes reconnecting, not connected, when the auto-reconnected room is already SDK-reconnecting", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      mockRoom.state = "signalReconnecting";
+      (setVoiceStatus as any).mockClear();
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(statusCalls()).not.toContain("connected");
+      expect(statusCalls().at(-1)).toBe("reconnecting");
+    });
+
     it("writes connected after a successful auto-reconnect", async () => {
       (session as any)._state = {
         type: "reconnecting",
@@ -1389,6 +1464,46 @@ describe("LiveKitSession", () => {
       await reconnectPromise;
 
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
+    });
+
+    it("RT-6: applies the saved input device before the reconnect re-captures the mic", async () => {
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "usb-mic";
+        return defaultVal;
+      });
+      const order: string[] = [];
+      mockRoom.switchActiveDevice.mockImplementation(async (kind: string) => {
+        order.push(kind);
+        return true;
+      });
+      mockRoom.localParticipant.setMicrophoneEnabled.mockImplementation(async (on: boolean) => {
+        order.push(`mic:${on}`);
+      });
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 7,
+        latestToken: "reconnect-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "reconnect-token",
+        "/livekit",
+        7,
+        "ws://localhost:7880",
+        new AbortController().signal,
+      );
+      await vi.advanceTimersByTimeAsync(3100);
+      await reconnectPromise;
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "usb-mic", false);
+      expect(order.indexOf("audioinput")).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf("audioinput")).toBeLessThan(order.indexOf("mic:true"));
+      expect(order.filter((o) => o === "audioinput")).toHaveLength(1);
     });
 
     it("re-applies deafened remote subscriptions on reconnect", async () => {
@@ -2323,6 +2438,45 @@ describe("LiveKitSession", () => {
       mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
     });
 
+    // A gated join publishes no mic and attaches no RNNoise processor, and a
+    // device switch while gated no longer attaches one either (OC-0474), so
+    // the first unmute is the only place left to give the track its processor.
+    it.each([
+      [true, "applies"],
+      [false, "does not apply"],
+    ])(
+      "with enhancedNoiseSuppression=%s, the first unmute after a muted join %s the noise suppressor",
+      async (enhancedNS) => {
+        mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+          key === "enhancedNoiseSuppression" ? enhancedNS : defaultVal,
+        );
+        const noiseSpy = vi
+          .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
+          .mockResolvedValue(undefined);
+        mockVoiceState.localMuted = true;
+        try {
+          await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+          expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+          expect(noiseSpy).not.toHaveBeenCalled();
+
+          mockVoiceState.localMuted = false;
+          session.setMuted(false);
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+          if (enhancedNS) {
+            expect(noiseSpy).toHaveBeenCalledTimes(1);
+          } else {
+            expect(noiseSpy).not.toHaveBeenCalled();
+          }
+        } finally {
+          mockVoiceState.localMuted = false;
+          noiseSpy.mockRestore();
+          mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        }
+      },
+    );
+
     it("mode reconnect with mic error logs warn but does NOT call error callback", async () => {
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -2868,6 +3022,33 @@ describe("LiveKitSession", () => {
       expect(result).toBe(true);
     });
 
+    it("RT-6: applies the saved input device before the mic is first captured", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      mockRoom.connect.mockResolvedValue(undefined);
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
+        if (key === "audioInputDevice") return "usb-mic";
+        return defaultVal;
+      });
+      const order: string[] = [];
+      mockRoom.switchActiveDevice.mockImplementation(async (kind: string) => {
+        order.push(kind);
+        return true;
+      });
+      mockRoom.localParticipant.setMicrophoneEnabled.mockImplementation(async (on: boolean) => {
+        order.push(`mic:${on}`);
+      });
+
+      await (session as any).connectAndSetup("token", "/livekit", 1, "ws://localhost:7880", true);
+
+      // Non-exact: a saved mic that was unplugged degrades to the default
+      // instead of failing the publish into listen-only.
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "usb-mic", false);
+      expect(order.indexOf("audioinput")).toBeGreaterThanOrEqual(0);
+      expect(order.indexOf("audioinput")).toBeLessThan(order.indexOf("mic:true"));
+      expect(order.filter((o) => o === "audioinput")).toHaveLength(1);
+    });
+
     it("calls leaveVoice(false) when room is non-null at entry", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -3183,6 +3364,48 @@ describe("LiveKitSession", () => {
   });
 
   describe("attemptAutoReconnect (lifecycle)", () => {
+    // RT-9: a companion LiveKit restart backs off from 3 s and doubles, plus
+    // its own start-up, so the old 2 tries 3 s apart (about 6 s) gave up
+    // before the SFU was back and ejected every call. The loop must keep
+    // retrying with backoff, so an SFU that returns on the third attempt
+    // still resumes the call.
+    it("RT-9: keeps retrying with backoff so a companion LiveKit restart can land", async () => {
+      (session as any)._state = {
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac: new AbortController(),
+      };
+      session.setServerHost("localhost:7880");
+      const errorCb = vi.fn();
+      session.setOnError(errorCb);
+      const ac = new AbortController();
+
+      mockRoom.connect
+        .mockRejectedValueOnce(new Error("sfu restarting"))
+        .mockRejectedValueOnce(new Error("sfu restarting"))
+        .mockResolvedValueOnce(undefined);
+
+      const reconnectPromise = (session as any).attemptAutoReconnect(
+        "token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+
+      await vi.advanceTimersByTimeAsync(3000); // attempt 1 fails
+      await vi.advanceTimersByTimeAsync(6000); // attempt 2 fails — the old budget gave up here
+      await vi.advanceTimersByTimeAsync(6000); // attempt 3 succeeds
+      await reconnectPromise;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(3);
+      expect(errorCb).not.toHaveBeenCalled();
+      expect(setVoiceStatus).toHaveBeenCalledWith("connected");
+    });
+
     it("returns without reconnecting when signal is aborted during delay", async () => {
       (session as any)._state = {
         type: "reconnecting",
@@ -3259,8 +3482,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
       await reconnectPromise;
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(2);
@@ -3290,8 +3513,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(6000);
       await reconnectPromise;
 
       // The room whose connect failed must be torn down — in "reconnecting"
@@ -3330,8 +3553,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      // Exhaust the whole RT-9 budget: 3 s, then 6 s per attempt.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
@@ -3370,12 +3593,12 @@ describe("LiveKitSession", () => {
 
       // Every attempt fails, and on the LAST attempt's failure the session
       // has already moved on to a different (live) channel — simulating the
-      // user joining channel 9 while attempt 2 (MAX_RECONNECT_ATTEMPTS) was
-      // still connecting.
+      // user joining channel 9 while the final attempt
+      // (MAX_RECONNECT_ATTEMPTS) was still connecting.
       let connectCalls = 0;
       mockRoom.connect.mockImplementation(() => {
         connectCalls++;
-        if (connectCalls >= 2) {
+        if (connectCalls >= 5) {
           (session as any)._state = {
             type: "connected",
             room: mockRoom,
@@ -3396,8 +3619,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      // Exhaust the whole RT-9 budget so the loop reaches the post-loop check.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       // The give-up path must not have run: no error toast, no leaveVoiceChannel,
@@ -3430,7 +3653,7 @@ describe("LiveKitSession", () => {
       let connectCalls = 0;
       mockRoom.connect.mockImplementation(() => {
         connectCalls++;
-        if (connectCalls >= 2) {
+        if (connectCalls >= 5) {
           // A fresh join for the SAME channel completed while the final
           // reconnect attempt was in flight.
           (session as any)._state = {
@@ -3453,8 +3676,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      // Exhaust the whole RT-9 budget so the loop reaches the post-loop check.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
@@ -3487,8 +3710,7 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      await vi.advanceTimersByTimeAsync(3100);
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(leaveVoiceChannel).toHaveBeenCalled();
@@ -3868,7 +4090,7 @@ describe("LiveKitSession", () => {
       expect(offerSends(ws)).toHaveLength(1);
     });
 
-    it("blocks and emits identity-tofu when the pinned identity key changed", async () => {
+    it("accepts a changed identity key automatically: verifies against it, re-pins, keys the peer", async () => {
       seedPeer("new-identity-b64");
       (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
@@ -3877,14 +4099,14 @@ describe("LiveKitSession", () => {
 
       await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
 
-      expect(setPeerVerification).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
+      // The announce must verify against the NEW key before it is pinned.
+      expect(verifyEphemeralKeySignature).toHaveBeenCalledTimes(1);
+      expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
+      expect(setPeerVerification).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: PEER_ID, status: "changed" }),
       );
-      // Blocked before verify — no pin overwrite, no signature check, no offer.
-      expect(storeIdentityPin).not.toHaveBeenCalled();
-      expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
-      expect(offerSends(ws)).toHaveLength(0);
-      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(false);
+      expect((session as any)._peerPublicKeys.has(PEER_ID)).toBe(true);
+      expect(offerSends(ws)).toHaveLength(1);
     });
 
     it("fails closed when the pin store cannot be read (DC-08): rejects, never re-pins", async () => {
@@ -3955,10 +4177,9 @@ describe("LiveKitSession", () => {
       expect(storeIdentityPin).not.toHaveBeenCalled();
     });
 
-    it("re-pin recovers a mismatched peer so a later valid announce verifies", async () => {
-      // Peer legitimately rotated its identity key (reinstall / new device).
-      // Its pinned key mismatches the new published one → blocked.
-      seedPeer("new-identity-b64");
+    it("re-pin recovers a peer blocked for a missing key once a key is delivered again", async () => {
+      // The server stopped delivering a pinned peer's identity key → blocked.
+      seedPeer(null);
       (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "old-identity-b64" });
       const ws = { send: vi.fn() };
       await joinAsKeyHolder(ws);
@@ -3968,19 +4189,15 @@ describe("LiveKitSession", () => {
       expect(setPeerVerification).toHaveBeenLastCalledWith(
         expect.objectContaining({ userId: PEER_ID, status: "mismatch" }),
       );
+      expect(offerSends(ws)).toHaveLength(0);
 
-      // User accepts the new key (analogous to accepting a changed TLS cert):
-      // re-pin overwrites the stored pin with the verified key and clears the
-      // mismatch block.
+      // A key is delivered again and the user trusts it: re-pin overwrites the
+      // stored pin with that key and replays the blocked announce against it.
+      seedPeer("new-identity-b64");
+      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "new-identity-b64" });
       const recovered = await session.rePinPeerIdentity(PEER_ID, "new-identity-b64");
       expect(recovered).toBe(true);
       expect(storeIdentityPin).toHaveBeenCalledWith(HOST, String(PEER_ID), "new-identity-b64");
-
-      // Store now holds the new pin; a fresh valid announce verifies.
-      (getIdentityPin as any).mockResolvedValue({ status: "pinned", pin: "new-identity-b64" });
-      (storeIdentityPin as any).mockClear();
-      ws.send.mockClear();
-      await session.handleE2EEAnnounce(PEER_ID, "cGVlcg==", "sig");
 
       expect(setPeerVerification).toHaveBeenLastCalledWith(
         expect.objectContaining({ userId: PEER_ID, status: "verified" }),

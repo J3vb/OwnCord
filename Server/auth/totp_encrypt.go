@@ -121,7 +121,7 @@ func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 	if err := writeKeyFileAtomic(keyPath, []byte(hex.EncodeToString(key))); err != nil {
 		return nil, err
 	}
-	slog.Warn("auto-generated "+spec.what+" and saved to disk; "+spec.generated, "path", keyPath)
+	slog.Warn("auto-generated key saved to disk", "key", spec.what, "advice", spec.generated, "path", keyPath)
 	return key, nil
 }
 

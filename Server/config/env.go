@@ -22,7 +22,7 @@ func walkLeafKeys() map[string]reflect.Kind {
 	out := make(map[string]reflect.Kind)
 	var walk func(t reflect.Type, prefix string)
 	walk = func(t reflect.Type, prefix string) {
-		for t.Kind() == reflect.Ptr {
+		for t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		if t.Kind() != reflect.Struct {
@@ -38,7 +38,7 @@ func walkLeafKeys() map[string]reflect.Kind {
 				key = prefix + "." + tag
 			}
 			ft := f.Type
-			for ft.Kind() == reflect.Ptr {
+			for ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
 			}
 			if ft.Kind() == reflect.Struct {

@@ -6,13 +6,16 @@
  *   owncord://invite/<code>              registration invite
  *   owncord://invite/<code>?host=<host>
  *   owncord://<code>                     (bare code — invite)
- *   owncord://message/<channelId>/<messageId>   message permalink
+ *   owncord://message/<channelId>/<messageId>            message permalink
+ *   owncord://message/<channelId>/<messageId>?host=<host>  a toast's launch URI
  *
  * OwnCord invites are *registration* invites (a code you supply when creating
  * an account on a server), so an invite link can only pre-fill and open the
  * register form — it cannot complete a join on its own. A message link opens
  * the channel and jumps to the message, and is ignored when the channel is not
- * visible to this user.
+ * visible to this user. A Windows message toast's launch URI carries `host` so
+ * a click from Action Center names its server; a link whose host is not the
+ * signed-in server is ignored rather than opening an unrelated message.
  *
  * Cold starts are handled via getCurrent(); while the app is already running,
  * the single-instance plugin (built with the "deep-link" feature) forwards the
@@ -33,6 +36,13 @@ export interface InviteLink {
 export interface MessageLink {
   readonly channelId: number;
   readonly messageId: number;
+  /**
+   * The server the link named, when it carried one. A Windows message toast
+   * sets this so a click from Action Center after the banner timed out still
+   * says which server it was for; channel and message ids are only unique per
+   * server, so the app must ignore a target for a server it is not signed into.
+   */
+  readonly host?: string;
 }
 
 /** Split an owncord:// URL into its path segments, or null for other schemes. */
@@ -64,8 +74,9 @@ export function formatMessageLink(channelId: number, messageId: number): string 
 }
 
 /**
- * Parse an `owncord://message/<channelId>/<messageId>` permalink. Returns null
- * for any other owncord:// route, another scheme, or non-numeric ids. Pure.
+ * Parse an `owncord://message/<channelId>/<messageId>` permalink, with an
+ * optional `?host=` naming the server it came from. Returns null for any other
+ * owncord:// route, another scheme, or non-numeric ids. Pure.
  */
 export function parseMessageLink(url: string): MessageLink | null {
   const parts = linkSegments(url);
@@ -73,7 +84,9 @@ export function parseMessageLink(url: string): MessageLink | null {
   const channelId = parseIdSegment(parts.segments[1]);
   const messageId = parseIdSegment(parts.segments[2]);
   if (channelId === null || messageId === null) return null;
-  return { channelId, messageId };
+  const host =
+    parts.query === "" ? "" : (new URLSearchParams(parts.query).get("host") ?? "").trim();
+  return host === "" ? { channelId, messageId } : { channelId, messageId, host };
 }
 
 /**
@@ -108,4 +121,21 @@ export function parseInviteLink(url: string): InviteLink | null {
   if (!code) return null;
 
   return host ? { code, host } : { code };
+}
+
+/**
+ * Normalise a raw invite code for submission: trim, then lower-case, and
+ * accept a pasted `owncord://invite/<code>` (or bare `owncord://<code>`) link
+ * by pulling its code out first. Server codes are lower-case hex and redemption
+ * is an exact, case-sensitive match, so a typed/pasted upper-case code or a
+ * whole link would otherwise be refused with the same opaque 400. Never throws,
+ * and an empty result means the caller should fall back to its own required
+ * check. Pure.
+ */
+export function normaliseInviteCode(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  const link = parseInviteLink(trimmed);
+  const code = link ? link.code : trimmed;
+  return code.trim().toLowerCase();
 }

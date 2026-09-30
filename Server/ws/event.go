@@ -53,6 +53,11 @@ type Result struct {
 	// channel-switch cleanup call it un-throttled; only the message dispatch
 	// moved to V2 (which does the rate-limit before setting this flag).
 	LeaveVoice bool
+	// LeaveVoiceReason is the machine-readable reason the leave is being
+	// triggered; it is logged on the "voice leave" line so an operator can tell
+	// one teardown path from another (SRE-M2). Only meaningful alongside
+	// LeaveVoice. Use one of the voiceLeaveReason* constants.
+	LeaveVoiceReason string
 }
 
 // Event is the base interface for all server-to-client events.

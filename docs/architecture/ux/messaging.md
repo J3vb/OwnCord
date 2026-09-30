@@ -54,14 +54,28 @@ stateDiagram-v2
     SlowMode --> Enabled: cooldown elapsed
 ```
 
-| Composer state                                 | Presentation                                                                                                                | Reason shown                                         |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `enabled`                                      | Editable textarea, attach + pickers active                                                                                  | —                                                    |
-| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                         | "Only moderators can post in announcement channels." |
-| `no-permission`                                | Disabled bar                                                                                                                | "You don't have permission to send messages here."   |
-| `offline`                                      | Disabled — "Reconnecting…" while retrying, "Not connected" when disconnected                                                | connection status (README §3)                        |
-| `slow-mode`                                    | Disabled with a live countdown                                                                                              | "Slow mode: wait Ns."                                |
-| `uploading`                                    | Send disabled until uploads settle (already the `pendingUploadCount` guard in `handleSend()`, `components/MessageInput.ts`) | per-attachment spinner                               |
+| Composer state                                 | Presentation                                                                                                                                 | Reason shown                                         |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `enabled`                                      | Editable textarea, attach + pickers active                                                                                                   | —                                                    |
+| `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                          | "Only moderators can post in announcement channels." |
+| `no-permission`                                | Disabled bar                                                                                                                                 | "You don't have permission to send messages here."   |
+| `offline`                                      | Gated — "Reconnecting…" while retrying, "Not connected" when disconnected; the textarea uses `aria-disabled` + `readOnly` so the caret stays | connection status (README §3)                        |
+| `slow-mode`                                    | Disabled with a live countdown                                                                                                               | "Slow mode: wait Ns."                                |
+| `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment progress bar                          |
+
+**Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
+state — text, reply target and staged upload ids — in `ChannelController`'s
+`draftByChannel`, and restores it when the user returns; a send that consumes
+the draft leaves nothing behind. An in-progress edit is dropped, not stashed
+(restored outside edit mode it would send as a duplicate), a reply whose
+target was deleted meanwhile is dropped, and a staged upload older than
+`DRAFT_ATTACHMENT_TTL_MS` (50 min, under the server's ~1 h unlinked-attachment
+sweep) is dropped with an "attach it again" notice. Gating the composer
+(offline, slow mode, no permission) uses `aria-disabled` + `readOnly` rather
+than the `disabled` attribute, so a mid-sentence caret is never dropped to
+`<body>`; paste-to-upload and ArrowUp-to-edit are ignored while gated, and a
+refused Send shows the reason on the composer's refusal line (linked by
+`aria-describedby`, kept current as the slow-mode countdown ticks).
 
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
@@ -105,11 +119,12 @@ sequenceDiagram
     end
 ```
 
-| Optimistic state | Presentation                                                                                 | Transition                                |
-| ---------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `pending`        | Row shown dimmed with a subtle "sending" affordance                                          | `chat_send_ok` → `sent`; error → `failed` |
-| `sent`           | Normal row; the subsequent `chat_message` broadcast reconciles (same `id`), never duplicates | —                                         |
-| `failed`         | Row marked failed with **Retry** and **Delete draft**; content preserved                     | Retry re-sends with a new correlation id  |
+| Optimistic state       | Presentation                                                                                   | Transition                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `pending`              | Row shown dimmed with a subtle "sending" affordance                                            | `chat_send_ok` → `sent`; error → `failed` |
+| `sent`                 | Normal row; the subsequent `chat_message` broadcast reconciles (same `id`), never duplicates   | —                                         |
+| `failed`               | Row marked failed with **Retry** and **Delete draft**; content preserved                       | Retry re-sends with a new correlation id  |
+| `failed` (pre-restore) | Row kept with its text; says the server was restored — check the conversation before resending | Retry re-sends the same id (OC-0476)      |
 
 **Reconciliation contract:** the correlation id (`ws.ts` per-send UUID, echoed as
 `chat_send_ok.id`) is the join key. `addMessage` from the broadcast must detect an
@@ -134,11 +149,17 @@ existing pending/sent row for that id and replace-in-place rather than append.
 
 ## 4. Edit / delete
 
-| Action                   | Target UX                                                                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); optimistic content swap; `chat_edited` reconciles + stamps "edited"; failure rolls back with a toast                         |
-| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); optimistic tombstone; `chat_deleted` confirms; failure restores the row + toast |
-| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                               |
+| Action                   | Target UX                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit (own message)       | Inline edit in the composer (`startEdit`, `MessageInput.ts`); the frame's envelope id is tracked (CLI-08) and resolved by the `chat_edited` echo; a refused or dropped frame shows exactly one error and puts the text back in the composer when it is empty, so no "edited" toast is claimed before delivery                                         |
+| Delete (own / moderator) | **Two-click confirm** on the row (`createPendingDeleteManager()`, `pages/main-page/MessageController.ts`); the frame's envelope id is tracked (CLI-08) and resolved by the `chat_deleted` echo; a refused or dropped frame shows one error instead of a false success, and the button is disabled with the connection reason while the socket is down |
+| Delete (no permission)   | The delete affordance is not offered on others' messages unless the user has MANAGE_MESSAGES                                                                                                                                                                                                                                                          |
+
+A frame counts as dropped when the socket leaves `connected` before its echo
+arrives; if several edits fail together, only the newest is put back. A tracked
+entry still unechoed after 90 s on a socket that stayed connected is dropped
+silently (`TRACKED_ACTION_EXPIRY_MS`, `ChannelController.ts`): the frame reached
+the server, and the echo can miss this client when it left the channel first.
 
 Deleted messages are soft-deleted (kept as a tombstone in the array, `deleted:true`)
 so surrounding context and reply references stay intact.
@@ -170,8 +191,9 @@ _"alice, bob, carol and 4 others reacted with 👍"_. The debounce mirrors
 `lib/streamPreview.ts` so a pointer crossing a row of pills fires no requests.
 The list comes from `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`
 (oldest first, capped at 100 server-side) and is cached per message+emoji in
-`message-list/reaction-tooltip.ts`; a `reaction_update` for that message evicts
-every one of its lists, since the event names only the emoji that changed.
+`features/messaging/reactionUsers.ts` (the tooltip component renders it); a
+`reaction_update` for that message evicts every one of its lists, since the
+event names only the emoji that changed.
 Usernames are inserted as text nodes — never markup.
 
 ---
@@ -181,13 +203,13 @@ Usernames are inserted as text nodes — never markup.
 The composer supports file attach with client-side validation and per-item
 upload state (already thorough — `MessageInput.ts`).
 
-| State      | Presentation                                                                                                                                                                 |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| selected   | Thumbnail/chip per file                                                                                                                                                      |
-| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)           |
-| uploading  | Per-item spinner; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`) |
-| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                          |
-| failed     | Inline error on the chip with remove/retry                                                                                                                                   |
+| State      | Presentation                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| selected   | Thumbnail/chip per file                                                                                                                                                                                                                                                                                                                                                              |
+| validating | Reject oversize/disallowed type inline via `showUploadError` (the `MAX_FILE_SIZE`/`ALLOWED_TYPES` validation in `handlePasteFile()`, `components/MessageInput.ts`)                                                                                                                                                                                                                   |
+| uploading  | Per-item progress bar; **send disabled** until all settle (the per-item uploading preview in `handlePasteFile()` + the `handleSend()` upload guard, `components/MessageInput.ts`). The bar is indeterminate until the Rust HTTP proxy's first `upload-progress` tick, then determinate. Removing the chip (×) aborts its `POST /uploads` and frees Send at once, with no error shown |
+| uploaded   | Chip ready; ids attached to the `chat_send` payload                                                                                                                                                                                                                                                                                                                                  |
+| failed     | Inline error on the chip with remove/retry                                                                                                                                                                                                                                                                                                                                           |
 
 Upload goes through `POST /uploads` (multipart). **✓ Implemented (2026-07):**
 `uploadFile` now honors the global 401 handler like every other call — a 401
@@ -218,12 +240,12 @@ string and park it in the LRU + IndexedDB caches.
 
 ## 7. Replies, pins, search, read/unread
 
-| Feature     | Target UX                                                                                                                                                                                                                                                         |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                   |
-| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)                    |
-| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query                                                       |
-| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (`handleChatMessage`, `features/messaging/wsHandlers.ts`); focus emits `channel_focus` for server read-state |
+| Feature     | Target UX                                                                                                                                                                                                                                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                                                             |
+| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)                                                              |
+| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query. Each hit names its author by display name, followed by a muted `@username` when the two differ |
+| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (`handleChatMessage`, `features/messaging/wsHandlers.ts`); focus emits `channel_focus` for server read-state                                           |
 
 **Read-state target rule:** unread counts are **not** suppressed during
 reconnect replay — a replayed frame increments its channel exactly as a live one
@@ -263,8 +285,9 @@ instead of resetting to 0.
 
 Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
-opened from the OS — goes through one path (`lib/message-navigation.ts`
-registry → `main-page/MessageJump.ts`), so they behave identically.
+opened from the OS, a clicked message notification — goes through one path
+(`lib/message-navigation.ts` registry → `main-page/MessageJump.ts`), so they
+behave identically.
 
 | Step                                  | Target UX                                                                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -296,15 +319,15 @@ per-channel `mention_count` in `ready`. The client treats those fields as
 authoritative and only falls back to parsing `@tokens` locally when an older
 server omits them.
 
-| Surface               | Target UX                                                                                                                                                                                                                                                            |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@username`           | Highlighted **only** when it resolves — against the server's `mentions` list or `membersStore` (case-insensitive). An unresolvable `@nobody`, an email local part (`mail@example`) or an address-shaped `@bob@example.com` stays plain text                          |
-| `@everyone` / `@here` | Highlighted only when `mentions_everyone` is true; a sender without `MENTION_EVERYONE` produces ordinary text with no mention semantics anywhere in the client                                                                                                       |
-| Mention of _you_      | The `@token` gets `.mention-self` **and** the whole row gets `.mentioned` (left accent + tinted background)                                                                                                                                                          |
-| `#channel-name`       | Rendered as a clickable chip when the name resolves in `channelsStore` (DM channels excluded); click / Enter routes through `navigateToChannel`, the same activation path the sidebar and quick switcher use                                                         |
-| Channel badge         | `mentionCount` per channel, seeded from `ready`, incremented on an incoming `chat_message` that mentions you, cleared on activation alongside unread. The red `.mention-badge` replaces the plain unread badge — never both on one row                               |
-| Notification          | "_X_ mentioned you in #channel" for a direct mention or an honoured `@everyone`. The **Suppress @everyone** preference drops only `mentions_everyone`-driven notifications; a message that also names you still notifies. DND still silences the popup and the chime |
-| Composer              | Typing `@` opens `MentionAutocomplete` (up/down/enter/tab/escape), filtered by username; `@everyone`/`@here` appear only when your role holds `MENTION_EVERYONE`. Selection inserts `@username ` and the popup owns Enter so a half-typed mention never sends        |
+| Surface               | Target UX                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@username`           | Highlighted **only** when it resolves — against the server's `mentions` list or `membersStore` (case-insensitive). An unresolvable `@nobody`, an email local part (`mail@example`) or an address-shaped `@bob@example.com` stays plain text                                                                                                                                 |
+| `@everyone` / `@here` | Highlighted only when `mentions_everyone` is true; a sender without `MENTION_EVERYONE` produces ordinary text with no mention semantics anywhere in the client                                                                                                                                                                                                              |
+| Mention of _you_      | The `@token` gets `.mention-self` **and** the whole row gets `.mentioned` (left accent + tinted background)                                                                                                                                                                                                                                                                 |
+| `#channel-name`       | Rendered as a clickable chip when the name resolves in `channelsStore` (DM channels excluded); click / Enter routes through `navigateToChannel`, the same activation path the sidebar and quick switcher use                                                                                                                                                                |
+| Channel badge         | `mentionCount` per channel, seeded from `ready`, incremented on an incoming `chat_message` that mentions you, cleared on activation alongside unread. The red `.mention-badge` replaces the plain unread badge — never both on one row                                                                                                                                      |
+| Notification          | "_X_ mentioned you in #channel" for a direct mention or an honoured `@everyone`. The **Suppress @everyone** preference drops only `mentions_everyone`-driven notifications; a message that also names you still notifies. DND still silences the popup and the chime                                                                                                        |
+| Composer              | Typing `@` opens `MentionAutocomplete` (up/down/enter/tab/escape), filtered by username or display name; a row with a distinct display name shows it as the label with `@username` in the detail line. `@everyone`/`@here` appear only when your role holds `MENTION_EVERYONE`. Selection inserts `@username ` and the popup owns Enter so a half-typed mention never sends |
 
 **Editing rule:** an edit re-resolves mentions (the row's highlight follows the
 new text) but never re-notifies and never re-increments a badge — that is
@@ -385,8 +408,7 @@ the same signal in future.
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
 `src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
-`src/components/message-list/content-parser.ts` (+ `markdown.ts`,
-`syntax-highlight.ts`),
-`src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
+`src/components/message-list/content-parser.ts` (+ `syntax-highlight.ts`),
+`src/lib/markdown.ts`, `src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,
 `Server/ws/handlers_chat.go`.

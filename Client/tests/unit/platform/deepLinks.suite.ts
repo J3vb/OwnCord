@@ -45,8 +45,18 @@ export function describeDeepLinksSuite(
       const onInvite = vi.fn();
       const onMessage = vi.fn();
       await ctx.subject.init(onInvite, onMessage);
-      expect(onMessage).toHaveBeenCalledWith(7, 42);
+      expect(onMessage).toHaveBeenCalledWith(7, 42, undefined);
       expect(onInvite).not.toHaveBeenCalled();
+    });
+
+    check("passes a message permalink's host through to onMessage", async () => {
+      // A Windows toast's launch URI carries the server it was raised for, so
+      // a click from Action Center can be ignored when another server is
+      // signed into now (message_notification.rs builds this shape).
+      ctx.native.coldStartLinks(["owncord://message/7/42?host=chat.example:8443"]);
+      const onMessage = vi.fn();
+      await ctx.subject.init(vi.fn(), onMessage);
+      expect(onMessage).toHaveBeenCalledWith(7, 42, "chat.example:8443");
     });
   });
 }

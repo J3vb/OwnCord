@@ -1,0 +1,361 @@
+/* ── DM call panel (components/DmCallPanel.ts) ─────────────────────────── */
+
+/* Sits between the chat header and the messages; the chat stays usable
+   below it. Status text uses the qualified --text-* tokens, and the speaking
+   ring --text-positive: --green is 2.52:1 on light's --bg-tertiary, below the
+   3:1 non-text bar. */
+.dm-call-panel {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+.dm-call-panel[hidden] {
+  display: none;
+}
+.dm-call-panel--expanded {
+  height: 58%;
+  min-height: fit-content;
+}
+.dcp-body {
+  display: contents;
+}
+
+.dcp-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  min-width: 0;
+}
+.dcp-status {
+  font-weight: 700;
+  color: var(--text-positive);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dcp-status--warn {
+  color: var(--text-warning);
+}
+.dcp-status--bad {
+  color: var(--text-danger);
+}
+.dcp-secured {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-positive);
+  font-weight: 600;
+}
+.dcp-secured[hidden] {
+  display: none;
+}
+.dcp-secured--degraded {
+  color: var(--text-danger);
+}
+.dcp-timer {
+  font-variant-numeric: tabular-nums;
+}
+.dcp-spacer {
+  flex: 1;
+}
+.dcp-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 24px;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  color: var(--text-normal);
+  font-size: var(--font-size-xs);
+  flex-shrink: 0;
+}
+.dcp-collapse:hover {
+  background: var(--bg-hover);
+}
+
+.dcp-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  padding: var(--space-2) var(--space-4);
+  overflow: hidden;
+}
+.dcp-person {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.dcp-person-name {
+  max-width: 140px;
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dcp-caption {
+  text-align: center;
+  color: var(--header-primary);
+  font-weight: 700;
+  font-size: var(--font-size-lg);
+}
+.dcp-sub {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  margin-top: 2px;
+}
+
+/* Avatars: a fixed box, so the initial keeps literal px (DESIGN_SYSTEM). */
+.dcp-avatar {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+}
+.dcp-avatar--lg {
+  width: 80px;
+  height: 80px;
+  font-size: 28px;
+}
+.dcp-avatar--sm {
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+}
+.dcp-avatar--speaking {
+  box-shadow:
+    0 0 0 3px var(--bg-tertiary),
+    0 0 0 6px var(--text-positive);
+}
+/* A callee who has not picked up: dimmed, with a pulse. The words
+   ("Calling Otto…") carry the state; Reduce Motion stops the pulse. */
+.dcp-avatar--ringing {
+  opacity: 0.55;
+  animation: dcp-ring 1.4s ease-in-out infinite;
+}
+@keyframes dcp-ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--text-positive) 60%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+}
+.dcp-avatar-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-circle);
+  background: var(--bg-tertiary);
+  color: var(--text-danger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dcp-avatar-badge[hidden] {
+  display: none;
+}
+.dcp-avatar--sm .dcp-avatar-badge {
+  width: 18px;
+  height: 18px;
+  right: -5px;
+  bottom: -5px;
+}
+.dcp-avatar--sm .dcp-avatar-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Controls: 44px round buttons, named and pressed-state aware. They wrap
+   rather than clip at the 940x500 minimum with 20px text. */
+.dcp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) var(--space-3) 14px;
+}
+.dcp-controls--compact {
+  padding: 0;
+  gap: 6px;
+}
+.dcp-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: var(--radius-circle);
+  background: var(--bg-active);
+  color: var(--text-normal);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast);
+}
+.dcp-btn:hover {
+  background: var(--bg-hover);
+}
+.dcp-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.dcp-btn--neg[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--red) 22%, var(--bg-active));
+  color: var(--text-danger);
+}
+.dcp-btn--pos[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.dcp-btn--hang {
+  width: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--danger-fill);
+  color: var(--on-fill);
+}
+.dcp-btn--hang:hover {
+  background: var(--danger-fill-hover);
+}
+.dcp-btn--accept {
+  width: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--green);
+  color: var(--on-fill);
+}
+.dcp-btn--accept:hover {
+  filter: brightness(0.9);
+}
+.dcp-controls--compact .dcp-btn {
+  width: 36px;
+  height: 36px;
+}
+.dcp-controls--compact .dcp-btn--hang {
+  width: 44px;
+}
+.dcp-sep {
+  width: 1px;
+  height: 28px;
+  margin: 0 var(--space-1);
+  background: var(--border-strong);
+}
+/* Text buttons reuse the shared .btn-primary/.btn-ghost looks at pill size. */
+.dcp-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-height: 36px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.dcp-pill.btn-ghost {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.dcp-pill.btn-ghost:hover {
+  background: var(--bg-hover);
+}
+
+/* One-row layouts: the live-call strip and the collapsed call. */
+.dcp-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.dm-call-panel--strip .dcp-row {
+  padding-top: 0;
+}
+.dcp-faces {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+}
+.dcp-row-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.dcp-row-text .dcp-caption,
+.dcp-row-text .dcp-sub {
+  text-align: left;
+}
+.dcp-row-text .dcp-caption {
+  font-size: var(--font-size-md);
+}
+.dm-call-panel--collapsed .dcp-status {
+  color: var(--header-primary);
+}
+
+/* The call's video: the shared grid moves in here (VideoModeController), so
+   the chat stays visible below. */
+/* The grid sizes its tiles from the room it is given, so the panel must not
+   grow to fit them: it keeps its share of the chat column. */
+.dm-call-panel--video {
+  min-height: 0;
+}
+.dcp-video {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dcp-video .video-grid {
+  background: transparent;
+}
+/* An avatar tile's avatar shrinks with the tile (the filmstrip is 90px). */
+.video-cell--avatar .dcp-avatar--lg {
+  width: min(80px, 55%);
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* The DM list's live-call glyph. */
+.dm-in-call {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-positive);
+}
+
+/* The voice widget's call name, as a link back to the DM. */
+.vw-channel-link {
+  padding: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.vw-channel-link:hover {
+  color: var(--text-normal);
+}

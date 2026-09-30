@@ -11,6 +11,7 @@ import type { UserStatus } from "@lib/types";
 import { errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
+import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
@@ -26,6 +27,7 @@ import { logout } from "@lib/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
+import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
@@ -41,6 +43,8 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
+  enableCamera,
+  getRemoteVideoStats,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -55,10 +59,11 @@ import { forgetAdmittedItems } from "../features/content-consent/external";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
-} from "@components/message-list/reaction-tooltip";
+} from "../features/messaging/reactionUsers";
 import { setMarkReadSender } from "@lib/read-state";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
+import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
@@ -67,16 +72,17 @@ import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import type { ReactionController } from "./main-page/ReactionController";
 import { createVideoModeController } from "./main-page/VideoModeController";
-import type { VideoModeController } from "./main-page/VideoModeController";
+import type { VideoModeController, VideoPanelHost } from "./main-page/VideoModeController";
 import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
-import { createRingController } from "@lib/call-ring";
-import type { RingController } from "@lib/call-ring";
-import { startRingChime, stopRingChime } from "@lib/notifications";
+import { createRingController, createOutgoingCall } from "@lib/call-ring";
+import type { RingController, OutgoingCall } from "@lib/call-ring";
+import type { DmCallPanelComponent } from "@components/DmCallPanel";
+import { startRingChime, stopRingChime } from "@lib/notificationSound";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
@@ -105,6 +111,16 @@ export interface MainPageOptions {
 // ---------------------------------------------------------------------------
 // MainPage
 // ---------------------------------------------------------------------------
+
+/** The person's name as every identity surface shows it, or undefined. */
+function personName(userId: number): string | undefined {
+  const voice = voiceStore.getState();
+  const channelId = voice.currentChannelId;
+  const channelUsers = channelId !== null ? voice.voiceUsers.get(channelId) : undefined;
+  const voiceUser = channelUsers?.get(userId);
+  const member = membersStore.getState().members.get(userId);
+  return (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
+}
 
 /**
  * Build the profile panel's data from the live stores for a 1:1 DM channel.
@@ -203,6 +219,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     ws.send({ type: "mark_read", payload: { channel_id: channelId } });
   });
 
+  // The native screen-share picker adapter is a lower layer and may not import
+  // a component (ARCH-06); the UI registers the dialog here. It is loaded on
+  // demand — the dialog is its own lazy chunk, not part of startup — and
+  // the dynamic import is the sanctioned lower-layer-to-UI seam (Queue.ts's
+  // NsfwGate does the same).
+  setScreenSourcePicker((request) =>
+    import("@components/ScreenSharePicker").then((m) => m.showScreenSharePicker(request)),
+  );
+
   // The who-reacted tooltip fetches on hover; give it the live REST client the
   // same way the attachment renderer is given the server host.
   clearReactionUsersCache();
@@ -280,6 +305,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM calls: the banner draws a ring, the controller owns its lifetime.
   let callBanner: IncomingCallBannerComponent | null = null;
   let ringCtrl: RingController | null = null;
+  // The caller's side of a ring, and the in-DM panel that draws both sides.
+  let outgoingCall: OutgoingCall | null = null;
+  let callPanel: DmCallPanelComponent | null = null;
+  /** The loaded panel as the video controller's host: one object per panel,
+   *  since the controller tells hosts apart by identity. */
+  let callPanelHost: VideoPanelHost | null = null;
+  /** "Join with video": turn the camera on once this call is connected. */
+  let cameraOnJoin: number | null = null;
 
   // The narrow-width sidebar drawer (WCAG 1.4.10). Null above 800px in
   // practice, but always created so the breakpoint is decided by CSS, not JS.
@@ -416,8 +449,58 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       return;
     }
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
-    ws.send({ type: "call_ring", payload: { channel_id: active.id } });
-    showToast(account("toast.calling"), "info");
+    ringCallees(active.id);
+  }
+
+  /** Send a ring and start (or restart) the caller's 30s window. The panel
+   *  is the caller's feedback: it shows "Calling…" from here on, unless the
+   *  call is already answered (a redial from inside a live call). */
+  function ringCallees(channelId: number): void {
+    ws.send({ type: "call_ring", payload: { channel_id: channelId } });
+    const roster = voiceStore.getState().voiceUsers.get(channelId);
+    const self = getCurrentUserId();
+    if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    outgoingCall?.start(channelId, dm?.participants.map((p) => p.id) ?? []);
+  }
+
+  /**
+   * Draw the incoming ring on exactly one surface. While the ringing DM is on
+   * screen the call panel is the answer surface and the banner stays hidden,
+   * so there are never two Accept buttons; everywhere else the banner is the
+   * only way to answer.
+   */
+  function syncRingSurfaces(): void {
+    const ring = ringCtrl?.current() ?? null;
+    // setIncoming re-derives the panel from the live stores first, so the
+    // check below never reads a panel one channel switch behind.
+    callPanel?.setIncoming(ring);
+    const ui = uiStore.getState();
+    const panelAnswers =
+      ring !== null &&
+      callPanel?.showsRingFor(ring.channelId) === true &&
+      ui.activeView === null &&
+      !ui.settingsOpen;
+    callBanner?.setRing(panelAnswers ? null : ring);
+  }
+
+  /** Accept the ring from either surface. */
+  function acceptRing(withVideo: boolean): void {
+    // ringCtrl.accept() unconditionally consumes the ring (stopRinging)
+    // before onVoiceJoin ever runs, and onVoiceJoin itself silently refuses
+    // to join while the socket is down (VoiceCallbacks.ts's socketLive()
+    // guard) — so accepting while reconnecting would otherwise discard the
+    // ring for good with no join and no retry. Guarded here, the only caller
+    // of accept(), so the ring survives for the user to accept again once
+    // reconnected.
+    if (uiStore.getState().connectionStatus !== "connected") {
+      showToast(account("voice.canAnswerWhileReconnecting"), "error");
+      return;
+    }
+    const ring = ringCtrl?.current() ?? null;
+    if (ring === null) return;
+    cameraOnJoin = withVideo ? ring.channelId : null;
+    ringCtrl?.accept();
   }
 
   /** Close the DM profile sidebar if open. */
@@ -454,12 +537,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     root.appendChild(banner.liveElement);
 
     // "Use here" takes the connection back: this device connects again and
-    // the server displaces the other one (last connect wins).
+    // the server displaces the other one (last connect wins). It serves both
+    // a displaced socket (SESSION_REPLACED) and a wake reconnect the server
+    // refused because another device held the session (ANOTHER_DEVICE_ACTIVE,
+    // U4) — the two are the same user choice, so they share one prompt.
     const useHere = (): void => {
       const token = authStore.getState().token;
       if (token === null) return;
       setSessionReplaced(false);
-      ws.connect({ host: api.getConfig().host, token });
+      ws.connect({ host: api.getConfig().host, token }, { takeover: true });
     };
     // Retry is safe on a plain disconnect: connect() re-dials and the native
     // proxy re-validates the certificate, so a TOFU mismatch re-latches rather
@@ -553,10 +639,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
         try {
-          // A "shutdown" broadcast kicks back to the login screen (handled in
-          // the dispatcher) — no point starting a countdown on a page that is
-          // about to unmount.
-          if (banner !== null && payload.reason !== "shutdown") {
+          // Every reason counts down: the session survives the restart
+          // and ws.ts reconnects once the socket drops.
+          if (banner !== null) {
             if (payload.delay_seconds <= 0) {
               // A zero/negative delay is a cancel, not a countdown (e.g.
               // "update_aborted" correcting an earlier restart announcement
@@ -593,6 +678,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
+      // The member list's profile popup Call action opens the DM then starts
+      // its call through this, the same startCall the DM header uses (BUG-05).
+      onStartCall: () => startCall(),
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
@@ -620,6 +708,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       slots: chatAreaResult.slots,
       videoGrid: chatAreaResult.videoGrid,
       getCurrentUserId,
+      // The DM call panel hosts the video of its own call (chat stays up).
+      panelHost: () => callPanelHost,
     });
 
     // The composer of the channel on screen, else the header's menu button
@@ -840,6 +930,31 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       }),
     );
 
+    // U6: Ctrl+Shift+M/Ctrl+Shift+D and the tray's Mute/Deafen items work
+    // while the app is unfocused. The native host polls the keys (Windows and
+    // X11 Linux) and the tray emits the same event; both run the same toggles
+    // as the in-app shortcuts, and like them no-op outside a voice channel.
+    unsubscribers.push(
+      desktop.globalShortcuts.onShortcut((action) => {
+        if (voiceStore.getState().currentChannelId === null) return;
+        if (action === "mute") voiceKeybindActions.onMuteToggle();
+        else voiceKeybindActions.onDeafenToggle();
+      }),
+    );
+    void desktop.globalShortcuts.start().catch(() => {
+      // Not a Tauri host, or the command was refused: the tray and the in-app
+      // shortcuts still work; the global key path simply is not live.
+    });
+    // Push the persisted rebind onto the running poller at startup, so a
+    // choice made in Settings survives a restart (the native default is
+    // Ctrl+Shift+M / Ctrl+Shift+D).
+    const globalKeys = loadGlobalShortcutVks();
+    void desktop.globalShortcuts
+      .setKeys({ muteVk: globalKeys.mute, deafenVk: globalKeys.deafen })
+      .catch(() => {
+        // Not a Tauri host, or the command was refused: keep the native default.
+      });
+
     // Toast container
     toast = createToastContainer();
     toast.mount(root);
@@ -851,7 +966,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // so a ring stays visible while the user is looking at another channel —
     // which is exactly when a call most needs to be answerable.
     ringCtrl = createRingController({
-      onRingStateChange: (state) => callBanner?.setRing(state),
+      onRingStateChange: () => syncRingSurfaces(),
       onChime: (playing) => (playing ? startRingChime() : stopRingChime()),
       onAccept: (channelId) => {
         createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
@@ -861,28 +976,109 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
     });
     callBanner = createIncomingCallBanner({
-      onAccept: () => {
-        // ringCtrl.accept() unconditionally consumes the ring
-        // (stopRinging) before onVoiceJoin ever runs, and onVoiceJoin itself
-        // silently refuses to join while the socket is down (VoiceCallbacks
-        // .ts's socketLive() guard) — so accepting while reconnecting would
-        // otherwise discard the ring for good with no join and no retry.
-        // Guarded here, the banner's only caller of accept(), so the ring
-        // survives for the user to accept again once reconnected.
-        if (uiStore.getState().connectionStatus !== "connected") {
-          showToast(account("voice.canAnswerWhileReconnecting"), "error");
-          return;
-        }
-        ringCtrl?.accept();
-      },
+      onAccept: () => acceptRing(false),
       onDecline: () => ringCtrl?.decline(),
     });
     callBanner.mount(root);
     children.push(callBanner);
 
+    outgoingCall = createOutgoingCall({
+      onChange: (state) => callPanel?.setOutgoing(state),
+    });
+    // Loaded on demand like the sidebar drawer: the panel is only drawn in a
+    // DM with a call, so its code stays out of the eager MainPage chunk
+    // (bundle budget). Until it lands, the banner answers every ring.
+    void import("@components/DmCallPanel").then(({ createDmCallPanel }) => {
+      if (tornDown) return;
+      const panel = createDmCallPanel({
+        onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
+        onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
+        onCameraToggle: () => voiceKeybindActions.onCameraToggle(),
+        onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
+        onLeave: () => voiceKeybindActions.onDisconnect(),
+        onAccept: (withVideo) => acceptRing(withVideo),
+        onDecline: () => ringCtrl?.decline(),
+        onJoin: (channelId) => {
+          if (uiStore.getState().connectionStatus !== "connected") {
+            showToast(shellText("channel.notConnected"), "error");
+            return;
+          }
+          createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
+        },
+        onRingAgain: (channelId) => {
+          if (uiStore.getState().connectionStatus !== "connected") {
+            showToast(shellText("channel.notConnected"), "error");
+            return;
+          }
+          ringCallees(channelId);
+        },
+        onVideoHostChange: () => videoModeCtrl?.checkVideoMode(),
+        videoGrid: chatAreaResult.videoGrid,
+      });
+      // Published before mount: mounting reports whether it can host video,
+      // and the video controller reads the panel through callPanelHost.
+      callPanel = panel;
+      callPanelHost = {
+        ownsCall: (channelId) => panel.ownsCall(channelId),
+        element: () => panel.videoElement(),
+        setActive: (active) => panel.setVideoActive(active),
+      };
+      panel.mount(chatAreaResult.callPanelSlot);
+      children.push(panel);
+      panel.setOutgoing(outgoingCall?.current() ?? null);
+      syncRingSurfaces();
+    });
+
+    // The ring's surface depends on what is on screen.
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => s.activeChannelId,
+        () => syncRingSurfaces(),
+      ),
+      uiStore.subscribeSelector(
+        (s) => s.activeView === null && !s.settingsOpen,
+        () => syncRingSurfaces(),
+      ),
+    );
+
+    // The outgoing ring is over once anyone else is in the room, or once
+    // the caller is not; an incoming ring is answered by being in its room,
+    // however you got there; and "Join with video" turns the camera on as
+    // soon as the accepted call is connected.
+    unsubscribers.push(
+      voiceStore.subscribe((state) => {
+        const ring = ringCtrl?.current() ?? null;
+        if (ring !== null && state.currentChannelId === ring.channelId) {
+          ringCtrl?.cancel(ring.channelId);
+        }
+        const out = outgoingCall?.current() ?? null;
+        if (out !== null) {
+          const roster = state.voiceUsers.get(out.channelId);
+          const self = getCurrentUserId();
+          const answered = roster !== undefined && [...roster.keys()].some((id) => id !== self);
+          if (state.currentChannelId !== out.channelId || answered) outgoingCall?.clear();
+        }
+        if (cameraOnJoin !== null) {
+          if (state.currentChannelId !== cameraOnJoin) {
+            cameraOnJoin = null;
+          } else if (state.voiceStatus === "connected") {
+            cameraOnJoin = null;
+            if (!state.localCamera) {
+              enableCamera().catch((err: unknown) => {
+                log.error("Camera on join failed", { error: String(err) });
+              });
+            }
+          }
+        }
+      }),
+    );
+
     unsubscribers.push(
       ws.on("call_incoming", (payload) => {
         try {
+          // Being in the room already answers the ring (a redial from
+          // someone in the call re-rings everyone else in the DM).
+          if (voiceStore.getState().currentChannelId === payload.channel_id) return;
           // A call in the DM you are already sitting in still rings: the
           // channel being open does not mean the app has focus, and Discord
           // rings there too.
@@ -907,6 +1103,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // server holds no call state to target with (see handlers_call.go).
         // In a group DM that includes fellow callees who are also ringing;
         // only the actual ringer declining should silence this client's ring.
+        // The caller hears about it too: in a 1:1 a decline ends the ring,
+        // in a group it takes that callee off the list.
+        outgoingCall?.declined(payload.channel_id, payload.from_user);
         const ringing = ringCtrl?.current();
         if (ringing === null || ringing === undefined) return;
         if (payload.from_user === ringing.fromUserId) {
@@ -939,6 +1138,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ringCtrl?.destroy();
       ringCtrl = null;
       callBanner = null;
+      callPanel = null;
+      callPanelHost = null;
+      outgoingCall?.destroy();
+      outgoingCall = null;
+      cameraOnJoin = null;
     });
 
     // Message loading controller
@@ -993,13 +1197,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // leaves your own tile indistinguishable from a participant's (OC-0375).
     // These two branches must keep matching VideoModeController's addStream
     // labels — that is what the OC-0375 test pins.
+
     function tileLabel(userId: number, isScreenshare: boolean): string {
-      const voice = voiceStore.getState();
-      const channelId = voice.currentChannelId;
-      const channelUsers = channelId !== null ? voice.voiceUsers.get(channelId) : undefined;
-      const voiceUser = channelUsers?.get(userId);
-      const member = membersStore.getState().members.get(userId);
-      const name = (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
+      const name = personName(userId);
       const isSelf = userId === getCurrentUserId();
       if (name === undefined || name === "") {
         if (isSelf) return isScreenshare ? shellText("tile.yourScreen") : shellText("tile.you");
@@ -1019,10 +1219,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (channelId === null) return;
       const tileId = isScreenshare ? userId + SCREENSHARE_TILE_ID_OFFSET : userId;
       const username = tileLabel(userId, isScreenshare);
+      const name = personName(userId);
       videoGrid.addStream(tileId, username, stream, {
         isSelf: false,
         audioUserId: userId,
         isScreenshare,
+        ...(name === undefined || name === "" ? {} : { name }),
       });
       videoModeCtrl?.checkVideoMode();
     });
@@ -1033,14 +1235,54 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
     unsubscribers.push(() => clearOnRemoteVideo());
 
-    // Subscribe to voice store for camera/screenshare state changes, voice
-    // channel switches, and remote-tile identity changes (not speaking ticks)
+    // The cover on your own screen-share preview stops the share.
+    chatAreaResult.videoGrid.setCallbacks({
+      onStopSharing: () => {
+        if (voiceStore.getState().localScreenshare) voiceKeybindActions.onScreenshareToggle();
+      },
+      // HTML full screen fills only the webview in WebView2: take the window
+      // along (a no-op where the webview already filled it).
+      setWindowFullscreen: (on) => desktop.window.setFullscreen(on),
+      callControls: {
+        onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
+        onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
+        onLeave: () => voiceKeybindActions.onDisconnect(),
+      },
+      getStreamStats: (tileId) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
+          : getRemoteVideoStats(tileId, "camera"),
+    });
+
     let prevVideoSignature = "";
+    let prevSpeaking = "";
+    let prevCallState = "";
     const prevTileLabels = new Map<number, string>();
+    // Subscribe to voice store for camera/screenshare state changes, voice
+    // channel switches, remote-tile identity changes and who is speaking.
     unsubscribers.push(
       voiceStore.subscribe((state) => {
         try {
           const channelId = state.currentChannelId;
+          // Speaking rings on the video tiles: only when who is speaking
+          // changes, not on every store update.
+          const talking = new Set<number>();
+          for (const u of channelId !== null
+            ? (state.voiceUsers.get(channelId)?.values() ?? [])
+            : []) {
+            if (u.speaking && !u.muted) talking.add(u.userId);
+          }
+          const speakingKey = [...talking].join(",");
+          if (speakingKey !== prevSpeaking) {
+            prevSpeaking = speakingKey;
+            videoGrid?.setSpeaking(talking);
+          }
+          const callKey = `${String(state.localMuted)}|${String(state.localDeafened)}`;
+          if (callKey !== prevCallState) {
+            prevCallState = callKey;
+            videoGrid?.setCallState({ muted: state.localMuted, deafened: state.localDeafened });
+          }
+
           // Seed the signature with the channel id so ANY voice-channel
           // switch changes it, even one where the camera/screenshare flags
           // happen to be identical on both sides (e.g. both channels empty).
@@ -1063,11 +1305,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                 // changed (mid-call rename) — addStream only runs once per
                 // tile, so nothing else keeps its label in sync (OC-0227).
                 // setLabel() no-ops for a tile that isn't open yet.
+                const name = personName(uid) || undefined;
                 if (u.camera) {
                   const label = tileLabel(uid, false);
                   if (prevTileLabels.get(uid) !== label) {
                     prevTileLabels.set(uid, label);
-                    videoGrid?.setLabel(uid, label);
+                    videoGrid?.setLabel(uid, label, name);
                   }
                 }
                 if (u.screenshare) {
@@ -1075,7 +1318,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                   const label = tileLabel(uid, true);
                   if (prevTileLabels.get(tileId) !== label) {
                     prevTileLabels.set(tileId, label);
-                    videoGrid?.setLabel(tileId, label);
+                    videoGrid?.setLabel(tileId, label, name);
                   }
                 }
               }
@@ -1115,7 +1358,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             // text, dm and announcement all mount a chat surface and must
             // dismiss it, not just "text" (a dm/announcement switch used to
             // leave the grid covering an unrelated channel's chat).
-            if (active.type !== "voice") {
+            // The DM that owns the current call is the exception: its call
+            // panel shows the video above the chat (its own update re-seats
+            // the grid through onVideoHostChange).
+            const ownsCall =
+              active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
+            if (active.type !== "voice" && !ownsCall) {
               videoModeCtrl?.showChat();
             }
             // Close DM profile sidebar when switching channels
@@ -1207,6 +1455,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // that can silently mark an unrelated channel read on the NEXT
       // connection (OC-0418).
       setMarkReadSender(null);
+      // The native screen-share picker is registered per page; drop it so a
+      // torn-down connection cannot leave the next page's dialog pointed at a
+      // dead one (a share with none registered resolves to cancelled).
+      setScreenSourcePicker(null);
       channelCtrl?.destroyChannel();
       channelCtrl = null;
 

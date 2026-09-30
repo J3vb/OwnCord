@@ -32,10 +32,8 @@ export interface ScreenCaptureRequest {
 /** Map the web path's capture options onto the host's. An unset resolution
  *  is what `createLocalScreenTracks` turns into 1080p at 30 fps; a zero size
  *  is its "no cap". */
-export function captureOptions(
-  options: ScreenCaptureRequest | undefined,
-): NativeVoiceScreenCapture {
-  const resolution = options?.resolution ?? { width: 1920, height: 1080, frameRate: 30 };
+export function captureOptions(options: ScreenCaptureRequest): NativeVoiceScreenCapture {
+  const resolution = options.resolution ?? { width: 1920, height: 1080, frameRate: 30 };
   return {
     fps: resolution.frameRate ?? 30,
     maxWidth: resolution.width,
@@ -50,6 +48,12 @@ export function startError(err: unknown): unknown {
   return message.includes(CANCELLED) ? new DOMException(message, "NotAllowedError") : err;
 }
 
+/** The publish encoding the picker chose for this share. */
+export interface ScreenPublishEncoding {
+  readonly maxBitrate: number;
+  readonly maxFramerate: number;
+}
+
 export class NativeScreenTrack {
   readonly kind = "video";
   readonly source = "screen_share";
@@ -60,11 +64,13 @@ export class NativeScreenTrack {
   private stopped = false;
 
   /** `previewUrl`: the frame socket's `/screen` route. `onStop` stops the
-   *  host capture. */
+   *  host capture. `publishEncoding` is the per-share quality the picker
+   *  chose. */
   constructor(
     started: NativeVoiceScreenStarted,
     previewUrl: string,
     private readonly onStop: (track: NativeScreenTrack) => void,
+    readonly publishEncoding: ScreenPublishEncoding,
   ) {
     this.capture = started.capture;
     this.width = started.width;

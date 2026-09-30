@@ -11,6 +11,7 @@ import { createElement, setText } from "@lib/dom";
 import { formatUntil, formatWhen, safetyText as t } from "../../i18n/safety";
 import { createAppealsSection, replaceKeepingFocus, type AppealsApi } from "./Appeals";
 import { refreshOwnModeration, safetyStore, serverNow, serverTime } from "./store";
+import { setStatusIcon, statusIcon } from "../settings/status";
 
 function historyStatus(row: OwnModerationAction): string[] {
   const parts: string[] = [];
@@ -72,7 +73,16 @@ export function renderSafetyTab(
   signal: AbortSignal,
   api: AppealsApi | null = null,
 ): void {
-  const restrictions = createElement("p", { class: "setting-desc", role: "status" });
+  // Answer first: the account's standing in one line, then any restriction.
+  const standing = createElement("p", {
+    class: "summary-line",
+    role: "status",
+    "data-testid": "safety-standing",
+  });
+  const standingIcon = statusIcon("ok");
+  const standingText = createElement("span", {});
+  standing.append(standingIcon, standingText);
+  const restrictions = createElement("p", { class: "setting-desc" });
   const historyStatusEl = createElement("p", { class: "setting-desc", role: "status" });
   const retry = createElement(
     "button",
@@ -88,11 +98,13 @@ export function renderSafetyTab(
   );
   const appeals = createAppealsSection(api, signal);
 
+  const historyHint = createElement("p", { class: "setting-desc" }, t("tab.historyHint"));
+
   pane.append(
-    createElement("h3", { class: "safety-heading" }, t("tab.restrictions")),
+    standing,
     restrictions,
     historyHeading,
-    createElement("p", { class: "setting-desc" }, t("tab.historyHint")),
+    historyHint,
     historyStatusEl,
     retry,
     list,
@@ -101,12 +113,19 @@ export function renderSafetyTab(
 
   function render(): void {
     const { timeout, history, historyFailed } = safetyStore.getState();
+    // A timeout is the one restriction a signed-in member can have.
+    setStatusIcon(standingIcon, timeout === null ? "ok" : "warn");
+    setText(
+      standingText,
+      timeout === null ? t("tab.standingOk") : t("tab.activeRestrictions", { count: 1 }),
+    );
+    restrictions.hidden = timeout === null;
     setText(
       restrictions,
-      timeout === null
-        ? t("tab.none")
-        : t("tab.timedOut", { time: formatUntil(timeout.expiresAt) }),
+      timeout === null ? "" : t("tab.timedOut", { time: formatUntil(timeout.expiresAt) }),
     );
+    // Empty or unread history is one line; the hint is for reading rows.
+    historyHint.hidden = history === null || history.length === 0 || historyFailed;
     retry.hidden = !historyFailed;
     let status = "";
     if (historyFailed) status = t("tab.loadFailed");

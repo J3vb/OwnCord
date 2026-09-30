@@ -41,7 +41,7 @@ func TestVoiceLeave_DeletedChannel_NotLeakedToNonParticipant(t *testing.T) {
 		t.Fatalf("DeleteChannel: %v", err)
 	}
 
-	if !hub.DisconnectFromVoiceInChannel(context.Background(), alice.ID, dmID) {
+	if !hub.DisconnectFromVoiceInChannel(context.Background(), alice.ID, dmID, ws.VoiceLeaveReasonDMLeave) {
 		t.Fatal("DisconnectFromVoiceInChannel reported the user was not in the channel")
 	}
 

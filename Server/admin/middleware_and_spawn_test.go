@@ -19,6 +19,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // openWhiteboxTestDB opens an in-memory SQLite database for whitebox tests.
@@ -454,17 +455,17 @@ func TestHandleListUsers_DBError(t *testing.T) {
 // the admin_test package's mockHub type).
 type mockHubWB struct{}
 
-func (m *mockHubWB) BroadcastServerRestart(reason string, delaySeconds int) {}
-func (m *mockHubWB) BroadcastChannelCreate(ch *db.Channel)                  {}
-func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                  {}
-func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                 {}
-func (m *mockHubWB) BroadcastMemberBan(userID int64)                        {}
-func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)    {}
-func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                {}
-func (m *mockHubWB) RefreshAllChannelVisibility()                           {}
-func (m *mockHubWB) BroadcastRolesUpdate(roles []*db.Role)                  {}
-func (m *mockHubWB) CleanupVoiceForChannel(channelID int64)                 {}
-func (m *mockHubWB) ClientCount() int                                       { return 0 }
+func (m *mockHubWB) BroadcastServerRestart(reason ws.RestartReason, delaySeconds int) {}
+func (m *mockHubWB) BroadcastChannelCreate(ch *db.Channel)                            {}
+func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                            {}
+func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                           {}
+func (m *mockHubWB) BroadcastMemberBan(userID int64)                                  {}
+func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)              {}
+func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                          {}
+func (m *mockHubWB) RefreshAllChannelVisibility()                                     {}
+func (m *mockHubWB) BroadcastRolesUpdate(roles []*db.Role)                            {}
+func (m *mockHubWB) CleanupVoiceForChannel(channelID int64)                           {}
+func (m *mockHubWB) ClientCount() int                                                 { return 0 }
 
 // isolateSpawnedTestBinary makes it safe for a test to re-exec the test binary
 // itself.

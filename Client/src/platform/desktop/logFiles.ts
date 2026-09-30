@@ -17,6 +17,13 @@ import type { LogFiles } from "../contracts/logFiles";
 const log = createLogger("logPersistence");
 const MAX_LOG_FILES = 5;
 const LOG_SUBDIR = "client-logs";
+// The Rust log the tauri-plugin-log writes: `owncord-client.log` in the app
+// log directory itself, with `owncord-client_<date>.log` kept beside it
+// (rotation_strategy KeepSome(2) in src-tauri/src/lib.rs). Read for the
+// support bundle's native half (CLI-03). Each file is tail-capped so three
+// ~10 MB files never balloon the store-only zip.
+const NATIVE_LOG_PREFIX = "owncord-client";
+const NATIVE_LOG_TAIL_BYTES = 2 << 20; // 2 MB
 
 let logDir: string | null = null;
 let currentDate: string | null = null;
@@ -219,6 +226,52 @@ async function clearAll(): Promise<void> {
   }
 }
 
+/**
+ * The Rust log files, newest first, each capped to its last
+ * `NATIVE_LOG_TAIL_BYTES` bytes. The plugin's dated rotations
+ * (`owncord-client_<date>.log`) sort chronologically by name, so newest-first
+ * is the active file, then the rotations in reverse. A missing directory is not
+ * an error — the bundle just carries no native log.
+ */
+async function readNative(): Promise<{ name: string; text: string }[]> {
+  try {
+    const baseDir = await appLogDir();
+    const names = (await readDir(baseDir))
+      .filter(
+        (e) =>
+          !e.isDirectory &&
+          (e.name === `${NATIVE_LOG_PREFIX}.log` || e.name?.startsWith(`${NATIVE_LOG_PREFIX}_`)),
+      )
+      .map((e) => e.name)
+      .toSorted((a, b) => {
+        const aActive = a === `${NATIVE_LOG_PREFIX}.log`;
+        const bActive = b === `${NATIVE_LOG_PREFIX}.log`;
+        if (aActive !== bActive) return aActive ? -1 : 1;
+        return b.localeCompare(a);
+      });
+    const files = [];
+    for (const name of names) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- at most three files, kept in order
+        files.push({ name, text: await readLogTail(`${baseDir}/${name}`) });
+      } catch (err) {
+        if (!isMissingPathError(err)) log.warn(`reading ${name} failed`, err);
+      }
+    }
+    return files;
+  } catch (err) {
+    if (isMissingPathError(err)) return [];
+    log.warn("reading the native log failed", err);
+    return [];
+  }
+}
+
+/** Read a log file, keeping only its last NATIVE_LOG_TAIL_BYTES bytes. */
+async function readLogTail(path: string): Promise<string> {
+  const text = await readTextFile(path);
+  return text.length > NATIVE_LOG_TAIL_BYTES ? text.slice(-NATIVE_LOG_TAIL_BYTES) : text;
+}
+
 /** Every persisted log file, oldest first, read verbatim. */
 async function readAll(): Promise<{ name: string; text: string }[]> {
   await flush();
@@ -251,4 +304,5 @@ export const logFiles: LogFiles = {
   getDir: () => logDir,
   clearAll,
   readAll,
+  readNative,
 };

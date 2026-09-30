@@ -6,17 +6,18 @@
  */
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { createIcon, type IconName } from "@lib/icons";
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
-import type { ApiClient } from "@lib/api";
+import { type ApiClient, errorText } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
 import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
-import type { DmSidebar } from "@components/DmSidebar";
+import type { DmConversation, DmSidebar } from "@components/DmSidebar";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createUserBar } from "@components/UserBar";
@@ -35,6 +36,7 @@ import {
   handleCreateDm,
   handleCreateGroupDm,
   buildDmConversations,
+  findDirectDm,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
 import { createMemberPickerModal } from "./MemberPickerModal";
@@ -47,6 +49,7 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { dmStore, closeDmLocally } from "@stores/dm.store";
+import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canModerateMembers, canViewAuditLog } from "@lib/permissions";
@@ -57,6 +60,25 @@ import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
 
 const log = createLogger("SidebarArea");
+
+/** A server-header icon button: named by its aria-label, the title is its
+ *  hover tooltip. */
+function headerAction(
+  label: string,
+  hint: string,
+  icon: IconName,
+  testId: string,
+): HTMLButtonElement {
+  const btn = createElement("button", {
+    type: "button",
+    class: "sidebar-header-action",
+    title: hint,
+    "aria-label": label,
+    "data-testid": testId,
+  });
+  btn.appendChild(createIcon(icon, 16));
+  return btn;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,6 +100,9 @@ export interface SidebarAreaOptions {
   readonly destinations?: NavigationDestinations;
   /** Open a content view; `opener` gets focus back when it closes. */
   readonly onOpenView?: (id: ContentViewId, opener: HTMLElement) => void;
+  /** Start a call in the currently active DM (MainPage's `startCall`). Used by
+   *  the member list's profile popup Call action, which first opens the DM. */
+  readonly onStartCall?: () => void;
 }
 
 export interface SidebarAreaResult {
@@ -100,6 +125,15 @@ export interface SidebarAreaResult {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+
+/** The DM rows, each marked when someone is in that DM's call. */
+function dmConversations(activeChannelId: number | null): DmConversation[] {
+  const voiceUsers = voiceStore.getState().voiceUsers;
+  return buildDmConversations(activeChannelId).map((c) => ({
+    ...c,
+    inCall: (voiceUsers.get(c.channelId)?.size ?? 0) > 0,
+  }));
+}
 
 export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const { ws, api, limiters, presenceSender, getRoot, getToast } = opts;
@@ -185,21 +219,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   serverHeader.appendChild(serverIcon);
   serverHeader.appendChild(serverInfoCol);
 
-  // Invite button in the server header (proper styled button)
+  // Invite, Audit Log and Moderation: one row of quiet icon buttons.
+  const headerActions = createElement("div", { class: "sidebar-header-actions" });
+
   const headerInviteCtrl = createInviteManagerController({ api, getRoot });
-  const headerInviteBtn = createElement(
-    "button",
-    {
-      class: "sidebar-invite-btn",
-      title: shellText("invite.invitePeople"),
-      "data-testid": "invite-btn",
-    },
+  const headerInviteBtn = headerAction(
     shellText("invite.invite"),
+    shellText("invite.invitePeople"),
+    "user-plus",
+    "invite-btn",
   );
   headerInviteBtn.addEventListener("click", () => {
     void headerInviteCtrl.open();
   });
-  serverHeader.appendChild(headerInviteBtn);
+  headerActions.appendChild(headerInviteBtn);
   unsubscribers.push(() => {
     headerInviteCtrl.cleanup();
   });
@@ -217,14 +250,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Rendered once per mount and kept in sync with the role list: `ready` may
   // land after this header is built, and a moderator whose role only becomes
   // known then would never see the entry otherwise.
-  const auditBtn = createElement(
-    "button",
-    {
-      class: "sidebar-audit-btn",
-      title: shellText("audit.hint"),
-      "data-testid": "audit-log-btn",
-    },
+  const auditBtn = headerAction(
     shellText("audit.label"),
+    shellText("audit.hint"),
+    "scroll-text",
+    "audit-log-btn",
   );
   auditBtn.addEventListener("click", () => {
     const host = api.getConfig().host ?? "";
@@ -241,15 +271,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // MODERATE_MEMBERS, and only once the Moderation Center ships.
   let moderationBtn: HTMLButtonElement | null = null;
   if (opts.destinations?.moderation !== undefined) {
-    const btn = createElement(
-      "button",
-      {
-        type: "button",
-        class: "sidebar-audit-btn",
-        title: navigationText("moderation.entryHint"),
-        "data-testid": "moderation-btn",
-      },
+    const btn = headerAction(
       navigationText("moderation.title"),
+      navigationText("moderation.entryHint"),
+      "shield",
+      "moderation-btn",
     );
     btn.addEventListener("click", () => opts.onOpenView?.("moderation", btn));
     unsubscribers.push(trackCurrentView(btn, "moderation"));
@@ -263,8 +289,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     }
   };
   syncAuditBtn();
-  serverHeader.appendChild(auditBtn);
-  if (moderationBtn !== null) serverHeader.appendChild(moderationBtn);
+  headerActions.appendChild(auditBtn);
+  if (moderationBtn !== null) headerActions.appendChild(moderationBtn);
+  serverHeader.appendChild(headerActions);
   // The permission is derived from the signed-in user's role plus the role
   // list, so both have to be watched.
   unsubscribers.push(
@@ -336,7 +363,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : shellText("channel.createFailed");
+              const msg = errorText(err, shellText("channel.createFailed"));
               getToast()?.show(msg, "error");
               // The modal's own catch re-enables its submit button and renders
               // the inline error, so the failure must propagate to it.
@@ -381,8 +408,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
                   modal.destroy?.();
                   activeModal = null;
                 } catch (err) {
-                  const msg =
-                    err instanceof Error ? err.message : shellText("channel.updateFailed");
+                  const msg = errorText(err, shellText("channel.updateFailed"));
                   getToast()?.show(msg, "error");
                   // Propagate so the modal re-enables its save button and shows
                   // the inline error.
@@ -413,7 +439,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
               modal.destroy?.();
               activeModal = null;
             } catch (err) {
-              const msg = err instanceof Error ? err.message : shellText("channel.deleteFailed");
+              const msg = errorText(err, shellText("channel.deleteFailed"));
               getToast()?.show(msg, "error");
               // Propagate so the modal re-enables its confirm button and shows
               // the inline error.
@@ -455,7 +481,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             result.count === 0 ? "info" : "success",
           );
         } catch (err) {
-          const msg = err instanceof Error ? err.message : shellText("purge.failed");
+          const msg = errorText(err, shellText("purge.failed"));
           getToast()?.show(msg, "error");
         }
       },
@@ -566,7 +592,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // The store is updated by the dm_channel_open the server fans out to
         // every participant, so the response is only used for the error path.
         void api.renameGroupDm(channelId, name).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : shellText("dm.renameFailed");
+          const msg = errorText(err, shellText("dm.renameFailed"));
           getToast()?.show(msg, "error");
         });
       },
@@ -616,7 +642,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
-    const conversations = buildDmConversations(activeChannelId);
+    const conversations = dmConversations(activeChannelId);
 
     return createDmSidebar({
       conversations,
@@ -705,6 +731,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         onMessageUser: (userId) => {
           void handleCreateDm(userId, dmDeps);
         },
+        onCallUser: (userId) => {
+          // A call lives in the DM's voice channel, so open the 1:1 first and
+          // start the call there (BUG-05). An existing DM is selected at once;
+          // a new one starts the call in `handleCreateDm`'s onReady, once it is
+          // the active channel `startCall` reads.
+          const existing = findDirectDm(userId);
+          if (existing !== undefined) {
+            selectDmConversation(existing, dmDeps);
+            opts.onStartCall?.();
+            return;
+          }
+          void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
+        },
       });
       contentSlot.appendChild(memberSection.element);
       channelModeExtras.push(memberSection.memberListComponent);
@@ -757,7 +796,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
        */
       function refreshDmSidebar(): void {
         if (activeSidebarContent === null) return;
-        const conversations = buildDmConversations(channelsStore.getState().activeChannelId);
+        const conversations = dmConversations(channelsStore.getState().activeChannelId);
         (activeSidebarContent as DmSidebar).update(conversations);
       }
 
@@ -774,6 +813,22 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         },
       );
       channelModeUnsubs.push(unsubDmStore);
+
+      // The live-call glyph follows who is in each DM's voice channel.
+      channelModeUnsubs.push(
+        voiceStore.subscribeSelector(
+          // Occupied channels only: a speaking tick replaces voiceUsers too,
+          // and must not re-render the list.
+          (s) =>
+            [...s.voiceUsers]
+              .filter(([, users]) => users.size > 0)
+              .map(([id]) => id)
+              .join(","),
+          () => {
+            refreshDmSidebar();
+          },
+        ),
+      );
 
       // Re-render DM sidebar when the active conversation changes. Keyed on the
       // active channel rather than activeDmUserId, which a group DM leaves null.
@@ -805,7 +860,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // ---------------------------------------------------------------------------
 
   const voiceWidgetSlot = createElement("div", {});
-  const voiceWidget = createVoiceWidget(createVoiceWidgetCallbacks(ws, limiters));
+  const voiceWidget = createVoiceWidget({
+    ...createVoiceWidgetCallbacks(ws, limiters),
+    onOpenCall: (channelId) => {
+      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+      if (dm !== undefined) selectDmConversation(dm, dmDeps);
+    },
+  });
   voiceWidget.mount(voiceWidgetSlot);
   children.push(voiceWidget);
   sidebarWrapper.appendChild(voiceWidgetSlot);

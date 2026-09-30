@@ -38,7 +38,10 @@ export interface ServerBannerControl {
   showRestart(seconds: number): void;
   showReconnecting(opts?: ConnectionBannerOptions): void;
   showDisconnected(opts?: ConnectionBannerOptions): void;
-  /** Persistent "signed in elsewhere" notice with a "Use here" action. */
+  /** Persistent "signed in elsewhere" notice with a "Use here" action. Shown
+   *  both when the server displaced this socket (SESSION_REPLACED) and when it
+   *  refused this device's wake reconnect because another device holds the
+   *  session (ANOTHER_DEVICE_ACTIVE, U4). */
   showSignedInElsewhere(onUseHere: () => void): void;
   hide(): void;
   destroy(): void;

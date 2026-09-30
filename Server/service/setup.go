@@ -53,22 +53,33 @@ const (
 // BootstrapInput is the first-run request. Username and Password have already
 // been validated by the transport; Device and Host describe the request that
 // will own the issued session.
+//
+// RecoveryKit asks the server to generate the owner's recovery kit as part of
+// the first run (B11-8): the wizard offers it because a lockout with no kit is
+// the one failure an owner cannot fix from inside the server. The kit is shown
+// once in BootstrapResult; only its verifier is stored.
 type BootstrapInput struct {
-	Username string
-	Password string
-	Device   string
-	Host     string
+	Username    string
+	Password    string
+	Device      string
+	Host        string
+	RecoveryKit bool
 }
 
 // BootstrapResult is a completed first run. Token is empty when the session
 // could not be issued and InviteCode when the invite could not be minted —
 // both are reported in Warnings rather than as errors, because the account
 // exists either way and the caller must not retry.
+//
+// RecoveryKitSecret is the owner's recovery kit, present only when the input
+// asked for one and it was issued. It is shown once, on the finish step: the
+// server stores only the verifier (B4-5, B11-8).
 type BootstrapResult struct {
-	OwnerID    int64
-	Token      string
-	InviteCode string
-	Warnings   []string
+	OwnerID           int64
+	Token             string
+	InviteCode        string
+	Warnings          []string
+	RecoveryKitSecret string
 }
 
 // SetupCompletedSetting is the durable first-run flag (migration 043): set
@@ -129,8 +140,42 @@ func (s *SetupService) Bootstrap(ctx context.Context, in BootstrapInput) (*Boots
 	res.Token = s.issueSetupSession(ctx, uid, in.Device, in.Host, &res.Warnings)
 	s.seedDefaultChannels(ctx)
 	res.InviteCode = s.mintBootstrapInvite(ctx, uid, &res.Warnings)
+	if in.RecoveryKit {
+		res.RecoveryKitSecret = s.issueRecoveryKitAtSetup(ctx, uid, &res.Warnings)
+	}
 	return res, nil
 }
+
+// issueRecoveryKitAtSetup generates the owner's recovery kit and stores its
+// verifier, returning the secret shown once. It is best-effort like the other
+// post-account steps (OC-0253): the account exists regardless, so a failure is
+// a warning the owner can act on by enrolling from the client later.
+func (s *SetupService) issueRecoveryKitAtSetup(ctx context.Context, uid int64, warnings *[]string) string {
+	shown, canonical, err := auth.GenerateRecoveryKitSecret()
+	if err != nil {
+		slog.Error("setup: failed to generate the recovery kit", "error", err)
+		*warnings = append(*warnings, recoveryKitSetupWarning)
+		return ""
+	}
+	verifier, err := auth.HashRecoveryKitSecret(canonical)
+	if err != nil {
+		slog.Error("setup: failed to hash the recovery kit", "error", err)
+		*warnings = append(*warnings, recoveryKitSetupWarning)
+		return ""
+	}
+	if err := s.st.UpsertRecoveryKit(ctx, uid, verifier); err != nil {
+		slog.Error("setup: failed to store the recovery kit", "error", err)
+		*warnings = append(*warnings, recoveryKitSetupWarning)
+		return ""
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "recovery_kit_issued", "user", uid,
+		"recovery kit issued at setup")
+	return shown
+}
+
+// recoveryKitSetupWarning is what the owner is told when the setup-time kit
+// could not be created. It names the in-product way to make one instead.
+const recoveryKitSetupWarning = "your account was created, but the recovery kit could not be generated — create one later in the OwnCord desktop client under Settings"
 
 // noSessionWarning is what the owner is told when their account exists but no
 // session could be started: the account is usable, they just have to log in.
@@ -178,7 +223,7 @@ func (s *SetupService) mintBootstrapInvite(ctx context.Context, uid int64, warni
 	if err != nil {
 		slog.Error("setup: failed to generate bootstrap invite", "error", err)
 		*warnings = append(*warnings,
-			"your account was created, but the bootstrap invite could not be generated — create one from the admin panel after logging in")
+			"your account was created, but the bootstrap invite could not be generated — create one in the OwnCord desktop client with the “Invite people” action in the server sidebar")
 		return ""
 	}
 	return code

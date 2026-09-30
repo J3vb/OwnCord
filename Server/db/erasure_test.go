@@ -75,6 +75,9 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/other', 'p', 'a', 'key1')`, other)
 	exec(`INSERT INTO invites (code, created_by) VALUES ('subject-invite', ?)`, uid)
 	exec(`INSERT INTO invites (code, created_by, redeemed_by) VALUES ('other-invite', ?, ?)`, other, uid)
+	// A redemption the subject spent (migration 055, class 15b): the invite is
+	// another user's, so it survives with the row, and only the user link is cut.
+	exec(`INSERT INTO invite_redemptions (invite_id, user_id) SELECT id, ? FROM invites WHERE code = 'other-invite'`, uid)
 	exec(`INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('wave', 'emoji-wave', ?)`, uid)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, uid, other)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)

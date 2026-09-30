@@ -30,11 +30,24 @@
 # machine budget; the packaging is qualified by B6-1's and B6-2's lifecycle
 # smokes (cmd/smoke, docker-smoke.sh).
 #
-# workflow_dispatch ONLY, and deliberately not part of the blocking CI matrix:
-# a perf run on shared runners is a flake source and a wall-clock tax the
-# pipeline doesn't need. Like the bench baseline, these numbers are recorded
-# and published, never gated. Re-run it deliberately before a release, or
-# after changes to the hub, the write path or the replay budget.
+# workflow_dispatch AND a weekly schedule, and deliberately not part of the
+# blocking CI matrix: a perf run on shared runners is a flake source and a
+# wall-clock tax the pipeline doesn't need. Like the bench baseline, these
+# numbers are recorded and published, never gated.
+#
+# The weekly schedule is RE-05's regression watch: it re-measures the
+# constrained profile once a week and uploads the artifacts, so a capacity
+# regression is visible in the Actions history instead of waiting for someone
+# to dispatch a run. It is inert until this file is carried to the default
+# branch (GitHub registers a `schedule:` only when the file exists on main, the
+# same rule nightly-docker-smoke.yml:14-15 states), and a scheduled run then
+# measures the workflow's own commit, so the wiring here and the harness it
+# drives are always the same revision. To measure dev, dispatch with
+# `--ref dev`. A scheduled run lands its checks on the DEFAULT branch, where no
+# context here is required.
+#
+# Re-run it deliberately before a release, or after changes to the hub, the
+# write path or the replay budget.
 #
 # FOUR PROFILES (B6-10), one cgroup recipe. `inputs.profile` selects the
 # scenario set inside Server/scripts/k6/ws-load.js; the legs and the extra
@@ -52,9 +65,12 @@
 #     exercises the control plane, not the media path.
 #   restart — 100 connections at the capacity rate while the WORKFLOW, not k6,
 #     stops the server between equal steady windows (T+135s) and restarts the
-#     same container. The drain contract under load is 30 s
-#     (internal/app/lifecycle.go shutdownBudget), not the 20 s an idle server
-#     proves, so the step fails on a non-zero exit or a drain over 30 s.
+#     same container. The drill gates the whole stop at 30 s, not the 20 s an
+#     idle server proves, and fails on a non-zero exit or a drain over 30 s.
+#     That is deliberately stricter than the server's 50 s hard cap
+#     (internal/app/lifecycle.go teardownBudget; httpDrainBudget alone may take
+#     30 s for a slow transfer): a restart with no slow transfers in flight
+#     must still finish well inside it.
 #   ceiling-search — one ramping-vus scenario stepping connections from 100 to
 #     `inputs.ceiling_max`, a 30 s ramp then a 60 s hold per step, to find the
 #     step where a capacity budget first breaks. Constrained-only: a ceiling
@@ -70,6 +86,11 @@
 name: Load Baseline
 
 on:
+  # RE-05's weekly regression watch. A schedule only ever runs from the default
+  # branch, so this file does nothing until it reaches main and then measures
+  # main's commit every week.
+  schedule:
+    - cron: "0 6 * * 0"
   workflow_dispatch:
     inputs:
       profile:
@@ -94,6 +115,14 @@ on:
         description: "Concurrent voice participants (BPR-030 says 25)"
         required: false
         default: "25"
+      churn_phase:
+        description: "operational: voice churn shape — spread (default) or aligned (the deliberate burst)"
+        required: false
+        type: choice
+        default: spread
+        options:
+          - spread
+          - aligned
       ceiling_max:
         description: "ceiling-search: highest connection count probed (and users to seed)"
         required: false
@@ -106,12 +135,15 @@ env:
   # The livekit-server release OwnCord itself downloads
   # (ws.DefaultLiveKitVersion). Measuring a different SFU release than the
   # product ships would measure something no owner ever runs.
-  LIVEKIT_VERSION: "1.13.5"
+  LIVEKIT_VERSION: "1.13.7"
   LK_CLI_VERSION: "2.18.6"
 
 jobs:
   baseline:
-    name: ${{ inputs.profile }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
+    name: ${{ inputs.profile || 'capacity' }} (${{ matrix.leg }}${{ matrix.tls == 'off' && ', tls off' || '' }})
+    # A scheduled run has no inputs, so every `inputs.X` below carries the
+    # same default the dispatch input declares. `|| 'x'` is the whole of the
+    # scheduled-vs-dispatched logic.
     runs-on: ubuntu-latest
     # 45 min covers every profile whose k6 run is ~4.5 min (60 s ramp + 180 s
     # sustain + 20 s drain) on top of the build, boot and seeding. The ceiling
@@ -120,18 +152,19 @@ jobs:
     # bcrypt cost 12 on two cores (~0.5 s each, ~4 min at the 500 default)
     # before any of it starts — so it gets the headroom the plan's risk row
     # promised rather than a timeout in the middle of a probe.
-    timeout-minutes: ${{ inputs.profile == 'ceiling-search' && 75 || 45 }}
+    timeout-minutes: ${{ (inputs.profile || 'capacity') == 'ceiling-search' && 75 || 45 }}
     # Per-run parameters, so the profile logic is one derive step rather than
     # an `if:` on a dozen steps. These sit at job scope, not workflow scope:
     # `matrix` is not an available context in the workflow-level `env:` block.
     # TLS_MODE is `matrix.tls` (always self_signed outside the operational
     # profile) and drives both the URL scheme and the server's own tls.mode.
     env:
-      PROFILE: ${{ inputs.profile }}
+      PROFILE: ${{ inputs.profile || 'capacity' }}
       TLS_MODE: ${{ matrix.tls }}
-      CEILING_MAX: ${{ inputs.ceiling_max }}
-      SEED_USERS_INPUT: ${{ inputs.users }}
-      CONNECTIONS: ${{ inputs.connections }}
+      CEILING_MAX: ${{ inputs.ceiling_max || '500' }}
+      SEED_USERS_INPUT: ${{ inputs.users || '250' }}
+      CONNECTIONS: ${{ inputs.connections || '100' }}
+      VOICE: ${{ inputs.voice || '25' }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,16 +177,26 @@ jobs:
         # is pinned at self_signed — the shipped default — so the scheme
         # expressions below stay total. The ceiling leg runs only for capacity,
         # as before: it is a labelled headroom check, not a second measurement.
-        leg: ${{ fromJSON(inputs.profile == 'capacity' && '["constrained", "ceiling"]' || '["constrained"]') }}
-        tls: ${{ fromJSON(inputs.profile == 'operational' && '["self_signed", "off"]' || '["self_signed"]') }}
+        leg: ${{ fromJSON((inputs.profile || 'capacity') == 'capacity' && '["constrained", "ceiling"]' || '["constrained"]') }}
+        tls: ${{ fromJSON((inputs.profile || 'capacity') == 'operational' && '["self_signed", "off"]' || '["self_signed"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
+      # So the log of every run states which commit was measured instead of
+      # leaving it to be re-derived from the trigger.
+      - name: Print checked-out revision
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          echo "event=$EVENT ref=$REF"
+          git rev-parse HEAD
+
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache-dependency-path: Server/go.sum
 
       # A four-CPU runner is a precondition, not a detail: --cpuset-cpus=0,1
@@ -317,16 +360,15 @@ jobs:
       # the server runs it as its companion process exactly as an owner's would,
       # from OwnCord's OWN generated livekit.yaml rather than a hand-written one.
       #
-      # node_ip=127.0.0.1 with advertise_internal_ip is what makes that
-      # generated config usable by a load client on the same machine: the
-      # template sets `use_external_ip: true`, so without a node_ip LiveKit
-      # discovers the runner's public address via STUN and advertises ICE
-      # candidates no loopback peer can reach — the room connects and carries no
-      # media, which is the "voice works but nobody hears anything" failure
-      # warnOnVoiceNodeIP exists to shout about. Verified 2026-09-12: with these
-      # two knobs `lk load-test` gets 25/25 tracks at 0% loss against the
-      # generated config; the server logs the expected not-a-public-address
-      # warning, which is correct for a single-machine rig.
+      # advertise_internal_ip is what makes that generated config usable by a
+      # load client on the same machine: the template sets
+      # `use_external_ip: true`, so on its own LiveKit advertises only the
+      # runner's STUN-discovered public address, which no local peer can reach
+      # — the room connects and carries no media, the "voice works but nobody
+      # hears anything" failure. advertise_internal_ip keeps the host
+      # candidates alongside it. Verified 2026-09-12: `lk load-test` gets 25/25
+      # tracks at 0% loss against this generated config (then also carrying a
+      # node_ip=127.0.0.1 that use_external_ip overrode, now dropped).
       - name: Boot server (constrained — 2 CPUs, 4 GB, no swap)
         if: matrix.leg == 'constrained'
         run: |
@@ -365,7 +407,6 @@ jobs:
             -e OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
             -e OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
             -e OWNCORD_VOICE_LIVEKIT_BINARY=/app/livekit-server \
-            -e OWNCORD_VOICE_NODE_IP=127.0.0.1 \
             -e OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
             "${extra_env[@]}" \
             debian:bookworm-slim /app/chatserver
@@ -394,7 +435,6 @@ jobs:
           OWNCORD_VOICE_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" \
           OWNCORD_VOICE_LIVEKIT_URL=ws://127.0.0.1:7880 \
           OWNCORD_VOICE_LIVEKIT_BINARY="$WORK/livekit-server" \
-          OWNCORD_VOICE_NODE_IP=127.0.0.1 \
           OWNCORD_VOICE_ADVERTISE_INTERNAL_IP=true \
             ./chatserver > server.log 2>&1 &
           echo $! > server.pid
@@ -537,10 +577,10 @@ jobs:
       # `docker run` text to drift from the line docs/capacity.md publishes.
       #
       # taskset keeps the generators on CPUs 2-3, off the server's cpuset.
-      - name: Run the ${{ inputs.profile }} profile
+      - name: Run the ${{ env.PROFILE }} profile
         id: profile
         env:
-          K6_PROFILE: ${{ inputs.profile }}
+          K6_PROFILE: ${{ env.PROFILE }}
           K6_WS_URL: ${{ env.SUT_WS_URL }}
           K6_HTTP_URL: ${{ env.SUT_HTTP_URL }}
           K6_CHANNEL_ID: ${{ env.CHANNEL_ID }}
@@ -548,15 +588,15 @@ jobs:
           # K6_VOICE_VUS to 0 and registers no voice threshold, so a disabled
           # leg neither fails nor passes vacuously.
           K6_VOICE_CHANNEL_ID: ${{ env.VOICE_LEG == '1' && env.VOICE_ID || '' }}
-          K6_VOICE_VUS: ${{ inputs.voice }}
-          K6_PEAK_VUS: ${{ inputs.connections }}
+          K6_VOICE_VUS: ${{ env.VOICE }}
+          K6_VOICE_CHURN_PHASE: ${{ inputs.churn_phase || 'spread' }}
+          K6_PEAK_VUS: ${{ env.CONNECTIONS }}
           K6_RAMP: 60s
           K6_SUSTAIN: 180s
-          K6_CEILING_MAX: ${{ inputs.ceiling_max }}
+          K6_CEILING_MAX: ${{ env.CEILING_MAX }}
           K6_CEILING_CHANNELS: ${{ env.CEILING_CHANNEL_IDS }}
           K6_RESTART_AT: ${{ env.RESTART_AT }}
           K6_RESTART_RECOVERY_S: ${{ env.RESTART_RECOVERY_S }}
-          INPUTS_VOICE: ${{ inputs.voice }}
           MATRIX_LEG: ${{ matrix.leg }}
         run: |
           mkdir -p Server/scripts/k6/reports
@@ -585,7 +625,7 @@ jobs:
           # operational k6 voice churn, which is why it is not the gate here.
           voice_pid=""
           if [ "$PROFILE" = "capacity" ]; then
-            PUBLISHERS="${INPUTS_VOICE}" SUBSCRIBERS="${INPUTS_VOICE}" \
+            PUBLISHERS="${VOICE}" SUBSCRIBERS="${VOICE}" \
             DURATION=260s LIVEKIT_VERSION="$LIVEKIT_VERSION" \
             LIVEKIT_URL=http://127.0.0.1:7880 \
             REPORT="$WORK/voice-load.txt" \
@@ -598,9 +638,9 @@ jobs:
             (
               sleep "$RESTART_AT"
               start=$(date +%s%N)
-              # Grace well past the 30 s shutdownBudget, so an over-budget
-              # drain is measured by the assertion below rather than cut
-              # short by docker's SIGKILL (rc 137, drain_ms pinned at 30 s).
+              # Grace well past the 30 s drill gate and the server's 50 s
+              # teardownBudget, so an over-budget drain is measured by the
+              # assertion below rather than cut short by docker's SIGKILL.
               docker stop --time=90 owncord-sut
               rc=$(docker wait owncord-sut)
               drain_ms=$((($(date +%s%N) - start) / 1000000))
@@ -655,10 +695,10 @@ jobs:
               exit 1
             fi
             if [ "$drill_drain_ms" -gt 30000 ]; then
-              echo "::error::the drain took ${drill_drain_ms} ms, over the 30 s shutdownBudget. Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
+              echo "::error::the drain took ${drill_drain_ms} ms, over the drill's 30 s gate (deliberately stricter than the server's 50 s teardownBudget cap). Publish the measured number and open a findings-ledger entry; do NOT re-run this on a bigger box."
               exit 1
             fi
-            echo "drain $drill_drain_ms ms, exit $drill_rc — inside the 30 s budget"
+            echo "drain $drill_drain_ms ms, exit $drill_rc — inside the 30 s drill gate"
           fi
 
           if [ "$voice_rc" -ne 0 ]; then
@@ -697,14 +737,18 @@ jobs:
       # rather than the machine -- they are inconclusive, not a ceiling. Same
       # posture as the run's own obs_ws_conn_rejects == 0, which makes the
       # same claim about the connection cap.
+      #
+      # Read the counter from metrics-after.json (SRE-M1), not the server log:
+      # the JSON figure is the same number the Attention panel alerts on, so
+      # the gate can no longer drift from what an operator sees. A missing or
+      # unreadable snapshot fails the gate rather than passing it.
       - name: Assert the ceiling search never hit the topic limiter
-        if: always() && inputs.profile == 'ceiling-search' && matrix.leg == 'constrained'
+        if: always() && env.PROFILE == 'ceiling-search' && matrix.leg == 'constrained'
         run: |
-          if [ ! -f "$WORK/server.log" ]; then
-            echo "::error::no server.log to check for topic-limiter shedding"
+          if ! shed=$(jq -er '.topic_sheds_total' "$WORK/metrics-after.json" 2>/dev/null); then
+            echo "::error::metrics-after.json is missing or has no topic_sheds_total, so topic-limiter shedding cannot be checked"
             exit 1
           fi
-          shed=$(grep -c 'topic rate limit exceeded' "$WORK/server.log" || true)
           if [ "$shed" != "0" ]; then
             echo "::error::$shed frame(s) were shed by topicRateLimitPerSecond. The search is shaped to stay under it (CEILING_CHANNELS=$CEILING_CHANNELS), so this means the shaping is wrong: the steps above the first shed are INCONCLUSIVE, not a server ceiling. Widen K6_CEILING_CHANNELS and re-run; do NOT publish these steps as the hardware ceiling."
             exit 1
@@ -717,7 +761,7 @@ jobs:
         with:
           # capacity keeps B6-9's exact artifact name, so the published runs
           # stay findable; the other profiles name themselves.
-          name: ${{ inputs.profile == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}', inputs.profile, matrix.leg, matrix.tls == 'off' && '-off' || '') }}
+          name: ${{ env.PROFILE == 'capacity' && format('capacity-{0}', matrix.leg) || format('capacity-{0}-{1}{2}', env.PROFILE, matrix.leg, matrix.tls == 'off' && '-off' || '') }}
           path: |
             ${{ runner.temp }}/loadtest/k6-summary.json
             ${{ runner.temp }}/loadtest/voice-load.txt

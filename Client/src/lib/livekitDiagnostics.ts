@@ -4,6 +4,7 @@ import { RoomEvent, Track } from "livekit-client";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
 import { onRoom } from "../features/voice/releaseRoom";
+import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import type { AudioElements } from "@lib/audioElements";
 
@@ -141,8 +142,12 @@ export interface SessionDebugDeps {
 
 export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, unknown> {
   const { room, currentChannelId, outputVolumeMultiplier, audioPipeline, audioElements } = deps;
+  // SRE-M2: the join timeline is the whole point of the bundle's voice section
+  // when a join fails — a failed join has no room, so `{hasRoom:false}` alone
+  // would hide why. It rides every read, connected or not.
+  const voiceJoin = voiceJoinSnapshot();
   if (room === null) {
-    return { hasRoom: false, hasRNNoiseProcessor: false, currentChannelId };
+    return { hasRoom: false, hasRNNoiseProcessor: false, currentChannelId, voiceJoin };
   }
   const remoteParticipants = [...room.remoteParticipants.values()].map((p) => {
     const userId = parseUserId(p.identity);
@@ -184,5 +189,6 @@ export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, un
     localTracks,
     remoteParticipants,
     iceConnectionState: getIceConnectionState(room),
+    voiceJoin,
   };
 }

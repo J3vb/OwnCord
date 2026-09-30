@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // setupStatusResponse is the JSON shape returned by GET /api/setup/status.
@@ -55,11 +57,15 @@ type setupResponse struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// CertificateFingerprint is the served TLS leaf certificate's SHA-256 in
 	// the client's pin format, shown on the finish step so the operator can
-	// publish it for users to compare out of band. Omitted when there is no
-	// statically loaded certificate (TLS off, or ACME before its first
-	// handshake), and when the wizard changed tls.mode: the restart will serve
+	// publish it for users to compare out of band. Omitted when no served
+	// certificate is known (TLS off, or ACME before its first handshake),
+	// and when the wizard changed tls.mode: the restart will serve
 	// a different certificate, which the dashboard shows once it is back.
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
+	// RecoveryKitSecret is the owner's recovery kit, present unless the
+	// wizard turned it off or it could not be issued. Shown once, on the finish step;
+	// the server stores only its verifier (B11-8).
+	RecoveryKitSecret string `json:"recovery_kit_secret,omitempty"`
 }
 
 // handleSetupStatus returns whether initial setup is needed (no users exist).
@@ -129,7 +135,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 	// Resolve the trusted-proxy CIDRs once at construction (W3-3a), never per
 	// request. opts.RunningCfg is nil in the legacy/test construction path
 	// (no SetupOptions passed to NewAdminAPI), which yields an empty list —
-	// setupClientIP then always falls back to raw RemoteAddr, preserving
+	// clientip.Resolve then always falls back to raw RemoteAddr, preserving
 	// prior behaviour exactly.
 	var trustedProxies []string
 	if opts.RunningCfg != nil {
@@ -144,10 +150,11 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		}
 
 		boot, err := setup.Bootstrap(r.Context(), service.BootstrapInput{
-			Username: req.Username,
-			Password: req.Password,
-			Device:   r.Header.Get("User-Agent"),
-			Host:     host,
+			Username:    req.Username,
+			Password:    req.Password,
+			Device:      r.Header.Get("User-Agent"),
+			Host:        host,
+			RecoveryKit: req.Wizard == nil || req.Wizard.RecoveryKit == nil || *req.Wizard.RecoveryKit,
 		})
 		switch {
 		case errors.Is(err, service.ErrSetupAlreadyDone):
@@ -169,7 +176,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		}
 		setup.RecordSetup(r.Context(), uid, detail)
 
-		fingerprint := leafFingerprint
+		fingerprint := servedCert().Fingerprint
 		if req.Wizard != nil && req.Wizard.TLSMode != nil &&
 			(opts.RunningCfg == nil || *req.Wizard.TLSMode != opts.RunningCfg.TLS.Mode) {
 			fingerprint = ""
@@ -184,6 +191,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 			RestartURL:             restartURL,
 			Warnings:               warnings,
 			CertificateFingerprint: fingerprint,
+			RecoveryKitSecret:      boot.RecoveryKitSecret,
 		})
 
 		if restartRequired {
@@ -217,7 +225,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// different source ports/hops from the same real client are correctly
 	// grouped under a single rate-limit bucket, and so distinct clients
 	// behind the same trusted proxy are NOT collapsed into one.
-	host := setupClientIP(r, proxyNets)
+	host := clientip.Resolve(r, proxyNets)
 	setupKey := "setup:" + host
 	if !limiter.Allow(setupKey, 5, time.Minute) {
 		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
@@ -330,7 +338,7 @@ func setupRestartAfterResponse(hub HubBroadcaster, opts SetupOptions) {
 		return
 	}
 	if hub != nil {
-		hub.BroadcastServerRestart("setup", restartBroadcastDelaySeconds)
+		hub.BroadcastServerRestart(ws.RestartReasonSetup, restartBroadcastDelaySeconds)
 	}
 	restartFn := opts.Restart
 	if restartFn == nil {

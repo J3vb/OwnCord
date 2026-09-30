@@ -17,3 +17,16 @@ UPDATE invites SET revoked = 1 WHERE code = ?;
 -- name: ListInvites :many
 SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
 FROM invites ORDER BY created_at DESC LIMIT 200;
+
+-- name: CreateInviteRedemption :exec
+INSERT INTO invite_redemptions (invite_id, user_id)
+SELECT id, sqlc.arg(user_id) FROM invites WHERE code = sqlc.arg(code);
+
+-- name: ListInviteRedemptions :many
+-- user_id is nullable: an erased redeemer leaves the row with no link.
+SELECT r.id, r.user_id, COALESCE(u.username, '') AS username, r.redeemed_at
+FROM invite_redemptions r
+LEFT JOIN users u ON u.id = r.user_id
+WHERE r.invite_id = ?
+ORDER BY r.redeemed_at DESC, r.id DESC
+LIMIT ?;

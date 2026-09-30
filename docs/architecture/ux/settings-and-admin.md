@@ -15,7 +15,7 @@ between what the desktop client does and what lives only on the server web panel
 A tabbed overlay (`SettingsOverlay`) available both authenticated (in Main) and
 unauthenticated (on Connect, for appearance/advanced). Tabs: Account,
 Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds,
-Advanced, Logs.
+Advanced, Diagnostics & logs.
 
 **Target rules:**
 
@@ -85,7 +85,7 @@ success message with a soft note, never a red error. (Server contract:
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
 
-**Recovery kit (B7-15b).** A section beside 2FA shows the kit status from
+**Recovery kit (B7-15b).** A row beside 2FA in the Security card shows the kit status from
 `GET /users/me/recovery-kit` — Enrolled, Used (spent by a recovery) or Not set
 up — and "Create"/"Replace recovery kit" behind a password confirm →
 `POST /users/me/recovery-kit`, which returns the server-generated secret once.
@@ -99,15 +99,15 @@ none reaches a log entry, the console or browser storage.
 
 ### 2.4 Sessions & delete account
 
-| Action                   | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| List sessions            | `GET /users/me/sessions`; show device/IP/last-used; current session marked. Both desktop User-Agents read "OwnCord desktop"                                                                                                                                                                                                                                                                                                                       |
-| Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device. Revoke-one never drops a live socket: its REST requests fail at once, but when a device showing "Signed in elsewhere" revokes the device holding the live socket, that socket closes within the hub's 30 s session sweep (or the per-message recheck), and the toast says so |
-| Sign out everywhere      | Inline confirm stating this device is included → `DELETE /users/me/sessions`; when `current_session_revoked`, `clearAuth()` → connect page                                                                                                                                                                                                                                                                                                        |
-| Sign-in not yet reviewed | On connect and on window focus the main page lists sessions; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/session-notice.ts`)                                                                                                                                                                        |
-| Signed in elsewhere      | A second device connecting displaces this socket; the server sends `SESSION_REPLACED` first. The client does not reconnect and keeps the credential; the connection banner shows "Signed in elsewhere" with "Use here", which reconnects (last connect wins)                                                                                                                                                                                      |
-| Message retention        | Shown only when `server-info` reports a server-default window (`retentionNotice()` in `lib/types.ts`)                                                                                                                                                                                                                                                                                                                                             |
-| Delete account           | **Modal with password confirm** (irreversible — stronger than a two-click). The warning says erasure is immediate, earlier backups keep a copy until they rotate (a restore re-applies it), and other devices may keep cached images; no retention window. `DELETE /auth/account` → `clearAuth()` → the account's image-cache scope is pruned → connect page                                                                                      |
+| Action                   | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| List sessions            | `GET /users/me/sessions`; show device/IP/last-used; current session marked. Both desktop User-Agents read "OwnCord desktop"                                                                                                                                                                                                                                                                                                                                                                                       |
+| Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device. Revoke-one never drops a live socket: its REST requests fail at once, but when a device showing "Signed in elsewhere" revokes the device holding the live socket, that socket closes within the hub's 30 s session sweep (or the per-message recheck), and the toast says so                                                                 |
+| Sign out everywhere      | Inline confirm stating this device is included → `DELETE /users/me/sessions`; when `current_session_revoked`, `clearAuth()` → connect page                                                                                                                                                                                                                                                                                                                                                                        |
+| Sign-in not yet reviewed | On connect and on window focus the main page lists sessions, at most once per 30 s after a successful listing; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/session-notice.ts`)                                                                                                                                                                                      |
+| Signed in elsewhere      | A second device connecting displaces this socket; the server sends `SESSION_REPLACED` first. A wake reconnect after a sleep is refused with `ANOTHER_DEVICE_ACTIVE` while another device holds the session (its live connection or a call it parked in the voice grace window), so it cannot displace it at all. Either way the client does not reconnect and keeps the credential; the connection banner shows "Signed in elsewhere" with "Use here", which reconnects without a wake marker (last connect wins) |
+| Message retention        | Shown only when `server-info` reports a server-default window (`retentionNotice()` in `lib/types.ts`)                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Delete account           | **Modal with password confirm** (irreversible — stronger than a two-click). The warning says erasure is immediate, earlier backups keep a copy until they rotate (a restore re-applies it), and other devices may keep cached images; no retention window. `DELETE /auth/account` → `clearAuth()` → the account's image-cache scope is pruned → connect page                                                                                                                                                      |
 
 ---
 
@@ -199,7 +199,7 @@ sequenceDiagram
 | State       | Presentation                                                                                                                                                                                                                                                   |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | checking    | Silent (no UI until a result)                                                                                                                                                                                                                                  |
-| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`)                                                                                                                           |
+| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`); on Windows a line below says SmartScreen will warn about the unsigned installer (More info → Run anyway)                 |
 | downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                                                                                                                                                  |
 | applied     | App relaunches automatically                                                                                                                                                                                                                                   |
 | failed      | "Update failed. Please try again later." + Dismiss                                                                                                                                                                                                             |
@@ -231,8 +231,13 @@ The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
 **Show/Hide** toggles the main window, a **Status** submenu
 (Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
 the TS side applies through the same presence path as the user-bar picker
-(`lib/userStatus.ts` / `components/StatusPicker.ts`), and **Quit** exits the
-app.
+(`lib/userStatus.ts` / `components/StatusPicker.ts`), **Mute / Unmute** and
+**Deafen / Undeafen** emit the `voice-shortcut` event that the global
+Ctrl+Shift+<key> poller (`src-tauri/src/shortcuts.rs`, rebindable from the
+Keybinds tab) also emits,
+toggling the same controls as the in-app shortcuts (a no-op outside a voice
+channel), **Open Log Folder** opens the client log directory, and **Quit** exits
+the app.
 
 ---
 

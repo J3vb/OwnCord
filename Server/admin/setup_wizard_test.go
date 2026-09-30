@@ -466,3 +466,83 @@ func TestSetupWizard_ForeignOriginBlocked(t *testing.T) {
 		t.Error("config file written from a cross-origin request")
 	}
 }
+
+// TestSetupWizard_RecoveryKit is B11-8: the recovery kit is on by default —
+// an explicit request, a wizard run that leaves the field out, and quick setup
+// (no wizard object at all) each get the finish response carrying it once and
+// the server storing only its verifier, so the owner has a way back in if they
+// lose their password and second factor.
+func TestSetupWizard_RecoveryKit(t *testing.T) {
+	cases := map[string]map[string]any{
+		"requested":     {"recovery_kit": true},
+		"field omitted": {"server_name": "Plain"},
+		"quick setup":   nil,
+	}
+	for name, wizard := range cases {
+		t.Run(name, func(t *testing.T) {
+			database := openAdminTestDB(t)
+			cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+			handler := wizardHandler(t, database, cfgPath, make(chan string, 1))
+
+			body := map[string]any{"username": "owner", "password": "SecurePass123!"}
+			if wizard != nil {
+				body["wizard"] = wizard
+			}
+			rr := doRequest(t, handler, "POST", "/setup", "", body)
+			if rr.Code != http.StatusCreated {
+				t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+			}
+			var resp struct {
+				UserID            int64  `json:"user_id"`
+				RecoveryKitSecret string `json:"recovery_kit_secret"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if resp.RecoveryKitSecret == "" {
+				t.Fatal("recovery_kit_secret missing from the setup response")
+			}
+			kit, err := database.GetRecoveryKit(context.Background(), resp.UserID)
+			if err != nil || kit == nil {
+				t.Fatalf("GetRecoveryKit: %v (kit %v)", err, kit)
+			}
+			if kit.Verifier == resp.RecoveryKitSecret {
+				t.Error("the stored verifier is the plaintext secret")
+			}
+		})
+	}
+}
+
+// TestSetupWizard_RecoveryKitTurnedOff: an explicit recovery_kit:false stores
+// no kit and returns no secret.
+func TestSetupWizard_RecoveryKitTurnedOff(t *testing.T) {
+	database := openAdminTestDB(t)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	handler := wizardHandler(t, database, cfgPath, make(chan string, 1))
+
+	rr := doRequest(t, handler, "POST", "/setup", "", map[string]any{
+		"username": "owner",
+		"password": "SecurePass123!",
+		"wizard":   map[string]any{"recovery_kit": false},
+	})
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		UserID            int64  `json:"user_id"`
+		RecoveryKitSecret string `json:"recovery_kit_secret"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.RecoveryKitSecret != "" {
+		t.Errorf("a kit was issued though the wizard turned it off: %q", resp.RecoveryKitSecret)
+	}
+	kit, err := database.GetRecoveryKit(context.Background(), resp.UserID)
+	if err != nil {
+		t.Fatalf("GetRecoveryKit: %v", err)
+	}
+	if kit != nil {
+		t.Error("a recovery kit row exists though the wizard turned it off")
+	}
+}

@@ -103,6 +103,22 @@ type Invite struct {
 	CreatedAt string
 }
 
+// Expired reports whether the invite's expiry has passed at now. A nil
+// ExpiresAt never expires. The stored format is RFC3339 UTC (see CreateInvite);
+// an unparseable stamp is treated as expired, matching the redemption query,
+// whose strftime('%s', expires_at) yields NULL for such a stamp and so never
+// admits it.
+func (i *Invite) Expired(now time.Time) bool {
+	if i.ExpiresAt == nil {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, *i.ExpiresAt)
+	if err != nil {
+		return true
+	}
+	return !now.Before(t)
+}
+
 // Role represents a row in the roles table.
 type Role struct {
 	ID          int64   `json:"id"`

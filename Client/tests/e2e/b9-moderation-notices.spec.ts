@@ -241,7 +241,7 @@ test.describe("B9-15 moderation notices", () => {
       "true",
     );
     const pane = page.locator(".safety-tab");
-    await expect(pane).toContainText("You have no active restrictions.");
+    await expect(pane).toContainText("Your account is in good standing.");
     await expect(pane.locator(".safety-history-row")).toHaveCount(2);
     await expect(page.locator("[data-testid='safety-history-9']")).toContainText("Message removed");
     await expect(page.locator("[data-testid='safety-history-9']")).toContainText("Appeal: open");

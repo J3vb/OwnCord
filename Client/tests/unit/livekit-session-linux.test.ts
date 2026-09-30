@@ -191,7 +191,7 @@ vi.mock("../../src/features/voice/native/videoRenderer", () => ({
 }));
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@components/settings/helpers", () => ({
+vi.mock("@lib/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
@@ -225,6 +225,8 @@ globalThis.Worker = vi.fn(function () {
 import { LiveKitSession } from "../../src/lib/livekitSession";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
+import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
+import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
 
 const names = () => host.commands.map(([n]) => n);
 const emit = (envelope: NativeVoiceEnvelope) => {
@@ -232,6 +234,13 @@ const emit = (envelope: NativeVoiceEnvelope) => {
 };
 const flush = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
+};
+/** Confirm the share dialog, as the user does before anything is captured. */
+const pressGoLive = async () => {
+  const goLive = () =>
+    document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]');
+  await vi.waitFor(() => expect(goLive()).not.toBeNull());
+  goLive()!.click();
 };
 
 describe("LiveKitSession on the Linux native backend", () => {
@@ -252,8 +261,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     session = new LiveKitSession();
     session.setWsClient({ send: vi.fn(), on: vi.fn() } as never);
     session.setServerHost("chat.example");
+    // MainPage registers the screen-share dialog through the layer slot
+    // (ARCH-06); mirror that here so the native share path reaches the real
+    // dialog. The UI is a separate layer, so this test does not mount it.
+    setScreenSourcePicker((request) => showScreenSharePicker(request));
   });
   afterEach(() => {
+    setScreenSourcePicker(null);
     session.cleanupAll();
   });
 
@@ -469,7 +483,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     session.setWsClient(ws as never);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     host.commands.length = 0;
-    await session.enableScreenshare();
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
     // Wayland here: the portal picks, so no source list is shown.
     expect(host.commands).toEqual([
       ["screenSources", []],
@@ -506,7 +522,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     desktop.nativeVoice.startScreen = () =>
       Promise.reject("screen capture was cancelled or refused");
     try {
-      await session.enableScreenshare();
+      const sharing = session.enableScreenshare();
+      await pressGoLive();
+      await sharing;
     } finally {
       desktop.nativeVoice.startScreen = real;
     }

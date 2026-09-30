@@ -1,7 +1,7 @@
 [![CI](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml/badge.svg)](https://github.com/J3vb/OwnCord/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/J3vb/OwnCord?include_prereleases&label=release)](https://github.com/J3vb/OwnCord/releases/latest)
 ![Status](https://img.shields.io/badge/status-beta-orange)
-![Go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white)
 ![Tauri](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20x64%20%7C%20Linux%20x64%20%7C%20Linux%20ARM64-informational)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
@@ -68,7 +68,7 @@ Every server asset and the Docker image ship for both `amd64` and `arm64`
    - Windows: `chatserver.exe` (x64) or `chatserver-windows-arm64.exe` (ARM64)
    - Linux: `./chatserver`, from the `amd64` or `arm64` archive
 3. Open `https://localhost:8443/admin` and complete the setup wizard, entering the setup token from the server's start-up output — it creates your Owner account and configures the server for you (settings are saved to `config.yaml` automatically).
-4. Generate invite codes in the admin panel and share them with friends.
+4. Create invite codes in the admin panel's **Invites** page (or the OwnCord desktop client's "Invite people" action) and share them with friends.
 
 ### Option B: Docker (Linux server)
 
@@ -81,9 +81,8 @@ cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml before starting, and in config.yaml set
-# voice.livekit_url to `ws://livekit:7880` (the copied default is localhost)
-# and voice.auto_download_livekit to false (LiveKit runs as its own container)
+# Edit .env and livekit.yaml before starting (matching LiveKit key/secret). The compose file wires voice.livekit_url to the LiveKit service
+# and turns auto-download off, so config.yaml needs no voice edit.
 docker compose up -d
 ```
 
@@ -147,7 +146,7 @@ Two main components:
 
 ### Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - Node.js 26.x and npm 11.x (see `Client/.nvmrc` — a different major fails
   `npm ci`)
 - Rust stable (client builds)
@@ -157,11 +156,11 @@ Two main components:
 ```bash
 # Server (Windows)
 cd Server
-go build -o chatserver.exe -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+go build -o chatserver.exe -ldflags "-s -w -X main.version=dev" .
 
 # Server (Linux)
 cd Server
-CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=1.2.0-alpha.4" .
+CGO_ENABLED=0 go build -o chatserver -ldflags "-s -w -X main.version=dev" .
 
 # Client
 cd Client
@@ -171,7 +170,10 @@ npm run tauri build
 
 ### Core verification commands
 
-Everything CI gates on, from the repository root:
+The local mirror of CI's static, unit and drift gates, from the repository
+root — it does **not** run the Playwright jobs, govulncheck, npm audit, the
+coverage-floor scripts, `typecheck:e2e` or the tag-gated Go tests; see
+[AGENTS.md](AGENTS.md#commands) for the exact split:
 
 ```bash
 npm run check                  # server + client + Rust

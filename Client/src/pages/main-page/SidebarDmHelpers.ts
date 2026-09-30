@@ -3,17 +3,22 @@
  * embedded DM section (channels mode) and the full DM sidebar (dms mode).
  */
 
-import type { ApiClient } from "@lib/api";
+import { type ApiClient, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import type { DmConversation } from "@components/DmSidebar";
 import { setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import type { Channel } from "@stores/channels.store";
-import { dmStore, clearDmUnread, addDmChannel, dmDisplayName } from "@stores/dm.store";
+import {
+  dmStore,
+  clearDmUnread,
+  addDmChannel,
+  dmDisplayName,
+  addDmToChannelsStore,
+  dmChannelFromPayload,
+} from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { isChannelMuted } from "@lib/channel-mutes";
-import type { DmChannelPayload } from "@lib/types";
 import { connectText } from "../../i18n/connect";
 
 // ---------------------------------------------------------------------------
@@ -59,54 +64,27 @@ export function selectDmConversation(dmChannel: DmChannel, deps: DmHelperDeps): 
 }
 
 // ---------------------------------------------------------------------------
-// addDmToChannelsStore
-// ---------------------------------------------------------------------------
-
-/** Ensure a DM channel exists in channelsStore so ChannelController can switch to it. */
-export function addDmToChannelsStore(dmChannel: DmChannel): void {
-  const existing = channelsStore.getState().channels.get(dmChannel.channelId);
-
-  // Re-synthesise when the stored name has gone stale as well as when it is
-  // empty: a group rename or a member leaving changes what the DM is called,
-  // and the channels-store copy is what the chat header reads.
-  if (existing !== undefined && existing.name === dmDisplayName(dmChannel)) return;
-
-  const newChannel: Channel = {
-    id: dmChannel.channelId,
-    name: dmDisplayName(dmChannel),
-    type: "dm",
-    category: null,
-    position: 0,
-    unreadCount: dmChannel.unreadCount,
-    // The DM's own mention count, not a hardcoded 0: the ready payload now
-    // carries it, so a DM mention badge survives a reconnect.
-    mentionCount: dmChannel.mentionCount,
-    lastMessageId: dmChannel.lastMessageId,
-    // Channel-level permission is always true for DMs; block state is layered on
-    // top by the composer via blocks.store (see ChannelController), not canSend.
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    // A DM is never age-gated and has no voice capacity: the flags exist on
-    // guild channels, and a DM row is synthesised here rather than coming from
-    // the server's channel list.
-    nsfw: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-  };
-  channelsStore.setState((prev) => {
-    const next = new Map(prev.channels);
-    next.set(newChannel.id, newChannel);
-    return { ...prev, channels: next };
-  });
-}
-
-// ---------------------------------------------------------------------------
 // handleCreateDm
 // ---------------------------------------------------------------------------
 
-/** Create a DM with a user via the API and switch to it. */
-export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): Promise<void> {
+/**
+ * The 1:1 DM this client already knows with `userId`, if any. A group that
+ * happens to include them is not it — a call is started in a 1:1.
+ */
+export function findDirectDm(userId: number): DmChannel | undefined {
+  return dmStore.getState().channels.find((c) => !c.isGroup && c.recipient.id === userId);
+}
+
+/**
+ * Create a DM with a user via the API and switch to it. `onReady` runs after
+ * the new conversation is selected, so a caller that needs to act on it (e.g.
+ * start a call, BUG-05) sees it as the active channel.
+ */
+export async function handleCreateDm(
+  recipientId: number,
+  deps: DmHelperDeps,
+  onReady?: (dm: DmChannel) => void,
+): Promise<void> {
   try {
     const result = await deps.api.createDm(recipientId);
     const member = membersStore.getState().members.get(recipientId);
@@ -133,50 +111,11 @@ export async function handleCreateDm(recipientId: number, deps: DmHelperDeps): P
 
     addDmChannel(dmChannel);
     selectDmConversation(dmChannel, deps);
+    onReady?.(dmChannel);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : connectText("app.dmCreateFailed");
+    const msg = errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
   }
-}
-
-// ---------------------------------------------------------------------------
-// dmChannelFromPayload
-// ---------------------------------------------------------------------------
-
-/**
- * Map a server DM summary (the shape `POST /dms/group`, `PATCH /dms/{id}`,
- * `GET /dms` and `dm_channel_open` all share) into the store's DmChannel.
- *
- * The dispatcher has its own copy of this for the WS path; this one exists so
- * the REST responses land in exactly the same shape without importing the
- * dispatcher's internals into the sidebar.
- */
-export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
-  const participants: DmUser[] = (p.recipients ?? [p.recipient]).map((u) => ({
-    id: u.id,
-    username: u.username,
-    avatar: u.avatar,
-    status: u.status,
-    displayName: u.display_name ?? "",
-  }));
-  return {
-    channelId: p.channel_id,
-    recipient: participants[0] ?? {
-      id: p.recipient.id,
-      username: p.recipient.username,
-      avatar: p.recipient.avatar,
-      status: p.recipient.status,
-      displayName: p.recipient.display_name ?? "",
-    },
-    participants,
-    name: p.name ?? "",
-    isGroup: p.is_group ?? false,
-    lastMessageId: p.last_message_id,
-    lastMessage: p.last_message,
-    lastMessageAt: p.last_message_at,
-    unreadCount: p.unread_count,
-    mentionCount: p.mention_count ?? 0,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +134,7 @@ export async function handleCreateGroupDm(
     addDmChannel(dmChannel);
     selectDmConversation(dmChannel, deps);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : connectText("app.dmCreateGroupFailed");
+    const msg = errorText(err, connectText("app.dmCreateGroupFailed"));
     deps.getToast()?.show(msg, "error");
   }
 }

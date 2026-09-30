@@ -94,12 +94,8 @@ input,select,textarea{font-family:inherit;border:none}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:24px}
 .stat-card{background:var(--bg-card);border-radius:var(--radius-md);padding:18px 20px;border:1px solid var(--border);transition:border-color .2s}
 .stat-card:hover{border-color:var(--border-strong)}
-.stat-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .stat-card-label{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase}
-.stat-card-icon{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.stat-card-icon svg{width:16px;height:16px}
 .stat-card-value{font-size:28px;font-weight:700;color:var(--header-primary);font-family:var(--font-mono);line-height:1.1}
-.stat-card-sub{font-size:12px;color:var(--text-muted);margin-top:4px;font-family:var(--font-mono)}
 
 .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
 .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
@@ -252,7 +248,6 @@ input,select,textarea{font-family:inherit;border:none}
 .save-bar.dirty{position:sticky;bottom:0}
 .save-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:12px 16px;background:var(--bg-secondary);border:1px solid var(--border-strong);border-radius:var(--radius-md);box-shadow:0 -8px 24px rgba(0,0,0,.45);z-index:5}
 .save-bar-status{margin-right:auto;font-size:13px;color:var(--text-muted)}
-.update-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap}
 .callout-warning{background:rgba(242,184,75,.1);border:1px solid rgba(242,184,75,.35);color:var(--text-warning);font-size:13px;padding:10px 12px;border-radius:var(--radius-sm);margin-top:12px;line-height:1.45}
 .check-row{display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer}
@@ -265,7 +260,6 @@ input,select,textarea{font-family:inherit;border:none}
   .setting-row{flex-direction:column;align-items:stretch;gap:8px}
   .setting-ctrl{margin-left:0}
   .setting-ctrl .form-input,.setting-ctrl .filter-select{width:100%}
-  .update-grid{grid-template-columns:1fr}
   .fact-row{flex-direction:column;gap:4px}
   .fact-row dd{justify-content:flex-start}
 }
@@ -306,6 +300,118 @@ input,select,textarea{font-family:inherit;border:none}
 .activity-text{font-size:13px;color:var(--text-muted);line-height:1.4}
 .activity-text strong{color:var(--text-normal)}
 .activity-time{font-size:11px;color:var(--text-muted);margin-top:2px}
+
+/* Status icons (core.js statusIcon): always beside a word, never colour
+   alone. The tints below are the existing badge tints of the same tokens. */
+.st-ic{display:inline-flex;width:18px;height:18px;flex-shrink:0}.st-ic svg{width:100%;height:100%}
+.st-ok{color:var(--text-positive)}.st-warn{color:var(--text-warning)}.st-crit{color:var(--text-danger)}.st-pending{color:var(--text-muted)}
+.muted{color:var(--text-muted)}
+.card-note{font-size:13px;color:var(--text-muted);line-height:1.45;margin-bottom:8px}
+/* Native disclosures: the leading chevron turns when open (reduced motion
+   zeroes the transition). */
+details.disclose>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}
+details.disclose>summary::-webkit-details-marker{display:none}
+details.disclose>summary>svg:first-child{width:14px;height:14px;flex-shrink:0;color:var(--text-muted);transition:transform .15s}
+details.disclose[open]>summary>svg:first-child{transform:rotate(90deg)}
+details.disclose>summary.section-card-header{justify-content:flex-start}
+details.disclose:not([open])>summary.section-card-header{border-bottom:none}
+.checks-sum{font-size:13px;color:var(--text-muted);margin-left:auto;text-align:right}
+
+/* Dashboard (UX clarity): one health headline, a card per active warning,
+   every check behind a disclosure. */
+.health-hero{display:flex;align-items:center;flex-wrap:wrap;gap:12px 16px;padding:18px 20px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-card);margin-bottom:12px}
+.health-hero.ok{border-color:rgba(92,195,137,.35)}.health-hero.warn{border-color:rgba(242,184,75,.45)}.health-hero.crit{border-color:rgba(255,143,146,.5)}
+.health-hero-icon{width:44px;height:44px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(163,169,178,.15)}
+.health-hero.ok .health-hero-icon{background:rgba(92,195,137,.15)}.health-hero.warn .health-hero-icon{background:rgba(242,184,75,.15)}.health-hero.crit .health-hero-icon{background:rgba(255,143,146,.15)}
+.health-hero-icon .st-ic{width:24px;height:24px}
+.health-hero-text{flex:1 1 240px;min-width:0}
+.health-hero-title{font-size:18px;font-weight:700;color:var(--header-primary)}
+.health-hero-sub{font-size:13px;color:var(--text-muted);margin-top:2px}
+.health-hero-counts{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.count-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 10px;border-radius:var(--radius-pill);background:var(--bg-hover);color:var(--text-normal)}
+.count-chip .st-ic{width:14px;height:14px}
+.attn-card{display:flex;gap:12px;padding:16px 20px;border-radius:var(--radius-md);background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--yellow);margin-bottom:12px}
+.attn-card.crit{border-left-color:var(--red)}.attn-card.ok{border-left-color:var(--green)}
+.attn-body{flex:1;min-width:0}
+.attn-card h4{font-size:14px;color:var(--header-primary);margin-bottom:4px;overflow-wrap:anywhere}
+.attn-next{font-size:13px;line-height:1.5;margin-top:6px}.attn-next b{color:var(--header-primary)}
+.attn-meta{font-size:12px;color:var(--text-muted);margin-top:8px;display:flex;gap:4px 12px;flex-wrap:wrap;align-items:center}
+.attn-tech{font-size:12px;color:var(--text-muted);margin-top:6px;font-family:var(--font-mono);overflow-wrap:anywhere}
+.attn-recovered{margin-bottom:12px}
+.attn-recovered>summary{font-size:13px;color:var(--text-muted);padding:4px 0 8px}
+#attentionPanel{margin-bottom:20px}
+.update-strip{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;padding:10px 16px;border-radius:var(--radius-md);background:var(--bg-card);border:1px solid var(--border);margin-bottom:20px;font-size:13px}
+.update-strip>svg{width:18px;height:18px;color:var(--accent-text);flex-shrink:0}
+.update-strip>span{flex:1 1 200px;min-width:0}
+.update-strip .btn{margin-left:auto}
+.stat-grid.compact{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px}
+.stat-grid.compact .stat-card{padding:12px 16px}
+.stat-grid.compact .stat-card-label{display:block;margin-bottom:6px}
+.stat-grid.compact .stat-card-value{font-size:22px}
+.check-group{padding:4px 20px 16px}
+.check-group-title{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase;padding:12px 0 6px}
+.check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.check-tile{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-primary);border:1px solid var(--border);min-width:0}
+.check-tile>div{min-width:0}
+.check-tile .lbl,.check-jobs .lbl{font-size:13px;font-weight:600;color:var(--text-normal)}
+.check-tile .val{font-size:12px;color:var(--text-muted);margin-top:2px;overflow-wrap:anywhere}
+.check-jobs>summary{padding:10px 12px;border-radius:var(--radius-md);background:var(--bg-primary);border:1px solid var(--border);flex-wrap:wrap}
+.check-jobs>summary .val{font-size:12px;color:var(--text-muted);margin-left:auto}
+.job-list{list-style:none;columns:2 260px;column-gap:24px;margin-top:8px;padding:0 4px}
+.job-list li{display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;break-inside:avoid}
+.job-list .st-ic{width:14px;height:14px}
+.job-list .val{color:var(--text-muted)}
+
+/* Message retention: the policy as a sentence, exceptions only, the full
+   channel list behind a disclosure. */
+.ret-policy{display:flex;align-items:center;flex-wrap:wrap;gap:10px 14px}
+.ret-policy-text{flex:1 1 260px;min-width:0}
+.ret-policy-big{font-size:20px;font-weight:700;color:var(--header-primary)}
+.ret-policy-sub{font-size:13px;color:var(--text-muted);margin-top:2px;line-height:1.45}
+.ret-edit{margin-top:12px;border-top:1px solid var(--border)}
+.ret-edit-ctrl{display:flex;gap:8px;align-items:center}.ret-edit-ctrl .form-input{width:110px}
+.ret-sweep{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;color:var(--text-muted)}
+.ret-sweep strong{color:var(--text-warning)}
+.ret-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;padding:12px 20px;border-top:1px solid var(--border);font-size:13px}
+.ret-row>svg{width:16px;height:16px;color:var(--text-muted);flex-shrink:0}
+.ret-row>.btn,.ret-row>.act-group{margin-left:auto}
+.section-card-header+.ret-row{border-top:none}
+
+/* Channels: grouped by category, the type as an icon beside the name. */
+.ch-tbl tr.ch-cat th{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-primary);padding:8px 16px;border-bottom:1px solid var(--border)}
+.ch-tbl tr.ch-cat:hover th{background:var(--bg-primary)}
+.ch-name{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.ch-type{display:inline-flex;color:var(--text-muted)}.ch-type svg{width:16px;height:16px}
+.ret-all>summary{padding:12px 20px;border-top:1px solid var(--border);font-size:13px;color:var(--text-muted)}
+.empty-line{display:flex;align-items:center;gap:10px;padding:16px 20px;font-size:13px;color:var(--text-muted)}
+.empty-line>svg{width:16px;height:16px;flex-shrink:0}
+
+/* A page's one-line answer (Backups, Updates): icon, a sentence, detail. */
+.status-line{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;margin-bottom:20px;border-radius:var(--radius-md);background:var(--bg-card);border:1px solid var(--border)}
+.status-line>.st-ic{margin-top:2px}
+.status-line-title{font-size:15px;font-weight:700;color:var(--header-primary)}
+.status-line-sub{font-size:13px;color:var(--text-muted);margin-top:2px;line-height:1.45;overflow-wrap:anywhere}
+/* An empty section: what the thing is, and the action that starts it. */
+.empty-state{padding:32px 24px;text-align:center}
+.empty-state-icon{width:44px;height:44px;margin:0 auto 12px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;background:var(--bg-hover);color:var(--text-muted)}
+.empty-state-icon svg{width:22px;height:22px}
+.empty-state h3{font-size:15px;font-weight:700;color:var(--header-primary);margin-bottom:6px}
+.empty-state p{font-size:13px;color:var(--text-muted);max-width:56ch;margin:0 auto 16px;line-height:1.5}
+/* Radio cards (Settings › Registration): the chosen card is outlined and
+   checked, and only its consequence line is at full contrast. */
+.radio-cards{border:0;min-width:0}
+.radio-cards legend{margin-bottom:10px}
+.radio-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.radio-card{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--radius-md);border:1px solid var(--border-control);background:var(--bg-primary);cursor:pointer}
+.radio-card:hover{border-color:var(--border-strong)}
+.radio-card input{margin-top:3px;width:16px;height:16px;flex-shrink:0;accent-color:var(--accent)}
+.radio-card:has(input:checked){border-color:var(--accent-text);background:var(--accent-glow)}
+.radio-card:has(input:focus-visible){outline:2px solid var(--focus-ring);outline-offset:2px}
+.radio-card-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.radio-card-title{font-size:14px;font-weight:600;color:var(--header-primary)}
+.radio-card-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
+.radio-card:has(input:checked) .radio-card-desc{color:var(--text-normal)}
+.radio-cards>.setting-desc{margin-top:8px}
 
 /* Members (AO-4): tabs, the list, one Manage button plus an overflow menu per
    row. The menu is position:fixed (members.js places it) so the table's scroll
@@ -349,12 +455,6 @@ input,select,textarea{font-family:inherit;border:none}
   .member-btn{padding:6px 10px}
   .member-actions{gap:2px}
 }
-
-.update-card{display:flex;align-items:flex-start;gap:16px;padding:20px;background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border)}
-.update-icon{width:48px;height:48px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.update-icon svg{width:24px;height:24px}
-.update-info{flex:1}.update-ver{font-size:18px;font-weight:700;color:var(--header-primary)}
-.update-notes{font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5}
 
 .code-copy{display:flex;align-items:center;gap:8px;background:var(--bg-tertiary);padding:8px 12px;border-radius:var(--radius-sm);margin-top:8px}
 .code-copy code{flex:1;font-family:var(--font-mono);font-size:13px;color:var(--text-link);word-break:break-all}
@@ -416,6 +516,8 @@ input,select,textarea{font-family:inherit;border:none}
 .level-toggle[aria-pressed="true"].lvl-warn{background:rgba(242,184,75,.15);border-color:rgba(242,184,75,.5);color:var(--text-warning)}
 .level-toggle[aria-pressed="true"].lvl-error{background:rgba(255,143,146,.15);border-color:rgba(255,143,146,.5);color:var(--text-danger)}
 .log-toolbar .log-filter{flex:1;min-width:180px}
+.log-level-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.log-level-status{color:var(--text-muted);font-size:12px}
 .log-actions{display:flex;gap:6px;flex-wrap:wrap}
 .log-actions .btn[aria-pressed="true"]{background:var(--accent-glow);color:var(--accent-text)}
 .log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 300px);min-height:240px;white-space:pre-wrap;word-break:break-all}
@@ -429,13 +531,45 @@ input,select,textarea{font-family:inherit;border:none}
 .log-line.l-error .log-lvl{color:var(--text-danger)}
 .log-line.l-error{color:var(--text-danger)}
 .log-status{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--text-muted)}
-.log-status .dot-live{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
-.log-status .dot-off{width:6px;height:6px;border-radius:50%;background:var(--red)}
+/* The connection state leads the toolbar as a dot and a word; an off level
+   chip is struck through, not just paler. Log line attrs read as chips. */
+.log-conn{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);min-width:96px}
+.log-conn .dot-live{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.log-conn .dot-off{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.log-conn .dot-wait{width:8px;height:8px;border-radius:50%;background:var(--text-muted)}
+.level-toggle[aria-pressed="false"]{text-decoration:line-through;border-style:dashed}
+.log-chips{display:inline;white-space:normal}
+.log-chip{display:inline-block;margin:0 4px 0 0;padding:0 6px;border-radius:var(--radius-sm);background:var(--bg-input);color:var(--text-normal);font-size:11px;line-height:1.7;word-break:break-all}
+.log-chip .log-key{color:var(--text-muted)}
+.log-chip.log-req{font-weight:700}
+.log-chip.log-status-ok{color:var(--text-muted)}.log-chip.log-status-4xx{color:var(--text-warning)}.log-chip.log-status-5xx{color:var(--text-danger)}
+.log-raw{color:var(--text-muted)}
+.log-more{display:inline}
+.log-more>summary{display:inline;cursor:pointer;color:var(--text-link);font-size:11px;font-family:var(--font-body)}
+.log-more[open]{display:block}
+.log-more pre{margin:4px 0 6px 16px;padding:6px 10px;background:var(--bg-primary);border-radius:var(--radius-sm);color:var(--text-normal);white-space:pre-wrap}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* Audit log */
 .audit-tbl .audit-time{font-size:12px;color:var(--text-muted);white-space:nowrap}
-.audit-tbl .audit-target{white-space:nowrap}
+.audit-tbl .audit-what{min-width:220px}.audit-tbl .audit-what>div{display:flex;align-items:baseline;gap:8px}
+.audit-tbl .audit-what strong,.act-line strong{color:var(--header-primary)}
+.audit-tbl tr.audit-day th{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-primary);padding:8px 16px;border-bottom:1px solid var(--border)}
+.audit-tbl tr.audit-day:hover th{background:var(--bg-primary)}
+/* The action's colour as a small mark beside the sentence, never alone. */
+.audit-mark{display:inline-block;width:8px;height:8px;padding:0;border-radius:50%;flex-shrink:0;align-self:center}
+.audit-mark.badge-red{background:var(--text-danger)}.audit-mark.badge-green{background:var(--text-positive)}
+.audit-mark.badge-yellow{background:var(--text-warning)}.audit-mark.badge-accent{background:var(--accent-text)}.audit-mark.badge-muted{background:var(--text-muted)}
+/* A filter chip: a toggle button whose pressed state shows as a filled chip
+   with a check, not colour alone. */
+.chip-toggle{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 14px;border-radius:var(--radius-pill);background:transparent;color:var(--text-muted);border:1px solid var(--border-control);font-size:13px;font-weight:600}
+.chip-toggle:hover{color:var(--text-normal);border-color:var(--border-strong)}
+.chip-toggle[aria-pressed="true"]{background:var(--accent-glow);color:var(--accent-text);border-color:var(--accent-text)}
+.chip-toggle svg{width:14px;height:14px}
+.act-line{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.act-line:last-child{border-bottom:none}
+.act-what{flex:1;min-width:0;overflow-wrap:anywhere}
+.act-when{font-size:12px;color:var(--text-muted);white-space:nowrap}
 .audit-tbl .audit-detail{font-size:12px;color:var(--text-muted);min-width:220px;overflow-wrap:anywhere}
 @media(max-width:600px){.audit-filters{align-items:stretch}}
 .tbl .tbl-empty{text-align:center;color:var(--text-muted);padding:24px}

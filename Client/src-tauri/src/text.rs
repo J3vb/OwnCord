@@ -18,6 +18,9 @@ pub const TRAY_STATUS_ONLINE: &str = "Online";
 pub const TRAY_STATUS_IDLE: &str = "Idle";
 pub const TRAY_STATUS_DND: &str = "Do Not Disturb";
 pub const TRAY_STATUS_OFFLINE: &str = "Offline";
+pub const TRAY_OPEN_LOGS: &str = "Open Log Folder";
+pub const TRAY_MUTE: &str = "Mute / Unmute";
+pub const TRAY_DEAFEN: &str = "Deafen / Undeafen";
 pub const TRAY_QUIT: &str = "Quit";
 pub const TRAY_TOOLTIP: &str = "OwnCord";
 
@@ -109,6 +112,9 @@ mod tests {
             TRAY_STATUS_IDLE,
             TRAY_STATUS_DND,
             TRAY_STATUS_OFFLINE,
+            TRAY_OPEN_LOGS,
+            TRAY_MUTE,
+            TRAY_DEAFEN,
             TRAY_QUIT,
             TRAY_TOOLTIP,
             STARTUP_DIALOG_TITLE,

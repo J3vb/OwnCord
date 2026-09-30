@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -15,12 +16,15 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -37,6 +41,63 @@ type TLSResult struct {
 	// (Client/src-tauri/src/tofu.rs). It is empty for TLS off and for ACME
 	// before the first handshake, where the leaf is not known at start-up.
 	Fingerprint string
+	// Served tracks the leaf certificate being served now: set at load for
+	// self_signed and manual, and on every handshake for ACME, so a renewal
+	// shows up without a restart. Nil for TLS off, where a reverse proxy
+	// serves the certificate; a nil tracker reports the zero ServedCert.
+	Served *CertTracker
+}
+
+// ServedCert is a served leaf certificate's fingerprint (LeafFingerprint's
+// form) and validity period. The zero value means none is known.
+type ServedCert struct {
+	Fingerprint string
+	NotBefore   time.Time
+	NotAfter    time.Time
+}
+
+// CertTracker records the leaf certificate the server most recently served.
+type CertTracker struct {
+	mu  sync.Mutex
+	cur ServedCert
+}
+
+// Current returns the most recently served certificate, or the zero value
+// before the first one (or on a nil tracker).
+func (t *CertTracker) Current() ServedCert {
+	if t == nil {
+		return ServedCert{}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cur
+}
+
+// record notes cert as served.
+func (t *CertTracker) record(cert *tls.Certificate) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if cert == nil || len(cert.Certificate) == 0 {
+		return
+	}
+	leaf := cert.Leaf
+	if leaf == nil {
+		parsed, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			return
+		}
+		leaf = parsed
+	}
+	t.cur = ServedCert{Fingerprint: LeafFingerprint(*cert), NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter}
+}
+
+// staticTracker is the tracker for a config with a statically loaded leaf.
+func staticTracker(cfg *tls.Config) *CertTracker {
+	t := &CertTracker{}
+	if cfg != nil && len(cfg.Certificates) > 0 {
+		t.record(&cfg.Certificates[0])
+	}
+	return t
 }
 
 // LeafFingerprint formats cert's leaf DER as lower-case colon-hex
@@ -123,14 +184,14 @@ func LoadOrGenerate(cfg config.TLSConfig) (*TLSResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg)}, nil
+		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg), Served: staticTracker(tlsCfg)}, nil
 
 	case "manual":
 		tlsCfg, err := loadCertPair(cfg.CertFile, cfg.KeyFile)
 		if err != nil {
 			return nil, err
 		}
-		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg)}, nil
+		return &TLSResult{TLSConfig: tlsCfg, Fingerprint: certConfigFingerprint(tlsCfg), Served: staticTracker(tlsCfg)}, nil
 
 	case "acme":
 		return loadACME(cfg)
@@ -245,18 +306,48 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 		host = net.JoinHostPort(cfg.Domain, strconv.Itoa(cfg.HTTPSPort))
 	}
 	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		target := "https://" + host + r.URL.RequestURI()
+		// Compose through url.URL rather than string concatenation: the request
+		// URI becomes Path/RawQuery on a URL whose Scheme and Host are fixed
+		// here, so a crafted path can never move the redirect to another host.
+		target := (&url.URL{
+			Scheme:   "https",
+			Host:     host,
+			Path:     r.URL.Path,
+			RawPath:  r.URL.RawPath,
+			RawQuery: r.URL.RawQuery,
+		}).String()
 		http.Redirect(w, r, target, http.StatusMovedPermanently)
 	})
 
 	tlsCfg := m.TLSConfig()
 	tlsCfg.MinVersion = tls.VersionTLS12
-	tlsCfg.GetCertificate = logCertificateFailures(tlsCfg.GetCertificate, cfg.Domain)
+	served := &CertTracker{}
+	tlsCfg.GetCertificate = logCertificateFailures(trackServed(tlsCfg.GetCertificate, served), cfg.Domain)
 
 	return &TLSResult{
 		TLSConfig:   tlsCfg,
 		HTTPHandler: m.HTTPHandler(redirect),
+		Served:      served,
 	}, nil
+}
+
+// trackServed records each certificate next hands to a member's handshake.
+// A TLS-ALPN-01 validation handshake gets a throwaway challenge certificate
+// instead, so it is skipped. So is autocert's RSA leaf: it goes only to
+// clients that cannot use ECDSA, while members are served the ECDSA leaf.
+func trackServed(
+	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
+	served *CertTracker,
+) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	return func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		cert, err := next(hello)
+		if err == nil && cert != nil && !slices.Contains(hello.SupportedProtos, acme.ALPNProto) {
+			if _, isRSA := cert.PrivateKey.(*rsa.PrivateKey); !isRSA {
+				served.record(cert)
+			}
+		}
+		return cert, err
+	}
 }
 
 // certFailureLogInterval bounds how often an issuance failure is logged. Long

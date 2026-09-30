@@ -22,6 +22,7 @@ import type {
 
 import { createRoomEventHandlers } from "@lib/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
+import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
@@ -545,6 +546,47 @@ describe("handleEncryptionError", () => {
     expect(voiceStore.getState().encryptionDegraded).toBe(true);
   });
 
+  it("SRE-M2: counts every receive-side decrypt failure, tolerated or not", () => {
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(
+      new Error("InvalidKey: Decryption failed: operation-specific"),
+      bob,
+    );
+
+    expectConsole("warn", /receive-side decrypt failure/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 1);
+  });
+
+  it("SRE-M2: counts a native decrypt failure from a remote participant", () => {
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(new Error("native decrypt failure"), bob);
+
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before + 1);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("SRE-M2: does not count an error with no remote participant as a decrypt failure", () => {
+    const h = build();
+    const before = voiceJoinSnapshot().decryptErrorCount;
+
+    h.handlers.handleEncryptionError(new Error("worker crashed"));
+    h.handlers.handleEncryptionError(new Error("InvalidKey: local"), {
+      identity: "me",
+      isLocal: true,
+    } as Participant);
+
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+    expect(voiceJoinSnapshot().decryptErrorCount).toBe(before);
+  });
+
   it("marks encryption degraded even when no participant is attributed", () => {
     const h = build();
 
@@ -799,5 +841,46 @@ describe("handleDisconnected", () => {
     expect(() => {
       h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
     }).not.toThrow();
+  });
+});
+
+// ── handleSdkReconnecting / handleSdkReconnected (RT-9) ────────────────────
+
+// livekit-client retries a dropped signal socket on its own before it ever
+// emits Disconnected (an SFU restart spends most of its window here), so the
+// widget must read "reconnecting" during that phase, not "connected".
+describe("handleSdkReconnecting / handleSdkReconnected", () => {
+  function setStatus(voiceStatus: "securing" | "connected" | "reconnecting"): void {
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus }));
+  }
+
+  it("shows reconnecting while the SDK retries a connected room, then connected once it recovers", () => {
+    const h = build();
+    setStatus("connected");
+
+    h.handlers.handleSdkReconnecting();
+    expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
+
+    h.handlers.handleSdkReconnected();
+    expect(voiceStore.getState().voiceStatus).toBe("connected");
+  });
+
+  it("leaves a join that is still securing alone", () => {
+    const h = build();
+    setStatus("securing");
+
+    h.handlers.handleSdkReconnecting();
+    h.handlers.handleSdkReconnected();
+
+    expect(voiceStore.getState().voiceStatus).toBe("securing");
+  });
+
+  it("ignores events from a room that is not the connected session room", () => {
+    const h = build({ getRoom: () => null, isReconnecting: () => true });
+    setStatus("reconnecting");
+
+    h.handlers.handleSdkReconnected();
+
+    expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
   });
 });

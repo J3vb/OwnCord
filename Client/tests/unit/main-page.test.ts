@@ -61,9 +61,10 @@ vi.mock("@lib/livekitSession", () => ({
   disableScreenshare: vi.fn().mockResolvedValue(undefined),
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
+  getRemoteVideoStats: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock("@lib/notifications", () => ({
+vi.mock("@lib/notificationSound", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
@@ -134,6 +135,10 @@ const {
         setFocusedTile: ReturnType<typeof vi.fn>;
         getFocusedTileId: ReturnType<typeof vi.fn>;
         setLabel: ReturnType<typeof vi.fn>;
+        setPeople: ReturnType<typeof vi.fn>;
+        setSpeaking: ReturnType<typeof vi.fn>;
+        setCallbacks: ReturnType<typeof vi.fn>;
+        setCallState: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -213,14 +218,28 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setFocusedTile: vi.fn(),
       getFocusedTileId: vi.fn(() => null),
       setLabel: vi.fn(),
+      setPeople: vi.fn(),
+      setSpeaking: vi.fn(),
+      setCallbacks: vi.fn(),
+      setCallState: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
     const chatArea = document.createElement("div");
+    const callPanelSlot = document.createElement("div");
+    // The real chat column's order: the call panel, then the chat slots.
+    chatArea.append(
+      callPanelSlot,
+      slots.messagesSlot,
+      slots.typingSlot,
+      slots.inputSlot,
+      slots.videoGridSlot,
+    );
     capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
     return {
       chatArea,
       slots,
+      callPanelSlot,
       videoGrid,
       chatHeaderName: document.createElement("span"),
       chatHeaderRefs: {
@@ -260,8 +279,10 @@ import {
   fetchExternalImage,
 } from "../../src/components/message-list/attachments";
 import { desktop } from "../../src/platform/desktop";
+import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
+import { startRingChime } from "../../src/lib/notificationSound";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -643,7 +664,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     // The already-open tile must pick up the new name without the tile
     // being torn down and re-created (no new addStream call for tile 200).
-    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert", "Robert");
   });
 
   it('keeps "(You)" on the self-view tile when the server echoes our own voice_state (OC-0375)', () => {
@@ -689,8 +710,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // "alice (You)". The relabel loop walks the whole roster, self included, so
     // it must produce the same self label — not the bare remote form, which
     // would leave your own tile indistinguishable from a participant's.
-    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice");
-    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)");
+    expect(videoGrid.setLabel).not.toHaveBeenCalledWith(1, "alice", "alice");
+    expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)", "alice");
   });
 
   it("brackets a bare IPv6 host when building the auto-updater URL (OC-0332)", () => {
@@ -814,6 +835,449 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // banner clearing means ringCtrl.accept() ran and nothing rejoins) — the
     // ring has to survive so the user can accept again once reconnected.
     expect(banner.style.display).not.toBe("none");
+  });
+
+  function openOneToOneDm(id: number): void {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(id, dmChannel(id, "dm-bob"));
+      return { ...prev, channels: ch, activeChannelId: id };
+    });
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: id,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+  }
+
+  it("answers a ring for the open DM in the call panel and hides the banner, handing it back when you look elsewhere", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "bob" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("incoming");
+    expect(banner.style.display).toBe("none");
+
+    // Another channel on screen: the banner is the only way to answer.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+    expect(banner.style.display).not.toBe("none");
+
+    // Settings over the DM hides the panel, so the banner answers there too.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+    channelsStore.flush();
+    expect(banner.style.display).toBe("none");
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    uiStore.flush();
+    expect(banner.style.display).not.toBe("none");
+  });
+
+  it("shows the DM's own call video in its panel, keeping the chat in view", async () => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [
+              1,
+              {
+                userId: 1,
+                username: "alice",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ],
+            [
+              10,
+              {
+                userId: 10,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: true,
+              },
+            ],
+          ]),
+        ],
+      ]),
+      localCamera: true,
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    voiceStore.flush();
+
+    const slots = capturedChatAreaRef.current!.slots;
+    const panelVideo = document.querySelector('[data-testid="dcp-video"]');
+    expect(panelVideo).not.toBeNull();
+    expect(panelVideo!.contains(slots.videoGridSlot)).toBe(true);
+    // Your own camera no longer takes over the DM's chat.
+    expect(slots.messagesSlot.style.display).toBe("");
+    expect(slots.inputSlot.style.display).toBe("");
+
+    // Opening another channel hands the grid back to the chat column.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+    expect(panelVideo!.contains(slots.videoGridSlot)).toBe(false);
+
+    page.destroy?.();
+  });
+
+  it("keeps the DM call panel's video up across repeated video changes, never switching it off in between", async () => {
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    const vu = (userId: number, username: string, extra = {}) => ({
+      userId,
+      username,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      ...extra,
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map([
+            [1, vu(1, "alice")],
+            [10, vu(10, "bob", { screenshare: true })],
+          ]),
+        ],
+      ]),
+    }));
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    voiceStore.flush();
+
+    const mute = document.querySelector('[data-testid="dcp-mute"]');
+    expect(mute).not.toBeNull();
+    const setPeople = capturedChatAreaRef.current!.videoGrid.setPeople;
+    setPeople.mockClear();
+
+    for (const extra of [{ screenshare: true, camera: true }, { screenshare: true }]) {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([
+          [
+            50,
+            new Map([
+              [1, vu(1, "alice")],
+              [10, vu(10, "bob", extra)],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+    }
+
+    expect(setPeople).not.toHaveBeenCalledWith([]);
+    expect(document.querySelector('[data-testid="dcp-mute"]')).toBe(mute);
+
+    page.destroy?.();
+  });
+
+  it("rings the video tiles of whoever is speaking in the current call", () => {
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const grid = capturedChatAreaRef.current!.videoGrid;
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              10,
+              {
+                userId: 10,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: true,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+            [
+              11,
+              {
+                userId: 11,
+                username: "cy",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: true,
+                screenshare: false,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    const last = grid.setSpeaking.mock.calls.at(-1)![0] as ReadonlySet<number>;
+    expect([...last]).toEqual([10]);
+  });
+
+  it("wires full screen, the full-screen call controls and stream stats into the video grid", async () => {
+    const lk = await import("@lib/livekitSession");
+    const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    const grid = capturedChatAreaRef.current!.videoGrid;
+    const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as {
+      setWindowFullscreen: (on: boolean) => Promise<void>;
+      callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
+      getStreamStats: (tileId: number) => Promise<unknown>;
+    };
+
+    await cbs.setWindowFullscreen(true);
+    expect(setFullscreen).toHaveBeenCalledWith(true);
+
+    // Stats for a screen-share tile ask for that user's screen share.
+    await cbs.getStreamStats(10 + SCREENSHARE_TILE_ID_OFFSET);
+    expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "screenshare");
+    await cbs.getStreamStats(10);
+    expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
+
+    // Leave from a full-screen tile leaves the call.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    cbs.callControls.onLeave();
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+
+    // The full-screen controls show your mute state.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith({ muted: true, deafened: false });
+    setFullscreen.mockRestore();
+  });
+
+  it("toggles mute and deafen from a global shortcut while unfocused (U6)", async () => {
+    const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
+    const onShortcut = vi
+      .spyOn(desktop.globalShortcuts, "onShortcut")
+      .mockImplementation((handler) => {
+        shortcutHandlers.add(handler);
+        return () => shortcutHandlers.delete(handler);
+      });
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    expect(start).toHaveBeenCalledTimes(1);
+    for (const handler of shortcutHandlers) handler("mute");
+
+    // The same toggle the in-app Ctrl+M runs: muting sends voice_mute(true).
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+
+    onShortcut.mockRestore();
+    start.mockRestore();
+  });
+
+  it("ignores a global shortcut outside a voice channel (U6)", async () => {
+    const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
+    const onShortcut = vi
+      .spyOn(desktop.globalShortcuts, "onShortcut")
+      .mockImplementation((handler) => {
+        shortcutHandlers.add(handler);
+        return () => shortcutHandlers.delete(handler);
+      });
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    const ws = fakeWs();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: null,
+      localMuted: false,
+      localDeafened: false,
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    for (const handler of shortcutHandlers) {
+      handler("mute");
+      handler("deafen");
+    }
+
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_deafen" }));
+    expect(voiceStore.getState().localMuted).toBe(false);
+    expect(voiceStore.getState().localDeafened).toBe(false);
+
+    onShortcut.mockRestore();
+    start.mockRestore();
+  });
+
+  it("pushes the persisted global shortcut bindings to the poller on mount (U6)", async () => {
+    const setKeys = vi.spyOn(desktop.globalShortcuts, "setKeys").mockResolvedValue(undefined);
+    const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+    localStorage.setItem("owncord:settings:globalMuteVk", "75"); // Ctrl+Shift+K
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    expect(setKeys).toHaveBeenCalledWith({ muteVk: 0x4b, deafenVk: 0x44 });
+    localStorage.removeItem("owncord:settings:globalMuteVk");
+    setKeys.mockRestore();
+    start.mockRestore();
+  });
+
+  it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
+    const { disableScreenshare } = await import("@lib/livekitSession");
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const grid = capturedChatAreaRef.current!.videoGrid;
+    const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as { onStopSharing: () => void };
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localScreenshare: true }));
+    cbs.onStopSharing();
+    expect(disableScreenshare).toHaveBeenCalled();
+
+    // A remote tile carries the person's name for its control labels.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "bob",
+        displayName: "Bobby",
+        avatar: null,
+        role: "member",
+        status: "online",
+      });
+      return { ...prev, members };
+    });
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          9,
+          new Map([
+            [
+              10,
+              {
+                userId: 10,
+                username: "bob",
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: true,
+              },
+            ],
+          ]),
+        ],
+      ]),
+    }));
+    capturedOnRemoteVideo.current!(10, {} as MediaStream, true);
+    const config = grid.addStream.mock.calls.at(-1)![3] as { name?: string };
+    expect(config.name).toBe("Bobby");
+  });
+
+  it("tells the caller when the callee declines, and Ring again rings once more", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    expect(panel.dataset.state).toBe("unanswered");
+
+    vi.mocked(ws.send).mockClear();
+    (panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    expect(panel.dataset.state).toBe("outgoing");
+
+    // The call timer is the page's to stop.
+    page.destroy?.();
+  });
+
+  it("redialing from inside a live call rings but leaves no outgoing ring behind", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    const vu = (userId: number, username: string) => ({
+      userId,
+      username,
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+    const roster = (ids: Array<[number, string]>) =>
+      new Map([[50, new Map(ids.map(([id, name]) => [id, vu(id, name)]))]]);
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceUsers: roster([
+        [1, "alice"],
+        [10, "bob"],
+      ]),
+    }));
+    voiceStore.flush();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    // The panel is a lazy chunk.
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("connected");
+
+    // Bob hangs up before any other voice change: the panel must not start
+    // "Calling bob…" about someone who was just in the call.
+    voiceStore.setState((prev) => ({ ...prev, voiceUsers: roster([[1, "alice"]]) }));
+    voiceStore.flush();
+    expect(panel.dataset.state).toBe("connected");
+
+    page.destroy?.();
   });
 
   it("shows the caller's nickname on the incoming-call banner, not the raw username (OC-0303)", () => {
@@ -965,6 +1429,45 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).not.toBe("none");
+  });
+
+  it("silently ends an incoming ring once this client is in the ringing channel by any path", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).not.toBe("none");
+
+    // Joined without Accept (the header's call button, the Join strip, the
+    // sidebar): being in the room answers the ring.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
+    voiceStore.flush();
+
+    expect(banner.style.display).toBe("none");
+    expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
+  });
+
+  it("does not ring for the channel this client is already in", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50 }));
+    voiceStore.flush();
+
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(startRingChime).mockClear();
+
+    // Someone else in the call redials the DM: the server rings everyone
+    // else in it, this client included.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).toBe("none");
+    expect(startRingChime).not.toHaveBeenCalled();
   });
 
   it("clears settingsOpen on destroy so the next page (e.g. ConnectPage after logout) doesn't inherit a stale open overlay", () => {
@@ -1198,7 +1701,10 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
     banner.querySelector("button")!.click();
 
-    expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
+    expect(ws.connect).toHaveBeenCalledWith(
+      { host: "chat.example.com", token: "tok-here" },
+      { takeover: true },
+    );
     expect(uiStore.getState().sessionReplaced).toBe(false);
   });
 
@@ -1354,6 +1860,17 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     window.dispatchEvent(new Event("offline"));
     window.dispatchEvent(new Event("online"));
     expect(banner.textContent).toBe("Server restarting in 30 seconds...");
+    expect(banner.classList.contains("visible")).toBe(true);
+  });
+
+  it("counts down a shutdown notice too: the session survives a restart (Q4)", () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi("chat.example.com") });
+    page.mount(container);
+
+    ws.emit("server_restart", { reason: "shutdown", delay_seconds: 5 });
+    const banner = container.querySelector<HTMLElement>(".reconnecting-banner")!;
+    expect(banner.textContent).toBe("Server restarting in 5 seconds...");
     expect(banner.classList.contains("visible")).toBe(true);
   });
 

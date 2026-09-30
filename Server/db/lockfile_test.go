@@ -5,6 +5,7 @@ package db
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,4 +34,24 @@ func TestTryLockFile_Exclusive(t *testing.T) {
 		t.Fatalf("tryLockFile after release: %v", err)
 	}
 	release2()
+}
+
+// TestAcquireProcessLock_OnlyBlamesAHolderWhenLocked: a lock that cannot be
+// taken for another reason (here, a missing data dir) must not send the
+// operator looking for a running server.
+func TestAcquireProcessLock_OnlyBlamesAHolderWhenLocked(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	release, err := AcquireProcessLock(dbPath)
+	if err != nil {
+		t.Fatalf("AcquireProcessLock: %v", err)
+	}
+	if _, err := AcquireProcessLock(dbPath); err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("held lock err = %v, want an in-use error", err)
+	}
+	release()
+
+	_, err = AcquireProcessLock(filepath.Join(t.TempDir(), "missing", "test.db"))
+	if err == nil || strings.Contains(err.Error(), "in use") {
+		t.Fatalf("missing dir err = %v, want a non-in-use error", err)
+	}
 }

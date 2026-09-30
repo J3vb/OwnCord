@@ -222,6 +222,7 @@ import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 // DOM setup written before it in source order — so this runs inside an async
 // beforeAll instead of a top-level import.
 // ---------------------------------------------------------------------------
+let startupInvokes: unknown[] = [];
 beforeAll(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   await import("../../src/main");
@@ -230,6 +231,7 @@ beforeAll(async () => {
   // eventHandlers before any test fires it.
   await Promise.resolve();
   await Promise.resolve();
+  startupInvokes = mockInvoke.mock.calls.map((call) => call[0]);
 });
 
 beforeEach(() => {
@@ -237,6 +239,16 @@ beforeEach(() => {
   mockInvoke.mockReset().mockResolvedValue(undefined);
   localStorage.clear();
   clearAuth();
+});
+
+afterEach(async () => {
+  // ws.ts arms its app-lifetime wake-probe listeners (window online,
+  // document visibilitychange) on auth_ok, and releases them on
+  // disconnect(). clearAuth() drives main.ts's isAuthenticated subscriber,
+  // which calls ws.disconnect(); the advance flushes the microtask-deferred
+  // store notification that runs it.
+  clearAuth();
+  await vi.advanceTimersByTimeAsync(10);
 });
 
 /** Drive a full login → WS connect → auth_ok cycle through the captured
@@ -252,6 +264,12 @@ async function loginAndReachAuthOk(
   emitTauriEvent("ws-state", "open");
   emitTauriEvent("ws-message", JSON.stringify({ type: "auth_ok", payload: authOkPayload }));
 }
+
+describe("main.ts startup", () => {
+  it("tells the native host once that the first page rendered", () => {
+    expect(startupInvokes.filter((cmd) => cmd === "frontend_ready")).toHaveLength(1);
+  });
+});
 
 describe("main.ts tray status-change listener (OC-0037)", () => {
   it("persists a tray-selected status through saveUserStatus, not just the wire", async () => {
@@ -272,6 +290,38 @@ describe("main.ts tray status-change listener (OC-0037)", () => {
     emitTauriEvent("status-change", "offline");
 
     expect(loadUserStatus()).toBe("invisible");
+  });
+});
+
+describe("main.ts notification-click opens the message (U1d)", () => {
+  it("routes a clicked message notification through the shared jumper", async () => {
+    const { jumpToMessage } = await import("@lib/message-navigation");
+    // Let the notifier's subscription register (the event API resolves async).
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    setChannelMutesHost("a.example");
+    vi.mocked(jumpToMessage).mockClear();
+
+    emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
+
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42);
+    setChannelMutesHost(null);
+  });
+
+  it("drops a click from a notification another server raised", async () => {
+    const { jumpToMessage } = await import("@lib/message-navigation");
+    await Promise.resolve();
+    await Promise.resolve();
+    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    setChannelMutesHost("b.example");
+    vi.mocked(jumpToMessage).mockClear();
+
+    emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
+
+    expect(vi.mocked(jumpToMessage)).not.toHaveBeenCalled();
+    setChannelMutesHost(null);
   });
 });
 
@@ -449,8 +499,7 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // Quick-switch overlay's flow (SidebarArea.ts:756-760): stash the target
     // host, then log out via a bare clearAuth() (reason defaults to "user").
     // The isAuthenticated subscriber below (main.ts:750-788) turns that into
-    // a stored "owncord:skip-auto-login" flag, since host is set and
-    // logoutReason !== "server_shutdown".
+    // a stored "owncord:skip-auto-login" flag, since host is set.
     sessionStorage.setItem("owncord:quick-switch-target", "server-b.example:8443");
     clearAuth();
 
@@ -469,8 +518,7 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // mount. Before the fix, the quick-switch branch returns early (line 669)
     // without ever reaching the skip-auto-login read/remove at line 680-683,
     // so the flag set by the clearAuth() above survives indefinitely — and
-    // would go on to suppress the auto-login that a later, unrelated
-    // clearAuth("server_shutdown") deliberately relies on.
+    // would go on to suppress a later, unrelated auto-login.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
   });
 });

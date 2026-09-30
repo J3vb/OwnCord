@@ -32,6 +32,7 @@ export const messagingText = defineCatalog("messaging", {
   "error.tooManyAttachments": "You can attach at most {max} files to a message",
   "error.uploadFailed": "Upload failed",
   "error.uploadFailedDetail": "Upload failed: {detail}",
+  "error.draftAttachmentExpired": "An attachment in your draft expired — please attach it again",
   "edit.editing": "Editing message",
   "edit.cancel": "Cancel editing",
   "attach.label": "Attach file",
@@ -65,6 +66,7 @@ export const messagingText = defineCatalog("messaging", {
 
   "mention.everyone": "Notify everyone in this channel",
   "mention.here": "Notify everyone who is online",
+  "mention.userDetail": "@{username} · {role}",
 
   "search.placeholder": "Search messages...",
   "search.label": "Search messages",
@@ -72,6 +74,7 @@ export const messagingText = defineCatalog("messaging", {
   "search.searching": "Searching...",
   "search.empty": "No results found",
   "search.failed": "Search failed",
+  "search.authorHandle": "@{username}",
 
   "pins.jump": "Jump to message",
   "pins.unpin": "Unpin message",
@@ -122,14 +125,15 @@ export const messagingText = defineCatalog("messaging", {
   "toast.retryExpired": "This message's retry window expired. Copy the text to send a new message.",
   "toast.retryUnsupported":
     "This server cannot safely retry a saved message. Copy its text to send it again.",
-  "toast.deleted": "Message deleted",
   "toast.deleteConfirm": "Click delete again to confirm",
+  "toast.editFailed": "Couldn't edit the message",
+  "toast.editFailedRestored": "Couldn't edit the message — your text is back in the composer",
+  "toast.deleteFailed": "Couldn't delete the message",
   "toast.pinned": "Message pinned",
   "toast.unpinned": "Message unpinned",
   "toast.pinFailed": "Failed to pin/unpin message",
   "toast.uploadFailed": "File upload failed",
   "toast.emptyMessage": "Message cannot be empty",
-  "toast.edited": "Message edited",
 
   "header.channelFallback": "general",
   "header.startCall": "Start a call",

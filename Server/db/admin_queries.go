@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
@@ -98,18 +95,16 @@ func (d *DB) ListAllUsers(ctx context.Context, f UserListFilter, limit, offset i
 	for i := range rows {
 		r := &rows[i]
 		result = append(result, UserWithRole{
-			User: User{
-				ID:         r.ID,
-				Username:   r.Username,
-				Avatar:     r.Avatar,
-				RoleID:     r.RoleID,
-				Status:     r.Status,
-				CreatedAt:  r.CreatedAt,
-				LastSeen:   r.LastSeen,
-				Banned:     r.Banned != 0,
-				BanReason:  r.BanReason,
-				BanExpires: r.BanExpires,
-			},
+			ID:           r.ID,
+			Username:     r.Username,
+			Avatar:       r.Avatar,
+			RoleID:       r.RoleID,
+			Status:       r.Status,
+			CreatedAt:    r.CreatedAt,
+			LastSeen:     r.LastSeen,
+			Banned:       r.Banned != 0,
+			BanReason:    r.BanReason,
+			BanExpires:   r.BanExpires,
 			RoleName:     r.RoleName,
 			RolePosition: int(r.RolePosition),
 		})
@@ -333,21 +328,27 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 
 // GetAuditLog returns audit log entries ordered newest-first with pagination.
 func (d *DB) GetAuditLog(ctx context.Context, limit, offset int) ([]AuditEntry, error) {
-	return d.SearchAuditLog(ctx, "", "", limit, offset)
+	return d.SearchAuditLog(ctx, "", "", false, limit, offset)
 }
 
 // SearchAuditLog is GetAuditLog narrowed to one action (exact) and to rows
 // whose actor name, action, target type or detail contains query (ASCII
-// case-insensitive). An empty action or query does not narrow.
+// case-insensitive). An empty action or query does not narrow. hideSignins
+// drops the user_login and ws_connect rows.
 //
 // ponytail: a substring scan over the whole table, fine at an admin's page
 // rate; an FTS5 index over audit_log is the upgrade if the table outgrows it.
-func (d *DB) SearchAuditLog(ctx context.Context, action, query string, limit, offset int) ([]AuditEntry, error) {
+func (d *DB) SearchAuditLog(ctx context.Context, action, query string, hideSignins bool, limit, offset int) ([]AuditEntry, error) {
+	var hide int64
+	if hideSignins {
+		hide = 1
+	}
 	rows, err := d.q.GetAuditLog(ctx, dbgen.GetAuditLogParams{
-		Action:    action,
-		Query:     query,
-		RowLimit:  int64(limit),
-		RowOffset: int64(offset),
+		Action:      action,
+		HideSignins: hide,
+		Query:       query,
+		RowLimit:    int64(limit),
+		RowOffset:   int64(offset),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("SearchAuditLog: %w", err)
@@ -462,132 +463,4 @@ func (d *DB) CountUsersWithoutTOTP(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("CountUsersWithoutTOTP: %w", err)
 	}
 	return int(count), nil
-}
-
-// ─── Backup ───────────────────────────────────────────────────────────────────
-
-// BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
-// The destination path must not already exist.
-//
-// Security: VACUUM INTO does not support bind parameters, so the path is
-// interpolated into SQL. To prevent injection we enforce two structural guards:
-//  1. The path must resolve to a location under safeRoot (after filepath.Clean
-//     and filepath.Abs).
-//  2. After structural validation, any single-quote, semicolon, double-dash,
-//     or null byte in the cleaned path causes rejection as defence-in-depth.
-//
-// The caller in handleBackup constructs the path from a hardcoded directory
-// and a timestamp — no user input reaches this function.
-func (d *DB) BackupTo(ctx context.Context, path string) error {
-	return d.BackupToSafe(ctx, path, filepath.Join("data", "backups"))
-}
-
-// BackupToSafe is the internal implementation that accepts an explicit safe
-// root directory. Exported for testing with isolated directories.
-func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
-	clean := filepath.Clean(path)
-
-	absRoot, err := filepath.Abs(safeRoot)
-	if err != nil {
-		return fmt.Errorf("BackupToSafe: resolving safe root: %w", err)
-	}
-	absClean, err := filepath.Abs(clean)
-	if err != nil {
-		return fmt.Errorf("BackupToSafe: resolving path: %w", err)
-	}
-
-	// Structural guard: path must be under the safe root directory.
-	if !strings.HasPrefix(absClean, absRoot+string(filepath.Separator)) {
-		return fmt.Errorf("BackupToSafe: path %q is not under safe root %q", absClean, absRoot)
-	}
-
-	if err := validateBackupPathChars(absClean); err != nil {
-		return err
-	}
-
-	// VACUUM INTO refuses to write over an existing destination on its own,
-	// but only after it has already created (and, on failure below, would
-	// otherwise abandon) the file. Check explicitly and return before the
-	// exec so the failure branch below can tell "this call created the file"
-	// (safe to remove) from "the file was already there" (a same-second
-	// timestamp collision, or an operator-chosen name) without ever deleting
-	// something that predates this call.
-	if _, statErr := os.Stat(absClean); statErr == nil {
-		return fmt.Errorf("BackupToSafe: destination %q already exists", absClean)
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return fmt.Errorf("BackupToSafe: checking destination %q: %w", absClean, statErr)
-	}
-
-	_, err = d.writer.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absClean))
-	if err != nil {
-		// An interrupted VACUUM INTO (ENOSPC, EIO, a canceled/expired ctx, ...)
-		// leaves a truncated file at absClean. Since the existence check above
-		// already proved nothing was there before this call, whatever exists
-		// now was created by this exec and is safe to remove — leaving it
-		// behind would let handleListBackups offer a truncated, unrestorable
-		// .db as a normal backup (OC-0212).
-		_ = os.Remove(absClean)
-		return fmt.Errorf("BackupToSafe: %w", err)
-	}
-	return nil
-}
-
-// validateBackupPathChars is the strict character gate BackupToSafe applies to
-// the destination before it is interpolated into VACUUM INTO. It is a separate
-// function only so the allowlist loop's branch count does not dominate its
-// caller; the rules and the messages are unchanged.
-func validateBackupPathChars(absClean string) error {
-	// Defence-in-depth: only allow safe characters (alphanumeric, path separators,
-	// hyphen, underscore, dot, space, colon, tilde). This is a strict allowlist —
-	// anything else is rejected to prevent SQL injection via the interpolated path.
-	for _, ch := range absClean {
-		switch {
-		case ch >= 'a' && ch <= 'z',
-			ch >= 'A' && ch <= 'Z',
-			ch >= '0' && ch <= '9',
-			ch == '/' || ch == '\\' || ch == '-' || ch == '_' || ch == '.' || ch == ' ' || ch == ':' || ch == '~':
-			// allowed (colon for Windows drive letters, tilde for temp paths)
-		default:
-			return fmt.Errorf("BackupToSafe: path contains forbidden character %q", string(ch))
-		}
-	}
-
-	// Reject SQL comment sequences that could break the VACUUM INTO statement,
-	// even though individual hyphens are allowed for filenames.
-	if strings.Contains(absClean, "--") {
-		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
-	}
-	return nil
-}
-
-// CheckBackupIntegrity opens the SQLite file at path read-only and runs
-// PRAGMA integrity_check against it. It returns nil only when SQLite reports
-// "ok". Use it to verify a backup right after it is written and again before
-// it is restored over the live database — a truncated or corrupt file must
-// never be presented (or accepted) as restorable.
-//
-// The path travels into a file: URI, so it is restricted with the same
-// character allowlist BackupToSafe enforces; callers always pass paths that
-// already passed that gate.
-func CheckBackupIntegrity(ctx context.Context, path string) error {
-	abs, err := filepath.Abs(filepath.Clean(path))
-	if err != nil {
-		return fmt.Errorf("CheckBackupIntegrity: resolving path: %w", err)
-	}
-	if _, err := os.Stat(abs); err != nil {
-		return fmt.Errorf("CheckBackupIntegrity: %w", err)
-	}
-	conn, err := sql.Open("sqlite", "file:"+filepath.ToSlash(abs)+"?mode=ro&_pragma=busy_timeout(2000)")
-	if err != nil {
-		return fmt.Errorf("CheckBackupIntegrity: open: %w", err)
-	}
-	defer conn.Close() //nolint:errcheck
-	var result string
-	if err := conn.QueryRowContext(ctx, "PRAGMA integrity_check(10)").Scan(&result); err != nil {
-		return fmt.Errorf("CheckBackupIntegrity: %w", err)
-	}
-	if result != "ok" {
-		return fmt.Errorf("CheckBackupIntegrity: integrity_check reported %q", result)
-	}
-	return nil
 }

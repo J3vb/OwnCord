@@ -2,7 +2,9 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/coder/websocket"
@@ -10,14 +12,45 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// writePumpWrite writes one frame to the WebSocket under writeTimeout.
-// Returns false only when the write failed.
+// writeFrameChunk caps the payload of one outbound data frame.
+const writeFrameChunk = 16 << 10
+
+// writeFragmented writes msg as one text message in frames of at most
+// writeFrameChunk bytes. coder/websocket holds its frame write lock for a whole
+// frame, and a control frame — the Pong answering a peer's Ping, or pingPump's
+// own Ping — waits for that lock under a fixed 5s deadline. One large frame on
+// a slow link could hold it for up to writeTimeout (10s), failing the Pong and
+// with it readPump's conn.Read, which drops a live session. Between fragments
+// the lock is free, so a control frame waits for one chunk at most.
+func writeFragmented(ctx context.Context, conn *websocket.Conn, msg []byte) error {
+	if len(msg) <= writeFrameChunk {
+		return conn.Write(ctx, websocket.MessageText, msg)
+	}
+	w, err := conn.Writer(ctx, websocket.MessageText)
+	if err != nil {
+		return err
+	}
+	for len(msg) > 0 {
+		n := min(len(msg), writeFrameChunk)
+		if _, err := w.Write(msg[:n]); err != nil {
+			return err
+		}
+		msg = msg[n:]
+	}
+	return w.Close()
+}
+
+// writePumpWrite writes one message to the WebSocket under writeTimeout.
+// Returns false only when the write failed. A failed write closes the
+// connection: it may have left a message half-sent, and readPump's teardown
+// must run rather than leave a peer that never hears another event.
 func writePumpWrite(ctx context.Context, conn *websocket.Conn, c *Client, msg []byte) bool {
 	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
-	err := conn.Write(wCtx, websocket.MessageText, msg)
+	err := writeFragmented(wCtx, conn, msg)
 	cancel()
 	if err != nil {
 		slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
+		_ = conn.CloseNow()
 		return false
 	}
 	return true
@@ -124,6 +157,44 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 	}
 }
 
+// pingInterval is how often the server sends a WebSocket protocol Ping, and
+// how long it waits for the matching Pong (CLI-01). The peer's WebSocket stack
+// answers a protocol Ping itself, so liveness no longer rests on the client's
+// app-level ping — a webview timer a minimised window may throttle. A live
+// peer refreshes its activity every interval; a silent (half-open) one is
+// closed at most 2×pingInterval after it went quiet.
+var pingInterval = 25 * time.Second
+
+// pingPump sends a protocol Ping every interval until ctx ends. A Pong
+// refreshes the client's activity for the stale sweep; a missing Pong closes
+// the connection, and readPump's teardown takes it from there. The Pong is
+// read by readPump's conn.Read, so pingPump only works alongside it.
+func pingPump(ctx context.Context, conn *websocket.Conn, c *Client, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		pingCtx, cancel := context.WithTimeout(ctx, interval)
+		err := conn.Ping(pingCtx)
+		cancel()
+		if err != nil {
+			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
+				slog.Warn("ws closing unresponsive connection (no pong)", "user_id", c.userID, "err", err)
+				_ = conn.CloseNow()
+			}
+			return
+		}
+		// Not touch(): a Pong is liveness, not a received message.
+		c.mu.Lock()
+		c.lastActivity = time.Now()
+		c.mu.Unlock()
+	}
+}
+
 // readPump reads from the WebSocket and dispatches messages. Blocks until disconnect.
 func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 	var lastReadErr error
@@ -142,8 +213,13 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			// difference — the transfer keeps the same joined_at — so
 			// cleaning here would delete the replacement's DB row whenever
 			// teardown snapshots voiceChID before the transfer zeroes it.
+			//
+			// RT-8: a completed membership is parked in the grace window
+			// (voice_grace.go) instead of torn down at once, so a resuming
+			// socket can inherit the call. leaveVoiceOnDisconnect runs the
+			// immediate teardown for an incomplete join or a disabled window.
 			if voiceChID != 0 && !replaced {
-				hub.handleVoiceLeave(cleanupCtx, c)
+				hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
 			}
 			c.mu.Lock()
 			received := c.msgsReceived

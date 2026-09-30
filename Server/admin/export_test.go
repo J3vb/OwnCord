@@ -48,6 +48,23 @@ func SetSetupLimiterReapTiming(interval time.Duration) (restore func()) {
 // at a temp dir. Lives here so it stays out of the production binary.
 func SetBackupBaseDir(dir string) { backupBaseDir = dir }
 
+// SetArchiveBeforeSnapshotHook installs h to run synchronously between the
+// archive's first plan and its database snapshot, the window an upload that
+// the snapshot records can land in.
+func SetArchiveBeforeSnapshotHook(h func()) (restore func()) {
+	prev := archiveBeforeSnapshotHook
+	archiveBeforeSnapshotHook = h
+	return func() { archiveBeforeSnapshotHook = prev }
+}
+
+// SetArchiveLinkTTL overrides how long a single-use archive link stays valid,
+// so the expiry test does not wait the real minute.
+func SetArchiveLinkTTL(d time.Duration) (restore func()) {
+	prev := archiveLinkTTL
+	archiveLinkTTL = d
+	return func() { archiveLinkTTL = prev }
+}
+
 // SetPatchChannelPostCommitHook installs h to run synchronously right after
 // handlePatchChannel's AdminUpdateChannel commit, before the post-commit
 // re-read and hub fan-out — the only way to deterministically land a caller
@@ -78,8 +95,8 @@ func StubCopyBackup(fn func(src, dst string) error) (restore func()) {
 	return func() { copyBackupFile = prev }
 }
 
-// CopyBackupForTest exposes the real copyFile for StubCopyBackup delegates.
-var CopyBackupForTest = copyFile
+// CopyBackupForTest exposes the real copy for StubCopyBackup delegates.
+var CopyBackupForTest = db.CopyDatabaseFile
 
 // StubCloseError makes the next handleRestoreBackup call's database.Close()
 // return err instead of actually closing the pools, so tests can exercise the

@@ -87,6 +87,23 @@ describe("CertMismatchModal", () => {
     expect(texts).toContain("11:22:33:44");
   });
 
+  it("tells the user how to verify the new fingerprint before accepting", () => {
+    mountModal();
+    const desc = container.querySelector(".cert-desc")?.textContent ?? "";
+    // Routine public-CA renewals are re-pinned silently, so the prompt must
+    // not call a change routine; it asks for extra care instead...
+    expect(desc).not.toMatch(/routine, but/);
+    expect(desc).toMatch(/public certificate authorities no longer prompt/);
+    expect(desc).toMatch(/extra care/);
+    // ...and it says how to check: who has the value, where they find it,
+    // which row to compare, over which channel, and what to do otherwise.
+    expect(desc).toMatch(/server owner/);
+    expect(desc).toMatch(/admin Dashboard/);
+    expect(desc).toMatch(/matches Current/);
+    expect(desc).toMatch(/another channel/);
+    expect(desc).toMatch(/choose Disconnect/);
+  });
+
   it("shows 'Unknown' when storedFingerprint is empty", () => {
     mountModal({ storedFingerprint: "" });
     const fps = container.querySelectorAll(".cert-fingerprint");

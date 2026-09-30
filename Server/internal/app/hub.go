@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/url"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/api"
@@ -73,6 +72,9 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		// this options struct: the setup wizard already treats voice.quality
 		// as requiring a restart to take effect.
 		VoiceQuality: cfg.Voice.Quality,
+		// server.trusted_proxies: the handshake log and the ws_connect audit
+		// row resolve the client address through it (SRE-11).
+		TrustedProxies: cfg.Server.TrustedProxies,
 	})
 	if err != nil {
 		return api.Runtime{}, fmt.Errorf("app: building hub: %w", err)
@@ -131,16 +133,14 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 		return lk, ws.NewLiveKitProcess(&cfg.Voice, &cfg.TLS, cfg.Server.DataDir), true
 	}
 
-	// Warn if LiveKit is externally managed and webhook may be blocked by admin CIDRs.
-	lkHost := ""
-	if u, parseErr := url.Parse(cfg.Voice.LiveKitURL); parseErr == nil {
-		lkHost = u.Hostname()
-	}
-	if lkHost != "" && lkHost != "localhost" && lkHost != "127.0.0.1" && lkHost != "::1" {
-		slog.Warn("LiveKit is externally managed but webhook endpoint is admin-IP-restricted — "+
-			"add the LiveKit server's IP to livekit_webhook_allowed_cidrs or webhooks will be silently dropped",
-			"livekit_host", lkHost)
-	}
+	// No webhook warning here: the generated livekit.yaml (and the shipped
+	// example) set no `webhook:` block, so an externally managed LiveKit never
+	// calls OwnCord's webhook in the shipped configuration. Warning on the
+	// admin-CIDR gate anyway told operators to fix a setting that was not the
+	// problem. The gate stays on the route itself; a hand-managed
+	// `livekit.yaml` that does configure a webhook is the operator's to reason
+	// about (see server.livekit_webhook_allowed_cidrs in
+	// docs/server-configuration.md).
 	return lk, nil, true
 }
 
@@ -167,6 +167,27 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 		BackupSchedule: func(ctx context.Context) (string, error) {
 			return settings.Setting(ctx, "backup_schedule")
 		},
-		LastBackup: admin.NewestBackup,
+		LastBackup:  admin.NewestBackup,
+		Certificate: admin.ServedCertificate,
+		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
+			// OwnCord-managed companion: report the supervisor's own state,
+			// which probes nothing. Elsewhere (or voice unconfigured) the
+			// hub's LiveKit client is external; probe its health (the probe
+			// bounds itself), or report unconfigured when there is none.
+			if hub.LiveKitManaged() {
+				status := hub.LiveKitProcessStatus()
+				return service.VoiceHealth{
+					Managed:  true,
+					Running:  status.Running,
+					Restarts: status.Restarts,
+					GaveUp:   status.GaveUp,
+				}
+			}
+			if hub.URL() == "" {
+				return service.VoiceHealth{}
+			}
+			reachable, _ := hub.LiveKitHealthCheck(ctx)
+			return service.VoiceHealth{Reachable: &reachable}
+		},
 	})
 }

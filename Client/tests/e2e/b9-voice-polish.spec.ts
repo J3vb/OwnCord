@@ -174,6 +174,9 @@ test.describe("B9-24 video tile overlay keyboard parity", () => {
     }, "/src/components/VideoGrid.ts");
     test.skip(!mounted, "needs the dev server's modules");
     await expect(page.locator("#b9-grid-host .video-cell")).toBeVisible();
+    // The join click leaves the pointer on the sidebar, which the host covers;
+    // park it outside the host so the tile starts un-hovered.
+    await page.mouse.move(900, 600);
   }
 
   test("a tile's audio controls reveal on focus, not only on hover", async ({ page }) => {

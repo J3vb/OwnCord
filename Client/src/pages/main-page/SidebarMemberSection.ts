@@ -8,14 +8,14 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
-import { parseTimestamp } from "@components/message-list/formatting";
+import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import { getRoleIdByName } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import { roleHasPermission } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
-import type { ApiClient } from "@lib/api";
+import { type ApiClient, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { shellText } from "../../i18n/shell";
@@ -36,6 +36,9 @@ export interface SidebarMemberSectionOptions {
   readonly getToast: () => ToastContainer | null;
   /** Start a DM with a user (profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
+  /** Call a user: open/create the 1:1 DM and start a call in it (profile
+   *  popup's Call button, BUG-05). */
+  readonly onCallUser?: (userId: number) => void;
 }
 
 export interface SidebarMemberSectionResult {
@@ -66,7 +69,7 @@ function isBanInForce(user: AdminUser): boolean {
 export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
-  const { api, getToast, onMessageUser } = opts;
+  const { api, getToast, onMessageUser, onCallUser } = opts;
   const unsubs: Array<() => void> = [];
 
   // --- Container ---
@@ -271,7 +274,7 @@ export function createSidebarMemberSection(
       // the REST call can succeed while the socket is down.
       await refreshBanned();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : shellText("members.unbanFailed");
+      const msg = errorText(err, shellText("members.unbanFailed"));
       getToast()?.show(msg, "error");
     }
   }
@@ -280,6 +283,7 @@ export function createSidebarMemberSection(
   const memberList = createMemberList({
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
+    ...(onCallUser !== undefined ? { onCallUser } : {}),
     onReportUser: (userId, name) => {
       // The dialog lives as long as this section (resizeOwner is its lifetime).
       import("../../features/reports/openers").then(
@@ -298,7 +302,7 @@ export function createSidebarMemberSection(
         await api.adminKickMember(userId);
         getToast()?.show(shellText("members.forcedLogout", { username }), "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : shellText("members.forceLogoutFailed");
+        const msg = errorText(err, shellText("members.forceLogoutFailed"));
         getToast()?.show(msg, "error");
       }
     },
@@ -315,7 +319,7 @@ export function createSidebarMemberSection(
         // somewhere or it cannot be undone from here.
         await refreshBanned();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : shellText("members.banFailed");
+        const msg = errorText(err, shellText("members.banFailed"));
         getToast()?.show(msg, "error");
       }
     },
@@ -333,7 +337,7 @@ export function createSidebarMemberSection(
         );
       } catch (err) {
         const fallback = shellText(block ? "members.blockFailed" : "members.unblockFailed");
-        const msg = err instanceof Error ? err.message : fallback;
+        const msg = errorText(err, fallback);
         getToast()?.show(msg, "error");
       }
     },
@@ -348,7 +352,7 @@ export function createSidebarMemberSection(
         await api.adminChangeRole(userId, roleId);
         getToast()?.show(shellText("members.roleChanged", { username, role: newRole }), "success");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : shellText("members.roleChangeFailed");
+        const msg = errorText(err, shellText("members.roleChangeFailed"));
         getToast()?.show(msg, "error");
       }
     },

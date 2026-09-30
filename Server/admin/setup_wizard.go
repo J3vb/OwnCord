@@ -33,6 +33,11 @@ type SetupOptions struct {
 	// not just an address inside admin_allowed_cidrs. Empty = not required
 	// (the direct-construction test path).
 	SetupToken string
+	// LogLevel, when non-nil, backs GET/PATCH /logs/level (SRE-07): the
+	// running log level and a timed debug boost that reverts on its own. Nil
+	// leaves the endpoints answering 503, which is the direct-construction
+	// test path and the one place no *slog.LevelVar exists to retune.
+	LogLevel *LogLevelController
 }
 
 // ─── Wizard payload ──────────────────────────────────────────────────────────
@@ -56,6 +61,11 @@ type setupWizardRequest struct {
 	// VoiceAutoDownload toggles voice.auto_download_livekit — download and
 	// run livekit-server automatically so voice works with zero setup.
 	VoiceAutoDownload *bool `json:"voice_auto_download"`
+	// RecoveryKit asks the server to generate the owner's recovery kit as
+	// part of the first run (B11-8). On unless explicitly false — an absent
+	// field or wizard object still gets one. The kit secret is returned once
+	// on the finish step; only its verifier is stored.
+	RecoveryKit *bool `json:"recovery_kit"`
 }
 
 // setupDefaults is the prefill data the wizard shows. Exposed only while

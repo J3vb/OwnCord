@@ -73,6 +73,12 @@ async function openWithKeyboard(page: Page): Promise<void> {
  * button, never <body> and never a control inside the closed (inert) sidebar.
  */
 async function expectFocusReachable(page: Page): Promise<void> {
+  // A content view's back path restores focus on a 0 ms timer. Equal-delay
+  // timers run in the order they were set, so once this one fires that restore
+  // has run too, and the next step cannot race it on a loaded runner (the
+  // late restore would pull focus to the composer between focusing the menu
+  // button and pressing Enter).
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
   await expect
     .poll(() =>
       page.evaluate(() => {

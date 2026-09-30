@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
@@ -52,6 +53,14 @@ const (
 	// attentionJobFailures consecutive failed runs raise a job warning; one
 	// successful run clears it.
 	attentionJobFailures = 2
+	// A self-signed or manual certificate warns inside attentionCertWarn of
+	// its expiry and is critical inside attentionCertCritical. An ACME
+	// certificate is instead measured against its renewal point, which
+	// autocert sets min(lifetime/3, attentionACMERenewMax) before expiry (see
+	// evalCertificate).
+	attentionCertWarn     = 21 * 24 * time.Hour
+	attentionCertCritical = 7 * 24 * time.Hour
+	attentionACMERenewMax = 30 * 24 * time.Hour
 	// attentionRecoveredKeep is how long a recovered warning stays listed so
 	// an operator who was away still sees what happened.
 	attentionRecoveredKeep = 24 * time.Hour
@@ -67,6 +76,21 @@ type AttentionThresholds struct {
 	DeliveryDropsPerMin   float64
 }
 
+// VoiceHealth is the LiveKit voice path's state, as the attention panel reads
+// it. A managed companion reports its supervisor state (Running/Restarts/
+// GaveUp); externally managed LiveKit reports Reachable from a health probe.
+// Reading it never invents a value: an unconfigured voice path is Managed
+// false with no probe, which the panel reports as unknown.
+type VoiceHealth struct {
+	Managed  bool
+	Running  bool
+	Restarts int
+	GaveUp   bool
+	// Reachable is the external LiveKit health probe's answer. Nil when not
+	// probed (managed, or unconfigured).
+	Reachable *bool
+}
+
 // AttentionSources are the in-process readings the panel reuses. Every
 // counter is cumulative since start; a nil source reports unknown.
 type AttentionSources struct {
@@ -77,6 +101,30 @@ type AttentionSources struct {
 	DispatchAlive  func() bool
 	BackupSchedule func(context.Context) (string, error)
 	LastBackup     func() (time.Time, error)
+	// VoiceHealth reports the LiveKit voice path's state. It receives the
+	// sample context so an external LiveKit can be probed with a bounded
+	// timeout. Nil (no voice, or a bare test service) reports unknown, never
+	// healthy.
+	VoiceHealth func(context.Context) VoiceHealth
+	// Certificate reports tls.mode and the served leaf certificate, zero when
+	// none is known (TLS off, or ACME before its first handshake).
+	Certificate func() (mode string, cert auth.ServedCert)
+}
+
+// BootStatus is what the previous run left in the boot marker (SRE-08):
+// whether the marker was readable, whether the last shutdown was clean, when
+// the previous run started and when it last recovered a panic.
+type BootStatus struct {
+	// Recorded is whether a boot marker was found and read. False on a first
+	// start, which is reported unknown, never a false warning.
+	Recorded bool
+	// Unclean is whether the previous run ended without clearing its marker —
+	// a kill, a crash, or a hardware exit.
+	Unclean bool
+	// StartedAt is when the previous run started, and LastPanicAt the last
+	// panic it recovered (zero if none).
+	StartedAt   time.Time
+	LastPanicAt time.Time
 }
 
 // AttentionSignal is one measurement and its current status.
@@ -132,7 +180,11 @@ type AttentionService struct {
 	writerWait  attentionRate
 	reconnects  attentionRate
 	delivery    attentionRate
+	voice       attentionLevel
 	jobs        []*attentionJob
+	// boot is the previous run's marker, set once at start-up and constant
+	// for this process (SRE-08).
+	boot BootStatus
 }
 
 type attentionJob struct {
@@ -197,6 +249,17 @@ func (s *AttentionService) job(label string) *attentionJob {
 	return nil
 }
 
+// RecordBootStatus records the previous run's marker for the attention panel
+// (SRE-08). It is set once at start-up, before Run samples.
+func (s *AttentionService) RecordBootStatus(b BootStatus) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.boot = b
+}
+
 // Run evaluates now and then every interval until ctx ends.
 func (s *AttentionService) Run(ctx context.Context, interval time.Duration) {
 	s.Evaluate(ctx, time.Now())
@@ -224,6 +287,10 @@ type attentionReadings struct {
 	scheduleErr   error
 	lastBackup    time.Time
 	lastBackupErr error
+	voice         *VoiceHealth
+	certMode      string
+	cert          auth.ServedCert
+	certMeasured  bool
 }
 
 func (s *AttentionService) read(ctx context.Context) attentionReadings {
@@ -258,6 +325,14 @@ func (s *AttentionService) read(ctx context.Context) attentionReadings {
 	if s.src.LastBackup != nil {
 		r.lastBackup, r.lastBackupErr = s.src.LastBackup()
 	}
+	if s.src.VoiceHealth != nil {
+		v := s.src.VoiceHealth(ctx)
+		r.voice = &v
+	}
+	if s.src.Certificate != nil {
+		r.certMode, r.cert = s.src.Certificate()
+		r.certMeasured = true
+	}
 	return r
 }
 
@@ -272,7 +347,7 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	s.evalRate(&s.writerWait, r.writerWait, now, rateSpec{
 		id: "db_writer_wait", label: "Database writer wait", unit: "ms/min", floor: s.thresholds.WriterWaitMsPerMin,
 		title:  "Database writes are queueing",
-		action: "Check Server Logs for long-running writes (backups, retention sweeps, bulk deletes). Sustained waits mean the single SQLite writer is saturated.",
+		action: "Check Server Logs for long-running writes (retention sweeps, bulk deletes). Sustained waits mean the single SQLite writer is saturated.",
 	})
 	s.evalRate(&s.reconnects, r.reconnects, now, rateSpec{
 		id: "reconnects", label: "Client reconnects", unit: "/min", floor: s.thresholds.ReconnectsPerMin,
@@ -287,6 +362,9 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 		dead:   !r.dispatchAlive,
 	})
 	s.evalBackup(r, now)
+	s.evalVoice(r, now)
+	s.evalCertificate(r, now)
+	s.evalBootStatus(now)
 	s.evalJobs(now)
 	for id, w := range s.warnings {
 		if w.RecoveredAt != nil && now.Sub(*w.RecoveredAt) > attentionRecoveredKeep {

@@ -1,5 +1,39 @@
 import { describe, it, expect } from "vitest";
-import { parseInviteLink, parseMessageLink, formatMessageLink } from "@lib/deep-link";
+import {
+  parseInviteLink,
+  parseMessageLink,
+  formatMessageLink,
+  normaliseInviteCode,
+} from "@lib/deep-link";
+
+describe("normaliseInviteCode", () => {
+  it("trims and lower-cases a typed code", () => {
+    // Server codes are 16-char lower-case hex, and redemption is an exact,
+    // case-sensitive match, so a pasted-capitals code would 400.
+    expect(normaliseInviteCode("  ABCD1234  ")).toBe("abcd1234");
+  });
+
+  it("accepts a pasted owncord://invite/<code> link", () => {
+    expect(normaliseInviteCode("owncord://invite/ABCD1234")).toBe("abcd1234");
+  });
+
+  it("accepts a bare owncord://<code> link", () => {
+    expect(normaliseInviteCode("owncord://AbCd1234")).toBe("abcd1234");
+  });
+
+  it("ignores the link's host query and still lower-cases the code", () => {
+    expect(normaliseInviteCode("owncord://invite/AbCd1234?host=chat.example.com")).toBe("abcd1234");
+  });
+
+  it("returns an empty string for empty or whitespace-only input", () => {
+    expect(normaliseInviteCode("")).toBe("");
+    expect(normaliseInviteCode("   ")).toBe("");
+  });
+
+  it("passes a non-link through trimmed and lower-cased", () => {
+    expect(normaliseInviteCode("  NOT-A-LINK ")).toBe("not-a-link");
+  });
+});
 
 describe("parseInviteLink", () => {
   it("parses owncord://invite/<code>", () => {
@@ -91,5 +125,31 @@ describe("parseMessageLink", () => {
     const url = formatMessageLink(7, 1234);
     expect(url).toBe("owncord://message/7/1234");
     expect(parseMessageLink(url)).toEqual({ channelId: 7, messageId: 1234 });
+  });
+
+  it("parses the optional host a notification's launch URI carries", () => {
+    // The Windows toast sets its launch URI to this shape (see
+    // src-tauri/src/message_notification.rs) so a click from Action Center
+    // still names the server it came from.
+    expect(parseMessageLink("owncord://message/5/42?host=chat.example:8443")).toEqual({
+      channelId: 5,
+      messageId: 42,
+      host: "chat.example:8443",
+    });
+  });
+
+  it("URL-decodes and trims the launch URI's host", () => {
+    expect(parseMessageLink("owncord://message/5/42?host=%20a.example%20")).toEqual({
+      channelId: 5,
+      messageId: 42,
+      host: "a.example",
+    });
+  });
+
+  it("treats an empty host as absent", () => {
+    expect(parseMessageLink("owncord://message/5/42?host=")).toEqual({
+      channelId: 5,
+      messageId: 42,
+    });
   });
 });

@@ -38,14 +38,14 @@ import type {
   NativeVoiceTrack,
 } from "../../../platform/contracts/nativeVoice";
 import { nativeCounters } from "./counters";
+
+/** OC-0473: how long a remote participant's frames may stay undecryptable
+ *  before the call counts as not secured — the web path's DECRYPT_GRACE_MS
+ *  (OC-0452, `lib/roomEventHandlers.ts`), which tolerates a key-rotation race. */
+const DECRYPT_GRACE_MS = 3000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { CameraUplink } from "./cameraUplink";
-import {
-  NativeScreenTrack,
-  captureOptions,
-  startError,
-  type ScreenCaptureRequest,
-} from "./screenTrack";
+import { NativeScreenTrack, startError } from "./screenTrack";
 import { pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
@@ -161,6 +161,9 @@ export class NativeRoom {
    *  has no browser peer connection, so they see "no transports". */
   readonly engine = { pcManager: undefined, client: { ws: undefined } };
   readonly remoteParticipants = new Map<string, NativeRemoteParticipant>();
+  /** OC-0473: one pending degrade per remote identity whose frames stopped
+   *  decrypting; cleared when they decrypt again or the peer leaves. */
+  private readonly decryptTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly localParticipant = {
     identity: "",
     permissions: undefined,
@@ -185,10 +188,10 @@ export class NativeRoom {
     },
     /** The native stand-in for `createLocalScreenTracks`: pick, then capture
      *  in the host. Resolves once the capture delivers its first frame. */
-    createScreenTracks: (options?: ScreenCaptureRequest) => this.createScreenTracks(options),
+    createScreenTracks: () => this.createScreenTracks(),
     publishTrack: (track: PublishableTrack, options: PublishOptions) =>
       (options.source ?? track.source) === "screen_share"
-        ? this.publishScreen(track, options)
+        ? this.publishScreen(track)
         : this.publishCamera(track, options),
     /** Takes the `mediaStreamTrack`, as the shared camera and screen-share
      *  paths pass it. */
@@ -305,6 +308,7 @@ export class NativeRoom {
     this.releaseSubscription();
     this.pending = null;
     this.releaseVideo();
+    this.clearDecryptTimers();
     if (id === null) return;
     this.sessionId = null;
     if (this.counted) nativeCounters.openRooms--;
@@ -370,17 +374,19 @@ export class NativeRoom {
       await desktop.nativeVoice.unpublishCamera(this.sessionId, camera.trackSid);
   }
 
-  private async createScreenTracks(options?: ScreenCaptureRequest): Promise<NativeScreenTrack[]> {
+  private async createScreenTracks(): Promise<NativeScreenTrack[]> {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     const session = this.sessionId;
-    const source = await pickScreenSource();
+    const pick = await pickScreenSource();
     // i18n-exempt: NotAllowedError signal for the shared screen-share code, not display text
-    if (source === null) throw new DOMException("Screen share cancelled", "NotAllowedError");
+    if (pick === null) throw new DOMException("Screen share cancelled", "NotAllowedError");
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId !== session) throw new Error("native room disconnected during screen pick");
+    // The picker resolved the capture pacing and size from the quality and fps
+    // chosen in the dialog (defaulted from the saved prefs).
     const started = await desktop.nativeVoice
-      .startScreen(session, source, captureOptions(options))
+      .startScreen(session, pick.source, pick.capture)
       .catch((err: unknown) => {
         throw startError(err);
       });
@@ -389,8 +395,11 @@ export class NativeRoom {
       // i18n-exempt: internal native-room state guard, never rendered
       throw new Error("native room disconnected during screen capture");
     }
-    const track = new NativeScreenTrack(started, `${this.frames}/screen`, (t) =>
-      this.stopScreen(session, t),
+    const track = new NativeScreenTrack(
+      started,
+      `${this.frames}/screen`,
+      (t) => this.stopScreen(session, t),
+      { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate },
     );
     this.screen?.stop();
     this.screen = track;
@@ -410,19 +419,15 @@ export class NativeRoom {
       .catch((err) => log.warn("native stopScreen failed", { capture: track.capture, err }));
   }
 
-  private async publishScreen(
-    track: PublishableTrack,
-    options: PublishOptions,
-  ): Promise<NativeLocalPublication> {
+  private async publishScreen(track: PublishableTrack): Promise<NativeLocalPublication> {
     // i18n-exempt: internal native-room state guard, never rendered
     if (this.sessionId === null) throw new Error("native room is not connected");
     if (!(track instanceof NativeScreenTrack))
       // i18n-exempt: internal unsupported-path guard, never rendered
       throw unsupported("publishing a browser screen track");
-    const encoding = options.videoEncoding;
-    if (encoding?.maxFramerate === undefined)
-      // i18n-exempt: internal publish-config guard, never rendered
-      throw new Error("native screen publish needs videoEncoding.maxBitrate and maxFramerate");
+    // The picker's per-share quality, not the shared path's saved-quality
+    // publish options, sets the encoding.
+    const encoding = track.publishEncoding;
     const session = this.sessionId;
     const sid = await desktop.nativeVoice.publishScreen(session, track.capture, {
       width: track.width,
@@ -564,10 +569,21 @@ export class NativeRoom {
       pub.setSubscribed(false);
   }
 
+  private clearDecryptTimer(identity: string): void {
+    clearTimeout(this.decryptTimers.get(identity));
+    this.decryptTimers.delete(identity);
+  }
+
+  private clearDecryptTimers(): void {
+    for (const timer of this.decryptTimers.values()) clearTimeout(timer);
+    this.decryptTimers.clear();
+  }
+
   private apply(event: NativeVoiceEvent): void {
     switch (event.type) {
       case "connected":
         this.releaseVideo();
+        this.clearDecryptTimers();
         this.remoteParticipants.clear();
         for (const info of event.participants) {
           this.participant(info.identity);
@@ -584,6 +600,7 @@ export class NativeRoom {
         for (const pub of p?.trackPublications.values() ?? [])
           this.unsubscribeVideo(event.identity, pub);
         this.remoteParticipants.delete(event.identity);
+        this.clearDecryptTimer(event.identity);
         if (p !== undefined) this.emit(RoomEvent.ParticipantDisconnected, p);
         break;
       }
@@ -624,11 +641,34 @@ export class NativeRoom {
         if (this.screen?.capture === event.capture) this.screen.end();
         break;
       case "encryptionStatus":
-        // The backend's only signal that frames are not being protected —
-        // surface it the way the web path surfaces a dead E2EE worker.
-        if (!event.encrypted && event.identity === this.localParticipant.identity)
-          // i18n-exempt: internal E2EE state guard, never rendered
-          this.emit(RoomEvent.EncryptionError, new Error("native E2EE not active"));
+        if (event.identity === this.localParticipant.identity) {
+          // The backend's only signal that frames are not being protected —
+          // surface it the way the web path surfaces a dead E2EE worker.
+          if (!event.encrypted)
+            // i18n-exempt: internal E2EE state guard, never rendered
+            this.emit(RoomEvent.EncryptionError, new Error("native E2EE not active"));
+          break;
+        }
+        // OC-0473: a remote peer's frames stopped (or resumed) decrypting.
+        // The backend reports each transition once, so the web path's
+        // streak logic cannot run here: degrade only if no `encrypted`
+        // arrives for that peer within the grace window. Tracked per
+        // identity, so a peer whose audio decrypts while its camera does not
+        // reads as decrypting (the pre-OC-0473 behaviour for that case).
+        this.clearDecryptTimer(event.identity);
+        if (!event.encrypted) {
+          const identity = event.identity;
+          this.decryptTimers.set(
+            identity,
+            setTimeout(() => {
+              this.decryptTimers.delete(identity);
+              const p = this.remoteParticipants.get(identity);
+              if (p !== undefined)
+                // i18n-exempt: internal E2EE state guard, never rendered
+                this.emit(RoomEvent.EncryptionError, new Error("native decrypt failure"), p);
+            }, DECRYPT_GRACE_MS),
+          );
+        }
         break;
       case "reconnecting":
         this.state = "reconnecting";
@@ -640,6 +680,7 @@ export class NativeRoom {
         break;
       case "disconnected":
         this.state = "disconnected";
+        this.clearDecryptTimers();
         this.emit(
           RoomEvent.Disconnected,
           event.reason === "ClientInitiated"

@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 	"testing/fstest"
 
@@ -190,6 +192,68 @@ func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
 	}
 }
 
+// TestBackupChecks_URIMetacharactersInPath: the restore CLI verifies a file
+// the operator names, and SQLite reads its path as a URI. A '#', '?' or '%' in
+// the name must still check that very file — not open (and create) a
+// different one and report it "ok".
+func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	plain := filepath.Join(backupDir, "plain.db")
+	if err := database.BackupToSafe(context.Background(), plain, backupDir); err != nil {
+		t.Fatalf("BackupToSafe: %v", err)
+	}
+	wantAhead, err := db.CheckBackupSchemaAhead(context.Background(), plain)
+	if err != nil {
+		t.Fatalf("CheckBackupSchemaAhead on the plain name: %v", err)
+	}
+	data, err := os.ReadFile(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oddDir := filepath.Join(tmpDir, "odd")
+	if err := os.MkdirAll(oddDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "chat#2%41"
+	if runtime.GOOS != "windows" {
+		name += "?x"
+	}
+	good := filepath.Join(oddDir, name+".db")
+	bad := filepath.Join(oddDir, name+"-bad.db")
+	if err := os.WriteFile(good, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte("this is not a sqlite database at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.CheckBackupIntegrity(context.Background(), good); err != nil {
+		t.Fatalf("CheckBackupIntegrity on %q: %v", good, err)
+	}
+	if err := db.CheckBackupIntegrity(context.Background(), bad); err == nil {
+		t.Fatalf("CheckBackupIntegrity accepted the garbage file %q", bad)
+	}
+	gotAhead, err := db.CheckBackupSchemaAhead(context.Background(), good)
+	if err != nil || !slices.Equal(gotAhead, wantAhead) {
+		t.Fatalf("CheckBackupSchemaAhead on %q = %v, %v; want %v", good, gotAhead, err, wantAhead)
+	}
+
+	entries, err := os.ReadDir(oddDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if n := e.Name(); n != filepath.Base(good) && n != filepath.Base(bad) {
+			t.Errorf("the checks created a stray file %q", n)
+		}
+	}
+}
+
 // TestBackupToSafe_RejectsDoubleQuote ensures a path containing a double-quote
 // is rejected.
 func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {
@@ -203,5 +267,57 @@ func TestBackupToSafe_RejectsDoubleQuote(t *testing.T) {
 	err := database.BackupToSafe(context.Background(), malicious, backupDir)
 	if err == nil {
 		t.Error("BackupToSafe() with double-quote in path should return error, got nil")
+	}
+}
+
+// TestBackupTo_RejectsPathOutsideDataBackups: the production entry point pins
+// its safe root to data/backups, so a destination anywhere else is refused
+// before a byte is written.
+func TestBackupTo_RejectsPathOutsideDataBackups(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	outside := filepath.Join(tmpDir, "outside.db")
+	if err := database.BackupTo(context.Background(), outside); err == nil {
+		t.Fatal("BackupTo accepted a path outside data/backups")
+	}
+	if _, err := os.Stat(outside); !os.IsNotExist(err) {
+		t.Fatalf("a refused backup left a file behind (stat err=%v)", err)
+	}
+}
+
+// TestBackupToSafe_MissingDirectoryFails: a destination directory that does
+// not exist is an error, not a silently created tree.
+func TestBackupToSafe_MissingDirectoryFails(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	missing := filepath.Join(backupDir, "not-there")
+	if err := database.BackupToSafe(context.Background(), filepath.Join(missing, "b.db"), backupDir); err == nil {
+		t.Fatal("BackupToSafe into a missing directory should fail")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("a failed backup created its directory (stat err=%v)", err)
+	}
+}
+
+// TestBackupToSafe_ParentIsAFileFails: a destination whose parent is a regular
+// file cannot be checked for existence, so it is refused and the file that is
+// in the way is left alone.
+func TestBackupToSafe_ParentIsAFileFails(t *testing.T) {
+	database, tmpDir := newBackupFileDB(t)
+
+	backupDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	blocker := filepath.Join(backupDir, "blocker")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.BackupToSafe(context.Background(), filepath.Join(blocker, "b.db"), backupDir); err == nil {
+		t.Fatal("BackupToSafe under a regular file should fail")
+	}
+	if got, err := os.ReadFile(blocker); err != nil || string(got) != "not a directory" {
+		t.Fatalf("the file in the way was touched: %q, %v", got, err)
 	}
 }

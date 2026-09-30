@@ -27,6 +27,8 @@ export const connectText = defineCatalog("connect", {
   "update.available": "Update v{version} available",
   "update.now": "Update Now",
   "update.later": "Later",
+  "update.smartScreen":
+    "Windows will show “Windows protected your PC” because this installer is not signed. Choose More info, then Run anyway to continue.",
   "update.installedRestarting": "Update installed. Restarting…",
   "update.installedRestart": "Update installed. Please restart OwnCord to finish.",
   "update.failed": "Update failed. Please try again later.",
@@ -47,7 +49,10 @@ export const connectText = defineCatalog("connect", {
   "servers.autoLogin.enable": "Enable auto-login",
   "servers.autoLogin.enabled": "Auto-login enabled",
   "servers.delete": "Delete server",
-  "servers.latency": "{ms}ms",
+  // This number times one REST call through the desktop TLS tunnel (a fresh
+  // connection and handshake per request, about 3× the network RTT), so it is
+  // labelled "response time" rather than claimed to be a ping.
+  "servers.latency": "{ms}ms response time",
   "servers.online": "{count} online",
   "servers.clientUpdateNeeded": "Client update needed",
   "servers.serverUpdateNeeded": "Server update needed",
@@ -113,7 +118,7 @@ export const connectText = defineCatalog("connect", {
   "cert.mismatch.title": "Certificate Warning",
   "cert.mismatch.heading": "Certificate Changed",
   "cert.mismatch.description":
-    "The server's TLS certificate fingerprint has changed. This could mean the server regenerated its certificate, or it could indicate a security issue.",
+    "This server is presenting a different certificate from the one you trusted before. Routine renewals from public certificate authorities no longer prompt, so seeing this on a server you use regularly deserves extra care: verify the fingerprint with the owner before accepting. Ask the server owner for the current fingerprint through another channel, such as a call or a chat outside OwnCord (the owner finds it on the admin Dashboard), and accept only if it matches Current below, character for character. If it does not match, or you cannot check, choose Disconnect.",
   "cert.mismatch.previous": "Previous",
   "cert.mismatch.current": "Current",
   "cert.mismatch.reject": "Disconnect",
@@ -132,12 +137,49 @@ export const connectText = defineCatalog("connect", {
   "connected.ready": "Ready!",
 
   "session.expired": "Your session expired — sign in again.",
-  "session.serverShutdown": "The server was shut down — you have been signed out.",
-  "session.serverRestarting": "Server is restarting: {reason}",
-  "session.restartReasonDefault": "maintenance",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
   "error.rateLimited": "Too many requests. Try again later.",
+  "error.accountLocked":
+    "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",
+  "error.totpTooManyAttempts": "Too many incorrect codes. Try again later.",
+  "error.registrationQueueFull":
+    "This server is not accepting new applications right now. Try again later.",
+  "error.loginUnavailable": "Sign-in is temporarily unavailable. Try again shortly.",
+  "error.registrationFailed": "Registration failed. Please try again.",
+  "error.recoveryLocked":
+    "Account recovery is temporarily locked after too many failed attempts. Try again later.",
+  "error.tooManyAttempts": "Too many failed attempts. Try again later.",
+  "error.registrationRateLimited":
+    "Too many accounts have been created from this network. Try again later.",
+  "error.authBusy": "The server is busy right now. Try again in a moment.",
+  "error.couldNotComplete": "The server could not complete that right now. Try again shortly.",
+  "error.recoveryCredentialBudget":
+    "Too many recovery credentials have been issued. Try again later.",
+  "error.registrationUnavailable": "Registration is temporarily unavailable. Try again shortly.",
+  "error.sessionFailed": "Could not start your session. Try signing in again.",
+  "error.registeredSignInFailed":
+    "Your account was created, but signing in failed. Sign in to continue.",
+  "error.totpUnavailable": "Two-factor verification is temporarily unavailable. Try again shortly.",
+  "error.logoutFailed": "Could not sign out. Try again.",
+  "error.deleteAccountFailed": "Could not delete your account. Try again.",
+  "error.totpEnableFailed": "Could not turn on two-factor authentication. Try again.",
+  "error.totpDisableFailed": "Could not turn off two-factor authentication. Try again.",
+  "error.recoveryCodesFailed": "Could not create new recovery codes. Try again.",
+  "error.recoveryFailed": "Account recovery failed. Please try again.",
+  "error.recoveryKitFailed": "Could not create a recovery kit. Try again.",
+  "error.recoveryCredentialFailed": "Could not issue a recovery credential. Try again.",
+  "error.unauthorized": "Your session has expired — sign in again.",
+  "error.invalidCredentials": "Incorrect username or password.",
+  "error.forbidden": "You don't have permission to do that.",
+  "error.notFound": "That item no longer exists.",
+  "error.banned": "Your account has been suspended.",
+  "error.unavailable": "The server is temporarily unavailable. Try again.",
+  "error.storageQuota": "Your storage is full — delete files or ask a server admin.",
+  "error.storageLowDisk": "The server is low on disk space — try again later.",
+  "error.storageError": "The server could not store that. Try again.",
+  "error.gifDisabled": "GIF search is not configured on this server.",
+  "error.pushDisabled": "Notifications are not enabled on this server.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
   "session.savedLoginUnavailable":
@@ -152,6 +194,8 @@ export const connectText = defineCatalog("connect", {
   "app.dmNoMessages": "No messages yet",
   "app.dmCreateFailed": "Failed to create DM",
   "app.dmCreateGroupFailed": "Failed to create group DM",
+  "app.sendBeforeRestore":
+    "The server was restored — check the conversation before sending this again.",
 
   "dm.emptyGroup": "Empty group",
   "dm.unknownUser": "Unknown user",
@@ -160,6 +204,7 @@ export const connectText = defineCatalog("connect", {
   "notifications.channelFallback": "Channel {id}",
   "notifications.mentioned": "{author} mentioned you in {channel}",
   "notifications.inChannel": "{author} in {channel}",
+  "notifications.spoiler": "Spoiler",
   "retention.kept": "keeps messages until they are deleted",
   "retention.deleted": {
     one: "deletes messages after {days} day",

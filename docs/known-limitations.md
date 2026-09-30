@@ -16,13 +16,17 @@ Each item links to the guidance that owns it.
   public domain the recommended setup is a reverse proxy you trust to own
   renewal — see [TLS Setup](deployment.md#tls-setup) and
   [What this build does not do](port-forwarding.md#what-this-build-does-not-do).
-- **A certificate renewal looks like a man-in-the-middle to desktop clients.**
-  Every `tls.mode` pins the certificate on first contact, so a public-CA renewal
-  or a proxy rotation changes the fingerprint and shows every user the
-  "Certificate Changed" prompt. Have them compare the new fingerprint out of
-  band before accepting; accepting a mismatch is indistinguishable from
-  accepting an interception — see
-  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
+- **A certificate change that is not a public-CA renewal looks like a
+  man-in-the-middle to desktop clients.** Every `tls.mode` pins the certificate
+  on first contact. A routine renewal where the old and the new certificate are
+  both publicly valid for the server's domain (Let's Encrypt, or a reverse
+  proxy using a public CA) is re-pinned without a prompt. Any other change — a
+  rotated self-signed or private-CA certificate, or any certificate on an
+  IP-address server — shows every user the "Certificate Changed" prompt. Have
+  them compare the new fingerprint out of band before accepting; accepting a
+  mismatch is indistinguishable from accepting an interception — see
+  [Publishing the fingerprint after a renewal](deployment.md#publishing-the-fingerprint-after-a-renewal)
+  and [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
 
 ## First-run defaults we chose not to change (accepted for beta)
 
@@ -40,21 +44,23 @@ Each item links to the guidance that owns it.
 
 ## Operating limits
 
-- **Owner lockout has no self-service fix.** An owner cannot issue their own
-  recovery, the setup wizard does not hand out a recovery kit, and
-  `chatserver token create` cannot reset a password. For beta the answer is:
-  restore `data/` from your archive and re-run setup, or recover through a
-  configured recovery kit — see [Backup Strategy](deployment.md#backup-strategy)
-  and [Restore](deployment.md#restore). A setup-time recovery kit is post-beta.
-- **Restore needs a running server or the archive.** The only in-product restore
-  is `POST /admin/api/backups/{name}/restore`, which needs the server (and the
-  admin panel) to be up. A server that will not boot has only the full-archive
-  procedure — [Restoring without a running server](deployment.md#restoring-without-a-running-server).
-  A `chatserver restore <file>` command is post-beta.
+- **Owner lockout has no self-service fix after setup.** An owner cannot issue
+  their own recovery, and `chatserver token create` cannot reset a password.
+  The setup wizard offers to generate a recovery kit for the owner at first
+  run, and one can be enrolled any time from the desktop client; without a kit,
+  the answer is: restore `data/` from your archive and re-run setup — see
+  [Backup Strategy](deployment.md#backup-strategy) and
+  [Restore](deployment.md#restore).
+- **Restore needs a running server or the CLI.** `POST /admin/api/backups/{name}/restore`
+  is the in-product path and needs the server (and the admin panel) to be up.
+  When the server will not boot, `chatserver restore [--force] <file>` puts a
+  database backup back offline; a full archive is still the supported path for
+  a whole-state rollback — [Restoring without a running server](deployment.md#restoring-without-a-running-server).
 - **Health is poll-only.** `/health` answers, but the server never pushes an
   alert and Docker only _surfaces_ `unhealthy` rather than restarting on it.
-  Point an uptime monitor at `/health` yourself — see
-  [Health Endpoint](deployment.md#health-endpoint).
+  Point an uptime monitor at `/health` and, for voice,
+  `/api/v1/livekit/health` yourself — see
+  [Monitor voice as well as liveness](deployment.md#monitor-voice-as-well-as-liveness).
 - **ARM64 server upgrades are not rehearsed.** ARM64 assets are
   lifecycle-checked (boot, migrate, drain, restart) but there is no published
   ARM64 alpha to upgrade _from_ yet — see
@@ -75,10 +81,24 @@ Each item links to the guidance that owns it.
 
 ## Voice and video
 
-- Voice media needs UDP `50000-60000` (and TCP `7881`) reachable on the LiveKit
+- Voice media needs a reachable UDP port — `50000-60000` by default, or the
+  single `voice.udp_port` when set (and TCP `7881`) on the LiveKit
   host; an HTTP reverse proxy cannot carry it. "Joins but no audio" is almost
   always a missing forwarding rule or a wrong `voice.node_ip` — see
   [Port Forwarding](port-forwarding.md).
+- **Linux voice needs a server on 2.0.0-beta.1 or later.** The Linux client's
+  native voice engine sends its room credential as an HTTP header, and servers
+  from the `1.2.0-alpha.*` series drop that header and refuse the join. Update
+  the server — [Linux desktop voice](deployment.md#linux-desktop-voice).
+- **On Linux, a 2.0.0-beta.1 or older client that reaches a 2.0.0-beta.1 or
+  older Docker Compose server on the same machine as `localhost` cannot join
+  voice.** Those servers hand the client LiveKit's container-internal address
+  (`ws://livekit:7880`), which does not resolve outside the container network,
+  and those clients use it as-is for a `localhost` server. Update the server or
+  the client — the next release of either fixes it — or connect using the
+  host's LAN address or hostname instead, so voice goes through the server's
+  `/livekit` tunnel —
+  [Linux desktop voice](deployment.md#linux-desktop-voice).
 
 ## FAQ
 
@@ -95,8 +115,9 @@ of band and have the user compare it before accepting —
 [Clients see a certificate mismatch](deployment.md#clients-see-a-certificate-mismatch).
 
 **Voice joins but nobody hears anything.**
-The UDP media range is not forwarded, or `voice.node_ip` is not your public
-address. Both checks are in the
+The UDP media port is not forwarded, or a pinned `voice.node_ip` is not your
+current public address (leave it empty so LiveKit detects it, and restart after
+the address changes). Both checks are in the
 [Port Forwarding Guide](port-forwarding.md); the server cannot see this
 failure because the media never reaches it.
 
@@ -105,6 +126,11 @@ failure because the media never reaches it.
 `server.admin_allowed_cidrs`, which defaults to loopback and private networks.
 On a VPS, use an SSH tunnel or add your address to that setting — see
 [Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
+
+**Voice works on Windows and macOS, but not on Linux.**
+Two known cases, both in [Voice and video](#voice-and-video): the server is an
+older `1.2.0-alpha.*` release, or a 2.0.0-beta.1 or older Linux client reaches a
+Docker Compose server on the same machine as `localhost`.
 
 ## See also
 

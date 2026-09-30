@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { notifyIncomingMessage, cleanupNotificationAudio } from "../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  openMessageTarget,
+  resetNotificationCoalescing,
+} from "../../src/lib/notifications";
+import { cleanupNotificationAudio } from "../../src/lib/notificationSound";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -8,6 +13,8 @@ import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setMessageJumpHandler } from "../../src/lib/message-navigation";
 
 // The three tests that assert on the logger's debug lines raise the level the
 // global setup lowered (C-04) for themselves; this puts it back.
@@ -43,6 +50,13 @@ const { shouldTauriNotifThrow } = vi.hoisted(() => ({
   shouldTauriNotifThrow: { value: false },
 }));
 
+// The shared notification mock. The native path now shows a *message*
+// notification through the host's `notify_message` command (so a click can
+// open the message), and the plugin's `sendNotification` is only reached when
+// that command is unavailable — so the mocked invoker forwards to it, and the
+// existing title/body assertions keep observing the same call.
+const { sendNotificationMock } = vi.hoisted(() => ({ sendNotificationMock: vi.fn() }));
+
 // Mock Tauri notification plugin (not available in test env)
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(() => {
@@ -50,7 +64,22 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
     return Promise.resolve(true);
   }),
   requestPermission: vi.fn().mockResolvedValue("granted"),
-  sendNotification: vi.fn(),
+  sendNotification: sendNotificationMock,
+}));
+
+// Mock the Tauri core invoker: `notify_message` records the same title/body a
+// `sendNotification` call used to.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn((cmd: string, args: { title: string; body: string }) => {
+    if (cmd === "notify_message") sendNotificationMock({ title: args.title, body: args.body });
+    return Promise.resolve();
+  }),
+}));
+
+// Mock the Tauri event API: no native host in the test env, so a subscription
+// simply never delivers.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
 // Mock Tauri window API
@@ -110,6 +139,14 @@ class MockAudioContext {
 describe("notifyIncomingMessage", () => {
   beforeEach(() => {
     testPrefs.clear();
+    // Coalescing state is module-level and keyed by channel id; clear it so a
+    // burst test cannot suppress the next test's single message.
+    resetNotificationCoalescing();
+
+    // These cases describe the pre-level behaviour (every non-active message
+    // notifies), i.e. the "All" level. The level's own default and gate are
+    // covered by notification-level.test.ts and the level cases below.
+    testPrefs.set("notificationLevel", "all");
 
     // Set up auth store with a different user
     authStore.setState(() => ({
@@ -755,7 +792,7 @@ describe("notifyIncomingMessage", () => {
 
     // OC-0233: the popup that tells you who wrote to you has to name them the
     // same way the message row you click through to does. resolveAuthor
-    // (message-list/formatting.ts) prefers the live membersStore copy of the
+    // (lib/formatting.ts) prefers the live membersStore copy of the
     // author's nickname over whatever was frozen into the payload.
     it("titles the notification with the member store's nickname, not the raw username", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
@@ -1336,6 +1373,193 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
+  describe("notification level (U1b)", () => {
+    it("Nothing silences the popup, the chime and the taskbar flash even for a mention", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+      mockOscillator.start.mockClear();
+      testPrefs.set("notificationLevel", "nothing");
+
+      notifyIncomingMessage(
+        makePayload({ content: "hey @Me", mentions: [1], mentions_everyone: false }),
+      );
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(mockOscillator.start).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
+    });
+
+    it("Mentions only suppresses a plain message but not one that names you", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "mentions");
+
+      notifyIncomingMessage(makePayload({ content: "just chatter", mentions: [] }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+
+      notifyIncomingMessage(
+        makePayload({ content: "hey @Me", mentions: [1], mentions_everyone: false }),
+      );
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+
+    it("treats a DM as addressed to you at Mentions only", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("notificationLevel", "mentions");
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+
+      notifyIncomingMessage(
+        makePayload({
+          channel_id: 55,
+          content: "hey",
+          user: { id: 2, username: "bob", avatar: null },
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe("notification coalescing (U1c)", () => {
+    // Messages in a burst arrive at slightly different times, so each test
+    // awaits the previous notification's async chain before sending the next
+    // (two concurrent dynamic imports of the mocked notifier in one tick do not
+    // both resolve under vitest). Date.now is mocked, so this costs no window.
+    it("collapses a burst of channel messages into one popup", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1, content: "one" }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(makePayload({ id: 2, content: "two" }));
+      now.mockReturnValue(1_000_200);
+      notifyIncomingMessage(makePayload({ id: 3, content: "three" }));
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+      now.mockRestore();
+    });
+
+    it("notifies again once the coalescing window has passed", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_000 + 6000);
+      notifyIncomingMessage(makePayload({ id: 2 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
+    });
+
+    it("always lets a mention through a burst", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1, content: "chatter" }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(
+        makePayload({ id: 2, content: "hey @Me", mentions: [1], mentions_everyone: false }),
+      );
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
+    });
+
+    it("collapses a burst of direct messages like any channel", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 55,
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      const dm = (id: number) =>
+        makePayload({ id, channel_id: 55, user: { id: 2, username: "bob", avatar: null } });
+
+      notifyIncomingMessage(dm(1));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(dm(2));
+      now.mockReturnValue(1_000_200);
+      notifyIncomingMessage(dm(3));
+
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+      now.mockRestore();
+    });
+
+    it("coalesces per channel, not globally", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+
+      notifyIncomingMessage(makePayload({ id: 1, channel_id: 1 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockReturnValue(1_000_100);
+      notifyIncomingMessage(makePayload({ id: 2, channel_id: 2 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
+    });
+  });
+
   describe("playNotificationSound: oscillator params", () => {
     it("sets frequency to 800 then 600", () => {
       mockOscillator.frequency.setValueAtTime.mockClear();
@@ -1595,6 +1819,113 @@ describe("notifyIncomingMessage", () => {
 
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("click-to-open (U1d)", () => {
+    it("shows the message notification with the channel and message it points at", async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      (invoke as ReturnType<typeof vi.fn>).mockClear();
+      testPrefs.set("desktopNotifications", true);
+      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("notificationSounds", false);
+
+      notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+
+      await vi.waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith(
+          "notify_message",
+          expect.objectContaining({ channelId: 7, messageId: 42 }),
+        );
+      });
+    });
+
+    it.each([
+      ["opens the message", "a.example", [[7, 42]]],
+      ["ignores a click once signed into another server", "b.example", []],
+    ])(
+      "falls back to the Web Notification API, whose click %s",
+      async (_name, hostAtClick, expectedJumps) => {
+        const { invoke } = await import("@tauri-apps/api/core");
+        (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("no native host"));
+        const shown: EventTarget[] = [];
+        const mockWebNotification = vi.fn(function () {
+          const popup = new EventTarget();
+          shown.push(popup);
+          return popup;
+        });
+        const originalNotification = globalThis.Notification;
+        (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
+          permission: "granted",
+          requestPermission: vi.fn(),
+        });
+        const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+        const jump = vi.fn();
+        const unregister = setMessageJumpHandler(jump);
+        setChannelMutesHost("a.example");
+        testPrefs.set("desktopNotifications", true);
+        testPrefs.set("flashTaskbar", false);
+        testPrefs.set("notificationSounds", false);
+
+        try {
+          notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
+
+          await vi.waitFor(() => {
+            expect(shown).toHaveLength(1);
+          });
+          setChannelMutesHost(hostAtClick);
+          shown[0]!.dispatchEvent(new Event("click"));
+
+          expect(focus).toHaveBeenCalledOnce();
+          expect(jump.mock.calls).toEqual(expectedJumps);
+        } finally {
+          focus.mockRestore();
+          unregister();
+          setChannelMutesHost(null);
+          (globalThis as Record<string, unknown>).Notification = originalNotification;
+        }
+      },
+    );
+  });
+
+  describe("openMessageTarget (the shared deep-link / notification guard)", () => {
+    it("opens a target that named the signed-in server", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      setChannelMutesHost("a.example");
+      try {
+        openMessageTarget(7, 42, "a.example");
+        expect(jump.mock.calls).toEqual([[7, 42]]);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("opens a link that named no server — a permalink pasted into chat", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      setChannelMutesHost("a.example");
+      try {
+        openMessageTarget(7, 42);
+        expect(jump.mock.calls).toEqual([[7, 42]]);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("ignores a target that named another server", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      setChannelMutesHost("b.example");
+      try {
+        openMessageTarget(7, 42, "a.example");
+        expect(jump).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
     });
   });
 });

@@ -28,7 +28,7 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    starting with `change-me`) the same way it refuses the `devkey` dev
    defaults: voice stays off and a start-up warning says why.
 
-2. **Edit `livekit.yaml`** (copy from `livekit.yaml.example`) — use the same key/secret and set your public IP:
+2. **Edit `livekit.yaml`** (copy from `livekit.yaml.example`) — use the same key/secret:
 
    ```yaml
    port: 7880
@@ -36,14 +36,26 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
      tcp_port: 7881
      port_range_start: 50000
      port_range_end: 60000
-     node_ip: "YOUR_SERVER_PUBLIC_IP" # required for remote clients
+     use_external_ip: true # LiveKit detects the public IP on every start
    keys:
      my-unique-key: my-secret-at-least-32-characters-long
    logging:
      level: info
    ```
 
-3. **In `config.yaml`** (copied from `config.yaml.example`), set `voice.livekit_url` to `ws://livekit:7880` (Docker DNS) and `voice.auto_download_livekit` to `false`, and leave `voice.livekit_binary` unset — see [Deployment — config.yaml for Docker](deployment.md#configyaml-for-docker).
+   **Single-port option.** To forward one UDP port instead of the 10,000-port
+   range, replace `port_range_start`/`port_range_end` with `udp_port: 7882`
+   (any free UDP port), and publish that same port in `docker-compose.yml` in
+   place of the range. Also uncomment `OWNCORD_VOICE_UDP_PORT` on the
+   `owncord` service with the same port, so the admin connectivity report and
+   the boot warning name that port rather than the range. LiveKit ignores the
+   range once `udp_port` is set. This
+   is the easier path through a restrictive firewall or a router with a small
+   port-forwarding table. When OwnCord runs LiveKit itself (the
+   `livekit_binary`/auto-download path), `voice.udp_port` in `config.yaml`
+   generates the same single-port config for you.
+
+3. **In `config.yaml`** (copied from `config.yaml.example`), no voice edit is needed: the compose file already points the server at `ws://livekit:7880` and turns auto-download off. Leave `voice.livekit_binary` unset — see [Deployment — config.yaml for Docker](deployment.md#configyaml-for-docker).
 
 4. **Open firewall ports** on your host:
 
@@ -52,11 +64,14 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    | `7881`        | TCP      | TCP fallback for WebRTC |
    | `50000-60000` | UDP      | WebRTC media            |
 
+   In single-port mode the second row is your one `udp_port` (for example
+   `7882/UDP`) instead of the range.
+
    `7880/TCP` is LiveKit's own API/signalling endpoint and does not need to be
    opened: OwnCord proxies signalling to clients through `/livekit` on its own
    `8443` port.
 
-> **`node_ip` is required** for remote clients. Without it, LiveKit advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. If your cloud VM has a metadata service (AWS, GCP, DigitalOcean) you can use `use_external_ip: true` instead.
+> **LiveKit needs a routable media address** for remote clients. Without `use_external_ip: true` or a `node_ip`, it advertises internal Docker IP addresses as ICE candidates, which are unreachable from the internet. Prefer `use_external_ip: true`: it detects the public address when LiveKit starts, so after a dynamic IP changes, `docker compose restart livekit` picks up the new one with no config edit. Pin `node_ip` only where detection cannot work (a tailnet-only host, set to its `100.x` address), and remove `use_external_ip` when you do: while it is on, LiveKit overwrites `node_ip` with the detected address. A pinned public IP goes stale silently when the address changes.
 
 ---
 
@@ -91,24 +106,24 @@ LiveKit settings live in the `voice:` section of `config.yaml`:
 
 ```yaml
 voice:
-  livekit_api_key: "devkey"
-  livekit_api_secret: "owncord-dev-secret-key-min-32chars"
+  livekit_api_key: "my-unique-key"
+  livekit_api_secret: "my-secret-at-least-32-characters-long"
   livekit_url: "ws://localhost:7880"
   livekit_binary: "C:/livekit/livekit-server.exe"
   quality: "medium"
 ```
 
-| Field                   | Purpose                                                                                              | Default                                |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `livekit_api_key`       | Shared API key between OwnCord and LiveKit                                                           | `"devkey"`                             |
-| `livekit_api_secret`    | Shared secret for JWT signing (min 32 chars)                                                         | `"owncord-dev-secret-key-min-32chars"` |
-| `livekit_url`           | LiveKit WebSocket URL                                                                                | `ws://localhost:7880`                  |
-| `livekit_binary`        | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed               | `""`                                   |
-| `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty   | `true` in generated config             |
-| `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.5"`)                                          | `""` (built-in pin)                    |
-| `node_ip`               | Public IP for WebRTC ICE candidates (remote users behind NAT)                                        | `""` (auto-detect)                     |
-| `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false`                                |
-| `quality`               | Default voice quality preset                                                                         | `"medium"`                             |
+| Field                   | Purpose                                                                                              | Default                                 |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `livekit_api_key`       | Shared API key between OwnCord and LiveKit                                                           | `""` (random key generated if unset)    |
+| `livekit_api_secret`    | Shared secret for JWT signing (min 32 chars)                                                         | `""` (random secret generated if unset) |
+| `livekit_url`           | LiveKit WebSocket URL                                                                                | `ws://localhost:7880`                   |
+| `livekit_binary`        | Path to `livekit-server` binary. Empty + auto-download off = assume externally managed               | `""`                                    |
+| `auto_download_livekit` | Download and manage a pinned `livekit-server` release automatically when `livekit_binary` is empty   | `true` in generated config              |
+| `livekit_version`       | Override the pinned auto-download release (e.g. `"1.13.7"`)                                          | `""` (built-in pin)                     |
+| `node_ip`               | Public IP for WebRTC ICE candidates; pin only when auto-detection cannot work                        | `""` (auto-detect)                      |
+| `advertise_internal_ip` | Also advertise LAN IPs — enable on dual-homed servers (LAN + public IP) so local clients can connect | `false`                                 |
+| `quality`               | Default voice quality preset                                                                         | `"medium"`                              |
 
 Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT_API_KEY`, `OWNCORD_VOICE_LIVEKIT_API_SECRET`, etc.
 
@@ -122,6 +137,9 @@ Environment variable overrides use the `OWNCORD_` prefix: `OWNCORD_VOICE_LIVEKIT
 | --------------- | -------- | ---------------------------------------- |
 | **7881**        | TCP      | LiveKit internal RTC (TURN/TCP fallback) |
 | **50000-60000** | UDP      | Media transport (RTP audio/video)        |
+
+With `voice.udp_port` set, the media row is that one UDP port instead of the
+range (see step 2's single-port option and `docs/port-forwarding.md`).
 
 `7880/TCP` (LiveKit's own HTTP/WS API) stays internal: OwnCord reaches it on
 the host or Docker network and proxies client signalling through `/livekit`.
@@ -138,7 +156,7 @@ For LAN-only setups, ensure these ports are open on Windows Firewall. For remote
 
 When `livekit_binary` is set, OwnCord manages LiveKit as a companion process:
 
-1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000. To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
+1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000 (or the single `voice.udp_port` when set). To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
 2. **Process launch**: `livekit-server --config data/livekit.yaml`
 3. **Crash recovery**: Exponential backoff restart (3s -> 6s -> 12s ... up to 60s), gives up after 10 consecutive rapid failures
 4. **Health checks**: `GET http://localhost:7880/` verifies LiveKit is responding
@@ -179,7 +197,7 @@ Client                     OwnCord Server              LiveKit Server
 **Client connection paths:**
 
 - **Proxy path** (`/livekit`): Client connects through OwnCord's HTTPS server. Avoids mixed-content issues.
-- **Direct URL** (`ws://localhost:7880`): Used when the client is on localhost and the URL is itself loopback `ws:`/`http:`; any other `direct_url` goes through the proxy path, except on Linux desktop, where native voice uses a local server's `direct_url` as-is ([security.md](security.md#tauri-capabilities-least-privilege)).
+- **Direct URL** (`ws://localhost:7880`): Sent only when `voice.livekit_url` is loopback ([protocol.md](protocol.md#voice_token-server---client-direct)). Used when the client is on localhost and the URL is itself loopback `ws:`/`http:`; any other `direct_url` — including a compose-internal name such as `ws://livekit:7880` that resolves only inside the container network — goes through the proxy path, on Linux desktop native voice as on every other platform ([security.md](security.md#tauri-capabilities-least-privilege)). Linux clients up to 2.0.0-beta.1 used any `direct_url` as-is for a `localhost` server — see [Linux desktop voice](deployment.md#linux-desktop-voice).
 
 ---
 
@@ -188,32 +206,36 @@ Client                     OwnCord Server              LiveKit Server
 Neither shipped LiveKit config (`Server/livekit.yaml.example`, the managed
 `Server/ws/livekit_process.go`) defines a `webhook:` block, so LiveKit sends no
 webhooks by default and the server relies on its own server SDK plus client
-`voice_leave` frames. If you configure LiveKit to post webhooks to
-`POST /api/v1/livekit/webhook` (operator opt-in), the endpoint verifies the JWT
-and handles `participant_left` to clean up ghost voice states when a user
-disconnects from LiveKit without sending a `voice_leave` message.
+`voice_leave` frames. To catch a user whose LiveKit connection died without a
+`voice_leave`, the server polls LiveKit's participant list for every room with
+a voice member once a minute and removes a membership whose participant has
+been missing for two consecutive checks (`Server/ws/voice_reconcile.go`). If
+you configure LiveKit to post webhooks to `POST /api/v1/livekit/webhook`
+(operator opt-in), the endpoint verifies the JWT and handles
+`participant_left` to clean up such ghost voice states immediately.
 
 ---
 
 ## 7. Troubleshooting
 
-| Symptom                                                          | Cause                                        | Fix                                                                                |
-| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------- |
-| "voice not configured" error                                     | LiveKit client failed to initialize          | Check `livekit_api_key` and `livekit_api_secret` are set and secret is >= 32 chars |
-| "failed to generate voice token"                                 | API key/secret mismatch                      | Ensure `config.yaml` key/secret match what LiveKit is using                        |
-| Voice connects but no audio                                      | Firewall blocking UDP 50000-60000            | Open UDP port range in Windows Firewall                                            |
-| "backend unavailable" from `/livekit` proxy                      | LiveKit not running on port 7880             | Check `livekit_binary` path or start LiveKit manually                              |
-| "too many rapid failures, giving up" in logs                     | LiveKit binary crashes on startup            | Run `livekit-server --config data/livekit.yaml` manually to see errors             |
-| Mixed content / insecure WS error                                | Client using direct URL over HTTPS page      | Client should use the `/livekit` proxy path                                        |
-| Voice works via public IP but not on the LAN (dual-homed server) | LiveKit only advertises the public `node_ip` | Set `voice.advertise_internal_ip: true` so LAN host candidates are advertised too  |
-| `GET /api/v1/livekit/health` returns degraded                    | LiveKit server not reachable                 | Verify LiveKit is running: `curl http://localhost:7880`                            |
+| Symptom                                                          | Cause                                        | Fix                                                                                                                                                                        |
+| ---------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "voice not configured" error                                     | LiveKit client failed to initialize          | Check `livekit_api_key` and `livekit_api_secret` are set and secret is >= 32 chars                                                                                         |
+| "failed to generate voice token"                                 | API key/secret mismatch                      | Ensure `config.yaml` key/secret match what LiveKit is using                                                                                                                |
+| Voice connects but no audio                                      | Firewall blocking UDP 50000-60000            | Open UDP port range in Windows Firewall                                                                                                                                    |
+| "backend unavailable" from `/livekit` proxy                      | LiveKit not running on port 7880             | Check `livekit_binary` path or start LiveKit manually                                                                                                                      |
+| "too many rapid failures, giving up" in logs                     | LiveKit binary crashes on startup            | Read the `livekit companion output` entries (`component=livekit`, text in `line`) before it in the server log, or run `livekit-server --config data/livekit.yaml` manually |
+| Mixed content / insecure WS error                                | Client using direct URL over HTTPS page      | Client should use the `/livekit` proxy path                                                                                                                                |
+| Voice works via public IP but not on the LAN (dual-homed server) | LiveKit only advertises the public `node_ip` | Set `voice.advertise_internal_ip: true` so LAN host candidates are advertised too; LiveKit then detects the public address itself and ignores a pinned `node_ip`           |
+| `GET /api/v1/livekit/health` returns degraded                    | LiveKit server not reachable                 | Verify LiveKit is running: `curl http://localhost:7880`                                                                                                                    |
 
 ---
 
 ## 8. Production Checklist
 
-- [ ] Change `livekit_api_key` from `"devkey"` to a random string
-- [ ] Change `livekit_api_secret` to a random 32+ character string
+- [ ] Set `livekit_api_key` and `livekit_api_secret` to your own random values
+      (the setup wizard generates them, but a random key regenerated at every
+      start is only a dev convenience; a fixed key/secret keeps voice tokens valid)
 - [ ] Open firewall ports: 7881/TCP, 50000-60000/UDP
 - [ ] If using ACME/manual TLS, ensure LiveKit proxy at `/livekit` is working
 - [ ] Test voice by joining a voice channel from two clients

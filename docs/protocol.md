@@ -135,12 +135,13 @@ After the WebSocket connection is established, the client sends the first messag
 }
 ```
 
-| Field               | Type   | Required | Description                                                                                                                                                                                                      |
-| ------------------- | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                            |
-| `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                        |
-| `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown. |
-| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                 |
+| Field               | Type   | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `token`             | string | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `last_seq`          | uint64 | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `active_channel_id` | int64  | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                                                                                                                                                                                           |
+| `wake`              | bool   | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). The server refuses it with `ANOTHER_DEVICE_ACTIVE` (an `error` frame) when a different session of the same account holds the live connection or a call it parked in the voice grace window, so a woken device cannot silently displace another. Kept on every later dial (including a user's Retry) until one authenticates; only an explicit takeover ("Use here") omits it. |
+| `epoch`             | int    | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                                                                                                                                                                                           |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -151,8 +152,29 @@ resumed socket holds no channel subscription until its post-`auth_ok`
 in the meantime reaches nobody on that connection and can never be re-requested,
 since the client only ever reports `max(seq)`.
 
+The hint is honoured on both resume paths: a replay-capable resume (ring or
+cold tier) and the full re-sync the hub sends when replay cannot converge — for
+instance after a server restart, when the fresh per-boot sequence floor makes
+every in-memory gap unreplayable. The full re-sync also holds no channel
+subscription until `channel_focus` otherwise, so omitting the hint there loses
+the same frames.
+
 Clients should still send `channel_focus` after `auth_ok` — it remains the
 fallback for servers that predate this field, and it is idempotent.
+
+`wake` carries no privilege and grants nothing: it only asks the server not to
+displace a **different** session's live connection or a call it parked in the
+voice grace window. The server holds one live socket per account (last connect
+wins), so a device dialling on its own after a suspend could otherwise end the
+call on the machine the user is actually at. When a different session is live,
+or has a call parked in the grace window, the server answers an `error` frame
+with code `ANOTHER_DEVICE_ACTIVE` (not `auth_error` — the token is still valid)
+and closes without touching that session; the client stays signed in and offers
+"Use here", which reconnects **without** `wake` and takes the connection back.
+With no other session — or when the live connection or parked call is this same
+session's own — the wake connects normally. Only an explicit takeover ("Use
+here") omits `wake`; every other dial after a suspend, including a user's Retry,
+keeps it until one authenticates.
 
 ### Step 2: Success -- auth_ok
 
@@ -244,9 +266,13 @@ refuses anything else with `protocol_epoch_unsupported`.
 - **Within an epoch, changes are additive.** New optional fields; new message
   types the other side may ignore. Unknown server→client types are ignored by
   the client; unknown client→server types get an `error` frame. The frozen
-  transcripts under `protocol/fixtures/epoch-1/` replay against the server for
-  as long as epoch 1 is accepted — a failing fixture means "bump the epoch",
-  not "fix the fixture".
+  transcripts under `protocol/fixtures/epoch-1/` replay against the server
+  (`Server/ws/protocol_epoch1_contract_test.go`) for as long as epoch 1 is
+  accepted — a failing fixture means "bump the epoch", not "fix the fixture".
+  The client half replays each server→client frame through the real dispatcher
+  and asserts its store effect (`Client/tests/contract/protocol-fixtures.test.ts`,
+  ARCH-02), so a rename or retype on the wire fails a client test and not only
+  the server's.
 - **A breaking change is a new epoch.** Bump `protocol_epoch`, regenerate, and
   set `minClientEpoch` (`Server/ws/messages.go`) to the new value: the server
   accepts exactly one epoch by policy. Epoch 1 additionally accepts an absent
@@ -298,9 +324,53 @@ The server responds immediately:
 { "type": "pong" }
 ```
 
+### Server Protocol Ping
+
+Every 25 seconds the server sends a WebSocket protocol Ping frame (RFC 6455
+control frame, not a JSON message) and waits up to 25 seconds for the Pong.
+Browsers and WebSocket libraries answer it automatically, so a peer stays
+alive even when its app-level ping timer is throttled. A Pong counts as
+activity for the stale sweep below; a peer that misses a Pong is disconnected,
+so a silent peer is closed within 50 seconds. A client can treat a gap of more
+than 2.5 × 25 seconds without any frame from the server as a dead connection.
+The server sends a message larger than 16 KiB as a fragmented message (RFC
+6455 continuation frames), so a Pong or Ping never waits behind one large frame
+on a slow link.
+
 ### Server Stale Client Sweep
 
-Every 30 seconds, the server checks all clients. Any client with no activity for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
+Every 30 seconds, the server checks all clients. Any client with no activity (a message, or a Pong to the server's protocol Ping) for 90 seconds is forcibly disconnected. Normal chat activity also keeps the connection alive.
+
+### Client Silence Deadline
+
+The client treats any inbound frame (a `pong`, chat, presence) as proof that
+the socket still delivers. After 60 seconds with no inbound frame, it drops a
+half-open socket and reconnects. It does this only once a heartbeat ping has
+gone unanswered for at least 15 seconds. That rule keeps a minimised window,
+whose throttled heartbeat timer may not have sent a ping yet, from
+reconnecting for no reason.
+
+When the client may have just woken from a suspend — a heartbeat tick that
+lands more than three heartbeat intervals (90 seconds) after the previous one,
+the window becoming visible again, or the network coming back online — it
+sends a ping at once and shortens the deadline to 15 seconds (never extending
+one already due sooner). A socket that died during the suspend is redialled
+within about 15 seconds instead of staying Connected for up to a minute.
+A gap longer than 90 seconds since the client last saw its clock running — at
+a heartbeat tick, an inbound frame or when a reconnect is about to dial — also
+marks its next dials `wake: true` ([Step 1](#step-1-client-sends-auth)), so
+the server refuses one that would displace another device
+([connection-and-auth.md](architecture/ux/connection-and-auth.md) §4).
+
+### Desktop Transport Liveness
+
+The desktop client's Rust WebSocket proxy (`Client/src-tauri/src/ws_proxy.rs`)
+also sends a WebSocket protocol Ping every 25 seconds, which the server's read
+loop answers with a Pong. If no frame of any kind arrives for 62.5 seconds
+(2.5 ping intervals), the proxy closes the socket and the client reconnects.
+This catches a half-open connection that a firewall or NAT dropped silently,
+and does not depend on the webview's JSON ping timer, which the OS may throttle
+while the window is minimised. The JSON ping above is unchanged.
 
 ---
 
@@ -919,7 +989,11 @@ All member messages are broadcast to all connected clients.
 
 ### member_join (Server -> Client, broadcast)
 
-Sent when a user first connects (fresh connection, not reconnect replay).
+Sent when a user first connects (fresh connection, not reconnect replay), and
+when a ban is lifted (an admin unban or an overturned ban appeal) so clients
+re-add the row `member_ban` removed. On an unban, `status` is `"offline"`
+unless the user holds a live connection (a lapsed temporary ban lets them
+reconnect before the unban).
 
 ```json
 {
@@ -1244,6 +1318,10 @@ it is written before item 3 in the same program order as items 1 and 4.
 }
 ```
 
+`direct_url` is the server's own `voice.livekit_url`, sent only when its host
+is loopback (`localhost`, `127.0.0.1`, `::1`) and omitted otherwise; a client
+without it connects through the `url` proxy path.
+
 `is_key_holder` tells the joiner whether they are the channel's E2EE key
 holder (see [Voice End-to-End Encryption](#voice-end-to-end-encryption)).
 Tokens are 5-minute scoped JWTs whose publish sources (mic/camera/screen) are
@@ -1367,12 +1445,16 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. All four require
-`MUTE_MEMBERS` on the actor's role (`ADMINISTRATOR` bypasses the bit, never the
-hierarchy), the actor must strictly outrank the target by role position, and
-the target must currently be in a voice channel. Each is rate limited to 5/sec
-and written to the audit log (`voice_mod_mute`, `voice_mod_deafen`,
-`voice_mod_move`, `voice_mod_kick`, target type `user`).
+Four moderator commands act on another user's voice session. All four run
+`permissions.AuthorizeVoiceModerator` against the actor in the TARGET's channel:
+the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit,
+never the hierarchy), and the effective permission after both override layers
+must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
+room the actor cannot see cannot be moderated. For a DM call the actor must be a
+participant. The actor must strictly outrank the target by role position, and the
+target must currently be in a voice channel. Each is rate limited to 5/sec and
+written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
+`voice_mod_kick`, target type `user`).
 
 Failures: `FORBIDDEN` (missing bit, or target of equal/higher rank),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
@@ -1421,6 +1503,12 @@ place someone where they could not go themselves) and against the destination's
 ordinary `voice_join` for the destination, so capacity, token minting and
 key-holder election keep their single implementation.
 
+A target whose socket has dropped while the server holds its call open for a
+reconnect (up to 15 seconds) has no socket to receive `voice_moved`. The server
+removes it from voice instead, audits the action as `voice_mod_kick`, and
+answers the moderator with `VOICE_ERROR` ("user was reconnecting; removed from
+voice instead of moved").
+
 ### voice_moved (Server -> Client, direct)
 
 ```json
@@ -1437,7 +1525,9 @@ Sent only to the moved user. The client tears down its LiveKit session and joins
 ```
 
 Removes the target from the LiveKit room, deletes their `voice_states` row and
-broadcasts `voice_leave`, then sends them `voice_disconnected`.
+broadcasts `voice_leave`, then sends them `voice_disconnected`. A target whose
+call is being held for a reconnect is still removed, but gets no
+`voice_disconnected`; on resume it sees only the replayed `voice_leave`.
 
 ### voice_disconnected (Server -> Client, direct)
 
@@ -1472,8 +1562,9 @@ keypair, published via `PATCH /api/v1/users/me` (`identity_public_key`) and
 distributed in the `ready` / `member_join` / `user_update` member payloads.
 Peers pin the key on first sight (trust-on-first-use) and verify each
 announce's `signature` against the pin, so a malicious server cannot swap
-`user_id ↔ ephemeral pubkey` after first contact. A later key change is
-surfaced to the user as a TOFU mismatch.
+`user_id ↔ ephemeral pubkey` without the announce failing verification. A
+later identity-key change is accepted once the announce verifies against the
+new key; the pin is replaced and the change is surfaced to the user.
 
 ### voice_e2ee_announce (Client -> Server)
 
@@ -1798,6 +1889,32 @@ and the ringer's own 30s window already covers it.
 }
 ```
 
+`reason` is one of a closed set, generated from `protocol/schema.json`
+(`ws.RestartReason`, `ServerRestartReason`):
+
+| `reason`         | Sent when                                                                  |
+| ---------------- | -------------------------------------------------------------------------- |
+| `update`         | an admin applied a server update                                           |
+| `update_aborted` | with `delay_seconds` 0: the staged update failed, the restart is cancelled |
+| `backup_restore` | an admin restored a backup                                                 |
+| `setup`          | the setup wizard finished                                                  |
+| `shutdown`       | a stop or restart from outside the server (a signal, a supervisor)         |
+
+A restart the admin panel starts is announced twice: once by the admin
+action, and again by the hub as the server stops, both naming the same
+`reason`. A stop from outside is announced once, as `shutdown`.
+
+A positive `delay_seconds` announces that the socket is about to drop. The
+desktop client keeps the session for every `reason`: it counts down,
+reconnects with the same token once the server is back and returns to the
+channel it was in. Voice ends when the socket actually drops after an
+announcement, since the server's voice state goes with the process; the
+announcement alone leaves the call, because an update can still be aborted.
+After an `update`, `backup_restore` or `setup` drop, the client re-joins the
+call with one ordinary `voice_join` once `ready` arrives
+([voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md), RT-12).
+A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
+
 ---
 
 ## Error Handling
@@ -1817,27 +1934,28 @@ and the ringer's own 30s window already covers it.
 
 ### Error Codes
 
-| Code               | Description                                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `BAD_REQUEST`      | Invalid payload format or field values                                                                                                           |
-| `BAD_PAYLOAD`      | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                            |
-| `INTERNAL`         | Server-side error                                                                                                                                |
-| `NOT_FOUND`        | Channel or message not found                                                                                                                     |
-| `FORBIDDEN`        | Missing required permission                                                                                                                      |
-| `NOT_KEY_HOLDER`   | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                     |
-| `RATE_LIMITED`     | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                        |
-| `ALREADY_JOINED`   | Already in this voice channel                                                                                                                    |
-| `CHANNEL_FULL`     | Voice channel at capacity                                                                                                                        |
-| `VOICE_ERROR`      | Voice-specific error                                                                                                                             |
-| `VIDEO_LIMIT`      | Maximum video streams reached                                                                                                                    |
-| `BANNED`           | User is banned                                                                                                                                   |
-| `INVALID_JSON`     | Message is not valid JSON                                                                                                                        |
-| `UNKNOWN_TYPE`     | Unrecognized message type                                                                                                                        |
-| `SLOW_MODE`        | Channel has slow mode enabled                                                                                                                    |
-| `CONFLICT`         | Duplicate reaction or constraint violation                                                                                                       |
-| `SERVER_MUTED`     | Self-unmute refused: a moderator imposed the mute                                                                                                |
-| `SERVER_DEAFENED`  | Self-undeafen refused: a moderator imposed the deafen                                                                                            |
-| `SESSION_REPLACED` | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own |
+| Code                    | Description                                                                                                                                                                                                                                                                      |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BAD_REQUEST`           | Invalid payload format or field values                                                                                                                                                                                                                                           |
+| `BAD_PAYLOAD`           | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                                                                                                                                                            |
+| `INTERNAL`              | Server-side error                                                                                                                                                                                                                                                                |
+| `NOT_FOUND`             | Channel or message not found                                                                                                                                                                                                                                                     |
+| `FORBIDDEN`             | Missing required permission                                                                                                                                                                                                                                                      |
+| `NOT_KEY_HOLDER`        | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                                                     |
+| `RATE_LIMITED`          | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                                                        |
+| `ALREADY_JOINED`        | Already in this voice channel                                                                                                                                                                                                                                                    |
+| `CHANNEL_FULL`          | Voice channel at capacity                                                                                                                                                                                                                                                        |
+| `VOICE_ERROR`           | Voice-specific error                                                                                                                                                                                                                                                             |
+| `VIDEO_LIMIT`           | Maximum video streams reached                                                                                                                                                                                                                                                    |
+| `BANNED`                | User is banned                                                                                                                                                                                                                                                                   |
+| `INVALID_JSON`          | Message is not valid JSON                                                                                                                                                                                                                                                        |
+| `UNKNOWN_TYPE`          | Unrecognized message type                                                                                                                                                                                                                                                        |
+| `SLOW_MODE`             | Channel has slow mode enabled                                                                                                                                                                                                                                                    |
+| `CONFLICT`              | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
+| `SERVER_MUTED`          | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
+| `SERVER_DEAFENED`       | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
+| `SESSION_REPLACED`      | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
+| `ANOTHER_DEVICE_ACTIVE` | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 
@@ -1904,10 +2022,10 @@ tables below add per-type behavioral notes.
 | `voice_deafen`        | 2/sec                                | Refused with `SERVER_DEAFENED` while server deafened            |
 | `voice_camera`        | 2/sec                                | Requires USE_VIDEO                                              |
 | `voice_screenshare`   | 2/sec                                | Requires SHARE_SCREEN                                           |
-| `voice_mod_mute`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
-| `voice_mod_deafen`    | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
-| `voice_mod_move`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
-| `voice_mod_kick`      | 5/sec                                | Requires MUTE_MEMBERS + outranks target                         |
+| `voice_mod_mute`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_deafen`    | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_move`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_kick`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
 | `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
 | `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
 | `voice_e2ee_offer`    | 64/sec outer, 5/sec per target       | Wrapped room key to target (budgeted per key rotation)          |

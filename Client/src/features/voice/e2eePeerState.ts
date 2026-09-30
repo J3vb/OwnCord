@@ -13,9 +13,11 @@ import {
   computeRawKeyFingerprint,
 } from "../../lib/e2eeCrypto";
 import { getIdentityPin, storeIdentityPin } from "../../lib/identity";
-import { membersStore } from "../../stores/members.store";
+import { memberDisplayName, membersStore } from "../../stores/members.store";
 import { setPeerVerification } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
+import { showToast } from "../../lib/toast";
+import { voiceText } from "../../i18n/voice";
 import { rawFromBase64 } from "./e2eeIdentity";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.
@@ -56,6 +58,12 @@ export class E2EEPeerState {
    *  simply overwrites the previous one. Cleared in clearState(). */
   private _blockedAnnounces: Map<number, { publicKeyBase64: string; signatureBase64?: string }> =
     new Map();
+  /** Peers whose identity key changed and was accepted automatically this
+   *  session, mapped to the latest key a notice was shown for, so their badge
+   *  keeps showing the change after later announces verify cleanly against the
+   *  new pin and every further change raises its own notice. Cleared in
+   *  clearState(). */
+  private _keyChangedPeers: Map<number, string> = new Map();
 
   constructor(private readonly deps: E2EEPeerStateDeps) {}
 
@@ -78,6 +86,9 @@ export class E2EEPeerState {
   }
   get blockedAnnounces(): Map<number, { publicKeyBase64: string; signatureBase64?: string }> {
     return this._blockedAnnounces;
+  }
+  get keyChangedPeers(): Map<number, string> {
+    return this._keyChangedPeers;
   }
 
   // --- Host view, named as the pre-extraction field so the bodies read the same ---
@@ -114,11 +125,14 @@ export class E2EEPeerState {
 
   /**
    * F3 TOFU: resolve a peer's identity key and verify their ephemeral-announce
-   * signature. Pins the identity key on first sight; on a later change it emits
-   * an identity-tofu "mismatch" (via the voice store) and blocks the peer until
-   * the user re-pins. Returns true when the announce may be accepted (verified,
-   * or a legacy peer with no identity key), false to reject/block. The store
-   * write is the surfaced verification state the voice panel reads.
+   * signature. Pins the identity key on first sight. A later change is accepted
+   * automatically once the announce verifies against the new key: the pin is
+   * overwritten, the peer shows as "changed" for the rest of the session and
+   * the user gets a notice naming them. A pinned peer whose key the server
+   * stopped delivering is still blocked ("mismatch") until the user re-pins.
+   * Returns true when the announce may be accepted (verified, or a legacy peer
+   * with no identity key), false to reject/block. The store write is the
+   * surfaced verification state the voice panel reads.
    *
    * Compatibility posture (transition):
    *   - peer HAS a published identity key, signature missing/invalid → reject
@@ -135,6 +149,7 @@ export class E2EEPeerState {
     const publishedIdentity =
       membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
     const host = this.deps.getServerHost();
+    const sessionGeneration = this._sessionGeneration;
 
     // Resolve the persisted pin FIRST — before any legacy shortcut. A server
     // must not be able to strip a pinned peer's published key (or swap it) to
@@ -164,9 +179,9 @@ export class E2EEPeerState {
 
     const pin = lookup.status === "pinned" ? lookup.pin : null;
 
-    // Pinned peer whose delivered key is absent or differs from the pin —
-    // possible server MITM. Block until the user re-pins.
-    if (pin !== null && publishedIdentity !== pin) {
+    // Pinned peer whose delivered key the server stopped sending. There is no
+    // key to verify against or re-pin, so block until the user re-pins.
+    if (pin !== null && !publishedIdentity) {
       // Buffer this announce (OC-0212) so a successful rePinPeerIdentity can
       // replay it: a mid-call peer never re-announces on its own, so without
       // this, re-pinning writes a new pin that nothing ever verifies the
@@ -178,11 +193,15 @@ export class E2EEPeerState {
         safetyNumber: null,
         sessionFingerprint: null,
       });
-      log.error("E2EE: pinned peer identity key missing/changed — blocking (identity-tofu)", {
+      log.error("E2EE: pinned peer identity key missing — blocking (identity-tofu)", {
         userId,
       });
       return false;
     }
+    // Pinned peer whose delivered key differs from the pin (reinstall, new
+    // device, or a swapped key). Accepted below only if the announce verifies
+    // against the NEW key; the pin is then overwritten and the user notified.
+    const keyChanged = pin !== null && publishedIdentity !== pin;
 
     // Fingerprint of the ephemeral key this announce carries (OC-0003). Every
     // accepted peer gets one — for an unverified peer it is the only value
@@ -203,16 +222,19 @@ export class E2EEPeerState {
       return true;
     }
 
-    // Verify the ephemeral-key signature against the trusted identity key
-    // (the pin when we have one, else the first-sight published key).
-    const anchorBase64 = pin ?? publishedIdentity;
-    const identityKey = await importIdentityPublicKey(anchorBase64);
+    // Verify the ephemeral-key signature against the delivered identity key:
+    // it equals the pin when one matched, and is the key about to be pinned on
+    // first sight or after a change.
+    const identityKey = await importIdentityPublicKey(publishedIdentity);
     const ephemeralRaw = rawFromBase64(publicKeyBase64);
     const ok = signatureBase64
       ? await verifyEphemeralKeySignature(identityKey, userId, ephemeralRaw, signatureBase64)
       : false;
     if (!ok) {
       // Fail closed: peer has an identity key but no valid signature (MITM).
+      // Buffered like the missing-key block so a re-pin replays and
+      // re-verifies it rather than clearing the badge (OC-0212).
+      if (isCurrent()) this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
       this.setPeerVerificationIfCurrent(isCurrent, {
         userId,
         status: "mismatch",
@@ -223,25 +245,46 @@ export class E2EEPeerState {
       return false;
     }
 
-    // First sight with a valid signature — pin the identity key now. A
-    // failed write (disk full, unwritable pins file) must not display
-    // "verified" with no pin ever persisted: the pin is what arms mismatch
-    // detection on a LATER announce, so a peer we call verified but never
-    // pinned can never have that check fire — the exact MITM window the pin
-    // exists to close. "no-store" (non-Tauri: no pin store by design) is not
-    // a failure and keeps the normal verified outcome below.
+    // First sight (or a changed key) with a valid signature — pin the
+    // identity key now. A failed write (disk full, unwritable pins file) must
+    // not display "verified" with no pin ever persisted: the pin is what arms
+    // mismatch detection on a LATER announce, so a peer we call verified but
+    // never pinned can never have that check fire — the exact MITM window the
+    // pin exists to close. "no-store" (non-Tauri: no pin store by design) is
+    // not a failure and keeps the normal verified outcome below.
     if (!isCurrent()) return false;
     let pinWriteFailed = false;
-    if (pin === null && host) {
+    if ((pin === null || keyChanged) && host) {
       const pinResult = await storeIdentityPin(host, String(userId), publishedIdentity);
       if (pinResult === "failed") {
         pinWriteFailed = true;
         log.error("E2EE: failed to persist identity pin — marking unverified, not verified", {
           userId,
         });
+      } else if (keyChanged) {
+        log.warn("E2EE: peer identity key changed — accepted and re-pinned (identity-tofu)", {
+          userId,
+        });
       } else {
         log.info("E2EE: pinned peer identity key on first sight", { userId });
       }
+    }
+    if (
+      keyChanged &&
+      (!pinWriteFailed || isCurrent()) &&
+      this._keyChangedPeers.get(userId) !== publishedIdentity
+    ) {
+      if (this._sessionGeneration === sessionGeneration) {
+        this._keyChangedPeers.set(userId, publishedIdentity);
+      }
+      const member = membersStore.getState().members.get(userId);
+      showToast(
+        voiceText("identity.keyChanged", {
+          name: member ? memberDisplayName(member) : String(userId),
+        }),
+        "warning",
+        Infinity,
+      );
     }
     if (pinWriteFailed) {
       this.setPeerVerificationIfCurrent(isCurrent, {
@@ -253,6 +296,15 @@ export class E2EEPeerState {
       return true; // still accept the announce — the write failure alone shouldn't block the call
     }
     const safetyNumber = await computeKeyFingerprint(identityKey);
+    if (this._keyChangedPeers.has(userId)) {
+      this.setPeerVerificationIfCurrent(isCurrent, {
+        userId,
+        status: "changed",
+        safetyNumber,
+        sessionFingerprint,
+      });
+      return true;
+    }
     this.setPeerVerificationIfCurrent(isCurrent, {
       userId,
       status: "verified",

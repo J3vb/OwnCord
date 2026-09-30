@@ -2,12 +2,15 @@ import { describe, it, expect } from "vitest";
 import { createReconnectClock } from "./dispatchContext";
 
 describe("createReconnectClock", () => {
-  it("starts a login with no handshake, no ready and no skew", () => {
+  it("starts a login with no handshake, no ready, no skew and no restart announced", () => {
     expect(createReconnectClock()).toEqual({
       hasAuthenticatedBefore: false,
       hasReceivedReadyBefore: false,
       lastReconnectHandshakeAt: null,
       serverClockSkewMs: 0,
+      restartAnnounced: false,
+      voiceRejoinChannelId: null,
+      voiceRejoinNoticeAt: null,
     });
   });
 

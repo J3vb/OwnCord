@@ -130,6 +130,41 @@ describe("filterMentionSuggestions", () => {
     seedMembers(["John Smith"]);
     expect(filterMentionSuggestions("john")).toEqual([]);
   });
+
+  it("matches a member by display name and shows it, keeping the username as the token", () => {
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice_w",
+            displayName: "Alice",
+            avatar: null,
+            role: "member" as const,
+            status: "online" as const,
+          },
+        ],
+        [
+          2,
+          {
+            id: 2,
+            username: "bob",
+            displayName: null,
+            avatar: null,
+            role: "member" as const,
+            status: "online" as const,
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+
+    const found = filterMentionSuggestions("Ali");
+    expect(found.map((s) => s.token)).toEqual(["alice_w"]);
+    expect(found.map((s) => s.label)).toEqual(["Alice"]);
+    expect(found[0]!.detail).toBe("@alice_w · member");
+  });
 });
 
 describe("createMentionAutocomplete", () => {
@@ -163,6 +198,61 @@ describe("createMentionAutocomplete", () => {
     expect(popup.element.querySelector(".ma-item")?.classList.contains("ma-item--active")).toBe(
       true,
     );
+  });
+
+  it("tells two members sharing a display name apart by @username", () => {
+    const alex = (id: number, username: string) =>
+      [
+        id,
+        {
+          id,
+          username,
+          displayName: "Alex",
+          avatar: null,
+          role: "member" as const,
+          status: "online" as const,
+        },
+      ] as const;
+    membersStore.setState(() => ({
+      members: new Map([alex(1, "alex1"), alex(2, "alex_k")]),
+      typingUsers: new Map(),
+    }));
+
+    popup.setQuery("Al");
+    const rows = Array.from(popup.element.querySelectorAll(".ma-item")).map((row) => [
+      row.querySelector(".ma-name")?.textContent,
+      row.querySelector(".ma-detail")?.textContent,
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        ["Alex", "@alex1 · member"],
+        ["Alex", "@alex_k · member"],
+      ]),
+    );
+  });
+
+  it("shows @username once when the display name is unset or equals it", () => {
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice",
+            displayName: "alice",
+            avatar: null,
+            role: "member" as const,
+            status: "online" as const,
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+
+    popup.setQuery("al");
+    expect(labels()).toEqual(["@alice"]);
+    expect(popup.element.querySelector(".ma-detail")?.textContent).toBe("member");
   });
 
   it("reports no match so the composer can close it", () => {

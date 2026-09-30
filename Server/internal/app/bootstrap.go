@@ -57,17 +57,22 @@ func removeOldBinaryAt(exePath string, log *slog.Logger) {
 // and resolves the restart handoff mode. main() calls it before app.New:
 // the level applies to main's own log sinks, and the mode is read back from
 // the coordinator after Run returns.
-func LoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinator) (*config.Config, error) {
+//
+// It also returns the boot log level, which app.New hands the admin API as
+// the level the timed debug toggle reverts to (SRE-07).
+func LoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinator) (*config.Config, slog.Level, error) {
 	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
-		return nil, fmt.Errorf("loading config: %w", err)
+		return nil, slog.LevelInfo, fmt.Errorf("loading config: %w", err)
 	}
 
 	// Apply the configured log level. The admin panel's live log view (ring
 	// buffer) follows the same threshold — set logging.level to "debug" to
 	// capture debug records there.
+	base := slog.LevelInfo
 	if lvl, ok := config.ParseLevel(cfg.Logging.Level); ok {
 		levelVar.Set(lvl)
+		base = lvl
 	} else {
 		log.Warn("unknown logging.level, keeping info", "value", cfg.Logging.Level)
 	}
@@ -77,7 +82,7 @@ func LoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinato
 	// after Run() returns.
 	rc.SetMode(resolveRestartMode(cfg.Server.RestartMode, log))
 
-	return cfg, nil
+	return cfg, base, nil
 }
 
 // prepareDataDir creates the configured data directory and warns when the

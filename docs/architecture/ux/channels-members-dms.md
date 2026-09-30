@@ -20,7 +20,7 @@ category, sorted by position. The sidebar has two modes (`ui.store.sidebarMode`)
 | `ready`            | Channels loaded from `ready`           | Grouped, collapsible category list                                                                              |
 | `empty`            | Zero channels                          | "No channels yet" + hint (already the empty-state branch of `renderChannels()`, `components/ChannelSidebar.ts`) |
 | category collapsed | User toggles                           | Persisted per-server in localStorage (`ui.toggleCategory`); chevron reflects state                              |
-| active channel     | `setActiveChannel`                     | Highlighted; unread cleared                                                                                     |
+| active channel     | `setActiveChannel`                     | Highlighted; unread cleared only when actually mounted (UX-8)                                                   |
 | unread             | `chat_message` in a non-active channel | Unread pill; badge on the channel                                                                               |
 
 ### 1.1 Channel type affordances
@@ -46,6 +46,13 @@ red mention badge. It is a client-side preference on purpose (stored in
 settings table, and "which of my devices bothers me" is a property of the
 device, not the account.
 
+The mute sits under the **notification level** (Settings › Notifications,
+`lib/notificationLevel.ts`): All, Mentions only (a DM counts as addressed to
+you) or Nothing, a device-wide default with a per-server override keyed by
+host like the mutes. The level is checked first, so Nothing silences even a
+mention, which a mute never does. A new install starts at Mentions only; an
+install with earlier OwnCord state keeps All.
+
 ### 1.2 Channel switching
 
 ```mermaid
@@ -56,11 +63,21 @@ sequenceDiagram
     participant CH as channels.store
     participant CC as ChannelController
     U->>CS: click channel
-    CS->>CH: setActiveChannel(id)  %% clears that channel's unread
+    CS->>CH: setActiveChannel(id)  %% selecting; badge cleared on mount, not here
     CH-->>CC: activeChannelId change
     CC->>CC: mountChannel(id, type) — MessageList + Typing + Composer
-    CC->>SRV: channel_focus{channel_id}  %% server read-state
+    CC->>CH: viewChannel → clearUnread(id) + rememberLastChannel(id)  %% not recorded for a DM
+    CC->>SRV: viewChannel → channel_focus{channel_id}  %% server read-state
 ```
+
+> **✓ UX-8 (2026-09).** A launch restores the last channel viewed for that
+> server (`lib/last-channel.ts`, host-scoped like `channel-mutes.ts`) instead of
+> always jumping to the first text channel, and the ready-time auto-select no
+> longer zeroes a badge the user never looked at: the restore selects with
+> `clearUnread: false`, and `mountChannel` — the channel actually on screen —
+> clears its badge and records it as the last channel. A DM mount clears its
+> badge but is not recorded, because the restore only matches server channels
+> from `ready` (DMs arrive in `dm_channels`).
 
 **Target rules:**
 

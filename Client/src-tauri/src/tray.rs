@@ -11,6 +11,9 @@ const STATUS_ONLINE_ID: &str = "status_online";
 const STATUS_IDLE_ID: &str = "status_idle";
 const STATUS_DND_ID: &str = "status_dnd";
 const STATUS_OFFLINE_ID: &str = "status_offline";
+const OPEN_LOGS_ID: &str = "open_logs";
+const MUTE_ID: &str = "voice_mute";
+const DEAFEN_ID: &str = "voice_deafen";
 const QUIT_ID: &str = "quit";
 
 /// One menu item: its event id and its label from the text table.
@@ -22,6 +25,11 @@ struct TrayMenu {
     show_hide: Item,
     status: &'static str,
     statuses: [Item; 4],
+    /// U6: toggle the microphone and the call audio without focusing the app.
+    /// Every platform gets these; the global Ctrl+Shift+M/Ctrl+Shift+D path is a separate,
+    /// display-server-dependent extra.
+    voice: [Item; 2],
+    open_logs: Item,
     quit: Item,
     tooltip: &'static str,
 }
@@ -36,6 +44,8 @@ fn tray_menu() -> TrayMenu {
             (STATUS_DND_ID, text::TRAY_STATUS_DND),
             (STATUS_OFFLINE_ID, text::TRAY_STATUS_OFFLINE),
         ],
+        voice: [(MUTE_ID, text::TRAY_MUTE), (DEAFEN_ID, text::TRAY_DEAFEN)],
+        open_logs: (OPEN_LOGS_ID, text::TRAY_OPEN_LOGS),
         quit: (QUIT_ID, text::TRAY_QUIT),
         tooltip: text::TRAY_TOOLTIP,
     }
@@ -53,9 +63,21 @@ pub fn create_tray<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), tauri::E
         true,
         &[&online?, &idle?, &dnd?, &offline?],
     )?;
+    let open_logs = item(spec.open_logs)?;
+    let [mute, deafen] = spec.voice.map(item);
     let quit = item(spec.quit)?;
 
-    let menu = Menu::with_items(app, &[&show_hide, &status_submenu, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &show_hide,
+            &status_submenu,
+            &mute?,
+            &deafen?,
+            &open_logs,
+            &quit,
+        ],
+    )?;
 
     let app_handle = app.clone();
     let app_handle_menu = app.clone();
@@ -106,6 +128,9 @@ fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
         STATUS_IDLE_ID => emit_status_change(app_handle, "idle"),
         STATUS_DND_ID => emit_status_change(app_handle, "dnd"),
         STATUS_OFFLINE_ID => emit_status_change(app_handle, "offline"),
+        OPEN_LOGS_ID => open_log_folder(app_handle),
+        MUTE_ID => emit_voice_shortcut(app_handle, "mute"),
+        DEAFEN_ID => emit_voice_shortcut(app_handle, "deafen"),
         QUIT_ID => {
             app_handle.exit(0);
         }
@@ -113,8 +138,34 @@ fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
     }
 }
 
+/// Open the directory the Rust log is written to, so a user whose window never
+/// came up still has a route to the file that explains why.
+fn open_log_folder<R: Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri_plugin_opener::OpenerExt;
+    let opened = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| e.to_string())
+        .and_then(|dir| {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            app.opener()
+                .open_path(dir.to_string_lossy(), None::<&str>)
+                .map_err(|e| e.to_string())
+        });
+    if let Err(e) = opened {
+        log::warn!("[tray] cannot open the log folder: {e}");
+    }
+}
+
 fn emit_status_change<R: Runtime>(app: &tauri::AppHandle<R>, status: &str) {
     let _ = app.emit("status-change", status);
+}
+
+/// U6: a tray Mute/Deafen pick. The renderer toggles the matching control; it
+/// is the same event the global voice-shortcut poller emits, so both paths run
+/// one handler.
+fn emit_voice_shortcut<R: Runtime>(app: &tauri::AppHandle<R>, action: &str) {
+    let _ = app.emit("voice-shortcut", action);
 }
 
 #[cfg(test)]
@@ -134,6 +185,11 @@ mod tests {
                 (STATUS_DND_ID, text::TRAY_STATUS_DND),
                 (STATUS_OFFLINE_ID, text::TRAY_STATUS_OFFLINE),
             ]
+        );
+        assert_eq!(menu.open_logs, (OPEN_LOGS_ID, text::TRAY_OPEN_LOGS));
+        assert_eq!(
+            menu.voice,
+            [(MUTE_ID, text::TRAY_MUTE), (DEAFEN_ID, text::TRAY_DEAFEN)]
         );
         assert_eq!(menu.quit, (QUIT_ID, text::TRAY_QUIT));
         assert_eq!(menu.tooltip, text::TRAY_TOOLTIP);

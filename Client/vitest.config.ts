@@ -1,5 +1,17 @@
 import { configDefaults, defineConfig } from "vitest/config";
+import { readFileSync } from "node:fs";
 import { resolve } from "path";
+
+// D7 of the check-reliability pain-points report: the aggregate statements floor
+// lived in two places, and they disagreed — `coverage-floor.json` said 93.0 for
+// CI's `scripts/coverage-floor.sh`, while the vitest threshold below said 90.
+// A local run at 91% therefore passed `npm run test:coverage` and then went red
+// in CI. The JSON file is the single source of truth (the server's floor script
+// reads the same shape); the statements threshold is derived from it here so the
+// two can no longer drift.
+const AGGREGATE_FLOOR: number = JSON.parse(
+  readFileSync(new URL("./coverage-floor.json", import.meta.url), "utf8"),
+).aggregate;
 
 // Node >= 22.4 ships its own Web Storage, and vitest's jsdom environment makes
 // `window === globalThis` — so Node's `localStorage` AND its `Storage` class
@@ -77,7 +89,7 @@ export default defineConfig({
         "src/lib/noise-suppression.ts",
       ],
       thresholds: {
-        statements: 90,
+        statements: AGGREGATE_FLOOR,
         branches: 70,
         functions: 70,
         lines: 70,

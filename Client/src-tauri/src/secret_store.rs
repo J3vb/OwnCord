@@ -48,7 +48,6 @@
 use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
 
 use crate::constants::CREDENTIAL_FALLBACK_STORE;
 
@@ -386,8 +385,7 @@ fn set_fallback(app: &AppHandle, account: &str, secret: &str) -> Result<(), Stri
     let blob = protect_secret(app, account, secret)?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(blob);
 
-    let store = app
-        .store(CREDENTIAL_FALLBACK_STORE)
+    let store = crate::json_store::open(app, CREDENTIAL_FALLBACK_STORE)
         .map_err(|e| format!("failed to open credential fallback store: {e}"))?;
     let old = store.get(account);
     store.set(account, Value::String(encoded));
@@ -408,8 +406,7 @@ fn set_fallback(app: &AppHandle, account: &str, secret: &str) -> Result<(), Stri
 fn get_fallback(app: &AppHandle, account: &str) -> Option<String> {
     use base64::Engine as _;
 
-    let store = app
-        .store(CREDENTIAL_FALLBACK_STORE)
+    let store = crate::json_store::open(app, CREDENTIAL_FALLBACK_STORE)
         .map_err(|e| log::warn!("failed to open credential fallback store: {e}"))
         .ok()?;
     let encoded = match store.get(account) {
@@ -436,8 +433,7 @@ fn get_fallback(app: &AppHandle, account: &str) -> Option<String> {
 /// next read. Callers where the keyring copy is authoritative (a `set()`
 /// recovering from a stale fallback) may still discard the `Err` themselves.
 fn clear_fallback(app: &AppHandle, account: &str) -> Result<(), String> {
-    let store = app
-        .store(CREDENTIAL_FALLBACK_STORE)
+    let store = crate::json_store::open(app, CREDENTIAL_FALLBACK_STORE)
         .map_err(|e| format!("failed to open credential fallback store: {e}"))?;
     // `delete` reports whether a key was present; only flush when one was, so
     // the common healthy path does not rewrite the file on every save.

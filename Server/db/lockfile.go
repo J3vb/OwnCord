@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -11,6 +12,25 @@ import (
 // handle on Windows) are released by the OS when their holder exits, so a
 // held lock always means a running process, never a stale file.
 var errAlreadyLocked = errors.New("database lock held by another process")
+
+// AcquireProcessLock takes the database's single-process lock for dbPath and
+// returns its release. It is the exported front door for short-lived tooling —
+// the `chatserver restore` CLI — that must refuse when a server is already
+// running against the file, rather than swapping it underneath a live process.
+// It tries ONCE and reports the lock immediately, with no retry window: an
+// operator running the command wants a fast refusal, not the restart-handoff
+// wait acquireProcessLock exists for. The returned error is descriptive, not a
+// sentinel callers must match.
+func AcquireProcessLock(dbPath string) (release func(), err error) {
+	release, err = tryLockFile(lockFilePath(dbPath))
+	if errors.Is(err, errAlreadyLocked) {
+		return nil, fmt.Errorf("database %s is in use by another process (stop the server first): %w", dbPath, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("could not take the process lock for database %s: %w", dbPath, err)
+	}
+	return release, nil
+}
 
 // lockFilePath is the sidecar lock file next to the SQLite database.
 func lockFilePath(dbPath string) string { return dbPath + ".lock" }

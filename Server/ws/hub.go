@@ -4,6 +4,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,6 +57,13 @@ type Hub struct {
 	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
 	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
+	queueDrops     queueDropState   // SRV-03 (hub_stats.go)
+
+	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
+	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
+	// and the topic-shed counter. The zero value is usable, so no initializer
+	// is needed and the field costs no allocation on the hot path.
+	latency hubLatencyMetrics
 
 	// Phase B Step 7 — event persistence. nil = ring buffer only. Atomic
 	// because internal/app wires these one lifecycle stage after Run has
@@ -108,18 +116,21 @@ type Hub struct {
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight atomic.Bool
-	voiceSweepInFlight   atomic.Bool
+	sessionSweepInFlight   atomic.Bool
+	voiceSweepInFlight     atomic.Bool
+	voiceReconcileInFlight atomic.Bool
+
+	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
+	voiceGrace     voiceGraceState     // RT-8 grace window (voice_grace.go)
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
 
-	// Sequence watermark of the last channel-visibility change. Visibility
-	// updates are sent as targeted, unsequenced messages, so clients resuming
-	// from a seq at or before this point must take the full-ready path to
-	// converge (replay cannot deliver them). Reset on restart — a fresh
+	// Sequence watermark of the last channel-visibility change or content shed
+	// (SRV-03): neither reaches a client via replay, so one resuming from a seq
+	// at or before it takes the full-ready path. Reset on restart — a fresh
 	// connection always gets a correctly filtered ready payload anyway.
 	visibilityChangeSeq atomic.Uint64
 
@@ -158,6 +169,13 @@ type Hub struct {
 	// the handshake's bearer-token resolution, the sweep's session verdicts
 	// and the connect audit row. Required.
 	authn SocketAuthenticator
+
+	// trustedProxyNets is server.trusted_proxies parsed once at construction
+	// (SRE-11): the handshake resolves the client address for its log line and
+	// the ws_connect audit row through it, so the recommended reverse-proxy
+	// deployment records the client rather than the proxy hop. Empty means
+	// RemoteAddr is used and a client-supplied header is ignored.
+	trustedProxyNets []*net.IPNet
 
 	// voice is the voice family's service (readers.go's VoiceStore): every
 	// voice_states read and write the join, moderation, control and sweep
@@ -237,15 +255,19 @@ func (h *Hub) Run() {
 						"panic_count", panicCount,
 						"stack", stackutil.Capture())
 
-					if panicCount >= 3 {
-						// The hub's state after three panics in a minute is
-						// unknown, and a stopped dispatch loop is invisible from
-						// the outside: registerNow keeps admitting clients that
-						// can never receive a broadcast. Exit and let the
-						// process supervisor restart us (fatalFn is os.Exit(1)
-						// in production; tests substitute a no-op and rely on
-						// the Stop below).
-						slog.Error("hub: too many panics in 60s, stopping and exiting for supervisor restart")
+					// SRE-08: a Windows hardware fault (a nil deref or an
+					// invalid address) may have left the heap corrupt
+					// (golang/go#81238), so it exits at once rather than
+					// being recovered onto damaged memory. Software panics
+					// keep the breaker below.
+					hardware := stackutil.Recovered(r)
+					breaker := panicCount >= 3
+					if hardware || breaker {
+						// State is unknown, and a dead loop is invisible from
+						// outside, so exit for a supervisor restart (see
+						// fatalFn; tests substitute a no-op and rely on Stop).
+						slog.Error("hub: stopping and exiting for supervisor restart",
+							"hardware_fault", hardware, "panic_count", panicCount)
 						h.Stop()
 						h.dispatchExited.Store(true)
 						if h.fatalFn != nil {
@@ -264,7 +286,10 @@ func (h *Hub) Run() {
 					if ev.add {
 						// No handshake permission set on this path (and no DB
 						// call allowed on the hub goroutine) — nil denies the
-						// inherited voice-channel subscription.
+						// inherited voice-channel subscription. A wake
+						// refusal cannot occur here: the handshake paths
+						// refuse before queueing a Register event, and the
+						// event path never carries wakeReconnect.
 						h.registerNow(ev.c, nil)
 					} else {
 						h.unregisterNow(ev.c)
@@ -280,6 +305,8 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
+					// RT-3 has its own guard: a slow ListParticipants never suppresses the ghost sweep.
+					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
 				}
 			}
 		}()
@@ -318,18 +345,22 @@ func (h *Hub) StopLiveKit() {
 	}
 }
 
-// GracefulStop stops the LiveKit process (if managed) and then stops the hub.
-// Safe to call multiple times concurrently. Prefer GracefulStopContext where a
-// shutdown budget exists — this variant waits the full client-notice window.
+// GracefulStop stops the hub, announcing a plain shutdown, and then the
+// LiveKit process (if managed). Safe to call multiple times concurrently.
+// Prefer GracefulStopContext where a shutdown budget exists — this variant
+// waits the full client-notice window.
 func (h *Hub) GracefulStop() {
-	h.GracefulStopContext(context.Background())
+	h.GracefulStopContext(context.Background(), RestartReasonShutdown)
 }
 
 // GracefulStopContext is GracefulStop bounded by ctx: the client-notice wait
 // ends early when ctx expires, so the hub's drain counts against the caller's
-// shutdown budget instead of extending it. Safe to call multiple times
-// concurrently (only the first call's ctx is used).
-func (h *Hub) GracefulStopContext(ctx context.Context) {
+// shutdown budget instead of extending it. The order is notice, notice
+// window, socket close, then StopLiveKit. reason is what the restart notice
+// tells clients — the restart's own intent (an update, a restore) rather than
+// a generic shutdown. Safe to call multiple times concurrently (only the
+// first call's ctx and reason are used).
+func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 	h.gracefulOnce.Do(func() {
 		// The notice window matters only when someone is connected to hear
 		// it — an idle server (and every early-return startup path) skips
@@ -337,11 +368,8 @@ func (h *Hub) GracefulStopContext(ctx context.Context) {
 		hasClients := h.ClientCount() > 0
 		if hasClients {
 			// Broadcast restart notice to all connected clients.
-			h.BroadcastServerRestart("shutdown", 5)
+			h.BroadcastServerRestart(reason, 5)
 		}
-
-		// Stop LiveKit process.
-		h.StopLiveKit()
 
 		// Give clients the promised notice window to disconnect gracefully —
 		// the 5s matches the countdown BroadcastServerRestart told them.
@@ -359,14 +387,11 @@ func (h *Hub) GracefulStopContext(ctx context.Context) {
 		}
 		h.mu.Unlock()
 
+		// Stop LiveKit only now, so a client leaves voice on the socket drop
+		// while its room is still up instead of reconnecting to a dead one.
+		h.StopLiveKit()
+
 		// Stop the hub dispatch loop.
 		h.stopOnce.Do(func() { close(h.stop) })
 	})
-}
-
-// clientEvent is a register (add=true) or unregister (add=false) request.
-// Both kinds share one channel so per-connection ordering is preserved.
-type clientEvent struct {
-	c   *Client
-	add bool
 }

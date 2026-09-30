@@ -1,7 +1,9 @@
 package ws
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -86,6 +89,11 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*LiveKitProcess, liveKi
 	}
 	t.Cleanup(p.Stop)
 	waitForLiveKitTestFile(t, filepath.Join(dir, "listeners.json"))
+	return p, readLiveKitTestListeners(t, dir)
+}
+
+func readLiveKitTestListeners(t *testing.T, dir string) liveKitTestListeners {
+	t.Helper()
 	data, err := os.ReadFile(filepath.Join(dir, "listeners.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +102,7 @@ func startLiveKitTestProcess(t *testing.T, mode string) (*LiveKitProcess, liveKi
 	if err := json.Unmarshal(data, &listeners); err != nil {
 		t.Fatal(err)
 	}
-	return p, listeners
+	return listeners
 }
 
 func waitForLiveKitTestFile(t *testing.T, path string) {
@@ -230,5 +238,90 @@ func TestLiveKitProcess_StopDuringDownloadAndRejectDuplicateStart(t *testing.T) 
 	}
 	if p.IsRunning() {
 		t.Error("companion started during shutdown")
+	}
+}
+
+// SRE-05: the companion's stdout/stderr are routed into slog with
+// component=livekit, line by line and level-mapped.
+func TestLiveKitLogWriter_RoutesLinesThroughSlog(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	w := &liveKitLogWriter{}
+	// Partial writes, mixed levels, and a blank line.
+	if _, err := w.Write([]byte("2024-01-01 INFO starting\n2024-01-01 ERRO")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("R ice failed\n2024-01-01 WARN port busy\n\n")); err != nil {
+		t.Fatal(err)
+	}
+	// Only the level field counts: an "error" field on a WARN line keeps
+	// it WARN, and "trace" in an INFO line's text does not make it DEBUG.
+	if _, err := w.Write([]byte("2024-01-01T00:00:00Z\tWARN\tlivekit\trtc/transport.go:123\tcould not handle ICE candidate\t{\"error\": \"x\"}\n" +
+		"2024-01-01T00:00:00Z\tINFO\tlivekit\tstacktrace tracer ready\n")); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"component=livekit",
+		"level=INFO",
+		"starting",
+		"level=ERROR",
+		"ice failed",
+		"level=WARN",
+		"port busy",
+		"level=WARN msg=\"livekit companion output\" line=\"2024-01-01T00:00:00Z\\tWARN\\tlivekit\\trtc/transport.go:123\\tcould not handle ICE candidate",
+		"level=INFO msg=\"livekit companion output\" line=\"2024-01-01T00:00:00Z\\tINFO\\tlivekit\\tstacktrace tracer ready\"",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slog output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "line=\"\"") {
+		t.Errorf("blank line was logged:\n%s", out)
+	}
+}
+
+// One companion line longer than the cap is truncated, so a stream with no
+// newlines cannot grow the buffer without bound.
+func TestLiveKitLogWriter_CapsLongLines(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	w := &liveKitLogWriter{}
+	long := strings.Repeat("x", liveKitMaxLine*2)
+	if _, err := w.Write([]byte(long)); err != nil {
+		t.Fatal(err)
+	}
+	// No newline arrived yet: the partial buffer is capped and emitted.
+	if got := w.buf.Len(); got > liveKitMaxLine {
+		t.Fatalf("writer buffer grew to %d bytes, want <= %d", got, liveKitMaxLine)
+	}
+	if !strings.Contains(buf.String(), "truncated") {
+		t.Errorf("over-long line was not marked truncated:\n%s", buf.String())
+	}
+}
+
+// A nil manager reports the zero status (unmanaged), and status reads the
+// running/restart/gave-up flags without probing.
+func TestLiveKitProcess_Status(t *testing.T) {
+	t.Parallel()
+	var nilProc *LiveKitProcess
+	if got := nilProc.Status(); got != (LiveKitProcessStatus{}) {
+		t.Fatalf("a nil process status = %+v, want the zero value", got)
+	}
+	p := &LiveKitProcess{}
+	if got := p.Status(); got.Running || got.Restarts != 0 || got.GaveUp {
+		t.Fatalf("fresh process status = %+v, want the zero value", got)
+	}
+	p.restarts.Store(3)
+	p.gaveUp.Store(true)
+	got := p.Status()
+	if got.Restarts != 3 || !got.GaveUp {
+		t.Fatalf("status = %+v, want restarts=3 gaveUp=true", got)
 	}
 }

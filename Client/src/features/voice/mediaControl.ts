@@ -12,7 +12,7 @@ import {
   setLocalDeafened,
   setListenOnly,
 } from "../../stores/voice.store";
-import { loadPref } from "../../components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
@@ -263,6 +263,17 @@ export class MediaControl {
         setLocalMuted(true);
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
         this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
+        return;
+      }
+      // A muted or PTT-armed join publishes no track and so attaches no
+      // RNNoise processor; the first unmute is where it gets one. Already
+      // attached is a no-op. A processor failure is not a mic failure.
+      if (!isMicPolicyGated() && loadPref<boolean>("enhancedNoiseSuppression", false)) {
+        try {
+          await this._audioPipeline.applyNoiseSuppressor();
+        } catch (err) {
+          log.warn("Noise suppressor apply failed after unmute", err);
+        }
       }
     }
   }

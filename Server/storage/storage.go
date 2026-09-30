@@ -170,8 +170,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 		// Write-side failures surface as *fs.PathError (File.Write wraps
 		// them); read-side failures (client aborted mid-upload) do not, and
 		// those stay the client's fault.
-		var pathErr *fs.PathError
-		if errors.As(err, &pathErr) {
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
 			return 0, fmt.Errorf("writing file: %w: %w", ErrIO, err)
 		}
 		return 0, fmt.Errorf("writing file: %w", err)

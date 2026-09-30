@@ -422,6 +422,7 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
     // bob erases his own account from the client (BPR-052 client half).
     await bob.getByRole("button", { name: "Settings", exact: true }).click();
     await bob.getByRole("tab", { name: "Account" }).click();
+    await bob.locator("summary", { hasText: "Delete account" }).click();
     await bob.locator("[data-testid='delete-account-trigger']").click();
     await bob.locator("[data-testid='delete-account-password']").fill(TEST_PASSWORD);
     await bob.locator("[data-testid='delete-account-confirm']").click();
@@ -564,10 +565,15 @@ test.describe("B9-26 first-contact journey (real server)", () => {
 
       // The server records the block; the server refuses a new DM from the
       // blocked sender, and the DM conversation's composer now gates.
-      const blocks = (await server.api("/api/v1/blocks", undefined, bobToken)) as {
-        blocked_user_ids: number[];
-      };
-      expect(blocks.blocked_user_ids).toContain(strangerId);
+      // The confirming click only starts the block request, so wait for it.
+      await expect
+        .poll(async () => {
+          const blocks = (await server.api("/api/v1/blocks", undefined, bobToken)) as {
+            blocked_user_ids: number[];
+          };
+          return blocks.blocked_user_ids;
+        })
+        .toContain(strangerId);
       await expect
         .poll(() => status(server, "/api/v1/dms", stranger.token, { recipient_id: bobId }))
         .toBe(403);

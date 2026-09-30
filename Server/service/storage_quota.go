@@ -111,8 +111,9 @@ func (s *UploadService) MaxUploadBytes() int64 {
 // runs under the lock on purpose: a reading taken before earlier uploads
 // landed, judged after they committed (and so left the in-flight sum),
 // under-counts what the volume holds and over-admits. A statfs is
-// microseconds; the DB charge is the write that can queue behind a backup,
-// and that one has to be inside anyway (see reserve). No floor or a failed
+// microseconds, and the DB charge has to be inside anyway (see reserve). A
+// backup no longer queues that charge: it runs on the reader pool, not the
+// writer (SRV-02, which is what satisfies PERF-10). No floor or a failed
 // probe is "unknown", never "full", and fits.
 //
 // Addition only: free is unsigned and a subtraction wraps exactly when the

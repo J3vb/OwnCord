@@ -14,13 +14,13 @@ import { STORAGE_PREFIX } from "@lib/preferences";
 // listener at load. loadNotifications() re-imports against these instances,
 // so its vi.resetModules() does not install a second copy of each listener.
 import * as attachments from "@components/message-list/attachments";
-import * as formatting from "@components/message-list/formatting";
+import * as formatting from "@lib/formatting";
 import * as channelMutes from "@lib/channel-mutes";
 import * as appLogger from "@lib/logger";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
-  ["@components/message-list/formatting", formatting],
+  ["@lib/formatting", formatting],
   ["@lib/channel-mutes", channelMutes],
   ["@lib/logger", appLogger],
 ] as const;

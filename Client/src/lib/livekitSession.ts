@@ -1,5 +1,6 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
-import { Room } from "livekit-client";
+import { Room, Track } from "livekit-client";
+import type { StreamSample } from "../features/voice/remoteTracks";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -10,7 +11,7 @@ import {
   setListenOnly,
   setVoiceStatus,
 } from "@stores/voice.store";
-import { loadPref } from "@components/settings/helpers";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
@@ -791,9 +792,24 @@ export class LiveKitSession {
     return this._remoteTracks.getLocalScreenshareStream();
   }
 
+  /** Your screen share is publishing its audio too. */
+  hasLocalScreenshareAudio(): boolean {
+    return (
+      this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio) !== undefined
+    );
+  }
+
   /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
   getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
     return this._remoteTracks.getRemoteVideoStream(userId, type);
+  }
+
+  /** One receiver sample of a remote camera or screen share (video tile chip). */
+  getRemoteVideoStats(
+    userId: number,
+    type: "camera" | "screenshare",
+  ): Promise<StreamSample | null> {
+    return this._remoteTracks.getRemoteVideoStats(userId, type);
   }
 
   getRoom(): Room | null {
@@ -872,7 +888,9 @@ export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
+export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
+export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);

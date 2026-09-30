@@ -101,7 +101,7 @@ Routes are registered in the `Mount*Routes` function of the owning `Server/api/*
 
 - channels, overrides, access preview → `MANAGE_CHANNELS`; roles → `MANAGE_ROLES`; settings, config facts (`GET /config`), registrations, retention → `MANAGE_SERVER`; audit log → `VIEW_AUDIT_LOG`; force-logout → `KICK_MEMBERS`.
 - `PATCH /users/{id}` → the perimeter only, with a ban or role change re-checked in `ModerationService` (`BAN_MEMBERS`/`MANAGE_ROLES` plus role hierarchy).
-- logs ticket, support bundles, attention, account erasure → `ADMINISTRATOR`, which bypasses every bit check.
+- logs ticket and log level, support bundles, attention, account erasure → `ADMINISTRATOR`, which bypasses every bit check.
 - tokens, backups, updates, recovery credentials → **Owner role only**; `ADMINISTRATOR` does not bypass this.
 - `POST /admin/api/setup` and `GET /admin/api/setup/status` are unauthenticated (setup additionally requires the one-time token printed at start-up); `/logs/stream` takes a single-use ticket.
 
@@ -119,14 +119,14 @@ In mount order: request-ID binding (`boundRequestID`, chi `RequestID`, `X-Reques
 ```json
 {
   "type": "auth",
-  "payload": { "token": "...", "last_seq": 0, "active_channel_id": null, "epoch": 1 }
+  "payload": { "token": "...", "last_seq": 0, "active_channel_id": null, "wake": false, "epoch": 1 }
 }
 ```
 
 - **Success:** `auth_ok` (`{user, server_name, motd, replay_source}`), followed by `ready` (full initial state) unless replaying.
 - **Failure:** `auth_error` is terminal (the client stops reconnecting and clears its credential), with `message` one of `invalid message`, `first message must be auth`, `missing token`, `invalid token`, `session expired`, `user not found`, or the structured epoch refusal below. A banned user instead gets an `error` frame with code `BANNED`; a database fault gets an `error` frame with code `INTERNAL` (retry with backoff and keep the credential). Every failure then closes with code **1008**.
-- **One live socket per account:** a newly authenticated connection displaces the user's previous one, which gets an `error` frame with code `SESSION_REPLACED` before the close and must not auto-reconnect.
-- **Heartbeat:** the client sends `{"type":"ping","payload":{}}` every 30 s (server cap 2/sec, excess silently dropped), and the server replies `{"type":"pong"}`. Every 30 s the hub disconnects clients idle for 90 s and re-checks every connected session (revoked, expired or banned → kicked); each connection is also re-checked every 10 inbound messages.
+- **One live socket per account:** a newly authenticated connection displaces the user's previous one, which gets an `error` frame with code `SESSION_REPLACED` before the close and must not auto-reconnect. A reconnect that marks itself a wake (`wake: true`, sent after a process suspend) is instead refused with code `ANOTHER_DEVICE_ACTIVE` when a different session holds the live connection or a call it parked in the voice grace window: that session and its call are left untouched, and the client stays signed in until the user chooses "Use here" (which reconnects without `wake`).
+- **Heartbeat:** the client sends `{"type":"ping","payload":{}}` every 30 s (server cap 2/sec, excess silently dropped), and the server replies `{"type":"pong"}`. The server also sends a WebSocket protocol Ping every 25 s and closes a peer that does not answer it within 25 s. Every 30 s the hub disconnects clients idle for 90 s and re-checks every connected session (revoked, expired or banned → kicked); each connection is also re-checked every 10 inbound messages.
 
 ### Message envelope
 

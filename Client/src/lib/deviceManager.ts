@@ -6,7 +6,7 @@
 
 import { Room } from "livekit-client";
 import { voiceStore } from "@stores/voice.store";
-import { loadPref, savePref } from "@components/settings/helpers";
+import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import { nativeAudioDevices } from "../features/voice/native/devices";
@@ -226,12 +226,17 @@ export class DeviceManager {
         log.warn("Audio pipeline setup failed after input device switch", pipelineErr);
         this.onToast?.(voiceText("device.pipelineError"));
       }
-      // Re-apply or remove RNNoise processor based on current setting
-      const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
-      if (enhancedNS) {
-        await this.audioPipeline?.applyNoiseSuppressor();
-      } else {
-        await this.audioPipeline?.removeNoiseSuppressor();
+      // Re-apply or remove RNNoise processor based on current setting.
+      // OC-0474: not while gated — the muted track keeps any attached
+      // processor across the switch and re-inits it on unmute, and attaching
+      // one now would run an RNNoise context over the ended track.
+      if (!isMicPolicyGated()) {
+        const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
+        if (enhancedNS) {
+          await this.audioPipeline?.applyNoiseSuppressor();
+        } else {
+          await this.audioPipeline?.removeNoiseSuppressor();
+        }
       }
       log.info("Switched input device", { deviceId });
     } catch (err) {

@@ -62,6 +62,7 @@ import type { DevTools } from "../../../src/platform/contracts/devTools";
 import type { Notifier } from "../../../src/platform/contracts/notifications";
 import type { UrlOpener } from "../../../src/platform/contracts/opener";
 import type { TrayStatus } from "../../../src/platform/contracts/trayStatus";
+import type { GlobalShortcuts } from "../../../src/platform/contracts/globalShortcuts";
 import type { Autostart } from "../../../src/platform/contracts/updater";
 import type { WindowControl } from "../../../src/platform/contracts/window";
 import { describeAppMetadataSuite } from "./appMetadata.suite";
@@ -81,6 +82,8 @@ import type { NativeControl as NativeVoiceNativeControl } from "./nativeVoice.su
 import type { NativeVoice } from "../../../src/platform/contracts/nativeVoice";
 import { describeTrayStatusSuite } from "./trayStatus.suite";
 import type { NativeControl as TrayStatusNativeControl } from "./trayStatus.suite";
+import { describeGlobalShortcutsSuite } from "./globalShortcuts.suite";
+import type { NativeControl as GlobalShortcutsNativeControl } from "./globalShortcuts.suite";
 import { describeWindowControlSuite } from "./window.suite";
 import type { NativeControl as WindowControlNativeControl } from "./window.suite";
 
@@ -287,6 +290,8 @@ describeNotifierSuite(async () => {
     permissionGranted: async () => undefined,
     requestPermission: async () => undefined,
     show: async () => undefined,
+    showMessage: async () => undefined,
+    onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
   } as unknown as Notifier;
   const native: NotifierNativeControl = {
@@ -294,6 +299,8 @@ describeNotifierSuite(async () => {
     userAnswers: () => undefined,
     unavailable: () => undefined,
     shown: () => [],
+    messageShown: () => [],
+    emitsActivation: async () => undefined,
     attentionRequests: () => 0,
   };
   return { subject, native };
@@ -306,6 +313,7 @@ describeWindowControlSuite(async () => {
     outerPosition: async () => undefined,
     outerSize: async () => undefined,
     center: async () => undefined,
+    setFullscreen: async () => undefined,
   } as unknown as WindowControl;
   const native: WindowControlNativeControl = {
     maximized: () => undefined,
@@ -313,6 +321,7 @@ describeWindowControlSuite(async () => {
     monitorsFailWith: () => undefined,
     placedAt: () => undefined,
     centered: () => 0,
+    fullscreenCalls: () => [],
   };
   return { subject, native };
 }, failEveryTest);
@@ -359,10 +368,14 @@ describeAutostartSuite(async () => {
 }, failEveryTest);
 
 describeAppProcessSuite(async () => {
-  const subject = { relaunch: async () => undefined } as unknown as AppProcess;
+  const subject = {
+    relaunch: async () => undefined,
+    reportReady: async () => undefined,
+  } as unknown as AppProcess;
   const native: AppProcessNativeControl = {
     failWith: () => undefined,
     relaunches: () => 0,
+    readyReports: () => 0,
   };
   return { subject, native };
 }, failEveryTest);
@@ -371,6 +384,22 @@ describeTrayStatusSuite(async () => {
   const subject = { onStatusChange: () => () => undefined } as unknown as TrayStatus;
   const native: TrayStatusNativeControl = {
     emits: async () => undefined,
+  };
+  return { subject, native };
+}, failEveryTest);
+
+describeGlobalShortcutsSuite(async () => {
+  const subject = {
+    start: async () => undefined,
+    supported: async () => true,
+    setKeys: async () => undefined,
+    onShortcut: () => () => undefined,
+  } as unknown as GlobalShortcuts;
+  const native: GlobalShortcutsNativeControl = {
+    emits: async () => undefined,
+    commands: () => [],
+    keyCodes: () => undefined,
+    supported: true,
   };
   return { subject, native };
 }, failEveryTest);

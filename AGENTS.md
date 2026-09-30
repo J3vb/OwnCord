@@ -8,13 +8,13 @@ Instructions for AI coding agents (Codex, Cursor and similar) working in this re
 
 OwnCord is a self-hosted chat platform (beta):
 
-- `Server/`: Go 1.26 REST + WebSocket server over SQLite, with LiveKit voice/video. Key dependencies: chi (HTTP), a sqlc-generated SQLite layer, the LiveKit server SDK, the Coraza WAF, Prometheus.
+- `Server/`: Go 1.27 REST + WebSocket server over SQLite, with LiveKit voice/video. Key dependencies: chi (HTTP), a sqlc-generated SQLite layer, the LiveKit server SDK, the Coraza WAF, Prometheus.
 - `Client/`: Tauri v2 desktop app, a TypeScript frontend (Vite, vanilla TS, no React/Vue) plus a deliberately thin Rust backend (`src-tauri/`) for native APIs.
 - `protocol/schema.json`: the single source of truth for WebSocket message types, generated into both sides.
 
 Prerequisites ([README.md](README.md#prerequisites)):
 
-- Go 1.26+, plus a C compiler on PATH for the `-race` tests. On Windows use a MinGW-w64 gcc such as WinLibs. Without a compiler, Go disables cgo and `go test -race` fails with `-race requires cgo`.
+- Go 1.27+, plus a C compiler on PATH for the `-race` tests. On Windows use a MinGW-w64 gcc such as WinLibs. Without a compiler, Go disables cgo and `go test -race` fails with `-race requires cgo`.
 - Node.js 26.x with npm 11.x (`Client/.nvmrc`); a different major fails `npm ci`.
 - Rust via rustup. `Client/src-tauri/rust-toolchain.toml` pins 1.98.1 with clippy and rustfmt, installed on the first cargo run.
 
@@ -48,7 +48,7 @@ Inspect existing code before creating a new component, helper or pattern. OwnCor
 
 Full rules: [CODE_STYLE.md](CODE_STYLE.md). Match the surrounding code rather than reasoning about style from scratch.
 
-- **Go:** `gofmt` + `golangci-lint` (CI pins v2.11.3). Prefer the standard library, except for the concurrency-heavy packages: in `ws/` and `service/` declare `syncutil.Mutex`/`syncutil.RWMutex` (`Server/syncutil/`), never a raw `sync.Mutex`/`sync.RWMutex`. `syncutil` gains deadlock detection under `-tags deadlock`, and the `syncutil-locks` rule in `Server/invariants/` fails `go test` on a raw lock outside the frozen set — the rule's scope is `ws/` and `service/`, and a handful of other production files use raw locks deliberately (`Server/invariants/syncutil_locks.go` lists them).
+- **Go:** `gofmt` + `golangci-lint` (CI pins v2.13.2). Prefer the standard library, except for the concurrency-heavy packages: in `ws/` and `service/` declare `syncutil.Mutex`/`syncutil.RWMutex` (`Server/syncutil/`), never a raw `sync.Mutex`/`sync.RWMutex`. `syncutil` gains deadlock detection under `-tags deadlock`, and the `syncutil-locks` rule in `Server/invariants/` fails `go test` on a raw lock outside the frozen set — the rule's scope is `ws/` and `service/`, and a handful of other production files use raw locks deliberately (`Server/invariants/syncutil_locks.go` lists them).
 - **Server layering:** `api → service → db`. Only `db/` and `service/` import `db` freely; new persistence goes behind a service, not into a handler. New authorization code resolves a `permissions.Subject` and calls the predicate that owns the property; only `permissions/` and a frozen residue listed in `AuthzResidueAllow` (`Server/invariants/authz_chokepoint.go`) call the raw permission-bit helpers.
 - **TypeScript:** vanilla TS, no UI framework. New or extracted client code goes under `src/features/`, using relative imports, but `messages.store` mutators come from the `@stores/messages.store` facade, never its reducer modules ([Client/CLAUDE.md](Client/CLAUDE.md)). `src/` has no import cycles (`npm run lint:cycles`, `--max-warnings=0`); invert the dependency edge rather than importing upward.
 - **Client platform seam:** `src/platform/desktop/` is the only place under `src/` a `@tauri-apps` import may appear; ESLint enforces it.

@@ -13,7 +13,7 @@ import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
-import type { MessageInputComponent } from "@components/MessageInput";
+import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
@@ -40,6 +40,7 @@ import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
+import { viewChannel } from "@lib/last-channel";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
@@ -59,6 +60,10 @@ import {
 } from "@lib/pendingMessages";
 
 const log = createLogger("channel-ctrl");
+
+/** Longer than ws.ts's 60 s server-silence deadline, so a half-open socket is
+ *  declared dead (and the entry failed) before the entry can expire. */
+const TRACKED_ACTION_EXPIRY_MS = 90_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -142,6 +147,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
+  // UX-1: unsent composer state per channel, so switching away and back keeps
+  // the text, the reply target and the staged upload ids. Controller-scoped
+  // (not per-mount) because the whole point is to outlive a channel switch.
+  // Entries are dropped once a send consumes them or the user clears them.
+  const draftByChannel = new Map<number, ComposerDraft>();
+
   // Optimistic send: keep the raw payload per correlation id so a failed send
   // can be retried (including its attachments). Controller-scoped rather than
   // per-mount: correlation ids are globally unique (crypto.randomUUID), and a
@@ -186,6 +197,63 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let sendChainBusy = false;
   let sendChainGen = 0;
   const sendTimers = new Map<string, { timer: number; release?: () => void }>();
+
+  // CLI-08: chat_edit and chat_delete are fire-and-forget — no ack carries
+  // their envelope id back, so before this they were toasted "success" on
+  // send and silently dropped by a closed or half-open socket. Track each
+  // frame by the id ws.send returns (the same correlation scheme reactions
+  // use), resolve it on the server echo, and report a failure instead of a
+  // false success. Controller-scoped like draftByCorrelation so a frame in
+  // flight across a channel switch keeps its entry; restoration only lands
+  // when that channel is the one mounted.
+  interface TrackedEdit {
+    readonly channelId: number;
+    readonly messageId: number;
+    readonly content: string;
+  }
+  const pendingEdits = new Map<string, TrackedEdit>();
+  const pendingDeletes = new Map<string, { channelId: number; messageId: number }>();
+  const trackTimers = new Map<string, number>();
+  function track<T>(pending: Map<string, T>, id: string, entry: T): void {
+    pending.set(id, entry);
+    trackTimers.set(
+      id,
+      window.setTimeout(() => untrack(pending, id), TRACKED_ACTION_EXPIRY_MS),
+    );
+  }
+  /** Remove a tracked entry and its expiry timer; returns the entry, if any. */
+  function untrack<T>(pending: Map<string, T>, id: string): T | undefined {
+    const entry = pending.get(id);
+    pending.delete(id);
+    window.clearTimeout(trackTimers.get(id));
+    trackTimers.delete(id);
+    return entry;
+  }
+
+  /** Put a failed edit's text back in the composer, but only while its own
+   *  channel is the mounted one and the composer holds nothing of the user's
+   *  — the row it belongs to may be gone by now, and startEdit against
+   *  another channel's composer would target the wrong message id. At most
+   *  one edit lands, the newest; the error toast (when asked for) says the text is back
+   *  only if it is. Deferred a microtask because the synchronous disconnected
+   *  path runs inside MessageInput.handleSend, whose own cancelEdit() (right
+   *  after onEditMessage returns) would otherwise wipe the restored text. */
+  function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
+    queueMicrotask(() => {
+      const newest = edits.findLast((edit) => edit.channelId === currentChannelId);
+      let restored = false;
+      if (newest !== undefined && messageInput?.isIdle() === true) {
+        messageInput.startEdit(newest.messageId, newest.content);
+        restored = true;
+      }
+      if (toast) {
+        showToast(
+          messagingText(restored ? "toast.editFailedRestored" : "toast.editFailed"),
+          "error",
+        );
+      }
+    });
+  }
   function clearSendTimer(id: string): void {
     const owned = sendTimers.get(id);
     if (!owned) return;
@@ -225,6 +293,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       typingIndicator = null;
     }
     if (messageInput !== null) {
+      // UX-1: stash the unsent state before the composer is torn down. Empty
+      // drafts are not stored, so switching away from a channel with nothing
+      // typed leaves no entry behind.
+      if (currentChannelId !== null) {
+        const draft = messageInput.getDraft();
+        if (draft.content !== "" || draft.replyTo !== null || draft.attachments.length > 0) {
+          draftByChannel.set(currentChannelId, draft);
+        } else {
+          draftByChannel.delete(currentChannelId);
+        }
+      }
       messageInput.destroy?.();
       messageInput = null;
     }
@@ -275,10 +354,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     log.info("Switching channel", { channelId, channelName });
 
-    ws.send({
-      type: "channel_focus",
-      payload: { channel_id: channelId },
-    });
+    // UX-8: the channel is actually on screen now, so this is where its
+    // badge is cleared and it is recorded as the last channel (the ready-time
+    // auto-select only selected it), alongside the channel_focus.
+    viewChannel(channelId, channelType, ws);
 
     channelAbort = new AbortController();
     const signal = channelAbort.signal;
@@ -705,15 +784,22 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       onDeleteClick: (msgId: number) => {
         const result = pendingDeleteManager.tryDelete(msgId);
-        if (result === "confirmed") {
-          ws.send({
-            type: "chat_delete",
-            payload: { message_id: msgId },
-          });
-          showToast(messagingText("toast.deleted"), "success");
-        } else {
+        if (result !== "confirmed") {
           showToast(messagingText("toast.deleteConfirm"), "info");
+          return;
         }
+        // CLI-08: a destructive menu action is gated on the connection. A
+        // closed or half-open socket would drop the frame and leave the
+        // moderator thinking the message was deleted.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          showToast(messagingText("toast.deleteFailed"), "error");
+          return;
+        }
+        const id = ws.send({
+          type: "chat_delete",
+          payload: { message_id: msgId },
+        });
+        track(pendingDeletes, id, { channelId, messageId: msgId });
       },
       onReactionClick: (msgId: number, emoji: string) => {
         reactionCtrl.handleReaction(msgId, emoji);
@@ -738,12 +824,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onReportClick: (msgId: number) => {
         const msg = getChannelMessages(channelId).find((m) => m.id === msgId);
         if (msg === undefined) return;
-        // The dialog's closing restores focus to the Report button; the
-        // composer is the fallback when a re-render has replaced the row.
-        const fallbackFocus = () => slots.inputSlot.querySelector<HTMLElement>("textarea");
         import("../../features/reports/openers").then(
           ({ openMessageReport }) => {
-            if (!signal.aborted) openMessageReport({ api, msg, signal, fallbackFocus });
+            if (signal.aborted) return;
+            // The dialog's closing restores focus to the Report button; the
+            // composer is the fallback when a re-render has replaced the row.
+            openMessageReport({
+              api,
+              msg,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
           },
           () => showToast(reportEntryText("reportLoadFailed"), "error"),
         );
@@ -769,11 +860,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
         performSend(content, replyTo, attachments);
       },
-      onUploadFile: async (file: File) => {
+      onUploadFile: async (
+        file: File,
+        uploadSignal?: AbortSignal,
+        onProgress?: (fraction: number) => void,
+      ) => {
         try {
-          const result = await api.uploadFile(file);
+          const result = await api.uploadFile(file, uploadSignal, onProgress);
           return { id: result.id, url: result.url, filename: result.filename };
         } catch (err) {
+          // A user-cancelled upload is not a failure — the composer already
+          // removed its preview and does not want an error for it.
+          if (uploadSignal?.aborted) throw err;
           log.error("File upload failed", { error: String(err) });
           showToast(messagingText("toast.uploadFailed"), "error");
           throw err;
@@ -798,14 +896,38 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         if (original !== undefined && original.content === trimmed) {
           return;
         }
-        ws.send({
+        // CLI-08: same connection gate as delete. A dropped edit frame must
+        // not toast success — the row would keep its old text, and the user
+        // would never know to try again.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          failEdits([{ channelId, messageId, content: trimmed }], true);
+          return;
+        }
+        const id = ws.send({
           type: "chat_edit",
           payload: { message_id: messageId, content: trimmed },
         });
-        showToast(messagingText("toast.edited"), "success");
+        track(pendingEdits, id, { channelId, messageId, content: trimmed });
       },
     });
     messageInput.mount(slots.inputSlot);
+
+    // UX-1: restore this channel's stashed draft, if any — its text, reply
+    // target and staged upload ids — so a switch away and back is lossless.
+    // A reply whose target is gone (deleted while away) is dropped, not
+    // restored onto a message the server would refuse the reply to.
+    const stashedDraft = draftByChannel.get(channelId);
+    if (stashedDraft !== undefined) {
+      const replyTo =
+        stashedDraft.replyTo !== null &&
+        !getChannelMessages(channelId).some(
+          (m) => m.id === stashedDraft.replyTo!.messageId && !m.deleted,
+        )
+          ? null
+          : stashedDraft.replyTo;
+      messageInput.restoreDraft({ ...stashedDraft, replyTo });
+      draftByChannel.delete(channelId);
+    }
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user
@@ -936,10 +1058,70 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       }),
     );
+    // CLI-08: the server's edit/delete echoes carry no envelope id, so a
+    // tracked frame is resolved by its channel + message (the same
+    // content-match reactions use). Only the server echo proves delivery.
+    composerGatingUnsubs.push(
+      ws.on("chat_edited", (payload) => {
+        for (const [id, edit] of pendingEdits) {
+          if (edit.channelId === payload.channel_id && edit.messageId === payload.message_id) {
+            untrack(pendingEdits, id);
+          }
+        }
+      }),
+    );
+    composerGatingUnsubs.push(
+      ws.on("chat_deleted", (payload) => {
+        for (const [id, del] of pendingDeletes) {
+          if (del.channelId === payload.channel_id && del.messageId === payload.message_id) {
+            untrack(pendingDeletes, id);
+          }
+        }
+      }),
+    );
+    // A local transport failure never echoes, so the frame is gone: report
+    // one error (the dispatcher's generic handler ignores an id that matches
+    // no pending send/reaction) and put a failed edit's text back. A half-open
+    // socket does not reject the send (the frame buffers), so the reconnect
+    // transition below is what catches that case.
+    composerGatingUnsubs.push(
+      ws.onSendFailure((id) => {
+        const edit = untrack(pendingEdits, id);
+        if (edit !== undefined) {
+          failEdits([edit], true);
+          return;
+        }
+        if (untrack(pendingDeletes, id) !== undefined) {
+          showToast(messagingText("toast.deleteFailed"), "error");
+        }
+      }),
+    );
+    // Leaving "connected" means an in-flight frame can never be echoed: the
+    // dispatcher only sweeps optimistic sends/reactions, so resolve the
+    // tracked edit/delete frames here too — one error, and an edit's text
+    // back — instead of leaving a false success and a leaked entry.
+    composerGatingUnsubs.push(
+      ws.onStateChange((state) => {
+        if (state === "connected") return;
+        if (pendingEdits.size > 0) failEdits([...pendingEdits.values()], true);
+        pendingEdits.clear();
+        const hadDelete = pendingDeletes.size > 0;
+        pendingDeletes.clear();
+        for (const timer of trackTimers.values()) window.clearTimeout(timer);
+        trackTimers.clear();
+        if (hadDelete) showToast(messagingText("toast.deleteFailed"), "error");
+      }),
+    );
     // A refused send restarts the full window: the server's limiter is the
-    // authority on when the next one is allowed.
+    // authority on when the next one is allowed. A refused edit restores the
+    // text but leaves the one error to the dispatcher's own chain.
     composerGatingUnsubs.push(
       ws.on("error", (payload, correlationId) => {
+        if (correlationId !== undefined) {
+          const edit = untrack(pendingEdits, correlationId);
+          if (edit !== undefined) failEdits([edit], false);
+          untrack(pendingDeletes, correlationId);
+        }
         if (payload.code !== "SLOW_MODE") return;
         if (!sentToMountedChannel(correlationId)) return;
         const ch = channelsStore.getState().channels.get(channelId);

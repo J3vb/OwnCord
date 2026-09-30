@@ -15,6 +15,9 @@ import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
+import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
+import { uiStore } from "@stores/ui.store";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
 let developerModeEnabled = loadPref<boolean>("developerMode", false);
@@ -35,7 +38,7 @@ export {
   shouldGroup,
   getUserRole,
   roleColorVar,
-} from "./formatting";
+} from "@lib/formatting";
 
 export {
   renderInlineContent,
@@ -48,9 +51,10 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatTime, formatFullDate, formatMessageTimestamp } from "./formatting";
-import { getUserRole, resolveAuthor, roleColorVar } from "./formatting";
-import { createAvatarElement, resolveDisplayName } from "@lib/avatar";
+import { formatTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
+import { createAvatarElement } from "./avatar";
+import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
@@ -175,6 +179,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "BEFORE_RESTORE":
+      return connectText("app.sendBeforeRestore");
     default:
       return messagingText("send.failed");
   }
@@ -365,8 +371,17 @@ export function renderMessage(
         "aria-label": messagingText("action.delete"),
       });
       deleteBtn.appendChild(createIcon("trash-2", 16));
-      deleteBtn.title = messagingText("action.delete");
-      deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
+      const connectionStatus = uiStore.getState().connectionStatus;
+      if (connectionStatus === "connected") {
+        deleteBtn.title = messagingText("action.delete");
+        deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
+      } else {
+        deleteBtn.disabled = true;
+        deleteBtn.setAttribute("aria-disabled", "true");
+        deleteBtn.title = shellText(
+          connectionStatus === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
+        );
+      }
       actionsBar.appendChild(deleteBtn);
     }
 

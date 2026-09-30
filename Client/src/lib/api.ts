@@ -46,6 +46,20 @@ export interface ApiClientConfig {
   readonly token?: string;
 }
 
+/**
+ * Per-request options for the internal `doFetch`. `onUploadProgress` tags a
+ * multipart upload with a fresh id so the native transport's `upload-progress`
+ * ticks can be matched to this request, and receives the matching ones as a
+ * 0–1 fraction.
+ */
+interface RequestOptions {
+  skipUnauthorized?: boolean;
+  token?: string;
+  multipart?: boolean;
+  detached?: boolean;
+  onUploadProgress?: (fraction: number) => void;
+}
+
 /** API client error with parsed error body. */
 export class ApiClientError extends Error {
   readonly status: number;
@@ -59,21 +73,146 @@ export class ApiClientError extends Error {
   }
 }
 
+function isSessionExpired(message: string): boolean {
+  return (
+    message === "session has expired" ||
+    message === "invalid or expired session" ||
+    message === "missing or invalid authorization header" ||
+    message === "not authenticated"
+  );
+}
+
+function authSliceCopy(message: string): string | null {
+  switch (message) {
+    case "account temporarily locked due to too many failed attempts":
+      return connectText("error.accountLocked");
+    case "recovery temporarily locked due to too many failed attempts":
+      return connectText("error.recoveryLocked");
+    case "too many failed attempts, try again later":
+      return connectText("error.tooManyAttempts");
+    case "registration queue is full, try again later":
+      return connectText("error.registrationQueueFull");
+    case "too many registrations from this address, try again later":
+      return connectText("error.registrationRateLimited");
+    case "too many authentication attempts in progress, try again later":
+      return connectText("error.authBusy");
+    case "too many recovery credentials issued; try again later":
+      return connectText("error.recoveryCredentialBudget");
+    case "login temporarily unavailable":
+      return connectText("error.loginUnavailable");
+    case "failed to load authentication policy":
+    case "failed to process registration":
+      return connectText("error.couldNotComplete");
+    case "failed to load registration policy":
+      return connectText("error.registrationUnavailable");
+    case "registration failed — please try again":
+      return connectText("error.registrationFailed");
+    case "failed to create session":
+      return connectText("error.sessionFailed");
+    case "registration succeeded but user fetch failed":
+      return connectText("error.registeredSignInFailed");
+    case "failed to start two-factor challenge":
+    case "failed to verify two-factor code":
+    case "two-factor verification temporarily unavailable":
+      return connectText("error.totpUnavailable");
+    case "failed to logout":
+      return connectText("error.logoutFailed");
+    case "failed to delete account":
+      return connectText("error.deleteAccountFailed");
+    case "failed to generate two-factor secret":
+    case "failed to stage two-factor enrolment":
+    case "failed to enable two-factor authentication":
+      return connectText("error.totpEnableFailed");
+    case "failed to disable two-factor authentication":
+      return connectText("error.totpDisableFailed");
+    case "failed to issue recovery codes":
+      return connectText("error.recoveryCodesFailed");
+    case "recovery failed — please try again":
+      return connectText("error.recoveryFailed");
+    case "failed to issue the recovery kit":
+      return connectText("error.recoveryKitFailed");
+    case "failed to issue the recovery credential":
+      return connectText("error.recoveryCredentialFailed");
+    default:
+      return null;
+  }
+}
+
+const PERMISSION_REFUSAL =
+  /\bmissing\b.*\bpermission\b|insufficient permissions|permission required$|role required$|^access denied$/i;
+
 /**
- * The text for a server error: catalog text when its code has a mapping, the
- * server's message only when it has none, and `fallback` for an empty message.
- * An internal failure maps to the caller's own `fallback`.
+ * The user-facing copy for a server error code that has one, or null when the
+ * code has none (the caller then shows the server's own message). Every string
+ * is plain, capitalised prose — never the raw lower-case server text.
+ *
+ * `message` disambiguates the codes the server overloads. UNAUTHORIZED is an
+ * expired session, a refused sign-in ("invalid credentials"), or a wrong
+ * two-factor code or recovery kit; FORBIDDEN is a missing permission, a
+ * suspended account, or an account-state refusal ("account is awaiting
+ * approval"). Only a refused sign-in, session, suspension or permission has
+ * fixed copy — the rest keep the server's own sentence, which says what went
+ * wrong. RATE_LIMITED and INTERNAL_ERROR carry the auth slice's lockout,
+ * budget and failure sentences, each of which gets copy of its own; any other
+ * rate limit reads as the generic line and any other internal failure as the
+ * caller's fallback.
  */
-export function serverErrorText(code: string, message: string, fallback: string): string {
+export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
-      return connectText("error.rateLimited");
+      return authSliceCopy(message) ?? connectText("error.rateLimited");
     case "INTERNAL":
     case "INTERNAL_ERROR":
-      return fallback;
+      return authSliceCopy(message);
+    case "UNAUTHORIZED":
+      if (message === "invalid credentials") return connectText("error.invalidCredentials");
+      return isSessionExpired(message) ? connectText("error.unauthorized") : null;
+    case "FORBIDDEN":
+      if (message === "your account has been suspended") return connectText("error.banned");
+      return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
+    case "NOT_FOUND":
+      return connectText("error.notFound");
+    case "BANNED":
+      return connectText("error.banned");
+    case "SERVICE_UNAVAILABLE":
+    case "BAD_GATEWAY":
+      return connectText("error.unavailable");
+    case "STORAGE_QUOTA_EXCEEDED":
+      return connectText("error.storageQuota");
+    case "STORAGE_LOW_DISK":
+      return connectText("error.storageLowDisk");
+    case "STORAGE_ERROR":
+      return connectText("error.storageError");
+    case "GIF_DISABLED":
+      return connectText("error.gifDisabled");
+    case "PUSH_DISABLED":
+      return connectText("error.pushDisabled");
     default:
-      return message || fallback;
+      return null;
   }
+}
+
+/**
+ * Capitalise a server message's first letter, so an unmapped code's raw
+ * lower-case text ("name already exists") still reads as a sentence. The rest
+ * of the string is left alone — it may be a proper noun or an already-cased
+ * developer message.
+ */
+function capitalise(message: string): string {
+  return message.length === 0 ? message : message[0]!.toUpperCase() + message.slice(1);
+}
+
+/**
+ * The text for a server error: catalog copy when its code has a mapping, the
+ * server's message (capitalised) only when it has none, and `fallback` for an
+ * empty message. An unmapped internal failure maps to the caller's own
+ * `fallback`.
+ */
+export function serverErrorText(code: string, message: string, fallback: string): string {
+  const copy = serverErrorCopy(code, message);
+  if (copy !== null) return copy;
+  if (code === "INTERNAL" || code === "INTERNAL_ERROR") return fallback;
+  return message ? capitalise(message) : fallback;
 }
 
 /** A failed request's text: `serverErrorText` for an `ApiClientError`, else the error's own message. */
@@ -343,6 +482,35 @@ interface SessionsListResponse {
 
 const log = createLogger("api");
 
+function refusal(): ApiClientError {
+  return new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
+}
+
+/**
+ * A content read from one channel, admitted only with NSFW consent (B9-7):
+ * refused locally, with the server's own error, before any request while
+ * the channel is gated, and discarded if consent was withdrawn while it was
+ * in flight — so nothing from a labelled channel is fetched or delivered
+ * pre-consent, whichever feature asked.
+ */
+async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
+  if (nsfwContentBlocked(channelId)) throw refusal();
+  let result: T;
+  try {
+    result = await load();
+  } catch (err) {
+    // The server's refusal outranks a stale local "consented". A resume
+    // that missed an nsfw_ack already gets a full ready (the revoke bumps
+    // the server's visibility watermark), so this is defence in depth.
+    if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
+      setNsfwAcknowledged(channelId, false);
+    }
+    throw err;
+  }
+  if (nsfwContentBlocked(channelId)) throw refusal();
+  return result;
+}
+
 /** Create the REST API client. */
 export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?: OnUnauthorized) {
   let config: Readonly<ApiClientConfig> = Object.freeze({ ...initialConfig });
@@ -367,7 +535,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
+    opts?: RequestOptions,
   ): Promise<T> {
     const snapshot = config;
     // A detached request is owned by its caller's signal alone, so ending the
@@ -390,6 +558,22 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       const init: RequestInit = { method, headers, signal: transport.signal };
       if (body !== undefined)
         init.body = opts?.multipart ? (body as FormData) : JSON.stringify(body);
+      // Subscribe before the request goes out (the proxy can emit as soon as
+      // the body starts moving) and let the request scope unsubscribe it.
+      if (opts?.onUploadProgress !== undefined) {
+        // The Rust proxy echoes this id back in its upload-progress events, so
+        // the caller can tell its own upload's ticks from any other in flight.
+        const id = crypto.randomUUID();
+        headers["X-Upload-Id"] = id;
+        const onProgress = opts.onUploadProgress;
+        const unsubscribe = desktop.http.onUploadProgress((p) => {
+          if (p.id === id) {
+            // A 0–1 fraction; the native <progress> renders and announces it.
+            onProgress(p.total > 0 ? Math.min(1, Math.max(0, p.sent / p.total)) : 0);
+          }
+        });
+        owner.addCleanup(unsubscribe);
+      }
       const origin = await owner.run(ensureHttpProxy(snapshot.host));
       owner.assertCurrent();
       log.debug(`${label} →`, { method, path });
@@ -439,36 +623,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     path: string,
     body?: unknown,
     signal?: AbortSignal,
-    opts?: { skipUnauthorized?: boolean; token?: string; multipart?: boolean; detached?: boolean },
+    opts?: RequestOptions,
   ): Promise<T> {
     return doFetch<T>("API", "/api/v1", method, path, body, signal, opts);
-  }
-
-  /**
-   * A content read from one channel, admitted only with NSFW consent (B9-7):
-   * refused locally, with the server's own error, before any request while
-   * the channel is gated, and discarded if consent was withdrawn while it was
-   * in flight — so nothing from a labelled channel is fetched or delivered
-   * pre-consent, whichever feature asked.
-   */
-  async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
-    const refusal = (): ApiClientError =>
-      new ApiClientError(403, NSFW_ACKNOWLEDGEMENT_REQUIRED, NSFW_ACKNOWLEDGEMENT_REQUIRED);
-    if (nsfwContentBlocked(channelId)) throw refusal();
-    let result: T;
-    try {
-      result = await load();
-    } catch (err) {
-      // The server's refusal outranks a stale local "consented". A resume
-      // that missed an nsfw_ack already gets a full ready (the revoke bumps
-      // the server's visibility watermark), so this is defence in depth.
-      if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) {
-        setNsfwAcknowledged(channelId, false);
-      }
-      throw err;
-    }
-    if (nsfwContentBlocked(channelId)) throw refusal();
-    return result;
   }
 
   function adminRequest<T>(
@@ -1046,11 +1203,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── File Uploads ──────────────────────────────────────
 
-    uploadFile(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+    /**
+     * Upload one file. `onProgress` receives a 0–1 fraction for this upload
+     * only, correlated by an id the client generates; the callback is not
+     * called at all when the native transport reports none (e.g. a browser
+     * adapter with no progress channel).
+     */
+    uploadFile(
+      file: File,
+      signal?: AbortSignal,
+      onProgress?: (fraction: number) => void,
+    ): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
 
-      return request<UploadResponse>("POST", "/uploads", formData, signal, { multipart: true });
+      return request<UploadResponse>("POST", "/uploads", formData, signal, {
+        multipart: true,
+        onUploadProgress: onProgress,
+      });
     },
 
     // ── Invites ───────────────────────────────────────────

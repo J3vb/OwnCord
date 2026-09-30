@@ -153,6 +153,13 @@ type Invite struct {
 	Revoked    int64   `json:"revoked"`
 }
 
+type InviteRedemption struct {
+	ID         int64  `json:"id"`
+	InviteID   int64  `json:"inviteId"`
+	UserID     *int64 `json:"userId"`
+	RedeemedAt string `json:"redeemedAt"`
+}
+
 type LoginAttempt struct {
 	ID        int64   `json:"id"`
 	IpAddress string  `json:"ipAddress"`

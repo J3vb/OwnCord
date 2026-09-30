@@ -27,6 +27,10 @@
     overflow: hidden;
   }
 
+  .toast-container {
+    left: 50%;
+  }
+
   .ch-sidebar-toggle {
     display: inline-flex;
     align-items: center;
