@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 ### Voice
 
 - **The voice connection panel is tidier.** The transport-stats readout now lays Outgoing and Incoming out as a two-column grid of label/value rows, each value on one line with a single unit — a rate reads "331 kB/s" instead of the old "331.25 kB/s (2.6 Mbps)" that wrapped. A zero rate or a missing RTT is dimmed rather than shown at full strength, and the in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
+
 ### Installing & updating
 
 - **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.
