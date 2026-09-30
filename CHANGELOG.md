@@ -85,6 +85,7 @@ and only when it changes something a contributor or fork holder must do
 - **The tray's status menu and the app now use the same word for "Invisible".** The tray said "Offline" for the status the app calls Invisible.
 - **Settings now shows your uploaded avatar** beside your name, not just its initial letter, and a group DM's header no longer shows a pointer cursor that did nothing when clicked.
 - **Signing in no longer fetches settings data before you open Settings.** The overlay read your sessions, two-factor status and recovery-kit status on every page load even while it was closed — three wasted requests on sign-in and on each reconnect, felt most on a slow link. They now go out the first time you open Settings, which shows the same live data as before.
+- **Every channel is visible on a first login to a server with a long member list.** The Members section claimed its full content height and squeezed the channel list above it down to about three rows, so a fresh profile on a busy server could not see its channels without collapsing Members or scrolling. The channel list now sizes to its rows and the Members section takes the rest and scrolls inside itself, keeping about three member rows (a channel list too long for that scrolls instead); a member height you previously dragged still restores.
 
 ### Voice
 

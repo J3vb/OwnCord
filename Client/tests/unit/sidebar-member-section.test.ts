@@ -221,6 +221,41 @@ describe("SidebarMemberSection", () => {
 
       section.destroy();
     });
+
+    // P1-01: the section fills the space the channel list leaves (a flex
+    // share) until a definite height is set, when it becomes a fixed size so
+    // the channel list above can grow. The `.sized` class carries that state.
+    it("marks the section sized only when a definite height is set", () => {
+      const unsized = createSidebarMemberSection(defaultOpts());
+      expect(unsized.element.classList.contains("sized")).toBe(false);
+      unsized.destroy();
+
+      localStorage.setItem(LS_KEY_HEIGHT, "250");
+      const sized = createSidebarMemberSection(defaultOpts());
+      expect(sized.element.style.height).toBe("250px");
+      expect(sized.element.classList.contains("sized")).toBe(true);
+      sized.destroy();
+    });
+
+    it("drops the sized class when a saved height is cleared", () => {
+      localStorage.setItem(LS_KEY_HEIGHT, "250");
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+      const header = section.element.querySelector(".sidebar-members-header") as HTMLElement;
+      expect(section.element.classList.contains("sized")).toBe(true);
+
+      // Collapsing pins it to auto (still a definite height), and expanding
+      // with no saved height returns it to a flex share.
+      localStorage.removeItem(LS_KEY_HEIGHT);
+      header.click();
+      expect(section.element.style.height).toBe("auto");
+      expect(section.element.classList.contains("sized")).toBe(true);
+      header.click();
+      expect(section.element.style.height).toBe("");
+      expect(section.element.classList.contains("sized")).toBe(false);
+
+      section.destroy();
+    });
   });
 
   // -------------------------------------------------------------------------

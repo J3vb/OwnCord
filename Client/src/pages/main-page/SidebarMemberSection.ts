@@ -97,10 +97,21 @@ export function createSidebarMemberSection(
   const resizeHandle = createElement("div", { class: "sidebar-resize-handle" });
   memberListContainer.appendChild(resizeHandle);
 
+  /**
+   * Give the section a definite height (a saved or dragged one, or `auto` when
+   * collapsed), or clear it back to its flex share of the column. The `.sized`
+   * class mirrors this, so the stylesheet can size the section to the height
+   * instead of flexing it to fill the space the channel list leaves (P1-01).
+   */
+  function applyMemberHeight(height: string | null): void {
+    memberListContainer.style.height = height ?? "";
+    memberListContainer.classList.toggle("sized", height !== null);
+  }
+
   // Restore saved height
   const savedHeight = localStorage.getItem(LS_KEY_HEIGHT);
   if (savedHeight !== null) {
-    memberListContainer.style.height = `${savedHeight}px`;
+    applyMemberHeight(`${savedHeight}px`);
   }
 
   // --- Drag-to-resize logic ---
@@ -114,8 +125,7 @@ export function createSidebarMemberSection(
     (e: MouseEvent) => {
       isDragging = true;
       startY = e.clientY;
-      startHeight =
-        parseFloat(memberListContainer.style.height) || memberListContainer.offsetHeight;
+      startHeight = memberListContainer.getBoundingClientRect().height;
       e.preventDefault();
     },
     { signal: resizeOwner.signal },
@@ -127,8 +137,8 @@ export function createSidebarMemberSection(
       if (!isDragging) return;
       const delta = startY - e.clientY;
       const maxH = window.innerHeight * 0.65;
-      const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
-      memberListContainer.style.height = `${newHeight}px`;
+      const newHeight = Math.max(80, Math.min(startHeight + delta, Math.max(maxH, startHeight)));
+      applyMemberHeight(`${newHeight}px`);
       localStorage.setItem(LS_KEY_HEIGHT, String(newHeight));
     },
     { signal: resizeOwner.signal },
@@ -157,14 +167,10 @@ export function createSidebarMemberSection(
     memberContent.style.display = membersCollapsed ? "none" : "";
     resizeHandle.style.display = membersCollapsed ? "none" : "";
     if (membersCollapsed) {
-      memberListContainer.style.height = "auto";
+      applyMemberHeight("auto");
     } else {
       const h = localStorage.getItem(LS_KEY_HEIGHT);
-      if (h !== null) {
-        memberListContainer.style.height = `${h}px`;
-      } else {
-        memberListContainer.style.height = "";
-      }
+      applyMemberHeight(h !== null ? `${h}px` : null);
     }
   }
 
