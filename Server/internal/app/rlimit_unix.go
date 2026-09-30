@@ -42,10 +42,10 @@ func realSetFileLimit(l fileLimit) error {
 
 // raiseFileLimit is the start-up step that lifts the process's soft open-file
 // limit to the hard one and reports the result. A chat server holds one
-// descriptor per WebSocket, so a host whose soft limit is the traditional
-// 1,024 needs it raised to carry 2,000 connections; the hard limit is the
-// ceiling the host already permits, and systemd's LimitNOFILE, a Docker
-// ulimit, or the operator's own `ulimit -n` sets it.
+// descriptor per WebSocket. The Go runtime's syscall init already lifts the
+// soft limit to hard-1, so the step here is the last one; the hard limit is
+// the real ceiling, and systemd's LimitNOFILE, a Docker ulimit, or the
+// operator's own `ulimit -n` sets it.
 //
 // A raise the host refuses is only logged: the limit it already has may still
 // be enough, and a server that refuses to serve because it could not grab more

@@ -52,9 +52,7 @@ func (a *App) stages() []stage {
 
 // startFileLimit is the start step that raises the process's soft open-file
 // limit toward its hard limit and reports the result (see raiseFileLimit; a
-// no-op on Windows). Every WebSocket holds a descriptor, so a host whose soft
-// limit is the traditional 1,024 cannot hold a large community until this
-// lifts it to what systemd's LimitNOFILE or a container ulimit permits.
+// no-op on Windows).
 func (a *App) startFileLimit() error {
 	raiseFileLimit(a.log, a.cfg.Server.MaxWSConnections)
 	return nil
