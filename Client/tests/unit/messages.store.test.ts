@@ -2061,13 +2061,14 @@ describe("messages store", () => {
     });
 
     it("keeps a row that arrived live when the page carries its REST twin in the server's wire shapes", () => {
-      setMessages(1, page(1, 50), true);
+      // The whole channel fits in one page, so the refetch is the cached window.
+      setMessages(1, page(1, 49), false);
       // chat_message's user carries the role, the nickname and an explicit
       // null avatar, and the broadcast echoes client_message_id. History's
       // user has none of them and omits a null avatar.
       addMessage(
         makeChatPayload({
-          id: 51,
+          id: 50,
           client_message_id: "1773568800000:live",
           user: {
             id: 2,
@@ -2076,7 +2077,7 @@ describe("messages store", () => {
             display_name: "Bobby",
             role: "member",
           } as MessageUser,
-          content: "m51",
+          content: "m50",
           timestamp: "2026-03-15T09:00:00Z",
           mentions: [],
           mentions_everyone: false,
@@ -2087,25 +2088,25 @@ describe("messages store", () => {
 
       revisit();
       const restTwin = makeMessageResponse({
-        id: 51,
+        id: 50,
         user: { id: 2, username: "bob" } as MessageUser,
-        content: "m51",
+        content: "m50",
         timestamp: "2026-03-15T09:00:00Z",
         mentions: [],
         mentions_everyone: false,
       });
-      setMessages(1, [restTwin, ...page(1, 50)], true);
+      setMessages(1, [restTwin, ...page(1, 49)], false);
 
       expect(getChannelMessages(1)).toBe(cached);
     });
 
     it("replaces a live row whose avatar changed while away", () => {
-      setMessages(1, page(1, 50), true);
+      setMessages(1, page(1, 49), false);
       addMessage(
         makeChatPayload({
-          id: 51,
+          id: 50,
           user: { id: 2, username: "bob", avatar: null, role: "member" } as MessageUser,
-          content: "m51",
+          content: "m50",
           timestamp: "2026-03-15T09:00:00Z",
         }),
       );
@@ -2116,14 +2117,14 @@ describe("messages store", () => {
         1,
         [
           makeMessageResponse({
-            id: 51,
+            id: 50,
             user: { id: 2, username: "bob", avatar: "bob.png" },
-            content: "m51",
+            content: "m50",
             timestamp: "2026-03-15T09:00:00Z",
           }),
-          ...page(1, 50),
+          ...page(1, 49),
         ],
-        true,
+        false,
       );
 
       expect(getChannelMessages(1).at(-1)).not.toBe(live);
