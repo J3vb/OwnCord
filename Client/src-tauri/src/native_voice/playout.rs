@@ -386,6 +386,7 @@ impl Playout {
         switch_output(
             &mut lock(&self.output),
             id,
+            false,
             output_devices(&host),
             |device| {
                 open_output(
@@ -409,9 +410,12 @@ impl Playout {
         let follow_dead = dead.clone();
         let follow = move || {
             let target = lock(&selected).clone();
+            // Always reopen: a dead stream is usually still on the same
+            // sink, so "already plays there" must not skip it.
             if let Err(e) = switch_output(
                 &mut lock(&output),
                 &target,
+                true,
                 output_devices(&follow_host),
                 |device| {
                     open_output(
@@ -502,9 +506,12 @@ impl Drop for Watcher {
 }
 
 /// `Playout::set_device` over any listed devices and stream opener.
+/// `reopen` opens a new stream even when `output` already plays on the
+/// resolved device (the watcher's path: a dead stream stays on its sink).
 fn switch_output<D, S>(
     output: &mut Option<(String, S)>,
     id: &str,
+    reopen: bool,
     listed: Vec<(DeviceInfo, D)>,
     open: impl FnOnce(&D) -> Result<S, String>,
 ) -> Result<(), String> {
@@ -513,7 +520,7 @@ fn switch_output<D, S>(
     let (info, device) = index
         .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
         .ok_or("no playout device")?;
-    if output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
+    if reopen || output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
         let stream = open(&device)?;
         *output = Some((info.id, stream));
     }
@@ -623,10 +630,11 @@ mod tests {
             opened.push(*sink);
             Ok(*sink)
         };
-        switch_output(&mut output, "", sinks(&["speakers"]), &mut open).unwrap();
+        switch_output(&mut output, "", false, sinks(&["speakers"]), &mut open).unwrap();
         switch_output(
             &mut output,
             "",
+            false,
             sinks(&["speakers", "headphones"]),
             &mut open,
         )
@@ -635,6 +643,7 @@ mod tests {
         switch_output(
             &mut output,
             "",
+            false,
             sinks(&["headphones", "speakers"]),
             &mut open,
         )
@@ -646,11 +655,34 @@ mod tests {
     #[test]
     fn a_device_that_fails_to_open_leaves_the_current_stream_playing() {
         let mut output = Some(("speakers".to_string(), "speakers"));
-        let result = switch_output(&mut output, "usb", sinks(&["speakers", "usb"]), |_| {
-            Err::<&str, _>("busy".to_string())
-        });
+        let result = switch_output(
+            &mut output,
+            "usb",
+            false,
+            sinks(&["speakers", "usb"]),
+            |_| Err::<&str, _>("busy".to_string()),
+        );
         assert_eq!(result, Err("busy".to_string()));
         assert_eq!(output, Some(("speakers".to_string(), "speakers")));
+    }
+
+    #[test]
+    fn a_reopen_replaces_a_dead_stream_on_the_same_sink() {
+        // A suspend or sound-server restart kills the stream but leaves the
+        // sink in place: the watcher's reopen must not be skipped as
+        // "already plays there".
+        let mut output = Some(("speakers".to_string(), "dead"));
+        switch_output(&mut output, "speakers", true, sinks(&["speakers"]), |_| {
+            Ok("fresh")
+        })
+        .unwrap();
+        assert_eq!(output, Some(("speakers".to_string(), "fresh")));
+        // The user-facing switch still keeps a live stream on the same sink.
+        switch_output(&mut output, "speakers", false, sinks(&["speakers"]), |_| {
+            Ok("again")
+        })
+        .unwrap();
+        assert_eq!(output, Some(("speakers".to_string(), "fresh")));
     }
 
     /// The pieces `watch` hands back.
