@@ -80,14 +80,14 @@ The form is an explicit FSM: `idle | loading | totp | connecting | error |
 auto-connecting` (the `FormState` type in `pages/connect-page/LoginForm.ts`). This is the model other views should
 follow.
 
-| State             | Presentation                                                                                                                      | Exit                            |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `idle`            | Enabled fields; Login/Register toggle                                                                                             | submit → validate               |
-| `loading`         | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`)                   | `auth.login` resolves           |
-| `totp`            | Code overlay (6-digit TOTP or `XXXXX-XXXXX` emergency code), Verify/Cancel                                                        | code → `verifyTotp`             |
-| `connecting`      | "Connecting…" while WS handshakes                                                                                                 | ws `connected`                  |
-| `auto-connecting` | Dedicated spinner card for saved-profile auto-login                                                                               | any key/click cancels to `idle` |
-| `error`           | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle`             |
+| State             | Presentation                                                                                                                      | Exit                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `idle`            | Enabled fields; Login/Register toggle                                                                                             | submit → validate                                                   |
+| `loading`         | Submit shows spinner, fields disabled (`updateSubmitButton()` + `updateFormInputsDisabled()` in `LoginForm.ts`)                   | `auth.login` resolves                                               |
+| `totp`            | Code overlay (6-digit TOTP or `XXXXX-XXXXX` emergency code), Verify/Cancel                                                        | code → `verifyTotp`                                                 |
+| `connecting`      | "Connecting…" while WS handshakes                                                                                                 | ws `connected`, or the pre-auth deadline → `error`                  |
+| `auto-connecting` | Dedicated spinner card for saved-profile auto-login                                                                               | any key/click cancels to `idle`, or the pre-auth deadline → `error` |
+| `error`           | Shake-animated banner, server message capped 200 chars (the `handleFormSubmit()` catch + `updateErrorBanner()` in `LoginForm.ts`) | user edits → `idle`                                                 |
 
 **Client-side validation before any request** (`validateForm()` in `LoginForm.ts`): host,
 username, password required; password ≥ 8; in register mode the invite code is
@@ -208,8 +208,11 @@ It exists specifically so Main never renders mid-populate. Everything else
 ## 4. Reconnect UX
 
 The WS client auto-reconnects with exponential backoff (base 1 s, cap 30 s, no
-jitter; the `DEFAULT_MAX_RECONNECT_DELAY` constant in `lib/ws.ts`), preserving `last_seq` for replay. The user-facing
-contract:
+jitter; the `DEFAULT_MAX_RECONNECT_DELAY` constant in `lib/ws.ts`), preserving `last_seq` for replay. The **first**
+authentication is additionally bounded by a 20 s deadline (`PREAUTH_CONNECT_TIMEOUT_MS`): a login or stored-token
+auto-login that never reaches `auth_ok` returns to the form with "Couldn't reach this server — it may be offline"
+rather than retrying forever behind the connecting overlay. Once a session is live the deadline is cleared, so an
+outage keeps the in-place reconnect. The user-facing contract:
 
 ```mermaid
 stateDiagram-v2

@@ -204,6 +204,7 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { createApiClient } from "@lib/api";
@@ -212,6 +213,8 @@ import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
+import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
+import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
@@ -349,6 +352,105 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     setActivePresenceSender(null);
 
     expect(() => emitTauriEvent("status-change", "idle")).not.toThrow();
+  });
+});
+
+describe("main.ts pre-auth connection deadline", () => {
+  it("returns to the form with an error when a manual login never reaches auth_ok", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("offline.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    const attempt = vi.mocked(createApiClient).mock.results[0]!.value.getSession();
+
+    // The socket was asked to open, but the offline server never answers — so
+    // the deadline must give up rather than leave the spinner running forever.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(uiStore.getState().transientError).toContain("offline");
+    // Ended like a cancelled auto-login: the dead attempt's scope is no longer live.
+    expect(attempt.isCurrent()).toBe(false);
+
+    clearAuth();
+  });
+
+  it("does not tear down a session re-dialled after a certificate mismatch", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("rotated.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "rotated.example:8443",
+      fingerprint: "sha256:CHANGED",
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    // The user reads the fingerprint in the mismatch modal for a while, then
+    // accepts: the re-dial must still have its host and token to resume with.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS / 2);
+    const { reconnectAfterCertAccept: realReconnect } =
+      await vi.importActual<typeof import("@lib/cert-reconnect")>("@lib/cert-reconnect");
+    vi.mocked(reconnectAfterCertAccept).mockImplementationOnce(realReconnect);
+    vi.mocked(createCertMismatchModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(reconnectAfterCertAccept).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "rotated.example:8443",
+      "test-token",
+    );
+
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "alex", avatar: null, role: "member" },
+          server_name: "Rotated",
+          motd: "",
+        },
+      }),
+    );
+    mockInvoke.mockClear();
+
+    // Past the original deadline, the re-dialled session is live: nothing may
+    // tear it down or claim the server is offline.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    clearAuth();
+  });
+
+  it("does not time out while the user answers a first-use certificate prompt", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("unpinned.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "unpinned.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    mockInvoke.mockClear();
+
+    // The server answered; the user is reading the fingerprint past the deadline.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    // Accept still resumes this login against the same host.
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
+
+    clearAuth();
   });
 });
 
