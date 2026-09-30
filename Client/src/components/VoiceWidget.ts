@@ -166,20 +166,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // missing RTT is shown softly (the CSS dims .vw-stat-value--empty) rather
     // than as another full-strength number competing for attention.
     setStatValue(outRateEl, formatRateCompact(stats.outRate), stats.outRate === 0);
-    setStatValue(
-      outPacketsEl,
-      stats.outPackets === 0 ? "0" : String(stats.outPackets),
-      stats.outPackets === 0,
-    );
+    setStatValue(outPacketsEl, String(stats.outPackets), stats.outPackets === 0);
     // i18n-exempt: numeric RTT value with its unit, not translatable prose
     setStatValue(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—", stats.rtt <= 0);
-    if (rttEl) rttEl.style.color = color;
+    if (rttEl) rttEl.style.color = stats.rtt > 0 ? color : "";
     setStatValue(inRateEl, formatRateCompact(stats.inRate), stats.inRate === 0);
-    setStatValue(
-      inPacketsEl,
-      stats.inPackets === 0 ? "0" : String(stats.inPackets),
-      stats.inPackets === 0,
-    );
+    setStatValue(inPacketsEl, String(stats.inPackets), stats.inPackets === 0);
     setStatValue(totalUpEl, formatBytes(stats.totalUp), stats.totalUp === 0);
     setStatValue(totalDownEl, formatBytes(stats.totalDown), stats.totalDown === 0);
   }

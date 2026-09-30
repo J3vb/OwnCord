@@ -30,9 +30,7 @@ vi.mock("@lib/connectionStats", () => ({
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
   }),
   formatBytes: (v: number) => `${v} B`,
-  formatRate: (v: number) => `${v} B/s`,
   formatRateCompact: (v: number) => `${v} B/s`,
-  formatBitrate: (v: number) => `${v} bps`,
 }));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
@@ -145,6 +143,7 @@ describe("VoiceWidget transport stats redesign", () => {
     const rttValue = outRows[2]!.querySelector(".vw-stat-value")!;
     expect(rttValue.textContent).toBe("—");
     expect(rttValue.classList.contains("vw-stat-value--empty")).toBe(true);
+    expect((rttValue as HTMLElement).style.color).toBe("");
 
     const inRows = container.querySelectorAll(".vw-stats-col")[1]!.querySelectorAll(".vw-stats-row");
     expect(inRows[0]!.querySelector(".vw-stat-value")!.classList.contains("vw-stat-value--empty")).toBe(
@@ -162,6 +161,7 @@ describe("VoiceWidget transport stats redesign", () => {
     const rttValue = outRows[2]!.querySelector(".vw-stat-value")!;
     expect(rttValue.textContent).toBe("42.0 ms");
     expect(rttValue.classList.contains("vw-stat-value--empty")).toBe(false);
+    expect((rttValue as HTMLElement).style.color).not.toBe("");
 
     widget.destroy?.();
   });

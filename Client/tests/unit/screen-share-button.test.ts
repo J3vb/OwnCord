@@ -28,8 +28,7 @@ vi.mock("@lib/connectionStats", () => ({
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
   }),
   formatBytes: vi.fn((v: number) => `${v} B`),
-  formatRate: vi.fn((v: number) => `${v} B/s`),
-  formatBitrate: vi.fn((v: number) => `${v} bps`),
+  formatRateCompact: vi.fn((v: number) => `${v} B/s`),
 }));
 
 import { createVoiceWidget } from "@components/VoiceWidget";
