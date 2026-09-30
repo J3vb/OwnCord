@@ -570,6 +570,10 @@ function buildVoiceAudioTabInner(
   registerCameraInvalidation(() => {
     cameraRequestId += 1;
     micRequestId += 1;
+    // Detach the preview too: Chrome keeps a detached media element that
+    // still has a source among its pending activities, and it holds the whole
+    // torn-down pane alive with it. Stopping the tracks does not release it.
+    previewVideo.srcObject = null;
   });
 
   function stopCameraPreview(): void {
