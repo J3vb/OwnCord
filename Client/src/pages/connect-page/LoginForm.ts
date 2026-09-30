@@ -112,7 +112,9 @@ export interface LoginFormApi {
   showConnecting(): void;
   showAutoConnecting(serverName: string): void;
   /** "Waiting for <server>… Cancel" while a down server is re-probed; the form stays usable. */
-  showServerWait(serverName: string): void;
+  showServerWait(serverName: string, host: string): void;
+  /** Report a cancel when waiting on a server other than `host`. */
+  cancelServerWaitUnless(host: string): void;
   /** Hide the waiting line without reporting a cancel. */
   hideServerWait(): void;
   showError(message: string): void;
@@ -221,6 +223,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let autoConnectServerName: HTMLSpanElement;
   let serverWait: HTMLDivElement;
   let serverWaitText: HTMLSpanElement;
+  let serverWaitHost = "";
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -471,7 +474,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal });
     // Typing means the user is taking over from the automatic retry.
-    form.addEventListener("input", cancelServerWait, { signal });
+    for (const input of [hostInput, usernameInput, passwordInput]) {
+      input.addEventListener("input", cancelServerWait, { signal });
+    }
     toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
 
     appendChildren(formContainer, formLogo, errorBanner, serverWait, form);
@@ -1146,9 +1151,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       transitionTo("auto-connecting");
     },
 
-    showServerWait(serverName: string): void {
+    showServerWait(serverName: string, host: string): void {
       setText(serverWaitText, connectText("login.waitingForServer", { server: serverName }));
+      serverWaitHost = host;
       serverWait.hidden = false;
+    },
+
+    cancelServerWaitUnless(host: string): void {
+      if (host !== serverWaitHost) cancelServerWait();
     },
 
     hideServerWait(): void {

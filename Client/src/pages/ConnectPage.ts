@@ -69,8 +69,8 @@ export function createConnectPage(
   showTotp(): void;
   showConnecting(): void;
   showAutoConnecting(serverName: string): void;
-  /** "Waiting for <server>… Cancel"; Cancel and typing report `onAutoLoginCancel`. */
-  showServerWait(serverName: string): void;
+  /** "Waiting for <server>… Cancel"; Cancel, typing and picking another server report `onAutoLoginCancel`. */
+  showServerWait(serverName: string, host: string): void;
   hideServerWait(): void;
   showError(message: string): void;
   resetToIdle(): void;
@@ -142,6 +142,7 @@ export function createConnectPage(
     {
       signal,
       onServerClick(host: string, username?: string, autoConnect?: boolean) {
+        loginForm.cancelServerWaitUnless(host);
         loginForm.setHost(host);
         if (username) {
           loginForm.setCredentials(username);
@@ -389,7 +390,8 @@ export function createConnectPage(
     showTotp: () => loginForm.showTotp(),
     showConnecting: () => loginForm.showConnecting(),
     showAutoConnecting: (serverName: string) => loginForm.showAutoConnecting(serverName),
-    showServerWait: (serverName: string) => loginForm.showServerWait(serverName),
+    showServerWait: (serverName: string, host: string) =>
+      loginForm.showServerWait(serverName, host),
     hideServerWait: () => loginForm.hideServerWait(),
     showError: (message: string) => loginForm.showError(message),
     resetToIdle: () => loginForm.resetToIdle(),

@@ -216,8 +216,8 @@ authentication is additionally bounded by a 20 s deadline (`PREAUTH_CONNECT_TIME
 auto-login that never reaches `auth_ok` returns to the form with "Couldn't reach this server — it may be offline"
 rather than retrying forever behind the connecting overlay. A stored-token resume (auto-login or a quick switch
 back) that times out also shows "Waiting for <server>… Cancel" above the form and keeps probing the server's health
-(5 s, doubling to 30 s); when it answers, the stored token is resumed once. Cancel, typing into the form, a manual
-login, leaving the page or deleting that server's profile ends the wait (`waitForServer` in `main.ts`). Once a session is live the deadline is
+(5 s, doubling to 30 s); when it answers, the stored token is resumed once. Cancel, typing into the host, username or password
+field, picking another server, a manual login, leaving the page or deleting that server's profile ends the wait (`waitForServer` in `main.ts`). Once a session is live the deadline is
 cleared, so an outage keeps the in-place reconnect. The user-facing contract:
 
 ```mermaid

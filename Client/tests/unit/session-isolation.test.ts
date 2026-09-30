@@ -509,7 +509,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     await quickSwitchTo(A);
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
     expectConsole("warn", /Pre-auth connection timed out/);
-    expect(latestConnectPage().showServerWait).toHaveBeenCalledWith("Server A");
+    expect(latestConnectPage().showServerWait).toHaveBeenCalledWith("Server A", A);
   }
 
   afterEach(() => {
