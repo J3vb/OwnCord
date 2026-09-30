@@ -98,8 +98,9 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   within 15 minutes lock the username for 15 minutes whatever the source IP
   (never scaled: it is the only cross-IP defence); the same count, scaled,
   locks the source IP.
-- Lifetimes: a session expires 30 days after it was created, and use does not
-  extend it; a 2FA login challenge (`partial_token`) lives 10 minutes and is
+- Lifetimes: a session expires 30 days after it was last used (REST requests
+  and the WebSocket handshake and heartbeat each count, at most once a
+  minute), and never more than a year after sign-in; a 2FA login challenge (`partial_token`) lives 10 minutes and is
   revoked after 5 wrong codes; a LiveKit access token lives 5 minutes; an API
   token lives as long as its creator chose, and one created without a lifetime
   never expires.

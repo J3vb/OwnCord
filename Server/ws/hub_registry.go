@@ -268,6 +268,8 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 // DisconnectRevokedUser call finds c in h.clients and kicks it normally.
 // There is no ordering left in which neither catches it.
 //
+// On a live session it also slides the session's expiry (touchSession).
+//
 // It returns true when the caller must abort the handshake instead of
 // continuing to send auth_ok/ready: c has already been torn back out of the
 // hub (mirroring unregisterFailedHandshake's post-registerNow teardown) and
@@ -297,6 +299,9 @@ func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) bool {
 		h.unregisterFailedHandshake(ctx, c)
 		return true
 	}
+	// The session just proved live on a registered socket: slide its expiry
+	// (DP-05). Both handshake paths come through here.
+	h.touchSession(ctx, c)
 	return false
 }
 

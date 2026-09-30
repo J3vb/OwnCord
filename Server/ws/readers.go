@@ -214,4 +214,5 @@ type SocketAuthenticator interface {
 	ResolveSocketPrincipal(ctx context.Context, tokenHash string) (*db.User, error)
 	SweepSessions(ctx context.Context, tokenHashes []string) (map[string]service.SessionVerdict, error)
 	RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string)
+	TouchSession(ctx context.Context, tokenHash string) error
 }

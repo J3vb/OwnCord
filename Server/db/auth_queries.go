@@ -645,9 +645,17 @@ func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
 	return nil
 }
 
-// TouchSession updates last_used for the session with the given token hash.
+// TouchSession records a use of the session with the given token hash: it
+// updates last_used and slides expires_at to sessionTTL from now, capped at a
+// year from sign-in (DP-05). A session that has already expired is left alone,
+// so a touch never revives it.
 func (d *DB) TouchSession(ctx context.Context, tokenHash string) error {
-	if err := d.q.TouchSession(ctx, tokenHash); err != nil {
+	now := time.Now().UTC()
+	if err := d.q.TouchSession(ctx, dbgen.TouchSessionParams{
+		ExpiresAt: now.Add(sessionTTL).Format(sessionTimeLayout),
+		Token:     tokenHash,
+		Now:       now.Format(sessionTimeLayout),
+	}); err != nil {
 		return fmt.Errorf("TouchSession: %w", err)
 	}
 	return nil

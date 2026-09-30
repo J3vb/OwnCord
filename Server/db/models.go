@@ -344,7 +344,10 @@ type Emoji struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-// sessionTTL is the duration a session remains valid after creation.
+// sessionTTL is the idle window: a session expires this long after it was
+// created or last touched (TouchSession slides it). TouchSession also caps
+// expires_at at created_at + 365 days, the absolute lifetime from sign-in,
+// in its query (sessions.sql).
 const sessionTTL = 30 * 24 * time.Hour
 
 // sessionTimeLayout is the storage format for sessions.expires_at (and the

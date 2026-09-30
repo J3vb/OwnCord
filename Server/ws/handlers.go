@@ -50,6 +50,10 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if !ok {
 		return
 	}
+	// The app-level heartbeat keeps an idle socket's session sliding (DP-05).
+	if env.Type == MsgTypePing {
+		h.touchSession(c.ctx, c)
+	}
 
 	// ── Typed command dispatch ───────────────────────────────────────────
 	// Every message type parses through its constructor into a typed Command,

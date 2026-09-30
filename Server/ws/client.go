@@ -95,6 +95,7 @@ type Client struct {
 	msgsDropped   int64          // messages dropped due to full send buffer
 	invalidCount  int            // consecutive invalid messages; reset on valid parse
 	lastActivity  time.Time      // last message received from this client; guarded by mu
+	lastTouch     time.Time      // last touchSession write for this socket's session; guarded by mu
 	sendClosed    bool           // true after all send channels have been closed
 	terminalKick  bool           // set by markTerminalKick: the server ended this session for good; guarded by mu
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)

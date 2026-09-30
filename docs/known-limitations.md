@@ -33,7 +33,7 @@ Each item links to the guidance that owns it.
 - **The server binds every interface on `:8443`.** There is no loopback-only
   option; put it behind a firewall or a reverse proxy if that matters to you.
 - **`server.max_ws_connections` defaults to unlimited** (`0`), and sessions
-  last 30 days.
+  last 30 days after last use (a year at most).
 - **Uploads allow up to 100 MB** with a magic-byte blocklist rather than an
   allowlist, and the WAF is off by default. Review
   [Capacity limits](deployment.md#capacity-limits) and
