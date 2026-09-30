@@ -7,10 +7,10 @@ package ws
 // and only then broadcasts the compensating voice_leave via the plain
 // broadcastVoiceEvent. That helper's audience is the channel's READ audience
 // unioned with clients whose *current* voiceChID still names the channel
-// (hub_broadcast.go). Voice membership is gated on CONNECT_VOICE alone
-// (voiceJoinPrecheck only checks permissions.ConnectVoice), so a participant
-// without READ_MESSAGES on the channel is in neither audience term once their
-// own voiceChID has been cleared — they never learn the join was undone.
+// (hub_broadcast.go). The join gate requires READ_MESSAGES, but READ can be
+// revoked while the join is in flight, so a participant without READ_MESSAGES
+// on the channel is in neither audience term once their own voiceChID has been
+// cleared — they never learn the join was undone.
 //
 // Every sibling teardown path that clears client voice state before
 // broadcasting (finishVoiceLeave, webhookLeftFinishLeave,
@@ -32,14 +32,6 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 	uid := seedHarvestVoiceUser(t, database, "join-0267-victim")
 	chID := mustCreateVoiceChannel(t, database, "voice-join-0267")
 
-	// Deny READ_MESSAGES on this specific channel via an override, while the
-	// role keeps CONNECT_VOICE (and base READ_MESSAGES elsewhere) — the exact
-	// combination the finding describes: CONNECT_VOICE without READ_MESSAGES
-	// on the voice channel itself.
-	if err := database.UpsertChannelOverride(context.Background(), chID, harvestVoiceRoleID, 0, permissions.ReadMessages); err != nil {
-		t.Fatalf("UpsertChannelOverride: %v", err)
-	}
-
 	lk := healthyTestLiveKit(t)
 
 	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
@@ -60,6 +52,12 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 	var hookRan bool
 	voiceJoinPostTokenRaceHook = func(client *Client) {
 		hookRan = true
+		// Deny READ_MESSAGES on this specific channel via an override once the
+		// join gate has passed, while the role keeps CONNECT_VOICE — the member
+		// ends up in the room with CONNECT_VOICE but no READ_MESSAGES on it.
+		if err := database.UpsertChannelOverride(context.Background(), chID, harvestVoiceRoleID, 0, permissions.ReadMessages); err != nil {
+			t.Fatalf("hook: UpsertChannelOverride: %v", err)
+		}
 		if _, err := database.ExecContext(context.Background(), `ALTER TABLE users RENAME TO users_bak_0267`); err != nil {
 			t.Fatalf("hook: rename users: %v", err)
 		}

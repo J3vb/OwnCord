@@ -1340,6 +1340,9 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 { "type": "voice_join", "payload": { "channel_id": 10 } }
 ```
 
+The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
+`READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
+
 On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL

@@ -178,8 +178,10 @@ func CanAddReaction(s Subject) error {
 
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
-// membership, so this can only ever narrow), a channel that has a room, for
-// a DM membership plus no block, and no archive for either kind — the admin
+// membership, so this can only ever narrow), READ_MESSAGES for a non-DM
+// channel so a room hidden from a member (CanViewChannel) is not joinable, a
+// channel that has a room, for a DM membership plus no block, and no archive
+// for either kind — the admin
 // PATCH accepts `archived` for any channel type, and an evicted participant
 // must not rejoin the archived room. Applies at join, at token refresh, to
 // the target of a moderator move, and in the stale-voice sweep.
@@ -189,6 +191,9 @@ func CanJoinVoice(s Subject) error {
 	}
 	if !s.Has(ConnectVoice) {
 		return missing(ConnectVoice)
+	}
+	if s.Channel.Type != "dm" && !s.Has(ReadMessages) {
+		return missing(ReadMessages)
 	}
 	switch s.Channel.Type {
 	case "dm":

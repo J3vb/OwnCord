@@ -39,7 +39,10 @@ func actionPredicate(a Action, s Subject) (func(Subject) error, int64, bool) {
 	case ActionAddReaction:
 		return CanAddReaction, ReadMessages | AddReactions, true
 	case ActionJoinVoice:
-		return CanJoinVoice, ConnectVoice, true
+		if s.Channel.Type == "dm" {
+			return CanJoinVoice, ConnectVoice, true
+		}
+		return CanJoinVoice, ReadMessages | ConnectVoice, true
 	case ActionModerateVoice:
 		return AuthorizeVoiceModerator, ReadMessages | MuteMembers, true
 	}

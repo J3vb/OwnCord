@@ -345,7 +345,7 @@ func (h *Hub) webhookLeftFinishLeave(ctx context.Context, c *Client, userID, cha
 	// broadcastVoiceEvent's still-in-the-room union can no longer see
 	// them — without broadcastVoiceEventWithLeaver's extra term, a
 	// participant without READ_MESSAGES on this channel (voice
-	// membership needs only CONNECT_VOICE) never learns the server
+	// membership can outlive a READ revocation) never learns the server
 	// already tore down their call. Mirrors finishVoiceLeave and
 	// CleanupVoiceForChannel, which add the leaver for the same reason.
 	h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, userID), userID)

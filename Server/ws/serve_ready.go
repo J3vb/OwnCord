@@ -327,8 +327,8 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 		visibleSet[dmChannels[i].ChannelID] = struct{}{}
 	}
 	// The caller's own live voice room can never leak by definition -- seed it
-	// even if it fell outside both sets above (e.g. CONNECT_VOICE granted
-	// without READ_MESSAGES, or a DM voice call after the DM was closed:
+	// even if it fell outside both sets above (e.g. READ_MESSAGES revoked
+	// mid-call, or a DM voice call after the DM was closed:
 	// CloseDM removes dm_open_state but performs no voice eviction). This
 	// mirrors liveVoiceEventsSince's rationale on the reconnect-replay tier
 	// (serve.go), which this full-ready tier had no equivalent for (OC-0028).
