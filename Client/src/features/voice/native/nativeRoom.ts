@@ -115,8 +115,9 @@ export class NativeRemotePublication {
   setVideoQuality(quality: VideoQuality): void {
     this.setVideoView(this.isEnabled, (["low", "medium", "high"] as const)[quality] ?? "high");
   }
-  /** The Rust SDK has no dimensions call: the smallest of the usual
-   *  180p/360p/720p layers that covers the tile. */
+  /** Maps the size to a quality by choice (livekit 0.9.3's
+   *  update_video_dimensions exists but is not used): the smallest of the
+   *  usual 180p/360p/720p layers that covers the tile. */
   setVideoDimensions({ width, height }: { width: number; height: number }): void {
     const side = Math.max(width, height);
     this.setVideoView(this.isEnabled, side <= 320 ? "low" : side <= 640 ? "medium" : "high");

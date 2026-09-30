@@ -70,8 +70,9 @@ pub fn video_quality(name: &str) -> Result<VideoQuality, String> {
 
 /// Layer control for one remote video (P3-07, the web path's
 /// `setEnabled`/`setVideoQuality`): a stream no one sees stops, a shown one
-/// comes at `quality`. The SDK has no dimensions call, so the webview maps a
-/// tile's size to a quality (`video_quality`). Runs without the session lock;
+/// comes at `quality`. The webview maps a tile's size to a quality
+/// (`video_quality`) by choice; livekit 0.9.3's `update_video_dimensions` is
+/// not used. Runs without the session lock;
 /// the webview sends a publication's next view only once this returns.
 pub async fn set_video_view(
     publication: &RemoteTrackPublication,
