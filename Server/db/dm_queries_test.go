@@ -306,6 +306,36 @@ func TestGetUserDMChannels_UnreadCount(t *testing.T) {
 	}
 }
 
+// A DM with more than 100 unread messages reports a capped count, matching
+// GetChannelUnreadCounts: the ready payload's unread_count is capped at 100 so
+// the client can render "99+". A small DM is unaffected.
+func TestGetUserDMChannels_UnreadCountCapsAt100(t *testing.T) {
+	database := openMigratedMemory(t)
+	user1 := seedUser(t, database, "capalice")
+	user2 := seedUser(t, database, "capbob")
+
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), user1, user2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	for i := 0; i < 150; i++ {
+		if _, err := database.CreateMessage(context.Background(), ch.ID, user2, "msg", nil); err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+	}
+
+	dms, err := database.GetUserDMChannels(context.Background(), user1)
+	if err != nil {
+		t.Fatalf("GetUserDMChannels: %v", err)
+	}
+	if len(dms) != 1 {
+		t.Fatalf("expected 1 DM, got %d", len(dms))
+	}
+	if dms[0].UnreadCount != 100 {
+		t.Errorf("UnreadCount = %d, want 100 (capped)", dms[0].UnreadCount)
+	}
+}
+
 func TestGetUserDMChannels_NoMessages(t *testing.T) {
 	database := openMigratedMemory(t)
 	user1 := seedUser(t, database, "alice")

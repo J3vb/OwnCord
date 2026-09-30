@@ -376,6 +376,43 @@ describe("SidebarDmSection", () => {
       section.destroy();
     });
 
+    it("caps the unread badge at 99+", () => {
+      addDmChannel(makeDm({ channelId: 100, unreadCount: 137 }));
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      expect(container.querySelector(".dm-unread-badge")?.textContent).toBe("99+");
+      // The mention badge counts mentions, not unreads, and stays uncapped.
+      expect(container.querySelector(".dm-mention-badge")).toBeNull();
+
+      section.destroy();
+    });
+
+    it("shows 99 without the plus at the cap, and 100 as 99+", () => {
+      addDmChannel(makeDm({ channelId: 100, unreadCount: 99 }));
+      addDmChannel(
+        makeDm({
+          channelId: 101,
+          recipient: { id: 11, username: "Bob", avatar: "", status: "online" },
+          unreadCount: 100,
+        }),
+      );
+
+      const section = createSidebarDmSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const rows = Array.from(container.querySelectorAll("[data-testid='dm-entry']"));
+      const badgeFor = (channelId: number): string | undefined =>
+        rows
+          .find((r) => r.getAttribute("data-channel-id") === String(channelId))
+          ?.querySelector(".dm-unread-badge")?.textContent ?? undefined;
+      expect(badgeFor(100)).toBe("99");
+      expect(badgeFor(101)).toBe("99+");
+
+      section.destroy();
+    });
+
     it("does not show unread badge when unreadCount is 0", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 0 }));
 

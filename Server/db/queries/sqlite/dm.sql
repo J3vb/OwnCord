@@ -46,10 +46,11 @@ SELECT
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
-    (SELECT COUNT(*) FROM messages mu
+    (SELECT COUNT(*) FROM (SELECT 1 FROM messages mu
       WHERE mu.channel_id = c.id AND mu.deleted = 0
         AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
                                WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0)
+      LIMIT 100)
     ) AS unread_count,
     CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
                WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count

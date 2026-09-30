@@ -749,6 +749,23 @@ describe("DmSidebar — unread and mention badges", () => {
     expect(container.querySelector(".dm-unread")).toBeNull();
   });
 
+  it("caps the unread badge at 99+", () => {
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 137 }));
+
+    const badge = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
+    expect(badge.textContent).toBe("99+");
+    // The tooltip matches the badge text, never a four-digit number.
+    expect(badge.title).toBe("99+ unread messages");
+  });
+
+  it("keeps the mention badge uncapped", () => {
+    mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 137 }));
+
+    const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
+    expect(mentions.textContent).toBe("137");
+    expect(mentions.title).toBe("137 mentions");
+  });
+
   it("renders a mention badge instead of the unread badge", () => {
     mountWith(
       makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 5, mentionCount: 2 }),
@@ -765,12 +782,7 @@ describe("DmSidebar — unread and mention badges", () => {
     );
   });
 
-  it("keeps large badge counts ungrouped in the tooltip, matching the badge text", () => {
-    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 1234 }));
-    const unread = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
-    expect(unread.textContent).toBe("1234");
-    expect(unread.title).toBe("1234 unread messages");
-
+  it("keeps large mention counts ungrouped in the tooltip, matching the badge text", () => {
     mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 1234 }));
     const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
     expect(mentions.textContent).toBe("1234");

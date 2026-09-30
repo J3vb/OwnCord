@@ -1066,6 +1066,39 @@ func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
 	}
 }
 
+// A channel with more than 100 unread messages reports a capped count: the
+// ready payload only needs "99+" to render, and bounding the subquery keeps a
+// huge never-read channel from scanning every message row on every connect.
+// A small channel is unaffected.
+func TestGetChannelUnreadCounts_CapsAt100(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreadcap")
+	bigChID := seedChannel(t, database, "bigchan")
+	smallChID := seedChannel(t, database, "smallchan")
+
+	for i := 0; i < 150; i++ {
+		if _, err := database.CreateMessage(context.Background(), bigChID, userID, "msg", nil); err != nil {
+			t.Fatalf("CreateMessage(big): %v", err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := database.CreateMessage(context.Background(), smallChID, userID, "msg", nil); err != nil {
+			t.Fatalf("CreateMessage(small): %v", err)
+		}
+	}
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	if got := counts[bigChID].UnreadCount; got != 100 {
+		t.Errorf("big channel UnreadCount = %d, want 100 (capped)", got)
+	}
+	if got := counts[smallChID].UnreadCount; got != 3 {
+		t.Errorf("small channel UnreadCount = %d, want 3 (uncapped)", got)
+	}
+}
+
 // A channel with no messages must still yield a 0,0 entry — the correlated
 // subquery rewrite must not silently drop empty channels from the ready
 // payload's unread map.

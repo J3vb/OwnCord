@@ -134,6 +134,13 @@ export function atEachMidnight(signal: AbortSignal, fn: () => void): void {
   );
 }
 
+/** Display text for an unread badge. Counts at or above the wire cap (100,
+ *  see GetChannelUnreadCounts) read as "99+"; the raw count is never shown as
+ *  a four-digit number. Mention counts are not capped and do not pass here. */
+export function formatBadgeCount(count: number): string {
+  return count >= 100 ? "99+" : String(count);
+}
+
 export function isSameDay(a: string, b: string): boolean {
   const da = parseTimestamp(a);
   const db = parseTimestamp(b);
