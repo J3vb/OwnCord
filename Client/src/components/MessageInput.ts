@@ -1288,7 +1288,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   /** Capture the unsent state for a channel switch. Only settled attachments
    *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
-   *  it on unmount). */
+   *  it on unmount). Mid-edit this is the draft the edit displaced: the edit
+   *  text itself is never stashed, since restored outside edit mode it would
+   *  send as a duplicate new message. */
   function getDraft(): ComposerDraft {
     const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
     return {
