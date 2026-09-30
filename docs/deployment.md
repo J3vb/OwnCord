@@ -576,7 +576,7 @@ server {
         # the client pings every 30s, so 300s has comfortable margin.
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
-        client_max_body_size 100m;           # match upload.max_size_mb
+        client_max_body_size 101m;           # upload.max_size_mb plus 1m of multipart framing
     }
 }
 ```
