@@ -1128,7 +1128,7 @@ authStore.subscribeSelector(
   (s) => s.isAuthenticated,
   (isAuthenticated) => {
     // The router only reaches "main" from the connected overlay's own
-    // onReady, 800ms after `ready` arrives — so a session that ends between
+    // onReady, a task after `ready` arrives — so a session that ends between
     // auth_ok and ready (a ban, an auth_error on an intervening reconnect)
     // flips isAuthenticated false while the router is still "connect". The synchronous session cleanup has already
     // destroyed its overlay; lastConnectHost retains the transport ownership
@@ -1233,7 +1233,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
   if (lastConnectHost !== "") {
     // wirePostAuth already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected
-    // overlay's ready countdown hasn't called navigate("main") yet, so
+    // overlay's ready hand-off hasn't called navigate("main") yet, so
     // the branch above never triggered. The authStore subscriber only tears
     // down once the active page IS "main", so it won't fire for this window
     // either: left alone, the overlay's timer fires navigate("main")

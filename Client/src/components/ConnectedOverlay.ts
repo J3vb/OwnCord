@@ -25,8 +25,6 @@ export interface ConnectedOverlayControl {
   destroy(): void;
 }
 
-const READY_DELAY_MS = 800;
-
 function serverIconColor(name: string): string {
   const palette = [
     "#5865f2",
@@ -110,12 +108,15 @@ export function createConnectedOverlay(options: ConnectedOverlayOptions): Connec
     loaderText.appendChild(createIcon("check", 16));
     loaderText.appendChild(document.createTextNode(` ${connectText("connected.ready")}`));
 
+    // The old 800ms countdown is gone: the app appears as soon as `ready`
+    // arrives. Hand off on the next task rather than synchronously, so the
+    // mount's dynamic MainPage import does not start in the same task as the
+    // `connected` prewarm import — the two racing in the unit harness can let
+    // the module graph evaluate inside another test's window. One task is at
+    // most a frame, and `destroy()` still cancels it if the session ends first.
     const timer = setTimeout(() => {
-      if (!disposable.signal.aborted) {
-        onReady();
-      }
-    }, READY_DELAY_MS);
-
+      if (!disposable.signal.aborted) onReady();
+    }, 0);
     disposable.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
   }
 
