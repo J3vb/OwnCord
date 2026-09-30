@@ -170,7 +170,9 @@ export function setChannelLoadError(channelId: number): void {
  *  whole history fits in one page (hasMore false). Otherwise cached "sent"
  *  rows older than the page are dropped, so nothing deleted or edited while
  *  away stays on screen (scrolling up loads them again), the channel gets a
- *  new array and the list rebuilds once. */
+ *  new array and the list rebuilds once. A revisit that opens with unread
+ *  messages always rebuilds the list once, when this lands, to place the NEW
+ *  divider. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
