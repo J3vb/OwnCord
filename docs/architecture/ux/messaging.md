@@ -276,9 +276,9 @@ which would misroute unread bookkeeping for the channel actually on screen.
 
 **DM badges (✓ implemented 2026-08):** the DM sidebar renders the real unread
 count (and a red mention count that outranks it) instead of a bare dot. The ready
-payload's `dm_channels[]` now carries `mention_count` — `GetChannelUnreadCounts`
-includes the caller's DM rows — so a DM mention badge survives a reconnect
-instead of resetting to 0.
+payload's `dm_channels[]` and `GET /dms` both carry `mention_count` — the
+`GetUserDMChannels` query reads it from `read_states` — so a DM mention badge
+survives a reconnect or a REST reload of the DM list instead of resetting to 0.
 
 ---
 

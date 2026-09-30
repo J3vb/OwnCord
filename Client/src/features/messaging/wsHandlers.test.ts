@@ -216,24 +216,25 @@ describe("handleSendFailure", () => {
   });
 });
 
+function seedDm(lastMessageId: number, lastMessage: string, lastMessageAt: string): void {
+  setDmChannels([
+    {
+      channelId: 1,
+      recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+      participants: [],
+      name: "",
+      isGroup: false,
+      lastMessageId,
+      lastMessage,
+      lastMessageAt,
+      unreadCount: 0,
+      mentionCount: 0,
+    },
+  ]);
+}
+const dm = () => dmStore.getState().channels[0]!;
+
 describe("DM preview follows an edit or delete of its last message", () => {
-  function seedDm(lastMessageId: number, lastMessage: string, lastMessageAt: string): void {
-    setDmChannels([
-      {
-        channelId: 1,
-        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-        participants: [],
-        name: "",
-        isGroup: false,
-        lastMessageId,
-        lastMessage,
-        lastMessageAt,
-        unreadCount: 0,
-        mentionCount: 0,
-      },
-    ]);
-  }
-  const dm = () => dmStore.getState().channels[0]!;
   afterEach(() => setDmChannels([]));
 
   it("replaces the preview text when the shown message is edited", () => {
