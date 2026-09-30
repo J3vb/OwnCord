@@ -84,3 +84,13 @@ test("the signing key password counts as the key", () => {
     ["ci.yml"],
   );
 });
+
+test("the signing key read by bracket or set as an env var from another secret is caught", () => {
+  assert.deepEqual(
+    signingKeyHolders([
+      { name: "a.yml", src: "k: ${{ secrets['TAURI_SIGNING_PRIVATE_KEY'] }}" },
+      { name: "b.yml", src: "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.OTHER_ALIAS }}" },
+    ]),
+    ["a.yml", "b.yml"],
+  );
+});
