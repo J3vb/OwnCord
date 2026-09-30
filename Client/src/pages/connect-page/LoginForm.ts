@@ -1040,7 +1040,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   /**
    * Run a login, retrying an AUTH_BUSY refusal after the larger of its
    * Retry-After and AUTH_BUSY_MIN_RETRY_MS (plus jitter) until it succeeds,
-   * fails any other way, or the next wait would overrun the retry budget —
+   * fails any other way, or that wait (before jitter) would overrun the retry budget —
    * that refusal is the one shown. The busy line shows while it retries; its
    * Cancel, or picking another host, sends no further attempt, reports
    * `onAutoLoginCancel` (which ends the attempt in flight) and returns the
@@ -1068,10 +1068,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
             return;
           }
           if (!isAuthBusy(err)) throw err;
-          const wait =
-            Math.max(err.retryAfterMs ?? 0, AUTH_BUSY_MIN_RETRY_MS) +
-            Math.random() * AUTH_BUSY_JITTER_MS;
-          if (wait >= deadline - Date.now()) throw err;
+          const minWait = Math.max(err.retryAfterMs ?? 0, AUTH_BUSY_MIN_RETRY_MS);
+          const left = deadline - Date.now();
+          if (minWait > left) throw err;
+          // Jitter never costs the last retry: it is clipped to the budget.
+          const wait = Math.min(minWait + Math.random() * AUTH_BUSY_JITTER_MS, left);
           authBusyRetry.hidden = false;
           // oxlint-disable-next-line no-await-in-loop -- the wait between retries
           await new Promise<void>((resolve) => {

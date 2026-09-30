@@ -125,6 +125,31 @@ describe("LoginForm retries a busy server", () => {
     page.destroy?.();
   });
 
+  it("still makes the last retry the 15 s floor fits when jitter would overrun the bound", async () => {
+    // The live 4 vCPU give-up: each refused attempt sat 10 s in the server's
+    // queue first, RA=34 then RA=5, leaving ~15.1 s of the 70 s budget.
+    vi.spyOn(Math, "random").mockReturnValue(0.9);
+    const refuseAfterQueue = (retryAfterMs: number) => (): Promise<void> =>
+      new Promise((_, reject) => setTimeout(() => reject(busy(retryAfterMs)), 10_000));
+    const onLogin = vi
+      .fn()
+      .mockImplementationOnce(refuseAfterQueue(34_000))
+      .mockImplementationOnce(refuseAfterQueue(5_000))
+      .mockResolvedValueOnce(undefined);
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    submitTyped();
+    await vi.advanceTimersByTimeAsync(54_900);
+    expect(onLogin).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(15_100);
+    expect(onLogin).toHaveBeenCalledTimes(3);
+    expect(banner().classList.contains("visible")).toBe(false);
+    expect(busyShown()).toBe(false);
+
+    page.destroy?.();
+  });
+
   it.each([
     ["typed", undefined],
     ["typed with a short Retry-After", 1000],
