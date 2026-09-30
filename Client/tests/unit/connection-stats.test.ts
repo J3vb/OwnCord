@@ -13,6 +13,7 @@ import {
   createConnectionStatsPoller,
   formatBytes,
   formatRateCompact,
+  qualityFromSignals,
   type ConnectionStatsPoller,
   type QualityLevel,
 } from "../../src/lib/connectionStats";
@@ -56,6 +57,40 @@ describe("formatRateCompact", () => {
     expect(formatRateCompact(99_960)).toBe("100 kB/s");
     expect(formatRateCompact(999_600)).toBe("1.0 MB/s");
     expect(formatRateCompact(9_960_000)).toBe("10 MB/s");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Quality from RTT + loss + jitter
+// ---------------------------------------------------------------------------
+
+describe("qualityFromSignals", () => {
+  it("is excellent on a clean low-latency link", () => {
+    expect(qualityFromSignals(40, 0, 0)).toBe("excellent");
+  });
+
+  it("rtt 40 ms, 0% loss, 5 ms jitter is excellent", () => {
+    expect(qualityFromSignals(40, 0, 5)).toBe("excellent");
+  });
+
+  it("rtt 40 ms with 8% loss is poor", () => {
+    // A low-RTT but lossy link must not read as excellent.
+    expect(qualityFromSignals(40, 8, 0)).toBe("poor");
+  });
+
+  it("takes the worst of RTT, loss and jitter", () => {
+    expect(qualityFromSignals(600, 0, 0)).toBe("bad");
+    expect(qualityFromSignals(40, 12, 0)).toBe("bad");
+    expect(qualityFromSignals(40, 0, 120)).toBe("bad");
+    expect(qualityFromSignals(40, 3, 0)).toBe("fair");
+    expect(qualityFromSignals(40, 0, 40)).toBe("fair");
+  });
+
+  it("keeps the RTT-only thresholds when loss and jitter are zero", () => {
+    expect(qualityFromSignals(50, 0, 0)).toBe("excellent");
+    expect(qualityFromSignals(150, 0, 0)).toBe("fair");
+    expect(qualityFromSignals(300, 0, 0)).toBe("poor");
+    expect(qualityFromSignals(400, 0, 0)).toBe("bad");
   });
 });
 
@@ -206,6 +241,82 @@ describe("createConnectionStatsPoller", () => {
 
     const stats = cb.mock.calls[0]![0];
     expect(stats.quality).toBe("fair");
+  });
+
+  it("lowers quality when a good-RTT link is dropping packets (DP-41)", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04, // 40ms — on RTT alone this is excellent
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      // 8 lost of 100 received ≈ 8% inbound loss => poor
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        packetsReceived: 100,
+        packetsLost: 8,
+        bytesReceived: 1000,
+      },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.rtt).toBe(40);
+    expect(stats.loss).toBeGreaterThan(7);
+    expect(stats.quality).toBe("poor");
+  });
+
+  it("lowers quality when a good-RTT link is jittery (DP-41)", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      // 120 ms interarrival jitter => bad
+      { id: "in1", type: "inbound-rtp", packetsReceived: 100, jitter: 0.12 },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.jitter).toBeCloseTo(120, 5);
+    expect(stats.quality).toBe("bad");
+  });
+
+  it("uses remote-inbound-rtp fractionLost for the far end's view of our stream", async () => {
+    const room = createMockRoom([
+      {
+        id: "cp1",
+        type: "candidate-pair",
+        currentRoundTripTime: 0.04,
+        bytesSent: 0,
+        bytesReceived: 0,
+      },
+      // The far end reports it lost 12% of our outbound packets.
+      { id: "ri1", type: "remote-inbound-rtp", fractionLost: 0.12, jitter: 0.01 },
+    ]);
+    const cb = vi.fn();
+    poller = createConnectionStatsPoller(() => room as any);
+    poller.onUpdate(cb);
+    poller.start();
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const stats = cb.mock.calls[0]![0];
+    expect(stats.loss).toBeCloseTo(12, 5);
+    expect(stats.quality).toBe("bad");
   });
 
   it("classifies quality as poor for RTT 200-400ms", async () => {

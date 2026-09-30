@@ -17,6 +17,11 @@ export interface ConnectionStats {
   readonly inPackets: number;
   readonly totalUp: number;
   readonly totalDown: number;
+  /** Inbound packet loss, percent. A low-RTT link that drops packets is not
+   *  excellent, so quality weighs this alongside RTT (DP-41). */
+  readonly loss: number;
+  /** Interarrival jitter, milliseconds. */
+  readonly jitter: number;
   /** False until a real sample has been extracted. The native Linux path has
    *  no browser peer connection (NativeRoom.engine.pcManager is undefined), so
    *  no sample ever arrives; the widget must render "not available" rather
@@ -41,14 +46,42 @@ const EMPTY_STATS: ConnectionStats = {
   inPackets: 0,
   totalUp: 0,
   totalDown: 0,
+  loss: 0,
+  jitter: 0,
   available: false,
 };
 
-function qualityFromRtt(rtt: number): QualityLevel {
+/** Score one signal on the same excellent/fair/poor/bad scale. */
+function levelFromRtt(rtt: number): QualityLevel {
   if (rtt < 100) return "excellent";
   if (rtt < 200) return "fair";
   if (rtt < 400) return "poor";
   return "bad";
+}
+
+function levelFromLoss(loss: number): QualityLevel {
+  if (loss < 1) return "excellent";
+  if (loss < 5) return "fair";
+  if (loss < 10) return "poor";
+  return "bad";
+}
+
+function levelFromJitter(jitter: number): QualityLevel {
+  if (jitter < 20) return "excellent";
+  if (jitter < 50) return "fair";
+  if (jitter < 100) return "poor";
+  return "bad";
+}
+
+const QUALITY_ORDER: readonly QualityLevel[] = ["excellent", "fair", "poor", "bad"];
+
+/** Connection quality is the worst of RTT, packet loss and jitter, so a lossy
+ *  or jittery link can never read "excellent" on a good round trip (DP-41). */
+export function qualityFromSignals(rtt: number, loss: number, jitter: number): QualityLevel {
+  const signals = [levelFromRtt(rtt), levelFromLoss(loss), levelFromJitter(jitter)];
+  return signals.reduce((worst, level) =>
+    QUALITY_ORDER.indexOf(level) > QUALITY_ORDER.indexOf(worst) ? level : worst,
+  );
 }
 
 interface PrevSnapshot {
@@ -85,6 +118,8 @@ function extractMetrics(reports: RTCStatsReport[]): {
   inPackets: number;
   outBytes: number;
   inBytes: number;
+  loss: number;
+  jitter: number;
 } {
   let rtt = 0;
   let totalUp = 0;
@@ -93,6 +128,14 @@ function extractMetrics(reports: RTCStatsReport[]): {
   let inPackets = 0;
   let outBytes = 0;
   let inBytes = 0;
+  // Inbound loss/jitter are accumulated from every inbound-rtp entry; the
+  // remote-inbound-rtp report carries the fraction the far end lost on our
+  // outbound stream. qualityFromSignals takes the worst, so the two loss
+  // readings never need reconciling here.
+  let packetsLost = 0;
+  let packetsReceivedForLoss = 0;
+  let remoteLossFraction = 0;
+  let jitterMs = 0;
 
   for (const report of reports) {
     report.forEach((entry: Record<string, unknown>) => {
@@ -118,11 +161,40 @@ function extractMetrics(reports: RTCStatsReport[]): {
       if (entry.type === "inbound-rtp") {
         if (typeof entry.packetsReceived === "number") inPackets += entry.packetsReceived;
         if (typeof entry.bytesReceived === "number") inBytes += entry.bytesReceived;
+        if (typeof entry.packetsLost === "number") packetsLost += entry.packetsLost;
+        if (typeof entry.packetsReceived === "number")
+          packetsReceivedForLoss += entry.packetsReceived;
+        // jitter is in seconds (WebRTC stats spec); keep the worst stream.
+        if (typeof entry.jitter === "number" && entry.jitter * 1000 > jitterMs)
+          jitterMs = entry.jitter * 1000;
+      }
+
+      if (entry.type === "remote-inbound-rtp") {
+        if (typeof entry.fractionLost === "number" && entry.fractionLost > remoteLossFraction)
+          remoteLossFraction = entry.fractionLost;
+        if (typeof entry.jitter === "number" && entry.jitter * 1000 > jitterMs)
+          jitterMs = entry.jitter * 1000;
       }
     });
   }
 
-  return { rtt, totalUp, totalDown, outPackets, inPackets, outBytes, inBytes };
+  const inboundLoss =
+    packetsLost + packetsReceivedForLoss > 0
+      ? (packetsLost / (packetsLost + packetsReceivedForLoss)) * 100
+      : 0;
+  const loss = Math.max(inboundLoss, remoteLossFraction * 100);
+
+  return {
+    rtt,
+    totalUp,
+    totalDown,
+    outPackets,
+    inPackets,
+    outBytes,
+    inBytes,
+    loss,
+    jitter: jitterMs,
+  };
 }
 
 export function createConnectionStatsPoller(getRoom: () => Room | null): ConnectionStatsPoller {
@@ -155,13 +227,15 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
 
     current = {
       rtt: metrics.rtt,
-      quality: qualityFromRtt(metrics.rtt),
+      quality: qualityFromSignals(metrics.rtt, metrics.loss, metrics.jitter),
       outRate: Math.max(0, outRate),
       inRate: Math.max(0, inRate),
       outPackets: metrics.outPackets,
       inPackets: metrics.inPackets,
       totalUp: metrics.totalUp,
       totalDown: metrics.totalDown,
+      loss: metrics.loss,
+      jitter: metrics.jitter,
       available: true,
     };
 

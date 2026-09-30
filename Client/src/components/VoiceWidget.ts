@@ -214,18 +214,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     setStatValue(totalDownEl, formatBytes(stats.totalDown), stats.totalDown === 0);
   }
 
-  let qualityUnlisten: (() => void) | null = null;
-
   function startStatsPoller(): void {
     if (statsPoller !== null) return;
     statsPoller = createConnectionStatsPoller(() => getRoomForStats());
     statsUnlisten = statsPoller.onUpdate(updateSignalIcon);
-    qualityUnlisten = statsPoller.onQualityChanged((quality, _prevQuality) => {
-      // Auto-expand stats pane when quality degrades
-      if ((quality === "poor" || quality === "bad") && statsPane !== null) {
-        statsPane.classList.add("visible");
-      }
-    });
+    // The stats pane opens only on demand. A quality change updates the signal
+    // bars via onUpdate, but never expands the pane on its own (DP-41).
     statsPoller.start();
     // Paint the initial state now. updateSignalIcon only runs on a sample;
     // where none ever arrives (native Linux voice has no peer connection)
@@ -236,8 +230,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function stopStatsPoller(): void {
     statsUnlisten?.();
     statsUnlisten = null;
-    qualityUnlisten?.();
-    qualityUnlisten = null;
     statsPoller?.stop();
     statsPoller = null;
   }
