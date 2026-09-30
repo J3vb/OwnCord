@@ -362,6 +362,11 @@ the server keeps waiting instead of printing its prompt over the log.
 exits with it. Closing the window stops both, and LiveKit. Each self-restart
 leaves one more idle process behind until the window closes or the server stops.
 
+The one exception is a restart whose teardown wedges past the 90-second restart
+backstop. The old process may still hold the port or the database lock, so it
+exits instead of staying behind, and the replacement opens in a new console
+window of its own.
+
 A server started without a console (by a service wrapper, for example) gets a
 new console window of its own on a self-restart.
 

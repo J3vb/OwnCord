@@ -159,12 +159,12 @@ func TestPerformRestartHandoff(t *testing.T) {
 	}
 	defer func() { spawnReplacement = prev }()
 
-	PerformRestartHandoff("update", restartModeSupervised, log)
+	PerformRestartHandoff("update", restartModeSupervised, false, log)
 	if len(calls) != 0 {
 		t.Fatalf("supervised handoff spawned a process: %+v — the supervisor owns the relaunch", calls)
 	}
 
-	PerformRestartHandoff("update", restartModeSpawn, log)
+	PerformRestartHandoff("update", restartModeSpawn, false, log)
 	if len(calls) != 1 {
 		t.Fatalf("spawn handoff made %d spawn calls, want 1", len(calls))
 	}
@@ -176,7 +176,7 @@ func TestPerformRestartHandoff(t *testing.T) {
 	// A failing spawn must be survivable (logged, no panic) — there is no
 	// hub left to notify at this point.
 	spawnReplacement = func(string, []string) (func() int, error) { return nil, fmt.Errorf("injected spawn failure") }
-	PerformRestartHandoff("update", restartModeSpawn, log)
+	PerformRestartHandoff("update", restartModeSpawn, false, log)
 }
 
 // A process that stays behind for its replacement (a Windows server on a
@@ -208,6 +208,51 @@ func TestRestartCoordinator_HandoffReturnsTheWaitedReplacementsExitCode(t *testi
 	}
 }
 
+// The backstop fires because teardown is wedged: this process may still hold
+// the listener, the database lock or SQLite handles, and only exiting releases
+// them. Staying behind for the replacement would keep them held for as long
+// as the replacement runs, so it must start one it never waits for.
+func TestRestartCoordinator_BackstopNeverStaysBehind(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	prev, prevDetached := spawnReplacement, spawnDetached
+	defer func() { spawnReplacement, spawnDetached = prev, prevDetached }()
+	var detached, waiting atomic.Int32
+	spawnDetached = func(string, []string) error {
+		detached.Add(1)
+		return nil
+	}
+	spawnReplacement = func(string, []string) (func() int, error) {
+		waiting.Add(1)
+		return func() int { select {} }, nil
+	}
+
+	type outcome struct {
+		code   int
+		waited bool
+	}
+	done := make(chan outcome, 1)
+	var rc *RestartCoordinator
+	rc = NewRestartCoordinator(time.Millisecond, func() {
+		code, waited := rc.PerformBackstopHandoff(log)
+		done <- outcome{code, waited}
+	})
+	defer rc.Disarm()
+	rc.SetMode(restartModeSpawn)
+	rc.Request("update")
+
+	select {
+	case got := <-done:
+		if got.waited || got.code != 0 {
+			t.Errorf("PerformBackstopHandoff = (%d, %v), want (0, false)", got.code, got.waited)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the backstop handoff is waiting for its replacement")
+	}
+	if detached.Load() != 1 || waiting.Load() != 0 {
+		t.Errorf("backstop spawns: detached %d, staying behind %d; want 1 and 0", detached.Load(), waiting.Load())
+	}
+}
+
 func TestRestartCoordinator_HandoffJoinsCompanionExactlyOnce(t *testing.T) {
 	for _, mode := range []string{restartModeSpawn, restartModeSupervised} {
 		t.Run(mode, func(t *testing.T) {
@@ -219,25 +264,29 @@ func TestRestartCoordinator_HandoffJoinsCompanionExactlyOnce(t *testing.T) {
 			defer listener.Close()
 			addr := listener.Addr().String()
 			var spawns, stops atomic.Int32
-			prev := spawnReplacement
-			spawnReplacement = func(string, []string) (func() int, error) {
+			prev, prevDetached := spawnReplacement, spawnDetached
+			spawnDetached = func(string, []string) error {
 				spawns.Add(1)
 				// A replacement must be able to bind immediately, including
 				// when the backstop wins before normal teardown reaches LiveKit.
 				next, err := net.Listen("tcp4", addr)
 				if err != nil {
 					t.Errorf("replacement launched before companion released its port: %v", err)
-					return nil, err
+					return err
 				}
-				return nil, next.Close()
+				return next.Close()
 			}
-			defer func() { spawnReplacement = prev }()
+			spawnReplacement = func(string, []string) (func() int, error) {
+				t.Error("the backstop won the handoff but spawned a replacement to stay behind for")
+				return nil, nil
+			}
+			defer func() { spawnReplacement, spawnDetached = prev, prevDetached }()
 
 			stopStarted, releaseStop := make(chan struct{}), make(chan struct{})
 			backstopDone, normalDone := make(chan struct{}), make(chan struct{})
 			var rc *RestartCoordinator
 			rc = NewRestartCoordinator(time.Millisecond, func() {
-				rc.PerformHandoff(log)
+				rc.PerformBackstopHandoff(log)
 				close(backstopDone)
 			})
 			defer rc.Disarm()

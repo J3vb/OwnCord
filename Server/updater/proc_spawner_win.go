@@ -47,10 +47,17 @@ func SpawnReplacement(exePath string, args []string) (wait func() int, err error
 			return cmd.ProcessState.ExitCode()
 		}, nil
 	}
-	// No console (started detached, e.g. by a service wrapper): give the
-	// replacement one of its own.
+	// No console (started detached, e.g. by a service wrapper).
+	return nil, SpawnDetached(exePath, args)
+}
+
+// SpawnDetached starts the replacement server in a new console of its own and
+// never waits for it. The restart backstop uses it even on a console: a
+// wedged predecessor must exit to release what it still holds, so the
+// replacement cannot share a window that would close with it.
+func SpawnDetached(exePath string, args []string) error {
 	if isConsole(os.Stdout) && isConsole(os.Stderr) {
-		return nil, startInNewConsole(exePath, args)
+		return startInNewConsole(exePath, args)
 	}
 	// Output is redirected (e.g. to a log file by a wrapper): keep the
 	// redirect. A stream that is not a file or pipe (an unusable handle, or a
@@ -63,7 +70,7 @@ func SpawnReplacement(exePath string, args []string) (wait func() int, err error
 		cmd.Stderr = os.Stderr
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_CONSOLE}
-	return nil, cmd.Start()
+	return cmd.Start()
 }
 
 // startInNewConsole calls CreateProcess directly because os/exec always passes

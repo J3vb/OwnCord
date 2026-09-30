@@ -106,12 +106,12 @@ func main() {
 	// internal/app/restart.go. main owns it and hands it in; the handoff
 	// below is the last thing this process does. The backstop closure fires
 	// only if a requested restart's drain wedges past RestartBackstopDelay:
-	// it performs the handoff and force-exits, mirroring what the code below
-	// does on the healthy path.
+	// it performs the handoff without staying behind for the replacement and
+	// force-exits, releasing whatever the wedged teardown still holds.
 	var rc *app.RestartCoordinator
 	rc = app.NewRestartCoordinator(app.RestartBackstopDelay, func() {
 		slog.Error("restart backstop fired — teardown exceeded its budget, exiting for handoff")
-		code, _ := rc.PerformHandoff(slog.Default())
+		code, _ := rc.PerformBackstopHandoff(slog.Default())
 		os.Exit(code)
 	})
 
