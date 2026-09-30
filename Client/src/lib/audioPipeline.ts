@@ -8,12 +8,18 @@
 // processor's gated output. This class holds the settings (input volume,
 // sensitivity, push-to-talk) and re-applies them to whichever processor is
 // live, runs the VAD worklet on the processor's tap, and mirrors the
-// Enhanced Noise Suppression preference into it.
+// Enhanced Noise Suppression preference into it. The Linux native room has
+// no web mic track and so no processor: push-to-talk goes to its own gate.
 
 import { Track, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
-import { createMicProcessor, GATE_LOOKAHEAD_S, type MicProcessor } from "@lib/micProcessor";
+import {
+  createMicProcessor,
+  GATE_LOOKAHEAD_S,
+  workletStopped,
+  type MicProcessor,
+} from "@lib/micProcessor";
 import { voiceText } from "../i18n/voice";
 
 const log = createLogger("audioPipeline");
@@ -52,7 +58,8 @@ export function micCaptureOptions(): {
 }
 
 export interface VadDetector {
-  stop(): void;
+  /** Resolves once the worklet has stopped: only then may its context close. */
+  stop(): Promise<void>;
   /** Move the threshold without restarting; the attack/hold state carries on. */
   setThreshold(threshold: number): void;
 }
@@ -163,20 +170,20 @@ export function startVadDetector(
       startFallback();
     });
 
-  const stop = (): void => {
+  const stop = (): Promise<void> => {
     stopped = true;
     if (timer !== null) clearTimeout(timer);
-    if (workletNode !== null) {
-      // Detach the handler first — the worklet's `process()` loop only
-      // observes `stop` on its next audio-thread callback, so it can still
-      // post one more {type:"gate"} message after this postMessage (OC-0231).
-      // oxlint-disable-next-line prefer-add-event-listener -- registered via onmessage, so removeEventListener cannot detach it
-      workletNode.port.onmessage = null;
-      // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
-      workletNode.port.postMessage({ type: "stop" });
-      workletNode.disconnect();
-      workletNode = null;
-    }
+    const node = workletNode;
+    if (node === null) return Promise.resolve();
+    workletNode = null;
+    // Swap the handler first — the worklet's `process()` loop only observes
+    // `stop` on its next audio-thread callback, so it can still post one more
+    // {type:"gate"} message after this postMessage (OC-0231).
+    const done = workletStopped(node);
+    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
+    node.port.postMessage({ type: "stop" });
+    node.disconnect();
+    return done;
   };
   return {
     stop,
@@ -186,6 +193,12 @@ export function startVadDetector(
       workletNode?.port.postMessage({ type: "config", threshold });
     },
   };
+}
+
+/** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
+ *  whose microphone is the Rust session's and never has a web processor. */
+interface PttGatedRoom {
+  setPttGated(gated: boolean): void;
 }
 
 export class AudioPipeline {
@@ -286,14 +299,16 @@ export class AudioPipeline {
     this.attach(track).catch((err) => log.warn("Mic processor attach failed", err));
   }
 
-  /** Drop the processor. The track destroys it with itself on stop; a live
-   *  track keeps publishing its (now settings-less) output until reattached. */
+  /** Drop the processor, closing its context once the detector's worklet has
+   *  stopped. A live track keeps publishing its (now settings-less) output
+   *  until reattached. */
   teardownAudioPipeline(): void {
     this.generation++;
-    this.stopVadPolling();
-    if (this.processor !== null) {
-      void this.processor.destroy();
+    const vadStopped = this.stopVadPolling();
+    const processor = this.processor;
+    if (processor !== null) {
       this.processor = null;
+      void vadStopped.then(() => processor.destroy());
     }
   }
 
@@ -305,24 +320,19 @@ export class AudioPipeline {
     await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
   }
 
-  /** Route the live processor through RNNoise. Safe to call if already on. */
-  async applyNoiseSuppressor(): Promise<void> {
-    await this.processor?.setEnhanced(true);
-  }
-
-  /** Route the live processor around RNNoise. Safe to call if already off. */
-  async removeNoiseSuppressor(): Promise<void> {
-    await this.processor?.setEnhanced(false);
+  /** Route the live processor through or around RNNoise for the saved
+   *  preference. The capture is not touched. */
+  async reapplyEnhancedNoiseSuppression(onError?: (message: string) => void): Promise<void> {
+    const processor = this.processor;
+    if (processor === null) return;
+    await this.applyEnhancedPreference();
+    // The user just asked for it: say so when it could not start.
+    if (loadPref<boolean>("enhancedNoiseSuppression", false) && !processor.enhanced) {
+      onError?.(voiceText("audio.settingsFailed"));
+    }
   }
 
   // --- Volume / gates ---
-
-  /** Re-apply the current gain and gates; the processor smooths the change. */
-  updatePipelineGain(): void {
-    this.processor?.setInputGain(this.currentInputGain);
-    this.processor?.setGate("vad", this.vadGated);
-    this.processor?.setGate("ptt", this.pttGated);
-  }
 
   setInputVolume(volume: number): void {
     const clamped = Math.max(0, Math.min(200, volume));
@@ -333,10 +343,12 @@ export class AudioPipeline {
 
   /** Close (true) or open (false) the push-to-talk gate. It is applied to the
    *  live processor and to every one attached later, so a press or release
-   *  never touches the capture device or the SDK's mute. */
+   *  never touches the capture device or the SDK's mute. A room that gates
+   *  its own capture (NativeRoom) gets it too. */
   setPttGated(gated: boolean): void {
     this.pttGated = gated;
     this.processor?.setGate("ptt", gated);
+    (this.room as Partial<PttGatedRoom> | null)?.setPttGated?.(gated);
   }
 
   /**
@@ -357,7 +369,7 @@ export class AudioPipeline {
 
   /** (Re)start the detector on the live processor for the saved sensitivity. */
   startVadPolling(): void {
-    this.stopVadPolling();
+    void this.stopVadPolling();
     const processor = this.processor;
     if (processor === null || processor.analyser === null) return;
     const sensitivity = loadPref<number>("voiceSensitivity", 50);
@@ -381,20 +393,22 @@ export class AudioPipeline {
     });
   }
 
-  /** Stop the detector and open its gate. The processor stays. */
-  stopVadPolling(): void {
-    this.vad?.stop();
+  /** Stop the detector and open its gate. The processor stays. Resolves once
+   *  the detector's worklet has stopped. */
+  stopVadPolling(): Promise<void> {
+    const stopped = this.vad?.stop() ?? Promise.resolve();
     this.vad = null;
     this._vadUsingWorklet = false;
     this._lastVadRms = 0;
     this.vadGated = false;
     this.processor?.setGate("vad", false);
+    return stopped;
   }
 
   /**
-   * Re-apply audio processing settings (echo cancellation, noise suppression,
-   * AGC, Enhanced Noise Suppression) to the live mic track. The SDK restarts
-   * the capture and keeps the processor, whose output stays on the sender.
+   * Re-apply the browser's capture processing (echo cancellation, noise
+   * suppression, AGC) to the live mic track. The SDK restarts the capture and
+   * keeps the processor, whose output stays on the sender.
    */
   async reapplyAudioProcessing(onError?: (message: string) => void): Promise<void> {
     if (this.room === null) {
@@ -411,11 +425,6 @@ export class AudioPipeline {
       // restartTrack re-acquires the mic with new constraints without unpublishing
       await track.restartTrack(captureOptions);
       log.info("Audio processing reapplied via restartTrack", captureOptions);
-      await this.applyEnhancedPreference();
-      // The user just asked for it: say so when it could not start.
-      if (loadPref<boolean>("enhancedNoiseSuppression", false) && !this.processor?.enhanced) {
-        onError?.(voiceText("audio.settingsFailed"));
-      }
     } catch (err) {
       log.error("Failed to reapply audio processing", err);
       onError?.(voiceText("audio.settingsFailed"));

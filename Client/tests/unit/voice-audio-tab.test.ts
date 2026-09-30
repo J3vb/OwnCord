@@ -6,6 +6,7 @@ const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
+const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
@@ -14,6 +15,8 @@ vi.mock("@lib/livekitSession", () => ({
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
   setOutputVolume: (...args: unknown[]) => mockSetOutputVolume(...args),
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
+  reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
+    mockReapplyEnhancedNoiseSuppression(...args),
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
@@ -790,6 +793,33 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("re-routes the call and the meter through RNNoise on the Enhanced NS toggle, reopening no microphone", async () => {
+    stubNavigator();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+    );
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    await vi.waitFor(() =>
+      expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+    );
+    const requests = vi.mocked(navigator.mediaDevices.getUserMedia).mock.calls.length;
+
+    el.querySelector<HTMLElement>(
+      "[role='switch'][aria-label='Enhanced Noise Suppression']",
+    )!.click();
+
+    await vi.waitFor(() =>
+      expect(FakeAudioWorkletNode.instances.some((w) => w.name === "rnnoise-processor")).toBe(true),
+    );
+    expect(mockReapplyEnhancedNoiseSuppression).toHaveBeenCalledTimes(1);
+    expect(mockReapplyAudioProcessing).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(requests);
+    ac.abort();
+  });
+
   it("moves the meter to a newly chosen input device", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
     const ac = new AbortController();
@@ -1255,7 +1285,7 @@ describe("VoiceAudioTab UI structure", () => {
   ])("detaches the camera preview from its stream on %s", async (_label, teardown) => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     const camStream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
-    const micStream = { getTracks: () => [] } as unknown as MediaStream;
+    const micStream = { getTracks: () => [], getAudioTracks: () => [] } as unknown as MediaStream;
     vi.stubGlobal("navigator", {
       mediaDevices: {
         enumerateDevices: vi.fn().mockResolvedValue([]),

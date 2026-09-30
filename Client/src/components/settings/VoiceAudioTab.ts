@@ -12,6 +12,7 @@ import {
   setInputVolume,
   setOutputVolume,
   reapplyAudioProcessing,
+  reapplyEnhancedNoiseSuppression,
 } from "@lib/livekitSession";
 import {
   VAD_MAX_THRESHOLD,
@@ -19,7 +20,7 @@ import {
   startVadDetector,
   vadThreshold,
 } from "@lib/audioPipeline";
-import { createMicProcessor } from "@lib/micProcessor";
+import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import { nativeAudioDevices } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
@@ -253,6 +254,8 @@ function buildVoiceAudioTabInner(
 
   /** The meter's detector, so a dragged threshold applies to it at once. */
   let meterThresholdSetter: ((threshold: number) => void) | null = null;
+  /** The meter's processor, so the Enhanced NS toggle re-routes it at once. */
+  let meterProcessor: MicProcessor | null = null;
 
   function previewSensitivity(val: number): void {
     currentSensitivity = val;
@@ -681,8 +684,10 @@ function buildVoiceAudioTabInner(
         const processor = createMicProcessor();
         const options = { kind: Track.Kind.Audio, track: stream.getAudioTracks()[0]! };
         await processor.init(options as AudioProcessorOptions);
+        meterProcessor = processor;
         await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
         if (signal.aborted || thisRequest !== micRequestId) {
+          if (meterProcessor === processor) meterProcessor = null;
           void processor.destroy();
           stopStream();
           return;
@@ -721,8 +726,8 @@ function buildVoiceAudioTabInner(
         meterThresholdSetter = detector.setThreshold;
         registerMic(() => {
           if (meterThresholdSetter === detector.setThreshold) meterThresholdSetter = null;
-          detector.stop();
-          void processor.destroy();
+          if (meterProcessor === processor) meterProcessor = null;
+          void detector.stop().then(() => processor.destroy());
           stopStream();
         });
       } catch (err) {
@@ -797,6 +802,13 @@ function buildVoiceAudioTabInner(
       label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
+        if (item.key === "enhancedNoiseSuppression") {
+          // RNNoise sits inside the processors: re-route the call's and the
+          // meter's, and leave both captures alone.
+          void reapplyEnhancedNoiseSuppression();
+          void meterProcessor?.setEnhanced(nowOn);
+          return;
+        }
         // Reapply audio processing constraints to the live mic track, then to
         // the meter's, so it keeps measuring what the call captures.
         restartMeterAfter(reapplyAudioProcessing());

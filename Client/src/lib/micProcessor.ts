@@ -31,6 +31,34 @@ export const GATE_LOOKAHEAD_S = 0.05;
 /** Gain smoothing: opening has to finish inside the lookahead. */
 const GATE_OPEN_TIME_CONSTANT_S = 0.005;
 const GAIN_TIME_CONSTANT_S = 0.015;
+/** Upper bound on waiting for a worklet's `stopped`; a context that is not
+ *  rendering (suspended) never calls process() again. */
+const WORKLET_STOP_TIMEOUT_MS = 1000;
+
+/**
+ * Resolve once `node`'s processor has made its final process() call, which
+ * posts `{type:"stopped"}` (vad-worklet.js, rnnoise-worklet.js), or after a
+ * timeout. Chromium keeps an AudioWorkletNode, and with it the AudioContext,
+ * alive until process() returns false; closing the context first ends
+ * rendering before the processor sees its stop, which pins the closed
+ * context for the page's lifetime. Replaces the port's handler: nothing but
+ * `stopped` is acted on once a node is stopping (OC-0231).
+ */
+export function workletStopped(node: AudioWorkletNode): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
+      node.port.onmessage = null;
+      resolve();
+    };
+    const timer = setTimeout(done, WORKLET_STOP_TIMEOUT_MS);
+    // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
+    node.port.onmessage = (event: MessageEvent) => {
+      if ((event.data as { type?: string }).type === "stopped") done();
+    };
+  });
+}
 
 export type GateSource = "vad" | "ptt";
 
@@ -61,6 +89,9 @@ export function createMicProcessor(): MicProcessor {
   let gain: GainNode | null = null;
   let dest: MediaStreamAudioDestinationNode | null = null;
   let rnnoise: RNNoiseNode | null = null;
+  let loadingRnnoise: Promise<void> | null = null;
+  /** The last setEnhanced request: a load that settles late applies it. */
+  let wantEnhanced = false;
   let enhanced = false;
   let inputGain = 1;
   const closed: Record<GateSource, boolean> = { vad: false, ptt: false };
@@ -137,6 +168,7 @@ export function createMicProcessor(): MicProcessor {
       if (destroyed) return;
       destroyed = true;
       source?.disconnect();
+      const rnnoiseStopped = rnnoise === null ? null : workletStopped(rnnoise.node);
       rnnoise?.destroy();
       rnnoise = null;
       entry?.disconnect();
@@ -144,6 +176,7 @@ export function createMicProcessor(): MicProcessor {
       delay?.disconnect();
       gain?.disconnect();
       dest?.disconnect();
+      await rnnoiseStopped;
       void ctx.close();
       log.info("Mic processor destroyed");
     },
@@ -169,20 +202,24 @@ export function createMicProcessor(): MicProcessor {
     },
 
     async setEnhanced(on: boolean): Promise<void> {
+      wantEnhanced = on;
       if (on && rnnoise === null && !destroyed) {
-        try {
-          rnnoise = await createRNNoiseNode(ctx);
-        } catch (err) {
-          log.warn("RNNoise failed to start — Enhanced Noise Suppression stays off", err);
-          on = false;
-        }
-        if (destroyed) {
-          rnnoise?.destroy();
-          rnnoise = null;
-          return;
-        }
+        loadingRnnoise ??= createRNNoiseNode(ctx)
+          .then(
+            (node) => {
+              if (destroyed) node.destroy();
+              else rnnoise = node;
+            },
+            (err) =>
+              log.warn("RNNoise failed to start — Enhanced Noise Suppression stays off", err),
+          )
+          .finally(() => {
+            loadingRnnoise = null;
+          });
+        await loadingRnnoise;
       }
-      enhanced = on && rnnoise !== null;
+      if (destroyed) return;
+      enhanced = wantEnhanced && rnnoise !== null;
       route();
     },
   };

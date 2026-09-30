@@ -117,17 +117,18 @@ export class MediaControl {
       if (this._room !== room) return;
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
-      // Also honor a moderator's server-mute, a genuine self-mute, and an
-      // unpressed push-to-talk key the same way: a listen-only join publishes
-      // no audio track, so none of these have anything to act on and persist
-      // silently — republishing here must not hand the whole channel a
-      // fresh, unmuted track. Shares applyMicMuteState's own gate rather
-      // than re-deriving a narrower one (the setMuted() guard does not cover
-      // this direct setMicrophoneEnabled call).
+      // Also honor a moderator's server-mute and a genuine self-mute the
+      // same way: a listen-only join publishes no audio track, so none of
+      // these have anything to act on and persist silently — republishing
+      // here must not hand the whole channel a fresh, unmuted track. Shares
+      // applyMicMuteState's own gate rather than re-deriving a narrower one
+      // (the setMuted() guard does not cover this direct
+      // setMicrophoneEnabled call). An unpressed push-to-talk key needs
+      // nothing here: the new track publishes behind its closed gate.
       if (isMicPolicyGated()) {
         await this.applyMicMuteState(true);
         if (this._room !== room) return;
-        log.info("Microphone acquired but muted (mute/deafen/server-mute/PTT gate active)");
+        log.info("Microphone acquired but muted (mute/deafen/server-mute active)");
       } else {
         setLocalMuted(false);
         log.info("Microphone permission granted — exited listen-only mode");
@@ -216,8 +217,8 @@ export class MediaControl {
       // call's to lift — setMuted/setDeafened only guard their own flag
       // before calling here, so this is the one place every re-enable path
       // (present and future) shares the full policy check. Push-to-talk is
-      // not part of it: its gate closes inside the mic processor, and the
-      // microphone is published (and idle) while the key is up.
+      // not part of it: the room enables the microphone behind its gate
+      // (AudioPipeline.setPttGated), which stays closed while the key is up.
       if (isMicPolicyGated()) {
         this.pendingMicrophoneRoom = null;
         log.debug("Skipping mic re-publish — still gated (mute/deafen/server-mute)");
@@ -336,12 +337,16 @@ export class MediaControl {
     this._audioPipeline.setVoiceSensitivity(sensitivity);
   }
 
-  /** Close or open the push-to-talk gate inside the mic processor. */
+  /** Close or open the push-to-talk gate (AudioPipeline.setPttGated). */
   setPttGated(gated: boolean): void {
     this._audioPipeline.setPttGated(gated);
   }
 
   async reapplyAudioProcessing(): Promise<void> {
     return this._audioPipeline.reapplyAudioProcessing(this.onErrorCallback ?? undefined);
+  }
+
+  async reapplyEnhancedNoiseSuppression(): Promise<void> {
+    return this._audioPipeline.reapplyEnhancedNoiseSuppression(this.onErrorCallback ?? undefined);
   }
 }

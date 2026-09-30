@@ -562,8 +562,8 @@ export class LiveKitSession {
     // platforms where PTT can never actually report state (macOS's
     // is_key_down stub, pure-Wayland Linux with no XWayland).
     // Record the gate in pttGated, NEVER in localMuted: localMuted means "the
-    // user muted themselves". The gate closes inside the mic processor, so
-    // the microphone is published either way and a press only opens the gate.
+    // user muted themselves". The microphone is enabled either way, behind
+    // the gate (AudioPipeline.setPttGated), and a press only opens the gate.
     // On reconnect, don't recompute pttArmed from scratch — that always
     // yields false (mode !== "join") and ignores whatever pttGated the store
     // is still carrying from before the disconnect. If the user joined with
@@ -851,9 +851,10 @@ export class LiveKitSession {
     this._media.setVoiceSensitivity(sensitivity);
   }
 
-  /** Push-to-talk: close (key up) or open (key down) the gate in the mic
-   *  processor. Recorded in the store for the widget, applied to the live
-   *  processor and to every one attached later. */
+  /** Push-to-talk: close (key up) or open (key down) the gate — the mic
+   *  processor's, or the native room's own (AudioPipeline.setPttGated).
+   *  Recorded in the store for the widget, applied to the live processor and
+   *  to every one attached later. */
   setPttGated(gated: boolean): void {
     setPttGatedState(gated);
     this._media.setPttGated(gated);
@@ -861,6 +862,12 @@ export class LiveKitSession {
 
   async reapplyAudioProcessing(): Promise<void> {
     return this._media.reapplyAudioProcessing();
+  }
+
+  /** Route the live mic processor through or around RNNoise for the saved
+   *  preference, without restarting the capture. */
+  async reapplyEnhancedNoiseSuppression(): Promise<void> {
+    return this._media.reapplyEnhancedNoiseSuppression();
   }
 
   getLocalCameraStream(): MediaStream | null {
@@ -978,6 +985,8 @@ export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const setPttGated = session.setPttGated.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
+export const reapplyEnhancedNoiseSuppression =
+  session.reapplyEnhancedNoiseSuppression.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);

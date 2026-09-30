@@ -286,7 +286,12 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
    * @returns {boolean} - Whether to continue processing
    */
   process(inputs, outputs) {
-    if (this._destroyed) return false;
+    if (this._destroyed) {
+      // Returning false stops the processor. The main thread waits for this
+      // before closing the AudioContext (micProcessor.ts workletStopped).
+      this.port.postMessage({ type: "stopped" });
+      return false;
+    }
 
     // Validate input/output structure
     if (!inputs || !inputs[0] || !inputs[0][0] || !outputs || !outputs[0] || !outputs[0][0]) {

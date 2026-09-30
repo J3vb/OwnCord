@@ -2353,28 +2353,6 @@ describe("LiveKitSession", () => {
       expect(setLocalMuted).toHaveBeenCalledWith(false);
     });
 
-    it("leaves noise suppression to the pipeline even when enhancedNoiseSuppression is true", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
-      vi.clearAllMocks();
-
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return true;
-        return defaultVal;
-      });
-
-      const noiseSpy = vi
-        .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
-        .mockResolvedValue(undefined);
-
-      await session.retryMicPermission();
-
-      expect(noiseSpy).not.toHaveBeenCalled();
-      noiseSpy.mockRestore();
-      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
-    });
-
     it("calls error callback and remains listen-only when mic fails", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -2468,54 +2446,21 @@ describe("LiveKitSession", () => {
       session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
     });
 
-    it("leaves noise suppression to the pipeline on join when enhancedNoiseSuppression is true", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return true;
-        return defaultVal;
-      });
+    it("enables the microphone on the first unmute after a muted join", async () => {
+      mockVoiceState.localMuted = true;
+      try {
+        await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
 
-      const noiseSpy = vi
-        .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
-        .mockResolvedValue(undefined);
+        mockVoiceState.localMuted = false;
+        session.setMuted(false);
+        await vi.advanceTimersByTimeAsync(0);
 
-      await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
-
-      expect(noiseSpy).not.toHaveBeenCalled();
-      noiseSpy.mockRestore();
-      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+      } finally {
+        mockVoiceState.localMuted = false;
+      }
     });
-
-    // Rewritten: the processor attaches when the room creates the track and
-    // mirrors the NS pref itself, so the first unmute after a muted join never
-    // asks the session to apply (or remove) the noise suppressor.
-    it.each([[true], [false]])(
-      "with enhancedNoiseSuppression=%s, the first unmute after a muted join leaves the noise suppressor to the pipeline",
-      async (enhancedNS) => {
-        mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-          key === "enhancedNoiseSuppression" ? enhancedNS : defaultVal,
-        );
-        const noiseSpy = vi
-          .spyOn((session as any)._audioPipeline, "applyNoiseSuppressor")
-          .mockResolvedValue(undefined);
-        mockVoiceState.localMuted = true;
-        try {
-          await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
-          expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
-          expect(noiseSpy).not.toHaveBeenCalled();
-
-          mockVoiceState.localMuted = false;
-          session.setMuted(false);
-          await vi.advanceTimersByTimeAsync(0);
-
-          expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
-          expect(noiseSpy).not.toHaveBeenCalled();
-        } finally {
-          mockVoiceState.localMuted = false;
-          noiseSpy.mockRestore();
-          mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
-        }
-      },
-    );
 
     it("mode reconnect with mic error logs warn but does NOT call error callback", async () => {
       const errorCb = vi.fn();

@@ -209,10 +209,13 @@ export class NativeRoom {
     trackPublications: new Map<string, NativeLocalPublication>(),
     getTrackPublication: (source: string): NativeLocalPublication | undefined =>
       this.localParticipant.trackPublications.get(source),
+    /** Every enable honours the push-to-talk gate (setPttGated): the key
+     *  opens a microphone the user wants on, never one they turned off. */
     setMicrophoneEnabled: async (enabled: boolean): Promise<void> => {
       // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
       if (this.sessionId === null) throw new Error("native room is not connected");
-      await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
+      this.microphoneWanted = enabled;
+      await desktop.nativeVoice.setMicrophone(this.sessionId, enabled && !this.pttGated);
     },
     /** Only the disable is reachable: the camera path publishes its own
      *  track (`publishTrack`), as on the web path. */
@@ -242,6 +245,10 @@ export class NativeRoom {
   };
 
   private sessionId: number | null = null;
+  /** The last setMicrophoneEnabled request (mute, deafen, server mute). */
+  private microphoneWanted = false;
+  /** Push-to-talk's key is up: the capture stays off whatever is wanted. */
+  private pttGated = false;
   /** The session's frame-socket base URL (token included); never logged. */
   private frames = "";
   /** Whether this room is counted in `nativeCounters.openRooms`. */
@@ -293,6 +300,17 @@ export class NativeRoom {
    *  `native_voice_set_key`. Kept so roomLifecycle's call site is shared. */
   setE2EEEnabled(_enabled: boolean): Promise<void> {
     return Promise.resolve();
+  }
+  /** Push-to-talk for the native room, which has no web mic processor to
+   *  gate (AudioPipeline.setPttGated): the key closes and reopens the
+   *  session's capture, as a mute does, only while the microphone is wanted. */
+  setPttGated(gated: boolean): void {
+    if (this.pttGated === gated) return;
+    this.pttGated = gated;
+    if (this.sessionId === null || !this.microphoneWanted) return;
+    desktop.nativeVoice
+      .setMicrophone(this.sessionId, !gated)
+      .catch((err) => log.warn("Push-to-talk could not switch the native microphone", err));
   }
   /** Native playout needs no autoplay gesture. */
   startAudio(): Promise<void> {

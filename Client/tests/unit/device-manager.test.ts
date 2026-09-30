@@ -167,8 +167,6 @@ describe("DeviceManager", () => {
     it("clears the pipeline so device switches skip pipeline setup", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn(),
-        removeNoiseSuppressor: vi.fn(),
       } as any;
       dm.setAudioPipeline(pipeline);
       dm.setAudioPipeline(null);
@@ -181,8 +179,6 @@ describe("DeviceManager", () => {
     it("stores a pipeline that is invoked during device switches", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);
@@ -210,8 +206,6 @@ describe("DeviceManager", () => {
         setupAudioPipeline: vi.fn(() => {
           throw new Error("pipeline error");
         }),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setOnToast(onToast);
       dm.setOnToast(null);
@@ -295,50 +289,11 @@ describe("DeviceManager", () => {
     it("calls setupAudioPipeline on the pipeline after switch", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);
       await dm.switchInputDevice("device-1");
       expect(pipeline.setupAudioPipeline).toHaveBeenCalled();
-    });
-
-    it("leaves enhanced noise suppression to the pipeline when enabled", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return true;
-        return defaultVal;
-      });
-      const pipeline = {
-        setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-      } as any;
-      dm.setRoom(mockRoom);
-      dm.setAudioPipeline(pipeline);
-      await dm.switchInputDevice("device-1");
-      expect(pipeline.setupAudioPipeline).toHaveBeenCalled();
-      expect(pipeline.applyNoiseSuppressor).not.toHaveBeenCalled();
-      expect(pipeline.removeNoiseSuppressor).not.toHaveBeenCalled();
-    });
-
-    // Deleted OC-0474 (RNNoise left alone while gated): a device switch never touches NS any more; covered by the two tests above.
-    it("leaves noise suppression to the pipeline when not enabled", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return false;
-        return defaultVal;
-      });
-      const pipeline = {
-        setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-      } as any;
-      dm.setRoom(mockRoom);
-      dm.setAudioPipeline(pipeline);
-      await dm.switchInputDevice("device-1");
-      expect(pipeline.setupAudioPipeline).toHaveBeenCalled();
-      expect(pipeline.applyNoiseSuppressor).not.toHaveBeenCalled();
-      expect(pipeline.removeNoiseSuppressor).not.toHaveBeenCalled();
     });
 
     it("calls onError callback on device switch failure", async () => {
@@ -356,8 +311,6 @@ describe("DeviceManager", () => {
         setupAudioPipeline: vi.fn(() => {
           throw new Error("pipeline error");
         }),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);

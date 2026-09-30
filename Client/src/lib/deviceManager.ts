@@ -19,8 +19,8 @@ const DEVICE_CHANGE_DEBOUNCE_MS = 500;
 
 /** True when a mute/deafen/server-mute means the mic must stay off
  *  regardless of a caller's own request to (re-)enable it. Push-to-talk is
- *  not part of it: its gate closes inside the mic processor and the
- *  microphone stays published while the key is up.
+ *  not part of it: a re-enabled microphone comes up behind its gate
+ *  (AudioPipeline.setPttGated), which stays closed while the key is up.
  *  Re-enabling never re-publishes: setMicrophoneEnabled(true) on an existing
  *  publication is a track.unmute() (only ScreenShare actually unpublishes),
  *  and with the Room's stopMicTrackOnMute that same call re-acquires the

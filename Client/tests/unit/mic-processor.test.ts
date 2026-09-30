@@ -20,6 +20,14 @@ async function started() {
   return { processor, ctx, entry: entry!, output: output! };
 }
 
+/** Answer the RNNoise worklet's init once it exists. */
+async function ready(): Promise<FakeAudioWorkletNode> {
+  await vi.waitFor(() => expect(FakeAudioWorkletNode.instances).toHaveLength(1));
+  const node = FakeAudioWorkletNode.instances[0]!;
+  node.emit({ type: "ready" });
+  return node;
+}
+
 describe("createMicProcessor", () => {
   beforeEach(() => {
     installFakeAudio();
@@ -103,6 +111,72 @@ describe("createMicProcessor", () => {
     expect(processor.enhanced).toBe(false);
     expect(entry.outputs).toEqual([ctx.node("analyser"), ctx.node("delay")]);
     expect(rnnoise.disconnect).toHaveBeenCalled();
+  });
+
+  describe("with RNNoise loaded", () => {
+    beforeEach(() => {
+      vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+      );
+    });
+
+    // #1728: a context closed before a worklet's final process() call pins
+    // the closed context (and RNNoise's WASM) for the page's lifetime.
+    it("closes the context only after RNNoise's worklet has stopped", async () => {
+      const { processor, ctx } = await started();
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      const enabling = processor.setEnhanced(true);
+      const rnnoise = await ready();
+      await enabling;
+
+      const destroying = processor.destroy();
+      await Promise.resolve();
+      expect(rnnoise.port.postMessage).toHaveBeenCalledWith({ type: "destroy" });
+      expect(ctx.close).not.toHaveBeenCalled();
+
+      rnnoise.emit({ type: "stopped" });
+      await destroying;
+      expect(ctx.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes the context anyway when the worklet never reports stopped", async () => {
+      vi.useFakeTimers();
+      try {
+        const { processor, ctx } = await started();
+        ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+        const enabling = processor.setEnhanced(true);
+        await vi.advanceTimersByTimeAsync(0);
+        FakeAudioWorkletNode.instances[0]!.emit({ type: "ready" });
+        await enabling;
+
+        const destroying = processor.destroy();
+        await vi.advanceTimersByTimeAsync(999);
+        expect(ctx.close).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        await destroying;
+        expect(ctx.close).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("settles toggles made while RNNoise loads on the last one, loading it once", async () => {
+      const { processor, ctx, entry } = await started();
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+
+      const on = processor.setEnhanced(true);
+      const off = processor.setEnhanced(false);
+      const onAgain = processor.setEnhanced(true);
+      const offAgain = processor.setEnhanced(false);
+      await ready();
+      await Promise.all([on, off, onAgain, offAgain]);
+
+      expect(FakeAudioWorkletNode.instances).toHaveLength(1);
+      expect(processor.enhanced).toBe(false);
+      expect(entry.outputs).toEqual([ctx.node("analyser"), ctx.node("delay")]);
+    });
   });
 
   it("stays off, and keeps passing audio, when RNNoise cannot load", async () => {

@@ -167,7 +167,11 @@ PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
 `setPttGated(!pressed)` only while in a channel (the `ptt-state` listener inside
 `initPtt()`, `platform/desktop/pushToTalkService.ts`): the key opens and closes
 a gate inside the microphone processor (§8), never the mute, so the capture
-stays open across presses and no press publishes a raw track. **Target UX:**
+stays open across presses and no press publishes a raw track. The Linux native
+room has no web microphone to gate: there the same `setPttGated` switches the
+Rust session's microphone (`NativeRoom.setPttGated` →
+`nativeVoice.setMicrophone`), and every enable while the key is up comes up
+off. **Target UX:**
 
 | State               | Presentation                                                                                                                                                                                                   |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -280,7 +284,9 @@ trust action entirely (a blind accept is refused).
   (`livekitSession.setPttGated`; `pushToTalkService.ts`). The microphone
   stays published and its capture stays open across presses, the store's
   `pttGated` never writes `localMuted`, and a user's own mute or deafen still
-  stops the capture as before.
+  stops the capture as before. On Linux the native room keeps its own gate
+  behind the same call and turns the session's microphone off and on with
+  the key, only while the user has it on.
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
   plug/unplug and re-routes the active input/output without rejoining.
 - **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview

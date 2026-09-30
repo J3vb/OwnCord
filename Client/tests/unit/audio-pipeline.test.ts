@@ -38,6 +38,8 @@ function roomWith(track: LocalAudioTrack | undefined) {
   } as never;
 }
 
+const rnnoise = () => FakeAudioWorkletNode.instances.find((w) => w.name === "rnnoise-processor");
+
 describe("AudioPipeline", () => {
   beforeEach(() => {
     prefs.clear();
@@ -99,6 +101,45 @@ describe("AudioPipeline", () => {
       expect(outputGain(contextOf(reconnected)).value).toBe(0);
       pipeline.setPttGated(false);
       expect(outputGain(contextOf(reconnected)).value).toBe(1);
+    });
+
+    it("drives the room's own gate where the room has no web processor (the native room)", () => {
+      const pipeline = new AudioPipeline();
+      const setPttGated = vi.fn();
+      pipeline.setRoom({
+        localParticipant: { getTrackPublication: () => undefined },
+        setPttGated,
+      } as never);
+
+      pipeline.setPttGated(true);
+      pipeline.setPttGated(false);
+
+      expect(setPttGated.mock.calls).toEqual([[true], [false]]);
+    });
+  });
+
+  describe("teardown", () => {
+    // #1728: a context closed before the VAD worklet's final process() call
+    // is pinned for the page's lifetime, one per voice join.
+    it("closes the context only after the detector's worklet has stopped", async () => {
+      FakeAudioContext.workletsLoad = true;
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+      const ctx = contextOf(track);
+      const vad = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+
+      pipeline.teardownAudioPipeline();
+      expect(vad.port.postMessage).toHaveBeenCalledWith({ type: "stop" });
+      // OC-0231: a gate the worklet posts after the stop is not acted on.
+      vad.emit({ type: "gate", gated: true });
+      expect(pipeline.isVadGated).toBe(false);
+      await Promise.resolve();
+      expect(ctx.close).not.toHaveBeenCalled();
+
+      vad.emit({ type: "stopped" });
+      await vi.waitFor(() => expect(ctx.close).toHaveBeenCalledTimes(1));
     });
   });
 
@@ -177,6 +218,41 @@ describe("AudioPipeline", () => {
     });
   });
 
+  describe("reapplyEnhancedNoiseSuppression", () => {
+    it("routes the live processor through RNNoise without restarting the capture", async () => {
+      FakeAudioContext.workletsLoad = true;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+      );
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      pipeline.setRoom(roomWith(track));
+      const restartTrack = vi.spyOn(track, "restartTrack");
+      prefs.set("enhancedNoiseSuppression", true);
+
+      const applying = pipeline.reapplyEnhancedNoiseSuppression();
+      await vi.waitFor(() => expect(rnnoise()).toBeDefined());
+      rnnoise()!.emit({ type: "ready" });
+      await applying;
+
+      expect(restartTrack).not.toHaveBeenCalled();
+      expect((track.getProcessor() as unknown as MicProcessor).enhanced).toBe(true);
+    });
+
+    it("reports RNNoise failing to start", async () => {
+      const pipeline = new AudioPipeline();
+      await pipeline.attach(micTrack());
+      prefs.set("enhancedNoiseSuppression", true);
+      const onError = vi.fn();
+
+      await pipeline.reapplyEnhancedNoiseSuppression(onError);
+
+      expect(onError).toHaveBeenCalledWith("Failed to update audio settings");
+    });
+  });
+
   describe("reapplyAudioProcessing", () => {
     it("restarts the capture with the saved device and processing, keeping the processor", async () => {
       prefs.set("audioInputDevice", "usb-mic");
@@ -240,7 +316,7 @@ describe("startVadDetector", () => {
     const worklet = FakeAudioWorkletNode.instances[0]!;
     expect(worklet.port.postMessage).toHaveBeenLastCalledWith({ type: "config", threshold: 0.01 });
     expect(FakeAudioWorkletNode.instances).toHaveLength(1);
-    detector.stop();
+    void detector.stop();
     worklet.emit({ type: "gate", gated: true });
     expect(onGate).not.toHaveBeenCalled();
   });
@@ -272,6 +348,6 @@ describe("startVadDetector", () => {
     expect(onGate).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(16);
     expect(onGate).toHaveBeenLastCalledWith(false);
-    detector.stop();
+    void detector.stop();
   });
 });
