@@ -107,7 +107,7 @@ function enterConversation(dm: DmChannel): void {
 /**
  * Open the accepted conversation once the server has opened it: from its
  * dm_channel_open, or from GET /dms when that frame was lost (a resume gets
- * no ready to carry it). Dropped when `signal` aborts.
+ * no ready to carry it). The fallback open is dropped when `signal` aborts.
  *
  * GET /dms is asked either way: the accept's dm_channel_open carries no last
  * message, so without it the row would say "No messages yet" beside the
@@ -132,13 +132,15 @@ export function openAcceptedConversation(
     });
     signal.addEventListener("abort", unsub, { once: true });
   }
-  api.getDmChannels?.(signal).then(
+  // Not the view's signal: entering the conversation closes the view, and the
+  // preview must still land.
+  api.getDmChannels?.().then(
     (r) => {
       const p = r.dm_channels.find((d) => d.channel_id === channelId);
-      if (p === undefined || signal.aborted) return;
+      if (p === undefined) return;
       const fetched = dmChannelFromPayload(p);
       if (find() === undefined) {
-        addDmChannel(fetched);
+        if (!signal.aborted) addDmChannel(fetched);
       } else if (fetched.lastMessageId !== null) {
         // Monotonic: a live message that landed first is newer and stays.
         updateDmLastMessagePreview(

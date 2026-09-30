@@ -216,7 +216,7 @@ describe("message request decisions", () => {
     expect(channelsStore.getState().activeChannelId).toBe(101);
   });
 
-  it("fills the accepted DM's preview from GET /dms when dm_channel_open carried none", async () => {
+  it("fills the accepted DM's preview from GET /dms after the inbox has closed", async () => {
     await open(1);
     const dms = vi.fn(() =>
       Promise.resolve({
@@ -232,12 +232,29 @@ describe("message request decisions", () => {
         ],
       }),
     );
-    Object.assign(fx.api, { getDmChannels: dms });
+    // Like a real fetch, the request dies with the signal it was given.
+    let answer = (): void => {};
+    Object.assign(fx.api, {
+      getDmChannels: (signal?: AbortSignal) =>
+        new Promise((resolve, reject) => {
+          const abort = (): void => reject(new DOMException("aborted", "AbortError"));
+          if (signal?.aborted) abort();
+          signal?.addEventListener("abort", abort);
+          answer = () => void dms().then(resolve);
+        }),
+    });
+    // Entering the conversation unmounts the inbox, as contentView does.
+    const unmount = channelsStore.subscribe(() => {
+      if (channelsStore.getState().activeChannelId === 101) owner.abort();
+    });
     // The accept's dm_channel_open has no last message and beats the POST's answer.
     addDmChannel(dm(1));
     button(1, "accept").click();
     fx.decisions[0]!.resolve();
     await settle();
+    unmount();
+    expect(owner.signal.aborted).toBe(true);
+    answer();
     await settle();
     expect(channelsStore.getState().activeChannelId).toBe(101);
     expect(dmStore.getState().channels.find((c) => c.channelId === 101)).toMatchObject({
