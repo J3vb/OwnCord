@@ -8,7 +8,8 @@ import (
 )
 
 // afterHubStart runs the wiring that needs the built runtime: the admin
-// panel's runtime log-level card (SRE-07), then the boot-status record. It
+// panel's runtime log-level card (SRE-07), the boot-status record, then the
+// batched connection writes (installConnWrites). It
 // lives beside the controller so lifecycle.go keeps its file-size budget.
 //
 // A nil LevelVar (an App built without main's wiring, as some tests do)
@@ -23,4 +24,5 @@ func (a *App) afterHubStart(services *service.Services) {
 		})
 	}
 	a.recordBootStatus(services)
+	a.installConnWrites(services)
 }

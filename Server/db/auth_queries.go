@@ -408,16 +408,6 @@ func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 	return nil
 }
 
-// MarkUserDisconnected records that a user's last session went away: last_seen
-// is refreshed and "online" falls back to "offline", while a chosen
-// idle/dnd/invisible is preserved for the next connect to honour.
-func (d *DB) MarkUserDisconnected(ctx context.Context, userID int64) error {
-	if err := d.q.MarkUserDisconnected(ctx, userID); err != nil {
-		return fmt.Errorf("MarkUserDisconnected: %w", err)
-	}
-	return nil
-}
-
 // BanUser marks a user as banned with an optional expiry. Pass nil for a
 // permanent ban.
 func (d *DB) BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error {
@@ -641,22 +631,6 @@ func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
 	cutoff := time.Now().UTC().Format(sessionTimeLayout)
 	if err := d.q.DeleteExpiredSessions(ctx, cutoff); err != nil {
 		return fmt.Errorf("DeleteExpiredSessions: %w", err)
-	}
-	return nil
-}
-
-// TouchSession records a use of the session with the given token hash: it
-// updates last_used and slides expires_at to sessionTTL from now, capped at a
-// year from sign-in (DP-05). A session that has already expired is left alone,
-// so a touch never revives it.
-func (d *DB) TouchSession(ctx context.Context, tokenHash string) error {
-	now := time.Now().UTC()
-	if err := d.q.TouchSession(ctx, dbgen.TouchSessionParams{
-		ExpiresAt: now.Add(sessionTTL).Format(sessionTimeLayout),
-		Token:     tokenHash,
-		Now:       now.Format(sessionTimeLayout),
-	}); err != nil {
-		return fmt.Errorf("TouchSession: %w", err)
 	}
 	return nil
 }

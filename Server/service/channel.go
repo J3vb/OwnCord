@@ -187,47 +187,31 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 		}
 	}
 
-	// Read the stored custom status BEFORE either write, unconditionally.
-	// custom_status is *string with no omitempty on the wire (see
-	// presencePayload), so a nil on the broadcast is wire-identical to "the
-	// user cleared it" — returning nil for a value we merely failed to read
-	// wipes the text on every connected client while the row still holds it.
-	// The stored value is needed twice:
-	//   - when the command carries no custom_status field, it is what rides
-	//     along on the broadcast (a plain online -> idle flip must not blank
-	//     everyone else's copy of the text);
-	//   - when it does carry one and the second write below fails after the
-	//     status write has already committed, it is the true DB state the
-	//     broadcast has to report.
-	// Doing it first means a read failure aborts before anything commits,
-	// instead of leaving a committed status with nothing truthful to say.
-	current, readErr := s.st.GetUserByID(ctx, userID)
-	if readErr != nil || current == nil {
-		slog.Error("ChannelService.HandlePresenceUpdate: could not read stored custom status",
-			"err", readErr, "user_id", userID)
-		return nil, fmt.Errorf("%w: failed to read current custom status", ErrInternal)
+	if customStatus == nil {
+		// A bare status flip: the stored text rides along on the broadcast, so
+		// a plain online -> idle flip does not blank everyone else's copy.
+		// Read it BEFORE writing: custom_status is *string with no omitempty
+		// on the wire (see presencePayload), so a nil for a value we merely
+		// failed to read would be wire-identical to "the user cleared it", and
+		// reading first means a read failure aborts before anything commits.
+		current, readErr := s.st.GetUserByID(ctx, userID)
+		if readErr != nil || current == nil {
+			slog.Error("ChannelService.HandlePresenceUpdate: could not read stored custom status",
+				"err", readErr, "user_id", userID)
+			return nil, fmt.Errorf("%w: failed to read current custom status", ErrInternal)
+		}
+		if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+			slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
+			return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
+		}
+		return current.CustomStatus, nil
 	}
-	storedCustomStatus := current.CustomStatus
 
-	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+	// Status and text commit together in one writer transaction (P5-O08), so
+	// a failure leaves both as they were and there is nothing to broadcast.
+	if err := s.st.UpdateUserPresence(ctx, userID, status, cleaned); err != nil {
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
 		return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
-	}
-
-	if customStatus == nil {
-		return storedCustomStatus, nil
-	}
-
-	if err := s.st.UpdateUserCustomStatus(ctx, userID, cleaned); err != nil {
-		// The status row is already committed at this point (two independent
-		// writes, no transaction), so failing the whole update here would
-		// report total failure — and broadcast nothing — for a presence
-		// change that in fact partly succeeded, leaving every client
-		// (sender included) stuck on the old status while the DB has the
-		// new one. Swallow the write failure and broadcast the value that is
-		// actually stored, not the unpersisted "cleaned" text.
-		slog.Error("ChannelService.HandlePresenceUpdate custom status", "err", err, "user_id", userID)
-		return storedCustomStatus, nil //nolint:nilerr // status committed; broadcast the true stored custom status
 	}
 	return cleaned, nil
 }

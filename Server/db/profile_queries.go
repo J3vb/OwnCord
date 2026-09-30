@@ -46,6 +46,17 @@ func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customSta
 	return nil
 }
 
+// UpdateUserPresence writes a presence_update's status and custom status line
+// in one transaction, so the two commit together or not at all (P5-O08).
+func (d *DB) UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error {
+	return d.inWriteTx(ctx, "UpdateUserPresence", func(q *dbgen.Queries) error {
+		if err := q.UpdateUserStatus(ctx, dbgen.UpdateUserStatusParams{Status: status, ID: userID}); err != nil {
+			return err
+		}
+		return q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{CustomStatus: customStatus, ID: userID})
+	})
+}
+
 // IsAvatarFileURL reports whether url is currently some user's avatar. It is
 // the authorization check that lets an uploaded avatar — an attachment with no
 // channel, and therefore private to its uploader by default — be served to

@@ -14,8 +14,10 @@ import (
 // exercised without depending on a real DB fault.
 type faultyStore struct {
 	Store
-	failGetUserByID            bool
-	failUpdateUserCustomStatus bool
+	failGetUserByID        bool
+	failUpdateUserPresence bool
+	statusWrites           int
+	presenceWrites         int
 }
 
 func (f *faultyStore) GetUserByID(ctx context.Context, id int64) (*db.User, error) {
@@ -25,11 +27,21 @@ func (f *faultyStore) GetUserByID(ctx context.Context, id int64) (*db.User, erro
 	return f.Store.GetUserByID(ctx, id)
 }
 
-func (f *faultyStore) UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error {
-	if f.failUpdateUserCustomStatus {
-		return errors.New("injected UpdateUserCustomStatus failure")
+func (f *faultyStore) UpdateUserStatus(ctx context.Context, id int64, status string) error {
+	f.statusWrites++
+	return f.Store.UpdateUserStatus(ctx, id, status)
+}
+
+func (f *faultyStore) UpdateUserCustomStatus(context.Context, int64, *string) error {
+	return errors.New("presence_update must write its custom status with the status, in one transaction")
+}
+
+func (f *faultyStore) UpdateUserPresence(ctx context.Context, id int64, status string, customStatus *string) error {
+	f.presenceWrites++
+	if f.failUpdateUserPresence {
+		return errors.New("injected UpdateUserPresence failure")
 	}
-	return f.Store.UpdateUserCustomStatus(ctx, userID, customStatus)
+	return f.Store.UpdateUserPresence(ctx, id, status, customStatus)
 }
 
 // A bare status flip (no custom_status field) must read the currently stored
@@ -74,49 +86,40 @@ func TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(t *testing
 	}
 }
 
-// When customStatus != nil, UpdateUserStatus and UpdateUserCustomStatus are
-// two independent writes. If the second fails after the first commits, the
-// handler must not report total failure (which would broadcast nothing for
-// a status change that in fact happened) — it must swallow the failure and
-// return the true stored custom_status, not the unpersisted intended value.
-// Regression for finding v104.
-func TestHandlePresenceUpdate_CustomStatusWriteFailureSwallowedAfterStatusCommit(t *testing.T) {
+// A presence_update carrying a custom status is one writer transaction, not
+// two autocommits (P5-O08, folded into P5-S07): the status and the text commit
+// together.
+func TestHandlePresenceUpdate_CustomStatusIsOneWriterTransaction(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	ctx := context.Background()
 
-	fs := &faultyStore{Store: database, failUpdateUserCustomStatus: true}
+	fs := &faultyStore{Store: database}
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))
 
 	text := "in a meeting"
 	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil)
 	if err != nil {
-		t.Fatalf("HandlePresenceUpdate: %v, want the status commit reported as success", err)
+		t.Fatalf("HandlePresenceUpdate: %v", err)
 	}
-	if got != nil {
-		t.Fatalf("returned custom status = %v, want nil (the write never persisted, must not broadcast it)", *got)
+	if got == nil || *got != text {
+		t.Fatalf("returned custom status = %v, want %q", got, text)
 	}
-
-	u, gerr := database.GetUserByID(ctx, 1)
-	if gerr != nil {
-		t.Fatalf("GetUserByID: %v", gerr)
+	if fs.presenceWrites != 1 || fs.statusWrites != 0 {
+		t.Fatalf("writes = %d presence + %d status, want exactly 1 combined write", fs.presenceWrites, fs.statusWrites)
 	}
-	if u.Status != db.StatusDND {
-		t.Fatalf("status = %q, want committed %q", u.Status, db.StatusDND)
-	}
-	if u.CustomStatus != nil {
-		t.Fatalf("custom_status = %v, want unwritten (nil)", *u.CustomStatus)
+	u, _ := database.GetUserByID(ctx, 1)
+	if u.Status != db.StatusDND || u.CustomStatus == nil || *u.CustomStatus != text {
+		t.Fatalf("row = %q/%v, want dnd/%q", u.Status, u.CustomStatus, text)
 	}
 }
 
-// The swallowed custom-status write failure must broadcast the text that is
-// really stored, not nil: a nil custom_status on the wire is indistinguishable
-// from "the user cleared it" (presencePayload has no omitempty), so reporting
-// nil for a value the DB still holds wipes it on every client. Regression for
-// v104's fix re-introducing v78 on its own failure path.
-func TestHandlePresenceUpdate_CustomStatusWriteFailureKeepsStoredText(t *testing.T) {
+// The combined write either commits both halves or neither, so a failure is
+// an error with nothing committed and nothing to broadcast: the stored status
+// and text are untouched.
+func TestHandlePresenceUpdate_CombinedWriteFailureCommitsNothing(t *testing.T) {
 	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
+	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h", Status: db.StatusOnline})
 	ctx := context.Background()
 
 	stored := "on call"
@@ -124,23 +127,19 @@ func TestHandlePresenceUpdate_CustomStatusWriteFailureKeepsStoredText(t *testing
 		t.Fatalf("seed custom status: %v", err)
 	}
 
-	fs := &faultyStore{Store: database, failUpdateUserCustomStatus: true}
+	fs := &faultyStore{Store: database, failUpdateUserPresence: true}
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))
 
 	text := "in a meeting"
 	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil)
-	if err != nil {
-		t.Fatalf("HandlePresenceUpdate: %v, want the status commit reported as success", err)
+	if !errors.Is(err, ErrInternal) {
+		t.Fatalf("err = %v, want ErrInternal", err)
 	}
-	if got == nil || *got != stored {
-		t.Fatalf("returned custom status = %v, want the stored %q — nil would broadcast a bogus clear", got, stored)
+	if got != nil {
+		t.Fatalf("returned custom status = %v, want nil on failure", *got)
 	}
-
-	u, gerr := database.GetUserByID(ctx, 1)
-	if gerr != nil {
-		t.Fatalf("GetUserByID: %v", gerr)
-	}
-	if u.CustomStatus == nil || *u.CustomStatus != stored {
-		t.Fatalf("custom_status = %v, want unchanged %q", u.CustomStatus, stored)
+	u, _ := database.GetUserByID(ctx, 1)
+	if u.Status != db.StatusOnline || u.CustomStatus == nil || *u.CustomStatus != stored {
+		t.Fatalf("row = %q/%v, want the untouched online/%q", u.Status, u.CustomStatus, stored)
 	}
 }

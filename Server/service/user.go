@@ -17,6 +17,10 @@ import (
 type UserService struct {
 	st           Store
 	profileLocks keyedMutex
+	// batch, when set, queues the connection stamps instead of writing them
+	// (P5-S07). nil writes each at once, which is what tests and the admin
+	// panel's own instance get.
+	batch *ConnWrites
 }
 
 // NewUserService creates a UserService.
@@ -515,7 +519,7 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 // on purpose — the second is only correct because of what the first chose to
 // preserve.
 
-// StampConnect writes the status this session comes online as and returns it.
+// StampConnect records the status this session comes online as and returns it.
 //
 // It is db.ConnectStatus(saved), not a flat "online": stamping online on every
 // connect is what made a saved Do Not Disturb — and, before this phase, an
@@ -524,12 +528,21 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 // choices and survive; anything else becomes online. The write still happens
 // when the status is unchanged, because it also refreshes last_seen.
 //
-// The caller must not cache the returned status unless the error is nil: a
-// value the users row disagrees with is exactly the divergence OC-0298 is
-// about.
+// With a batch installed the write is queued and lands on the next flush, at
+// most StampFlushInterval later. The member list does not wait on it (the hub
+// overlays each connection's live status, ws presentableMembers); a reader of
+// the row itself, such as @here, may see the pre-connect value for that long.
+// The SQL re-derives the status from the column at write time, so a
+// presence_update committed meanwhile is not overwritten.
+//
+// The caller must not cache the returned status unless the error is nil.
 func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {
 	status := db.ConnectStatus(savedStatus)
-	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+	if s.batch != nil {
+		s.batch.queueStamp(userID, true)
+		return status, nil
+	}
+	if err := s.st.StampConnections(ctx, []int64{userID}, nil); err != nil {
 		return "", fmt.Errorf("%w: failed to stamp connect status: %w", ErrInternal, err)
 	}
 	return status, nil
@@ -541,10 +554,19 @@ func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatu
 // idle/dnd/invisible is left standing, which is what StampConnect reads back
 // on the next connect. The stale-choice that leaves behind is handled at read
 // time instead: a member with no live connection renders offline whatever the
-// column says.
+// column says. A batched stamp lost to a crash leaves "online" behind, which
+// the boot-time ResetAllUserStatuses clears.
 func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
-	if err := s.st.MarkUserDisconnected(ctx, userID); err != nil {
+	if s.batch != nil {
+		s.batch.queueStamp(userID, false)
+		return nil
+	}
+	if err := s.st.StampConnections(ctx, nil, []int64{userID}); err != nil {
 		return fmt.Errorf("%w: failed to stamp disconnect: %w", ErrInternal, err)
 	}
 	return nil
 }
+
+// SetConnWrites installs the batch the connection stamps queue into. Call
+// once at startup, before the service is shared.
+func (s *UserService) SetConnWrites(w *ConnWrites) { s.batch = w }

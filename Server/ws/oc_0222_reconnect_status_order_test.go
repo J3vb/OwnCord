@@ -49,7 +49,7 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	if err := database.UpdateUserStatus(ctx, userID, db.StatusOnline); err != nil {
 		t.Fatalf("UpdateUserStatus(online): %v", err)
 	}
-	if err := database.MarkUserDisconnected(ctx, userID); err != nil {
+	if err := database.StampConnections(ctx, nil, []int64{userID}); err != nil {
 		t.Fatalf("MarkUserDisconnected: %v", err)
 	}
 	pre, err := database.GetUserByID(ctx, userID)

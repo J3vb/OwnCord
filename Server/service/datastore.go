@@ -130,9 +130,10 @@ type Store interface {
 	DenyPendingUser(ctx context.Context, userID int64) error
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
+	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
-	MarkUserDisconnected(ctx context.Context, userID int64) error
+	StampConnections(ctx context.Context, connected, disconnected []int64) error
 	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
@@ -191,7 +192,7 @@ type Store interface {
 	DeleteUserSessions(ctx context.Context, userID int64) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
-	TouchSession(ctx context.Context, tokenHash string) error
+	TouchSessions(ctx context.Context, tokenHashes []string) error
 	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
 

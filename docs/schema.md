@@ -339,8 +339,11 @@ connect. The collapse happens at read time instead (`db.BroadcastStatus` /
 `offline`, while the owner's own payloads keep the true value.
 
 A chosen `idle`/`dnd`/`invisible` therefore survives a disconnect (only
-`online` is cleared, by `MarkUserDisconnected`) and survives a server restart
-(`ResetAllUserStatuses` clears only `online`). It cannot render as "present" in
+`online` is cleared, by `StampUsersDisconnected`) and survives a server restart
+(`ResetAllUserStatuses` clears only `online`). The server batches the connect
+and disconnect stamps and writes them at most 2 seconds late
+(`service.ConnWrites`); a crash loses that window, and the boot-time reset
+clears the `online` it leaves behind. It cannot render as "present" in
 the meantime because the ready payload treats a member with no live connection
 as `offline` regardless of the column.
 
@@ -379,7 +382,7 @@ CREATE TABLE sessions (
 );
 ```
 
-Session TTL: 30 days after last use (`TouchSession` slides `expires_at`), capped at 365 days after `created_at`. Token is stored as SHA-256 hash.
+Session TTL: 30 days after last use (`TouchSessions` slides `expires_at`), capped at 365 days after `created_at`. Touches are batched and flushed once a minute (and at shutdown), so `last_used` and the slide lag the use by at most 60 seconds; a flush never revives a lapsed row, and revocation deletes the row without waiting on it. Token is stored as SHA-256 hash.
 
 ---
 

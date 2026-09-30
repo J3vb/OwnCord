@@ -105,8 +105,8 @@ func TestMarkUserDisconnected_PreservesChosenStatus(t *testing.T) {
 	_ = database.UpdateUserStatus(ctx, invisID, db.StatusInvisible)
 
 	for _, id := range []int64{onlineID, dndID, invisID} {
-		if err := database.MarkUserDisconnected(ctx, id); err != nil {
-			t.Fatalf("MarkUserDisconnected(%d): %v", id, err)
+		if err := database.StampConnections(ctx, nil, []int64{id}); err != nil {
+			t.Fatalf("StampConnections(%d): %v", id, err)
 		}
 	}
 

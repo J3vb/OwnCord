@@ -442,7 +442,7 @@ func TestTouchSession(t *testing.T) {
 	sess1, _ := database.GetSessionByTokenHash(context.Background(), "touchToken")
 	time.Sleep(2 * time.Millisecond)
 
-	if err := database.TouchSession(context.Background(), "touchToken"); err != nil {
+	if err := database.TouchSessions(context.Background(), []string{"touchToken"}); err != nil {
 		t.Fatalf("TouchSession: %v", err)
 	}
 

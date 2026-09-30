@@ -15,7 +15,9 @@ const sessionTouchInterval = 60 * time.Second
 // sessionTouchInterval. A long-lived socket may make no REST call for weeks,
 // so the handshake and the app-level ping touch the session themselves.
 // Non-fatal: a failed write only means the slide waits for the next touch.
-// The touch never revives an expired or revoked row (TouchSession's WHERE).
+// In the server the service queues it and writes all sockets' touches in one
+// statement a minute (service.ConnWrites, P5-S07). The touch never revives an
+// expired or revoked row (TouchSessions' WHERE).
 func (h *Hub) touchSession(ctx context.Context, c *Client) {
 	if c.tokenHash == "" {
 		return
