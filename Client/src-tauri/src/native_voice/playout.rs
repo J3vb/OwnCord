@@ -311,6 +311,27 @@ type Output = Arc<Mutex<Option<(String, cpal::Stream)>>>;
 /// with the watcher so a later choice takes effect on its next tick.
 pub(super) type Selected = Arc<Mutex<String>>;
 
+/// The sound-server host a watcher polls. A sound-server restart kills its
+/// connection for good, so each reopen goes through a fresh host that then
+/// replaces this one, and a host that stops answering is rebuilt.
+pub(super) type WatchedHost = Arc<Mutex<cpal::Host>>;
+
+/// The id of `host`'s default device per `default`, rebuilding the host when
+/// it does not answer so the next poll asks a live connection.
+pub(super) fn default_id(
+    host: &WatchedHost,
+    default: impl Fn(&cpal::Host) -> Option<cpal::Device>,
+) -> Option<String> {
+    let mut host = lock(host);
+    let id = default(&host)
+        .and_then(|d| d.id().ok())
+        .map(|d| d.to_string());
+    if id.is_none() {
+        *host = cpal::default_host();
+    }
+    id
+}
+
 /// A session's playout: the mixer, its readers and the output stream.
 #[derive(Default)]
 pub struct Playout {
@@ -383,7 +404,7 @@ impl Playout {
     fn switch(&self, id: &str) -> Result<(), String> {
         let host = cpal::default_host();
         let reference = self.reference.clone();
-        switch_output(
+        let fell_back = switch_output(
             &mut lock(&self.output),
             id,
             false,
@@ -396,27 +417,34 @@ impl Playout {
                     self.dead.clone(),
                 )
             },
-        )
+        )?;
+        if fell_back {
+            return Err(format!(
+                "playout device {id} not found; switched to the default"
+            ));
+        }
+        Ok(())
     }
 
     fn start_watcher(&self) -> Watcher {
-        let host = Arc::new(cpal::default_host());
+        let host: WatchedHost = Arc::new(Mutex::new(cpal::default_host()));
+        let poll_host = host.clone();
         let output = self.output.clone();
         let mixer = self.mixer.clone();
         let reference = self.reference.clone();
         let dead = self.dead.clone();
         let selected = self.selected.clone();
-        let follow_host = host.clone();
         let follow_dead = dead.clone();
         let follow = move || {
+            let fresh = cpal::default_host();
             let target = lock(&selected).clone();
             // Always reopen: a dead stream is usually still on the same
             // sink, so "already plays there" must not skip it.
-            if let Err(e) = switch_output(
+            let result = switch_output(
                 &mut lock(&output),
                 &target,
                 true,
-                output_devices(&follow_host),
+                output_devices(&fresh),
                 |device| {
                     open_output(
                         device,
@@ -425,8 +453,21 @@ impl Playout {
                         follow_dead.clone(),
                     )
                 },
-            ) {
-                log::warn!("[native_voice] reopening the playout stream: {e}");
+            );
+            *lock(&host) = fresh;
+            match result {
+                Ok(fell_back) => {
+                    if fell_back {
+                        log::warn!(
+                            "[native_voice] playout device {target} not found; using the default"
+                        );
+                    }
+                    true
+                }
+                Err(e) => {
+                    log::warn!("[native_voice] reopening the playout stream: {e}");
+                    false
+                }
             }
         };
         Watcher::start(
@@ -434,12 +475,7 @@ impl Playout {
             self.playing(),
             dead,
             self.selected.clone(),
-            move || {
-                host.default_output_device()?
-                    .id()
-                    .ok()
-                    .map(|d| d.to_string())
-            },
+            move || default_id(&poll_host, |h| h.default_output_device()),
             follow,
         )
     }
@@ -447,7 +483,9 @@ impl Playout {
 
 /// A thread that reopens a dead audio stream (the error callback set `dead`)
 /// and, while `selected` is the empty "System default" id, calls `follow`
-/// each time that default moves. `selected` is read on every tick, so a
+/// each time that default moves. `follow` reports whether it reopened; a
+/// failed reopen of a dead stream (the sound server still restarting) is
+/// retried on the next tick. `selected` is read on every tick, so a
 /// device chosen after the watcher started is honoured. Dropping it stops
 /// and joins the thread. Shared by the playout (default sink) and the
 /// capture (default source).
@@ -466,14 +504,16 @@ impl Watcher {
         dead: Arc<AtomicBool>,
         selected: Selected,
         mut default_device: impl FnMut() -> Option<String> + Send + 'static,
-        mut follow: impl FnMut() + Send + 'static,
+        mut follow: impl FnMut() -> bool + Send + 'static,
     ) -> Self {
         let (stop, stopped) = mpsc::channel();
         let thread = std::thread::spawn(move || {
             let mut last = playing;
             while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
                 if dead.swap(false, Ordering::Relaxed) {
-                    follow();
+                    if !follow() {
+                        dead.store(true, Ordering::Relaxed);
+                    }
                     continue;
                 }
                 // Tracked while pinned too, so returning to the default
@@ -505,16 +545,17 @@ impl Drop for Watcher {
     }
 }
 
-/// `Playout::set_device` over any listed devices and stream opener.
-/// `reopen` opens a new stream even when `output` already plays on the
-/// resolved device (the watcher's path: a dead stream stays on its sink).
+/// `Playout::set_device` over any listed devices and stream opener, and
+/// whether `id` fell back to the default. `reopen` opens a new stream even
+/// when `output` already plays on the resolved device (the watcher's path: a
+/// dead stream stays on its sink).
 fn switch_output<D, S>(
     output: &mut Option<(String, S)>,
     id: &str,
     reopen: bool,
     listed: Vec<(DeviceInfo, D)>,
     open: impl FnOnce(&D) -> Result<S, String>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
     let (index, fell_back) = resolve_device(id, &infos);
     let (info, device) = index
@@ -524,12 +565,7 @@ fn switch_output<D, S>(
         let stream = open(&device)?;
         *output = Some((info.id, stream));
     }
-    if fell_back {
-        return Err(format!(
-            "playout device {id} not found; switched to the default"
-        ));
-    }
-    Ok(())
+    Ok(fell_back)
 }
 
 impl Drop for Playout {
@@ -712,7 +748,10 @@ mod tests {
             dead.clone(),
             selected.clone(),
             move || lock(&source).clone(),
-            move || followed.send(()).unwrap(),
+            move || {
+                followed.send(()).unwrap();
+                true
+            },
         );
         (watcher, default, dead, selected, follows)
     }
@@ -775,6 +814,33 @@ mod tests {
         assert!(follows.recv_timeout(QUIET).is_err());
         *lock(&default) = Some("speakers".to_string());
         follows.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn a_failed_reopen_of_a_dead_stream_is_retried_until_it_succeeds() {
+        // A sound-server restart: the first reopens find no server yet.
+        let dead = Arc::new(AtomicBool::new(true));
+        let (attempted, attempts) = mpsc::channel();
+        let mut n = 0;
+        let _watcher = Watcher::start(
+            Duration::from_millis(2),
+            Some("speakers".to_string()),
+            dead,
+            Arc::new(Mutex::new(String::new())),
+            || Some("speakers".to_string()),
+            move || {
+                n += 1;
+                attempted.send(n).unwrap();
+                n >= 3
+            },
+        );
+        for expected in 1..=3 {
+            assert_eq!(attempts.recv_timeout(Duration::from_secs(5)), Ok(expected));
+        }
+        assert!(
+            attempts.recv_timeout(QUIET).is_err(),
+            "recovered: no more reopens"
+        );
     }
 
     #[test]

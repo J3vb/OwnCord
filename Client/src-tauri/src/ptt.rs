@@ -319,10 +319,12 @@ fn ptt_transition(vk: i32, key_down: bool, was_pressed: bool) -> Option<bool> {
 ///
 /// `ptt_start` spawns its thread unconditionally, so a live thread is NOT
 /// evidence that PTT works: on macOS `is_key_down` is a compile-time stub that
-/// always returns false, and on a pure-Wayland Linux session
-/// `DeviceState::checked_new()` returns None. The frontend gates its join-time
-/// PTT mute on this, because muting at join where no event can ever arrive
-/// would close the microphone for the whole session with no way to reopen it.
+/// always returns false, and on a Wayland session the app's window is a
+/// Wayland one, whose key presses an XWayland display never sees (with no
+/// XWayland at all `DeviceState::checked_new()` returns None). The frontend
+/// gates its join-time PTT mute and the Keybinds tab's binding on this,
+/// because muting at join where no event can ever arrive would close the
+/// microphone for the whole session with no way to reopen it.
 #[tauri::command]
 pub fn ptt_polling_supported() -> bool {
     #[cfg(windows)]
@@ -335,7 +337,11 @@ pub fn ptt_polling_supported() -> bool {
         use device_query::DeviceState;
         // Mirrors the availability check inside `is_key_down`: no reachable
         // X11/XWayland display means key state is never observable.
-        DeviceState::checked_new().is_some()
+        let wayland = crate::shortcuts::is_wayland_session(
+            std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+            std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+        );
+        crate::shortcuts::global_keys_observable(wayland, DeviceState::checked_new().is_some())
     }
 
     #[cfg(not(any(windows, target_os = "linux")))]
