@@ -213,6 +213,8 @@ import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
+import { createCertMismatchModal } from "@components/CertMismatchModal";
+import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
@@ -369,7 +371,7 @@ describe("main.ts pre-auth connection deadline", () => {
     clearAuth();
   });
 
-  it("does not fire after a certificate mismatch ends the attempt, so a later accept is not torn down", async () => {
+  it("does not tear down a session re-dialled after a certificate mismatch", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("rotated.example:8443", "alex", "hunter2");
     await vi.advanceTimersByTimeAsync(10);
@@ -383,9 +385,39 @@ describe("main.ts pre-auth connection deadline", () => {
     expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
     expectConsole("warn", /\[main\] Credential delete failed/);
 
-    // The user is still reading the fingerprint in the mismatch modal: the
-    // deadline must not claim the server is offline or drop the redial target.
-    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    // The user reads the fingerprint in the mismatch modal for a while, then
+    // accepts: the re-dial must still have its host and token to resume with.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS / 2);
+    const { reconnectAfterCertAccept: realReconnect } =
+      await vi.importActual<typeof import("@lib/cert-reconnect")>("@lib/cert-reconnect");
+    vi.mocked(reconnectAfterCertAccept).mockImplementationOnce(realReconnect);
+    vi.mocked(createCertMismatchModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(reconnectAfterCertAccept).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "rotated.example:8443",
+      "test-token",
+    );
+
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "alex", avatar: null, role: "member" },
+          server_name: "Rotated",
+          motd: "",
+        },
+      }),
+    );
+    mockInvoke.mockClear();
+
+    // Past the original deadline, the re-dialled session is live: nothing may
+    // tear it down or claim the server is offline.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
     expect(uiStore.getState().transientError ?? "").not.toContain("offline");
 
     clearAuth();
