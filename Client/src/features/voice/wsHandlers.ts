@@ -309,7 +309,10 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // elsewhere) must not kill a newer join. Read the store before
   // leaveVoiceChannel() below clears currentChannelId.
   const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
-  const shouldTeardownSession = isSelf && sameChannel;
+  // P2-T5: while voice is reconnecting, the reconnect loop owns what a
+  // released membership means — it rejoins, or gives up with its toast.
+  const autoReconnecting = voiceStore.getState().voiceStatus === "reconnecting";
+  const shouldTeardownSession = isSelf && sameChannel && !autoReconnecting;
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.

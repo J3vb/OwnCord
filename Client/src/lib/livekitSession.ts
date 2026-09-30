@@ -44,6 +44,7 @@ import { desktop } from "../platform/desktop";
 import { voiceText } from "../i18n/voice";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
+import { authStore } from "@stores/auth.store";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
@@ -463,6 +464,19 @@ export class LiveKitSession {
         this.ws.getState() !== "disconnected" &&
         (channelsStore.getState().channels.has(channelId) ||
           dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
+      hasServerMembership: () =>
+        voiceStore
+          .getState()
+          .voiceUsers.get(channelId)
+          ?.has(authStore.getState().user?.id ?? 0) === true,
+      rejoinVoice: () => {
+        const ws = this.ws;
+        if (ws?.getState() !== "connected") return false;
+        this.leaveVoice(false);
+        setVoiceStatus("joining");
+        ws.send({ type: "voice_join", payload: { channel_id: channelId } });
+        return true;
+      },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),

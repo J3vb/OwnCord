@@ -2962,6 +2962,32 @@ describe("WS Dispatcher", () => {
     expect(mockLeaveVoice).toHaveBeenCalledWith(false);
   });
 
+  // P2-T5: while voice is reconnecting, a self voice_leave is the server
+  // releasing the membership the reconnect loop is resuming — the loop
+  // rejoins or gives up with its toast, so this frame must not end the call.
+  it("leaves the session to the reconnect loop on a self voice_leave while reconnecting", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceStatus: "reconnecting",
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(3);
+    expect(voiceStore.getState().voiceUsers.get(3)?.has(5) ?? false).toBe(false);
+  });
+
   // A stale voice_leave for a channel we've already left (and rejoined
   // elsewhere) must not kill the newer join's live session.
   it("does not tear down the session for a stale voice_leave from a channel already left", async () => {
