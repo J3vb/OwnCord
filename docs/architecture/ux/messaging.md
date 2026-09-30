@@ -60,7 +60,7 @@ stateDiagram-v2
 | `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                          | "Only moderators can post in announcement channels." |
 | `no-permission`                                | Disabled bar                                                                                                                                 | "You don't have permission to send messages here."   |
 | `offline`                                      | Gated — "Reconnecting…" while retrying, "Not connected" when disconnected; the textarea uses `aria-disabled` + `readOnly` so the caret stays | connection status (README §3)                        |
-| `slow-mode`                                    | Disabled with a live countdown                                                                                                               | "Slow mode: wait Ns."                                |
+| `slow-mode`                                    | Send held back with a live countdown; the textarea stays editable (`MessageInput.setSendGate`)                                               | "Slow mode: wait Ns."                                |
 | `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment progress bar                          |
 
 **Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
@@ -71,9 +71,10 @@ the draft leaves nothing behind. An in-progress edit is dropped, not stashed
 target was deleted meanwhile is dropped, and a staged upload older than
 `DRAFT_ATTACHMENT_TTL_MS` (50 min, under the server's ~1 h unlinked-attachment
 sweep) is dropped with an "attach it again" notice. Gating the composer
-(offline, slow mode, no permission) uses `aria-disabled` + `readOnly` rather
+(offline, no permission) uses `aria-disabled` + `readOnly` rather
 than the `disabled` attribute, so a mid-sentence caret is never dropped to
-`<body>`; paste-to-upload and ArrowUp-to-edit are ignored while gated, and a
+`<body>`; paste-to-upload and ArrowUp-to-edit are ignored while gated. Slow mode
+gates only Send (and a picked GIF), leaving the draft editable. A
 refused Send shows the reason on the composer's refusal line (linked by
 `aria-describedby`, kept current as the slow-mode countdown ticks).
 
@@ -240,12 +241,12 @@ string and park it in the LRU + IndexedDB caches.
 
 ## 7. Replies, pins, search, read/unread
 
-| Feature     | Target UX                                                                                                                                                                                                                                                                                                   |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                                                             |
-| Pin/unpin   | Optimistic (`setMessagePinned()`, already optimistic in `stores/messages.store.ts`); pinned panel lists them, empty state "This channel doesn't have any pinned messages… yet!" (already `renderEmptyState()`, `components/PinnedMessages.ts`)                                                              |
-| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query. Each hit names its author by display name, followed by a muted `@username` when the two differ |
-| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (`handleChatMessage`, `features/messaging/wsHandlers.ts`); focus emits `channel_focus` for server read-state                                           |
+| Feature     | Target UX                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reply       | Reply target chip above the composer (`setReplyTo`/`clearReply`); `reply_to` sent; rendered as a quoted preview                                                                                                                                                                                                                                                                                                               |
+| Pin/unpin   | Offered only with `MANAGE_MESSAGES` or in a DM (else hidden, and the pinned panel is read-only); optimistic (`setMessagePinned()`, `stores/messages.store.ts`) and synced from the `chat_pinned` broadcast; pinned panel lists them newest-pinned first, empty state "This channel doesn't have any pinned messages… yet!" (`components/PinnedMessages.ts`)                                                                   |
+| Search      | Overlay with a status line cycling _type-N-chars → searching → results → no results → failed_ (already thorough: `doSearch()`/`setStatus()` in `components/SearchOverlay.ts`); abort in-flight on new query, and clearing or shortening the query below the minimum aborts it too, so a late response never repaints old hits. Each hit names its author by display name, followed by a muted `@username` when the two differ |
+| Read/unread | Unread badge per channel; cleared on focus (`setActiveChannel`); incremented for non-active, non-own messages — replayed frames count like live ones (`handleChatMessage`, `features/messaging/wsHandlers.ts`); focus emits `channel_focus` for server read-state                                                                                                                                                             |
 
 **Read-state target rule:** unread counts are **not** suppressed during
 reconnect replay — a replayed frame increments its channel exactly as a live one
@@ -368,9 +369,9 @@ message box does not have focus.
 ## 8. Slow-mode
 
 Server enforces per-channel slow-mode. **Target:** after a successful send in a
-slow-mode channel, disable the composer with a live countdown (derived from the
+slow-mode channel, hold back Send with a live countdown (derived from the
 channel's `slow_mode` seconds) and re-enable at zero; on a WS `SLOW_MODE`
-rejection, snap the composer to the countdown state without dropping the drafted
+rejection, snap Send to the countdown state without dropping the drafted
 text.
 
 > **✓ Implemented (2026-07/08).** `SLOW_MODE` errors mark the optimistic row
@@ -378,10 +379,10 @@ text.
 > (via the request-id error correlation in §3). The live countdown exists too:
 > the ready payload carries per-channel `slow_mode` seconds
 > (`Channel.slowMode` in `channels.store`), and `ChannelController`'s
-> `startSlowMode`/`computeComposerReason` disable the composer with a ticking
-> "Slow mode — Ns" reason after each accepted send (`chat_send_ok`) and snap
+> `startSlowMode`/`refreshComposerState` gate Send (`setSendGate`) with a
+> ticking "Slow mode — Ns" reason after each accepted send (`chat_send_ok`) and snap
 > to the full window on a `SLOW_MODE` rejection — without dropping the drafted
-> text (the draft stays in the textarea). Moderators (`canManageMessages`)
+> text (the textarea stays editable through the cooldown). Moderators (`canManageMessages`)
 > bypass the client gate exactly as they bypass the server's limiter.
 
 ---

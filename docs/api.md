@@ -241,7 +241,7 @@ endpoints return plain-text errors — see their section):
 | `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                |
 | `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                |
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                |
-| `RATE_LIMITED`                  | 429         | Too many requests; response includes `Retry-After` header (seconds)                                                                                                                                                                              |
+| `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                          |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
@@ -1244,16 +1244,16 @@ Get all pinned messages for a channel.
 
 #### Response 200 OK
 
-Returns `{ "messages": [...], "has_more": false }`. `has_more` is always `false` for pins (all pinned messages are returned at once).
+Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (messages pinned before migration 056 have no pin time and sort last). At most 1000 pins are returned; `has_more` is `true` only when the channel holds more and the list was truncated.
 
 ---
 
 ### POST /api/v1/channels/{id}/pins/{messageId}
 
-Pin a message in a channel.
+Pin a message in a channel. A successful pin or unpin is broadcast to the channel as [`chat_pinned`](protocol.md#chat_pinned-server---client-broadcast).
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel
+**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
 
 #### Response 204 No Content
 
@@ -1264,7 +1264,7 @@ Pin a message in a channel.
 Unpin a message from a channel.
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel
+**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
 
 #### Response 204 No Content
 
@@ -1922,7 +1922,7 @@ Create a new invite code.
 }
 ```
 
-Both fields are optional. An empty body creates an invite with unlimited uses and no expiry.
+Both fields are optional. An empty body (or `0`) creates an invite with unlimited uses and no expiry; a negative value is `400 BAD_REQUEST`.
 
 #### Response 201 Created
 
@@ -1934,7 +1934,8 @@ Both fields are optional. An empty body creates an invite with unlimited uses an
   "uses": 0,
   "expires_at": "2026-03-30T10:30:00Z",
   "revoked": false,
-  "created_at": "2026-03-28T10:30:00Z"
+  "created_at": "2026-03-28T10:30:00Z",
+  "creator_username": ""
 }
 ```
 
@@ -1949,7 +1950,7 @@ List all invites (active, expired, and revoked).
 
 #### Response 200 OK
 
-Returns a JSON array of invite objects.
+Returns a JSON array of invite objects, newest first (at most 200). Each carries `creator_username`, the creator's username (empty once that account is erased); the create response leaves it empty.
 
 ---
 
