@@ -100,9 +100,34 @@ pub(crate) async fn connect_tls(
     dial_target: &str,
     limit: Duration,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Box<dyn std::error::Error + Send + Sync>> {
+    let tcp = dial_tcp(dial_target, limit).await?;
+    connect_tls_over(connector, server_name, tcp, limit).await
+}
+
+/// Dial the upstream TCP connection, bounded by `limit`.
+///
+/// Split from [`connect_tls`] so a caller that must configure the socket
+/// before the handshake (the REST tunnel sets TCP_NODELAY) can dial, adjust,
+/// then hand the stream to [`connect_tls_over`]. The LiveKit tunnel keeps
+/// calling [`connect_tls`] and is unaffected.
+pub(crate) async fn dial_tcp(
+    dial_target: &str,
+    limit: Duration,
+) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
     let tcp = timeout(limit, TcpStream::connect(dial_target))
         .await
         .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
+    Ok(tcp)
+}
+
+/// Complete the TLS handshake over an already-dialed `tcp`, bounded by
+/// `limit` (the same mandatory bound [`connect_tls`] documents).
+pub(crate) async fn connect_tls_over(
+    connector: &tokio_rustls::TlsConnector,
+    server_name: ServerName<'static>,
+    tcp: TcpStream,
+    limit: Duration,
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Box<dyn std::error::Error + Send + Sync>> {
     let tls = timeout(limit, connector.connect(server_name, tcp))
         .await
         .map_err(|_| {

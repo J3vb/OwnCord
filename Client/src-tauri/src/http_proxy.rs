@@ -28,6 +28,9 @@
 //   changes, is forgotten, or fails a check. Every other request (uploads,
 //   POST/PATCH/PUT/DELETE) opens its own TLS connection with
 //   `Connection: close` and runs the TOFU check, as before.
+// - Each upstream socket is dialed with TCP_NODELAY: Nagle's algorithm
+//   otherwise holds a small request for the server's delayed ACK, about 40 ms
+//   at a low RTT (docs/plans/http-tofu-proxy.md "TCP_NODELAY").
 // - Per-host tunnels: the Connect page polls health for every profile, so
 //   multiple proxies can run concurrently (bounded by profile count).
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
@@ -111,9 +114,9 @@ impl HttpProxyState {
 }
 
 use crate::proxy_common::{
-    connect_tls, content_length, copy_with_deadline, header_value, read_request_headers,
-    resolve_remote_target, rewrite_headers, run_accept_loop, spawn_watched, validate_remote_host,
-    CountingStream,
+    connect_tls_over, content_length, copy_with_deadline, dial_tcp, header_value,
+    read_request_headers, resolve_remote_target, rewrite_headers, run_accept_loop, spawn_watched,
+    validate_remote_host, CountingStream,
 };
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return the
@@ -311,6 +314,19 @@ async fn handle_connection<R: Runtime>(
     Ok(())
 }
 
+/// Dial the upstream TCP socket with Nagle's algorithm off. A small request is
+/// otherwise held until the server's delayed ACK, about 40 ms per fresh
+/// connection at a low RTT (docs/plans/http-tofu-proxy.md, "Upstream
+/// connection reuse"). Best-effort: an option the system refuses is logged and
+/// the connection is used anyway, as the pooled keepalive options are.
+async fn dial_upstream(dial_target: &str, limit: Duration) -> Result<TcpStream, BoxError> {
+    let tcp = dial_tcp(dial_target, limit).await?;
+    if let Err(e) = tcp.set_nodelay(true) {
+        debug!("[http_proxy] TCP_NODELAY not set on the upstream connection: {e}");
+    }
+    Ok(tcp)
+}
+
 /// TLS-connect to `remote_host` and run the TOFU check (store/emit/reject).
 /// Every outcome but `Trusted` drops the host's pooled connections, so none
 /// outlives a pin that changed or was questioned.
@@ -327,13 +343,8 @@ async fn connect_verified<R: Runtime>(
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
     let (server_name, dial_target) = resolve_remote_target(remote_host)?;
-    let tls = connect_tls(
-        &connector,
-        server_name,
-        &dial_target,
-        Duration::from_secs(10),
-    )
-    .await?;
+    let tcp = dial_upstream(&dial_target, Duration::from_secs(10)).await?;
+    let tls = connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await?;
 
     let observed = captured_fp
         .lock()
@@ -509,6 +520,29 @@ pub(crate) const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Every upstream socket the tunnel opens must have Nagle's algorithm off:
+    // a fresh connection otherwise holds the request until the server's
+    // delayed ACK, about 40 ms at a low RTT. Both the one-shot and the pooled
+    // path dial through `connect_verified`, which dials via `dial_upstream`
+    // before the handshake, so the option is on the raw socket and this
+    // assertion covers both paths.
+    #[tokio::test]
+    async fn upstream_socket_has_nodelay_set() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let _accepted = listener.accept().await;
+        });
+
+        let tcp = dial_upstream(&addr.to_string(), Duration::from_secs(5))
+            .await
+            .expect("dial upstream");
+        assert!(
+            tcp.nodelay().expect("read nodelay"),
+            "dial_upstream must set TCP_NODELAY on the upstream socket"
+        );
+    }
 
     // Regression: the accept-error exit path in run_accept_loop must be able to
     // deregister its own dead entry, but must NOT clobber a newer tunnel that
