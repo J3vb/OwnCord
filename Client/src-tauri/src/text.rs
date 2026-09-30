@@ -17,7 +17,9 @@ pub const TRAY_STATUS: &str = "Status";
 pub const TRAY_STATUS_ONLINE: &str = "Online";
 pub const TRAY_STATUS_IDLE: &str = "Idle";
 pub const TRAY_STATUS_DND: &str = "Do Not Disturb";
-pub const TRAY_STATUS_OFFLINE: &str = "Offline";
+// The app's status picker calls this "Invisible"; the tray must not say
+// "Offline" for the same state (F24).
+pub const TRAY_STATUS_OFFLINE: &str = "Invisible";
 pub const TRAY_OPEN_LOGS: &str = "Open Log Folder";
 pub const TRAY_MUTE: &str = "Mute / Unmute";
 pub const TRAY_DEAFEN: &str = "Deafen / Undeafen";

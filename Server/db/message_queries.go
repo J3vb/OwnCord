@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -853,8 +854,9 @@ func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, er
 // spare across all three batch queries.
 const MaxPinnedMessages = 1000
 
-// GetPinnedMessages returns up to MaxPinnedMessages pinned messages in a
-// channel, most-recently-pinned first, in the API response shape, including
+// GetPinnedMessages returns up to MaxPinnedMessages+1 pinned messages in a
+// channel — the extra row only tells the caller the list was truncated —
+// most-recently-pinned first, in the API response shape, including
 // user object, reactions (with me flag), and attachments.
 func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
@@ -863,8 +865,8 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 		        m.mentions_everyone
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
-		 ORDER BY m.id DESC LIMIT ?`,
-		channelID, MaxPinnedMessages,
+		 ORDER BY m.pinned_at DESC, m.id DESC LIMIT ?`,
+		channelID, MaxPinnedMessages+1,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetPinnedMessages: %w", err)
@@ -944,9 +946,18 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 // SetMessagePinned updates the pinned column on a message.
 // Returns ErrNotFound if the message does not exist.
 func (d *DB) SetMessagePinned(ctx context.Context, id int64, pinned bool) error {
+	var pinnedAt *string
+	if pinned {
+		// Stamp pin time so GetPinnedMessages can order by recency. Fixed-width
+		// nanosecond precision keeps lexicographic TEXT ordering correct even
+		// for two pins in the same second.
+		t := time.Now().UTC().Format("2006-01-02 15:04:05.000000000")
+		pinnedAt = &t
+	}
 	res, err := d.q.SetMessagePinned(ctx, dbgen.SetMessagePinnedParams{
-		Pinned: b2i64(pinned),
-		ID:     id,
+		Pinned:   b2i64(pinned),
+		PinnedAt: pinnedAt,
+		ID:       id,
 	})
 	if err != nil {
 		return fmt.Errorf("SetMessagePinned: %w", err)

@@ -74,7 +74,15 @@ vi.mock("@components/SearchOverlay", () => ({
 // B9-7: channel 99 is labelled NSFW and not acknowledged.
 vi.mock("@stores/channels.store", () => ({
   setActiveChannel: mockSetActiveChannel,
-  channelsStore: { getState: () => ({ channels: new Map([[99, { nsfw: true }]]) }) },
+  channelsStore: {
+    getState: () => ({
+      channels: new Map([
+        [99, { nsfw: true }],
+        [3, { id: 3, name: "voice-lobby", type: "voice" }],
+        [4, { id: 4, name: "general", type: "text" }],
+      ]),
+    }),
+  },
 }));
 
 vi.mock("@stores/messages.store", () => ({
@@ -185,6 +193,29 @@ describe("createInviteManagerController", () => {
         .mockResolvedValue([
           makeInviteResponse({ code: "live1" }),
           makeInviteResponse({ code: "dead1", revoked: true }),
+        ]),
+    });
+
+    const controller = createInviteManagerController({
+      api: api as never,
+      getRoot: () => root,
+    });
+
+    await controller.open();
+
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+      invites: Array<{ code: string }>;
+    };
+    expect(opts.invites.map((i) => i.code)).toEqual(["live1"]);
+  });
+
+  it("filters out expired invites so Copy cannot hand out a dead code (F4)", async () => {
+    const api = makeMockApi({
+      getInvites: vi
+        .fn()
+        .mockResolvedValue([
+          makeInviteResponse({ code: "live1", expires_at: "2099-01-01T00:00:00Z" }),
+          makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
         ]),
     });
 
@@ -324,6 +355,25 @@ describe("createPinnedPanelController", () => {
     expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
   });
 
+  it("omits onUnpin when the viewer cannot pin (F1)", async () => {
+    // A plain member must not be offered an unpin the server (MANAGE_MESSAGES)
+    // would refuse; the panel is read-only for them.
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+      canPin: () => false,
+    });
+
+    await controller.toggle();
+
+    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
+      onUnpin?: (msgId: number) => void;
+    };
+    expect(opts.onUnpin).toBeUndefined();
+  });
+
   it("onUnpin catches API error, shows toast, and does NOT close the panel", async () => {
     const api = makeMockApi({
       unpinMessage: vi.fn().mockRejectedValue(new Error("unpin failed")),
@@ -335,6 +385,7 @@ describe("createPinnedPanelController", () => {
       getRoot: () => root,
 
       getCurrentChannelId: () => 42,
+      canPin: () => true,
     });
 
     await controller.toggle();
@@ -365,6 +416,7 @@ describe("createPinnedPanelController", () => {
       getRoot: () => root,
 
       getCurrentChannelId: () => 42,
+      canPin: () => true,
     });
 
     await controller.toggle();
@@ -655,10 +707,28 @@ describe("mapInviteResponse", () => {
     expect(result.maxUses).toBe(10);
     expect(result.expiresAt).toBe("2024-12-31");
     expect(result.createdBy).toBe("unknown");
-    expect(result.createdAt).toBe("2024-12-31");
+    // created_at is distinct from expires_at now (F4).
+    expect(result.createdAt).toBe("");
   });
 
-  it("extracts created_by username from extra field", () => {
+  it("uses the server's creator_username and created_at (F4)", () => {
+    const result = mapInviteResponse({
+      id: 1,
+      code: "abc",
+      url: "https://example.com/abc",
+      max_uses: 5,
+      use_count: 0,
+      expires_at: "2099-01-01T00:00:00Z",
+      revoked: false,
+      created_at: "2026-01-01T00:00:00Z",
+      creator_username: "Alice",
+    });
+    expect(result.createdBy).toBe("Alice");
+    expect(result.createdAt).toBe("2026-01-01T00:00:00Z");
+    expect(result.expiresAt).toBe("2099-01-01T00:00:00Z");
+  });
+
+  it("falls back to the legacy nested created_by username", () => {
     const raw = {
       id: 1,
       code: "abc",
@@ -897,6 +967,29 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
+  it("opens on Ctrl+K from the focused composer, but not while a modal is open", () => {
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    const modal = document.createElement("div");
+    modal.className = "modal-overlay visible";
+    document.body.appendChild(modal);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+    modal.remove();
+
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
+    );
+    expect(createQuickSwitcher).toHaveBeenCalledOnce();
+
+    composer.remove();
+    cleanup();
+  });
+
   it("opens quick switcher on Meta+K (macOS)", () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
@@ -963,6 +1056,40 @@ describe("createQuickSwitcherManager", () => {
 
     opts.onSelectChannel(42);
     expect(mockSetActiveChannel).toHaveBeenCalledWith(42);
+
+    cleanup();
+  });
+
+  it("joins voice instead of setting the active channel for a voice row (F8)", () => {
+    const join = vi.fn();
+    const manager = createQuickSwitcherManager(() => root, undefined, join);
+    const cleanup = manager.attach();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+
+    const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
+      onSelectChannel: (channelId: number) => void;
+    };
+    opts.onSelectChannel(3);
+
+    expect(join).toHaveBeenCalledWith(3);
+    expect(mockSetActiveChannel).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it("sets the active channel for a text row (F8)", () => {
+    const join = vi.fn();
+    const manager = createQuickSwitcherManager(() => root, undefined, join);
+    const cleanup = manager.attach();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+
+    const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
+      onSelectChannel: (channelId: number) => void;
+    };
+    opts.onSelectChannel(4);
+
+    expect(mockSetActiveChannel).toHaveBeenCalledWith(4);
+    expect(join).not.toHaveBeenCalled();
 
     cleanup();
   });

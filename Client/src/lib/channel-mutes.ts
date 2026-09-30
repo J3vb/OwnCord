@@ -24,6 +24,19 @@ import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
 const MUTED_KEY = "mutedChannels";
 
 /**
+ * Window event fired after any mute change. Dispatched from the store rather
+ * than a single caller, so every writer (the channel context menu, the
+ * Settings unmute list, a global shortcut) reaches the sidebars that redraw
+ * on it — the Settings unmute used to leave a sidebar row dimmed (F16).
+ */
+export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
+
+function announceMuteChange(channelId: number): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(CHANNEL_MUTE_CHANGED, { detail: { channelId } }));
+}
+
+/**
  * Server host the mutes below belong to. The app is multi-server (saved
  * profiles keyed by host, all sharing one Tauri webview origin and therefore
  * one localStorage), and channel ids are per-server SQLite autoincrement
@@ -155,6 +168,7 @@ export function muteChannel(channelId: number): void {
   const next = new Set(readMuted());
   next.add(channelId);
   writeMuted(next);
+  announceMuteChange(channelId);
 }
 
 /** Unmute a channel. Idempotent. */
@@ -162,6 +176,7 @@ export function unmuteChannel(channelId: number): void {
   const next = new Set(readMuted());
   next.delete(channelId);
   writeMuted(next);
+  announceMuteChange(channelId);
 }
 
 /** Flip a channel's mute and report the new state. */

@@ -140,6 +140,7 @@ export const accountText = defineCatalog("account", {
   "recovery.replaceKit": "Replace recovery kit",
   "recovery.createKit": "Create recovery kit",
   "recovery.kitStatusFailed": "Could not load the recovery kit status.",
+  "recovery.unknown": "Unknown",
   "recovery.create": "Create",
   "recovery.creating": "Creating...",
   "recovery.secretMissing": "The server did not return a recovery kit secret.",

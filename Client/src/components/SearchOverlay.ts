@@ -117,6 +117,12 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     // go stale. An empty set clears it (pointing at a missing id is worse).
     if (results.length > 0) {
       input.setAttribute("aria-activedescendant", `search-result-option-${activeIndex}`);
+      // The results box is a fixed max-height scroller, so the roving highlight
+      // otherwise walks off the bottom while Enter still opens the hidden row.
+      // The sibling inline autocomplete already does this (OC-0370).
+      (resultsDiv.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
+        block: "nearest",
+      });
     } else {
       input.removeAttribute("aria-activedescendant");
     }
@@ -128,6 +134,27 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   }
 
   function doSearch(): void {
+    const query = input.value.trim();
+    if (query.length < MIN_QUERY_LEN) {
+      // Clearing/shortening the query is a local action: it must not wait on
+      // the rate-limit window, and it must abort any outstanding request or
+      // its late response would repopulate `results` under the empty box (F5).
+      if (debounceTimer !== null) {
+        window.clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      if (searchAbort !== null) {
+        searchAbort.abort();
+        searchAbort = null;
+      }
+      results = [];
+      renderResults();
+      setStatus(
+        query.length > 0 ? messagingText("search.minChars", { count: String(MIN_QUERY_LEN) }) : "",
+      );
+      return;
+    }
+
     const now = Date.now();
     const sinceLast = now - lastSearchTime;
     if (sinceLast < MIN_SEARCH_INTERVAL_MS) {
@@ -141,27 +168,22 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     }
     lastSearchTime = now;
 
-    const query = input.value.trim();
-    if (query.length < MIN_QUERY_LEN) {
-      results = [];
-      renderResults();
-      setStatus(
-        query.length > 0 ? messagingText("search.minChars", { count: String(MIN_QUERY_LEN) }) : "",
-      );
-      return;
-    }
-
     // Cancel any in-flight search
     if (searchAbort !== null) {
       searchAbort.abort();
     }
     searchAbort = new AbortController();
+    const thisSearch = searchAbort;
 
     setStatus(messagingText("search.searching"));
 
     options
       .onSearch(query, options.currentChannelId, searchAbort.signal)
       .then((items) => {
+        // A stale response (superseded by a newer query, or by the query
+        // dropping below the minimum and clearing the box) must not repaint
+        // results under a different query.
+        if (thisSearch !== searchAbort) return;
         results = items;
         activeIndex = 0;
         renderResults();

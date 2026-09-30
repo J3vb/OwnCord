@@ -146,6 +146,32 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("rebuilds the sidebar avatar when the signed-in user's profile changes", async () => {
+    const { authStore } = await import("@stores/auth.store");
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    expect(container.querySelector(".settings-sidebar-avatar .avatar-initial")?.textContent).toBe(
+      "T",
+    );
+
+    const marker = {};
+    const call = vi
+      .mocked(authStore.subscribeSelector)
+      .mock.calls.find(
+        ([select]) => (select as (s: unknown) => unknown)({ user: marker }) === marker,
+      );
+    expect(call).toBeDefined();
+    (call![1] as (u: unknown) => void)({ ...mockAuthState.user, display_name: "Zed" });
+
+    expect(container.querySelectorAll(".settings-sidebar-avatar")).toHaveLength(1);
+    expect(container.querySelector(".settings-sidebar-avatar .avatar-initial")?.textContent).toBe(
+      "Z",
+    );
+    expect(container.querySelector(".settings-sidebar-name")?.textContent).toBe("testuser");
+
+    overlay.destroy?.();
+  });
+
   it("starts on Account tab", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);

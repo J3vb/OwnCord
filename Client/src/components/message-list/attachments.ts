@@ -9,6 +9,7 @@ import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
+import { showToast } from "@lib/toast";
 import { formatByteSize } from "@lib/connectionStats";
 import { ensureHttpProxy } from "@lib/httpProxy";
 import { getToken } from "@stores/auth.store";
@@ -856,31 +857,45 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       );
       wrap.appendChild(img);
     } else {
-      // Show loading placeholder, then replace with image
+      // Show loading placeholder, then replace with image. On failure the
+      // placeholder becomes a typed failure line with a bounded retry, like the
+      // external-media path — a silently un-"loading" filename box reads as
+      // still-loading forever (F14).
       const placeholder = createElement("div", { class: "placeholder-img loading" }, att.filename);
       wrap.appendChild(placeholder);
+      let current: Element = placeholder;
 
-      void fetchImageAsDataUrl(resolvedUrl).then((dataUrl) => {
-        if (dataUrl !== null) {
-          const img = createElement("img", {
-            src: dataUrl,
-            alt: att.filename,
-          });
-          recoverEvictedImage(img, { url: resolvedUrl });
-          attachLightbox(img);
-          img.addEventListener(
-            "load",
-            () => {
-              clearReservation();
-              if (isGif) observeMedia(img, dataUrl, wrap, !animateGifsPref);
-            },
-            { once: true },
-          );
-          placeholder.replaceWith(img);
-        } else {
-          placeholder.classList.remove("loading");
-        }
-      });
+      const attempt = (): void => {
+        void fetchImageAsDataUrl(resolvedUrl).then((dataUrl) => {
+          if (dataUrl !== null) {
+            const img = createElement("img", {
+              src: dataUrl,
+              alt: att.filename,
+            });
+            recoverEvictedImage(img, { url: resolvedUrl });
+            attachLightbox(img);
+            img.addEventListener(
+              "load",
+              () => {
+                clearReservation();
+                if (isGif) observeMedia(img, dataUrl, wrap, !animateGifsPref);
+              },
+              { once: true },
+            );
+            current.replaceWith(img);
+            current = img;
+          } else {
+            const failure = renderFailureStatus(
+              messageStatusText("file.imageFailed"),
+              messageStatusText("file.retry"),
+              attempt,
+            );
+            current.replaceWith(failure);
+            current = failure;
+          }
+        });
+      };
+      attempt();
     }
 
     return wrap;
@@ -914,7 +929,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     const res = await fetchServerFile(url);
     if (!res.ok) {
       log.error("Download failed", { filename, status: res.status });
-      alert(messageStatusText("file.downloadHttpFailed", { status: res.status }));
+      showToast(messageStatusText("file.downloadHttpFailed", { status: res.status }), "error");
       return;
     }
 
@@ -922,7 +937,7 @@ async function downloadFile(url: string, filename: string): Promise<void> {
     await desktop.fileSaver.writeFile(filePath, new Uint8Array(buffer));
   } catch (err) {
     log.error("Download failed", { filename, error: String(err) });
-    alert(messageStatusText("file.downloadFailed", { filename }));
+    showToast(messageStatusText("file.downloadFailed", { filename }), "error");
   }
 }
 

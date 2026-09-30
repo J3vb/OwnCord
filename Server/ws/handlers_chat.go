@@ -200,9 +200,11 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeNotFound, Message: err.Error()}}
 	case errors.Is(err, service.ErrTimedOut):
 		return Result{Error: ClientError{Code: ErrCodeTimedOut, Message: err.Error()}}
-	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked),
-		errors.Is(err, service.ErrDeletedMessage):
+	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		return Result{Error: ClientError{Code: ErrCodeForbidden, Message: err.Error()}}
+	case errors.Is(err, service.ErrDeletedMessage):
+		// Same state as REST's 409 ALREADY_DELETED, not a permission refusal.
+		return Result{Error: ClientError{Code: ErrCodeAlreadyDeleted, Message: err.Error()}}
 	case errors.Is(err, service.ErrConflict):
 		return Result{Error: ClientError{Code: ErrCodeConflict, Message: err.Error()}}
 	default:

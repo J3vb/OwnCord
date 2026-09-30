@@ -77,6 +77,56 @@ describe("global keybinds", () => {
     expect(h.onUploadFile).toHaveBeenCalledOnce();
   });
 
+  it("does not fire while a dialog/modal owns focus (#17)", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    // A modal (Create Channel, report dialog, confirm) is open. Ctrl+F must
+    // not fire behind it and swallow the key from the field.
+    const dialog = document.createElement("div");
+    dialog.className = "modal-overlay visible";
+    document.body.appendChild(dialog);
+
+    press("f");
+    expect(h.onSearch).not.toHaveBeenCalled();
+
+    dialog.remove();
+  });
+
+  it("still fires while a hidden aria-modal panel stays mounted (the closed Settings overlay)", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const overlay = document.createElement("div");
+    overlay.style.display = "none";
+    const panel = document.createElement("div");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    press("f");
+    expect(h.onSearch).toHaveBeenCalledOnce();
+
+    overlay.remove();
+  });
+
+  it("fires from the focused message composer", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }),
+    );
+
+    expect(h.onSearch).toHaveBeenCalledOnce();
+
+    composer.remove();
+  });
+
   it("ignores voice shortcuts outside a voice channel", () => {
     const h = makeHandlers();
     detach = attachGlobalKeybinds(h);

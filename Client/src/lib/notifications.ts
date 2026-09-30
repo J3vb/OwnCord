@@ -218,17 +218,18 @@ function currentHost(): string {
 
 /**
  * Open `channelId`/`messageId` from a notification or an `owncord://message/…`
- * link. When the source named a `host` and it is not the server signed into
- * now, the ids would name an unrelated channel and message here, so it is
- * ignored (a link that named no server — a permalink pasted into chat — is
- * always opened). One guard for both sources, so they cannot drift.
+ * link. When the source named a `host`, the jump is deferred until the signed-in
+ * server is known (a cold-start toast launches the app before MainPage sets the
+ * host and registers the jumper), then dropped if it named a different server —
+ * its ids would otherwise name an unrelated channel here. A link that named no
+ * server (a permalink pasted into chat) is always opened. One guard for both
+ * sources, so they cannot drift.
  */
 export function openMessageTarget(channelId: number, messageId: number, host?: string): void {
-  if (host !== undefined && host !== currentHost()) {
-    log.debug("Message target from another server ignored", { host });
-    return;
-  }
-  jumpToMessage(channelId, messageId);
+  // `jumpToMessage` buffers until the main page is live and applies the
+  // cross-server guard at handoff, so a target that arrives during startup is
+  // retained rather than discarded (F6).
+  jumpToMessage(channelId, messageId, host);
 }
 
 /**

@@ -205,6 +205,37 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 	return true
 }
 
+// RetryAfter returns the whole seconds until `key` may retry under `window`,
+// i.e. until its oldest recorded request falls out of the sliding window.
+// Returns 0 when the key is not currently over its limit. Used to answer with
+// the true remainder rather than the full window (F23).
+func (r *RateLimiter) RetryAfter(key string, limit int, window time.Duration) time.Duration {
+	s := r.shardFor(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	if lo, ok := s.lockouts[key]; ok && now.Before(lo.expiresAt) {
+		return time.Until(lo.expiresAt)
+	}
+	e, ok := s.windows[key]
+	if !ok {
+		return 0
+	}
+	cutoff := now.Add(-window)
+	valid := e.timestamps[:0]
+	for _, ts := range e.timestamps {
+		if ts.After(cutoff) {
+			valid = append(valid, ts)
+		}
+	}
+	e.timestamps = valid
+	if len(valid) < limit {
+		return 0
+	}
+	return valid[0].Add(window).Sub(now)
+}
+
 // Lockout prevents any requests from key for duration regardless of the
 // sliding-window counter. When a LockoutStore is configured, the lockout
 // is persisted so it survives server restarts. The persist write must land

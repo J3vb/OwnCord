@@ -49,6 +49,10 @@ export const connectText = defineCatalog("connect", {
   "servers.autoLogin.enable": "Enable auto-login",
   "servers.autoLogin.enabled": "Auto-login enabled",
   "servers.delete": "Delete server",
+  "servers.deleteConfirmTitle": "Delete server?",
+  "servers.deleteConfirmBody":
+    "Remove {name} from your saved servers? Its remembered credential is deleted too.",
+  "servers.empty": "No saved servers yet — add one below.",
   // This number times one REST call through the desktop TLS tunnel (a fresh
   // connection and handshake per request, about 3× the network RTT), so it is
   // labelled "response time" rather than claimed to be a ping.

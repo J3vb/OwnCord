@@ -81,6 +81,12 @@ export type MessageInputComponent = MountableComponent & {
    */
   setDisabled(reason: string | null): void;
   /**
+   * Gate sending only, leaving the composer editable (slow mode). The reason
+   * shows on a refused send and greys the send control; the user can keep
+   * editing the draft. Pass null to lift.
+   */
+  setSendGate(reason: string | null): void;
+  /**
    * Open the attachment file picker, as the "+" button does. Backs the
    * Ctrl+U shortcut. No-op while the composer is disabled or when the host
    * didn't wire an upload handler.
@@ -255,6 +261,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let replyText: HTMLSpanElement | null = null;
   let editBar: HTMLDivElement | null = null;
   let disabledReason: string | null = options.disabledReason ?? null;
+  /** Slow-mode-style gate: refuses the send without freezing the composer. */
+  let sendGateReason: string | null = null;
   /** True once the server has told us GIFs are off, or if no GIF api was wired. */
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
@@ -567,6 +575,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (root !== null) {
       root.classList.toggle("composer-disabled", disabled);
     }
+    // A slow-mode send gate does not freeze the composer, but the send control
+    // must read as unavailable, and the reason becomes its title.
+    const sendBtn = controlButtons[0];
+    if (sendBtn !== undefined && !disabled) {
+      const gated = sendGateReason !== null;
+      sendBtn.classList.toggle("send-gated", gated);
+      sendBtn.title = gated ? sendGateReason! : "";
+    }
   }
 
   function setDisabled(reason: string | null): void {
@@ -578,9 +594,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     applyDisabledState();
   }
 
+  function setSendGate(reason: string | null): void {
+    if (uploadErrorEl?.textContent === sendGateReason) {
+      if (reason === null) clearUploadError();
+      else showUploadError(reason);
+    }
+    sendGateReason = reason;
+    applyDisabledState();
+  }
+
   function handleSend(): void {
-    if (disabledReason !== null) {
-      showUploadError(disabledReason);
+    // A send gate (slow mode) refuses the send but, unlike `disabledReason`,
+    // leaves the draft editable — the user can keep typing and retry.
+    const refusal = disabledReason ?? sendGateReason;
+    if (refusal !== null) {
+      showUploadError(refusal);
       return;
     }
     if (textarea === null) return;
@@ -966,6 +994,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         }
 
         if (e.key === "Enter" && !e.shiftKey) {
+          // A CJK IME commits the current candidate on Enter, firing keydown
+          // with isComposing true (or the legacy keyCode 229). Sending here
+          // would ship the raw composition text instead of the committed word.
+          if (e.isComposing || e.keyCode === 229) return;
           e.preventDefault();
           handleSend();
         }
@@ -1144,9 +1176,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           // discarded — whatever draft the user had typed, and on slow
           // mode / mid-upload / debounced sends left the raw GIF URL sitting
           // in the composer instead of the draft. Guarded by the same
-          // disabledReason/debounce checks as a normal send; an in-progress
+          // refusal/debounce checks as a normal send; an in-progress
           // edit and any typed draft are left untouched.
-          if (disabledReason === null) {
+          const refusal = disabledReason ?? sendGateReason;
+          if (refusal !== null) {
+            showUploadError(refusal);
+          } else {
             const now = Date.now();
             if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
               lastSendTime = now;
@@ -1273,6 +1308,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     cancelEdit,
     isIdle,
     setDisabled,
+    setSendGate,
     openFilePicker,
     getDraft,
     restoreDraft,

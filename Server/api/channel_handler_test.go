@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS messages (
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0
+    mentions_everyone INTEGER NOT NULL DEFAULT 0,
+    pinned_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -843,6 +844,54 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 	}
 }
 
+// TestGetPins_HasMoreOnlyPastCap: exactly MaxPinnedMessages pins is the whole
+// list (has_more false); one more pin is truncated to the cap (has_more true).
+func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pincap", 1)
+	user, _ := database.GetUserByUsername(context.Background(), "pincap")
+	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+
+	pin := func() {
+		t.Helper()
+		id, err := database.CreateMessage(context.Background(), chID, user.ID, "pin", nil)
+		if err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+			t.Fatalf("SetMessagePinned: %v", err)
+		}
+	}
+	get := func() (int, bool) {
+		t.Helper()
+		rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Messages []any `json:"messages"`
+			HasMore  bool  `json:"has_more"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return len(resp.Messages), resp.HasMore
+	}
+
+	for range db.MaxPinnedMessages {
+		pin()
+	}
+	if n, more := get(); n != db.MaxPinnedMessages || more {
+		t.Errorf("at the cap: got %d pins, has_more=%v; want %d, false", n, more, db.MaxPinnedMessages)
+	}
+
+	pin()
+	if n, more := get(); n != db.MaxPinnedMessages || !more {
+		t.Errorf("past the cap: got %d pins, has_more=%v; want %d, true", n, more, db.MaxPinnedMessages)
+	}
+}
+
 func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
@@ -1020,6 +1069,10 @@ type purgeBroadcast struct {
 func (b *recordingPurgeBroadcaster) BroadcastChatBulkDeleted(channelID int64, ids []int64) {
 	b.calls = append(b.calls, purgeBroadcast{channelID: channelID, ids: ids})
 }
+
+// BroadcastMessagePinned satisfies PurgeBroadcaster; the pin fan-out itself is
+// asserted in ws/messages_test.go.
+func (b *recordingPurgeBroadcaster) BroadcastMessagePinned(_ int64, _ int64, _ bool) {}
 
 // buildPurgeRouter wires the channel routes with a recording broadcaster onto a
 // DB that has the DM and audit tables the purge path touches.

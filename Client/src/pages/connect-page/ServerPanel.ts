@@ -94,15 +94,17 @@ export function createServerPanel(
     onToggleAutoLogin,
   } = opts;
 
-  // Map of host -> DOM elements for health status updates
+  // Host -> the health-status elements of EVERY row with that host. Two
+  // profiles may share a host (same server, different accounts); a single
+  // slot per host left all but the last row's dot stale (F8).
   const healthElements = new Map<
     string,
-    {
+    Array<{
       dot: HTMLDivElement;
       latency: HTMLSpanElement;
       onlineUsers: HTMLSpanElement;
       compat: HTMLSpanElement;
-    }
+    }>
   >();
 
   // Cached DOM references
@@ -156,10 +158,25 @@ export function createServerPanel(
 
     clearChildren(serverListEl);
     healthElements.clear();
+    if (profiles.length === 0) {
+      // A fresh install with no saved profiles is a real state, not a blank
+      // panel; the footer's Add Server is the way out (#19).
+      serverListEl.appendChild(
+        createElement(
+          "div",
+          { class: "server-list-empty", "data-testid": "server-list-empty" },
+          connectText("servers.empty"),
+        ),
+      );
+      return;
+    }
     for (const profile of profiles) {
       const item = createElement("div", {
         class: "server-item",
         "data-host": profile.host,
+        // Keyboard users reach the same rows a pointer does (#19).
+        role: "button",
+        tabindex: "0",
       });
 
       const icon = createElement("div", {
@@ -191,12 +208,15 @@ export function createServerPanel(
 
       appendChildren(info, name, meta);
 
-      healthElements.set(profile.host, {
+      const entry = {
         dot: statusDot,
         latency,
         onlineUsers: onlineUsersEl,
         compat: compatEl,
-      });
+      };
+      const existing = healthElements.get(profile.host);
+      if (existing === undefined) healthElements.set(profile.host, [entry]);
+      else existing.push(entry);
 
       // Action buttons (auto-login toggle + delete)
       const actions = createElement("div", { class: "srv-actions" });
@@ -240,7 +260,7 @@ export function createServerPanel(
           "click",
           (e) => {
             e.stopPropagation();
-            onDeleteProfile(fullProfile.id!);
+            confirmDeleteProfile(fullProfile.id!, profile.name, onDeleteProfile, rowSignal);
           },
           { signal: rowSignal },
         );
@@ -249,34 +269,48 @@ export function createServerPanel(
 
       appendChildren(item, icon, info, statusDot, actions);
 
-      item.addEventListener(
-        "click",
-        () => {
-          // Immediately fill host + username from profile
-          onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
-          // Auto-fill credentials from credential store (async)
-          const requestedHost = profile.host;
-          // Two profiles can share a host (same server, different accounts),
-          // and `loadCredential` is keyed by host alone, so a slower earlier
-          // click could resolve last and overwrite the selection the user
-          // actually made. Only the newest click may apply its result. The
-          // host check downstream is not enough on its own, and a mismatch is
-          // no longer visible now that the password box shows identical dots.
-          credentialLoadSeq += 1;
-          const seq = credentialLoadSeq;
-          void (async () => {
-            try {
-              const cred = await loadCredential(requestedHost);
-              if (cred && seq === credentialLoadSeq) {
-                onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
-              }
-            } catch (err) {
-              log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
-                host: requestedHost,
-                err,
-              });
+      const activate = (): void => {
+        // The active profile gets a selected state; clicking is the only
+        // writer and there was previously none (the CSS existed unused).
+        for (const row of serverListEl.querySelectorAll(".server-item")) {
+          row.classList.toggle("active", row === item);
+        }
+        // Immediately fill host + username from profile
+        onServerClick(profile.host, fullProfile.username, fullProfile.autoConnect === true);
+        // Auto-fill credentials from credential store (async)
+        const requestedHost = profile.host;
+        // Two profiles can share a host (same server, different accounts),
+        // and `loadCredential` is keyed by host alone, so a slower earlier
+        // click could resolve last and overwrite the selection the user
+        // actually made. Only the newest click may apply its result. The
+        // host check downstream is not enough on its own, and a mismatch is
+        // no longer visible now that the password box shows identical dots.
+        credentialLoadSeq += 1;
+        const seq = credentialLoadSeq;
+        void (async () => {
+          try {
+            const cred = await loadCredential(requestedHost);
+            if (cred && seq === credentialLoadSeq) {
+              onCredentialLoaded(requestedHost, cred.username, cred.hasPassword);
             }
-          })();
+          } catch (err) {
+            log.debug("Credential auto-fill failed (best-effort, user can type manually)", {
+              host: requestedHost,
+              err,
+            });
+          }
+        })();
+      };
+
+      item.addEventListener("click", activate, { signal: rowSignal });
+      item.addEventListener(
+        "keydown",
+        (e: KeyboardEvent) => {
+          if (e.target !== item) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            activate();
+          }
         },
         { signal: rowSignal },
       );
@@ -286,53 +320,106 @@ export function createServerPanel(
   }
 
   function updateHealthStatus(host: string, status: HealthStatus): void {
-    const els = healthElements.get(host);
-    if (!els) return;
+    const rows = healthElements.get(host);
+    if (!rows) return;
 
-    // Update status dot
-    els.dot.className = `srv-status-dot ${status.status}`;
+    for (const els of rows) {
+      // Update status dot
+      els.dot.className = `srv-status-dot ${status.status}`;
 
-    // Update latency badge
-    if (status.latencyMs !== null) {
-      const ms = status.latencyMs;
-      setText(els.latency, connectText("servers.latency", { ms }));
-      els.latency.className = `srv-latency ${ms < 100 ? "good" : ms < 500 ? "warn" : "bad"}`;
-    } else {
-      setText(els.latency, "");
-      els.latency.className = "srv-latency";
-    }
+      // Update latency badge
+      if (status.latencyMs !== null) {
+        const ms = status.latencyMs;
+        setText(els.latency, connectText("servers.latency", { ms }));
+        els.latency.className = `srv-latency ${ms < 100 ? "good" : ms < 500 ? "warn" : "bad"}`;
+      } else {
+        setText(els.latency, "");
+        els.latency.className = "srv-latency";
+      }
 
-    // Update online users count
-    if (status.onlineUsers !== null && status.onlineUsers >= 0) {
-      setText(els.onlineUsers, connectText("servers.online", { count: status.onlineUsers }));
-      els.onlineUsers.className = `srv-online-users ${status.onlineUsers > 0 ? "has-users" : ""}`;
-    } else {
-      setText(els.onlineUsers, "");
-      els.onlineUsers.className = "srv-online-users";
+      // Update online users count
+      if (status.onlineUsers !== null && status.onlineUsers >= 0) {
+        setText(els.onlineUsers, connectText("servers.online", { count: status.onlineUsers }));
+        els.onlineUsers.className = `srv-online-users ${status.onlineUsers > 0 ? "has-users" : ""}`;
+      } else {
+        setText(els.onlineUsers, "");
+        els.onlineUsers.className = "srv-online-users";
+      }
     }
   }
 
   function updateCompatibility(host: string, compatibility: Compatibility): void {
-    const els = healthElements.get(host);
-    if (!els) return;
+    const rows = healthElements.get(host);
+    if (!rows) return;
 
     // Only a real mismatch earns a badge; `compatible` and `unreachable` are
     // silence (an unreachable server is not an update requirement).
-    if (compatibility === "client-older") {
-      setText(els.compat, connectText("servers.clientUpdateNeeded"));
-      els.compat.className = "srv-compat-badge client-older";
-    } else if (compatibility === "server-older") {
-      setText(els.compat, connectText("servers.serverUpdateNeeded"));
-      els.compat.className = "srv-compat-badge server-older";
-    } else {
-      setText(els.compat, "");
-      els.compat.className = "srv-compat-badge";
+    for (const els of rows) {
+      if (compatibility === "client-older") {
+        setText(els.compat, connectText("servers.clientUpdateNeeded"));
+        els.compat.className = "srv-compat-badge client-older";
+      } else if (compatibility === "server-older") {
+        setText(els.compat, connectText("servers.serverUpdateNeeded"));
+        els.compat.className = "srv-compat-badge server-older";
+      } else {
+        setText(els.compat, "");
+        els.compat.className = "srv-compat-badge";
+      }
     }
   }
 
   // ---------------------------------------------------------------------------
   // Add Server modal
   // ---------------------------------------------------------------------------
+
+  /** Confirm before deleting a saved profile — a one-click, hover-only delete
+   *  had no undo and no warning (#19). */
+  function confirmDeleteProfile(
+    profileId: string,
+    name: string,
+    onConfirm: (id: string) => void,
+    ownerSignal: AbortSignal,
+  ): void {
+    const header = createElement("div", { class: "modal-header" });
+    header.appendChild(
+      createElement("h3", { id: "delete-server-title" }, connectText("servers.deleteConfirmTitle")),
+    );
+    const body = createElement(
+      "div",
+      { class: "modal-body" },
+      connectText("servers.deleteConfirmBody", { name }),
+    );
+    const footer = createElement("div", { class: "modal-footer" });
+    const cancel = createElement(
+      "button",
+      { class: "btn-ghost", type: "button", "data-testid": "cancel-delete-server" },
+      connectText("common.cancel"),
+    );
+    const confirm = createElement(
+      "button",
+      { class: "btn-danger", type: "button", "data-testid": "confirm-delete-server" },
+      connectText("servers.delete"),
+    );
+    appendChildren(footer, cancel, confirm);
+    const content = createElement("div", {});
+    appendChildren(content, header, body, footer);
+
+    const modal = createModal(
+      {
+        content,
+        ariaLabelledBy: "delete-server-title",
+        signal: ownerSignal,
+        onClose: () => {},
+      },
+      // Inside .server-panel the login form paints over the buttons (#19).
+      panelEl.closest(".connect-page") ?? document.body,
+    );
+    cancel.addEventListener("click", () => modal.destroy(), { signal: ownerSignal });
+    confirm.addEventListener("click", () => {
+      modal.destroy();
+      onConfirm(profileId);
+    });
+  }
 
   function handleAddServer(): void {
     if (!onAddProfile) return;

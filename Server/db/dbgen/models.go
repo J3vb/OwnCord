@@ -179,6 +179,7 @@ type Message struct {
 	Pinned           int64   `json:"pinned"`
 	Timestamp        string  `json:"timestamp"`
 	MentionsEveryone int64   `json:"mentionsEveryone"`
+	PinnedAt         *string `json:"pinnedAt"`
 }
 
 type MessageDeliveryReceipt struct {

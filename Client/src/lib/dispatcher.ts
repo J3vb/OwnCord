@@ -49,6 +49,7 @@ import {
   handleChatBulkDeleted,
   handleChatDeleted,
   handleChatEdited,
+  handleChatPinned,
   handleChatMessage,
   handleChatSendOk,
   handleMessagingError,
@@ -224,6 +225,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.CHAT_DELETED, handleChatDeleted));
 
   unsubs.push(ws.on(S.CHAT_BULK_DELETED, handleChatBulkDeleted));
+
+  unsubs.push(ws.on(S.CHAT_PINNED, handleChatPinned));
 
   unsubs.push(ws.on(S.CHAT_SEND_OK, (payload, id) => handleChatSendOk(api, payload, id)));
 

@@ -50,6 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Login & connection
 
 - **An auto-login to a server that is down no longer sits on "Auto-connecting…" forever.** A stored token is resumed straight onto the socket with no health probe, so an offline server left the connecting screen spinning indefinitely while the client retried. The first connection now has a 20-second deadline: if the server never answers, the client returns to the login form and says the server may be offline. A live session's later outages still reconnect in place with the in-app banner.
+- **A rejected two-factor code now shows the error where you can see it.** The overlay that asks for the code is opaque and covered the login form's error banner, so a wrong code (or a lockout) looked like nothing happened. The message now appears inside the code card.
 
 ### Accounts & admin
 
@@ -59,6 +60,25 @@ and only when it changes something a contributor or fork holder must do
 - **The connectivity check has a button.** The admin-only voice and connection report existed only as an API call. The Dashboard now has a **Connectivity check** card that runs it and shows the result.
 - **Settings refuse values the setup wizard would refuse.** A server name over 100 characters or a message of the day over 500 was saved from the settings API, and `max_upload_bytes` and `voice_quality` accepted any text. These now get the same checks as the wizard and answer 400.
 - **Duplicate channel names are refused.** Creating or renaming a channel onto a name another channel of the same type already has in the same category, in any letter case, now answers 409 with a clear message. Existing channels that already share a name are left alone.
+- **The Invite Manager now shows who created an invite and hides ones that no longer work.** Every invite read "Created by unknown" because the creator's name was never sent, and an expired invite looked identical to a live one, so Copy handed out a code redemption rejected. The list now names the creator, drops expired and revoked codes, and no longer shows an invite's expiry in place of its creation time.
+- **A few server responses now tell the truth.** Invite creation refuses a negative use limit or expiry instead of silently turning it into "unlimited"/"never expires"; the pinned-messages endpoint reports when it has truncated a large pin list; "already deleted" answers with the same code over WebSocket as over REST; a rate-limit refusal reports the actual wait left rather than the whole window; and a failed "mark sessions seen" write no longer discards a successfully loaded device list.
+
+### Messages
+
+- **Pin is no longer offered to members who cannot pin.** The hover Pin button appeared on every message for every member, but the server only allows it with Manage Messages (or in a DM) — so a plain member saw a button that always failed. It now shows only where the action will work, including in the pinned-messages panel.
+- **A pin or unpin now reaches everyone, and the pinned list is ordered by when things were pinned.** Pinning used to update only the device that did it, so your other devices and everyone else kept showing a stale pin; the list was ordered by message id, so an old message pinned later appeared at the bottom. A pin change is now broadcast to the channel, and the list is newest-pinned first.
+- **Enter no longer sends a half-finished word in Japanese, Chinese or Korean input.** Committing an IME candidate with Enter used to send the raw composition text; it now lets the input method finish the word first.
+- **Clearing or shortening a search no longer repopulates the old results.** With a slow server, the earlier query's response could land after you cleared the box and repaint its hits under the empty query.
+- **The search and Ctrl+K result lists keep the highlighted row visible.** The highlight used to walk off the bottom of the list on longer result sets, so you could not see what Enter would open.
+- **Slow mode no longer freezes the composer.** After a send in a slow-mode channel the textbox was locked for the whole cooldown; you can now keep typing, and only Send is held back with the countdown.
+- **A pin, profile delete or invite action no longer leaves stale data behind.** Deleting a saved server now also removes its remembered credential (re-adding the same host no longer pre-fills the old password), and opening an invite link while signed in no longer deletes the current server's saved password. A message/notification click from the cold start now opens the message instead of being dropped. Two profiles on the same host both show their health, and a failed security-key re-pin now says so instead of closing silently.
+- **The channel and DM right-click menus stay on screen.** Opened near the bottom of a short window, their last items (Edit/Delete/Purge, Disconnect) were unreachable; they now flip up to fit. A member's last-message time and reply previews also read the same as the rest of the app (plain text, not raw markdown).
+- **A failed attachment or download now says so.** An image that failed to load used to sit as a filename box that looked like it was still loading; it now shows a short failure line with Retry. A failed download now shows a toast instead of a bare system dialog that told you to "check logs".
+
+### Desktop UI
+
+- **The tray's status menu and the app now use the same word for "Invisible".** The tray said "Offline" for the status the app calls Invisible.
+- **Settings now shows your uploaded avatar** beside your name, not just its initial letter, and a group DM's header no longer shows a pointer cursor that did nothing when clicked.
 
 ### Voice
 

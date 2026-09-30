@@ -913,6 +913,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const qsManager = createQuickSwitcherManager(
       () => root,
       () => uiStore.getState().settingsOpen,
+      // A voice row in the switcher joins voice (matching the sidebar row)
+      // instead of mounting chat for an unjoined voice channel (F8).
+      (channelId: number) => createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId),
     );
     unsubscribers.push(qsManager.attach());
 

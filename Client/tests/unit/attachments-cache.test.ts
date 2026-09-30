@@ -237,8 +237,10 @@ describe("attachment cache clearing", () => {
     clearAttachmentCaches();
     resolveFetch?.(imageResponse());
 
+    // The placeholder is replaced by the failure line, so nothing in the
+    // attachment reads as still loading.
     await vi.waitFor(() => {
-      expect(placeholder.classList.contains("loading")).toBe(false);
+      expect(element.querySelector(".loading")).toBeNull();
     });
   });
 

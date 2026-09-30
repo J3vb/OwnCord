@@ -30,6 +30,7 @@ import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
 import { attachDragHandlers } from "./channel-sidebar/drag-reorder";
 import { rePinPeerIdentity } from "@lib/livekitSession";
+import { showToast } from "@lib/toast";
 import { createIdentityMismatchModal } from "./IdentityMismatchModal";
 import { createLogger } from "@lib/logger";
 import { membersStore, memberDisplayName } from "@stores/members.store";
@@ -144,7 +145,6 @@ async function openIdentityMismatchModal(
     username,
     fingerprint,
     onAccept: () => {
-      closeIdentityModal();
       // Pin the EXACT key whose fingerprint we displayed and the user verified
       // out-of-band (captured above), NOT a fresh membersStore re-read — a
       // malicious server could mutate the store (user_update) during the human
@@ -153,14 +153,30 @@ async function openIdentityMismatchModal(
       // Only pin a key whose fingerprint was actually SHOWN: publishedKey null
       // means the server stripped the key, and fingerprint null means it could
       // not be computed (malformed key). In both cases the user saw nothing to
-      // verify, so pinning would be a blind accept — refuse it.
-      if (publishedKey === null || fingerprint === null) return;
+      // verify, so pinning would be a blind accept — refuse it, and say so
+      // rather than closing on a silent no-op.
+      if (publishedKey === null || fingerprint === null) {
+        closeIdentityModal();
+        showToast(shellText("identity.rePinFailed"), "error");
+        return;
+      }
       // Surface keyring/IO failures instead of dropping them — this re-pins a
       // trust anchor, so a silent failure would leave the user believing they
-      // recovered when they did not.
-      void rePinPeerIdentity(userId, publishedKey).catch((err: unknown) => {
-        log.error("E2EE: failed to re-pin peer identity", err);
-      });
+      // recovered when they did not. rePinPeerIdentity returns false (it does
+      // not reject) when the pin could not be persisted, so the boolean must
+      // be checked too.
+      void rePinPeerIdentity(userId, publishedKey)
+        .then((ok: boolean) => {
+          if (!ok) {
+            showToast(shellText("identity.rePinFailed"), "error");
+            return;
+          }
+          closeIdentityModal();
+        })
+        .catch((err: unknown) => {
+          log.error("E2EE: failed to re-pin peer identity", err);
+          showToast(shellText("identity.rePinFailed"), "error");
+        });
     },
     onReject: () => {
       closeIdentityModal();
@@ -869,12 +885,31 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
         { class: "channel-list-empty-text" },
         shellText("channel.empty"),
       );
-      const hint = createElement(
-        "p",
-        { class: "channel-list-empty-hint" },
-        shellText("channel.emptyHint"),
-      );
-      appendChildren(emptyState, msg, hint);
+      appendChildren(emptyState, msg);
+      // With zero channels there is no category header, so the per-category
+      // "+" (the only create affordance) never renders. Offer one here for a
+      // manager; a non-manager gets the plain message (#9).
+      if (onCreateChannel !== undefined && canManageChannels()) {
+        const createBtn = createElement(
+          "button",
+          {
+            type: "button",
+            class: "channel-list-empty-create",
+            "data-testid": "create-channel-empty",
+          },
+          shellText("channel.create"),
+        );
+        // Per-render owner so repeated empty-state renders do not stack
+        // listeners on the factory-lifetime signal.
+        const owner = new Disposable();
+        ownerByEl.set(emptyState, owner);
+        createBtn.addEventListener("click", () => onCreateChannel(""), { signal: owner.signal });
+        emptyState.appendChild(createBtn);
+      } else {
+        emptyState.appendChild(
+          createElement("p", { class: "channel-list-empty-hint" }, shellText("channel.emptyHint")),
+        );
+      }
       channelList.appendChild(emptyState);
       return;
     }
@@ -1041,7 +1076,9 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
 
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
-    root.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
+    // The event is dispatched on window by the mute store, so every writer
+    // (context menu, Settings unmute) redraws the rows (F16).
+    window.addEventListener(CHANNEL_MUTE_CHANGED, handleMuteChanged, { signal: disposable.signal });
 
     // Header
     const header = createElement("div", { class: "channel-sidebar-header" });

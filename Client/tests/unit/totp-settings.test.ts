@@ -1023,6 +1023,21 @@ describe("TOTP Settings", () => {
       overlay.destroy?.();
     });
 
+    it("settles the badge out of 'Checking…' when the status fetch fails (#18)", async () => {
+      const overlay = createSettingsOverlay(
+        makeOptions({
+          onGetRecoveryKitStatus: vi.fn().mockRejectedValue(new Error("network down")),
+        }),
+      );
+      overlay.mount(container);
+
+      await vi.waitFor(() =>
+        expect(byTestId("recovery-kit-status").textContent).not.toBe("Checking…"),
+      );
+      expect(container.textContent).toContain("Could not load the recovery kit status.");
+      overlay.destroy?.();
+    });
+
     it("enrols with the password, shows the secret once and refreshes the status", async () => {
       const onGetRecoveryKitStatus = vi
         .fn()

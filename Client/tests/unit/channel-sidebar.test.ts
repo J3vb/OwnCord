@@ -20,6 +20,13 @@ vi.mock("@lib/streamPreview", () => ({
   attachScrollCollapse: (...args: unknown[]) => mockAttachScrollCollapse(...args),
 }));
 
+const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
+vi.mock("@lib/toast", () => ({
+  showToast: mockShowToast,
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
+
 // Stub the identity-key crypto so the mismatch modal's fingerprint compute is
 // deterministic in jsdom (real WebCrypto key import needs a valid SPKI blob).
 vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
@@ -789,6 +796,28 @@ describe("ChannelSidebar", () => {
 
     const hint = container.querySelector(".channel-list-empty-hint");
     expect(hint).not.toBeNull();
+  });
+
+  it("offers a create affordance in the empty state for a channel manager (#9)", () => {
+    // With zero channels there is no category header and therefore no "+";
+    // the old hint pointed at a right-click that did nothing.
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar.mount(container);
+
+    const btn = container.querySelector(
+      "[data-testid='create-channel-empty']",
+    ) as HTMLButtonElement | null;
+    expect(btn).not.toBeNull();
+    btn!.click();
+    expect(onCreateChannel).toHaveBeenCalledWith("");
+  });
+
+  it("hides the empty-state create affordance from a non-manager (#9)", () => {
+    sidebar.mount(container);
+    expect(container.querySelector("[data-testid='create-channel-empty']")).toBeNull();
   });
 
   // ── Server name updates ──
@@ -2355,7 +2384,11 @@ describe("ChannelSidebar voice identity badge", () => {
 
     // Pins the exact key whose fingerprint was displayed, not a bare userId.
     expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10, "alice-published-key-b64");
-    expect(document.body.querySelector(".modal-overlay")).toBeNull();
+    // The modal closes once the re-pin confirms (#22: it no longer closes
+    // before the write is known to have succeeded).
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).toBeNull();
+    });
   });
 
   // The user verifies the DISPLAYED fingerprint out of band, which takes human
@@ -2431,6 +2464,40 @@ describe("ChannelSidebar voice identity badge", () => {
 
     expect(mockRePinPeerIdentity).not.toHaveBeenCalled();
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
+  });
+
+  it("surfaces a failed re-pin instead of silently staying blocked (#22)", async () => {
+    // rePinPeerIdentity returns false (rather than rejecting) when it could
+    // not persist the new pin; the caller used to ignore that boolean, so
+    // "Trust New Key" closed the modal and the peer stayed blocked silently.
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
+    setPeerVerif(10, "mismatch", null);
+    mockRePinPeerIdentity.mockResolvedValueOnce(false);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    const trustBtn = await vi.waitFor(() => {
+      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      return btn;
+    });
+    trustBtn.click();
+
+    await vi.waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining("Couldn't"), "error");
+    });
   });
 
   it("closes an open mismatch modal on sidebar destroy", async () => {

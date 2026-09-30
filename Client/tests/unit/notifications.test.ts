@@ -1927,5 +1927,45 @@ describe("notifyIncomingMessage", () => {
         setChannelMutesHost(null);
       }
     });
+
+    it("buffers a cold-start target until a jumper is registered, then opens it once the page is live (F6)", async () => {
+      // A Windows toast activated from Action Center launches the app before
+      // any MainPage registers the jumper and sets the host.
+      setChannelMutesHost(null);
+      openMessageTarget(7, 42, "a.example");
+
+      // MainPage mounts: host now known, then the jumper registers — before
+      // the rest of the synchronous mount creates the channel controller the
+      // jump needs.
+      setChannelMutesHost("a.example");
+      let pageLive = false;
+      const jump = vi.fn(() => pageLive);
+      const unregister = setMessageJumpHandler(jump);
+      pageLive = true;
+      try {
+        await Promise.resolve();
+        expect(jump.mock.calls).toEqual([[7, 42]]);
+        expect(jump.mock.results[0]?.value).toBe(true);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("drops a buffered cold-start target that names another server (F6)", async () => {
+      setChannelMutesHost(null);
+      openMessageTarget(7, 42, "a.example");
+
+      setChannelMutesHost("b.example");
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      try {
+        await Promise.resolve();
+        expect(jump).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
   });
 });

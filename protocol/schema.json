@@ -53,6 +53,12 @@
     { "wire": "chat_send_ok", "go": "MsgTypeChatSendOK", "ts": "CHAT_SEND_OK" },
     { "wire": "chat_edited", "go": "MsgTypeChatEdited", "ts": "CHAT_EDITED" },
     { "wire": "chat_deleted", "go": "MsgTypeChatDeleted", "ts": "CHAT_DELETED" },
+    {
+      "wire": "chat_pinned",
+      "go": "MsgTypeChatPinned",
+      "ts": "CHAT_PINNED",
+      "note": "a message was pinned or unpinned in a channel the recipient can read"
+    },
     { "wire": "chat_bulk_deleted", "go": "MsgTypeChatBulkDeleted", "ts": "CHAT_BULK_DELETED" },
     { "wire": "reaction_update", "go": "MsgTypeReactionUpdate", "ts": "REACTION_UPDATE" },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },

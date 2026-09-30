@@ -50,11 +50,13 @@ export function navigateToChannel(channelId: number): void {
  * though the user is a member and the server will happily serve its
  * messages.
  */
-export function findChannelById(channelId: number): { id: number; name: string } | null {
+export function findChannelById(
+  channelId: number,
+): { id: number; name: string; isDm: boolean } | null {
   const ch = channelsStore.getState().channels.get(channelId);
-  if (ch !== undefined) return { id: ch.id, name: ch.name };
+  if (ch !== undefined) return { id: ch.id, name: ch.name, isDm: ch.type === "dm" };
   const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-  return dm === undefined ? null : { id: dm.channelId, name: dmDisplayName(dm) };
+  return dm === undefined ? null : { id: dm.channelId, name: dmDisplayName(dm), isDm: true };
 }
 
 /**

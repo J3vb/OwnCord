@@ -2,11 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   failPendingOnDisconnect,
   handleChatMessage,
+  handleChatPinned,
   handleMessagingError,
   handleSendFailure,
 } from "./wsHandlers";
 import {
   messagesStore,
+  addMessage,
+  setMessagePinned,
   addOptimisticMessage,
   resetMessagesStore,
 } from "../../stores/messages.store";
@@ -95,6 +98,45 @@ describe("handleChatMessage replay gate", () => {
     handleChatMessage(createReconnectClock(), chat(1, "2026-03-15T10:00:05Z"));
 
     expect(notifyIncomingMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handleChatPinned (F5)", () => {
+  it("sets the row's pinned flag from the broadcast", () => {
+    addMessage({
+      id: 9,
+      channel_id: 7,
+      user: { id: 1, username: "me", avatar: null },
+      content: "x",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    handleChatPinned({ message_id: 9, channel_id: 7, pinned: true });
+    const row = messagesStore
+      .getState()
+      .messagesByChannel.get(7)!
+      .find((m) => m.id === 9);
+    expect(row?.pinned).toBe(true);
+  });
+
+  it("clears the flag on an unpin broadcast", () => {
+    addMessage({
+      id: 9,
+      channel_id: 7,
+      user: { id: 1, username: "me", avatar: null },
+      content: "x",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    setMessagePinned(7, 9, true);
+    handleChatPinned({ message_id: 9, channel_id: 7, pinned: false });
+    const row = messagesStore
+      .getState()
+      .messagesByChannel.get(7)!
+      .find((m) => m.id === 9);
+    expect(row?.pinned).toBe(false);
   });
 });
 

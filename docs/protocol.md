@@ -95,7 +95,7 @@ The sequence number system enables reconnection with state recovery.
 
 | Category           | Has seq? | Examples                                                                                                                                                                                     |
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                        |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                         |
 | Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
 | Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                  |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                      |
@@ -702,6 +702,28 @@ are soft, so clients mark each id as a tombstone exactly as they do for
   "payload": {
     "channel_id": 5,
     "ids": [1042, 1041, 1040]
+  }
+}
+```
+
+---
+
+### chat_pinned (Server -> Client, broadcast)
+
+Emitted by the REST pin/unpin handlers
+(`POST`/`DELETE /api/v1/channels/{id}/pins/{messageId}`, gated on
+`READ_MESSAGES|MANAGE_MESSAGES`, or DM participant) to every reader of the
+channel, so other clients and the pinner's own other devices do not show stale
+pins. Sequenced and replayable like `chat_edited`; `pinned` is the new state.
+
+```json
+{
+  "seq": 46,
+  "type": "chat_pinned",
+  "payload": {
+    "message_id": 1042,
+    "channel_id": 5,
+    "pinned": true
   }
 }
 ```
@@ -1952,6 +1974,7 @@ A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 | `UNKNOWN_TYPE`          | Unrecognized message type                                                                                                                                                                                                                                                        |
 | `SLOW_MODE`             | Channel has slow mode enabled                                                                                                                                                                                                                                                    |
 | `CONFLICT`              | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
+| `ALREADY_DELETED`       | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
 | `SERVER_MUTED`          | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`       | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`      | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
@@ -2034,7 +2057,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (42 types)
+### Server -> Client (43 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |
@@ -2046,6 +2069,7 @@ tables below add per-type behavioral notes.
 | `chat_edited`         | Yes      | Channel or DM participants                                              |
 | `chat_deleted`        | Yes      | Channel or DM participants                                              |
 | `chat_bulk_deleted`   | Yes      | Channel                                                                 |
+| `chat_pinned`         | Yes      | Channel                                                                 |
 | `reaction_update`     | Yes      | Channel or DM participants                                              |
 | `typing`              | No       | Channel (excl. sender) or DM                                            |
 | `presence`            | Yes      | All clients                                                             |

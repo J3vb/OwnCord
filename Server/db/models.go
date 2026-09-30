@@ -96,11 +96,14 @@ type Invite struct {
 	ID        int64
 	Code      string
 	CreatedBy int64
-	Uses      int
-	MaxUses   *int
-	ExpiresAt *string
-	Revoked   bool
-	CreatedAt string
+	// CreatorUsername is the invite creator's username, joined at read time for
+	// the invite list. Empty when the creator's account was erased.
+	CreatorUsername string
+	Uses            int
+	MaxUses         *int
+	ExpiresAt       *string
+	Revoked         bool
+	CreatedAt       string
 }
 
 // Expired reports whether the invite's expiry has passed at now. A nil

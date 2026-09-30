@@ -140,6 +140,24 @@ describe("QuickSwitcher", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("scrolls the active row into view on arrow navigation (#2)", () => {
+    // jsdom has no layout, so assert the call; the results box is a
+    // max-height scroller and the highlight must not walk off the bottom.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    switcher.mount(container);
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+
+    scrollIntoView.mockClear();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    const rows = container.querySelectorAll(".quick-switcher__item");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(rows[1]);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+  });
+
   it("shows voice icon for voice channels", () => {
     switcher.mount(container);
 

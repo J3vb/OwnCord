@@ -20,13 +20,14 @@ type createInviteRequest struct {
 
 // inviteResponse is the API shape for an invite.
 type inviteResponse struct {
-	ID        int64   `json:"id"`
-	Code      string  `json:"code"`
-	MaxUses   *int    `json:"max_uses"`
-	Uses      int     `json:"uses"`
-	ExpiresAt *string `json:"expires_at"`
-	Revoked   bool    `json:"revoked"`
-	CreatedAt string  `json:"created_at"`
+	ID              int64   `json:"id"`
+	Code            string  `json:"code"`
+	MaxUses         *int    `json:"max_uses"`
+	Uses            int     `json:"uses"`
+	ExpiresAt       *string `json:"expires_at"`
+	Revoked         bool    `json:"revoked"`
+	CreatedAt       string  `json:"created_at"`
+	CreatorUsername string  `json:"creator_username"`
 }
 
 // MountInviteRoutes registers invite endpoints on the given router.
@@ -146,12 +147,13 @@ func toInviteResponse(inv *db.Invite) inviteResponse {
 		maxUses = &v
 	}
 	return inviteResponse{
-		ID:        inv.ID,
-		Code:      inv.Code,
-		MaxUses:   maxUses,
-		Uses:      inv.Uses,
-		ExpiresAt: inv.ExpiresAt,
-		Revoked:   inv.Revoked,
-		CreatedAt: inv.CreatedAt,
+		ID:              inv.ID,
+		Code:            inv.Code,
+		MaxUses:         maxUses,
+		Uses:            inv.Uses,
+		ExpiresAt:       inv.ExpiresAt,
+		Revoked:         inv.Revoked,
+		CreatedAt:       inv.CreatedAt,
+		CreatorUsername: inv.CreatorUsername,
 	}
 }

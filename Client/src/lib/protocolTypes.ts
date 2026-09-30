@@ -23,6 +23,7 @@ export const ServerMessageType = {
   CHAT_SEND_OK: "chat_send_ok",
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
+  CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
   CHAT_BULK_DELETED: "chat_bulk_deleted",
   REACTION_UPDATE: "reaction_update",
   TYPING: "typing",

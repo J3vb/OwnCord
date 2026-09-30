@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"strings"
@@ -231,7 +232,14 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 			key := prefix + ip
 
 			if !limiter.Allow(key, limit, window) {
-				w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
+				// The true remainder, not the full window: a client told to
+				// wait the whole window when only a fraction is left retries
+				// too late (F23).
+				retry := limiter.RetryAfter(key, limit, window)
+				// Round up: a 59.4s remainder must not report 59 (which would
+				// tell the client to retry fractionally early).
+				secs := max(int(math.Ceil(retry.Seconds())), 1)
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", secs))
 				writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, please slow down")
 				return
 			}

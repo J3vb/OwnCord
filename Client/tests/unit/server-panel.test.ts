@@ -433,7 +433,29 @@ describe("ServerPanel", () => {
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
       deleteBtn.click();
 
+      // Deletion now confirms first; the modal only appears after the click.
+      expect(onDeleteProfile).not.toHaveBeenCalled();
+      const confirm = container.querySelector(
+        "[data-testid='confirm-delete-server']",
+      ) as HTMLElement;
+      expect(confirm).not.toBeNull();
+      confirm.click();
       expect(onDeleteProfile).toHaveBeenCalledWith("profile-1");
+    });
+
+    it("mounts the delete confirmation on the page root, not inside the panel (#19)", () => {
+      // Inside .server-panel the dialog shares that panel's stacking context and
+      // the login form paints over its buttons, so pointer users cannot click them.
+      const panel = createServerPanel(makeOpts({ onDeleteProfile: vi.fn() }), [fullProfile()]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".srv-btn.danger") as HTMLElement).click();
+
+      const overlay = container.querySelector(".modal-overlay") as HTMLElement;
+      expect(overlay.parentElement).toBe(container);
+      expect(overlay.closest(".server-panel")).toBeNull();
+      (container.querySelector("[data-testid='cancel-delete-server']") as HTMLElement).click();
+      expect(container.querySelector(".modal-overlay")).toBeNull();
     });
 
     it("stops event propagation so server click is not also triggered", () => {
@@ -445,9 +467,44 @@ describe("ServerPanel", () => {
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
       deleteBtn.click();
+      (container.querySelector("[data-testid='confirm-delete-server']") as HTMLElement).click();
 
       expect(onDeleteProfile).toHaveBeenCalled();
       expect(onServerClick).not.toHaveBeenCalled();
+    });
+
+    it("keyboard users can reach and activate a server row (#19)", () => {
+      const onServerClick = vi.fn();
+      const panel = createServerPanel(makeOpts({ onServerClick }), [SIMPLE_PROFILES[0]!]);
+      container.appendChild(panel.element);
+
+      const item = container.querySelector(".server-item") as HTMLElement;
+      expect(item.getAttribute("role")).toBe("button");
+      expect(item.getAttribute("tabindex")).toBe("0");
+      item.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false);
+    });
+
+    it("Enter on the row's delete button is left to the button, not the row (#19)", () => {
+      const onServerClick = vi.fn();
+      const onDeleteProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onServerClick, onDeleteProfile }), [
+        fullProfile(),
+      ]);
+      container.appendChild(panel.element);
+
+      const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
+      const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      deleteBtn.dispatchEvent(enter);
+
+      expect(onServerClick).not.toHaveBeenCalled();
+      expect(enter.defaultPrevented).toBe(false);
+    });
+
+    it("shows an empty state when the profile list is empty (#19)", () => {
+      const panel = createServerPanel(makeOpts(), []);
+      container.appendChild(panel.element);
+      expect(container.querySelector("[data-testid='server-list-empty']")).not.toBeNull();
     });
 
     it("renders the x icon inside the delete button", () => {
@@ -465,6 +522,28 @@ describe("ServerPanel", () => {
   // -----------------------------------------------------------------------
 
   describe("updateHealthStatus", () => {
+    it("updates every row that shares a host, not just the last (F8)", () => {
+      // Two profiles on one host (same server, different accounts) are
+      // legitimate; keying the element map by host kept only the last row.
+      const panel = createServerPanel(makeOpts(), [
+        { name: "A", host: "shared.example:8443" },
+        { name: "B", host: "shared.example:8443" },
+      ]);
+      container.appendChild(panel.element);
+
+      panel.updateHealthStatus("shared.example:8443", {
+        status: "online",
+        latencyMs: 42,
+        version: "1.0.0",
+        onlineUsers: 5,
+      });
+
+      const dots = container.querySelectorAll(".srv-status-dot");
+      expect(dots).toHaveLength(2);
+      expect(dots[0]!.className).toBe("srv-status-dot online");
+      expect(dots[1]!.className).toBe("srv-status-dot online");
+    });
+
     it("updates the status dot class to online", () => {
       const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
       container.appendChild(panel.element);

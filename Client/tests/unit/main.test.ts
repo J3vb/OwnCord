@@ -35,6 +35,9 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
+const { mockOnOpenUrl } = vi.hoisted(() => ({
+  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
@@ -59,7 +62,7 @@ vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: vi.fn().mockResolvedValue(undefined),
+  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
@@ -67,20 +70,22 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+const mockProfileManager = vi.hoisted(() => ({
+  loadProfiles: vi.fn().mockResolvedValue(undefined),
+  saveProfiles: vi.fn().mockResolvedValue(undefined),
+  getAll: vi.fn((): { id: string; name: string; host: string }[] => []),
+  addProfile: vi.fn((data: unknown) => ({ id: "profile-1", ...(data as object) })),
+  updateProfile: vi.fn(() => null),
+  removeProfile: vi.fn(() => true),
+  getAutoConnectProfile: vi.fn(() => null),
+  setAutoLogin: vi.fn(),
+  setLastConnected: vi.fn(),
+}));
+
 vi.mock("@lib/profiles", async (importOriginal) => ({
   deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
-  createProfileManager: vi.fn(() => ({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    saveProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn(() => []),
-    addProfile: vi.fn((data: unknown) => ({ id: "profile-1", ...(data as object) })),
-    updateProfile: vi.fn(() => null),
-    removeProfile: vi.fn(() => true),
-    getAutoConnectProfile: vi.fn(() => null),
-    setAutoLogin: vi.fn(),
-    setLastConnected: vi.fn(),
-  })),
+  createProfileManager: vi.fn(() => mockProfileManager),
 }));
 
 // api.ts — only login() is exercised (it drives wirePostAuth); nothing else
@@ -150,6 +155,7 @@ const capturedConnectCallbacks: {
   onTotpSubmit?: (code: string) => Promise<void>;
   getRegistrationMode?: (host: string) => string | null;
   getRetentionNotice?: (host: string) => string | null;
+  onDeleteProfile?: (profileId: string) => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -309,11 +315,13 @@ describe("main.ts notification-click opens the message (U1d)", () => {
 
     emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
 
-    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42);
+    // The cross-server guard lives in the real jumpToMessage (F6 buffers until
+    // the host and jumper are live); this mocked seam only checks forwarding.
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42, "a.example");
     setChannelMutesHost(null);
   });
 
-  it("drops a click from a notification another server raised", async () => {
+  it("forwards a cross-server click to the jumper, which applies the guard (F6)", async () => {
     const { jumpToMessage } = await import("@lib/message-navigation");
     await Promise.resolve();
     await Promise.resolve();
@@ -323,8 +331,32 @@ describe("main.ts notification-click opens the message (U1d)", () => {
 
     emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
 
-    expect(vi.mocked(jumpToMessage)).not.toHaveBeenCalled();
+    // The guard is inside the real jumpToMessage; the mocked jumper is still
+    // the forwarding target, with the host attached so the real one can drop it.
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42, "a.example");
     setChannelMutesHost(null);
+  });
+});
+
+describe("main.ts clears the per-server notification scope on logout (F13)", () => {
+  it("drops the host so Settings stops showing a dead server's override", async () => {
+    await loginAndReachAuthOk("scope.example:8443", "alice", {
+      user: { id: 9, username: "alice", avatar: null, role: "member" },
+      server_name: "Scope Co",
+      motd: "",
+    });
+    const { getChannelMutesHost, setChannelMutesHost } = await import("@lib/channel-mutes");
+    // MainPage sets this on mount; stand in for that here.
+    setChannelMutesHost("scope.example:8443");
+
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // This standalone login stores a credential the mocked store cannot keep,
+    // so the teardown's delete warns.
+    expectConsole("warn", /Credential delete failed/);
+    expect(getChannelMutesHost()).toBeNull();
   });
 });
 
@@ -510,6 +542,29 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
   });
 });
 
+describe("main.ts profile deletion clears the saved credential (F11)", () => {
+  afterEach(() => {
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
+    mockProfileManager.removeProfile.mockReset().mockReturnValue(true);
+    mockProfileManager.getAll.mockReset().mockReturnValue([]);
+  });
+
+  it("deletes the removed profile's host credential so re-adding it cannot resume the old password", async () => {
+    // The first read finds the profile; after removal no profile is left on
+    // that host, so its credential goes too.
+    mockProfileManager.getAll.mockReturnValueOnce([
+      { id: "p1", name: "Home", host: "gone.example:8443" },
+    ]);
+    vi.mocked(deleteCredential).mockResolvedValue(true);
+
+    capturedConnectCallbacks.onDeleteProfile!("p1");
+    await Promise.resolve();
+
+    expect(mockProfileManager.removeProfile).toHaveBeenCalledWith("p1");
+    expect(deleteCredential).toHaveBeenCalledWith("gone.example:8443");
+  });
+});
+
 describe("main.ts connected overlay teardown on mid-handshake session end (OC-0157)", () => {
   it('destroys the connected overlay when auth clears before the router leaves "connect"', async () => {
     await loginAndReachAuthOk("mid-handshake.example:8443", "casey", {
@@ -622,6 +677,38 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // so the flag set by the clearAuth() above survives indefinitely — and
     // would go on to suppress a later, unrelated auto-login.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+  });
+});
+
+describe("main.ts invite deep link keeps the current server's credential (F7)", () => {
+  afterEach(() => {
+    mockOnOpenUrl.mockClear();
+    vi.mocked(deleteCredential).mockClear();
+  });
+
+  it("does not delete the signed-in server's credential when an invite link arrives", async () => {
+    // An invite link is not a logout: signing in on server A and clicking an
+    // invite link must not silently lose A's remembered password.
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    vi.mocked(deleteCredential).mockClear();
+
+    // The deep-link plugin hands the app the invite while the session is live.
+    const handler = mockOnOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
+    expect(handler).toBeTypeOf("function");
+    handler(["owncord://invite/ABC123"]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(vi.mocked(deleteCredential)).not.toHaveBeenCalled();
   });
 });
 

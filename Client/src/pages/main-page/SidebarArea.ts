@@ -6,6 +6,7 @@
  */
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
@@ -42,7 +43,7 @@ import {
 import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
-import { toggleChannelMute } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
@@ -813,6 +814,15 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         },
       );
       channelModeUnsubs.push(unsubDmStore);
+
+      // A mute toggled anywhere (context menu, Settings) is not in a store, so
+      // the sidebar redraws from the mute store's own event (F16). Owned by a
+      // per-mount Disposable so the listener's lifetime matches this mount.
+      const muteOwner = new Disposable();
+      window.addEventListener(CHANNEL_MUTE_CHANGED, () => refreshDmSidebar(), {
+        signal: muteOwner.signal,
+      });
+      channelModeUnsubs.push(() => muteOwner.destroy());
 
       // The live-call glyph follows who is in each DM's voice channel.
       channelModeUnsubs.push(

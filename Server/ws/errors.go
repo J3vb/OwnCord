@@ -16,8 +16,13 @@ const (
 	ErrCodeUnknownType   = "UNKNOWN_TYPE"
 	ErrCodeSlowMode      = "SLOW_MODE"
 	ErrCodeConflict      = "CONFLICT"
-	ErrCodeBadPayload    = "BAD_PAYLOAD"
-	ErrCodeNotKeyHolder  = "NOT_KEY_HOLDER"
+	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
+	// same "already in the requested end state" refusal, so a client sees one
+	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED
+	// over REST (F23).
+	ErrCodeAlreadyDeleted = "ALREADY_DELETED"
+	ErrCodeBadPayload     = "BAD_PAYLOAD"
+	ErrCodeNotKeyHolder   = "NOT_KEY_HOLDER"
 	// Returned when a user tries to lift a moderator-imposed voice state.
 	ErrCodeServerMuted    = "SERVER_MUTED"
 	ErrCodeServerDeafened = "SERVER_DEAFENED"

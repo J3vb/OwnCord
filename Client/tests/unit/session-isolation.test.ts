@@ -144,6 +144,7 @@ vi.mock("@lib/api", async (importOriginal) => {
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  onDeleteProfile?: (profileId: string) => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -210,6 +211,7 @@ import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { leaveVoice } from "@lib/livekitSession";
 import { deleteCredential, loadCredential } from "@lib/credentials";
 import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
+import { createProfileManager } from "@lib/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
 
 const A = "a.example:8443";
@@ -424,6 +426,35 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
     expect(authStore.getState().isAuthenticated).toBe(true);
     expect(authStore.getState().token).toBe("stored-token-a");
     expect(peakLiveTransports()).toBe(1);
+  });
+
+  it("keeps a host's credential until its last saved profile is deleted", () => {
+    const shared = "shared.example:8443";
+    const saved = PROFILES.length;
+    PROFILES.push(
+      { ...PROFILES[0]!, id: "p-main", host: shared },
+      { ...PROFILES[0]!, id: "p-alt", host: shared },
+    );
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      removeProfile: ReturnType<typeof vi.fn>;
+    };
+    manager.removeProfile.mockImplementation((id: string) => {
+      PROFILES.splice(
+        PROFILES.findIndex((p) => p.id === id),
+        1,
+      );
+      return true;
+    });
+    try {
+      capturedConnectCallbacks.onDeleteProfile!("p-main");
+      expect(deleteCredential).not.toHaveBeenCalled();
+
+      capturedConnectCallbacks.onDeleteProfile!("p-alt");
+      expect(deleteCredential).toHaveBeenCalledWith(shared);
+    } finally {
+      PROFILES.splice(saved);
+      manager.removeProfile.mockImplementation(() => true);
+    }
   });
 
   it("still deletes the credential on an explicit logout", async () => {

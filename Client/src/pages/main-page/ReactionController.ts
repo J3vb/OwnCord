@@ -66,14 +66,18 @@ export function createReactionController(opts: ReactionControllerOptions): React
     const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
     if (reactBtn === null) return;
 
-    // Close any existing reaction picker (including proper cleanup)
+    // Close any existing reaction picker (including proper cleanup). A picker
+    // on the SAME message toggles closed and returns; one on a DIFFERENT
+    // message is replaced by the new one rather than swallowing the click.
     const existingWrap = document.querySelector(".reaction-picker-wrap");
     if (existingWrap !== null) {
+      const sameMessage = existingWrap.getAttribute("data-message-id") === String(msgId);
       closePicker();
-      return;
+      if (sameMessage) return;
     }
 
     const wrap = createElement("div", { class: "reaction-picker-wrap" });
+    wrap.setAttribute("data-message-id", String(msgId));
 
     // Backdrop to close on click-outside
     const backdrop = createElement("div", {

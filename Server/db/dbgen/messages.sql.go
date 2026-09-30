@@ -13,7 +13,7 @@ import (
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone
+          mentions_everyone, pinned_at
 `
 
 type CreateMessageParams struct {
@@ -42,6 +42,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -49,7 +50,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 const editMessageContent = `-- name: EditMessageContent :one
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone
+          mentions_everyone, pinned_at
 `
 
 type EditMessageContentParams struct {
@@ -75,6 +76,7 @@ func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContent
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -149,7 +151,7 @@ func (q *Queries) GetLatestMessageID(ctx context.Context, channelID int64) (inte
 
 const getMessage = `-- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone
+       mentions_everyone, pinned_at
 FROM messages WHERE id = ?
 `
 
@@ -167,6 +169,7 @@ func (q *Queries) GetMessage(ctx context.Context, id int64) (Message, error) {
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -286,16 +289,19 @@ func (q *Queries) MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelRe
 }
 
 const setMessagePinned = `-- name: SetMessagePinned :execresult
-UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0
 `
 
 type SetMessagePinnedParams struct {
-	Pinned int64 `json:"pinned"`
-	ID     int64 `json:"id"`
+	Pinned   int64   `json:"pinned"`
+	PinnedAt *string `json:"pinnedAt"`
+	ID       int64   `json:"id"`
 }
 
+// pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
+// pinning and NULL when unpinning (a re-pin stamps freshly).
 func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, setMessagePinned, arg.Pinned, arg.ID)
+	return q.db.ExecContext(ctx, setMessagePinned, arg.Pinned, arg.PinnedAt, arg.ID)
 }
 
 const softDeleteMessage = `-- name: SoftDeleteMessage :execresult

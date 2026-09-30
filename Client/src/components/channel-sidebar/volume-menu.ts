@@ -6,7 +6,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
-import { createMenuItem, enableMenuKeyboard } from "@lib/context-menu";
+import { createMenuItem, enableMenuKeyboard, clampMenuToViewport } from "@lib/context-menu";
 import { setUserVolume, getUserVolume } from "@lib/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
@@ -151,6 +151,7 @@ export function showUserVolumeMenu(
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
   document.body.appendChild(menu);
+  clampMenuToViewport(menu, x, y);
 
   // Keyboard model (A11Y-01): focus the first row on open, arrows/Home/End
   // move, Escape closes and restores the invoking row. The slider stays a

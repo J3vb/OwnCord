@@ -122,6 +122,25 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("Enter during an IME composition does not send the half-composed text (F3)", () => {
+    // CJK IMEs commit a candidate on Enter, firing keydown with isComposing
+    // true. Sending there would ship the raw kana/composition string.
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "\u3042"; // composing kana
+
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }),
+    );
+
+    expect(opts.onSend).not.toHaveBeenCalled();
+
+    comp.destroy?.();
+  });
+
   it("shift+enter does NOT send (just newlines)", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
@@ -775,6 +794,64 @@ describe("MessageInput", () => {
       expect(reason!.textContent).toBe("Slow mode — 4s");
       expect(textarea.getAttribute("aria-describedby")).toBe(reason!.id);
       expect(opts.onSend).not.toHaveBeenCalled();
+      comp.destroy?.();
+    });
+
+    it("keeps the composer editable under a send gate, only refusing Send (#12)", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.focus();
+      textarea.value = "typing through the cooldown";
+
+      comp.setSendGate("Slow mode — 5s");
+
+      // The composer is NOT frozen: it stays editable and focused, unlike
+      // setDisabled.
+      expect(textarea.readOnly).toBe(false);
+      expect(textarea.getAttribute("aria-disabled")).toBe("false");
+      expect(document.activeElement).toBe(textarea);
+      expect(
+        (container.querySelector(".send-btn") as HTMLButtonElement).classList.contains(
+          "send-gated",
+        ),
+      ).toBe(true);
+
+      // Send is refused with the reason shown.
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).not.toHaveBeenCalled();
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 5s",
+      );
+
+      // Lifting the gate allows the send.
+      comp.setSendGate(null);
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).toHaveBeenCalledWith("typing through the cooldown", null, []);
+      comp.destroy?.();
+    });
+
+    it("keeps the send-gate refusal line in step with the countdown and clears it at the end", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "next message";
+      comp.setSendGate("Slow mode — 7s");
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 7s",
+      );
+
+      comp.setSendGate("Slow mode — 6s");
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 6s",
+      );
+
+      comp.setSendGate(null);
+      expect(container.querySelector(".attachment-upload-error")).toBeNull();
+      expect(textarea.value).toBe("next message");
       comp.destroy?.();
     });
 
@@ -1518,6 +1595,22 @@ describe("MessageInput", () => {
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
     expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+
+    comp.destroy?.();
+  });
+
+  it("selecting a GIF under a slow-mode send gate is refused with the reason", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setSendGate("Slow mode — 5s");
+    (container.querySelector(".gif-btn") as HTMLElement).click();
+    expect(lastGifPickerOptions).not.toBeNull();
+    lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
+
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-upload-error")!.textContent).toBe("Slow mode — 5s");
 
     comp.destroy?.();
   });

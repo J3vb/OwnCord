@@ -23,6 +23,9 @@ export interface ChatHeaderRefs {
    * where the sidebar collapses. The drawer owns its `aria-expanded`.
    */
   readonly sidebarToggle: HTMLButtonElement;
+  /** The hash+name region. Its pointer cursor is only honest when the DM
+   *  profile panel can actually open (1:1 DMs, not groups) — F24. */
+  readonly nameGroupEl: HTMLDivElement;
 }
 
 export interface ChatHeaderOptions {
@@ -76,6 +79,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const toggle = opts.onToggleDmProfile;
     nameGroup.style.cursor = "pointer";
     nameGroup.addEventListener("click", () => {
+      // Only acts where the profile panel can open; MainPage's handler already
+      // no-ops for a group, but the cursor is toggled to match (F24).
       toggle();
     });
   }
@@ -127,7 +132,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
   return {
     element: header,
-    refs: { hashEl: hash, nameEl, topicEl, callBtn, sidebarToggle },
+    refs: { hashEl: hash, nameEl, topicEl, callBtn, sidebarToggle, nameGroupEl: nameGroup },
   };
 }
 
