@@ -258,7 +258,7 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 }
 
 // TimeoutUser writes a timeout row with the given expiry — its entire
-// effect is the row, read back by HasActiveTimeout through the predicates —
+// effect is the row, read back into Subject.TimedOut for the predicates —
 // and, in the same transaction, supersedes (lifts) any other still-active
 // timeout row for targetID (P2-9, Codex review): without this a repeated
 // timeout left overlapping active rows and LiftTimeout only ever reached the
@@ -411,8 +411,9 @@ func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, lifted
 	return out, rows.Err()
 }
 
-// HasActiveTimeout is the one indexed lookup permissions.Checker.Subject and
-// service.PermissionService.Subject run, uncached, to fill Subject.TimedOut.
+// HasActiveTimeout is the indexed lookup permissions.Checker.Subject runs,
+// uncached, to fill Subject.TimedOut (service.PermissionService.Subject reads
+// its active-timeout mirror instead, P5-O02).
 func (d *DB) HasActiveTimeout(ctx context.Context, userID int64) (bool, error) {
 	active, err := d.q.HasActiveTimeout(ctx, userID)
 	if err != nil {

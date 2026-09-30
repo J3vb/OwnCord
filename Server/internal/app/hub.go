@@ -109,6 +109,11 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 
 	go hub.Run()
 	hub.RearmTimeoutExpiries()
+	// Load the active-timeout mirror up front; on failure Subject retries
+	// the load itself on first use (and fails closed until it succeeds).
+	if err := svc.Permissions.RefreshTimeouts(context.Background()); err != nil {
+		slog.Error("boot: load active timeouts", "err", err)
+	}
 
 	return api.Runtime{Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled}, nil
 }

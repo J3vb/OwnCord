@@ -362,9 +362,12 @@ type Store interface {
 	// of them — ownership lives on the session now, not this ledger
 	// (round 4, replacing round 3's voiceMuted bool).
 	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
-	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
-	// Subject.TimedOut is filled from.
+	// HasActiveTimeout is the indexed per-user timeout lookup
+	// (FinalizeTimeoutLift; PermissionService.Subject reads its mirror).
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
+	// ListActiveTimeoutExpiries loads PermissionService's in-memory mirror
+	// of every active timeout (P5-O02).
+	ListActiveTimeoutExpiries(ctx context.Context) ([]db.ActiveTimeoutExpiry, error)
 	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)

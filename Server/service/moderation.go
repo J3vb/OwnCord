@@ -370,6 +370,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 		}
 		return nil, fmt.Errorf("%w: failed to time out user: %w", ErrInternal, err)
 	}
+	s.refreshTimeoutMirror(ctx)
 
 	// Audit rows must survive a request canceled after the timeout committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_timeout", "user", targetID,
@@ -532,6 +533,7 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 // state — a stale announcement racing behind the current one would tell a
 // live client it is free when a newer timeout still holds.
 func (s *ModerationService) FinalizeTimeoutLift(ctx context.Context, targetID int64, liftedActionIDs []int64, actorID int64) {
+	s.refreshTimeoutMirror(ctx)
 	if s.voiceMuter != nil {
 		s.voiceMuter.UnmuteForTimeout(context.WithoutCancel(ctx), targetID, liftedActionIDs)
 	}

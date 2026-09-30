@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -26,4 +28,18 @@ func TimeoutDurationFromSeconds(seconds int64) (time.Duration, error) {
 		return 0, fmt.Errorf("%w: duration must be between 1 minute and 28 days", ErrBadRequest)
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+// refreshTimeoutMirror reloads PermissionService's active-timeout mirror
+// after a committed timeout write (P5-O02), before the write returns, so the
+// next send sees it. Detached: the write already committed. A failed reload
+// drops the mirror, which Subject then treats as fail-closed, so the error
+// is only logged here.
+func (s *ModerationService) refreshTimeoutMirror(ctx context.Context) {
+	if s.perms == nil {
+		return
+	}
+	if err := s.perms.RefreshTimeouts(context.WithoutCancel(ctx)); err != nil {
+		slog.Error("ModerationService: RefreshTimeouts", "err", err)
+	}
 }
