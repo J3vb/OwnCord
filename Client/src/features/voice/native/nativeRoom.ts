@@ -41,8 +41,9 @@ import { nativeCounters } from "./counters";
 
 /** OC-0473: how often a remote participant whose frames stopped decrypting
  *  is re-reported — the web E2EE worker's cadence, so the shared streak grace
- *  (OC-0452) and quiet-gap recovery in `lib/roomEventHandlers.ts` apply to
- *  the native path unchanged. */
+ *  (OC-0452) in `lib/roomEventHandlers.ts` applies to the native path
+ *  unchanged. Unlike the web worker's, these reports are not rate-limited, so
+ *  the native room recovers after the short quiet gap (`isNativeRoom`). */
 const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { CameraUplink } from "./cameraUplink";
