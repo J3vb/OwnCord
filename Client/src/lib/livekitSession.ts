@@ -464,18 +464,17 @@ export class LiveKitSession {
         this.ws.getState() !== "disconnected" &&
         (channelsStore.getState().channels.has(channelId) ||
           dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
-      hasServerMembership: () =>
-        voiceStore
-          .getState()
-          .voiceUsers.get(channelId)
-          ?.has(authStore.getState().user?.id ?? 0) === true,
+      serverMembership: () => {
+        if (this.ws?.getState() !== "connected") return "unknown";
+        const self = authStore.getState().user?.id ?? 0;
+        return voiceStore.getState().voiceUsers.get(channelId)?.has(self) === true
+          ? "held"
+          : "released";
+      },
       rejoinVoice: () => {
-        const ws = this.ws;
-        if (ws?.getState() !== "connected") return false;
         this.leaveVoice(false);
         setVoiceStatus("joining");
-        ws.send({ type: "voice_join", payload: { channel_id: channelId } });
-        return true;
+        this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
       },
       leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
       onError: (msg) => this.onErrorCallback?.(msg),
@@ -510,10 +509,8 @@ export class LiveKitSession {
   }
 
   /** Request a refresh and resolve once a token lands, or after
-   *  RECONNECT_TOKEN_WAIT_MS (rate-limited or unanswered). Resolves at once
-   *  while the chat socket is down: nothing could carry the request. */
+   *  RECONNECT_TOKEN_WAIT_MS (rate-limited or unanswered). */
   private refreshTokenAndWait(): Promise<void> {
-    if (this.ws?.getState() !== "connected") return Promise.resolve();
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, RECONNECT_TOKEN_WAIT_MS);
       this._tokenWaiter = () => {

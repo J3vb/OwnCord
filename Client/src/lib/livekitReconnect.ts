@@ -50,15 +50,16 @@ export interface ReconnectDeps {
   tokenAgeMs: () => number;
   /** True while the chat socket is connected or reconnecting (not closed for
    *  good: sign-out, session replaced, auth failure) and the channel still
-   *  exists — the slow phase's precondition (P2-T5). */
+   *  exists — every attempt's precondition (P2-T5). */
   canKeepRetrying: () => boolean;
-  /** True while the voice roster still lists us in the channel — the server
-   *  still holds the membership the old token belongs to. */
-  hasServerMembership: () => boolean;
+  /** Whether the server still holds the membership the old token belongs to,
+   *  read from the voice roster — "unknown" while the chat socket is not
+   *  connected, since the roster cannot update then. */
+  serverMembership: () => "held" | "released" | "unknown";
   /** Tear the session down and send voice_join for the same channel, so the
-   *  ordinary join path (E2EE, device prefs) resumes the call. False, with
-   *  nothing done, while the chat socket cannot carry voice_join. */
-  rejoinVoice: () => boolean;
+   *  ordinary join path (E2EE, device prefs) resumes the call. Only called
+   *  once serverMembership() reads "released". */
+  rejoinVoice: () => void;
   /** Full session teardown, sending voice_leave to the server when the chat
    *  socket is connected (a socket still reconnecting cannot carry it; the
    *  server's RT-8 grace window and reaper retire the membership instead).
@@ -159,7 +160,7 @@ export async function attemptAutoReconnect(
       // socket closed for good or a channel that is already gone.
       if (Date.now() - startedAt + delay > RECONNECT_CEILING_MS || !deps.canKeepRetrying()) break;
       // OC-0014: the attempt after this delay must carry a live token.
-      if (deps.hasServerMembership() && deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
+      if (deps.serverMembership() === "held" && deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
         // oxlint-disable-next-line no-await-in-loop -- the attempt must wait for the fresh token it connects with
         await deps.refreshTokenAndWait();
       }
@@ -173,15 +174,16 @@ export async function attemptAutoReconnect(
       log.info("Auto-reconnect aborted — user left or channel changed");
       return;
     }
-    if (slow && !deps.canKeepRetrying()) break;
-    // The server released the membership (RT-8 grace expiry, an RT-3 reap, a
-    // restart): the old token would put us in the SFU with no membership.
-    if (!deps.hasServerMembership()) {
-      if (deps.rejoinVoice()) {
-        log.info("Auto-reconnect: server membership gone — rejoining", { channelId });
-        return;
-      }
-      continue;
+    if (!deps.canKeepRetrying()) break;
+    // The old token is only good for a membership the server still holds:
+    // wait out a chat socket that cannot say, and rejoin one it released
+    // (RT-8 grace expiry, an RT-3 reap, a restart).
+    const membership = deps.serverMembership();
+    if (membership === "unknown") continue;
+    if (membership === "released") {
+      log.info("Auto-reconnect: server membership gone — rejoining", { channelId });
+      deps.rejoinVoice();
+      return;
     }
     // The state carries any token refreshed since the drop; superseded() just
     // confirmed it is still this loop's "reconnecting" state.
