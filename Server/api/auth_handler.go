@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -337,7 +338,7 @@ func writeNotAuthenticated(w http.ResponseWriter) {
 
 // writeAuthError encodes a service.Err* refusal from the auth slice. Each
 // named value's Error() is the public message; its category picks the
-// status and code, and two values carry a code of their own. Anything that
+// status and code, and three values carry a code of their own. Anything that
 // is not an auth refusal is a contract bug in the service, logged and
 // answered as a generic 500 so no cause leaks to the client.
 func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
@@ -350,6 +351,9 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		status, code = http.StatusConflict, "TOTP_ALREADY_ENABLED"
 	case errors.Is(err, service.ErrConflict):
 		status, code = http.StatusConflict, "CONFLICT"
+	case errors.Is(err, service.ErrAuthBusy):
+		writeAuthBusy(w, err)
+		return
 	case errors.Is(err, service.ErrRateLimited):
 		status, code = http.StatusTooManyRequests, "RATE_LIMITED"
 	case errors.Is(err, service.ErrUnauthorized):
@@ -368,6 +372,19 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, status, errorResponse{Error: code, Message: err.Error()})
+}
+
+// writeAuthBusy answers an admission refusal (B4-4) as 429 AUTH_BUSY, a code
+// apart from the per-IP RATE_LIMITED so a client can tell the server's load
+// from its own pace. A refusal from the queue (P5-S02) carries the budget's
+// retry hint, sent as Retry-After in whole seconds.
+func writeAuthBusy(w http.ResponseWriter, err error) {
+	var hinted interface{ RetryAfter() time.Duration }
+	if errors.As(err, &hinted) {
+		secs := int((hinted.RetryAfter() + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+	}
+	writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", service.ErrAuthBusy.Error())
 }
 
 // truncateDevice truncates the User-Agent to prevent oversized session records.

@@ -86,6 +86,8 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "RATE_LIMITED"
+  /** The server's queue for password checks is full; retry after Retry-After. */
+  | "AUTH_BUSY"
   | "INVALID_INPUT"
   | "CONFLICT"
   | "TOO_LARGE"

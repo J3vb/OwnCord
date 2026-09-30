@@ -242,6 +242,7 @@ endpoints return plain-text errors — see their section):
 | `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                |
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                |
 | `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                          |
+| `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                           |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
@@ -338,6 +339,7 @@ application is anonymised and locked, and its username is released.
 | 400    | `INVALID_CREDENTIALS` | In `invite` mode: missing or bad invite code, expired/revoked invite; any mode: duplicate username                      |
 | 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required                                                 |
 | 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP; in `approval`/`open` mode, 5 per address per day or a full approval queue |
+| 429    | `AUTH_BUSY`           | The password-hashing queue is full (`Retry-After` set)                                                                  |
 | 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                                                                  |
 
 ---
@@ -393,7 +395,8 @@ The login shape: `token` and `user`, `requires_2fa` false.
 | 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
 | 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
 | 403    | `FORBIDDEN`           | The account is banned                                       |
-| 429    | `RATE_LIMITED`        | Recovery lockout, or the admission budget full              |
+| 429    | `RATE_LIMITED`        | Recovery lockout                                            |
+| 429    | `AUTH_BUSY`           | The admission budget is full                                |
 
 ---
 
@@ -449,13 +452,14 @@ If the account has TOTP enabled:
 
 #### Errors
 
-| Status | Code             | Cause                                                         |
-| ------ | ---------------- | ------------------------------------------------------------- |
-| 400    | `INVALID_INPUT`  | Missing username or password                                  |
-| 401    | `UNAUTHORIZED`   | Wrong username or password                                    |
-| 403    | `FORBIDDEN`      | Account is banned/suspended                                   |
-| 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown) |
-| 500    | `INTERNAL_ERROR` | Session creation failure                                      |
+| Status | Code             | Cause                                                                                                                  |
+| ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Missing username or password                                                                                           |
+| 401    | `UNAUTHORIZED`   | Wrong username or password                                                                                             |
+| 403    | `FORBIDDEN`      | Account is banned/suspended                                                                                            |
+| 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown)                                                          |
+| 429    | `AUTH_BUSY`      | Too many logins in progress: the queue for password checks is full, or the login waited 10 s in it (`Retry-After` set) |
+| 500    | `INTERNAL_ERROR` | Session creation failure                                                                                               |
 
 ---
 
@@ -505,11 +509,12 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 
 #### Errors
 
-| Status | Code             | Cause                                                               |
-| ------ | ---------------- | ------------------------------------------------------------------- |
-| 400    | `INVALID_INPUT`  | Malformed request body                                              |
-| 401    | `UNAUTHORIZED`   | Missing/expired challenge, invalid TOTP code, or challenge consumed |
-| 500    | `INTERNAL_ERROR` | Session creation failure                                            |
+| Status | Code             | Cause                                                                                           |
+| ------ | ---------------- | ----------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Malformed request body                                                                          |
+| 401    | `UNAUTHORIZED`   | Missing/expired challenge, invalid TOTP code, or challenge consumed                             |
+| 429    | `AUTH_BUSY`      | A recovery code could not be checked: the queue for password checks is full (`Retry-After` set) |
+| 500    | `INTERNAL_ERROR` | Session creation failure                                                                        |
 
 ---
 
@@ -603,6 +608,7 @@ the next maintenance tick.
 | 400    | `INVALID_INPUT`  | Missing or incorrect password                                 |
 | 403    | `FORBIDDEN`      | Cannot delete the last admin account                          |
 | 429    | `RATE_LIMITED`   | Locked out after 3 failed password attempts (15 min cooldown) |
+| 429    | `AUTH_BUSY`      | The admission budget for password checks is full              |
 | 500    | `INTERNAL_ERROR` | Database error during deletion                                |
 
 ---
@@ -734,10 +740,11 @@ any grouping or case) and the response never echoes it. Writes a
 
 #### Errors
 
-| Status | Code            | Cause                                                       |
-| ------ | --------------- | ----------------------------------------------------------- |
-| 400    | `INVALID_INPUT` | Wrong password, or a client secret of the wrong shape       |
-| 429    | `RATE_LIMITED`  | Password-confirmation lockout, or the admission budget full |
+| Status | Code            | Cause                                                 |
+| ------ | --------------- | ----------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Wrong password, or a client secret of the wrong shape |
+| 429    | `RATE_LIMITED`  | Password-confirmation lockout                         |
+| 429    | `AUTH_BUSY`     | The admission budget is full                          |
 
 ---
 
@@ -879,11 +886,12 @@ old one).
 
 #### Errors
 
-| Status | Code            | Cause                                         |
-| ------ | --------------- | --------------------------------------------- |
-| 400    | `INVALID_INPUT` | Weak new password, or new password equals old |
-| 403    | `FORBIDDEN`     | Incorrect old password                        |
-| 429    | `RATE_LIMITED`  | Too many attempts / lockout                   |
+| Status | Code            | Cause                                            |
+| ------ | --------------- | ------------------------------------------------ |
+| 400    | `INVALID_INPUT` | Weak new password, or new password equals old    |
+| 403    | `FORBIDDEN`     | Incorrect old password                           |
+| 429    | `RATE_LIMITED`  | Too many attempts / lockout                      |
+| 429    | `AUTH_BUSY`     | The admission budget for password checks is full |
 
 ---
 

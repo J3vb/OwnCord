@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -64,6 +65,9 @@ func newAdmissionFixture(t *testing.T, budget int) *admissionFixture {
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(budget)
 	svc := NewAuthService(database, limiter, key, nil)
+	// The queued sites give up on a held budget after this, rather than
+	// the production wait.
+	svc.admissionWait = 20 * time.Millisecond
 	partial, err := svc.partial.Issue(ctx, totpID, "device", "203.0.113.9")
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -242,5 +246,57 @@ func TestExpensiveAuth_ConcurrentAttemptsAdmitAtMostTheBudget(t *testing.T) {
 	}
 	if b.InFlight() != 0 {
 		t.Fatalf("in flight after every attempt returned = %d, want 0", b.InFlight())
+	}
+}
+
+// P5-S02: login, registration and the recovery-code verify wait for a slot
+// instead of being refused, so an attempt queued behind a held budget runs
+// once the slot comes back.
+func TestExpensiveAuth_QueuedSitesWaitForASlot(t *testing.T) {
+	ctx := context.Background()
+	f := newAdmissionFixture(t, 1)
+	f.svc.admissionWait = auth.AdmissionWait
+	queued := map[string]bool{"Login": true, "Register": true, "VerifyTOTP with a recovery code": true}
+	for _, site := range f.sites() {
+		if !queued[site.name] {
+			continue
+		}
+		release := f.hold(t)
+		time.AfterFunc(100*time.Millisecond, release)
+		if err := site.call(ctx); errors.Is(err, ErrAuthBusy) {
+			t.Errorf("%s queued behind a held budget: error = %v, want it to wait for the slot", site.name, err)
+		}
+	}
+	if peak := f.limiter.Admission().Peak(); peak != 1 {
+		t.Fatalf("peak = %d, want 1", peak)
+	}
+}
+
+func TestLogin_QueuedBehindTheBudgetSucceeds(t *testing.T) {
+	ctx := context.Background()
+	f := newAdmissionFixture(t, 1)
+	f.svc.admissionWait = auth.AdmissionWait
+	release := f.hold(t)
+	time.AfterFunc(100*time.Millisecond, release)
+	if _, err := f.svc.Login(ctx, LoginInput{Username: "budgeted", Password: admissionPassword, IP: "203.0.113.50"}); err != nil {
+		t.Fatalf("login queued behind a held budget: error = %v, want success", err)
+	}
+}
+
+// A queued site's refusal carries the budget's retry hint for Retry-After.
+func TestExpensiveAuth_QueuedRefusalCarriesRetryHint(t *testing.T) {
+	ctx := context.Background()
+	f := newAdmissionFixture(t, 1)
+	f.hold(t)
+	_, err := f.svc.Login(ctx, LoginInput{Username: "budgeted", Password: admissionPassword, IP: "203.0.113.51"})
+	var hinted interface{ RetryAfter() time.Duration }
+	if !errors.As(err, &hinted) || hinted.RetryAfter() <= 0 {
+		t.Fatalf("login refused by a held budget: error = %v, want ErrAuthBusy with a positive retry hint", err)
+	}
+	if !errors.Is(err, ErrAuthBusy) || !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("hinted refusal = %v, want it to match ErrAuthBusy and ErrRateLimited", err)
+	}
+	if err.Error() != ErrAuthBusy.Error() {
+		t.Fatalf("hinted refusal message = %q, want ErrAuthBusy's %q", err.Error(), ErrAuthBusy.Error())
 	}
 }

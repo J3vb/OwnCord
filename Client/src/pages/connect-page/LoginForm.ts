@@ -149,6 +149,21 @@ export interface LoginFormApi {
 // Factory
 // ---------------------------------------------------------------------------
 
+/** How long a login keeps retrying a busy server before it gives up (P5-S02). */
+const AUTH_BUSY_RETRY_BUDGET_MS = 60_000;
+/** The wait before a retry when the refusal sent no Retry-After — the
+ *  saved-password relay passes on only the status and body. */
+const AUTH_BUSY_DEFAULT_RETRY_MS = 2_000;
+/** Up to this much is added to each wait, so a burst of refused clients
+ *  does not come back in lockstep. */
+const AUTH_BUSY_JITTER_MS = 1_000;
+
+/** The server's password-check queue was full: a refusal worth retrying. A
+ *  per-IP RATE_LIMITED is not — retrying only spends the window again. */
+function isAuthBusy(err: unknown): err is ApiClientError {
+  return err instanceof ApiClientError && err.code === "AUTH_BUSY";
+}
+
 function isBusy(state: FormState): boolean {
   return state === "loading" || state === "connecting" || state === "auto-connecting";
 }
@@ -224,6 +239,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let serverWait: HTMLDivElement;
   let serverWaitText: HTMLSpanElement;
   let serverWaitHost = "";
+  let authBusyRetry: HTMLDivElement;
+  /** The busy line's Cancel: ends the wait and stops the AUTH_BUSY retries. */
+  let cancelAuthBusyRetry: (() => void) | null = null;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -321,6 +339,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     });
 
     serverWait = buildServerWait();
+    authBusyRetry = buildAuthBusyRetry();
 
     // Form
     const form = createElement("form", { class: "connect-form" });
@@ -479,7 +498,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
 
-    appendChildren(formContainer, formLogo, errorBanner, serverWait, form);
+    appendChildren(formContainer, formLogo, errorBanner, serverWait, authBusyRetry, form);
     appendChildren(panel, settingsBtn, formContainer);
     return panel;
   }
@@ -661,6 +680,25 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     cancelBtn.addEventListener("click", cancelServerWait, { signal });
     appendChildren(wait, serverWaitText, cancelBtn);
     return wait;
+  }
+
+  function buildAuthBusyRetry(): HTMLDivElement {
+    // The server-wait line's look: a live status while a busy login retries.
+    const line = createElement("div", { class: "server-wait auth-busy-retry", role: "status" });
+    line.hidden = true;
+    const text = createElement(
+      "span",
+      { class: "server-wait-text" },
+      connectText("login.serverBusyRetrying"),
+    );
+    const cancelBtn = createElement(
+      "button",
+      { class: "btn-ghost server-wait-cancel", type: "button" },
+      connectText("common.cancel"),
+    );
+    cancelBtn.addEventListener("click", () => cancelAuthBusyRetry?.(), { signal });
+    appendChildren(line, text, cancelBtn);
+    return line;
   }
 
   function cancelServerWait(): void {
@@ -990,6 +1028,48 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     return null;
   }
 
+  /**
+   * Run a login, retrying an AUTH_BUSY refusal after its Retry-After (plus
+   * jitter) until it succeeds, fails any other way, or the retry budget is
+   * spent — the last attempt lands on the budget's end, and its refusal is
+   * the one shown. The busy line shows while it waits; its Cancel returns
+   * the form to idle.
+   */
+  async function loginRetryingWhileBusy(login: () => Promise<void>): Promise<void> {
+    const deadline = Date.now() + AUTH_BUSY_RETRY_BUDGET_MS;
+    let cancelled = false;
+    try {
+      for (;;) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- a retry is sequential by definition
+          await login();
+          return;
+        } catch (err) {
+          const remaining = deadline - Date.now();
+          if (!isAuthBusy(err) || remaining <= 0) throw err;
+          const wait =
+            (err.retryAfterMs ?? AUTH_BUSY_DEFAULT_RETRY_MS) + Math.random() * AUTH_BUSY_JITTER_MS;
+          authBusyRetry.hidden = false;
+          // oxlint-disable-next-line no-await-in-loop -- the wait between retries
+          await new Promise<void>((resolve) => {
+            setOwnedTimeout(signal, resolve, Math.min(wait, remaining));
+            cancelAuthBusyRetry = () => {
+              cancelled = true;
+              resolve();
+            };
+          });
+          if (cancelled) {
+            transitionTo("idle");
+            return;
+          }
+        }
+      }
+    } finally {
+      cancelAuthBusyRetry = null;
+      authBusyRetry.hidden = true;
+    }
+  }
+
   async function handleFormSubmit(e: Event): Promise<void> {
     e.preventDefault();
 
@@ -1011,11 +1091,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     try {
       if (formMode === "login") {
-        if (usingSavedPassword) {
-          await onLoginWithSavedPassword(host, username);
-        } else {
-          await onLogin(host, username, password);
-        }
+        const savedPassword = usingSavedPassword;
+        await loginRetryingWhileBusy(() =>
+          savedPassword
+            ? onLoginWithSavedPassword(host, username)
+            : onLogin(host, username, password),
+        );
       } else {
         const inviteCode = normaliseInviteCode(inviteInput.value);
         await onRegister(host, username, password, inviteCode);
