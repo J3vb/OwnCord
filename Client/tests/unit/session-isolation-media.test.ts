@@ -60,6 +60,7 @@ function makeRoom() {
       getTrackPublication: vi.fn().mockReturnValue(undefined),
       unpublishTrack: vi.fn().mockResolvedValue(undefined),
       publishTrack: vi.fn().mockResolvedValue(undefined),
+      createTracks: vi.fn().mockResolvedValue([]),
       trackPublications: new Map(),
       identity: "user-1",
     },

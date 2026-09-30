@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Track } from "livekit-client";
-import { createRNNoiseProcessor } from "../../src/lib/noise-suppression";
+import { createMicProcessor } from "../../src/lib/micProcessor";
 
 // Real-browser sanity checks: a real DOM is available (jsdom can fake this,
 // but this suite runs in an actual Chromium instance via the vitest
@@ -25,34 +25,33 @@ describe("browser environment", () => {
   });
 });
 
-// src/lib/noise-suppression.ts needs a real AudioContext/AudioWorklet/WASM
-// runtime that jsdom cannot provide (vitest.config.ts excludes it from
-// coverage on that basis) — so it has to be exercised here, not in
-// tests/unit. Every tests/unit reference to it is a vi.mock().
-describe("noise-suppression (real AudioContext)", () => {
+// src/lib/micProcessor.ts and src/lib/noise-suppression.ts need a real
+// AudioContext/AudioWorklet/WASM runtime that jsdom cannot provide
+// (vitest.config.ts excludes noise-suppression from coverage on that basis) —
+// so they have to be exercised here, not in tests/unit.
+describe("mic processor (real AudioContext)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("loads the AudioWorklet pipeline with the shipped minified RNNoise WASM", async () => {
-    const audioContext = new AudioContext();
-    const inputTrack = audioContext.createMediaStreamDestination().stream.getAudioTracks()[0]!;
-
+  it("builds its graph and loads the RNNoise worklet with the shipped minified WASM", async () => {
+    const feed = new AudioContext();
+    const inputTrack = feed.createMediaStreamDestination().stream.getAudioTracks()[0]!;
+    const processor = createMicProcessor();
     try {
-      const processor = createRNNoiseProcessor();
-      await processor.init({
-        kind: Track.Kind.Audio,
-        track: inputTrack,
-        audioContext,
-      });
-
-      // init() resolves only once the worklet reports the WASM ready, which
-      // proves the minified export mapping worked.
+      await processor.init({ kind: Track.Kind.Audio, track: inputTrack } as never);
       expect(processor.processedTrack).toBeInstanceOf(MediaStreamTrack);
+      expect(processor.context.sampleRate).toBe(48000);
 
-      await processor.destroy();
+      // setEnhanced resolves true only once the worklet reports the WASM
+      // ready, which proves the minified export mapping worked.
+      await processor.setEnhanced(true);
+      expect(processor.enhanced).toBe(true);
+      await processor.setEnhanced(false);
+      expect(processor.enhanced).toBe(false);
     } finally {
-      await audioContext.close();
+      await processor.destroy();
+      await feed.close();
     }
   });
 });

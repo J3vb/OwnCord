@@ -13,7 +13,14 @@ import {
   setOutputVolume,
   reapplyAudioProcessing,
 } from "@lib/livekitSession";
-import { VAD_MAX_THRESHOLD, micCaptureOptions, vadThreshold } from "@lib/audioPipeline";
+import {
+  VAD_MAX_THRESHOLD,
+  micCaptureOptions,
+  startVadDetector,
+  vadThreshold,
+} from "@lib/audioPipeline";
+import { createMicProcessor } from "@lib/micProcessor";
+import { Track, type AudioProcessorOptions } from "livekit-client";
 import { nativeAudioDevices } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
@@ -23,8 +30,6 @@ const log = createLogger("VoiceAudioTab");
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
 const MIC_NOISE_FLOOR = 0.005;
-/** One render quantum: the block the live gate takes its RMS over (vad-worklet.js). */
-const GATE_BLOCK_SAMPLES = 128;
 /** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
 const MIC_HEARD_HOLD_MS = 1000;
 
@@ -41,25 +46,13 @@ export interface VoiceAudioTabHandle {
 }
 
 export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
-  let micStream: MediaStream | null = null;
-  let micAudioCtx: AudioContext | null = null;
-  let micAnimFrame: number | null = null;
+  let stopMeter: (() => void) | null = null;
   let cameraPreviewStream: MediaStream | null = null;
   let invalidateCameraPreviewRequest: (() => void) | null = null;
 
   function stopMic(): void {
-    if (micAnimFrame !== null) {
-      cancelAnimationFrame(micAnimFrame);
-      micAnimFrame = null;
-    }
-    if (micStream !== null) {
-      for (const track of micStream.getTracks()) track.stop();
-      micStream = null;
-    }
-    if (micAudioCtx !== null) {
-      void micAudioCtx.close();
-      micAudioCtx = null;
-    }
+    stopMeter?.();
+    stopMeter = null;
   }
 
   function cleanupMic(): void {
@@ -77,10 +70,8 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
     cleanupMic();
     return buildVoiceAudioTabInner(
       buildSignal,
-      (stream, ctx, frame) => {
-        micStream = stream;
-        micAudioCtx = ctx;
-        micAnimFrame = frame;
+      (stop) => {
+        stopMeter = stop;
       },
       stopMic,
       (stream) => {
@@ -106,7 +97,7 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   return { build, cleanup };
 }
 
-type MicRegistrar = (stream: MediaStream, ctx: AudioContext, frame: number) => void;
+type MicRegistrar = (stop: () => void) => void;
 type CameraRegistrar = (stream: MediaStream | null) => void;
 type CameraInvalidationRegistrar = (invalidate: () => void) => void;
 
@@ -260,9 +251,13 @@ function buildVoiceAudioTabInner(
     return Math.round((1 - ratio) * 100);
   }
 
+  /** The meter's detector, so a dragged threshold applies to it at once. */
+  let meterThresholdSetter: ((threshold: number) => void) | null = null;
+
   function previewSensitivity(val: number): void {
     currentSensitivity = val;
     updateThresholdIndicator(val);
+    meterThresholdSetter?.(vadThreshold(val));
   }
 
   function commitSensitivity(): void {
@@ -653,72 +648,83 @@ function buildVoiceAudioTabInner(
   // another "abort" handler here too would add one more listener every time
   // the tab is rebuilt, since this function runs again on every build.
 
-  // Mic level meter. It measures what the live gate measures
-  // (lib/audioPipeline.ts, public/vad-worklet.js): the RMS of a 128-sample
-  // block at 48 kHz, from a microphone opened with the call's own capture
-  // settings, drawn on the threshold handle's axis. So the bar passing the
-  // handle, and turning green, is the level at which the gate opens. Opening
-  // it with other settings would also fight the call for the device: the
-  // browser can hand the call this stream's processing instead of its own.
+  // Mic level meter. It runs the call's own microphone processor
+  // (lib/micProcessor.ts: RNNoise when Enhanced Noise Suppression is on) over
+  // a microphone opened with the call's capture settings, and the call's own
+  // detector (lib/audioPipeline.ts startVadDetector, same attack and hold)
+  // at the same threshold. The bar is the loudest 128-sample block the
+  // detector saw, on the threshold handle's axis; green is the gate open. So
+  // what the meter shows is what the gate does. Opening the microphone with
+  // other settings would also fight the call for the device: the browser can
+  // hand the call this stream's processing instead of its own.
   // The meter previews the webview's microphone; on the native engine the
   // saved device id is the engine's, and the meter is hidden anyway.
   function startMicMeter(): void {
-    if (nativeAudio) return;
+    if (nativeAudio || signal.aborted) return;
     const thisRequest = ++micRequestId;
     stopMic();
     void (async () => {
       try {
         const constraints: MediaStreamConstraints = { audio: micCaptureOptions(), video: false };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stopStream = (): void => {
+          for (const track of stream.getTracks()) track.stop();
+        };
         // Race guard: teardown (cleanup or abort) or a newer request may have
         // run while we awaited — opening the mic now would leave it hot with
         // nobody left to stop it, and registerMic would re-arm state
         // cleanupMic() already cleared.
         if (signal.aborted || thisRequest !== micRequestId) {
-          for (const track of stream.getTracks()) track.stop();
+          stopStream();
           return;
         }
-        const audioCtx = new AudioContext({ sampleRate: 48000 });
-        const analyser = audioCtx.createAnalyser();
-        // About one animation frame of audio, in whole gate blocks.
-        analyser.fftSize = GATE_BLOCK_SAMPLES * 8;
-        const source = audioCtx.createMediaStreamSource(stream);
-        source.connect(analyser);
+        const processor = createMicProcessor();
+        const options = { kind: Track.Kind.Audio, track: stream.getAudioTracks()[0]! };
+        await processor.init(options as AudioProcessorOptions);
+        await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
+        if (signal.aborted || thisRequest !== micRequestId) {
+          void processor.destroy();
+          stopStream();
+          return;
+        }
 
-        const samples = new Float32Array(analyser.fftSize);
-
-        let latestFrame = 0;
+        // The detector starts open, as the live gate does.
+        let gateOpen = true;
+        let level = 0;
         let lastHeardAt = Number.NEGATIVE_INFINITY;
-        function updateMeter(now: number): void {
-          if (signal.aborted) return;
-          analyser.getFloatTimeDomainData(samples);
-          // The loudest block in the window: what the gate compared against.
-          let rms = 0;
-          for (let at = 0; at < samples.length; at += GATE_BLOCK_SAMPLES) {
-            let sum = 0;
-            for (let i = at; i < at + GATE_BLOCK_SAMPLES; i++) {
-              const v = samples[i] ?? 0;
-              sum += v * v;
-            }
-            rms = Math.max(rms, Math.sqrt(sum / GATE_BLOCK_SAMPLES));
-          }
+        const paint = (): void => {
           // Same axis as the handle, whose position is threshold / max.
-          const position = Math.min(rms / VAD_MAX_THRESHOLD, 1);
+          const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
           meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
-
-          // Green at or above the gate threshold, yellow below it.
-          meterLevel.style.background =
-            rms >= vadThreshold(currentSensitivity) ? "var(--green)" : "var(--yellow)";
+          meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
           // The pill says whether the mic picks anything up, whatever the
           // sensitivity, and holds between syllables so it does not flicker.
-          if (rms >= MIC_NOISE_FLOOR) lastHeardAt = now;
+          const now = performance.now();
+          if (level >= MIC_NOISE_FLOOR) lastHeardAt = now;
           showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
-
-          latestFrame = requestAnimationFrame(updateMeter);
-          registerMic(stream, audioCtx, latestFrame);
-        }
-        latestFrame = requestAnimationFrame(updateMeter);
-        registerMic(stream, audioCtx, latestFrame);
+        };
+        const detector = startVadDetector(
+          processor.context,
+          processor.analyser!,
+          vadThreshold(currentSensitivity),
+          {
+            onGate: (gated) => {
+              gateOpen = !gated;
+              paint();
+            },
+            onRms: (rms) => {
+              level = rms;
+              paint();
+            },
+          },
+        );
+        meterThresholdSetter = detector.setThreshold;
+        registerMic(() => {
+          if (meterThresholdSetter === detector.setThreshold) meterThresholdSetter = null;
+          detector.stop();
+          void processor.destroy();
+          stopStream();
+        });
       } catch (err) {
         if (signal.aborted || thisRequest !== micRequestId) return;
         log.warn("Mic access denied or unavailable — meter stays empty", err);
@@ -737,6 +743,8 @@ function buildVoiceAudioTabInner(
    * can hand them to the call's restart (and the reverse).
    */
   function restartMeterAfter(callRestart: Promise<void>): void {
+    // Invalidate a meter request still in flight, then release the meter.
+    micRequestId++;
     stopMic();
     void callRestart.then(startMicMeter, startMicMeter);
   }

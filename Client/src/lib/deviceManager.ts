@@ -17,8 +17,10 @@ const log = createLogger("deviceManager");
 /** Debounce interval for device change events (ms). */
 const DEVICE_CHANGE_DEBOUNCE_MS = 500;
 
-/** True when a mute/deafen/server-mute/push-to-talk gate means the mic must
- *  stay off regardless of a caller's own request to (re-)enable it.
+/** True when a mute/deafen/server-mute means the mic must stay off
+ *  regardless of a caller's own request to (re-)enable it. Push-to-talk is
+ *  not part of it: its gate closes inside the mic processor and the
+ *  microphone stays published while the key is up.
  *  Re-enabling never re-publishes: setMicrophoneEnabled(true) on an existing
  *  publication is a track.unmute() (only ScreenShare actually unpublishes),
  *  and with the Room's stopMicTrackOnMute that same call re-acquires the
@@ -30,12 +32,7 @@ const DEVICE_CHANGE_DEBOUNCE_MS = 500;
  *  gate instead of each re-deriving it. */
 export function isMicPolicyGated(): boolean {
   const s = voiceStore.getState();
-  return (
-    s.localMuted === true ||
-    s.localDeafened === true ||
-    s.localServerMuted === true ||
-    s.pttGated === true
-  );
+  return s.localMuted === true || s.localDeafened === true || s.localServerMuted === true;
 }
 
 export class DeviceManager {
@@ -69,7 +66,7 @@ export class DeviceManager {
 
   /** Reset the capture device to the system default, then toggle the mic
    *  off/on to force a fresh capture, skipping the re-enable when a
-   *  mute/deafen/server-mute/PTT gate is active. Shared by
+   *  mute/deafen/server-mute is active. Shared by
    *  handleDeviceChange's device-removed fallback and switchInputDevice('')
    *  — both drive the exact same reset + false/true cycle, and both were
    *  unconditionally republishing a gated mic before this guard. */
@@ -219,24 +216,14 @@ export class DeviceManager {
         await this.cycleMicForDeviceSwitch(room);
       }
       if (this.room !== room) return;
-      // Rebuild audio pipeline (source track changed after device switch)
+      // The mic processor rides the SDK's restart: its gated output stays on
+      // the sender and only the capture behind it changed. This only attaches
+      // one where a track has none.
       try {
         this.audioPipeline?.setupAudioPipeline();
       } catch (pipelineErr) {
         log.warn("Audio pipeline setup failed after input device switch", pipelineErr);
         this.onToast?.(voiceText("device.pipelineError"));
-      }
-      // Re-apply or remove RNNoise processor based on current setting.
-      // OC-0474: not while gated — the muted track keeps any attached
-      // processor across the switch and re-inits it on unmute, and attaching
-      // one now would run an RNNoise context over the ended track.
-      if (!isMicPolicyGated()) {
-        const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
-        if (enhancedNS) {
-          await this.audioPipeline?.applyNoiseSuppressor();
-        } else {
-          await this.audioPipeline?.removeNoiseSuppressor();
-        }
       }
       log.info("Switched input device", { deviceId });
     } catch (err) {

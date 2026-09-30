@@ -4,7 +4,7 @@
 // state and every collaborator stay owned by LiveKitSession; this module
 // reaches them only through RoomLifecycleHost, and receives the room event
 // handlers from it rather than importing the facade.
-import { Room, RoomEvent } from "livekit-client";
+import { Room, RoomEvent, Track, type LocalAudioTrack } from "livekit-client";
 import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/preferences";
@@ -213,8 +213,40 @@ export class RoomLifecycle {
     // flag and it's a no-op today for the "" pre-connect identity, then wires
     // up for real once the SignalConnected handler has the real identity.
     await newRoom.setE2EEEnabled(true);
+    this.attachMicProcessorOnCreate(newRoom);
     this.wireRoomEvents(newRoom);
     return newRoom;
+  }
+
+  /**
+   * Put the mic processor on every microphone track this room creates,
+   * before it is published. setMicrophoneEnabled creates its track through
+   * `localParticipant.createTracks` and publishes `track.mediaStreamTrack`,
+   * which is the processor's output once one is attached, so the sender never
+   * carries the raw capture track — not even for the moment between a
+   * publish and a later setProcessor (the click on the channel, the
+   * push-to-talk key). The SDK's own `audioCaptureDefaults.processor` hook
+   * cannot do this: it attaches before the track has an AudioContext and
+   * LocalAudioTrack.setProcessor refuses. A processor that fails to attach
+   * fails the publish, which the join reports as a microphone failure
+   * rather than publishing raw audio.
+   */
+  private attachMicProcessorOnCreate(room: Room): void {
+    const participant = room.localParticipant;
+    const createTracks = participant.createTracks.bind(participant);
+    participant.createTracks = async (options) => {
+      const tracks = await createTracks(options);
+      const audio = tracks.find((track) => track.kind === Track.Kind.Audio);
+      if (audio !== undefined) {
+        try {
+          await this._audioPipeline.attach(audio as LocalAudioTrack);
+        } catch (err) {
+          for (const track of tracks) track.stop();
+          throw err;
+        }
+      }
+      return tracks;
+    };
   }
 
   /** Linux: the Room is the Rust backend's (`src-tauri/src/native_voice/`),

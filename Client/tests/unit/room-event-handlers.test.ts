@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DisconnectReason, RoomEvent, Track, TrackEvent } from "livekit-client";
+import { DisconnectReason, RoomEvent, Track } from "livekit-client";
 import type {
   LocalTrackPublication,
   Participant,
@@ -243,30 +243,7 @@ describe("handleLocalTrackPublished", () => {
     expect(h.spies.setupAudioPipeline).toHaveBeenCalledTimes(1);
   });
 
-  it("rebuilds the audio pipeline when the SDK restarts the microphone track", () => {
-    const h = build();
-    const track = { on: vi.fn(), off: vi.fn() };
-    const publication = {
-      source: Track.Source.Microphone,
-      track,
-    } as unknown as LocalTrackPublication;
-
-    h.handlers.handleLocalTrackPublished(publication);
-    h.handlers.handleLocalTrackPublished(publication);
-    h.spies.setupAudioPipeline.mockClear();
-
-    // One listener however often the same track is republished.
-    expect(track.on).toHaveBeenCalledTimes(2);
-    expect(track.off).toHaveBeenCalledTimes(2);
-    const [event, onRestarted] = track.on.mock.calls[0] as [string, () => void];
-    expect(event).toBe(TrackEvent.Restarted);
-    expect(track.off).toHaveBeenCalledWith(TrackEvent.Restarted, onRestarted);
-    expect(track.on.mock.calls[1]).toEqual([TrackEvent.Restarted, onRestarted]);
-
-    onRestarted();
-
-    expect(h.spies.setupAudioPipeline).toHaveBeenCalledTimes(1);
-  });
+  // Deleted "rebuilds on TrackEvent.Restarted": the processor now survives SDK restarts, so the handler no longer subscribes.
 
   it("leaves the pipeline alone for a published camera or screen share", () => {
     const h = build();

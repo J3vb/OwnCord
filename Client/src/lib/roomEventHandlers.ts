@@ -1,7 +1,6 @@
 // LiveKit room event handler factories — extracted from livekitSession.ts
 import {
   Track,
-  TrackEvent,
   type RemoteTrack,
   type RemoteTrackPublication,
   type RemoteParticipant,
@@ -83,7 +82,7 @@ export interface RoomEventDeps {
   teardownForReconnect: () => void;
   leaveVoice: (sendWs: boolean) => void;
   applyMicMuteState: (muted: boolean) => Promise<void>;
-  /** Put the input-volume/sensitivity chain back on the microphone's sender. */
+  /** Attach the mic processor to a published microphone that has none. */
   setupAudioPipeline: () => void;
   /** The room is the native backend's, whose decrypt reports are not
    *  rate-limited (see DECRYPT_QUIET_MS). */
@@ -169,24 +168,13 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }
   }
 
-  // livekit-client swaps the sender's track on its own in two places the
-  // session never asked for: a full reconnect republishes every local track,
-  // and a microphone whose device ends is restarted. Each leaves the raw
-  // capture track on the sender, past the input-volume and sensitivity chain,
-  // until something else happens to rebuild it.
-  const handleMicRestarted = (): void => {
-    deps.setupAudioPipeline();
-  };
-
   const handleLocalTrackPublished = (publication: LocalTrackPublication): void => {
     // SRE-M2: join-relative ms for the first local track publication.
     markLocalTrackPublished();
     if (publication.source === Track.Source.Microphone) {
+      // The processor is attached before the first publish and rides every
+      // republish; this only covers a microphone that somehow has none.
       deps.setupAudioPipeline();
-      // The same track object survives a republish: keep one listener on it.
-      // Optional calls because the native (Linux) track has no emitter.
-      publication.track?.off?.(TrackEvent.Restarted, handleMicRestarted);
-      publication.track?.on?.(TrackEvent.Restarted, handleMicRestarted);
       const { localMuted, localDeafened } = voiceStore.getState();
       if (localMuted || localDeafened) {
         deps.applyMicMuteState(true).catch((e) => log.warn("applyMicMuteState failed", e));

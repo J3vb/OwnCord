@@ -38,10 +38,10 @@ class VadProcessor extends AudioWorkletProcessor {
         this._threshold = event.data.threshold;
         if (event.data.gateOnFrames !== undefined) this._gateOnFrames = event.data.gateOnFrames;
         if (event.data.gateOffFrames !== undefined) this._gateOffFrames = event.data.gateOffFrames;
-        // Reset state on config change
+        // A new threshold restarts the attack/hold counts; the start-up
+        // grace is about audio settling and is not repeated.
         this._silentFrames = 0;
         this._speechFrames = 0;
-        this._startupFrames = 0;
         if (this._gated) {
           this._gated = false;
           this.port.postMessage({ type: "gate", gated: false });

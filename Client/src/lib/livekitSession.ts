@@ -6,7 +6,7 @@ import {
   voiceStore,
   setLocalCamera,
   setLocalScreenshare,
-  setPttGated,
+  setPttGated as setPttGatedState,
   isPttPollingLive,
   setListenOnly,
   setVoiceStatus,
@@ -562,9 +562,8 @@ export class LiveKitSession {
     // platforms where PTT can never actually report state (macOS's
     // is_key_down stub, pure-Wayland Linux with no XWayland).
     // Record the gate in pttGated, NEVER in localMuted: localMuted means "the
-    // user muted themselves", and ptt.ts refuses to open the mic on a PTT
-    // press while it is set — writing it here would close the mic for the
-    // whole session instead of only until the first press.
+    // user muted themselves". The gate closes inside the mic processor, so
+    // the microphone is published either way and a press only opens the gate.
     // On reconnect, don't recompute pttArmed from scratch — that always
     // yields false (mode !== "join") and ignores whatever pttGated the store
     // is still carrying from before the disconnect. If the user joined with
@@ -576,10 +575,9 @@ export class LiveKitSession {
       mode === "join"
         ? isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0
         : state.pttGated === true;
-    if (mode === "join") {
-      setPttGated(pttArmed);
-    }
-    const muted = pttArmed || state.localMuted || state.localDeafened;
+    if (mode === "join") setPttGatedState(pttArmed);
+    this._audioPipeline.setPttGated(pttArmed);
+    const muted = state.localMuted || state.localDeafened;
     const deafened = state.localDeafened;
     const shouldEnableMicrophone = !muted;
 
@@ -592,9 +590,6 @@ export class LiveKitSession {
             ? "Published mic via LiveKit native capture"
             : "Auto-reconnect restored live microphone",
         );
-        if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-          await this._audioPipeline.applyNoiseSuppressor();
-        }
       }
       if (this._room !== room) return;
       setListenOnly(false); // Mic acquired successfully
@@ -856,6 +851,14 @@ export class LiveKitSession {
     this._media.setVoiceSensitivity(sensitivity);
   }
 
+  /** Push-to-talk: close (key up) or open (key down) the gate in the mic
+   *  processor. Recorded in the store for the widget, applied to the live
+   *  processor and to every one attached later. */
+  setPttGated(gated: boolean): void {
+    setPttGatedState(gated);
+    this._media.setPttGated(gated);
+  }
+
   async reapplyAudioProcessing(): Promise<void> {
     return this._media.reapplyAudioProcessing();
   }
@@ -973,6 +976,7 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
+export const setPttGated = session.setPttGated.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
