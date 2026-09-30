@@ -580,6 +580,38 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     }
   });
 
+  it("ends the wait at once when the waited-on profile is deleted", async () => {
+    const original = PROFILES[0]!;
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      removeProfile: ReturnType<typeof vi.fn>;
+    };
+    manager.removeProfile.mockImplementation((id: string) => {
+      PROFILES.splice(
+        PROFILES.findIndex((p) => p.id === id),
+        1,
+      );
+      return true;
+    });
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+    try {
+      latestConnectPage().hideServerWait.mockClear();
+      capturedConnectCallbacks.onDeleteProfile!(original.id);
+      expect(latestConnectPage().hideServerWait).toHaveBeenCalled();
+
+      mockGetHealth.mockResolvedValue(HEALTHY);
+      const [probesA, probesB] = [probesOf(A), probesOf(B)];
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(probesOf(A) - probesA).toBe(0);
+      expect(probesOf(B) - probesB).toBeGreaterThan(0);
+      expect(connectsToA()).toBe(before);
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    } finally {
+      PROFILES.unshift(original);
+      manager.removeProfile.mockImplementation(() => true);
+    }
+  });
+
   it("backs off from 5 s to 30 s between probes", async () => {
     await resumeAgainstDownServer();
     // Only the wait probes A more often than B: the page's own 15 s check

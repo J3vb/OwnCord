@@ -902,6 +902,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           profileManager.removeProfile(profileId);
           if (host && !profileManager.getAll().some((p) => p.host === host)) {
             void deleteCredential(host);
+            if (serverWait?.host === host) serverWait.scope.dispose();
           }
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
@@ -938,6 +939,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     );
 
     let autoLoginCancelled = false;
+    let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
 
     interface ResumableProfile {
       readonly name: string;
@@ -951,10 +953,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // 30 s, and resumes once when it answers. The wait belongs to the API
     // session the timeout left behind, so whatever ends that session ends the
     // wait: a manual login, Cancel, typing or picking another server
-    // (onAutoLoginCancel), the resume itself (wirePostAuth's setConfig), or
-    // leaving this page.
+    // (onAutoLoginCancel), the resume itself (wirePostAuth's setConfig),
+    // deleting the server's last profile, or leaving this page.
     function waitForServer(profile: ResumableProfile): void {
       const wait = pageOwner.fork(api.getSession().signal);
+      serverWait = { host: profile.host, scope: wait };
       wait.addCleanup(() => connectPage.hideServerWait());
       connectPage.showServerWait(profile.name, profile.host);
       const probeAfter = (delayMs: number): void => {
