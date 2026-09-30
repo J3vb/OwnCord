@@ -151,10 +151,10 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 
 	// channel_id is attacker-controlled, so the gate is
 	// permissions.CanJoinVoice over the channel-TYPE-aware subject: the
-	// CONNECT_VOICE bit, READ_MESSAGES outside a DM (a channel hidden from
-	// the caller is not joinable) (a role-only check passes for any DM id — DMs have no
+	// CONNECT_VOICE bit (a role-only check passes for any DM id — DMs have no
 	// overrides — and the token minted below carries RoomJoin+CanSubscribe
-	// for that room), a channel that has a room (a text channel would
+	// for that room), READ_MESSAGES outside a DM (a channel hidden from the
+	// caller is not joinable), a channel that has a room (a text channel would
 	// otherwise persist a voice_states row and mint a LiveKit room the UI can
 	// never render or moderate; DM and group calls join through this same
 	// handler), no archive (a caller still holding the id of a channel nobody

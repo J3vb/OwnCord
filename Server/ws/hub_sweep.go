@@ -436,7 +436,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// The evicted participants themselves must always be in it (their client
 	// state is already cleared, so broadcastVoiceEvent's participant union
 	// cannot see them): the voice_leave is what drives their own E2EE
-	// teardown, and voice membership never required READ_MESSAGES.
+	// teardown, and voice membership can outlive READ_MESSAGES.
 	//
 	// Both callers of CleanupVoiceForChannel commit archived=1 to this
 	// channel before evicting (OC-0022) — deliberately, so a concurrent

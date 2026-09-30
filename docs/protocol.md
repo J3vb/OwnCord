@@ -1558,11 +1558,11 @@ the moderator did and restates it with `voice_deafen`.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
-The destination is checked against the TARGET's `CONNECT_VOICE` (a move must not
-place someone where they could not go themselves) and against the destination's
-`voice_max_users`. The server then runs its voice-leave routine for the target —
-`voice_leave` is broadcast, the LiveKit participant is removed, the row deleted
-— and sends the target `voice_moved`. The target's client answers with an
+The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
+DM, `READ_MESSAGES` (a move must not place someone where they could not go
+themselves) and against the destination's `voice_max_users`. The server then
+runs its voice-leave routine for the target — `voice_leave` is broadcast, the
+LiveKit participant is removed, the row deleted — and sends the target `voice_moved`. The target's client answers with an
 ordinary `voice_join` for the destination, so capacity, token minting and
 key-holder election keep their single implementation.
 
