@@ -61,6 +61,11 @@ export function clearEmbedCaches(): void {
 
 // -- OG fetch -----------------------------------------------------------------
 
+function nonBlank(text: string | null): string | null {
+  const trimmed = text?.trim() ?? "";
+  return trimmed === "" ? null : trimmed;
+}
+
 /** Fetch OG metadata for a URL through the external-content broker, which
  *  owns the whole destination policy (resolved-address classification,
  *  redirects, time/byte/type ceilings) and parses the page natively — the
@@ -88,10 +93,10 @@ function fetchOgMeta(url: string): Promise<OgLoad> {
       load = {
         ok: true,
         meta: {
-          title: result.value.title,
-          description: result.value.description,
+          title: nonBlank(result.value.title),
+          description: nonBlank(result.value.description),
           image: result.value.image,
-          siteName: result.value.siteName,
+          siteName: nonBlank(result.value.siteName),
         },
       };
     } else {

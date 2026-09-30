@@ -202,6 +202,37 @@ describe("renderGenericLinkPreview", () => {
     expect(card.hidden).toBe(true);
   });
 
+  it("adds no card when the preview's text is only blank strings", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: "  ", description: "", siteName: "", image: null },
+    });
+
+    const card = renderGenericLinkPreview("https://blank.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("empty");
+    });
+    expect(card.hidden).toBe(true);
+  });
+
+  it("names a blank-titled preview by its host", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: "", description: "Some text", siteName: " ", image: null },
+    });
+
+    const card = renderGenericLinkPreview("https://untitled.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("loaded");
+    });
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("untitled.example.com");
+    expect(card.querySelector(".msg-embed-host")?.textContent).toBe("untitled.example.com");
+  });
+
   it("keeps a pending card's link out of the tab order until it has content", async () => {
     const settle = deferredPreview();
 
