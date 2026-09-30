@@ -128,6 +128,67 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_TouchSlidesExpiry pins DP-05 through the REST path: a
+// request after the throttle interval slides expires_at, and a second request
+// inside the interval writes nothing.
+func TestAuthMiddleware_TouchSlidesExpiry(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser(context.Background(), "slider", "hash", 4)
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+
+	t0 := time.Now()
+	clock := t0
+	api.SetMiddlewareClockForTest(t, func() time.Time { return clock })
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
+
+	// A near-expiry sentinel: still valid, but well short of a fresh window.
+	sentinel := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	backdate := func() {
+		t.Helper()
+		if _, err := database.ExecContext(context.Background(),
+			`UPDATE sessions SET expires_at = ? WHERE token = ?`, sentinel, hash); err != nil {
+			t.Fatalf("backdating expires_at: %v", err)
+		}
+	}
+	expiresAt := func() string {
+		t.Helper()
+		sess, err := database.GetSessionByTokenHash(context.Background(), hash)
+		if err != nil || sess == nil {
+			t.Fatalf("GetSessionByTokenHash: %v (sess=%v)", err, sess)
+		}
+		return sess.ExpiresAt
+	}
+	do := func() {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+	}
+
+	backdate()
+	do()
+	if expiresAt() <= sentinel {
+		t.Fatal("first request did not slide expires_at")
+	}
+
+	backdate()
+	clock = t0.Add(30 * time.Second)
+	do()
+	if expiresAt() != sentinel {
+		t.Error("request within the throttle interval wrote expires_at; want it skipped")
+	}
+
+	clock = t0.Add(61 * time.Second)
+	do()
+	if expiresAt() <= sentinel {
+		t.Error("request 61s after the last touch did not slide expires_at")
+	}
+}
+
 func TestAuthMiddleware_MissingToken(t *testing.T) {
 	database := newAPITestDB(t)
 
