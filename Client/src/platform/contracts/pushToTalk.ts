@@ -15,4 +15,9 @@ export interface PushToTalk {
   updateKey(vk: number): Promise<void>;
   /** Capture the next key press for the binding UI. */
   captureKeyPress(): Promise<number>;
+  /** Whether this platform can observe global key state at all. False on
+   *  macOS and on a pure-Wayland Linux session, where PTT can never gate the
+   *  mic; the Settings tab discloses the gap instead of promising a shortcut
+   *  that cannot fire (voice #12). */
+  supported(): Promise<boolean>;
 }

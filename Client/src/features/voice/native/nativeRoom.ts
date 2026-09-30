@@ -45,7 +45,7 @@ import { nativeCounters } from "./counters";
 const DECRYPT_GRACE_MS = 3000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { CameraUplink } from "./cameraUplink";
-import { NativeScreenTrack, startError } from "./screenTrack";
+import { NativeScreenTrack, startError, isDeviceFallback } from "./screenTrack";
 import { pickScreenSource } from "./screenPicker";
 
 const log = createLogger("nativeRoom");
@@ -266,11 +266,19 @@ export class NativeRoom {
     if (kind !== "audioinput" && kind !== "audiooutput") return false;
     // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
     if (this.sessionId === null) throw new Error("native room is not connected");
-    await desktop.nativeVoice.setDevice(
-      this.sessionId,
-      kind,
-      deviceId === "default" ? "" : deviceId,
-    );
+    try {
+      await desktop.nativeVoice.setDevice(
+        this.sessionId,
+        kind,
+        deviceId === "default" ? "" : deviceId,
+      );
+    } catch (err) {
+      // The host reports "device not found; switched to the default" as a
+      // rejection, but the switch itself succeeded — surface it as success,
+      // not "mic failed" (voice #19). A real failure still rejects.
+      if (isDeviceFallback(err)) return true;
+      throw err;
+    }
     return true;
   }
 

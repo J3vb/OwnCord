@@ -181,12 +181,14 @@ describePushToTalkSuite(async () => {
     stop: async () => undefined,
     updateKey: async () => undefined,
     captureKeyPress: async () => undefined,
+    supported: async () => undefined,
   } as unknown as PushToTalk;
   const native: PushToTalkNativeControl = {
     captureSucceedsWith: () => undefined,
     captureFailsWith: () => undefined,
     configuredKey: () => undefined,
     pollingStarted: () => false,
+    pollingSupported: () => undefined,
   };
   return { subject, native };
 }, failEveryTest);

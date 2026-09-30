@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockCaptureKeyPress = vi.fn();
 const mockUpdatePttKey = vi.fn();
+const mockPttSupported = vi.fn(async () => true);
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
 vi.mock("@lib/ptt", () => ({
@@ -11,6 +12,7 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: {
     captureKeyPress: (...args: unknown[]) => mockCaptureKeyPress(...args),
     updateKey: (...args: unknown[]) => mockUpdatePttKey(...args),
+    supported: () => mockPttSupported(),
   },
 }));
 // U6: the tab discloses whether global (unfocused) shortcuts are available.
@@ -502,5 +504,16 @@ describe("KeybindsTab", () => {
         "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
       );
     });
+  });
+
+  it("disables PTT and discloses the gap where key polling is unsupported (voice #12)", async () => {
+    mockPttSupported.mockResolvedValue(false);
+    const el = buildKeybindsTab(new AbortController().signal);
+    const pttBtn = el.querySelector('[aria-label="Push to Talk keybind — click to capture"]') as HTMLButtonElement;
+    await vi.waitFor(() => {
+      expect(pttBtn.disabled).toBe(true);
+    });
+    // The hint says why, in the same region the capture button lives.
+    expect(el.textContent).toContain("Push to Talk needs global key observation");
   });
 });

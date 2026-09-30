@@ -20,6 +20,10 @@ const log = createLogger("nativeCamera");
 /** Upload formats the backend converts, keyed by `VideoFrame.format`. */
 const FORMATS: Record<string, number> = { RGBA: 1, RGBX: 1, BGRA: 2, BGRX: 2, I420: 3, NV12: 4 };
 const HEADER_BYTES = 9 * 4;
+/** Consecutive frame-send failures before the loopback socket is reopened. */
+const MAX_SEND_FAILURES = 60;
+/** How long to wait before reopening a dropped loopback frame socket. */
+const RECONNECT_DELAY_MS = 1000;
 
 /** Header: format, width, height, then offset/stride of up to three planes
  *  (offsets relative to the pixel data after the header), all u32 LE. */
@@ -62,28 +66,53 @@ export async function encodeFrame(
 }
 
 export class CameraUplink {
-  private readonly socket: WebSocket;
+  private socket: WebSocket;
   private readonly video = document.createElement("video");
   private canvas: CanvasRenderingContext2D | null = null;
   private callback = 0;
   private lastSent = -Infinity;
   private busy = false;
   private disposed = false;
+  /** Consecutive send failures; the socket is reopened once this reaches the
+   *  bound, so a dropped loopback socket resumes instead of freezing the tile
+   *  for the rest of the call (voice #13). */
+  private failures = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** `url`: the frame socket's `/camera` route. */
   constructor(
-    url: string,
+    private readonly url: string,
     track: MediaStreamTrack,
     private readonly maxFramerate: number,
   ) {
-    this.socket = new WebSocket(url);
-    this.socket.binaryType = "arraybuffer";
+    this.socket = this.openSocket();
     this.video.muted = true;
     this.video.playsInline = true;
     this.video.srcObject = new MediaStream([track]);
     this.video.play().catch((err: unknown) => log.warn("camera pump did not start", err));
     this.callback = this.video.requestVideoFrameCallback(this.onFrame);
     nativeCounters.cameraUplinks++;
+  }
+
+  private openSocket(): WebSocket {
+    const socket = new WebSocket(this.url);
+    socket.binaryType = "arraybuffer";
+    // A close (the host restarted or the session's frame server dropped the
+    // socket) must not leave the pump sending into a dead socket forever.
+    socket.addEventListener("close", () => this.scheduleReconnect());
+    return socket;
+  }
+
+  /** Reopen the frame socket after a short cooldown. Guarded so a close and a
+   *  failure burst cannot each spawn a socket. */
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnectTimer !== null) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.disposed) return;
+      this.socket = this.openSocket();
+      this.failures = 0;
+    }, RECONNECT_DELAY_MS);
   }
 
   private readonly onFrame = (now: number): void => {
@@ -99,7 +128,14 @@ export class CameraUplink {
     this.lastSent = now;
     this.busy = true;
     void this.send()
-      .catch((err: unknown) => log.warn("camera frame dropped", err))
+      .then(() => {
+        this.failures = 0;
+      })
+      .catch((err: unknown) => {
+        log.warn("camera frame dropped", err);
+        this.failures++;
+        if (this.failures >= MAX_SEND_FAILURES) this.scheduleReconnect();
+      })
       .finally(() => {
         this.busy = false;
       });
@@ -135,6 +171,10 @@ export class CameraUplink {
     if (this.disposed) return;
     this.disposed = true;
     nativeCounters.cameraUplinks--;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.video.cancelVideoFrameCallback(this.callback);
     this.video.srcObject = null;
     this.socket.close();

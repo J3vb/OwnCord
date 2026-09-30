@@ -16,6 +16,7 @@ const listen = vi.fn();
 let configuredVk = 0;
 let captureBehavior: () => Promise<number> = () => Promise.reject(new Error("not configured"));
 let pollingLive = false;
+let pollingSupported = true;
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
@@ -50,10 +51,11 @@ describePushToTalkSuite(async () => {
   vi.resetModules();
   configuredVk = 0;
   pollingLive = false;
+  pollingSupported = true;
   captureBehavior = () => Promise.reject(new Error("not configured"));
   invoke.mockReset().mockImplementation((cmd: string) => {
     if (cmd === "ptt_listen_for_key") return captureBehavior();
-    if (cmd === "ptt_polling_supported") return Promise.resolve(true);
+    if (cmd === "ptt_polling_supported") return Promise.resolve(pollingSupported);
     return Promise.resolve(undefined);
   });
   listen.mockReset().mockResolvedValue(() => {});
@@ -75,6 +77,9 @@ describePushToTalkSuite(async () => {
       },
       pollingStarted() {
         return pollingLive;
+      },
+      pollingSupported(v: boolean) {
+        pollingSupported = v;
       },
     },
   };

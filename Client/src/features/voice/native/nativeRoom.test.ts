@@ -37,6 +37,7 @@ const host = vi.hoisted(() => ({
     frames: "ws://127.0.0.1:9/tok",
   }),
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
+  setDevice: (): Promise<void> => Promise.resolve(),
   pick: (): Promise<unknown> =>
     Promise.resolve({
       source: "screen:7",
@@ -117,7 +118,7 @@ vi.mock("../../../platform/desktop", () => ({
       },
       setDevice: (...args: unknown[]) => {
         host.calls.push(["setDevice", args]);
-        return Promise.resolve();
+        return host.setDevice();
       },
       publishCamera: (...args: unknown[]) => {
         host.calls.push(["publishCamera", args]);
@@ -289,6 +290,17 @@ describe("NativeRoom device switching", () => {
       ["setDevice", [1, "audioinput", "guid-mic"]],
       ["setDevice", [1, "audiooutput", ""]],
     ]);
+  });
+
+  it("treats the host's fallback-to-default as a successful switch (voice #19)", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    host.setDevice = () => Promise.reject("capture device gone; switched to the default");
+    await expect(room.switchActiveDevice("audioinput", "gone")).resolves.toBe(true);
+
+    // A real failure still rejects.
+    host.setDevice = () => Promise.reject("no capture device");
+    await expect(room.switchActiveDevice("audioinput", "gone")).rejects.toThrow();
   });
 });
 

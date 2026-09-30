@@ -39,10 +39,19 @@ describe("parseI420", () => {
 
 class FakeSocket {
   static last: FakeSocket;
+  static instances: FakeSocket[] = [];
+  static readonly OPEN = 1;
+  readyState = 1;
   binaryType = "";
   deliver: ((e: { data: ArrayBuffer }) => void) | null = null;
-  addEventListener(_type: "message", handler: (e: { data: ArrayBuffer }) => void) {
-    this.deliver = handler;
+  private listeners: Record<string, Array<() => void>> = {};
+  addEventListener(type: string, handler: (e: { data: ArrayBuffer }) => void) {
+    if (type === "message") this.deliver = handler;
+    else (this.listeners[type] ??= []).push(handler as () => void);
+  }
+  emitClose() {
+    this.closed = true;
+    for (const cb of this.listeners["close"] ?? []) cb();
   }
   closed = false;
   sent: ArrayBuffer[] = [];
@@ -51,6 +60,7 @@ class FakeSocket {
   }
   constructor(readonly url: string) {
     FakeSocket.last = this;
+    FakeSocket.instances.push(this);
   }
   close() {
     this.closed = true;
@@ -66,6 +76,7 @@ describe("NativeVideoRenderer", () => {
   };
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeSocket);
+    FakeSocket.instances = [];
     gl.uploads.length = 0;
     gl.draws = 0;
     gl.lost = 0;
@@ -149,5 +160,22 @@ describe("NativeVideoRenderer", () => {
     expect(stop).toHaveBeenCalled();
     expect(gl.lost).toBe(1);
     expect(nativeCounters.videoRenderers).toBe(0);
+  });
+
+  it("reopens the loopback socket after the host closes it (voice #13)", async () => {
+    const renderer = new NativeVideoRenderer("ws://x/remote/sid");
+    const first = FakeSocket.last;
+    first.emitClose();
+    await vi.waitFor(
+      () => {
+        expect(FakeSocket.instances).toHaveLength(2);
+      },
+      { timeout: 3000 },
+    );
+    expect(FakeSocket.last).not.toBe(first);
+    // The new socket draws again.
+    FakeSocket.last.deliver!({ data: message(4, 2) });
+    expect(gl.draws).toBe(1);
+    renderer.dispose();
   });
 });

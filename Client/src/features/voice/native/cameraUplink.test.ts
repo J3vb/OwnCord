@@ -70,14 +70,24 @@ describe("camera upload messages", () => {
 
 class FakeSocket {
   static readonly OPEN = 1;
-  static last: FakeSocket;
+  static instances: FakeSocket[] = [];
   readyState = 1;
   bufferedAmount = 0;
   binaryType = "";
   sent: ArrayBuffer[] = [];
   closed = false;
+  private listeners: Record<string, Array<() => void>> = {};
   constructor(readonly url: string) {
+    FakeSocket.instances.push(this);
     FakeSocket.last = this;
+  }
+  addEventListener(type: string, cb: () => void) {
+    (this.listeners[type] ??= []).push(cb);
+  }
+  /** Simulate the host closing the loopback socket. */
+  emitClose() {
+    this.closed = true;
+    for (const cb of this.listeners["close"] ?? []) cb();
   }
   send(data: ArrayBuffer) {
     this.sent.push(data);
@@ -99,6 +109,7 @@ describe("CameraUplink", () => {
     frameCallback = null;
     cancelled.length = 0;
     nativeCounters.cameraUplinks = 0;
+    FakeSocket.instances = [];
     const proto = HTMLVideoElement.prototype as unknown as Record<string, unknown>;
     proto.requestVideoFrameCallback = (cb: (now: number) => void) => {
       frameCallback = cb;
@@ -144,5 +155,39 @@ describe("CameraUplink", () => {
     frameCallback!(5000);
     await flush();
     expect(socket.sent).toHaveLength(0);
+  });
+
+  it("reopens the frame socket after the host closes it", async () => {
+    const uplink = new CameraUplink("ws://127.0.0.1:9/tok/camera", {} as MediaStreamTrack, 30);
+    const first = FakeSocket.last;
+    first.emitClose();
+    await vi.waitFor(
+      () => {
+        expect(FakeSocket.instances).toHaveLength(2);
+      },
+      { timeout: 3000 },
+    );
+    expect(FakeSocket.last).not.toBe(first);
+    uplink.dispose();
+  });
+
+  it("reopens the frame socket after a burst of send failures", async () => {
+    const uplink = new CameraUplink("ws://127.0.0.1:9/tok/camera", {} as MediaStreamTrack, 30);
+    const first = FakeSocket.last;
+    first.send = () => {
+      throw new Error("socket dead");
+    };
+    // 60 failures at 30 fps: drive the pump enough times to cross the bound.
+    for (let i = 0; i < 61; i++) {
+      frameCallback!(1000 + i * 100);
+      await flush();
+    }
+    await vi.waitFor(
+      () => {
+        expect(FakeSocket.instances.length).toBeGreaterThan(1);
+      },
+      { timeout: 3000 },
+    );
+    uplink.dispose();
   });
 });

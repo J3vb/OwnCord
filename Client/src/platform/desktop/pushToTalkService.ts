@@ -378,9 +378,21 @@ async function captureKeyPress(): Promise<number> {
   return invoke<number>("ptt_listen_for_key");
 }
 
+/** Whether the host can observe global key state (false on macOS / pure
+ *  Wayland, where PTT never gates). A missing bridge (dev/test) is false. */
+async function pttSupported(): Promise<boolean> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<boolean>("ptt_polling_supported");
+  } catch {
+    return false;
+  }
+}
+
 export const pushToTalk: PushToTalk = {
   init: initPtt,
   stop: stopPtt,
   updateKey: updatePttKey,
   captureKeyPress,
+  supported: pttSupported,
 };

@@ -13,6 +13,8 @@ export interface NativeControl {
   configuredKey(vk: number): void;
   /** The binding's own bookkeeping of whether native key polling is running. */
   pollingStarted(): boolean;
+  /** Whether the host reports that it can observe global key state. */
+  pollingSupported(v: boolean): void;
 }
 
 export interface PushToTalkSubject {
@@ -85,6 +87,15 @@ export function describePushToTalkSuite(
 
         await ctx.subject.updateKey(0);
         expect(ctx.native.pollingStarted()).toBe(false);
+      });
+    });
+
+    describe("supported", () => {
+      check("reports what the host says about global key observation", async () => {
+        ctx.native.pollingSupported(false);
+        await expect(ctx.subject.supported()).resolves.toBe(false);
+        ctx.native.pollingSupported(true);
+        await expect(ctx.subject.supported()).resolves.toBe(true);
       });
     });
   });
