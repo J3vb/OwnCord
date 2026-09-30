@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"fmt"
+	"iter"
 	"log/slog"
 
 	"github.com/coder/websocket"
@@ -73,21 +74,25 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
 //
-// members is shared with other ready payloads: each element is copied, never
-// changed in place.
-func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) []db.MemberSummary {
+// It yields members[i] as presented at index i, and changes only Status and
+// CustomStatus, the latter only to nil: writeReadyMembers splices exactly
+// those two into each member's cached encoding. members is shared with other
+// ready payloads: each element is copied, never changed in place.
+func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
 	live := h.liveStatuses()
-	out := make([]db.MemberSummary, 0, len(members))
-	for _, m := range members {
-		if status := live[m.ID]; status != "" {
-			m.Status = status
-		} else {
-			m.Status = db.StatusOffline
-			m.CustomStatus = nil
+	return func(yield func(int, db.MemberSummary) bool) {
+		for i, m := range members {
+			if status := live[m.ID]; status != "" {
+				m.Status = status
+			} else {
+				m.Status = db.StatusOffline
+				m.CustomStatus = nil
+			}
+			if !yield(i, m.ForViewer(viewerID)) {
+				return
+			}
 		}
-		out = append(out, m.ForViewer(viewerID))
 	}
-	return out
 }
 
 // presentableDMChannels applies presentableMembers' "no live connection means
@@ -366,11 +371,11 @@ func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, u
 	return ackMap
 }
 
-// buildReady constructs the ready server→client message.
+// readReady reads everything the ready server→client message carries.
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
+func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyFields, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -380,11 +385,10 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
 	}
 
-	members, err := h.readyMembers(ctx, database)
+	roster, err := h.readyMembers(ctx, database)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
 	}
-	members = h.presentableMembers(members, userID)
 
 	visibleChannels, overrides, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
 	if err != nil {
@@ -437,24 +441,26 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
 
-	return buildJSON(map[string]any{
-		"type": MsgTypeReady,
-		"payload": map[string]any{
-			"capabilities": map[string]any{
+	return &readyFields{
+		head: readyHead{
+			Capabilities: map[string]any{
 				"message_deduplication":        true,
 				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
 				"message_retry_floor_ms":       retryFloorMS,
 			},
-			"channels":     channelPayloads,
-			"members":      members,
-			"voice_states": voiceStates,
-			"roles":        roles,
-			"dm_channels":  dmChannels,
-			"server_name":  serverName,
-			"motd":         motd,
-			"notices":      notices,
+			Channels:   channelPayloads,
+			DMChannels: dmChannels,
 		},
-	}), nil
+		tail: readyTail{
+			MOTD:        motd,
+			Notices:     notices,
+			Roles:       roles,
+			ServerName:  serverName,
+			VoiceStates: voiceStates,
+		},
+		roster:   roster,
+		viewerID: userID,
+	}, nil
 }
 
 // readyNoticePayload is one row of ready's notices slot (B5-9): an
@@ -587,13 +593,14 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		return err
 	}
 	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
-		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
-		if err := handshakeWrite(ctx, conn, ready); err != nil {
+		n, err := h.handshakeWriteReady(ctx, conn, ready)
+		if err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 			return err
 		}
+		slog.Info("ws sent ready payload", "user_id", c.userID, "payload_bytes", n)
 	} else {
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
 		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))

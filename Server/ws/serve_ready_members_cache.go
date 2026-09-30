@@ -1,7 +1,9 @@
 package ws
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -31,9 +33,59 @@ type memberCache struct {
 	mu      syncutil.Mutex
 	filled  bool
 	gen     int64
-	lapseAt string             // NextMemberBanLapse at the read; "" = none pending
-	members []db.MemberSummary // shared by every caller: read-only
+	lapseAt string        // NextMemberBanLapse at the read; "" = none pending
+	roster  *memberRoster // shared by every caller: read-only
 	flight  singleflight.Group
+}
+
+// memberRoster is one generation's member list with each member's JSON
+// encoded once (P5-O01), so a ready writes it instead of re-encoding the
+// whole roster per viewer.
+type memberRoster struct {
+	members []db.MemberSummary
+	enc     []memberJSON // enc[i] encodes members[i]
+}
+
+// memberJSON is one member's encoding split around the two fields
+// presentableMembers decides per viewer: head, the status, mid, then the
+// custom_status (last), then "}" is json.Marshal of the presented member.
+type memberJSON struct {
+	head   []byte // `{"id":…,"status":`
+	mid    []byte // `,"role":…,"custom_status":`
+	custom []byte // the encoded custom_status; nil when unset
+}
+
+var (
+	emptyStatusField = []byte(`"status":""`)
+	nullCustomTail   = []byte(`"custom_status":null}`)
+)
+
+// encodeRoster encodes every member once. The split points are found in
+// json.Marshal's own output, so the verbatim parts follow MemberSummary's
+// tags. A string value cannot hold emptyStatusField: its quotes would be
+// escaped.
+func encodeRoster(members []db.MemberSummary) (*memberRoster, error) {
+	enc := make([]memberJSON, len(members))
+	for i, m := range members {
+		custom := m.CustomStatus
+		m.Status, m.CustomStatus = "", nil
+		b, err := json.Marshal(m)
+		if err != nil {
+			return nil, fmt.Errorf("encodeRoster: %w", err)
+		}
+		at := bytes.Index(b, emptyStatusField)
+		if at < 0 || !bytes.HasSuffix(b, nullCustomTail) {
+			return nil, fmt.Errorf("encodeRoster: member %d: status or custom_status is not where the splice expects", m.ID)
+		}
+		enc[i].head = b[:at+len(emptyStatusField)-len(`""`)]
+		enc[i].mid = b[at+len(emptyStatusField) : len(b)-len("null}")]
+		if custom != nil {
+			if enc[i].custom, err = json.Marshal(*custom); err != nil {
+				return nil, fmt.Errorf("encodeRoster: %w", err)
+			}
+		}
+	}
+	return &memberRoster{members: members, enc: enc}, nil
 }
 
 // sqliteNow renders the current instant as ListMembers' ban-lapse comparison
@@ -43,31 +95,31 @@ func sqliteNow() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05Z")
 }
 
-// lookup returns the cached list when it is at least as new as gen and no
+// lookup returns the cached roster when it is at least as new as gen and no
 // ban it hides has lapsed since.
-func (c *memberCache) lookup(gen int64) ([]db.MemberSummary, bool) {
+func (c *memberCache) lookup(gen int64) (*memberRoster, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.filled || c.gen < gen || (c.lapseAt != "" && sqliteNow() >= c.lapseAt) {
 		return nil, false
 	}
-	return c.members, true
+	return c.roster, true
 }
 
-// store keeps members as the cached list unless a read at a newer generation
+// store keeps roster as the cached one unless a read at a newer generation
 // already landed: a slow read that started before a write must not replace
 // the list read after it.
-func (c *memberCache) store(gen int64, lapseAt string, members []db.MemberSummary) {
+func (c *memberCache) store(gen int64, lapseAt string, roster *memberRoster) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.filled && c.gen > gen {
 		return
 	}
-	c.filled, c.gen, c.lapseAt, c.members = true, gen, lapseAt, members
+	c.filled, c.gen, c.lapseAt, c.roster = true, gen, lapseAt, roster
 }
 
 // readyMembers returns the member roster for one ready payload, shared with
-// every concurrent and later ready at the same member generation. The slice
+// every concurrent and later ready at the same member generation. The roster
 // is shared: callers copy before changing an element (presentableMembers
 // does).
 //
@@ -77,13 +129,13 @@ func (c *memberCache) store(gen int64, lapseAt string, members []db.MemberSummar
 // that read the same generation share one flight: a caller that read
 // generation g started after every member write up to g committed, and the
 // flight for g read its list after that too.
-func (h *Hub) readyMembers(ctx context.Context, database ReadySnapshotReader) ([]db.MemberSummary, error) {
+func (h *Hub) readyMembers(ctx context.Context, database ReadySnapshotReader) (*memberRoster, error) {
 	gen, err := database.MemberGeneration(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if members, ok := h.members.lookup(gen); ok {
-		return members, nil
+	if roster, ok := h.members.lookup(gen); ok {
+		return roster, nil
 	}
 	v, err, _ := h.members.flight.Do(strconv.FormatInt(gen, 10), func() (any, error) {
 		// Detached from the first caller's handshake: that client giving up
@@ -99,15 +151,19 @@ func (h *Hub) readyMembers(ctx context.Context, database ReadySnapshotReader) ([
 		if err != nil {
 			return nil, err
 		}
-		h.members.store(gen, lapseAt, members)
-		return members, nil
+		roster, err := encodeRoster(members)
+		if err != nil {
+			return nil, err
+		}
+		h.members.store(gen, lapseAt, roster)
+		return roster, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	members, ok := v.([]db.MemberSummary)
+	roster, ok := v.(*memberRoster)
 	if !ok {
 		return nil, fmt.Errorf("readyMembers: unexpected flight result %T", v)
 	}
-	return members, nil
+	return roster, nil
 }
