@@ -106,18 +106,20 @@ rate, which the writer remedies in the scaling phase target.
 #### Open-file limit (file descriptors)
 
 Every WebSocket holds one file descriptor, so a server's connection count is
-bounded by `RLIMIT_NOFILE`. The traditional Linux soft limit is **1,024**,
-which a few hundred online will reach and 2,000 online (about 2,100
-descriptors with the process's own files) will not. The server **raises its
-soft limit to the hard limit at start-up** and logs the result, so the number
-that matters is the **hard limit** the supervisor or the shell sets:
+bounded by `RLIMIT_NOFILE`. The Go runtime already lifts the soft limit to
+just under the hard one at init, and the server **raises its soft limit to the
+hard limit at start-up** and logs the result, so the number that matters is the
+**hard limit** the supervisor or the shell sets. The risk is a low hard limit
+— a plain `ulimit -n 1024`, or an old daemon or unit default of 1,024 — which a
+few hundred online will reach and 2,000 online (about 2,100 descriptors with
+the process's own files) will not:
 
 - **systemd:** the shipped `deploy/owncord.service` sets `LimitNOFILE=65536`,
   which carries about 2,000 connections with headroom. Raise it (or set
   `infinity`) for a larger server.
 - **Docker Compose:** the shipped `Server/docker-compose.yml` sets
-  `ulimits.nofile` to 65,536. Docker's default is inherited from the host
-  daemon and is often 1,024.
+  `ulimits.nofile` to 65,536. Without it the hard limit is whatever the host
+  daemon passes down, which an old or tuned-down daemon can set to 1,024.
 - **Bare binary:** set `ulimit -n` (soft and hard) in the shell or run script
   that starts the server, or the `LimitNOFILE` equivalent in your supervisor.
 
@@ -125,10 +127,10 @@ The server warns at boot if the resulting limit is below
 `2 × max_ws_connections + 256` — the descriptors that many connections need,
 doubled for headroom, with a fixed allowance for the database, LiveKit, TLS and
 the rest of the process. When `server.max_ws_connections` is unset
-(unlimited), the budget is the 2,000-online target: 4,256. A server started under `ulimit -n 1024`
-therefore either reports a raised limit in its log or warns that the hard
-limit is too low, rather than failing at 1,000 connections with
-`too many open files`.
+(unlimited), the budget is the 2,000-online target: 4,256. A server started
+under `ulimit -n 1024` therefore either reports a raised limit in its log or
+warns that the hard limit is too low, rather than failing at 1,000 connections
+with `too many open files`.
 
 ## Configuration
 

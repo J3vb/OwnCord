@@ -294,11 +294,12 @@ in its header comments. The important choices it encodes:
   `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
   user.
 - `LimitNOFILE=65536` — the open-file ceiling. Each WebSocket holds a
-  descriptor, and the server raises its soft limit to the hard one at
-  start-up, so this hard limit is the real cap on how many people can be
-  online (see [Open-file limit](#open-file-limit-file-descriptors)). 65,536
-  carries about 2,000 connections; systemd's inherited default is often 1,024,
-  which a few hundred online will reach.
+  descriptor. The Go runtime already lifts the soft limit to just under the
+  hard one at init, and the server raises it the rest of the way, so this hard
+  limit is the real cap on how many people can be online (see
+  [Open-file limit](#open-file-limit-file-descriptors)). 65,536 carries about
+  2,000 connections; an old systemd default hard limit of 1,024 would stop at a
+  few hundred online.
 
 Pair it with the scheduled backups in the admin panel — or an external cron
 line (see Backup Strategy below) if you prefer driving backups outside the
@@ -1198,19 +1199,21 @@ The reading of these and the other growth signals is covered once, under
 ### Open-file limit (file descriptors)
 
 Every WebSocket holds a file descriptor, so the number of people who can be
-online at once is bounded by the process's `RLIMIT_NOFILE`. The traditional
-Linux soft limit is **1,024** — enough for a small community but not for
-1,000–2,000, which need about 2,100 descriptors. The server **raises its soft
-limit to the hard limit at start-up** and logs the result under `open-file
-limit`; the number that matters is therefore the **hard** limit, which the
-supervisor or shell sets:
+online at once is bounded by the process's `RLIMIT_NOFILE`. The Go runtime
+already lifts the soft limit to just under the hard one at init, and the server
+**raises its soft limit to the hard limit at start-up** and logs the result
+under `open-file limit`; the number that matters is therefore the **hard**
+limit, which the supervisor or shell sets. The risk is a low hard limit — a
+plain `ulimit -n 1024`, or an old daemon or unit default of 1,024 — enough for
+a small community but not for 1,000–2,000, which need about 2,100 descriptors:
 
 - **systemd:** `LimitNOFILE=65536` in the unit (the shipped
   [`deploy/owncord.service`](../deploy/owncord.service) sets it), or
   `infinity`. `systemctl edit owncord` overrides it without touching the file.
 - **Docker Compose:** `ulimits.nofile` on the `owncord` service (the shipped
-  `Server/docker-compose.yml` sets 65,536). Docker's own default is inherited
-  from the host daemon and is often 1,024.
+  `Server/docker-compose.yml` sets 65,536). Without it the hard limit is
+  whatever the host daemon passes down, which an old or tuned-down daemon can
+  set to 1,024.
 - **Bare binary or another supervisor:** set the soft and hard limit with
   `ulimit -n` (or `LimitNOFILE`-equivalent) before the server starts.
 
@@ -1218,9 +1221,9 @@ The server also warns at boot when the resulting limit is below
 `2 × max_ws_connections + 256` — the descriptors that many connections need,
 doubled for headroom, plus a fixed allowance for the database, LiveKit, TLS
 and the rest of the process. With `server.max_ws_connections` unset
-(unlimited), the budget is the 2,000-online target: 4,256. A server started under `ulimit -n 1024` reports a
-raised limit or a warning naming this setting, never a silent fall-over at
-1,000 connections.
+(unlimited), the budget is the 2,000-online target: 4,256. A server started
+under `ulimit -n 1024` reports a raised limit or a warning naming this setting,
+never a silent fall-over at 1,000 connections.
 
 ## Monitoring
 
