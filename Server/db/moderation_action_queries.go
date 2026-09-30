@@ -258,7 +258,7 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 }
 
 // TimeoutUser writes a timeout row with the given expiry — its entire
-// effect is the row, read back by HasActiveTimeout through the predicates —
+// effect is the row, read back into Subject.TimedOut for the predicates —
 // and, in the same transaction, supersedes (lifts) any other still-active
 // timeout row for targetID (P2-9, Codex review): without this a repeated
 // timeout left overlapping active rows and LiftTimeout only ever reached the

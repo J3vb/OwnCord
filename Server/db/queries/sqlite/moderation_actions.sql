@@ -68,7 +68,8 @@ SELECT id FROM moderation_actions
 
 -- name: ListActiveTimeoutExpiries :many
 -- Every currently-active timeout's target and expiry, across all users, so
--- the hub can re-arm its in-memory expiry refresh after a restart.
+-- the hub can re-arm its in-memory expiry refresh after a restart and
+-- service.PermissionService can load its active-timeout mirror (P5-O02).
 SELECT target_id, expires_at FROM moderation_actions
  WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
 

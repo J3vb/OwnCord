@@ -86,7 +86,7 @@ func (h *Hub) RearmTimeoutExpiries() {
 }
 
 // timeoutExpiryRefreshSlack is how long after a timeout's expires_at
-// NotifyModAction's scheduled refresh runs, so HasActiveTimeout already
+// NotifyModAction's scheduled refresh runs, so Subject.TimedOut already
 // reads it as expired.
 const timeoutExpiryRefreshSlack = time.Second
 
