@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"runtime"
 	"time"
 )
 
@@ -19,10 +20,18 @@ var pprofAddr = "127.0.0.1:6060"
 // the operator must ask for it and must reach the host to use it. The address
 // is fixed to loopback, not configurable, so enabling it can never expose the
 // profiler off-host. Nothing runs when the key is unset.
+//
+// Enabling it also turns on the block and mutex samplers (P5-O09): a CPU
+// profile alone cannot see contention on the single SQLite writer, and the
+// rates default to a useful value but are operator-overridable. They are set
+// only here, so a disabled profiler leaves runtime.SetBlockProfileRate and
+// runtime.SetMutexProfileFraction at their zero-overhead defaults.
 func (a *App) startPprof() error {
 	if !a.cfg.Server.PprofEnabled {
 		return nil
 	}
+	runtime.SetBlockProfileRate(a.cfg.Server.PprofBlockProfileRate)
+	runtime.SetMutexProfileFraction(a.cfg.Server.PprofMutexProfileFraction)
 	addr := pprofAddr
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
