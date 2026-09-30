@@ -226,16 +226,25 @@ describe("notifyIncomingMessage", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("notifies when window is focused but message is in a different channel", async () => {
+  it("with document.hasFocus() true and a message in a non-active channel, no OS notification and no taskbar flash fire", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+    mockOscillator.start.mockClear();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+    testPrefs.set("desktopNotifications", true);
+    testPrefs.set("flashTaskbar", true);
+    testPrefs.set("notificationSounds", true);
     const payload = makePayload({ channel_id: 1 });
     notifyIncomingMessage(payload);
-    await vi.waitFor(() => {
-      expect(sendNotification).toHaveBeenCalled();
-    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    expect(win.requestUserAttention).not.toHaveBeenCalled();
+    // D3 (b), Discord desktop: the chime still plays while focused.
+    expect(mockOscillator.start).toHaveBeenCalled();
   });
 
   it("suppresses @everyone when toggle is enabled", async () => {
@@ -1206,22 +1215,25 @@ describe("notifyIncomingMessage", () => {
       expect(sendNotification).not.toHaveBeenCalled();
     });
 
-    it("proceeds when window focused but channel DIFFERS", async () => {
+    it("suppresses popup and flash when window focused but channel DIFFERS (D3)", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
 
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
 
       testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("flashTaskbar", true);
       testPrefs.set("notificationSounds", false);
 
       notifyIncomingMessage(makePayload({ channel_id: 1 }));
 
-      await vi.waitFor(() => {
-        expect(sendNotification).toHaveBeenCalled();
-      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
 
     it("proceeds when window NOT focused even for active channel", async () => {
