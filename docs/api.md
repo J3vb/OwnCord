@@ -2001,7 +2001,7 @@ Upload a file as multipart form data.
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
 
-The file name is then checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
+Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
 #### Response 201 Created
 
@@ -3833,11 +3833,11 @@ does not bypass it.
 `upload_blocked_extensions` and `upload_allowed_extensions` are the upload
 file-type policy (see [`POST /api/v1/uploads`](#post-apiv1uploads)): extensions
 separated by commas or spaces, with or without the dot, stored lower-case,
-deduplicated and comma-separated. An entry holding a dot, a path or stream
-separator, a space or an invisible character, or longer than 32 bytes, is
-refused with `400`. A saved row replaces the matching config.yaml list;
-an empty allowed list turns allow-only mode off. Like the backup policy they
-need the **Owner** role (`403 FORBIDDEN` otherwise).
+deduplicated and comma-separated. An entry that is nothing but dots, holds a
+dot after its leading ones, a path or stream separator or an invisible
+character, or is longer than 32 bytes, is refused with `400`. A saved row
+replaces the matching config.yaml list; an empty allowed list turns allow-only
+mode off. Like the backup policy they need the **Owner** role (`403 FORBIDDEN` otherwise).
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change

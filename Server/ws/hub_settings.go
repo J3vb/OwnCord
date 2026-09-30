@@ -35,7 +35,8 @@ func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {
 }
 
 // refreshSettingsLocked reloads server_name and motd through the settings
-// reader, and upload_policy's extension lists. Caller must hold settingsMu (write lock) or call during init.
+// reader, and upload_policy's extension lists. Caller must hold settingsMu
+// (write lock) or call during init.
 func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 	// The refresh serves the hub-wide settings cache, not the connection that
 	// happened to trigger it — a dying connection's ctx must not fail the
