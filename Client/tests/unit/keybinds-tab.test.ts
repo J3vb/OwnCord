@@ -173,8 +173,8 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 3 Navigation + 3 Communication + 2 Global + 5 Messages = 14
-    expect(rows.length).toBe(14);
+    // 1 PTT + 5 Navigation + 3 Communication + 2 Global + 5 Messages = 16
+    expect(rows.length).toBe(16);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });

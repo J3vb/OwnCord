@@ -153,6 +153,9 @@ export function enableRovingNavigation(
         origin.click();
         return;
       }
+      // A modified arrow is an app shortcut (Alt+↑/↓ steps channels), not a
+      // move within this list.
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
 
       const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
       const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";

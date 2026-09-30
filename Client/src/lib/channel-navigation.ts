@@ -4,8 +4,15 @@
  * the same badges and leaves the app in the same state.
  */
 
-import { setActiveChannel, clearUnread, channelsStore } from "@stores/channels.store";
+import {
+  setActiveChannel,
+  clearUnread,
+  channelsStore,
+  getChannelsByCategory,
+} from "@stores/channels.store";
 import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
+import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
+import { hasUnread } from "./read-state";
 
 /**
  * Activate `channelId`, clearing its unread and mention badges.
@@ -71,4 +78,55 @@ export function findChannelByName(name: string): { id: number; name: string } | 
     if (ch.name.toLowerCase() === wanted) return { id: ch.id, name: ch.name };
   }
   return null;
+}
+
+/**
+ * The channels Alt+↑/↓ steps through, in the order they appear on screen.
+ * While the DM view is open that is the DM list, in its recency order, so a
+ * step never leaves the DMs for a server channel. Otherwise it is
+ * the grouped channel list (categories as headers, rows by position), with
+ * collapsed categories' hidden rows skipped. Voice channels are skipped too:
+ * opening one means joining the call, which a keyboard step must never do,
+ * and a bare setActiveChannel would mount its chat unjoined (F8).
+ */
+function navigableChannelIds(): number[] {
+  if (uiStore.getState().sidebarMode === "dms") {
+    return dmStore.getState().channels.map((c) => c.channelId);
+  }
+  const ids: number[] = [];
+  for (const [category, channels] of getChannelsByCategory()) {
+    if (category !== null && isCategoryCollapsed(category)) continue;
+    for (const ch of channels) if (ch.type !== "voice") ids.push(ch.id);
+  }
+  return ids;
+}
+
+/**
+ * DP-35: Alt+↑/↓ moves to the previous or next channel, Alt+Shift+↑/↓ to the
+ * previous or next unread channel. `direction` is 1 (down/next) or -1
+ * (up/previous); the steps wrap at the ends, matching Discord.
+ *
+ * Unread is what a badge counts (`hasUnread`): an unread or mention count in
+ * either store. No-op when nothing matches — an up step with the active
+ * channel already at the top, or an unread step when nothing is unread.
+ */
+export function stepChannel(direction: 1 | -1, unreadOnly = false): void {
+  const ids = navigableChannelIds();
+  if (ids.length === 0) return;
+  const current = channelsStore.getState().activeChannelId;
+  const from = current === null ? (direction === 1 ? -1 : 0) : ids.indexOf(current);
+  // An active channel that is not in the list (a DM in channels mode, or a
+  // channel filtered out) steps from the edge rather than bailing: Alt+↓ lands
+  // on the first entry, Alt+↑ on the last.
+  const start = from === -1 ? (direction === 1 ? -1 : ids.length) : from;
+  for (let step = 1; step <= ids.length; step++) {
+    const idx = (((start + direction * step) % ids.length) + ids.length) % ids.length;
+    const id = ids[idx]!;
+    if (!unreadOnly || hasUnread(id)) {
+      navigateToChannel(id);
+      const dm = dmStore.getState().channels.find((c) => c.channelId === id);
+      if (dm !== undefined) setActiveDmUser(dm.isGroup ? null : dm.recipient.id);
+      return;
+    }
+  }
 }

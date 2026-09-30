@@ -15,6 +15,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { findUnnamedControls } from "./support/b9-accessibility";
 import {
   buildTauriMockScript,
   mockTauriFullSessionWithVoice,
@@ -267,6 +268,69 @@ test.describe("DM sidebar — row context menu", () => {
       "Rename Group",
     );
     await expect(page.locator(`[data-testid='dm-close-${GROUP_DM_ID}']`)).toHaveText("Leave Group");
+  });
+
+  // DP-34: leaving a group is destructive and confirms first; a 1:1 hide does not.
+  test("leaving a group asks for confirmation before sending DELETE", async ({ page }) => {
+    const row = page.locator(`.dm-item[data-channel-id="${GROUP_DM_ID}"]`);
+
+    await openDmRowMenu(page, GROUP_DM_ID);
+    await page.locator(`[data-testid='dm-close-${GROUP_DM_ID}']`).click();
+
+    // The confirm is up, and nothing has been sent yet.
+    await expect(page.locator("[data-testid='dm-leave-modal']")).toBeVisible({ timeout: 3_000 });
+    expect((await fetchCalls(page)).some((c) => c.method === "DELETE")).toBe(false);
+
+    await page.locator("[data-testid='dm-leave-confirm']").click();
+
+    const call = await waitForCall(
+      page,
+      (c) => (c.url ?? "").includes(`/api/v1/dms/${GROUP_DM_ID}`) && c.method === "DELETE",
+    );
+    expect(call.method).toBe("DELETE");
+    await expect(row).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  test("the group-leave confirm is a named dialog and the ✕ title leads to it", async ({
+    page,
+  }) => {
+    const row = page.locator(`.dm-item[data-channel-id="${GROUP_DM_ID}"]`);
+    // The ✕ is hover-only; move the pointer onto the row to reveal it.
+    await row.hover();
+    await row.locator(".dm-close").click();
+
+    const dialog = page.getByRole("dialog", { name: "Leave this group?" });
+    await expect(dialog).toBeVisible({ timeout: 3_000 });
+    // Cancel is the first control and takes focus, so Enter cannot destroy by
+    // accident — the same shape DeleteChannelModal uses.
+    await expect(dialog.locator("[data-testid='dm-leave-cancel']")).toBeFocused();
+    expect(await findUnnamedControls(dialog)).toEqual([]);
+  });
+
+  test("cancelling the group-leave confirm leaves the group in place", async ({ page }) => {
+    const row = page.locator(`.dm-item[data-channel-id="${GROUP_DM_ID}"]`);
+
+    await openDmRowMenu(page, GROUP_DM_ID);
+    await page.locator(`[data-testid='dm-close-${GROUP_DM_ID}']`).click();
+    await page.locator("[data-testid='dm-leave-cancel']").click();
+
+    await expect(page.locator("[data-testid='dm-leave-modal']")).toBeHidden();
+    await expect(row).toBeVisible();
+    expect((await fetchCalls(page)).some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  test("a 1:1 close stays one click (no confirm)", async ({ page }) => {
+    const row = page.locator(`.dm-item[data-channel-id="${DM_ONE_TO_ONE_ID}"]`);
+
+    await openDmRowMenu(page, DM_ONE_TO_ONE_ID);
+    await page.locator(`[data-testid='dm-close-${DM_ONE_TO_ONE_ID}']`).click();
+
+    await expect(page.locator("[data-testid='dm-leave-modal']")).toHaveCount(0);
+    await waitForCall(
+      page,
+      (c) => (c.url ?? "").includes(`/api/v1/dms/${DM_ONE_TO_ONE_ID}`) && c.method === "DELETE",
+    );
+    await expect(row).not.toBeVisible({ timeout: 5_000 });
   });
 });
 

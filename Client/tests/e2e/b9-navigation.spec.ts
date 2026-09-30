@@ -158,6 +158,22 @@ test.describe("B9-4 shared navigation", () => {
     await expect(page.getByRole("dialog", { name: "Server Invites" })).toBeVisible();
   });
 
+  test("Alt+ArrowDown / Alt+ArrowUp step the channel list (DP-35)", async ({ page }) => {
+    const header = page.locator("[data-testid='chat-header-name']");
+    await expect(header).toHaveText("general");
+
+    // Switching channels focuses the composer, where a bare Alt+Arrow belongs
+    // to the field — blur so the document-level shortcut can see the key.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+    await page.keyboard.press("Alt+ArrowDown");
+    await expect(header).toHaveText("random");
+
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("Alt+ArrowUp");
+    await expect(header).toHaveText("general");
+  });
+
   test("channel → DM → back → settings → logout → sign in again keeps the shell whole", async ({
     page,
   }) => {

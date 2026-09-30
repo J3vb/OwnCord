@@ -336,6 +336,40 @@ describe("focusDialog", () => {
 });
 
 describe("enableRovingNavigation", () => {
+  it("leaves a modified arrow (Alt+↓ steps channels) to the app", () => {
+    const cells = [0, 1].map(() => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal, "vertical");
+    cells[0]!.focus();
+
+    for (const mod of ["altKey", "ctrlKey", "metaKey"] as const) {
+      const e = new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        [mod]: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      cells[0]!.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+      expect(cells[1]!.getAttribute("tabindex")).not.toBe("0");
+    }
+
+    const plain = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    cells[0]!.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(true);
+    expect(cells[1]!.getAttribute("tabindex")).toBe("0");
+    ac.abort();
+  });
+
   it("leaves Enter on a control nested inside a cell to that control", () => {
     const cell = document.createElement("div");
     cell.className = "cell";

@@ -2338,6 +2338,50 @@ describe("MainPage — B9-4 content view wiring", () => {
     container.remove();
   });
 
+  it("saves the server channel for Back before Alt+ArrowDown steps into a DM", () => {
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 60,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    const activeWhenRemembered: Array<number | null> = [];
+    mockRememberChannel.mockImplementation(() =>
+      activeWhenRemembered.push(channelsStore.getState().activeChannelId),
+    );
+    // jsdom loads no CSS, so the closed Settings panel would read as an open
+    // dialog and block every global shortcut.
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+    const altDown = (): void => {
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true }),
+      );
+    };
+
+    // Channels mode: a step stays among server channels; nothing to remember.
+    altDown();
+    expect(mockRememberChannel).not.toHaveBeenCalled();
+
+    // "View all" opens the DM view with #general still active.
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+    altDown();
+    expect(activeWhenRemembered).toEqual([1]);
+    expect(channelsStore.getState().activeChannelId).toBe(60);
+
+    mockRememberChannel.mockReset();
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels" }));
+  });
+
   it("places the view column between the chat column and the DM profile slot", () => {
     const view = container.querySelector("[data-testid='feature-view']");
     const chat = capturedChatAreaRef.current!;
