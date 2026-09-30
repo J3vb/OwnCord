@@ -554,6 +554,9 @@ const video = (sid: string, source: "camera" | "screen_share" = "camera") => ({
   muted: false,
 });
 
+const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
+const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+
 describe("NativeRoom remote video", () => {
   it("raises a subscribed video track backed by a renderer on the frame socket", async () => {
     const room = createNativeRoom(audio);
@@ -636,8 +639,6 @@ describe("NativeRoom remote video", () => {
       event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
     });
     const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
-    const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
-    const settle = () => new Promise<void>((r) => setTimeout(r, 0));
     expect(pub.isEnabled).toBe(true);
 
     // Hidden: the stream stops.
@@ -683,8 +684,6 @@ describe("NativeRoom remote video", () => {
       event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
     });
     const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
-    const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
-    const settle = () => new Promise<void>((r) => setTimeout(r, 0));
     let applied!: () => void;
     host.setVideoView = () => new Promise<void>((r) => (applied = r));
 

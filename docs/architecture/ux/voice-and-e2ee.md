@@ -131,8 +131,8 @@ for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %) a
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
 `components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
 volumes apart and offers Mute stream and **Stop watching**, which hides the
-stream locally behind a **Watch stream** card (the track stays subscribed;
-opt-in watching is open question Q3). Your own screen share is covered by what
+stream behind a **Watch stream** card (the track stays subscribed but receives
+no video; opt-in watching is open question Q3). Your own screen share is covered by what
 is going out (surface, resolution, fps, audio) with **Stop sharing** and
 **Hide preview**. In a DM call, focus view stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
@@ -145,6 +145,12 @@ stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
 the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
 stats, so it shows the resolution only.
+Each remote tile asks only for what it shows (`setRemoteVideoView`, since
+`adaptiveStream` stays off for OC-0455): a tile no one can see (grid closed,
+app hidden or minimised, Stop watching) receives no video, a small tile gets
+the lower simulcast layer that fits it, and the stream you watch (focused,
+full screen or popped out) gets the top one. An open sidebar stream preview
+keeps its stream playing even while the grid is closed.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
