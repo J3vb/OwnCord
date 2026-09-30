@@ -382,6 +382,30 @@ describe("startAutoIdle with an OS idle source", () => {
     expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
   });
 
+  it("gives the DOM fallback a fresh full delay when the OS stops answering", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    let idleMs: number | null = 1000;
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: async () => idleMs,
+    });
+
+    // Typing in another app for longer than the delay: the DOM sees nothing.
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS + SYSTEM_IDLE_POLL_MS * 9);
+    expect(onStatusChange).not.toHaveBeenCalled();
+
+    // One poll fails, right before the DOM timer's next firing.
+    idleMs = null;
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS - 1);
+    expect(onStatusChange).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+  });
+
   it("treats a non-numeric platform answer like null", async () => {
     saveUserStatus("online");
     const onStatusChange = vi.fn();

@@ -180,8 +180,14 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     if (destroyed) return;
     // Anything but a finite count (an absent host answering undefined) is
     // the OS not knowing.
+    const knew = osKnowsIdle;
     osKnowsIdle = typeof idleMs === "number" && Number.isFinite(idleMs);
-    if (!osKnowsIdle || idleMs === null) return;
+    if (!osKnowsIdle || idleMs === null) {
+      // The DOM timer was armed on a clock the OS has been overruling; its
+      // fallback counts a full delay from the moment the OS went quiet.
+      if (knew) arm();
+      return;
+    }
     // nextAutoStatus makes a repeat of the same answer a no-op, so a steady
     // stream of polls cannot flap the status. Coming back goes through the
     // same onStatusChange as the DOM path, and so through the caller's
