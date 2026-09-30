@@ -8,7 +8,8 @@ const log = createLogger("voiceTokenManager");
 
 export interface TokenManagerDeps {
   getWs: () => WsClient | null;
-  isRoomConnected: () => boolean;
+  /** A connected room, or an auto-reconnect that will need the token. */
+  hasVoiceSession: () => boolean;
   onRefreshTimeout: () => void;
 }
 
@@ -75,7 +76,7 @@ export class VoiceTokenManager {
   /** Send a token refresh request, respecting the server's rate limit.
    *  Arms a BUG-146 response-deadline timer. */
   requestRefresh(): void {
-    if (!this.deps.getWs() || !this.deps.isRoomConnected()) {
+    if (!this.deps.getWs() || !this.deps.hasVoiceSession()) {
       log.debug("Skipping token refresh — no active session");
       return;
     }

@@ -42,11 +42,17 @@ import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
 import { desktop } from "../platform/desktop";
 import { voiceText } from "../i18n/voice";
+import { channelsStore } from "@stores/channels.store";
+import { dmStore } from "@stores/dm.store";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
 
 const log = createLogger("livekitSession");
+
+/** P2-T5: how long a reconnect attempt waits for its voice_token_refresh
+ *  reply before trying with the token it has. */
+const RECONNECT_TOKEN_WAIT_MS = 10_000;
 
 // --- Push-to-talk liveness (cross-module signal, no instance state) ---
 
@@ -78,6 +84,13 @@ export class LiveKitSession {
    *  call gets a value no other attempt has ever held, regardless of how
    *  many times the session has bounced through "idle" in between. */
   private _joinGenerationCounter = 0;
+
+  /** P2-T5: the latest token and when it arrived, so a long reconnect knows
+   *  when it needs a fresh one (server TTL 5 minutes, OC-0014). */
+  private _stampedToken: string | null = null;
+  private _tokenReceivedAt = 0;
+  /** The reconnect attempt waiting for a voice_token_refresh reply. */
+  private _tokenWaiter: (() => void) | null = null;
 
   // --- Non-connection fields (configuration / callbacks / infrastructure) ---
   private ws: WsClient | null = null;
@@ -141,7 +154,8 @@ export class LiveKitSession {
 
   private _tokenManager = new VoiceTokenManager({
     getWs: () => this.ws,
-    isRoomConnected: () => this._room !== null,
+    // P2-T5: a long auto-reconnect refreshes its token too (OC-0014).
+    hasVoiceSession: () => this._room !== null || this._state.type === "reconnecting",
     // OC-0429: retry at the rate-limit cadence, not the full periodic one —
     // see VoiceTokenManager.startRetryTimer.
     onRefreshTimeout: () => this._tokenManager.startRetryTimer(),
@@ -154,6 +168,13 @@ export class LiveKitSession {
   private setState(next: SessionState): void {
     const prev = this._state.type;
     this._state = next;
+    if (
+      (next.type === "connected" || next.type === "reconnecting") &&
+      next.latestToken !== this._stampedToken
+    ) {
+      this._stampedToken = next.latestToken;
+      this._tokenReceivedAt = Date.now();
+    }
     log.debug("Session state transition", { from: prev, to: next.type });
   }
 
@@ -435,6 +456,12 @@ export class LiveKitSession {
       restoreLocalVoiceState: (m) => this.restoreLocalVoiceState(m),
       startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
       requestTokenRefresh: () => this.requestTokenRefresh(),
+      refreshTokenAndWait: () => this.refreshTokenAndWait(),
+      tokenAgeMs: () => Date.now() - this._tokenReceivedAt,
+      canKeepRetrying: () =>
+        this.ws?.getState() === "connected" &&
+        (channelsStore.getState().channels.has(channelId) ||
+          dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
       leaveVoice: () => this.leaveVoice(true),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),
@@ -467,6 +494,19 @@ export class LiveKitSession {
     this._tokenManager.requestRefresh();
   }
 
+  /** Request a refresh and resolve once a token lands, or after
+   *  RECONNECT_TOKEN_WAIT_MS (rate-limited or unanswered). */
+  private refreshTokenAndWait(): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, RECONNECT_TOKEN_WAIT_MS);
+      this._tokenWaiter = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.requestTokenRefresh();
+    });
+  }
+
   handleVoiceTokenRefresh(token?: string): void {
     // KNOWN LIMITATION: The livekit-client SDK does not expose a method to
     // rotate the token on an active connection. We store the fresh token so
@@ -483,6 +523,8 @@ export class LiveKitSession {
     } else if (token && this._state.type === "reconnecting") {
       this.setState({ ...this._state, latestToken: token });
     }
+    this._tokenWaiter?.();
+    this._tokenWaiter = null;
     this._tokenManager.handleRefreshResponse();
   }
 

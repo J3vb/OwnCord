@@ -238,6 +238,7 @@ import { getIdentityPin, storeIdentityPin } from "@lib/identity";
 import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
+import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import {
@@ -3537,7 +3538,9 @@ describe("LiveKitSession", () => {
       };
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
-      session.setWsClient({ send: sendSpy } as any);
+      // The chat socket is down, so the D-4 slow phase does not run and the
+      // loop gives up once the fast attempts are spent.
+      session.setWsClient({ send: sendSpy, getState: () => "disconnected" } as any);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
       const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
@@ -3792,6 +3795,164 @@ describe("LiveKitSession", () => {
 
       expect(mockRoom.disconnect).toHaveBeenCalled();
       expect((session as any)._state.type).not.toBe("connected");
+    });
+  });
+
+  // P2-T5 / DP-39: after the five fast attempts the loop keeps retrying every
+  // 15 s while the chat socket is up and the channel exists, until the D-4
+  // five-minute ceiling — an SFU restart or a long Wi-Fi drop resumes the
+  // call instead of ejecting the user after about 27 s.
+  describe("attemptAutoReconnect slow phase (D-4)", () => {
+    let wsState: string;
+    let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => void>>;
+    let errorCb: ReturnType<typeof vi.fn<(message: string) => void>>;
+    let ac: AbortController;
+
+    beforeEach(() => {
+      wsState = "connected";
+      sendSpy = vi.fn<(msg: { type: string }) => void>();
+      errorCb = vi.fn<(message: string) => void>();
+      ac = new AbortController();
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: sendSpy, getState: () => wsState } as any);
+      session.setOnError(errorCb);
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[5, { id: 5, type: "voice" } as any]]),
+      }));
+      // Through setState so the session stamps when this token arrived.
+      (session as any).setState({
+        type: "reconnecting",
+        channelId: 5,
+        latestToken: "old-token",
+        lastUrl: "/livekit",
+        lastDirectUrl: "ws://localhost:7880",
+        ac,
+      });
+    });
+
+    afterEach(() => {
+      resetChannelsStore();
+    });
+
+    function startLoop(): Promise<void> {
+      return (session as any).attemptAutoReconnect(
+        "old-token",
+        "/livekit",
+        5,
+        "ws://localhost:7880",
+        ac.signal,
+      );
+    }
+
+    it("keeps retrying after five failed connects and resumes on attempt 7", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      let connects = 0;
+      mockRoom.connect.mockImplementation(async () => {
+        connects++;
+        if (connects < 7) throw new Error("SFU down");
+      });
+
+      const loop = startLoop();
+      // 27 s of fast attempts, then 15 s gaps: attempt 7 lands at about 57 s.
+      await vi.advanceTimersByTimeAsync(60_000);
+      await loop;
+
+      expect(connects).toBe(7);
+      expect(leaveVoiceSpy).not.toHaveBeenCalled();
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("connected");
+      expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
+    });
+
+    it("refreshes the token before an attempt more than 4 minutes after the last one", async () => {
+      // The server answers voice_token_refresh with an ordinary voice_token
+      // for the channel we are still reconnecting to.
+      sendSpy.mockImplementation((msg: { type: string }) => {
+        if (msg.type === "voice_token_refresh") {
+          queueMicrotask(() => {
+            void session.handleVoiceToken("fresh-token", "/livekit", 5, "ws://localhost:7880");
+          });
+        }
+      });
+      const tokensAfterFourMinutes: string[] = [];
+      const start = Date.now();
+      mockRoom.connect.mockImplementation(async (_url: string, token: string) => {
+        if (Date.now() - start > 4 * 60_000) tokensAfterFourMinutes.push(token);
+        if (token !== "fresh-token") throw new Error("SFU down");
+      });
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 30_000);
+      await loop;
+
+      expect(sendSpy).toHaveBeenCalledWith({ type: "voice_token_refresh", payload: {} });
+      expect(tokensAfterFourMinutes.length).toBeGreaterThan(0);
+      expect(tokensAfterFourMinutes).not.toContain("old-token");
+      expect((session as any)._state.type).toBe("connected");
+      expect((session as any)._state.latestToken).toBe("fresh-token");
+    });
+
+    it("stops with no further connects when the user leaves during the slow phase", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(45_000); // attempt 6 (42 s) has failed
+      const connectsBeforeLeave = mockRoom.connect.mock.calls.length;
+      expect(connectsBeforeLeave).toBe(6);
+
+      session.leaveVoice(true);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(connectsBeforeLeave);
+      expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+    });
+
+    it("ends the loop when the chat socket drops", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(30_000); // the five fast attempts have failed
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(5);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("ends the loop when the channel is deleted", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(30_000);
+      resetChannelsStore();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(5);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
+    });
+
+    it("gives up with the voice-lost toast once the ceiling passes", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      mockRoom.connect.mockRejectedValue(new Error("SFU down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(4 * 60_000 + 30_000);
+      expect(leaveVoiceSpy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await loop;
+
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(true);
+      expect(leaveVoiceChannel).toHaveBeenCalled();
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect((session as any)._state.type).toBe("idle");
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
     });
   });
 

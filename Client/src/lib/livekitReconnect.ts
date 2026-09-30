@@ -43,6 +43,14 @@ export interface ReconnectDeps {
   startTokenRefreshTimer: () => void;
   /** Request a token refresh. */
   requestTokenRefresh: () => void;
+  /** Request a token refresh and wait for the reply (bounded), so the next
+   *  attempt reads the fresh token from the state. */
+  refreshTokenAndWait: () => Promise<void>;
+  /** Milliseconds since the current token arrived. */
+  tokenAgeMs: () => number;
+  /** True while the chat socket is connected and the channel still exists —
+   *  the slow phase's precondition (P2-T5). */
+  canKeepRetrying: () => boolean;
   /** Full session teardown, sending voice_leave to the server.
    *
    *  Not a bare voice_leave frame: the give-up path is a real leave, so it owes
@@ -74,17 +82,31 @@ export interface ReconnectDeps {
  *  RT-9: the companion SFU restarts with exponential backoff (3 s, doubling,
  *  up to 60 s in `Server/ws/livekit_process.go`) plus its own start-up, so a
  *  2-attempt, 3 s-apart loop (about 6 s) gave up while the SFU was still
- *  coming back and ejected every call. This loop retries for about 27 s (a
- *  3 s-doubling backoff capped at 6 s), so it is still trying past a companion's
- *  3 s + 6 s + 12 s restart ladder, and the 6 s cap keeps the retry gap small
- *  enough to resume the call promptly within the 30 s bar. The status badge
- *  shows "Reconnecting voice…" for the whole window. */
-const MAX_RECONNECT_ATTEMPTS = 5;
+ *  coming back and ejected every call. The first 5 attempts span about 27 s (a
+ *  3 s-doubling backoff capped at 6 s), so they are still trying past a
+ *  companion's 3 s + 6 s + 12 s restart ladder, and the 6 s cap keeps the
+ *  retry gap small enough to resume the call promptly within the 30 s bar.
+ *
+ *  P2-T5 (DP-39, owner decision D-4): after those fast attempts the loop keeps
+ *  trying every 15 s — a longer SFU restart or Wi-Fi drop resumes the call
+ *  instead of ejecting the user — while the chat socket is connected and the
+ *  channel still exists, and gives up 5 minutes after the drop. The ceiling
+ *  bounds how long a dropped user stays in everyone's voice roster. The status
+ *  badge shows "Reconnecting voice…" for the whole window. */
+const FAST_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 3000;
 const RECONNECT_MAX_DELAY_MS = 6000;
+const SLOW_RECONNECT_DELAY_MS = 15_000;
+const RECONNECT_CEILING_MS = 5 * 60_000;
 
-/** Delay before attempt `attempt` (1-based): 3 s, doubling, capped at 6 s. */
+/** OC-0014: the server's token TTL is 5 minutes, so a token older than this
+ *  is refreshed before the next attempt rather than failing it. */
+const TOKEN_REFRESH_AGE_MS = 4 * 60_000;
+
+/** Delay before attempt `attempt` (1-based): 3 s, doubling, capped at 6 s,
+ *  then 15 s once the fast attempts are spent. */
 function reconnectDelayMs(attempt: number): number {
+  if (attempt > FAST_RECONNECT_ATTEMPTS) return SLOW_RECONNECT_DELAY_MS;
   return Math.min(RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1), RECONNECT_MAX_DELAY_MS);
 }
 
@@ -107,7 +129,7 @@ function reconnectSuperseded(
  *  The signal is aborted by leaveVoice() to cancel the loop when the user
  *  voluntarily leaves voice during the reconnect delay. */
 export async function attemptAutoReconnect(
-  token: string,
+  initialToken: string,
   url: string,
   channelId: number,
   directUrl: string | undefined,
@@ -117,20 +139,34 @@ export async function attemptAutoReconnect(
   const state = deps.getState();
   const owner = state.type === "reconnecting" ? state.ac : null;
   const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
+  const startedAt = Date.now();
 
-  for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt++) {
-    log.info("Auto-reconnect attempt", {
-      attempt,
-      maxAttempts: MAX_RECONNECT_ATTEMPTS,
-    });
+  for (let attempt = 1; ; attempt++) {
+    const slow = attempt > FAST_RECONNECT_ATTEMPTS;
+    const delay = reconnectDelayMs(attempt);
+    if (slow) {
+      // D-4: no attempt starts past the ceiling, and none waits on a chat
+      // socket or channel that is already gone.
+      if (Date.now() - startedAt + delay > RECONNECT_CEILING_MS || !deps.canKeepRetrying()) break;
+      // OC-0014: the attempt after this delay must carry a live token.
+      if (deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
+        // oxlint-disable-next-line no-await-in-loop -- the attempt must wait for the fresh token it connects with
+        await deps.refreshTokenAndWait();
+      }
+    }
+    log.info("Auto-reconnect attempt", { attempt });
     // RT-9: exponential backoff so the loop outlasts a companion restart.
     // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
-    await new Promise((r) => setTimeout(r, reconnectDelayMs(attempt)));
+    await new Promise((r) => setTimeout(r, delay));
     // If user manually left or joined a different channel during the delay, abort.
     if (superseded()) {
       log.info("Auto-reconnect aborted — user left or channel changed");
       return;
     }
+    if (slow && !deps.canKeepRetrying()) break;
+    // The state carries any token refreshed since the drop; superseded() just
+    // confirmed it is still this loop's "reconnecting" state.
+    const token: string = deps.getState().latestToken ?? initialToken;
     // Aliased outside the try so the catch can tear down the attempt's own
     // room: deps.getState() has no room while state is "reconnecting".
     let attemptRoom: Room | null = null;
@@ -302,8 +338,9 @@ export async function attemptAutoReconnect(
         deps.syncModuleRooms();
     }
   }
-  // All attempts exhausted — give up and clean up. But first check this
-  // loop is still current (see OC-0009 in connectAndSetup).
+  // Out of time (D-4), or the chat socket or channel is gone — give up and
+  // clean up. But first check this loop is still current (see OC-0009 in
+  // connectAndSetup).
   if (superseded()) {
     log.info("Auto-reconnect give-up skipped — superseded");
     return;
@@ -311,7 +348,7 @@ export async function attemptAutoReconnect(
   // Tear the session down for real. leaveVoice(true) also sends voice_leave
   // over WS, so the server removes our voice state — without that the server
   // and other clients see us as a ghost participant.
-  log.error("Auto-reconnect exhausted all attempts, giving up");
+  log.error("Auto-reconnect giving up");
   deps.leaveVoice();
   leaveVoiceChannel();
   deps.onError(voiceText("reconnect.voiceLost"));

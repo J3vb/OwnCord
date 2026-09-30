@@ -557,7 +557,13 @@ export class JoinOrchestration {
     // through to a full teardown+rejoin of a session that is about to
     // recover on its own; only a room the SDK has fully given up on
     // ("disconnected") should be treated as needing a real reconnect here.
-    if (s.type === "connected" && s.channelId === channelId && s.room.state !== "disconnected") {
+    // P2-T5: the same for our own auto-reconnect — the token answers its
+    // voice_token_refresh, and the loop connects with it on its next attempt;
+    // a full join here would eject the user if the SFU is still down.
+    if (
+      (s.type === "connected" && s.channelId === channelId && s.room.state !== "disconnected") ||
+      (s.type === "reconnecting" && s.channelId === channelId)
+    ) {
       this.handleVoiceTokenRefresh(token);
       return;
     }
