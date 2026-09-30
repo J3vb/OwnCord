@@ -69,6 +69,9 @@ export function createConnectPage(
   showTotp(): void;
   showConnecting(): void;
   showAutoConnecting(serverName: string): void;
+  /** "Waiting for <server>… Cancel"; Cancel and typing report `onAutoLoginCancel`. */
+  showServerWait(serverName: string): void;
+  hideServerWait(): void;
   showError(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
@@ -386,6 +389,8 @@ export function createConnectPage(
     showTotp: () => loginForm.showTotp(),
     showConnecting: () => loginForm.showConnecting(),
     showAutoConnecting: (serverName: string) => loginForm.showAutoConnecting(serverName),
+    showServerWait: (serverName: string) => loginForm.showServerWait(serverName),
+    hideServerWait: () => loginForm.hideServerWait(),
     showError: (message: string) => loginForm.showError(message),
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>

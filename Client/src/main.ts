@@ -9,6 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
+import { setOwnedTimeout } from "@lib/dom";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import {
@@ -360,83 +361,89 @@ let currentPage: { destroy?(): void } | null = null;
  */
 const serverInfoByHost = new Map<string, ServerInfoResponse>();
 
+/** The connect page's per-server health readouts. */
+interface HealthReadout {
+  updateHealthStatus(
+    host: string,
+    status: {
+      status: string;
+      latencyMs: number | null;
+      version: string | null;
+      onlineUsers: number | null;
+    },
+  ): void;
+  updateCompatibility(host: string, compatibility: Compatibility, serverEpoch: number | null): void;
+}
+
 /** Run health checks for a list of profiles and update the connect page. */
 function runHealthChecks(
-  connectPage: {
-    updateHealthStatus(
-      host: string,
-      status: {
-        status: string;
-        latencyMs: number | null;
-        version: string | null;
-        onlineUsers: number | null;
-      },
-    ): void;
-    updateCompatibility(
-      host: string,
-      compatibility: Compatibility,
-      serverEpoch: number | null,
-    ): void;
-  },
+  connectPage: HealthReadout,
   profiles: readonly { host: string }[],
   owner: SessionScope,
 ): void {
-  for (const profile of profiles) {
-    void (async () => {
-      try {
-        owner.assertCurrent();
-        connectPage.updateHealthStatus(profile.host, {
-          status: "checking",
-          latencyMs: null,
-          version: null,
-          onlineUsers: null,
-        });
-        const start = performance.now();
-        const health = await api.getHealth(profile.host, 3000, owner.signal);
-        owner.assertCurrent();
-        const elapsed = Math.round(performance.now() - start);
-        connectPage.updateHealthStatus(profile.host, {
-          status: elapsed > 1500 ? "slow" : "online",
-          latencyMs: elapsed,
-          version: health.version ?? null,
-          onlineUsers: health.online_users ?? null,
-        });
+  for (const profile of profiles) void checkHealth(connectPage, profile.host, owner);
+}
 
-        // Advisory epoch preflight, beside the health probe and sharing its
-        // timeout/dispose shape. A failed probe is `unreachable` — no badge,
-        // never an error banner (the WebSocket refusal stays authoritative).
-        let serverEpoch: number | null = null;
-        let compatibility: Compatibility = "unreachable";
-        try {
-          const info = await api.getServerInfo(profile.host, 3000, owner.signal);
-          owner.assertCurrent();
-          serverInfoByHost.set(profile.host, info);
-          serverEpoch = info.protocol_epoch;
-          compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
-        } catch (infoErr) {
-          if (!owner.isCurrent()) return;
-          serverInfoByHost.delete(profile.host);
-          log.debug("server-info preflight failed", {
-            host: profile.host,
-            error: String(infoErr),
-          });
-        }
-        connectPage.updateCompatibility(profile.host, compatibility, serverEpoch);
-      } catch (err) {
-        if (!owner.isCurrent()) return;
-        serverInfoByHost.delete(profile.host);
-        // Record why the check failed (TLS/cert-pin/network) — otherwise a
-        // "can't connect" report has no logged cause to diagnose.
-        log.warn("health check failed", { host: profile.host, error: String(err) });
-        connectPage.updateHealthStatus(profile.host, {
-          status: "offline",
-          latencyMs: null,
-          version: null,
-          onlineUsers: null,
-        });
-        connectPage.updateCompatibility(profile.host, "unreachable", null);
-      }
-    })();
+/** Probe one server and update its row; resolves whether it answered. */
+async function checkHealth(
+  connectPage: HealthReadout,
+  host: string,
+  owner: SessionScope,
+): Promise<boolean> {
+  try {
+    owner.assertCurrent();
+    connectPage.updateHealthStatus(host, {
+      status: "checking",
+      latencyMs: null,
+      version: null,
+      onlineUsers: null,
+    });
+    const start = performance.now();
+    const health = await api.getHealth(host, 3000, owner.signal);
+    owner.assertCurrent();
+    const elapsed = Math.round(performance.now() - start);
+    connectPage.updateHealthStatus(host, {
+      status: elapsed > 1500 ? "slow" : "online",
+      latencyMs: elapsed,
+      version: health.version ?? null,
+      onlineUsers: health.online_users ?? null,
+    });
+
+    // Advisory epoch preflight, beside the health probe and sharing its
+    // timeout/dispose shape. A failed probe is `unreachable` — no badge,
+    // never an error banner (the WebSocket refusal stays authoritative).
+    let serverEpoch: number | null = null;
+    let compatibility: Compatibility = "unreachable";
+    try {
+      const info = await api.getServerInfo(host, 3000, owner.signal);
+      owner.assertCurrent();
+      serverInfoByHost.set(host, info);
+      serverEpoch = info.protocol_epoch;
+      compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
+    } catch (infoErr) {
+      if (!owner.isCurrent()) return false;
+      serverInfoByHost.delete(host);
+      log.debug("server-info preflight failed", {
+        host,
+        error: String(infoErr),
+      });
+    }
+    connectPage.updateCompatibility(host, compatibility, serverEpoch);
+    return true;
+  } catch (err) {
+    if (!owner.isCurrent()) return false;
+    serverInfoByHost.delete(host);
+    // Record why the check failed (TLS/cert-pin/network) — otherwise a
+    // "can't connect" report has no logged cause to diagnose.
+    log.warn("health check failed", { host, error: String(err) });
+    connectPage.updateHealthStatus(host, {
+      status: "offline",
+      latencyMs: null,
+      version: null,
+      onlineUsers: null,
+    });
+    connectPage.updateCompatibility(host, "unreachable", null);
+    return false;
   }
 }
 
@@ -470,6 +477,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // credential rather than expressing a preference, and deleting there would
     // destroy the very credential it just used.
     rememberIsUserChoice = false,
+    // Runs after the pre-auth deadline gives up; a stored-token resume uses it
+    // to keep waiting for a server that is still down.
+    onPreauthTimeout?: () => void,
   ): void {
     log.info("Post-auth wiring", { host, username });
     // Tear down any prior session wiring so listeners and the connected
@@ -519,6 +529,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       lastConnectHost = "";
       lastConnectToken = "";
       setTransientError(connectText("session.connectTimeout"));
+      onPreauthTimeout?.();
     }, PREAUTH_CONNECT_TIMEOUT_MS);
 
     // Session-scoped WS listeners — collected so they're all removed together
@@ -928,15 +939,47 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     let autoLoginCancelled = false;
 
-    // Resume a profile's session from its stored token — startup auto-login
-    // and a quick switch back to a server share this path. No-op when the
-    // host has no stored token.
-    async function resumeStoredSession(profile: {
+    interface ResumableProfile {
       readonly name: string;
       readonly host: string;
       readonly autoConnect: boolean;
       readonly rememberPassword: boolean;
-    }): Promise<void> {
+    }
+
+    // A stored-token resume that timed out against a down server (a home
+    // server still booting after a power cut) keeps probing it, 5 s doubling to
+    // 30 s, and resumes once when it answers. The wait belongs to the API
+    // session the timeout left behind, so whatever ends that session ends the
+    // wait: a manual login, Cancel or typing (onAutoLoginCancel), the resume
+    // itself (wirePostAuth's setConfig), or leaving this page.
+    function waitForServer(profile: ResumableProfile): void {
+      const wait = pageOwner.fork(api.getSession().signal);
+      wait.addCleanup(() => connectPage.hideServerWait());
+      connectPage.showServerWait(profile.name);
+      const probeAfter = (delayMs: number): void => {
+        setOwnedTimeout(
+          wait.signal,
+          () => {
+            void checkHealth(connectPage, profile.host, wait).then((up) => {
+              if (!wait.isCurrent()) return;
+              if (!up) {
+                probeAfter(Math.min(delayMs * 2, 30_000));
+                return;
+              }
+              wait.dispose();
+              void resumeStoredSession(profile);
+            });
+          },
+          delayMs,
+        );
+      };
+      probeAfter(5_000);
+    }
+
+    // Resume a profile's session from its stored token — startup auto-login
+    // and a quick switch back to a server share this path. No-op when the
+    // host has no stored token.
+    async function resumeStoredSession(profile: ResumableProfile): Promise<void> {
       const attempt = api.getSession();
       try {
         const cred = await loadCredential(profile.host);
@@ -971,6 +1014,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             cred.username,
             undefined,
             profile.rememberPassword,
+            false,
+            () => waitForServer(profile),
           );
         }
       } catch (err) {

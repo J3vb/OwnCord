@@ -111,6 +111,10 @@ export interface LoginFormApi {
   showTotp(): void;
   showConnecting(): void;
   showAutoConnecting(serverName: string): void;
+  /** "Waiting for <server>… Cancel" while a down server is re-probed; the form stays usable. */
+  showServerWait(serverName: string): void;
+  /** Hide the waiting line without reporting a cancel. */
+  hideServerWait(): void;
   showError(message: string): void;
   resetToIdle(): void;
   getRememberPassword(): boolean;
@@ -215,6 +219,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let rememberPasswordCheckbox: HTMLInputElement;
   let autoConnectCheckbox: HTMLInputElement;
   let autoConnectServerName: HTMLSpanElement;
+  let serverWait: HTMLDivElement;
+  let serverWaitText: HTMLSpanElement;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -310,6 +316,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       role: "alert",
       id: "connect-error-banner",
     });
+
+    serverWait = buildServerWait();
 
     // Form
     const form = createElement("form", { class: "connect-form" });
@@ -462,9 +470,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal });
+    // Typing means the user is taking over from the automatic retry.
+    form.addEventListener("input", cancelServerWait, { signal });
     toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
 
-    appendChildren(formContainer, formLogo, errorBanner, form);
+    appendChildren(formContainer, formLogo, errorBanner, serverWait, form);
     appendChildren(panel, settingsBtn, formContainer);
     return panel;
   }
@@ -631,6 +641,27 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     appendChildren(card, spinner, title, autoConnectServerName, cancelBtn);
     overlay.appendChild(card);
     return overlay;
+  }
+
+  function buildServerWait(): HTMLDivElement {
+    // A live status line, not a modal: the form beneath stays usable.
+    const wait = createElement("div", { class: "server-wait", role: "status" });
+    wait.hidden = true;
+    serverWaitText = createElement("span", { class: "server-wait-text" });
+    const cancelBtn = createElement(
+      "button",
+      { class: "btn-ghost server-wait-cancel", type: "button" },
+      connectText("common.cancel"),
+    );
+    cancelBtn.addEventListener("click", cancelServerWait, { signal });
+    appendChildren(wait, serverWaitText, cancelBtn);
+    return wait;
+  }
+
+  function cancelServerWait(): void {
+    if (serverWait.hidden) return;
+    serverWait.hidden = true;
+    onAutoLoginCancel?.();
   }
 
   // ---------------------------------------------------------------------------
@@ -1113,6 +1144,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     showAutoConnecting(serverName: string): void {
       setText(autoConnectServerName, serverName);
       transitionTo("auto-connecting");
+    },
+
+    showServerWait(serverName: string): void {
+      setText(serverWaitText, connectText("login.waitingForServer", { server: serverName }));
+      serverWait.hidden = false;
+    },
+
+    hideServerWait(): void {
+      serverWait.hidden = true;
     },
 
     showError(message: string): void {

@@ -1090,6 +1090,69 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  // --- showServerWait (P2-T7) ---
+
+  it("showServerWait shows the waiting line with a keyboard-reachable Cancel", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+
+    page.showServerWait("Home Server");
+
+    const wait = container.querySelector<HTMLElement>(".server-wait")!;
+    expect(wait.hidden).toBe(false);
+    expect(wait.getAttribute("role")).toBe("status");
+    expect(wait.textContent).toContain("Waiting for Home Server…");
+    // The form stays usable beneath it: the wait is not a blocking overlay.
+    expect((container.querySelector("#host") as HTMLInputElement).disabled).toBe(false);
+
+    const cancel = wait.querySelector<HTMLButtonElement>("button")!;
+    expect(cancel.textContent).toBe("Cancel");
+    expect(cancel.type).toBe("button");
+    expect(cancel.disabled).toBe(false);
+    expect(cancel.tabIndex).toBe(0);
+    cancel.focus();
+    expect(document.activeElement).toBe(cancel);
+
+    cancel.click();
+    expect(onAutoLoginCancel).toHaveBeenCalledTimes(1);
+    expect(wait.hidden).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("typing into the form cancels the server wait", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+    page.showServerWait("Home Server");
+
+    const username = container.querySelector("#username") as HTMLInputElement;
+    username.value = "a";
+    username.dispatchEvent(new Event("input", { bubbles: true }));
+    username.value = "al";
+    username.dispatchEvent(new Event("input", { bubbles: true }));
+
+    expect(onAutoLoginCancel).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLElement>(".server-wait")!.hidden).toBe(true);
+
+    page.destroy?.();
+  });
+
+  it("hideServerWait hides the waiting line without cancelling", () => {
+    const onAutoLoginCancel = vi.fn();
+    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
+    page.mount(container);
+    page.showServerWait("Home Server");
+
+    page.hideServerWait();
+
+    expect(container.querySelector<HTMLElement>(".server-wait")!.hidden).toBe(true);
+    expect(onAutoLoginCancel).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
   // --- refreshProfiles ---
 
   it("refreshProfiles re-renders the server profile list", () => {

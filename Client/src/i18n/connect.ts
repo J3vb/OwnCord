@@ -94,6 +94,7 @@ export const connectText = defineCatalog("connect", {
   "login.registering": "Registering…",
   "login.registrationClosed": "Registration closed",
   "login.autoConnecting": "Auto-connecting...",
+  "login.waitingForServer": "Waiting for {server}…",
   "login.recoveryUnavailable": "Account recovery is unavailable.",
   "registration.closedNotice": "Registration is closed on this server.",
   "registration.approvalNotice":
