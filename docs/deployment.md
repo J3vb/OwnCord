@@ -1173,10 +1173,10 @@ which one is near:
 - `database.max_readers` (default `0` = automatic, `max(4, CPU count)`,
   clamped to 1–64) → read queries queue behind the pool →
   `db_reader_wait_seconds` growing.
-- `upload.max_size_mb` (default `100`) and `upload.user_quota_mb` (default
-  `0` = unlimited) → an upload past either is refused with
-  `507 STORAGE_QUOTA_EXCEEDED` → `upload_storage_used_mb` for where the
-  number is.
+- `upload.max_size_mb` (default `100`) → a larger file is refused with
+  `400 BAD_REQUEST`. `upload.user_quota_mb` (default `0` = unlimited) → an
+  upload past it is refused with `507 STORAGE_QUOTA_EXCEEDED` →
+  `upload_storage_used_mb` for where the number is.
 - `server.min_free_disk_mb` (default `256`) → uploads are refused with
   `507 STORAGE_LOW_DISK` and `/health` reports `degraded`/`disk` → `disk_low`
   on metrics.

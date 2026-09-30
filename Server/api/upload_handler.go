@@ -236,7 +236,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// sane, otherwise the worst case a single file can ever cost — the
 		// configured per-file cap (upload.max_size_mb, already enforced by
 		// storage.Storage.Save) when one is set, else the full request cap.
-		// A chunked upload otherwise reserves the entire 100 MiB request cap
+		// A chunked upload otherwise reserves the entire request cap
 		// for every user regardless of how small the body turns out to be,
 		// which starves anyone whose quota or headroom is smaller than that.
 		// The deferred Settle returns the charge on every path that does not
