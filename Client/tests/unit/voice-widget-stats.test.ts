@@ -233,6 +233,9 @@ describe("VoiceWidget connection panel (Option C)", () => {
     // change must never open it on its own.
     expect(pane.classList.contains("visible")).toBe(false);
 
+    // The drop arrives both as a live sample and as the debounced change.
+    pushStats({ quality: "poor", rtt: 300 });
+    expect(container.querySelector(".vw-signal .vw-ping")?.textContent).toBe("300ms");
     fireQualityChange("poor", "excellent");
 
     expect(pane.classList.contains("visible")).toBe(false);
