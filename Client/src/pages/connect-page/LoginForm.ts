@@ -950,7 +950,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // Event handlers
   // ---------------------------------------------------------------------------
 
+  /** Every write of the host goes through here: a new host ends a busy retry for the old one. */
+  function writeHost(host: string): void {
+    if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
+    hostInput.value = host;
+  }
+
   function handleToggleMode(): void {
+    cancelAuthBusyRetry?.();
     formMode = formMode === "login" ? "register" : "login";
 
     // A remembered password belongs to an EXISTING account. Carrying the
@@ -1291,8 +1298,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setHost(host: string): void {
-      if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
-      hostInput.value = host;
+      writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
     },
@@ -1334,7 +1340,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
      * which case the user still needs to enter the server address.
      */
     applyInviteLink(code: string, host?: string): void {
-      if (host) hostInput.value = host;
+      if (host) writeHost(host);
       if (formMode !== "register") handleToggleMode();
       inviteInput.value = code;
       updateRegistrationUi();

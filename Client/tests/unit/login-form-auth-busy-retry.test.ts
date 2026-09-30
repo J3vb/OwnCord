@@ -233,11 +233,13 @@ describe("LoginForm retries a busy server", () => {
   });
 
   it.each([
-    ["waiting", false],
-    ["with a retry in flight", true],
+    ["picking another server", "card", false],
+    ["picking another server", "card", true],
+    ["opening an invite link", "invite", false],
+    ["opening an invite link", "invite", true],
   ] as const)(
-    "picking another server %s stops the retry and ends the attempt",
-    async (_label, inFlight) => {
+    "%s (%s, in flight: %s) stops the retry and ends the attempt",
+    async (_label, trigger, inFlight) => {
       let refuseInFlight: ((err: unknown) => void) | undefined;
       const onLogin = vi.fn().mockRejectedValueOnce(busy());
       if (inFlight) {
@@ -261,7 +263,11 @@ describe("LoginForm retries a busy server", () => {
       expect(onLogin).toHaveBeenCalledTimes(inFlight ? 2 : 1);
       expect(busyShown()).toBe(true);
 
-      (container.querySelectorAll(".server-item")[1] as HTMLElement).click();
+      if (trigger === "card") {
+        (container.querySelectorAll(".server-item")[1] as HTMLElement).click();
+      } else {
+        page.applyInviteLink("INVITE-CODE", "other.example:8443");
+      }
       expect(onAutoLoginCancel).toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(60_000);
 
