@@ -39,7 +39,6 @@ import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
-import { shellText } from "../../i18n/shell";
 import { readingAnchor } from "./readingAnchor";
 import {
   activatePendingMessages,
@@ -451,7 +450,7 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
         // Present" refetches and no live row lands across the gap.
         setChannelLoadError(activeAfterReady);
         if (getChannelMessages(activeAfterReady).length > 0) {
-          showToast(shellText("messages.loadHistoryFailed"), "error");
+          showToast(connectText("app.loadHistoryFailed"), "error");
         }
       });
     }

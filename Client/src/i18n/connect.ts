@@ -203,6 +203,7 @@ export const connectText = defineCatalog("connect", {
   "app.dmCreateGroupFailed": "Failed to create group DM",
   "app.sendBeforeRestore":
     "The server was restored — check the conversation before sending this again.",
+  "app.loadHistoryFailed": "Failed to load message history",
 
   "dm.emptyGroup": "Empty group",
   "dm.unknownUser": "Unknown user",
