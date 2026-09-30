@@ -51,6 +51,7 @@ function harness(env = {}, vu = 1, files = {}) {
     open: (path) => files[path],
     check: () => true,
     sleep: () => {},
+    crypto: globalThis.crypto,
     http: {
       post: (url, payload, params) => {
         logins.push({ url, payload: JSON.parse(payload), params });

@@ -1240,13 +1240,10 @@ function passThroughThresholds() {
 }
 
 // A chat_send client_message_id: exactly "<13-digit ms>:<lowercase UUID v4>"
-// (docs/protocol.md, chat_send). Uniqueness is all the server needs of it.
+// (docs/protocol.md, chat_send). Uniqueness is all the server needs of it;
+// crypto is k6's global WebCrypto.
 function clientMessageId() {
-  const uuid = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.floor(Math.random() * 16);
-    return (c === "x" ? r : (r & 3) | 8).toString(16);
-  });
-  return `${Date.now()}:${uuid}`;
+  return `${Date.now()}:${crypto.randomUUID()}`;
 }
 
 // envelope wraps a client->server frame in the protocol's outer shape.
