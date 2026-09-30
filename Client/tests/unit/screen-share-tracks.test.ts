@@ -621,6 +621,20 @@ describe("enableScreenshare", () => {
     expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
   });
 
+  it("stays silent when the user cancels the picker (polish #10)", async () => {
+    // A cancel is not a denial. The Linux native path and getDisplayMedia's
+    // own dismissal both signal a cancel as NotAllowedError; announcing
+    // "permission denied" for closing the dialog is wrong.
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(new DOMException("cancelled", "AbortError"));
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).not.toHaveBeenCalled();
+  });
+
   it("tolerates a capture with no video track", async () => {
     const rig = fakeRoom();
     createLocalScreenTracks.mockResolvedValue([fakeAudioTrack()]);

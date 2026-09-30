@@ -232,13 +232,21 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
     const nextChannels = new Map(prev.voiceUsers);
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     const nextUsers = new Map(existingChannel ?? []);
+    // Preserve the LiveKit-authoritative speaking flag on an existing user:
+    // setSpeakers is the only writer (LiveKit's ActiveSpeakersChanged). The
+    // server's voice_state always ships speaking:false, so writing
+    // payload.speaking verbatim here cleared the speaking ring on any
+    // unrelated toggle that arrived between ActiveSpeakersChanged ticks. A
+    // brand-new user has no prior value, so the payload seeds it.
+    const existingUser = existingChannel?.get(payload.user_id);
+    const speaking = existingUser !== undefined ? existingUser.speaking : payload.speaking;
 
     nextUsers.set(payload.user_id, {
       userId: payload.user_id,
       username: payload.username,
       muted: payload.muted,
       deafened: payload.deafened,
-      speaking: payload.speaking,
+      speaking,
       camera: payload.camera,
       screenshare: payload.screenshare,
       serverMuted,

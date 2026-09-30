@@ -265,7 +265,19 @@ describe("voice store", () => {
       updateVoiceState({ ...FULL_VOICE_PAYLOAD, muted: true, speaking: false });
       const user = voiceStore.getState().voiceUsers.get(10)?.get(5);
       expect(user?.muted).toBe(true);
-      expect(user?.speaking).toBe(false);
+      expect(user?.speaking).toBe(true); // LiveKit is the sole speaking authority; a voice_state must not clobber it
+    });
+
+    it("preserves the LiveKit-authoritative speaking flag across an unrelated voice_state", () => {
+      // Talk (a LiveKit ActiveSpeakersChanged set speaking), then a toggle
+      // mute. The server's voice_state always ships speaking:false, so writing
+      // it verbatim cleared the speaking ring mid-speech (OC clobber).
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, speaking: false });
+      setSpeakers({ channel_id: 10, speakers: [5] });
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(5)?.speaking).toBe(true);
+
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, muted: true, speaking: false }); // camera/mute toggle
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(5)?.speaking).toBe(true);
     });
 
     it("does not affect other channels", () => {

@@ -809,11 +809,11 @@ describe("NativeRoom screen share", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("maps a closed picker and a cancelled portal dialog to NotAllowedError", async () => {
+  it("maps a closed picker and a cancelled portal dialog to AbortError (silent cancel)", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     host.pick = () => Promise.resolve(null);
-    await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
+    await expect(share(room)).rejects.toMatchObject({ name: "AbortError" });
     expect(host.calls.filter(([n]) => n === "startScreen")).toHaveLength(0);
     host.pick = () =>
       Promise.resolve({
@@ -823,7 +823,7 @@ describe("NativeRoom screen share", () => {
         maxFramerate: 30,
       });
     host.startScreen = () => Promise.reject("screen capture was cancelled or refused");
-    await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
+    await expect(share(room)).rejects.toMatchObject({ name: "AbortError" });
     host.startScreen = () => Promise.reject("that screen or window is no longer available");
     await expect(share(room)).rejects.toBe("that screen or window is no longer available");
     expect(host.renderers).toHaveLength(0);

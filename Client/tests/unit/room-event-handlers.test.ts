@@ -645,6 +645,26 @@ describe("handleEncryptionError", () => {
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
     });
 
+    it("clears the degraded badge again once a stalled peer's decrypts resume", () => {
+      const h = build();
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+      // The key finally lands: the worker stops reporting, so a quiet gap
+      // past the streak reset clears the latch instead of leaving
+      // "Unsecured" for the rest of the call.
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
     it("tolerates separate transient races a few seconds apart", () => {
       const h = build();
 

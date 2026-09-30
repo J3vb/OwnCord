@@ -107,6 +107,34 @@ export interface RoomEventHandlers {
 
 export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers {
   let autoplayUnlockHandler: (() => void) | null = null;
+  // Polish #21: a transient >3s key-delivery stall set the Secured badge to
+  // "Unsecured" and nothing ever cleared it until the next join/leave. The
+  // worker re-reports a failing remote decrypt once a second, so a quiet gap
+  // past the streak reset (same window the streak logic uses) means the peer's
+  // frames decrypt again — clear only what THIS path degraded, leaving a
+  // persistent worker-death/MissingKey degradations visible (OC-0002).
+  let degradedByDecrypt = false;
+  let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearDecryptQuietTimer(): void {
+    if (decryptQuietTimer !== null) {
+      clearTimeout(decryptQuietTimer);
+      decryptQuietTimer = null;
+    }
+  }
+
+  /** Arm the recovery: no further remote decrypt failure for the streak reset
+   *  window means delivery resumed. */
+  function armDecryptRecovery(): void {
+    clearDecryptQuietTimer();
+    decryptQuietTimer = setTimeout(() => {
+      decryptQuietTimer = null;
+      if (degradedByDecrypt) {
+        degradedByDecrypt = false;
+        setEncryptionDegraded(false);
+      }
+    }, DECRYPT_STREAK_RESET_MS);
+  }
 
   function removeAutoplayUnlock(): void {
     if (autoplayUnlockHandler !== null) {
@@ -291,6 +319,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
         });
         return;
       }
+      // A remote sender's failure past the grace window: its frames stopped
+      // decrypting. This is the class that recovers on its own once key
+      // delivery resumes, so arm the quiet-gap recovery — the worker keeps
+      // re-reporting once a second while it fails, so a gap means resumed.
+      degradedByDecrypt = true;
+      armDecryptRecovery();
     }
     log.error("LiveKit E2EE encryption error — call may not be secured", {
       error,

@@ -215,6 +215,20 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
+	// Guard: with no supervised companion, LiveKit is externally managed, so
+	// the process check above no-ops. Probe reachability before minting a
+	// token: a minted credential for an SFU nobody can reach is the
+	// disguised-success shape B6-6 forbids (cmd/smoke's stepSExternalAbsent
+	// records exactly this) — the client would connect, fail confusingly, and
+	// get no server-side explanation. ListRooms bounds itself at 3s.
+	if h.lkProcess == nil {
+		if healthy, err := h.livekit.HealthCheck(ctx); !healthy || err != nil {
+			slog.Warn("handleVoiceJoin: external LiveKit unreachable", "user_id", c.userID, "err", err)
+			c.sendMsg(buildErrorMsg(ErrCodeVoiceError, "voice is temporarily unavailable — LiveKit is not reachable"))
+			return 0, nil, false
+		}
+	}
+
 	return channelID, ch, true
 }
 

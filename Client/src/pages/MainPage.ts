@@ -1255,10 +1255,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
+      // The grid header's exit control: back to chat without leaving voice.
+      onExitGrid: () => videoModeCtrl?.showChat(),
     });
 
     let prevVideoSignature = "";
     let prevSpeaking = "";
+    let prevAudioState = "";
     let prevCallState = "";
     const prevTileLabels = new Map<number, string>();
     // Subscribe to voice store for camera/screenshare state changes, voice
@@ -1279,6 +1282,21 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (speakingKey !== prevSpeaking) {
             prevSpeaking = speakingKey;
             videoGrid?.setSpeaking(talking);
+          }
+          // Mute/deafen badges on the camera tiles, from the same roster state.
+          let audioKey = "";
+          const audioState = new Map<number, { muted: boolean; deafened: boolean }>();
+          for (const u of channelId !== null
+            ? (state.voiceUsers.get(channelId)?.values() ?? [])
+            : []) {
+            if (u.muted || u.deafened) {
+              audioState.set(u.userId, { muted: u.muted, deafened: u.deafened });
+              audioKey += `${String(u.userId)}:${String(u.muted)}${String(u.deafened)};`;
+            }
+          }
+          if (audioKey !== prevAudioState) {
+            prevAudioState = audioKey;
+            videoGrid?.setUserAudioState(audioState);
           }
           const callKey = `${String(state.localMuted)}|${String(state.localDeafened)}`;
           if (callKey !== prevCallState) {

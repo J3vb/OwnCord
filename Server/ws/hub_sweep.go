@@ -421,10 +421,13 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 			}
 		}
 
-		// Remove from LiveKit (best-effort).
-		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(ctx, channelID, vs.UserID, vs.JoinedAt)
-		}
+		// Remove from LiveKit (best-effort), off this goroutine: the caller
+		// is the admin archive/delete request, and LiveKit can take seconds
+		// to answer (OC-0453). The DB row and client state above are already
+		// conditional on this exact join instance, and the identity carries
+		// the join token, so the removal is safe to detach exactly as
+		// finishVoiceLeave does it.
+		h.removeLiveKitParticipantAsync(ctx, channelID, vs.UserID, vs.JoinedAt, "CleanupVoiceForChannel")
 	}
 
 	// Broadcast voice_leave for each participant. All leaves target the same

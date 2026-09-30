@@ -50,7 +50,7 @@ import {
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
-import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
+import { voiceStore, updateVoiceState, setSpeakers } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
@@ -843,7 +843,7 @@ describe("ChannelSidebar", () => {
 
   // ── Deafened and camera icons on voice users ──
 
-  it("shows both mic-off and headphones-off icons for deafened user", () => {
+  it("shows only the headphones-off icon for a deafened user (deafen implies mute)", () => {
     setChannels(testChannels);
     updateVoiceState({
       channel_id: 3,
@@ -859,9 +859,11 @@ describe("ChannelSidebar", () => {
 
     const userRow = container.querySelector(".voice-user-item");
     expect(userRow).not.toBeNull();
-    // Deafened shows TWO .vu-muted elements (mic-off + headphones-off)
+    // Deafened implies muted, so showing both mic-off and headphones-off is a
+    // duplicate. Discord shows the single headphones-off.
     const mutedIcons = userRow!.querySelectorAll(".vu-muted");
-    expect(mutedIcons.length).toBe(2);
+    expect(mutedIcons.length).toBe(1);
+    expect(mutedIcons[0]!.querySelector("svg")).not.toBeNull();
   });
 
   it("shows camera icon for user with active camera", () => {
@@ -902,17 +904,10 @@ describe("ChannelSidebar", () => {
     expect(userRow).not.toBeNull();
     expect(userRow!.classList.contains("speaking")).toBe(false);
 
-    // Update only speaking flag (structural signature stays the same)
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 60,
-      username: "Talker",
-      muted: false,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    // Update only speaking flag (structural signature stays the same).
+    // setSpeakers is the only writer of speaking now (a voice_state no longer
+    // clobbers the LiveKit-authoritative flag).
+    setSpeakers({ channel_id: 3, speakers: [60] });
     voiceStore.flush();
 
     // The same DOM element should now have speaking class toggled
@@ -939,16 +934,7 @@ describe("ChannelSidebar", () => {
     expect(rowBefore).not.toBeNull();
 
     // speaking-only flip → patched via the cached row map, not re-rendered
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 61,
-      username: "Talker2",
-      muted: false,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    setSpeakers({ channel_id: 3, speakers: [61] });
     voiceStore.flush();
 
     const rowAfter = container.querySelector('.voice-user-item[data-voice-uid="61"]');

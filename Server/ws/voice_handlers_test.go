@@ -3,6 +3,8 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -52,26 +54,42 @@ func openVoiceTestDB(t *testing.T) *db.DB {
 }
 
 // newVoiceHub creates a hub+db suitable for voice handler tests.
-// It injects a test LiveKit client so voice_join passes the livekit!=nil guard.
+// It injects a test LiveKit client pointed at a stub SFU so voice_join clears
+// the "voice not configured" guard AND the externally-managed reachability
+// probe (voice_join.go), which the token mint now precedes.
 func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openVoiceTestDB(t)
 	limiter := auth.NewRateLimiter()
 
-	// A test LiveKit client with non-default credentials.
-	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-12345",
-		LiveKitAPISecret: "test-api-secret-67890abcdef",
-		LiveKitURL:       "ws://localhost:7880",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyLiveKitClient(t)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: lk})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database
+}
+
+// healthyLiveKitClient returns a LiveKit client pointed at an httptest server
+// that answers every Twirp RPC with an empty protobuf success — enough for the
+// ListRooms reachability probe voice_join runs when no companion process is
+// managed, and for the participant RPCs the eviction paths call.
+func healthyLiveKitClient(t *testing.T) *ws.LiveKitClient {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/protobuf")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
+		LiveKitAPIKey:    "test-api-key-12345",
+		LiveKitAPISecret: "test-api-secret-67890abcdef",
+		LiveKitURL:       "ws://" + srv.Listener.Addr().String(),
+	})
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+	return lk
 }
 
 // seedVoiceOwner inserts an Owner-role user for permission-passing tests.

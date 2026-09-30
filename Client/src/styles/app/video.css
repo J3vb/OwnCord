@@ -15,6 +15,35 @@
   align-content: center;
   justify-content: center;
   background: var(--bg-primary);
+  position: relative;
+}
+
+/* The always-present way out of video/focus mode. Pinned top-left so it stays
+   reachable when the focus layout has scrolled the focused tile's own nav off. */
+.video-grid__exit {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+  cursor: pointer;
+}
+
+.video-grid__exit:hover {
+  background: var(--scrim-hover);
+}
+
+.video-grid__exit[hidden] {
+  display: none;
 }
 
 .video-cell {
@@ -114,6 +143,25 @@
 }
 .video-cell--speaking {
   box-shadow: 0 0 0 2px var(--text-positive);
+}
+/* Mute/deafen badge on a camera tile (roster parity: tiles lacked the state
+   the sidebar row already shows). Sits with the label, bottom-right. */
+.video-cell__audio {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+  pointer-events: none;
+}
+.video-cell__audio--deafened {
+  color: var(--text-danger, var(--danger-fill));
 }
 .video-tile-nav {
   position: absolute;

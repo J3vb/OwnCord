@@ -41,11 +41,12 @@ export function captureOptions(options: ScreenCaptureRequest): NativeVoiceScreen
   };
 }
 
-/** A host start failure as the shared code classifies getDisplayMedia's:
- *  a cancelled or refused portal dialog is a `NotAllowedError`. */
+/** A host start failure as the shared code classifies getDisplayMedia's: a
+ *  cancelled or refused portal dialog is an `AbortError`, which the shared
+ *  code treats as a silent user cancel rather than a permission denial. */
 export function startError(err: unknown): unknown {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes(CANCELLED) ? new DOMException(message, "NotAllowedError") : err;
+  return message.includes(CANCELLED) ? new DOMException(message, "AbortError") : err;
 }
 
 /** The publish encoding the picker chose for this share. */

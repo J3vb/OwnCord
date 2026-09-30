@@ -188,9 +188,9 @@ Client                     OwnCord Server              LiveKit Server
 **Token details:**
 
 - Room name: `"channel-{channelID}"`
-- Identity: `"user-{userID}"`
-- TTL: 24 hours (refresh at 23h)
-- `canPublish` is derived from the `SPEAK_VOICE` permission
+- Identity: `"user-{userID}:{joinToken}"` (the join instance token is appended, so a rejoin creates a distinct participant; `"user-{userID}"` when no token is present)
+- TTL: 5 minutes; the client refreshes via `voice_token_refresh` every 4 minutes (rate limited to 1/60s)
+- Publish is scoped per track source via `CanPublishSources`: microphone from `SPEAK_VOICE`, camera from `USE_VIDEO`, screen share from `SHARE_SCREEN`, each independently
 - `canSubscribe` is always true
 - Client can request refresh via `voice_token_refresh` (rate limited to 1/60s)
 

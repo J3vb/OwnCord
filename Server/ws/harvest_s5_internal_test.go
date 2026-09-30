@@ -138,15 +138,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	t.Cleanup(h.Stop) // ends the background leave retries the blocked delete spawns
-	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "harvest-key",
-		LiveKitAPISecret: "harvest-secret-0123456789abcdef",
-		LiveKitURL:       "ws://127.0.0.1:9",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
-	h.livekit = lk
+	h.livekit = healthyTestLiveKit(t)
 
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {

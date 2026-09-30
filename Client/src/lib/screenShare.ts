@@ -488,7 +488,10 @@ export async function enableScreenshare(
     stopManualScreenTracks(state, room);
     setLocalScreenshare(false);
     log.error("Failed to enable screenshare", err);
-    if (err instanceof DOMException && err.name === "NotAllowedError") {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      // The user closed the picker: not a failure and not a denial — stay
+      // silent rather than reporting "permission denied" (polish #10).
+    } else if (err instanceof DOMException && err.name === "NotAllowedError") {
       deps.onError(voiceText("share.screenDenied"));
     } else {
       deps.onError(voiceText("share.screenFailed"));

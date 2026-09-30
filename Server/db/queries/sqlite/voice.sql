@@ -194,7 +194,13 @@ SELECT vs.user_id, vs.server_muted_by AS action_id
 UPDATE voice_states SET server_deafened = 1, deafened = 1 WHERE user_id = ? AND channel_id = ?;
 
 -- name: ClearVoiceServerDeafen :execresult
-UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?;
+-- Clears the self-deafen that ApplyVoiceServerDeafen set, mirroring the Apply
+-- statement: the deafen and its implied mute are lifted together by an
+-- undeafen, and leaving deafened=1 here would strand the target unable to
+-- subscribe remote audio (the client's release path requires !selfDeafened)
+-- even though server_deafened and the implied mute are gone. Same "no way to
+-- tell explicit from implied" caveat the mute path documents.
+UPDATE voice_states SET server_deafened = 0, deafened = 0 WHERE user_id = ? AND channel_id = ?;
 
 -- Camera and screenshare share one voice_max_video budget, counted in
 -- STREAMS, not rows: a channel capped at N simultaneous video streams must

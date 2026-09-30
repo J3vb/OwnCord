@@ -24,6 +24,7 @@ vi.mock("@lib/connectionStats", () => ({
       inPackets: 0,
       totalUp: 0,
       totalDown: 0,
+      available: true,
     }),
     onUpdate: vi.fn().mockReturnValue(() => {}),
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
@@ -33,6 +34,7 @@ vi.mock("@lib/connectionStats", () => ({
 }));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { createConnectionStatsPoller } from "@lib/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -306,6 +308,35 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("does not paint the mic button as muted while a PTT gate owns the mute", () => {
+    // PTT release routes through setMuted, writing localMuted; pttGated records
+    // that the gate (not the user) silenced the mic. The button must read the
+    // user's own mute, not the gate, or a PTT user sees "muted" the whole time.
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+
+    // A genuine self-mute (no PTT gate) still paints muted.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: false }));
+    voiceStore.flush();
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+
+    widget.destroy?.();
+  });
+
   it("toggles screenshare active state based on store", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
@@ -553,6 +584,29 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("does not paint the mic button as unmuted while joined listen-only", () => {
+    // Listen-only means no microphone track is published; the button must not
+    // read "unmuted" as if the user were hot. It is disabled with no active
+    // state, matching the "Grant Microphone" call to action.
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true, localMuted: false }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(true);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+
+    widget.destroy?.();
+  });
+
   it("shows an actionable mic notice in listen-only mode and hides it otherwise", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
@@ -665,6 +719,43 @@ describe("VoiceWidget", () => {
     // Click again to hide
     signalWrap.click();
     expect(statsPane.classList.contains("visible")).toBe(false);
+
+    widget.destroy?.();
+  });
+
+  it("renders the signal readout as unavailable, not a false green, when no stats sample arrives", () => {
+    const poller = createConnectionStatsPoller as unknown as ReturnType<typeof vi.fn>;
+    poller.mockReturnValueOnce({
+      start: vi.fn(),
+      stop: vi.fn(),
+      getStats: vi.fn().mockReturnValue({
+        rtt: 0,
+        quality: "excellent",
+        outRate: 0,
+        inRate: 0,
+        outPackets: 0,
+        inPackets: 0,
+        totalUp: 0,
+        totalDown: 0,
+        available: false,
+      }),
+      onUpdate: vi.fn().mockReturnValue(() => {}),
+      onQualityChanged: vi.fn().mockReturnValue(() => {}),
+    });
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const signalWrap = container.querySelector(".vw-signal") as HTMLButtonElement;
+    expect(signalWrap.classList.contains("vw-signal--unavailable")).toBe(true);
+    expect(container.querySelector(".vw-ping")!.textContent).toBe("—");
 
     widget.destroy?.();
   });

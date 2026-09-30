@@ -1008,6 +1008,26 @@ describe("VideoGrid", () => {
       expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
     });
 
+    it("exposes a header control that leaves focus/grid mode and is keyboard reachable", () => {
+      // Focus mode pinned a watched peer with no way back once the focused
+      // tile's own nav was scrolled off (and an empty grid could cover chat
+      // with no control at all). A header button always offers the exit.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      grid.addStream(3, "Sam", fakeStream(), camera());
+
+      const exit = container.querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']");
+      expect(exit).not.toBeNull();
+      expect(exit!.tagName).toBe("BUTTON");
+      expect(exit!.getAttribute("aria-label")).toBe("Show chat");
+
+      select(SCREEN).click();
+      expect(container.querySelector(".video-grid.focus-mode")).not.toBeNull();
+
+      exit!.click();
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
+    });
+
     it("marks screen shares LIVE, and cameras not", () => {
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
@@ -1025,6 +1045,21 @@ describe("VideoGrid", () => {
 
       grid.setSpeaking(new Set());
       expect(cell(2).classList.contains("video-cell--speaking")).toBe(false);
+    });
+
+    it("marks a muted/deafened peer on their camera tile, and clears it", () => {
+      grid.addStream(2, "Otto", fakeStream(), camera({ audioUserId: 2, name: "Otto" }));
+
+      grid.setUserAudioState(new Map([[2, { muted: true, deafened: false }]]));
+      const badge = cell(2).querySelector<HTMLElement>("[data-testid='tile-audio-state']")!;
+      expect(badge).not.toBeNull();
+      expect(badge.classList.contains("video-cell__audio--muted")).toBe(true);
+
+      grid.setUserAudioState(new Map([[2, { muted: true, deafened: true }]]));
+      expect(badge.classList.contains("video-cell__audio--deafened")).toBe(true);
+
+      grid.setUserAudioState(new Map());
+      expect(cell(2).querySelector("[data-testid='tile-audio-state']")).toBeNull();
     });
 
     it("names the volume slider for whose stream or voice it is, and shows its value", () => {
