@@ -111,8 +111,8 @@ just under the hard one at init, and the server **raises its soft limit to the
 hard limit at start-up** and logs the result, so the number that matters is the
 **hard limit** the supervisor or the shell sets. The risk is a low hard limit
 — a plain `ulimit -n 1024`, or an old daemon or unit default of 1,024 — which a
-few hundred online will reach and 2,000 online (about 2,100 descriptors with
-the process's own files) will not:
+few hundred online will reach, and which cannot hold 2,000 online (about 2,100
+descriptors with the process's own files):
 
 - **systemd:** the shipped `deploy/owncord.service` sets `LimitNOFILE=65536`,
   well above what 2,000 online need (the boot budget for 2,000 is 4,256).
