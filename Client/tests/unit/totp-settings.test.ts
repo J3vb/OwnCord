@@ -113,6 +113,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       // Rendered from the stale store first...
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
@@ -134,6 +135,7 @@ describe("TOTP Settings", () => {
       const confirmed = makeOptions({ onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined) });
       const overlay = createSettingsOverlay(confirmed);
       overlay.mount(container);
+      overlay.open();
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
       const pwInput = container.querySelector(
@@ -153,6 +155,7 @@ describe("TOTP Settings", () => {
       });
       const overlay2 = createSettingsOverlay(failing);
       overlay2.mount(container);
+      overlay2.open();
       await Promise.resolve();
       await Promise.resolve();
       const badge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
@@ -170,6 +173,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       expect(enableBtn).not.toBeNull();
@@ -183,6 +187,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -204,6 +209,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -226,6 +232,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -252,6 +259,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -280,6 +288,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -321,6 +330,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       (container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement).click();
       (container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement).value =
@@ -355,6 +365,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -389,6 +400,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       // Step 1: Click Enable 2FA
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
@@ -433,6 +445,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
       enableBtn.click();
@@ -466,6 +479,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       // Navigate through enable flow
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
@@ -521,6 +535,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       // Navigate through enable flow
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
@@ -577,6 +592,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       // Navigate through enable flow
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
@@ -631,6 +647,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       expect(disableBtn).not.toBeNull();
@@ -648,6 +665,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -669,6 +687,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -697,6 +716,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -738,6 +758,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -765,6 +786,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions();
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -801,6 +823,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -848,6 +871,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       // Navigate through enable flow
       const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
@@ -893,6 +917,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
       disableBtn.click();
@@ -937,6 +962,7 @@ describe("TOTP Settings", () => {
       mockTotpEnabled = false;
       const overlay = createSettingsOverlay(makeOptions());
       overlay.mount(container);
+      overlay.open();
       expect(q("[data-testid='totp-regenerate-btn']")).toBeNull();
       overlay.destroy?.();
     });
@@ -946,6 +972,7 @@ describe("TOTP Settings", () => {
       const options = makeOptions({ onRegenerateRecoveryCodes: vi.fn().mockResolvedValue(CODES) });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       await confirmWithPassword("totp-regenerate", "");
       expect(byTestId("totp-regenerate-error").textContent).toBe("Password is required.");
@@ -969,6 +996,7 @@ describe("TOTP Settings", () => {
         .mockResolvedValueOnce(["NEWNE-WNEWN"]);
       const overlay = createSettingsOverlay(makeOptions({ onRegenerateRecoveryCodes }));
       overlay.mount(container);
+      overlay.open();
 
       await confirmWithPassword("totp-regenerate", "pw");
       await vi.waitFor(() => expect(container.textContent).toContain("OLDOL-DOLDO"));
@@ -993,6 +1021,7 @@ describe("TOTP Settings", () => {
         }),
       );
       overlay.mount(container);
+      overlay.open();
       await confirmWithPassword("totp-regenerate", "wrong");
       await vi.waitFor(() =>
         expect(byTestId("totp-regenerate-error").textContent).toBe("invalid password"),
@@ -1018,6 +1047,7 @@ describe("TOTP Settings", () => {
         makeOptions({ onGetRecoveryKitStatus: vi.fn().mockResolvedValue(status) }),
       );
       overlay.mount(container);
+      overlay.open();
       await vi.waitFor(() => expect(byTestId("recovery-kit-status").textContent).toBe(badge));
       expect(byTestId("recovery-kit-btn").textContent).toBe(action);
       overlay.destroy?.();
@@ -1030,6 +1060,7 @@ describe("TOTP Settings", () => {
         }),
       );
       overlay.mount(container);
+      overlay.open();
 
       await vi.waitFor(() =>
         expect(byTestId("recovery-kit-status").textContent).not.toBe("Checking…"),
@@ -1055,6 +1086,7 @@ describe("TOTP Settings", () => {
       });
       const overlay = createSettingsOverlay(options);
       overlay.mount(container);
+      overlay.open();
 
       await confirmWithPassword("recovery-kit", "mypassword123");
       await vi.waitFor(() =>
@@ -1073,6 +1105,7 @@ describe("TOTP Settings", () => {
         makeOptions({ onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "x" }) }),
       );
       overlay.mount(container);
+      overlay.open();
       await confirmWithPassword("recovery-kit", "pw");
       await vi.waitFor(() =>
         expect(byTestId("recovery-kit-error").textContent).toMatch(/did not return/),

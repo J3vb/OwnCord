@@ -2264,6 +2264,10 @@ describe("MainPage — account deletion", () => {
   async function deleteAccount(api: ApiClient): Promise<void> {
     page = createMainPage({ ws: fakeWs(), api });
     page.mount(container);
+    // The Account tab (and its delete control) is only built once Settings is
+    // open (DP-52), so open it before driving the delete flow.
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    uiStore.flush();
     (document.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
     (document.querySelector("[data-testid='delete-account-password']") as HTMLInputElement).value =
       "pw";
