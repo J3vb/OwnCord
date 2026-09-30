@@ -25,6 +25,7 @@ function makeHandlers(): {
   onToggleDeafen: Mock<() => void>;
   onToggleCamera: Mock<() => void>;
   onUploadFile: Mock<() => void>;
+  onStepChannel: Mock<(direction: 1 | -1, unreadOnly: boolean) => void>;
 } {
   return {
     onSearch: vi.fn<() => void>(),
@@ -32,6 +33,7 @@ function makeHandlers(): {
     onToggleDeafen: vi.fn<() => void>(),
     onToggleCamera: vi.fn<() => void>(),
     onUploadFile: vi.fn<() => void>(),
+    onStepChannel: vi.fn<(direction: 1 | -1, unreadOnly: boolean) => void>(),
   };
 }
 
@@ -178,6 +180,50 @@ describe("global keybinds", () => {
     press("f", { altKey: true });
 
     expect(h.onSearch).not.toHaveBeenCalled();
+  });
+
+  // DP-35: Alt+↑/↓ steps to the previous/next channel, Alt+Shift+↑/↓ to the
+  // previous/next unread channel (Discord's shortcuts).
+  it("steps channels on Alt+ArrowDown / Alt+ArrowUp", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    press("ArrowDown", { ctrlKey: false, altKey: true });
+    press("ArrowUp", { ctrlKey: false, altKey: true });
+
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(1, 1, false);
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(2, -1, false);
+  });
+
+  it("steps to unread channels on Alt+Shift+ArrowDown / Alt+Shift+ArrowUp", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    press("ArrowDown", { ctrlKey: false, altKey: true, shiftKey: true });
+    press("ArrowUp", { ctrlKey: false, altKey: true, shiftKey: true });
+
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(1, 1, true);
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(2, -1, true);
+  });
+
+  it("does not step while typing in the composer", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        altKey: true,
+        bubbles: true,
+      }),
+    );
+
+    expect(h.onStepChannel).not.toHaveBeenCalled();
+
+    composer.remove();
   });
 
   it("keeps a handler error from escaping to the document", () => {

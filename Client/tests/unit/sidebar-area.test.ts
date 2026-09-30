@@ -1855,6 +1855,35 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    // DP-34: the optimistic removal is rolled back when the server refuses.
+    it("restores the DM row when closeDm rejects", async () => {
+      const dm = makeDm({
+        channelId: 100,
+        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+      });
+      addDmChannel(dm);
+
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 100 }));
+
+      const opts = defaultOpts();
+      (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onCloseDm(100);
+
+      // Gone immediately (optimistic), back once the request rejects.
+      expect(dmStore.getState().channels).toHaveLength(0);
+      await vi.waitFor(() => {
+        expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
+      });
+
+      cleanup(result);
+    });
+
     it("tracks the rename-group prompt so page teardown removes it (every other modal in this file does)", () => {
       const dm = makeDm({ channelId: 100, isGroup: true, name: "Old Name" });
       addDmChannel(dm);

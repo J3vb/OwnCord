@@ -18,6 +18,7 @@ import { atEachMidnight, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
+import { createModal } from "@lib/modalFactory";
 import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "./message-list/avatar";
@@ -28,6 +29,7 @@ import {
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
+import { shellText } from "../i18n/shell";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -153,6 +155,65 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
   return avatar;
 }
 
+/**
+ * The destructive group-leave confirm, modelled on DeleteChannelModal: Cancel
+ * first and focused, Escape and the backdrop cancel, focus returns to the
+ * opener. Kept local to the sidebar so a leave prompt cannot outlive the row
+ * that opened it — the signal is the row's own.
+ */
+function openLeaveConfirm(
+  convo: DmConversation,
+  onClose: (channelId: number) => void,
+  rowSignal: AbortSignal,
+): void {
+  const owner = new Disposable();
+  const titleId = `dm-leave-title-${convo.channelId}`;
+  const content = createElement("div");
+  const header = createElement("div", { class: "modal-header" });
+  header.appendChild(createElement("h3", { id: titleId }, requestsText("dm.leaveConfirmTitle")));
+  const body = createElement("div", { class: "modal-body" });
+  body.appendChild(
+    createElement(
+      "p",
+      { class: "modal-danger-text" },
+      requestsText("dm.leaveConfirmBody", { name: convo.username }),
+    ),
+  );
+  const footer = createElement("div", { class: "modal-footer" });
+  const cancel = createElement(
+    "button",
+    { class: "btn-modal-cancel", type: "button", "data-testid": "dm-leave-cancel" },
+    shellText("common.cancel"),
+  );
+  const confirm = createElement(
+    "button",
+    { class: "btn-danger", type: "button", "data-testid": "dm-leave-confirm" },
+    requestsText("dm.leaveConfirm"),
+  );
+  footer.append(cancel, confirm);
+  content.append(header, body, footer);
+
+  const modal = createModal({
+    content,
+    ariaLabelledBy: titleId,
+    overlayAttrs: { "data-testid": "dm-leave-modal" },
+    // The row's own lifetime also closes the prompt, so a re-render that
+    // disposes the row cannot leave its confirm behind.
+    signal: rowSignal,
+    // The modal owns its own listeners; drop this prompt's with it.
+    onClose: () => owner.destroy(),
+  });
+  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
+  confirm.addEventListener(
+    "click",
+    () => {
+      modal.close();
+      onClose(convo.channelId);
+    },
+    { signal: owner.signal },
+  );
+}
+
 function renderDmItem(
   convo: DmConversation,
   options: DmSidebarOptions,
@@ -228,7 +289,16 @@ function renderDmItem(
     "click",
     (e: Event) => {
       e.stopPropagation();
-      options.onCloseDm?.(convo.channelId);
+      const close = options.onCloseDm;
+      if (close === undefined) return;
+      // A group leave is destructive and asks first (DP-34). Shift-click skips
+      // the prompt, as Discord's delete confirm does. A 1:1 close is only a
+      // hide, so it stays one click.
+      if (convo.isGroup === true && !(e instanceof MouseEvent && e.shiftKey)) {
+        openLeaveConfirm(convo, close, signal);
+        return;
+      }
+      close(convo.channelId);
     },
     { signal },
   );
@@ -301,11 +371,14 @@ function renderDmItem(
     }
     if (options.onCloseDm !== undefined) {
       const close = options.onCloseDm;
+      const isGroup = convo.isGroup === true;
       items.push({
-        label: convo.isGroup === true ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
+        label: isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
         danger: true,
         testId: `dm-close-${convo.channelId}`,
-        onClick: () => close(convo.channelId),
+        // The menu item has no Shift modifier, so a group always confirms here
+        // too — the destructive action is destructive whichever path opens it.
+        onClick: () => (isGroup ? openLeaveConfirm(convo, close, signal) : close(convo.channelId)),
       });
     }
     if (items.length === 0) return;
@@ -346,9 +419,15 @@ export interface DmSidebar extends MountableComponent {
 /** A row the search filter has not hidden: the only rows the keyboard visits. */
 const VISIBLE_ROW = ".dm-item:not([hidden])";
 
-/** The unread-first order the conversation list renders in. */
+/**
+ * The order the conversation list renders in: pure recency, which is the order
+ * the store already carries (the server lists DMs by last message time, and
+ * every store mutator moves a touched DM to the front). The old unread-first
+ * sort contradicted this component's own header (DP-42) — and unread is not
+ * what a DM list is for; the badge already marks what is unread.
+ */
 function sortConversations(conversations: readonly DmConversation[]): DmConversation[] {
-  return [...conversations].toSorted((a, b) => (b.unread ? 1 : 0) - (a.unread ? 1 : 0));
+  return [...conversations];
 }
 
 /** Everything a row draws. A changed value rebuilds just that row. */

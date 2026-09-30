@@ -49,7 +49,7 @@ import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.sto
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import { dmStore, closeDmLocally } from "@stores/dm.store";
+import { dmStore, closeDmLocally, addDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
@@ -567,13 +567,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    * The client does not decide which: the server's DELETE /dms/{id} is a hide
    * for a 1:1 and a leave for a group, and duplicating that branch here would
    * be a second place to get it wrong. Locally, both mean "drop it from the
-   * list" — the row is removed optimistically because the request is a
-   * fire-and-forget one whose failure the sidebar cannot usefully recover from
-   * (the next `ready` restores the truth either way).
+   * list" — the row is removed optimistically so the sidebar reacts at once.
+   *
+   * If the server refuses, the row comes back (DP-34): the DmChannel is kept
+   * from just before the removal and re-inserted with `addDmChannel`, which
+   * also restores it to the top of the list and preserves nothing else it
+   * should not. The failure toast still fires so the user knows why.
    */
   function closeOrLeaveDm(channelId: number): void {
+    const removed = dmStore.getState().channels.find((c) => c.channelId === channelId);
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
+      if (removed !== undefined) addDmChannel(removed);
       getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
   }
