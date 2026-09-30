@@ -97,9 +97,19 @@ const FRESH_PROFILE_MEMBERS = Array.from({ length: 45 }, (_, i) => ({
   role: i === 0 ? "admin" : "member",
 }));
 
+/** More channel rows than the sidebar column can show. */
+const LONG_CHANNEL_LIST = Array.from({ length: 40 }, (_, i) => ({
+  id: i + 1,
+  name: `channel-${i}`,
+  type: "text" as const,
+  position: i,
+  category: "Text Channels",
+}));
+
 async function signInFreshProfile(
   page: import("@playwright/test").Page,
   stored?: Record<string, string>,
+  channels: Array<(typeof FRESH_PROFILE_CHANNELS)[number]> = FRESH_PROFILE_CHANNELS,
 ): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
@@ -110,7 +120,7 @@ async function signInFreshProfile(
         { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
       ],
       simulateWsFlow: true,
-      readyOverrides: { channels: FRESH_PROFILE_CHANNELS, members: FRESH_PROFILE_MEMBERS },
+      readyOverrides: { channels, members: FRESH_PROFILE_MEMBERS },
     }),
   );
   if (stored !== undefined) {
@@ -174,6 +184,36 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     const content = page.locator(".sidebar-members-content");
     const scrolls = await content.evaluate((el) => el.scrollHeight > el.clientHeight + 1);
     expect(scrolls).toBe(true);
+  });
+
+  test("members keep about three rows when the channel list overflows (P1-01)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await signInFreshProfile(page, undefined, LONG_CHANNEL_LIST);
+
+    // The members show at least three whole rows, and the channel list
+    // scrolls inside its slot instead of pushing them out.
+    const visibleMembers = await page.locator(".sidebar-members-content").evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return [...el.querySelectorAll(".member-item")].filter((row) => {
+        const r = row.getBoundingClientRect();
+        return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+      }).length;
+    });
+    expect(visibleMembers).toBeGreaterThanOrEqual(3);
+    const channelsScroll = await page
+      .locator(".sidebar-content-inner .channel-list")
+      .evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    expect(channelsScroll).toBe(true);
+  });
+
+  test("a saved height holds when the channel list overflows (P1-01)", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await signInFreshProfile(page, { "owncord:member-list-height": "200" }, LONG_CHANNEL_LIST);
+
+    const memberBox = (await page.locator("[data-testid='sidebar-members']").boundingBox())!;
+    expect(Math.abs(memberBox.height - 200)).toBeLessThanOrEqual(1);
   });
 
   test("a saved height and a collapsed state still restore (P1-01)", async ({ page }) => {

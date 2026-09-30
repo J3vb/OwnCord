@@ -18,17 +18,19 @@
   display: flex;
   flex-direction: column;
   /* Fills whatever the channel list above leaves, instead of claiming its full
-     content height and starving that list (P1-01). The min-height keeps the
-     header and resize handle in view. */
+     content height and starving that list (P1-01). The min-height keeps about
+     three member rows in view; past that, the channel list scrolls instead. */
   flex: 1 1 0;
-  min-height: calc(var(--font-size, 16px) * 2);
+  min-height: calc(var(--font-size, 16px) * 11);
 }
 /* A definite height — restored from storage, dragged, or collapsed — is not a
    share of the column: the section keeps that size and the channel list above
    grows to the rest (P1-01). The class carries the section between the two
-   states, so no measurement of inline styles is needed. */
+   states, so no measurement of inline styles is needed. Its min-height keeps
+   only the header and resize handle in view (B9 Q1 reflow). */
 .sidebar-members-section.sized {
   flex: 0 1 auto;
+  min-height: calc(var(--font-size, 16px) * 2);
 }
 .sidebar-members-header {
   padding: 8px 8px 4px 16px;

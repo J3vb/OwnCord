@@ -948,7 +948,11 @@ describe("SidebarArea", () => {
           "flex",
         )?.value,
       ).toMatchObject({
-        value: { grow: 1, shrink: 1, basis: { type: "auto" } },
+        value: {
+          grow: 1,
+          shrink: 1,
+          basis: { type: "length-percentage", value: { type: "dimension", value: { value: 0 } } },
+        },
       });
     });
   });

@@ -84,7 +84,7 @@
    collapsed), it no longer fills the rest, so the channel slot takes that
    space back instead of leaving a gap at the bottom (P1-01). */
 .sidebar-content:has(.sidebar-members-section.sized) .sidebar-content-inner {
-  flex: 1 1 auto;
+  flex: 1 1 0;
 }
 /* The unified header above already shows the server name and Invite. */
 .sidebar-content-inner .channel-sidebar-header {
