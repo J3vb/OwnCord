@@ -387,6 +387,7 @@ describe("SettingsOverlay", () => {
   it("shows current username", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const acName = container.querySelector(".account-header-name");
     expect(acName?.textContent).toBe("testuser");
@@ -407,6 +408,7 @@ describe("SettingsOverlay", () => {
   it("validates password change requires minimum length", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
@@ -426,6 +428,7 @@ describe("SettingsOverlay", () => {
   it("validates password confirmation matches", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
@@ -445,6 +448,7 @@ describe("SettingsOverlay", () => {
   it("requires the current password before calling the server", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "";
@@ -474,6 +478,7 @@ describe("SettingsOverlay", () => {
     );
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
@@ -503,6 +508,7 @@ describe("SettingsOverlay", () => {
     const onChangePassword = vi.fn().mockResolvedValue(undefined);
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
@@ -538,6 +544,7 @@ describe("SettingsOverlay", () => {
     const onChangePassword = vi.fn().mockResolvedValue({ warning, sessions_revoked: 0 });
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "oldpass123";
@@ -571,6 +578,7 @@ describe("SettingsOverlay", () => {
     const onChangePassword = vi.fn().mockRejectedValue(new Error("Incorrect old password"));
     const overlay = createSettingsOverlay({ ...defaultOptions, onChangePassword });
     overlay.mount(container);
+    overlay.open();
 
     const inputs = container.querySelectorAll("#pw-old, #pw-new, #pw-confirm");
     (inputs[0] as HTMLInputElement).value = "wrongold";
@@ -597,6 +605,7 @@ describe("SettingsOverlay", () => {
     const onUpdateProfile = vi.fn().mockRejectedValue(new Error("Username taken"));
     const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
     overlay.mount(container);
+    overlay.open();
 
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
@@ -623,6 +632,7 @@ describe("SettingsOverlay", () => {
   it("Cancel button hides the username edit form", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     // Open edit form
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
@@ -649,6 +659,7 @@ describe("SettingsOverlay", () => {
   it("shows confirmation area when Delete Account is clicked", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -671,6 +682,7 @@ describe("SettingsOverlay", () => {
   it("hides confirmation area when Cancel is clicked", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -699,6 +711,7 @@ describe("SettingsOverlay", () => {
       getRetentionNotice: () => "By default this server deletes messages after 30 days.",
     });
     overlay.mount(container);
+    overlay.open();
     (container.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
 
     const warning = container.querySelector(
@@ -718,6 +731,7 @@ describe("SettingsOverlay", () => {
     const notice = "By default this server deletes messages after 30 days.";
     const overlay = createSettingsOverlay({ ...defaultOptions, getRetentionNotice: () => notice });
     overlay.mount(container);
+    overlay.open();
 
     const section = container.querySelector("[data-testid='account-retention']")!;
     expect(section.textContent).toContain(notice);
@@ -738,6 +752,7 @@ describe("SettingsOverlay", () => {
   it("shows error when confirming delete without password", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -759,6 +774,7 @@ describe("SettingsOverlay", () => {
   it("calls onDeleteAccount with password on confirm", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -783,6 +799,7 @@ describe("SettingsOverlay", () => {
   it("disables confirm button and shows 'Deleting...' during delete", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -813,6 +830,7 @@ describe("SettingsOverlay", () => {
 
     const overlay = createSettingsOverlay(failOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -844,6 +862,7 @@ describe("SettingsOverlay", () => {
   it("clears password input when reopening confirmation area", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const triggerBtn = container.querySelector(
       "[data-testid='delete-account-trigger']",
@@ -986,6 +1005,7 @@ describe("SettingsOverlay", () => {
   it("rejects single-character username (min 2)", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     // Click "Edit" to open username edit form
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
@@ -1012,6 +1032,7 @@ describe("SettingsOverlay", () => {
   it("accepts two-character username (min 2)", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const editBtn = container.querySelector(".account-field-edit") as HTMLElement;
     editBtn.click();
@@ -1045,6 +1066,7 @@ describe("SettingsOverlay", () => {
 
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     // Header starts out showing the display name, not the username.
     const acName = container.querySelector(".account-header-name");
@@ -1084,6 +1106,7 @@ describe("SettingsOverlay", () => {
   it("offers Invisible as a status, not Offline", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
     const labels = Array.from(select.options).map((o) => o.textContent);
@@ -1098,6 +1121,7 @@ describe("SettingsOverlay", () => {
   it("status select is labelled and reports the chosen status", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
+    overlay.open();
 
     const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
     expect(select.tagName).toBe("SELECT");
@@ -1201,6 +1225,28 @@ describe("SettingsOverlay", () => {
 
     slider = container.querySelector(".settings-slider") as HTMLInputElement;
     expect(slider.value).toBe("20");
+
+    overlay.destroy?.();
+  });
+
+  // --- No fetches while closed (DP-52) ---
+
+  // The Account tab's three REST reads — sessions, TOTP status and recovery-kit
+  // status — are wasted work while the overlay is hidden. Mount must not build
+  // the tab (which issues them) until the panel is actually open.
+  it("does not fetch account data while closed, then fetches once on open", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    expect(defaultOptions.onListSessions).not.toHaveBeenCalled();
+    expect(defaultOptions.onRefreshTotpStatus).not.toHaveBeenCalled();
+    expect(defaultOptions.onGetRecoveryKitStatus).not.toHaveBeenCalled();
+
+    overlay.open();
+
+    expect(defaultOptions.onListSessions).toHaveBeenCalledTimes(1);
+    expect(defaultOptions.onRefreshTotpStatus).toHaveBeenCalledTimes(1);
+    expect(defaultOptions.onGetRecoveryKitStatus).toHaveBeenCalledTimes(1);
 
     overlay.destroy?.();
   });

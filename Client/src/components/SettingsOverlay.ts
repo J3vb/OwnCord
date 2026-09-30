@@ -504,10 +504,13 @@ export function createSettingsOverlay(
     );
 
     root.appendChild(panel);
-    renderActiveTab();
-    // Content built while the panel is closed is only a placeholder: opening
-    // rebuilds it so the first view is as fresh as every later one.
+    // Don't build the active tab while the overlay is closed (DP-52): its
+    // builders issue REST reads (sessions, TOTP and recovery-kit status) that
+    // are wasted work until the panel is actually shown. The first open
+    // rebuilds via show() → !contentLive, so its data is as fresh as any later
+    // open's.
     contentLive = uiStore.getState().settingsOpen;
+    if (contentLive) renderActiveTab();
 
     // Subscribe to uiStore for open/close
     unsubUi = uiStore.subscribeSelector(
