@@ -50,6 +50,10 @@ func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 type configFactsResponse struct {
 	UploadMaxSizeMB int    `json:"upload_max_size_mb"`
 	VoiceQuality    string `json:"voice_quality"`
+	// config.yaml's upload file-type lists: the Settings page's values until
+	// the owner saves the upload_*_extensions rows that replace them.
+	UploadBlockedExtensions []string `json:"upload_blocked_extensions"`
+	UploadAllowedExtensions []string `json:"upload_allowed_extensions"`
 
 	ServerPort       int     `json:"server_port"`
 	MinFreeDiskMB    int     `json:"min_free_disk_mb"`
@@ -75,6 +79,9 @@ func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 		resp := configFactsResponse{
 			UploadMaxSizeMB: cfg.Upload.MaxSizeMB,
 			VoiceQuality:    cfg.Voice.Quality,
+
+			UploadBlockedExtensions: cfg.Upload.BlockedExtensions,
+			UploadAllowedExtensions: cfg.Upload.AllowedExtensions,
 
 			ServerPort:       cfg.Server.Port,
 			MinFreeDiskMB:    cfg.Server.MinFreeDiskMB,

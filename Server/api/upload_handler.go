@@ -10,7 +10,6 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
-	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -173,19 +172,6 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 }
 
-// uploadBodyCap is the request body cap for one upload given the per-file
-// cap in bytes (upload.max_size_mb; 0 when unset, or when a max_size_mb of 0
-// disables uploads and storage.Save refuses every non-empty file). It never
-// drops below uploadMaxBodySize, so a file over a smaller per-file cap still
-// reaches storage.Save and its own size rejection; above that it is the
-// per-file cap plus the multipart margin, saturating rather than overflowing.
-func uploadBodyCap(fileCap int64) int64 {
-	if fileCap > math.MaxInt64-uploadMultipartMargin {
-		return math.MaxInt64
-	}
-	return max(uploadMaxBodySize, fileCap+uploadMultipartMargin)
-}
-
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
 	slots := &uploadSlots{n: make(map[int64]int)}
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +249,12 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer part.Close() //nolint:errcheck
 
+		// The owner's file-type policy judges the name the file will carry;
+		// storage.Save's content blocks still apply to whatever it allows.
+		safeFilename := sanitizeUploadFilename(part.FileName())
+		if !checkUploadFileType(r.Context(), w, uploads, safeFilename) {
+			return
+		}
 		stored, ok := uploadStoreFile(r.Context(), w, part, res, store)
 		if !ok {
 			return
@@ -270,7 +262,6 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 
 		// Record the attachment (unlinked — message_id is NULL) and commit
 		// the reservation under the same lock.
-		safeFilename := sanitizeUploadFilename(part.FileName())
 		if err := uploads.Record(r.Context(), service.AttachmentRecord{
 			ID:         stored.id,
 			UploaderID: user.ID,

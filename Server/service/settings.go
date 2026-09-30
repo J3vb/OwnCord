@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -43,6 +44,9 @@ var allowedSettingKeys = map[string]struct{}{
 	// The server-wide message-retention window in days (B4-11): 0 keeps
 	// everything, anything else is at least RetentionMinDays.
 	db.RetentionDaysKey: {},
+	// The upload file-type lists (upload_filetypes.go).
+	UploadBlockedExtensionsKey: {},
+	UploadAllowedExtensionsKey: {},
 }
 
 // ownerOnlySettingKeys are the settings that decide the owner-only backup
@@ -54,6 +58,10 @@ var allowedSettingKeys = map[string]struct{}{
 var ownerOnlySettingKeys = map[string]struct{}{
 	"backup_schedule":  {},
 	"backup_retention": {},
+	// The upload file-type policy decides which files members can share, so
+	// it is the owner's call too.
+	UploadBlockedExtensionsKey: {},
+	UploadAllowedExtensionsKey: {},
 }
 
 // IsOwnerOnlySettingKey reports whether a setting key changes the owner-only
@@ -204,6 +212,12 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 				return nil, err
 			}
 			normalized[key] = days
+		case UploadBlockedExtensionsKey, UploadAllowedExtensionsKey:
+			list, err := storage.ParseExtensionList(value)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", key, err)
+			}
+			normalized[key] = strings.Join(list, ",")
 		case "backup_schedule":
 			schedule := strings.ToLower(strings.TrimSpace(value))
 			switch schedule {

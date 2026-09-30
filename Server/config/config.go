@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	goyaml "go.yaml.in/yaml/v3"
+
+	"github.com/J3vb/OwnCord/Server/storage"
 )
 
 // Config holds the full server configuration.
@@ -370,6 +372,9 @@ type UploadConfig struct {
 	// the disk-headroom floor, see migration 044. 0, the default, is
 	// unlimited, so no existing install changes behaviour on upgrade.
 	UserQuotaMB int `yaml:"user_quota_mb"`
+	// The storage.FileTypePolicy lists; an admin-panel value replaces each.
+	BlockedExtensions []string `yaml:"blocked_extensions"`
+	AllowedExtensions []string `yaml:"allowed_extensions"`
 }
 
 // UserQuotaBytes is the per-user quota in bytes; 0 means unlimited.
@@ -445,8 +450,10 @@ func defaults() Config {
 			AcmeCacheDir: "data/acme_certs",
 		},
 		Upload: UploadConfig{
-			MaxSizeMB:  100,
-			StorageDir: "data/uploads",
+			MaxSizeMB:         100,
+			StorageDir:        "data/uploads",
+			BlockedExtensions: slices.Clone(storage.DefaultBlockedExtensions),
+			AllowedExtensions: []string{},
 		},
 		Voice: VoiceConfig{
 			LiveKitURL: "ws://localhost:7880",
@@ -568,6 +575,9 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments and avatars); 0 = unlimited
+  # blocked_extensions: [bat, cmd, ps1, vbs, js, hta, ...]  # refused by name (default:
+  #                           # Windows scripts, installers, disk images)
+  # allowed_extensions: []    # non-empty = only these extensions may be uploaded
 
 # Web Push subscriptions. Disabled by default: with push.enabled false,
 # every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
@@ -787,10 +797,25 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 		}
 	}
 	applyBounds(&cfg)
+	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
+		return nil, err
+	}
 	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
 		return nil, fmt.Errorf("applying voice defaults: %w", err)
 	}
 	return &cfg, nil
+}
+
+// normalizeUploadExtensions fails the load on a bad entry: skipping it could
+// empty an allow-only list, and so switch allow-only mode off.
+func normalizeUploadExtensions(u *UploadConfig) (err error) {
+	if u.BlockedExtensions, err = storage.NormalizeExtensions(u.BlockedExtensions); err != nil {
+		return fmt.Errorf("upload.blocked_extensions: %w", err)
+	}
+	if u.AllowedExtensions, err = storage.NormalizeExtensions(u.AllowedExtensions); err != nil {
+		return fmt.Errorf("upload.allowed_extensions: %w", err)
+	}
+	return nil
 }
 
 // warnInvalidCIDRs logs a startup warning for each list entry that is not

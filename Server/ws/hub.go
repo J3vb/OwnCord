@@ -189,11 +189,10 @@ type Hub struct {
 	// defaultVoiceQuality is the operator-configured voice.quality
 	// (HubOptions.VoiceQuality), used by voiceJoinComplete as the fallback
 	// when a channel has no per-channel voice_quality override (OC-0439).
-	// Always one of voiceQualities' keys — NewHub normalizes it. Set once at
-	// construction and never mutated (voice.quality is startup-only), so no
-	// mutex guards it, like livekit/lkProcess below.
+	// Always one of voiceQualities' keys — NewHub normalizes it. Set once and
+	// never mutated (voice.quality is startup-only), so no mutex guards it.
 	defaultVoiceQuality string
-	uploadPolicy        UploadPolicy // HubOptions.UploadPolicy for auth_ok; set once, like the above
+	uploadFileTypes     UploadFileTypes // HubOptions.UploadFileTypes; may be nil
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation
 	// DB transition with its paired LiveKit call (round 4, Codex review
@@ -205,6 +204,7 @@ type Hub struct {
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
+	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
 
 	// voiceKeyHolders maps channelID → userID of the current key holder.

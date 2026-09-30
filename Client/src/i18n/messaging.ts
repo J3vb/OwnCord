@@ -28,6 +28,9 @@ export const messagingText = defineCatalog("messaging", {
   "error.uploadsPending": "Please wait for uploads to finish",
   "error.attachWhileEditing": "Can't attach files while editing a message",
   "error.fileTooLarge": "File too large: {filename} exceeds {limit} MB limit",
+  "error.fileTypeBlocked": "{filename} can't be uploaded: this server doesn't allow .{ext} files",
+  "error.fileTypeNoExtension":
+    "{filename} can't be uploaded: this server only accepts certain file types",
   "error.tooManyAttachments": "You can attach at most {max} files to a message",
   "error.uploadFailed": "Upload failed",
   "error.uploadFailedDetail": "Upload failed: {detail}",

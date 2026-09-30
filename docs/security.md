@@ -352,7 +352,7 @@ The Tauri desktop client implements the following security measures:
 - PTT virtual key codes are validated to the Win32 range (1–254)
 - LiveKit proxy `remote_host` is validated against CRLF injection
 - API client validates host format before constructing URLs
-- File uploads accept any type in the composer, which pre-checks only the size; the server sniffs the type and refuses executables (see [SECURITY.md](../SECURITY.md))
+- File uploads accept any type the server's file-type policy allows; the composer pre-checks the size and the policy, and the server sniffs the type, refuses executables by content and refuses blocked extensions by name — by default Windows scripts, installers and disk images, owner-configurable in config.yaml and the admin panel (see [SECURITY.md](../SECURITY.md))
 - Error messages from server responses are capped at 200 characters
 - Notification titles are sanitized (control chars stripped, length capped)
 

@@ -3,15 +3,20 @@
 /* ═══ Settings ═══ */
 /* The keys this page edits. Config-file values (upload limit, voice quality)
    are read-only facts from GET /config, and the owner-only backup policy
-   lives on Backups & restore. */
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa'];
-function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):(v||'')}
+   lives on Backups & restore. The owner-only upload file-type lists show
+   config.yaml's value until the owner saves one here, which replaces it. */
+const EXT_KEYS=['upload_blocked_extensions','upload_allowed_extensions'];
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa',...EXT_KEYS];
+/* An extension list as the server stores it: lower case, no dots, deduped,
+   comma-separated; so a respelled but equal list is not a change. */
+function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
+function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
     const el=document.getElementById('s-'+k);if(!el)return;
     if(el instanceof HTMLFieldSetElement){const r=el.querySelector('input:checked');out[k]=r instanceof HTMLInputElement?r.value:'';return}
-    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):/** @type {HTMLInputElement} */(el).value;
+    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):settingNorm(k,/** @type {HTMLInputElement} */(el).value);
   });
   return out;
 }
@@ -35,6 +40,7 @@ async function renderSettings(){
   let settings,facts=null;
   try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   try{facts=await api('GET','/config')}catch(e){}
+  EXT_KEYS.forEach(k=>{if(!(k in settings)&&facts&&Array.isArray(facts[k]))settings[k]=facts[k].join(',')});
   state._settings={...settings};
   setSettingsChanged(false);
   const v=k=>settings[k]||'';
@@ -46,6 +52,12 @@ async function renderSettings(){
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
+  const owner=isOwner();
+  const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
+  html+=settingsCard('Upload file types',
+    '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by name, however the name is capitalised and wherever the extension appears in it, such as <code>report.pdf.bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'
+    +settingsRow('upload_blocked_extensions','Blocked file types','Never accepted',extInput('upload_blocked_extensions'))
+    +settingsRow('upload_allowed_extensions','Allow only these file types','Leave empty to accept any file type that is not blocked',extInput('upload_allowed_extensions')));
   /* Facts, not inputs: these take effect from config.yaml at start-up, so
      an editable-looking field here would change nothing. The running-config
      card shows the effective values an operator would otherwise read

@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -34,7 +35,7 @@ func (h *Hub) getCachedSettings(ctx context.Context) (string, string) {
 }
 
 // refreshSettingsLocked reloads server_name and motd through the settings
-// reader. Caller must hold settingsMu (write lock) or call during init.
+// reader, and upload_policy's extension lists. Caller must hold settingsMu (write lock) or call during init.
 func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 	// The refresh serves the hub-wide settings cache, not the connection that
 	// happened to trigger it — a dying connection's ctx must not fail the
@@ -46,5 +47,21 @@ func (h *Hub) refreshSettingsLocked(ctx context.Context) {
 	if motd, err := h.settings.Setting(ctx, "motd"); err == nil {
 		h.settingsMotd = motd
 	}
+	if h.uploadFileTypes != nil {
+		if p, err := h.uploadFileTypes.FileTypePolicy(ctx); err == nil {
+			h.settingsUpload.BlockedExtensions, h.settingsUpload.AllowedExtensions = p.Blocked, p.Allowed
+		} else {
+			slog.Warn("auth_ok: reading the upload file-type policy failed", "error", err)
+		}
+	}
 	h.settingsLastUpdate = time.Now()
+}
+
+// cachedUploadPolicy returns auth_ok's upload_policy, refreshing its
+// extension lists with the rest of the settings cache when it is stale.
+func (h *Hub) cachedUploadPolicy(ctx context.Context) UploadPolicy {
+	h.getCachedSettings(ctx)
+	h.settingsMu.RLock()
+	defer h.settingsMu.RUnlock()
+	return h.settingsUpload
 }

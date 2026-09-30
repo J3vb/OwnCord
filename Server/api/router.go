@@ -476,13 +476,14 @@ func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter 
 // configureStorageLimits installs B5-2's two bounds on the upload service:
 // the per-user quota (upload.user_quota_mb, 0 = unlimited) and the headroom
 // floor (server.min_free_disk_mb) probed on the upload volume, which may not
-// be the data volume /health watches.
+// be the data volume /health watches; and config.yaml's file-type lists.
 func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) {
 	uploads.SetStorageLimits(service.StorageLimits{
 		UserQuotaBytes: cfg.Upload.UserQuotaBytes(),
 		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
 		Dir:            cfg.Upload.StorageDir,
 		MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20,
+		FileTypes:      storage.FileTypePolicy{Blocked: cfg.Upload.BlockedExtensions, Allowed: cfg.Upload.AllowedExtensions},
 	})
 }
 

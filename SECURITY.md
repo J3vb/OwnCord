@@ -184,12 +184,16 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
 - IPC commands validate host format, string lengths and character
   allowlists; PTT virtual key codes are range-checked; the LiveKit proxy
   validates `remote_host` against CRLF injection.
-- Uploads: the composer accepts any file type and only pre-checks the size
-  against `auth_ok`'s `upload_policy`; the server is authoritative. It
+- Uploads: the composer pre-checks the size and file type against
+  `auth_ok`'s `upload_policy`; the server is authoritative. It
   sniffs the type from the file bytes,
   refuses executable and script magic bytes (`blockedMagic`,
-  `Server/storage/storage.go`), and serves HTML, SVG, XML, PDF and XSL as
+  `Server/storage/storage.go`), refuses names under the owner's file-type
+  policy (`storage.FileTypePolicy`: blocked extensions, by default Windows
+  scripts, installers and disk images, plus an optional allow-only list;
+  owner-only in the admin panel), and serves HTML, SVG, XML, PDF and XSL as
   `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff`.
+  Allowing an extension never lifts the magic-byte blocks.
 - All user-generated content in the desktop client renders via
   `textContent`/`setText`, never `innerHTML` (the one exception operates on a
   compile-time constant with a runtime guard). URLs are validated to allow

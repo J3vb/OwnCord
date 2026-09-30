@@ -195,7 +195,10 @@ keeps it until one authenticates.
     "server_name": "My Server",
     "motd": "Welcome!",
     "replay_source": "none",
-    "upload_policy": { "max_upload_bytes": 104857600 }
+    "upload_policy": {
+      "max_upload_bytes": 104857600,
+      "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"]
+    }
   }
 }
 ```
@@ -223,6 +226,14 @@ stays authoritative, and later fields may be added. `max_upload_bytes` is
 accepts. `0` means uploads are disabled on this server: the route refuses
 every non-empty file, and clients disable attaching. An older server omits
 `upload_policy`; clients then assume 100 MiB.
+
+`blocked_extensions` and `allowed_extensions` are the file-type policy in
+force (config.yaml's lists, or the owner's saved ones). A blocked extension
+anywhere in a file name is refused, case-insensitively, ignoring trailing dots
+and spaces; a non-empty `allowed_extensions` accepts only those final
+extensions. Either is omitted when empty or unknown, and clients then refuse
+nothing by name. The values are read with the server-name cache, so a change
+reaches a new connection within 30 seconds.
 
 ### Step 3: Failure -- auth_error
 

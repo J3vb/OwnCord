@@ -312,6 +312,10 @@ export interface AuthOkPayload {
 export interface UploadPolicy {
   /** upload.max_size_mb in bytes; 0 means uploads are disabled; absent falls back to 100 MiB. */
   readonly max_upload_bytes?: number;
+  /** Extensions refused wherever they appear in a file name. */
+  readonly blocked_extensions?: readonly string[];
+  /** Non-empty: allow-only mode, the final extension must be listed. */
+  readonly allowed_extensions?: readonly string[];
 }
 
 export interface AuthErrorPayload {

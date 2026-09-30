@@ -88,7 +88,8 @@ func perturb(v reflect.Value) any {
 		for i := range v.Len() {
 			out = append(out, v.Index(i).String())
 		}
-		return append(out, "203.0.113.0/24")
+		// Valid as an extension too: the upload extension lists reject a "/".
+		return append(out, "perturbed-7")
 	default:
 		panic("unhandled config kind " + v.Kind().String())
 	}
@@ -185,8 +186,8 @@ func TestParityEveryLeafRoundTrips(t *testing.T) {
 		want[key] = p
 	})
 	// A walk that silently loses a key would make the rest of this test vacuous.
-	if len(want) != 73 {
-		t.Fatalf("walked %d config leaves, want the full 73-key surface", len(want))
+	if len(want) != 75 {
+		t.Fatalf("walked %d config leaves, want the full 75-key surface", len(want))
 	}
 
 	body, err := goyaml.Marshal(tree)

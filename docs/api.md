@@ -2001,6 +2001,8 @@ Upload a file as multipart form data.
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
 
+The file name is then checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and covers every extension in the name, so `report.pdf.bat` and `report.bat.pdf` are both refused when `bat` is blocked; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
+
 #### Response 201 Created
 
 ```json
@@ -3809,7 +3811,8 @@ audited as `setting_change`.
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
-`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`.
+`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
+`upload_blocked_extensions`, `upload_allowed_extensions`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -3826,6 +3829,15 @@ pair of settings a PATCH may not change without the **Owner** role: a request
 carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
 even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
 does not bypass it.
+
+`upload_blocked_extensions` and `upload_allowed_extensions` are the upload
+file-type policy (see [`POST /api/v1/uploads`](#post-apiv1uploads)): extensions
+separated by commas or spaces, with or without the dot, stored lower-case,
+deduplicated and comma-separated. An entry holding a dot, a path or stream
+separator, a space or an invisible character, or longer than 32 bytes, is
+refused with `400`. A saved row replaces the matching config.yaml list;
+an empty allowed list turns allow-only mode off. Like the backup policy they
+need the **Owner** role (`403 FORBIDDEN` otherwise).
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
@@ -3873,7 +3885,9 @@ booleans. `tls_domain`, `voice_url` and `backup_dir` are included only when
 the caller holds `ADMINISTRATOR` or is the owner. `logging_level` is the
 level the server booted at, normalised (an unrecognised value reads `info`,
 an unset one `""`); a debug boost in force shows in
-`GET /admin/api/logs/level`, not here.
+`GET /admin/api/logs/level`, not here. `upload_blocked_extensions` and
+`upload_allowed_extensions` are config.yaml's file-type lists, which the
+Settings page shows until the owner saves its own.
 
 #### Response 200 OK
 
@@ -3881,6 +3895,8 @@ an unset one `""`); a debug boost in force shows in
 {
   "upload_max_size_mb": 100,
   "voice_quality": "medium",
+  "upload_blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
+  "upload_allowed_extensions": [],
   "server_port": 8443,
   "min_free_disk_mb": 256,
   "max_ws_connections": 1000,
