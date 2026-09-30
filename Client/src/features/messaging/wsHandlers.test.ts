@@ -15,6 +15,7 @@ import {
   setMessagePinned,
   addOptimisticMessage,
   resetMessagesStore,
+  setAroundMessages,
 } from "../../stores/messages.store";
 import { dmStore, setDmChannels } from "../../stores/dm.store";
 import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
@@ -266,6 +267,38 @@ describe("DM preview follows an edit or delete of its last message", () => {
     seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
     handleChatDeleted({ message_id: 7, channel_id: 1 });
     expect(dm().lastMessage).toBe("");
+  });
+
+  it("blanks the deleted text when the loaded window is detached from the live tail", () => {
+    setAroundMessages(
+      1,
+      [
+        {
+          id: 3,
+          channel_id: 1,
+          user: { id: 2, username: "bob", avatar: null },
+          content: "weeks old",
+          reply_to: null,
+          attachments: [],
+          reactions: [],
+          pinned: true,
+          edited_at: null,
+          deleted: false,
+          timestamp: "2026-02-01T10:00:00Z",
+        },
+      ],
+      true,
+      true,
+    );
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+
+    handleChatDeleted({ message_id: 7, channel_id: 1 });
+
+    expect(dm()).toMatchObject({
+      lastMessageId: 7,
+      lastMessage: "",
+      lastMessageAt: "2026-03-15T10:00:00Z",
+    });
   });
 
   it("applies the same fallback to a bulk delete that includes the shown message", () => {
