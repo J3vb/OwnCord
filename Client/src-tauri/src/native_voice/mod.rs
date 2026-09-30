@@ -416,6 +416,26 @@ pub async fn native_voice_set_subscribed(
         .set_subscribed(&identity, &sid, subscribed)
 }
 
+/// Layer control for one remote video: stop it (`enabled` false) or ask for
+/// `quality` ("low", "medium" or "high").
+#[tauri::command]
+pub async fn native_voice_set_video_view(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    identity: String,
+    sid: String,
+    enabled: bool,
+    quality: String,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_video_view(&identity, &sid, enabled, &quality)
+        .await
+}
+
 /// Per-user volume: `volume` is the gain for `identity`'s microphone (1.0 is
 /// unity), the value the web path hands `RemoteParticipant.setVolume`.
 #[tauri::command]

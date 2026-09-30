@@ -11,7 +11,7 @@
 
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { getRemoteVideoStream } from "@lib/livekitSession";
+import { getRemoteVideoStream, setRemoteVideoView } from "@lib/livekitSession";
 import { voiceStore } from "@stores/voice.store";
 import { shellText } from "../i18n/shell";
 
@@ -149,12 +149,18 @@ function showPreview(
       track.addEventListener("ended", onTrackDead);
       track.addEventListener("mute", onTrackDead);
 
-      // Store cleanup function
+      // Store cleanup function. The grid may have stopped this stream (grid
+      // closed, Stop watching): it plays at the preview's size while open.
       const state = previewTimers.get(row);
       if (state !== undefined) {
+        const type = isScreen ? "screenshare" : "camera";
+        const width = Math.round(row.getBoundingClientRect().width * devicePixelRatio);
+        const size = { width, height: Math.round((width * 9) / 16) };
+        setRemoteVideoView(userId, type, { enabled: true, size }, true);
         state.trackCleanup = () => {
           track.removeEventListener("ended", onTrackDead);
           track.removeEventListener("mute", onTrackDead);
+          setRemoteVideoView(userId, type, { enabled: false }, true);
         };
       }
     }

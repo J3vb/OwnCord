@@ -148,6 +148,9 @@ export interface NativeVoiceScreenOptions {
   maxFramerate: number;
 }
 
+/** A simulcast layer, as `native_voice_set_video_view` names it. */
+export type NativeVideoQuality = "low" | "medium" | "high";
+
 export interface NativeVoice {
   /** Install or rotate the room key: the same base64 text the web key
    *  provider receives, so both derive the same key (index 0). */
@@ -162,6 +165,15 @@ export interface NativeVoice {
   disconnect(session: number): Promise<NativeVoiceResources>;
   setMicrophone(session: number, enabled: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
+  /** Layer control for remote video `sid` (P3-07): stop it, or ask for
+   *  `quality` while it is shown. */
+  setVideoView(
+    session: number,
+    identity: string,
+    sid: string,
+    enabled: boolean,
+    quality: NativeVideoQuality,
+  ): Promise<void>;
   /** Per-user volume: play `identity`'s microphone at `volume` (1 is unity),
    *  the value the web path hands `RemoteParticipant.setVolume`. */
   setVolume(session: number, identity: string, volume: number): Promise<void>;

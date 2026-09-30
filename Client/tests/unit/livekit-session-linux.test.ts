@@ -141,6 +141,10 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setVideoView: (...args: unknown[]) => {
+        host.commands.push(["setVideoView", args]);
+        return Promise.resolve();
+      },
       setVolume: (...args: unknown[]) => {
         host.commands.push(["setVolume", args]);
         return Promise.resolve();

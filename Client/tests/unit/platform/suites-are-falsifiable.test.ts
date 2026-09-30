@@ -414,6 +414,7 @@ describeNativeVoiceSuite(async () => {
     disconnect: async () => undefined,
     setMicrophone: async () => undefined,
     setSubscribed: async () => undefined,
+    setVideoView: async () => undefined,
     setVolume: async () => undefined,
     setScreenshareVolume: async () => undefined,
     debugInfo: async () => undefined,

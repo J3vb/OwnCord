@@ -109,6 +109,10 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
       },
+      setVideoView: (...args: unknown[]) => {
+        host.calls.push(["setVideoView", args]);
+        return Promise.resolve();
+      },
       setVolume: (...args: unknown[]) => {
         host.calls.push(["setVolume", args]);
         return Promise.resolve();
@@ -620,6 +624,51 @@ describe("NativeRoom remote video", () => {
     });
     expect(host.renderers.map((r) => r.disposed)).toEqual([true, false]);
     expect(unsubscribed).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards the layer controls RemoteTracks drives to the native session (P3-07)", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
+    expect(pub.isEnabled).toBe(true);
+
+    // Hidden: the stream stops.
+    pub.setEnabled(false);
+    expect(pub.isEnabled).toBe(false);
+    // Shown in a 160-px tile: the lowest layer, then enabled.
+    pub.setVideoDimensions({ width: 160, height: 90 });
+    pub.setEnabled(true);
+    expect(pub.isEnabled).toBe(true);
+    // Resized to 480 px, then focused (the top layer); a repeat sends nothing.
+    pub.setVideoDimensions({ width: 480, height: 270 });
+    pub.setEnabled(true);
+    pub.setVideoQuality(2);
+    pub.setEnabled(true);
+    expect(views()).toEqual([
+      [1, "user-2", "TR_v", false, "high"],
+      [1, "user-2", "TR_v", false, "low"],
+      [1, "user-2", "TR_v", true, "low"],
+      [1, "user-2", "TR_v", true, "medium"],
+      [1, "user-2", "TR_v", true, "high"],
+    ]);
+
+    // A resubscribe comes enabled at the top layer, so hiding it is sent again.
+    pub.setEnabled(false);
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    expect(pub.isEnabled).toBe(true);
+    pub.setEnabled(false);
+    expect(views().slice(-2)).toEqual([
+      [1, "user-2", "TR_v", false, "high"],
+      [1, "user-2", "TR_v", false, "high"],
+    ]);
   });
 
   it("raises the unsubscriptions before the participant leaves", async () => {

@@ -26,7 +26,7 @@
 // down only its own room. Every renderer, the camera pump and the screen
 // track are disposed when their track goes away and, at the latest, in
 // disconnect().
-import { DisconnectReason, RoomEvent } from "livekit-client";
+import { DisconnectReason, RoomEvent, type VideoQuality } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { voiceStore } from "../../../stores/voice.store";
 import { desktop } from "../../../platform/desktop";
@@ -36,6 +36,7 @@ import type {
   NativeVoiceEnvelope,
   NativeVoiceEvent,
   NativeVoiceTrack,
+  NativeVideoQuality,
 } from "../../../platform/contracts/nativeVoice";
 import { nativeCounters } from "./counters";
 
@@ -82,7 +83,10 @@ export class NativeRemotePublication {
   readonly kind: string;
   readonly source: string;
   isSubscribed = true;
-  readonly isEnabled = true;
+  /** Video: whether the SFU sends it, and at which layer (P3-07). A fresh
+   *  subscription comes at the top one. */
+  isEnabled = true;
+  private quality: NativeVideoQuality = "high";
   isMuted: boolean;
   /** Video only, while subscribed. Audio has none: playout is native. */
   track: NativeRemoteVideoTrack | undefined = undefined;
@@ -100,6 +104,31 @@ export class NativeRemotePublication {
     if (this.isSubscribed === subscribed) return;
     this.isSubscribed = subscribed;
     this.room.setSubscribed(this.identity, this.trackSid, subscribed);
+  }
+  /** livekit-client's layer controls, which RemoteTracks drives: the layer
+   *  first, then whether it is sent. */
+  setEnabled(enabled: boolean): void {
+    this.setVideoView(enabled, this.quality);
+  }
+  setVideoQuality(quality: VideoQuality): void {
+    this.setVideoView(this.isEnabled, (["low", "medium", "high"] as const)[quality] ?? "high");
+  }
+  /** The Rust SDK has no dimensions call: the smallest of the usual
+   *  180p/360p/720p layers that covers the tile. */
+  setVideoDimensions({ width, height }: { width: number; height: number }): void {
+    const side = Math.max(width, height);
+    this.setVideoView(this.isEnabled, side <= 320 ? "low" : side <= 640 ? "medium" : "high");
+  }
+  /** A new subscription starts enabled at the top layer again. */
+  resetVideoView(): void {
+    this.isEnabled = true;
+    this.quality = "high";
+  }
+  private setVideoView(enabled: boolean, quality: NativeVideoQuality): void {
+    if (enabled === this.isEnabled && quality === this.quality) return;
+    this.isEnabled = enabled;
+    this.quality = quality;
+    this.room.setVideoView(this.identity, this.trackSid, enabled, quality);
   }
 }
 
@@ -491,6 +520,7 @@ export class NativeRoom {
   private subscribeVideo(identity: string, pub: NativeRemotePublication): void {
     this.unsubscribeVideo(identity, pub);
     const renderer = new NativeVideoRenderer(`${this.frames}/remote/${pub.trackSid}`);
+    pub.resetVideoView();
     pub.track = new NativeRemoteVideoTrack(pub.trackSid, pub.source, renderer);
     this.emit(RoomEvent.TrackSubscribed, pub.track, pub, this.participant(identity));
   }
@@ -509,6 +539,14 @@ export class NativeRoom {
     desktop.nativeVoice
       .setSubscribed(this.sessionId, identity, sid, subscribed)
       .catch((err) => log.warn("native setSubscribed failed", { identity, sid, subscribed, err }));
+  }
+
+  /** Video layer control: forwarded from the publication model. */
+  setVideoView(identity: string, sid: string, enabled: boolean, quality: NativeVideoQuality): void {
+    if (this.sessionId === null) return;
+    desktop.nativeVoice
+      .setVideoView(this.sessionId, identity, sid, enabled, quality)
+      .catch((err) => log.warn("native setVideoView failed", { identity, sid, enabled, err }));
   }
 
   /** Per-user volume: forwarded from the participant model. */

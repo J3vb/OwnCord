@@ -887,9 +887,14 @@ export class LiveKitSession {
     return this._remoteTracks.getRemoteVideoStats(userId, type);
   }
 
-  /** Ask for only what a remote video tile shows (P3-07). */
-  setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
-    this._remoteTracks.setRemoteVideoView(userId, type, view);
+  /** Ask for only what a remote video tile, or the hover preview, shows (P3-07). */
+  setRemoteVideoView(
+    userId: number,
+    type: "camera" | "screenshare",
+    view: VideoView,
+    preview?: boolean,
+  ): void {
+    this._remoteTracks.setRemoteVideoView(userId, type, view, preview);
   }
 
   getRoom(): Room | null {

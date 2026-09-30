@@ -24,6 +24,8 @@ import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 
 /** How often a watched stream's quality chip refreshes. */
 const STATS_POLL_MS = 2000;
+/** How long tile sizes settle (a window drag) before their views are sent. */
+const VIEW_RESIZE_MS = 150;
 
 const log = createLogger("VideoGrid");
 
@@ -373,6 +375,7 @@ export function createVideoGrid(): VideoGridComponent {
   let exitBtn: HTMLButtonElement | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let statsTile: number | null = null;
+  let viewResizeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Owns the grid's document listeners (full-screen changes, theatre keys). */
   const gridListeners = new Disposable();
 
@@ -885,6 +888,16 @@ export function createVideoGrid(): VideoGridComponent {
     }
   }
 
+  /** Resizes come every frame while the window drags: send the views once
+   *  the sizes settle. */
+  function scheduleViewSync(): void {
+    if (viewResizeTimer !== null) clearTimeout(viewResizeTimer);
+    viewResizeTimer = setTimeout(() => {
+      viewResizeTimer = null;
+      syncViews();
+    }, VIEW_RESIZE_MS);
+  }
+
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
   }
@@ -1356,7 +1369,7 @@ export function createVideoGrid(): VideoGridComponent {
     // remote tiles' sizes (0 once the grid is closed) for their video views.
     resizeObserver = new ResizeObserver(() => {
       scheduleResize();
-      syncViews();
+      scheduleViewSync();
     });
     resizeObserver.observe(root);
   }
@@ -1376,6 +1389,8 @@ export function createVideoGrid(): VideoGridComponent {
     statsTile = null;
     if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
     resizeRafId = 0;
+    if (viewResizeTimer !== null) clearTimeout(viewResizeTimer);
+    viewResizeTimer = null;
 
     if (resizeObserver !== null) {
       resizeObserver.disconnect();

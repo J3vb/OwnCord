@@ -1742,15 +1742,18 @@ describe("VideoGrid", () => {
     /** The last enabled state asked of a publication. */
     const enabled = (uid: number, source = "camera") =>
       pub(uid, source).setEnabled.mock.lastCall?.[0] as boolean | undefined;
+    /** Resize tiles and let the sizes settle (views follow a resize after 150 ms). */
     function resize(entries: Record<number, [number, number]>): void {
       for (const [id, [width, height]] of Object.entries(entries)) sizes.set(id, { width, height });
       for (const fire of observers) fire();
+      vi.advanceTimersByTime(150);
     }
     const cellOf = (id: number) =>
       container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
 
     beforeEach(() => {
       grid.destroy?.();
+      vi.useFakeTimers();
       sizes = new Map();
       observers = [];
       hidden = false;
@@ -1790,6 +1793,7 @@ describe("VideoGrid", () => {
     });
 
     afterEach(() => {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
       delete (document as { hidden?: unknown }).hidden;
@@ -1816,6 +1820,20 @@ describe("VideoGrid", () => {
       resize({ 1: [320, 180], 2: [320, 180], 3: [320, 180] });
       expect(enabled(2)).toBe(true);
       expect(enabled(3)).toBe(true);
+    });
+
+    it("sends one view per tile once a burst of resizes settles (a window drag)", () => {
+      addCameras();
+      pub(2).setVideoDimensions.mockClear();
+      for (const width of [400, 480, 560, 640]) {
+        sizes.set("2", { width, height: (width * 9) / 16 });
+        for (const fire of observers) fire();
+        vi.advanceTimersByTime(16);
+      }
+      expect(pub(2).setVideoDimensions).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(150);
+      expect(pub(2).setVideoDimensions).toHaveBeenCalledTimes(1);
+      expect(pub(2).setVideoDimensions).toHaveBeenLastCalledWith({ width: 640, height: 360 });
     });
 
     it("stops the video while the app is hidden (minimised), and resumes it when shown", () => {

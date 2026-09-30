@@ -77,6 +77,7 @@ export function describeNativeVoiceSuite(
     check("scopes microphone, subscription, volume and disconnect to a session id", async () => {
       await ctx.subject.setMicrophone(7, true);
       await ctx.subject.setSubscribed(7, "user-9", "TR_1", false);
+      await ctx.subject.setVideoView(7, "user-9", "TR_2", true, "low");
       await ctx.subject.setVolume(7, "user-9", 0.5);
       await ctx.subject.setScreenshareVolume(7, "user-9", 0.25);
       await ctx.subject.disconnect(7);
@@ -86,6 +87,10 @@ export function describeNativeVoiceSuite(
         [
           "native_voice_set_subscribed",
           { session: 7, identity: "user-9", sid: "TR_1", subscribed: false },
+        ],
+        [
+          "native_voice_set_video_view",
+          { session: 7, identity: "user-9", sid: "TR_2", enabled: true, quality: "low" },
         ],
         ["native_voice_set_volume", { session: 7, identity: "user-9", volume: 0.5 }],
         ["native_voice_set_screenshare_volume", { session: 7, identity: "user-9", volume: 0.25 }],
