@@ -146,15 +146,9 @@ func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (r
 	return func() {}, retryAfter, false
 }
 
-// RetryAfter estimates how long a caller refused now should wait before
+// retryAfterLocked estimates how long a caller refused now should wait before
 // trying again: the queue ahead of it divided by the budget's throughput,
 // never under a second.
-func (b *AdmissionBudget) RetryAfter() time.Duration {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.retryAfterLocked()
-}
-
 func (b *AdmissionBudget) retryAfterLocked() time.Duration {
 	wait := time.Duration(b.waiters.Len()+1) * b.avgHold / time.Duration(b.size)
 	return max(wait, time.Second)

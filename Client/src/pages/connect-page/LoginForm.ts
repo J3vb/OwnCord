@@ -151,9 +151,11 @@ export interface LoginFormApi {
 
 /** How long a login keeps retrying a busy server before it gives up (P5-S02). */
 const AUTH_BUSY_RETRY_BUDGET_MS = 60_000;
-/** The wait before a retry when the refusal sent no Retry-After — the
- *  saved-password relay passes on only the status and body. */
-const AUTH_BUSY_DEFAULT_RETRY_MS = 2_000;
+/** The shortest wait before a retry, whatever Retry-After says (the
+ *  saved-password relay sends none). The login route allows 5 attempts per IP
+ *  per minute and refused ones count, so attempts at least 15 s apart keep
+ *  one client to 4 in any minute. */
+const AUTH_BUSY_MIN_RETRY_MS = 15_000;
 /** Up to this much is added to each wait, so a burst of refused clients
  *  does not come back in lockstep. */
 const AUTH_BUSY_JITTER_MS = 1_000;
@@ -1029,15 +1031,22 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   /**
-   * Run a login, retrying an AUTH_BUSY refusal after its Retry-After (plus
-   * jitter) until it succeeds, fails any other way, or the retry budget is
-   * spent — the last attempt lands on the budget's end, and its refusal is
-   * the one shown. The busy line shows while it waits; its Cancel returns
-   * the form to idle.
+   * Run a login, retrying an AUTH_BUSY refusal after the larger of its
+   * Retry-After and AUTH_BUSY_MIN_RETRY_MS (plus jitter) until it succeeds,
+   * fails any other way, or the next wait would overrun the retry budget —
+   * that refusal is the one shown. The busy line shows while it retries; its
+   * Cancel sends no further attempt and returns the form to idle once any
+   * attempt in flight settles (a success still signs in).
    */
   async function loginRetryingWhileBusy(login: () => Promise<void>): Promise<void> {
     const deadline = Date.now() + AUTH_BUSY_RETRY_BUDGET_MS;
     let cancelled = false;
+    let wake: (() => void) | null = null;
+    cancelAuthBusyRetry = () => {
+      cancelled = true;
+      authBusyRetry.hidden = true;
+      wake?.();
+    };
     try {
       for (;;) {
         try {
@@ -1045,18 +1054,20 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
           await login();
           return;
         } catch (err) {
-          const remaining = deadline - Date.now();
-          if (!isAuthBusy(err) || remaining <= 0) throw err;
+          if (cancelled) {
+            transitionTo("idle");
+            return;
+          }
+          if (!isAuthBusy(err)) throw err;
           const wait =
-            (err.retryAfterMs ?? AUTH_BUSY_DEFAULT_RETRY_MS) + Math.random() * AUTH_BUSY_JITTER_MS;
+            Math.max(err.retryAfterMs ?? 0, AUTH_BUSY_MIN_RETRY_MS) +
+            Math.random() * AUTH_BUSY_JITTER_MS;
+          if (wait >= deadline - Date.now()) throw err;
           authBusyRetry.hidden = false;
           // oxlint-disable-next-line no-await-in-loop -- the wait between retries
           await new Promise<void>((resolve) => {
-            setOwnedTimeout(signal, resolve, Math.min(wait, remaining));
-            cancelAuthBusyRetry = () => {
-              cancelled = true;
-              resolve();
-            };
+            wake = resolve;
+            setOwnedTimeout(signal, resolve, wait);
           });
           if (cancelled) {
             transitionTo("idle");

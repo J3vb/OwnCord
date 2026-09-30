@@ -2,7 +2,9 @@
 // full it answers 429 AUTH_BUSY with Retry-After. The connect page retries
 // that refusal by itself — typed and saved password alike — for a bounded
 // time, showing that it is retrying, and gives up with the busy copy after
-// the bound. A per-IP 429 (RATE_LIMITED) is not retried.
+// the bound. Retries stay at least 15 s apart so one client never spends the
+// per-IP login limit (5 a minute, refused attempts included). A per-IP 429
+// (RATE_LIMITED) is not retried.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiClientError } from "../../src/lib/api";
 import { createConnectPage } from "../../src/pages/ConnectPage";
@@ -51,6 +53,7 @@ describe("LoginForm retries a busy server", () => {
 
   afterEach(() => {
     container.remove();
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -69,7 +72,7 @@ describe("LoginForm retries a busy server", () => {
   it("retries a typed-password login on AUTH_BUSY until it succeeds", async () => {
     const onLogin = vi
       .fn()
-      .mockRejectedValueOnce(busy(2000))
+      .mockRejectedValueOnce(busy(20_000))
       .mockRejectedValueOnce(busy())
       .mockResolvedValueOnce(undefined);
     const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
@@ -83,10 +86,15 @@ describe("LoginForm retries a busy server", () => {
     expect(busyLine().textContent).toContain(connectText("login.serverBusyRetrying"));
     expect(banner().classList.contains("visible")).toBe(false);
 
-    // Retry-After is honoured: nothing before it has passed.
-    await vi.advanceTimersByTimeAsync(1900);
+    // A Retry-After above the floor is honoured: nothing before it has passed.
+    await vi.advanceTimersByTimeAsync(19_900);
     expect(onLogin).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(onLogin).toHaveBeenCalledTimes(2);
+    // No Retry-After: the 15 s floor applies.
+    await vi.advanceTimersByTimeAsync(14_900);
+    expect(onLogin).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_100);
     expect(onLogin).toHaveBeenCalledTimes(3);
     expect(banner().classList.contains("visible")).toBe(false);
     expect(busyShown()).toBe(false);
@@ -100,22 +108,71 @@ describe("LoginForm retries a busy server", () => {
     page.mount(container);
 
     submitTyped();
-    await vi.advanceTimersByTimeAsync(59_000);
+    await vi.advanceTimersByTimeAsync(40_000);
     expect(banner().classList.contains("visible")).toBe(false);
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(20_000);
 
     expect(banner().classList.contains("visible")).toBe(true);
     expect(banner().textContent).toBe(connectText("error.authBusy"));
     expect(busyShown()).toBe(false);
     const calls = onLogin.mock.calls.length;
     expect(calls).toBeGreaterThan(1);
-    // Bounded: Retry-After is a second, jitter only adds to it.
-    expect(calls).toBeLessThanOrEqual(61);
+    expect(calls).toBeLessThanOrEqual(4);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(onLogin).toHaveBeenCalledTimes(calls);
 
     page.destroy?.();
   });
+
+  it.each([
+    ["typed", undefined],
+    ["typed with a short Retry-After", 1000],
+    ["saved", undefined],
+  ] as const)(
+    "keeps a %s-password login under the per-IP limit in any 60 s",
+    async (path, retryAfterMs) => {
+      // No jitter: the tightest spacing the retry can produce.
+      vi.spyOn(Math, "random").mockReturnValue(0);
+      const saved = path === "saved";
+      if (saved) {
+        mockLoadCredential.mockResolvedValue({
+          username: "saveduser",
+          token: "tok",
+          hasPassword: true,
+        });
+      }
+      const attempts: number[] = [];
+      const refuse = vi.fn(() => {
+        attempts.push(Date.now());
+        return Promise.reject(busy(retryAfterMs));
+      });
+      const page = createConnectPage(
+        makeCallbacks(saved ? { onLoginWithSavedPassword: refuse } : { onLogin: refuse }),
+        testProfiles,
+      );
+      page.mount(container);
+
+      if (saved) {
+        (container.querySelector(".server-item") as HTMLElement).click();
+        await vi.waitFor(() => expect(page.isUsingSavedPassword()).toBe(true));
+        const form = container.querySelector(".connect-form") as HTMLFormElement;
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      } else {
+        submitTyped();
+      }
+      await vi.advanceTimersByTimeAsync(180_000);
+
+      expect(attempts.length).toBeGreaterThan(1);
+      // The login route allows 5 per IP per minute, refused attempts included.
+      for (const t of attempts) {
+        expect(attempts.filter((a) => a <= t && a > t - 60_000).length).toBeLessThan(5);
+      }
+      expect(Math.max(...attempts) - Math.min(...attempts)).toBeLessThan(60_000);
+      expect(banner().textContent).toBe(connectText("error.authBusy"));
+
+      page.destroy?.();
+    },
+  );
 
   it("Cancel stops retrying and returns to the form", async () => {
     const onLogin = vi.fn().mockRejectedValue(busy(5000));
@@ -130,6 +187,41 @@ describe("LoginForm retries a busy server", () => {
 
     expect(onLogin).toHaveBeenCalledTimes(1);
     expect(busyShown()).toBe(false);
+    expect(banner().classList.contains("visible")).toBe(false);
+    const submit = container.querySelector(
+      ".connect-form button[type=submit]",
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+
+    page.destroy?.();
+  });
+
+  it("Cancel during a retry in flight sends no further retry and returns to the form", async () => {
+    let refuseInFlight: ((err: unknown) => void) | undefined;
+    const onLogin = vi
+      .fn()
+      .mockRejectedValueOnce(busy())
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            refuseInFlight = reject;
+          }),
+      )
+      .mockRejectedValue(busy());
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    submitTyped();
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(onLogin).toHaveBeenCalledTimes(2);
+    expect(busyShown()).toBe(true);
+
+    (busyLine().querySelector("button") as HTMLButtonElement).click();
+    expect(busyShown()).toBe(false);
+    refuseInFlight?.(busy());
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(onLogin).toHaveBeenCalledTimes(2);
     expect(banner().classList.contains("visible")).toBe(false);
     const submit = container.querySelector(
       ".connect-form button[type=submit]",
@@ -178,7 +270,7 @@ describe("LoginForm retries a busy server", () => {
     const form = container.querySelector(".connect-form") as HTMLFormElement;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(16_000);
     expect(onLoginWithSavedPassword).toHaveBeenCalledTimes(2);
     expect(onLoginWithSavedPassword).toHaveBeenLastCalledWith("localhost:8443", "saveduser");
     expect(onLogin).not.toHaveBeenCalled();
