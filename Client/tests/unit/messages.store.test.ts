@@ -400,8 +400,8 @@ describe("messages store", () => {
         timestamp: "2026-03-15T10:00:00Z",
       });
       invalidateLoadedMessageWindows();
-      expect(getChannelMessages(1)).toHaveLength(1);
-      expect(getChannelMessages(1)[0]!.status).toBe("pending");
+      expect(getChannelMessages(1)).toHaveLength(2);
+      expect(getChannelMessages(1)[1]!.status).toBe("pending");
 
       // The resync's history fetch reveals the server DID persist the send —
       // id 500 is the real echo of the lost ack.
@@ -428,8 +428,8 @@ describe("messages store", () => {
         timestamp: "2026-03-15T10:00:00Z",
       });
       invalidateLoadedMessageWindows();
-      expect(getChannelMessages(1)).toHaveLength(1);
-      expect(getChannelMessages(1)[0]!.status).toBe("pending");
+      expect(getChannelMessages(1)).toHaveLength(2);
+      expect(getChannelMessages(1)[1]!.status).toBe("pending");
 
       setMessages(1, [makeMessageResponse({ id: 500, content: "<", user: TEST_USER })], false);
 
@@ -1859,20 +1859,21 @@ describe("messages store", () => {
   });
 
   describe("invalidateLoadedMessageWindows", () => {
-    it("drops sent rows and clears loaded/hasMore/detached for every loaded channel", () => {
+    it("clears loaded for every loaded channel and keeps their rows, hasMore and detached flag", () => {
       setMessages(1, [makeMessageResponse({ id: 10 })], true);
-      setMessages(2, [makeMessageResponse({ id: 20, channel_id: 2 })], false);
+      setAroundMessages(2, [makeMessageResponse({ id: 20, channel_id: 2 })], true, true);
       expect(isChannelLoaded(1)).toBe(true);
       expect(isChannelLoaded(2)).toBe(true);
 
       invalidateLoadedMessageWindows();
 
-      expect(getChannelMessages(1)).toEqual([]);
-      expect(getChannelMessages(2)).toEqual([]);
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual([10]);
+      expect(getChannelMessages(2).map((m) => m.id)).toEqual([20]);
       expect(isChannelLoaded(1)).toBe(false);
       expect(isChannelLoaded(2)).toBe(false);
-      expect(hasMoreMessages(1)).toBe(false);
-      expect(isWindowDetached(1)).toBe(false);
+      expect(hasMoreMessages(1)).toBe(true);
+      // A detached window keeps refusing live appends until its refetch lands (OC-0204).
+      expect(isWindowDetached(2)).toBe(true);
     });
 
     it("carries pending and failed optimistic rows instead of destroying them", () => {
@@ -1898,23 +1899,15 @@ describe("messages store", () => {
       invalidateLoadedMessageWindows();
 
       const msgs = getChannelMessages(1);
-      expect(msgs.map((m) => m.correlationId)).toEqual(["c1", "c2"]);
-      expect(msgs[0]!.status).toBe("pending");
-      expect(msgs[1]!.status).toBe("failed");
+      expect(msgs.map((m) => m.correlationId)).toEqual([null, "c1", "c2"]);
+      expect(msgs[1]!.status).toBe("pending");
+      expect(msgs[2]!.status).toBe("failed");
     });
 
     it("is a no-op when no channel is loaded", () => {
       const before = messagesStore.getState();
       invalidateLoadedMessageWindows();
       expect(messagesStore.getState()).toBe(before);
-    });
-
-    it("deletes the channel entry entirely when nothing survives (not just empties the array)", () => {
-      setMessages(1, [makeMessageResponse({ id: 10 })], false);
-
-      invalidateLoadedMessageWindows();
-
-      expect(messagesStore.getState().messagesByChannel.has(1)).toBe(false);
     });
   });
 
@@ -2223,6 +2216,155 @@ describe("messages store", () => {
       setMessages(1, page(451, 500), true);
       expect(isWindowDetached(1)).toBe(false);
       expect(getChannelMessages(1).map((m) => m.id)[0]).toBe(451);
+    });
+  });
+
+  // P2-T4: a full `ready` keeps every loaded row, and the active channel's
+  // refetch splices into its window instead of replacing it.
+  describe("full-ready resync splice", () => {
+    /** Newest-first page of ids [from, to], as the REST API returns it. */
+    function page(from: number, to: number): MessageResponse[] {
+      const out: MessageResponse[] = [];
+      for (let id = to; id >= from; id--) out.push(makeMessageResponse({ id, content: `m${id}` }));
+      return out;
+    }
+    /** Oldest-first around-window of ids [from, to]. */
+    function around(from: number, to: number): MessageResponse[] {
+      return page(from, to).reverse();
+    }
+    /** The live tail plus three older pages: ids 1-200, the whole channel. */
+    function load200(): void {
+      setMessages(1, page(151, 200), true);
+      prependMessages(1, page(101, 150), true);
+      prependMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), false);
+    }
+    /** What the dispatcher runs on a second `ready` for the active channel. */
+    function resync(): void {
+      setChannelLoading(1);
+      invalidateLoadedMessageWindows();
+    }
+    const ids = (from: number, to: number): number[] =>
+      Array.from({ length: to - from + 1 }, (_, i) => from + i);
+
+    it("keeps every loaded row on screen while the refetch is in flight", () => {
+      load200();
+      const cached = getChannelMessages(1);
+
+      resync();
+
+      expect(getChannelMessages(1)).toBe(cached);
+      expect(isChannelLoaded(1)).toBe(false);
+      expect(getHistoryLoadState(1)).toBe("loading");
+    });
+
+    it("an overlapping tail keeps rows 1-150 and replaces 151-200", () => {
+      load200();
+      const cached = getChannelMessages(1);
+
+      resync();
+      const fresh = page(151, 200).map((m) =>
+        m.id === 180 ? { ...m, content: "edited", edited_at: "2026-03-15T10:00:00Z" } : m,
+      );
+      setMessages(1, fresh, true, true);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual(ids(1, 200));
+      for (let i = 0; i < 150; i++) expect(msgs[i]).toBe(cached[i]);
+      expect(msgs.find((m) => m.id === 180)!.content).toBe("edited");
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getHistoryLoadState(1)).toBeNull();
+      // The rows above the page are still the whole channel's start.
+      expect(hasMoreMessages(1)).toBe(false);
+    });
+
+    it("keeps the older rows when messages were posted during the outage", () => {
+      load200();
+
+      resync();
+      setMessages(1, page(171, 220), true, true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 220));
+    });
+
+    it("a disjoint tail replaces the window", () => {
+      load200();
+
+      resync();
+      setMessages(1, page(301, 350), true, true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(301, 350));
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+
+    it("a tail that is the whole channel drops the older rows", () => {
+      load200();
+
+      resync();
+      // No more history above the page: rows 1-150 were deleted during the outage.
+      setMessages(1, page(151, 200), false, true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(151, 200));
+    });
+
+    it("carries pending and failed rows through the splice", () => {
+      load200();
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "in flight",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c2", "OFFLINE");
+
+      resync();
+      expect(getChannelMessages(1)).toHaveLength(202);
+      setMessages(1, page(151, 200), true, true);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual([...ids(1, 200), 0, 0]);
+      expect(msgs.slice(-2).map((m) => m.status)).toEqual(["pending", "failed"]);
+    });
+
+    it("an around-window splice keeps the loaded rows on both sides of a detached window", () => {
+      setAroundMessages(1, around(100, 160), true, true);
+      prependMessages(1, page(50, 99), true);
+      const cached = getChannelMessages(1);
+
+      resync();
+      // Still detached while the refetch is in flight: live appends stay refused.
+      addMessage(makeChatPayload({ id: 900, channel_id: 1 }));
+      expect(getChannelMessages(1)).toBe(cached);
+
+      const fresh = around(110, 150).map((m) => (m.id === 130 ? { ...m, content: "edited" } : m));
+      setAroundMessages(1, fresh, true, true, true);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id)).toEqual(ids(50, 160));
+      expect(msgs.find((m) => m.id === 130)!.content).toBe("edited");
+      expect(msgs[0]).toBe(cached[0]);
+      expect(isWindowDetached(1)).toBe(true);
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+
+    it("an around-window that reaches the live tail drops nothing below it and reattaches", () => {
+      setAroundMessages(1, around(100, 160), true, true);
+
+      resync();
+      setAroundMessages(1, around(120, 170), true, false, true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(100, 170));
+      expect(isWindowDetached(1)).toBe(false);
     });
   });
 

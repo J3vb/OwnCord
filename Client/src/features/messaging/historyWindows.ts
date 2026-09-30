@@ -44,11 +44,17 @@ export function reduceSetChannelLoading(prev: MessagesState, channelId: number):
   return { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark };
 }
 
-/** setChannelLoadError's reducer. */
+/** setChannelLoadError's reducer. Rows the failed fetch did not reconcile may
+ *  end short of the live tail, so a window that has any is detached: live
+ *  broadcasts stop appending across the gap and "Jump to Present" refetches. */
 export function reduceSetChannelLoadError(prev: MessagesState, channelId: number): MessagesState {
   const updated = new Map(prev.historyLoadState);
   updated.set(channelId, "error");
-  return { ...prev, historyLoadState: updated };
+  const rows = prev.messagesByChannel.get(channelId) ?? [];
+  if (!rows.some((m) => m.status === "sent")) return { ...prev, historyLoadState: updated };
+  const detachedChannels = new Set(prev.detachedChannels);
+  detachedChannels.add(channelId);
+  return { ...prev, historyLoadState: updated, detachedChannels };
 }
 
 /** setMessages' reducer: merge a newest-first REST page into the channel's window. */
@@ -57,6 +63,8 @@ export function reduceSetMessages(
   channelId: number,
   messages: readonly MessageResponse[],
   hasMore: boolean,
+  splice = false,
+  anchorId: number | null = null,
 ): MessagesState {
   const converted = messages.map(messageResponseToMessage).toReversed();
   const trimmed =
@@ -96,10 +104,29 @@ export function reduceSetMessages(
     const cached = cachedById.get(m.id);
     return cached !== undefined && sameValue(cached, m) ? cached : m;
   });
-  let merged: readonly Message[] = [...snapshot, ...carried];
-  const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
-  if (mergeTrimmed) {
-    merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
+  // A resync splice keeps the loaded rows older than the page when the page
+  // reaches back to what was loaded at fetch start, so nothing is missing
+  // between them. A gap, or a page that is the whole channel, replaces.
+  const minSnapshotId = trimmed[0]?.id ?? 0;
+  const older =
+    splice &&
+    hasMore &&
+    trimmed.length > 0 &&
+    minSnapshotId <= (prev.loadWatermark?.get(channelId) ?? 0)
+      ? previous.filter((m) => m.status === "sent" && m.id < minSnapshotId)
+      : [];
+  let merged: readonly Message[] = [...older, ...snapshot, ...carried];
+  const overflow = merged.length - MAX_MESSAGES_PER_CHANNEL;
+  const mergeTrimmed = overflow > 0;
+  // A splice that would trim the reader's anchor off the top keeps the head
+  // instead and detaches, as prependMessages does, so the reader stays put.
+  const anchorIdx = anchorId === null ? -1 : merged.findIndex((m) => m.id === anchorId);
+  const keepHead = mergeTrimmed && older.length > 0 && anchorIdx !== -1 && anchorIdx < overflow;
+  if (keepHead) {
+    const cut = merged.slice(MAX_MESSAGES_PER_CHANNEL).filter((m) => m.status !== "sent");
+    merged = [...merged.slice(0, MAX_MESSAGES_PER_CHANNEL), ...cut];
+  } else if (mergeTrimmed) {
+    merged = merged.slice(overflow);
   }
   if (merged.length === previous.length && merged.every((m, i) => m === previous[i])) {
     merged = previous;
@@ -114,15 +141,22 @@ export function reduceSetMessages(
   const updatedHasMore = new Map(prev.hasMore);
   updatedHasMore.set(
     channelId,
-    hasMore || converted.length > MAX_MESSAGES_PER_CHANNEL || mergeTrimmed,
+    (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMore) : hasMore) ||
+      converted.length > MAX_MESSAGES_PER_CHANNEL ||
+      (mergeTrimmed && !keepHead),
   );
 
   const updatedLoadState = new Map(prev.historyLoadState);
   updatedLoadState.delete(channelId);
 
-  // Loading the plain tail always reattaches: this *is* the live end.
+  // Loading the plain tail reattaches: this *is* the live end, unless the
+  // trim above cut it off again.
   const updatedDetached = new Set(prev.detachedChannels);
-  updatedDetached.delete(channelId);
+  if (keepHead) {
+    updatedDetached.add(channelId);
+  } else {
+    updatedDetached.delete(channelId);
+  }
 
   // The watermark's job ends here — it was consumed as carryFloor above.
   const updatedWatermark = new Map(prev.loadWatermark ?? []);
@@ -146,6 +180,7 @@ export function reduceSetAroundMessages(
   messages: readonly MessageResponse[],
   hasMoreBefore: boolean,
   hasMoreAfter: boolean,
+  splice = false,
 ): MessagesState {
   const converted = messages.map(messageResponseToMessage);
   // Defensive: the server caps a window at 100, so this never fires today.
@@ -166,14 +201,34 @@ export function reduceSetAroundMessages(
   const attached = !hasMoreAfter && trimmed.length === converted.length;
   const maxWindowId = trimmed.reduce((max, m) => Math.max(max, m.id), 0);
   const carried = previous.filter((m) => m.status !== "sent" || (attached && m.id > maxWindowId));
+  // A resync splice is centred on a loaded row, so it overlaps the window:
+  // keep the loaded rows above it, and below it while it stays detached.
+  const splicing = splice && trimmed.length > 0;
+  const minWindowId = trimmed[0]?.id ?? 0;
+  const older =
+    splicing && hasMoreBefore
+      ? previous.filter((m) => m.status === "sent" && m.id < minWindowId)
+      : [];
+  const newer =
+    splicing && !attached ? previous.filter((m) => m.status === "sent" && m.id > maxWindowId) : [];
+  let merged: readonly Message[] =
+    older.length + newer.length + carried.length > 0
+      ? [...older, ...trimmed, ...newer, ...carried]
+      : trimmed;
+  const mergeTrimmed = splicing && merged.length > MAX_MESSAGES_PER_CHANNEL;
+  if (mergeTrimmed) merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
   const updatedMessages = new Map(prev.messagesByChannel);
-  updatedMessages.set(channelId, carried.length > 0 ? [...trimmed, ...carried] : trimmed);
+  updatedMessages.set(channelId, merged);
 
   const updatedLoaded = new Set(prev.loadedChannels);
   updatedLoaded.add(channelId);
 
   const updatedHasMore = new Map(prev.hasMore);
-  updatedHasMore.set(channelId, hasMoreBefore);
+  updatedHasMore.set(
+    channelId,
+    (older.length > 0 ? (prev.hasMore.get(channelId) ?? hasMoreBefore) : hasMoreBefore) ||
+      mergeTrimmed,
+  );
 
   const updatedLoadState = new Map(prev.historyLoadState);
   updatedLoadState.delete(channelId);
@@ -198,24 +253,7 @@ export function reduceSetAroundMessages(
 /** invalidateLoadedMessageWindows' reducer. */
 export function reduceInvalidateLoadedMessageWindows(prev: MessagesState): MessagesState {
   if (prev.loadedChannels.size === 0) return prev;
-  const updatedMessages = new Map(prev.messagesByChannel);
-  for (const channelId of prev.loadedChannels) {
-    const existing = updatedMessages.get(channelId);
-    if (existing === undefined) continue;
-    const carried = existing.filter((m) => m.status !== "sent");
-    if (carried.length > 0) {
-      updatedMessages.set(channelId, carried);
-    } else {
-      updatedMessages.delete(channelId);
-    }
-  }
-  return {
-    ...prev,
-    messagesByChannel: updatedMessages,
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    detachedChannels: new Set(),
-  };
+  return { ...prev, loadedChannels: new Set() };
 }
 
 /** invalidateChannelMessageWindow's reducer. */

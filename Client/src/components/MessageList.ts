@@ -17,6 +17,7 @@ import {
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { safetyStore } from "../features/safety/store";
+import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { uiStore } from "@stores/ui.store";
 import { unobserveMedia } from "@lib/media-visibility";
 
@@ -823,6 +824,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // last state always makes it to the screen.
   let renderAllSuppressed = false;
 
+  /** Index of the topmost message row in the viewport, or -1 when there is
+   *  none that can be re-found after a rebuild. */
+  function topMessageIndex(): number {
+    if (root === null || virtualItems.length === 0) return -1;
+    let idx = offsetToIndex(root.scrollTop);
+    // The topmost item may be a day divider or the NEW divider, neither of
+    // which has an identity that survives a rebuild — walk forward to the
+    // message row that follows it (every divider is immediately followed by
+    // one).
+    while (idx < virtualItems.length && virtualItems[idx]!.kind !== "message") idx++;
+    const item = virtualItems[idx];
+    // id 0 is the unconfirmed-optimistic-row sentinel (see itemKey above) —
+    // not unique across pending sends, so it cannot identify a specific row.
+    return item?.kind === "message" && item.message.id !== 0 ? idx : -1;
+  }
+
   function renderAll(): void {
     if (root === null) return;
     if (renderAllRunning) return; // prevent re-entrancy
@@ -863,25 +880,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // survives the prepend, since the id is stable while the index shifts.
       let anchorMessageId: number | null = null;
       let anchorOffsetInItem = 0;
-      if (!wasAtBottom && root !== null && virtualItems.length > 0) {
-        let anchorIdx = offsetToIndex(root.scrollTop);
-        // The topmost item may be a day divider or the NEW divider, neither
-        // of which has an identity that survives a rebuild — walk forward to
-        // the message row that follows it (every divider is immediately
-        // followed by one).
-        while (anchorIdx < virtualItems.length && virtualItems[anchorIdx]!.kind !== "message") {
-          anchorIdx++;
-        }
-        const anchorItem = virtualItems[anchorIdx];
-        // id 0 is the unconfirmed-optimistic-row sentinel (see itemKey
-        // above) — not unique across pending sends, so it cannot identify a
-        // specific row to re-find after the rebuild.
-        if (
-          anchorItem !== undefined &&
-          anchorItem.kind === "message" &&
-          anchorItem.message.id !== 0
-        ) {
-          anchorMessageId = anchorItem.message.id;
+      if (!wasAtBottom && root !== null) {
+        const anchorIdx = topMessageIndex();
+        if (anchorIdx !== -1) {
+          anchorMessageId = (virtualItems[anchorIdx] as VirtualItemMessage).message.id;
           anchorOffsetInItem = root.scrollTop - offsetBefore(anchorIdx);
         }
       }
@@ -1115,6 +1117,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     scrollToBottom();
     const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
     disposable.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
+
+    // A full-ready resync refetches a detached window around this (P2-T4).
+    unsubscribers.push(
+      registerReadingAnchor((channelId) => {
+        if (channelId !== options.channelId) return null;
+        const idx = topMessageIndex();
+        return idx === -1 ? null : (virtualItems[idx] as VirtualItemMessage).message.id;
+      }),
+    );
 
     unsubscribers.push(
       messagesStore.subscribeSelector(

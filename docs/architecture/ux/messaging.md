@@ -310,7 +310,10 @@ store refuses to append live broadcasts (they belong below a gap, and splicing
 them on would be a lie about ordering) and the message list shows a **Jump to
 Present** pill. Clicking it reattaches and refetches the live tail. Scrolling
 further up (`prependMessages`) keeps the window detached; only a fresh tail
-fetch reattaches.
+fetch reattaches. A window also detaches when a history fetch fails with
+delivered rows still on screen (they may end short of the live tail), and when
+a full-resync splice past the row cap trims its newest end to keep the reader's
+row (`features/messaging/historyWindows.ts`).
 
 **Permalinks.** The hover action bar's _Copy Message Link_ yields
 `owncord://message/{channelId}/{messageId}`. Pasted back into chat, that link

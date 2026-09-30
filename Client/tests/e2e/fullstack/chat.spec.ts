@@ -200,3 +200,90 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   await expect(row(alice, before)).toHaveCount(0);
   await expect(row(alice, gone)).toHaveCount(0);
 });
+
+test("a server restart keeps the reader where they were in older history", async ({
+  alice,
+  aliceTransport,
+  server,
+}) => {
+  const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
+  const general = channels.find(
+    (channel: { name: string; type: string }) =>
+      channel.name === "general" && channel.type === "text",
+  );
+  // Bob posts 120 messages from his own socket while alice has #general open,
+  // so she receives every one of them live.
+  const auth = await server.api("/api/v1/auth/login", {
+    username: "bob",
+    password: "OwnCord-E2E-pass-123!",
+  });
+  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/ws`);
+  // One send is in flight at a time: its reply is the frame carrying its id.
+  let pending: {
+    id: string;
+    resolve: (frame: { type: string; payload?: { code?: string } }) => void;
+  } | null = null;
+  let ready!: () => void;
+  const readyFrame = new Promise<void>((resolve) => (ready = resolve));
+  socket.addEventListener("message", (event) => {
+    const frame = JSON.parse(String(event.data));
+    if (frame.type === "ready") ready();
+    if (pending && frame.id === pending.id) pending.resolve(frame);
+  });
+  await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
+  socket.send(JSON.stringify({ type: "auth", payload: { token: auth.token } }));
+  await readyFrame;
+  const id = crypto.randomUUID().slice(0, 8);
+  const text = (n: number) => `seed-${id}-${n}`;
+  for (let n = 1; n <= 120; n++) {
+    // The server allows ten sends a second; wait out a refusal and resend.
+    for (;;) {
+      const requestId = crypto.randomUUID();
+      const reply = new Promise<{ type: string; payload?: { code?: string } }>(
+        (resolve) => (pending = { id: requestId, resolve }),
+      );
+      socket.send(
+        JSON.stringify({
+          type: "chat_send",
+          id: requestId,
+          payload: { channel_id: general.id, content: text(n), reply_to: null },
+        }),
+      );
+      const frame = await reply;
+      if (frame.type === "chat_send_ok") break;
+      expect(frame.payload?.code).toBe("RATE_LIMITED");
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+  socket.close();
+  await expect(alice.getByText(text(120), { exact: true })).toBeVisible();
+
+  // Alice scrolls back to message 30.
+  await alice.locator(".messages-container").evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  const reading = alice.getByText(text(30), { exact: true });
+  await reading.scrollIntoViewIfNeeded();
+  await expect(reading).toBeInViewport();
+
+  // The restart ends in a full `ready`, whose history refetch splices into
+  // what alice already has instead of replacing it with the latest page.
+  await server.stop();
+  await expect(alice.locator(".reconnecting-banner")).toBeVisible();
+  // HTTP runs over the test transport, not the page: watch it there.
+  let refetched!: () => void;
+  const refetch = new Promise<void>((resolve) => (refetched = resolve));
+  aliceTransport.failHttpRequests(({ path, method }) => {
+    if (method === "GET" && path === `/api/v1/channels/${general.id}/messages`) refetched();
+    return false;
+  });
+  await server.restart();
+  await refetch;
+  await expect(alice.locator(".reconnecting-banner")).not.toHaveClass(/visible/, {
+    timeout: 60_000,
+  });
+  // The request is out; give its page time to land and splice in.
+  await alice.waitForTimeout(2_000);
+  await expect(reading).toBeInViewport();
+  await expect(alice.locator(".messages-loading")).toHaveCount(0);
+});
