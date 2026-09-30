@@ -253,6 +253,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyTo: null as { messageId: number; username: string } | null,
     editing: null as { messageId: number } | null,
   };
+  /** The ordinary draft (text + reply) displaced by an edit, so cancelling or
+   *  saving the edit gives the user back what they were typing (P1-08). Staged
+   *  attachments are untouched by an edit and read live from the composer. */
+  let preEditDraft: {
+    text: string;
+    replyTo: { messageId: number; username: string } | null;
+  } | null = null;
   let lastTypingTime = 0;
   let lastSendTime = 0;
 
@@ -641,16 +648,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     if (state.editing !== null) {
       options.onEditMessage(state.editing.messageId, content);
-      cancelEdit();
-    } else {
-      // Only include attachments that have finished uploading (have a real server ID)
-      const attachmentIds = pendingAttachments
-        .filter((a) => !a.id.startsWith("pending-"))
-        .map((a) => a.id);
-      options.onSend(content, state.replyTo?.messageId ?? null, attachmentIds);
-      clearReply();
-      clearPendingAttachments();
+      // P1-08: sending the edit returns the composer to the ordinary draft the
+      // edit displaced, instead of clearing everything.
+      restorePreEditDraft();
+      clearUploadError();
+      textarea.focus();
+      return;
     }
+
+    // Only include attachments that have finished uploading (have a real server ID)
+    const attachmentIds = pendingAttachments
+      .filter((a) => !a.id.startsWith("pending-"))
+      .map((a) => a.id);
+    options.onSend(content, state.replyTo?.messageId ?? null, attachmentIds);
+    clearReply();
+    clearPendingAttachments();
 
     textarea.value = "";
     autoResize();
@@ -820,7 +832,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setReplyTo(messageId: number, username: string): void {
-    // cancelEdit also clears the textarea -- without it the stale edit text
+    // Leaving edit mode for reply mode discards the edit and gives back the
+    // ordinary draft the edit displaced. Without this the stale edit text
     // survives into reply mode and Enter reposts it as a duplicate.
     if (state.editing !== null) cancelEdit();
     state = { replyTo: { messageId, username }, editing: null };
@@ -834,6 +847,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function startEdit(messageId: number, content: string): void {
+    // P1-08: stash what the user was typing (text + reply) before the edit
+    // takes over the composer, so cancelling or saving gives it back. Staged
+    // attachments are left in place and read live, not part of the stash.
+    if (preEditDraft === null) {
+      preEditDraft = { text: textarea?.value ?? "", replyTo: state.replyTo };
+    }
     if (state.replyTo !== null) hideReplyBar();
     state = { replyTo: null, editing: { messageId } };
     showEditBar();
@@ -844,13 +863,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
-  function cancelEdit(): void {
-    state = { ...state, editing: null };
+  /** Return the composer to the ordinary draft an edit displaced. Falls back to
+   *  an empty composer when an edit was opened without one. */
+  function restorePreEditDraft(): void {
+    const stashed = preEditDraft ?? { text: "", replyTo: null };
+    preEditDraft = null;
+    state = { replyTo: stashed.replyTo, editing: null };
     hideEditBar();
     if (textarea !== null) {
-      textarea.value = "";
+      textarea.value = stashed.text;
       autoResize();
     }
+    if (stashed.replyTo !== null) showReplyBar(stashed.replyTo.username);
+    else hideReplyBar();
+  }
+
+  function cancelEdit(): void {
+    restorePreEditDraft();
   }
 
   function isIdle(): boolean {
@@ -1247,6 +1276,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyBar = null;
     replyText = null;
     editBar = null;
+    preEditDraft = null;
     attachmentPreviewBar = null;
     uploadErrorEl = null;
     openPicker = null;
@@ -1260,12 +1290,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
    *  it on unmount). */
   function getDraft(): ComposerDraft {
-    // An in-progress edit is dropped, not stashed: restored into a composer
-    // outside edit mode, its text would send as a duplicate new message.
-    if (state.editing !== null) return { content: "", replyTo: null, attachments: [] };
+    const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
     return {
-      content: textarea?.value ?? "",
-      replyTo: state.replyTo,
+      content: stashed.text,
+      replyTo: stashed.replyTo,
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
