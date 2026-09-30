@@ -8,9 +8,11 @@ import (
 
 // installConnWrites batches the session touches and connection status stamps
 // (P5-S07). Called from afterHubStart, before startHub registers the hub's own
-// close, so the reverse walk closes this step AFTER the hub: the disconnect
-// stamps the hub's shutdown queues are in its final flush, which still runs
-// before database.Close.
+// close, so the reverse walk closes this step AFTER the hub, and its final
+// flush, which still runs before database.Close, writes the stamps queued
+// before it runs. A disconnect stamp a connection's readPump defer queues
+// after that is lost like a crash, and the boot-time ResetAllUserStatuses
+// clears the "online" it leaves.
 func (a *App) installConnWrites(services *service.Services) {
 	if services == nil || services.Users == nil || services.Sessions == nil {
 		return
