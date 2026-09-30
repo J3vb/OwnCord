@@ -182,7 +182,7 @@ sequenceDiagram
     C->>S: {type:"auth", payload:{token, last_seq, active_channel_id, epoch}}
     S->>S: validate token hash → session expiry → user → ban
     S->>H: register (kicks previous conn of same user)
-    S-->>C: auth_ok {user, server_name, motd, replay_source}
+    S-->>C: auth_ok {user, server_name, motd, replay_source, upload_policy}
 
     alt last_seq within in-memory ring buffer (Tier 1)
         H-->>C: replay from EventRingBuffer (perm-filtered, fail-closed)
