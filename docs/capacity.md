@@ -100,8 +100,8 @@ Memory is not the constraint at either tier: 2,000 idle connections measure
 about 266 MB resident, 324 MB at 100 messages/s and 443 MB at 200 messages/s,
 with 3 goroutines per connection. Buy the **4 vCPU tier for 2,000** for the
 CPU, not the RAM. Beyond 2,000, CPU fan-out is the next wall rather than
-SQLite; the single SQLite writer is the limit on server-wide sustained message
-rate, which the writer remedies in the scaling phase target.
+SQLite. Server-wide sustained message rate is bounded by SQLite's single
+writer; that limit will be revisited as the scaling runs are published.
 
 #### Open-file limit (file descriptors)
 
