@@ -929,7 +929,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
         onUploadFile: () => channelCtrl?.openFilePicker(),
-        onStepChannel: (direction, unreadOnly) => stepChannel(direction, unreadOnly),
+        onStepChannel: (direction, unreadOnly) => {
+          if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
+          stepChannel(direction, unreadOnly);
+        },
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
       }),
