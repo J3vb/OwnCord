@@ -41,7 +41,15 @@ DELETE FROM sessions WHERE user_id = ?;
 DELETE FROM sessions WHERE expires_at < ?;
 
 -- name: TouchSession :exec
-UPDATE sessions SET last_used = datetime('now') WHERE token = ?;
+-- Slides the idle expiry (DP-05): a used session expires sessionTTL after its
+-- last touch, capped at created_at + 365 days, the absolute lifetime from
+-- sign-in. expires_at > now keeps a lapsed row lapsed, so a touch racing an
+-- expiry can never revive it. Both bounds use sessionTimeLayout, which keeps
+-- the sweep's index comparison in DeleteExpiredSessions valid.
+UPDATE sessions
+SET last_used = datetime('now'),
+    expires_at = MIN(CAST(sqlc.arg(expires_at) AS TEXT), strftime('%Y-%m-%dT%H:%M:%SZ', created_at, '+365 days'))
+WHERE token = sqlc.arg(token) AND expires_at > sqlc.arg(now);
 
 -- name: ListUserSessions :many
 SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at, unseen

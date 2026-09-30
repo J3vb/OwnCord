@@ -3681,9 +3681,25 @@ describe("WS Dispatcher", () => {
       );
     });
 
-    it("does not rejoin after a shutdown from outside the server", async () => {
+    it("rejoins after a shutdown restart from outside the server within its shorter window (D-2)", async () => {
       announceRestartAndDrop("shutdown");
       await vi.runAllTimersAsync();
+      // D-2: a systemctl/docker restart that is back quickly looks like a blip.
+      vi.setSystemTime(Date.now() + 60_000);
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      const joins = vi
+        .mocked(mock.ws.send)
+        .mock.calls.filter(([msg]) => (msg as { type?: string }).type === "voice_join");
+      expect(joins).toHaveLength(1);
+      expect(voiceStore.getState().currentChannelId).toBe(42);
+    });
+
+    it("does not rejoin when ready arrives after a shutdown notice's 2-minute window (D-2)", async () => {
+      announceRestartAndDrop("shutdown");
+      await vi.runAllTimersAsync();
+      vi.setSystemTime(Date.now() + 3 * 60_000);
 
       readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
 

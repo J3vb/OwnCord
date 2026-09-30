@@ -199,7 +199,10 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("sorts unread conversations first", () => {
+  // DP-42: the header promised "sorted by most recent" while the rows were
+  // sorted unread-first. Recency is the order the store hands over (the server
+  // orders by last message), so the list must not reorder on unread.
+  it("renders rows in recency order regardless of unread", () => {
     const conversations: DmConversation[] = [
       makeConvo({ channelId: 1, userId: 1, username: "Alice", unread: false }),
       makeConvo({ channelId: 2, userId: 2, username: "Bob", unread: true }),
@@ -212,10 +215,8 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    const items = container.querySelectorAll(".dm-item");
-    // Bob (unread) should come first
-    expect(items[0]!.querySelector(".dm-name")!.textContent).toBe("Bob");
-    expect(items[1]!.querySelector(".dm-name")!.textContent).toBe("Alice");
+    const names = [...container.querySelectorAll(".dm-item .dm-name")].map((n) => n.textContent);
+    expect(names).toEqual(["Alice", "Bob"]);
 
     sidebar.destroy?.();
   });
@@ -263,6 +264,98 @@ describe("DmSidebar", () => {
     const closeBtn = container.querySelector(".dm-close") as HTMLButtonElement;
     closeBtn.click();
     expect(onCloseDm).toHaveBeenCalledWith(42);
+    // A 1:1 close stays one click (DP-34): no confirm dialog.
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
+  // DP-34: leaving a group is destructive (the caller cannot return unaided),
+  // so the ✕ asks first; a 1:1 hide does not.
+  it("asks to confirm leaving a group, and calls onCloseDm only after confirm", () => {
+    const onCloseDm = vi.fn();
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    expect(onCloseDm).not.toHaveBeenCalled();
+    const confirm = document.querySelector("[data-testid='dm-leave-confirm']") as HTMLElement;
+    expect(confirm).not.toBeNull();
+
+    confirm.click();
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+
+    sidebar.destroy?.();
+  });
+
+  it("cancelling the group-leave confirm leaves the conversation alone", () => {
+    const onCloseDm = vi.fn();
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    (document.querySelector("[data-testid='dm-leave-cancel']") as HTMLButtonElement).click();
+
+    expect(onCloseDm).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
+  it("keeps the group-leave confirm open while its row is rebuilt, and closes it when the row goes", () => {
+    const onCloseDm = vi.fn();
+    const group = makeConvo({ channelId: 7, isGroup: true, username: "Crew" });
+    const sidebar = createDmSidebar({
+      conversations: [group],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    // A new message rebuilds the row; the prompt must survive it.
+    sidebar.update([{ ...group, lastMessage: "new!", unread: true, unreadCount: 1 }]);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+    (document.querySelector("[data-testid='dm-leave-confirm']") as HTMLButtonElement).click();
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+
+    // Reopened, then the group leaves the list some other way: the prompt goes.
+    sidebar.update([group]);
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+    sidebar.update([]);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
+  it("shift-click skips the group-leave confirm", () => {
+    const onCloseDm = vi.fn();
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true, shiftKey: true }),
+    );
+
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
 
     sidebar.destroy?.();
   });
@@ -749,6 +842,23 @@ describe("DmSidebar — unread and mention badges", () => {
     expect(container.querySelector(".dm-unread")).toBeNull();
   });
 
+  it("caps the unread badge at 99+", () => {
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 137 }));
+
+    const badge = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
+    expect(badge.textContent).toBe("99+");
+    // The tooltip matches the badge text, never a four-digit number.
+    expect(badge.title).toBe("99+ unread messages");
+  });
+
+  it("keeps the mention badge uncapped", () => {
+    mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 137 }));
+
+    const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
+    expect(mentions.textContent).toBe("137");
+    expect(mentions.title).toBe("137 mentions");
+  });
+
   it("renders a mention badge instead of the unread badge", () => {
     mountWith(
       makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 5, mentionCount: 2 }),
@@ -765,12 +875,7 @@ describe("DmSidebar — unread and mention badges", () => {
     );
   });
 
-  it("keeps large badge counts ungrouped in the tooltip, matching the badge text", () => {
-    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 1234 }));
-    const unread = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
-    expect(unread.textContent).toBe("1234");
-    expect(unread.title).toBe("1234 unread messages");
-
+  it("keeps large mention counts ungrouped in the tooltip, matching the badge text", () => {
     mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 1234 }));
     const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
     expect(mentions.textContent).toBe("1234");

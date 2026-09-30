@@ -13,6 +13,8 @@ vi.mock("@tauri-apps/api/event", async () => ({
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, type ConnectionState } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
+import { handleConnectionError } from "../../src/features/connection/wsHandlers";
+import { setSessionReplaced, uiStore } from "../../src/stores/ui.store";
 
 const AUTH_OK = JSON.stringify({
   type: "auth_ok",
@@ -186,5 +188,210 @@ describe("wake probe (U7d)", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     expect(pingSends()).toHaveLength(0);
+  });
+});
+
+// DP-02: the network or the screen coming back while the client is waiting out
+// a reconnect backoff dials at once rather than after up to 30 s.
+describe("wake kick while reconnecting (DP-02)", () => {
+  let client: ReturnType<typeof createWsClient>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue(undefined);
+    mockListen.mockClear();
+    eventHandlers.clear();
+    // The top of each backoff window, so the fourth failed dial waits 16 s.
+    client = createWsClient({ random: () => 1 });
+  });
+
+  afterEach(() => {
+    client.disconnect();
+    vi.useRealTimers();
+  });
+
+  function dials(): number {
+    return mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect").length;
+  }
+
+  function lastAuthPayload(): Record<string, unknown> {
+    const call = mockInvoke.mock.calls
+      .filter(
+        (c) =>
+          c[0] === "ws_send" &&
+          typeof c[1]?.message === "string" &&
+          (c[1].message as string).includes('"type":"auth"'),
+      )
+      .at(-1);
+    expect(call).toBeDefined();
+    return JSON.parse((call![1] as { message: string }).message).payload as Record<string, unknown>;
+  }
+
+  async function connectAndAuth(): Promise<void> {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent("ws-message", AUTH_OK);
+  }
+
+  // Loses the live socket, then fails three redials, leaving the fourth
+  // attempt pending 16 s out.
+  async function reconnectingAtSixteenSeconds(): Promise<void> {
+    await connectAndAuth();
+    emitTauriEvent("ws-state", "closed");
+    for (const delay of [1_000, 2_000, 4_000, 8_000]) {
+      await vi.advanceTimersByTimeAsync(delay);
+      emitTauriEvent("ws-state", "closed");
+    }
+    expect(client.getState()).toBe("reconnecting");
+    mockInvoke.mockClear();
+  }
+
+  it("dials at once when the network returns, replacing the pending backoff", async () => {
+    await reconnectingAtSixteenSeconds();
+
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials()).toBe(1);
+
+    // The backoff timer the kick replaced never fires a second dial.
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(dials()).toBe(1);
+  });
+
+  it("dials at once when the document becomes visible again", async () => {
+    await reconnectingAtSixteenSeconds();
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(dials()).toBe(1);
+  });
+
+  it("marks the kicked dial a wake after a suspend (U4)", async () => {
+    await reconnectingAtSixteenSeconds();
+
+    // The laptop slept through the backoff: the wall clock moved, no timer ran.
+    vi.setSystemTime(Date.now() + 2 * 60_000);
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials()).toBe(1);
+    emitTauriEvent("ws-state", "open");
+
+    expect(lastAuthPayload().wake).toBe(true);
+  });
+
+  it("does not mark the kicked dial a wake without a suspend", async () => {
+    await reconnectingAtSixteenSeconds();
+
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials()).toBe(1);
+    emitTauriEvent("ws-state", "open");
+
+    expect(lastAuthPayload().wake).toBeUndefined();
+  });
+
+  it("kicks at most once per 2 s", async () => {
+    await reconnectingAtSixteenSeconds();
+
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials()).toBe(1);
+
+    // The kicked dial fails straight away and another event lands at once.
+    emitTauriEvent("ws-state", "closed");
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(dials()).toBe(2);
+  });
+
+  it("does not dial after disconnect()", async () => {
+    await reconnectingAtSixteenSeconds();
+    client.disconnect();
+    mockInvoke.mockClear();
+
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(dials()).toBe(0);
+  });
+
+  it("does not dial after auth_error", async () => {
+    await reconnectingAtSixteenSeconds();
+    await vi.advanceTimersByTimeAsync(16_000);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_error", payload: { message: "revoked" } }),
+    );
+    expectConsole("error", /\[ws\] Authentication failed/);
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(dials()).toBe(0);
+  });
+
+  it("does not redial through a certificate-mismatch latch (TOFU)", async () => {
+    await reconnectingAtSixteenSeconds();
+    // The pending redial reaches a server whose certificate changed.
+    await vi.advanceTimersByTimeAsync(16_000);
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+      message: "Stored: sha256:OLD",
+    });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(dials()).toBe(0);
+  });
+
+  it("does not dial while the account is signed in elsewhere", async () => {
+    client.on("error", (payload) => handleConnectionError(client, payload));
+    await reconnectingAtSixteenSeconds();
+    // The kicked wake dial is refused: another device holds the session.
+    vi.setSystemTime(Date.now() + 2 * 60_000);
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(0);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "error",
+        payload: { code: "ANOTHER_DEVICE_ACTIVE", message: "in use elsewhere" },
+      }),
+    );
+    expect(uiStore.getState().sessionReplaced).toBe(true);
+    emitTauriEvent("ws-state", "closed");
+    mockInvoke.mockClear();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(dials()).toBe(0);
+    setSessionReplaced(false);
   });
 });

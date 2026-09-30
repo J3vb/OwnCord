@@ -60,6 +60,20 @@ test("two users receive exactly one message across transport loss and server res
   await expect(bob.locator(".msg-text", { hasText: after })).toHaveCount(1);
 });
 
+test("the network coming back redials at once instead of waiting out the backoff", async ({
+  alice,
+  aliceTransport,
+}) => {
+  const banner = alice.locator(".reconnecting-banner");
+  await aliceTransport.offline();
+  await expect(banner).toBeVisible();
+  // Long enough for the reconnect backoff to grow well past the 3 s below.
+  await alice.waitForTimeout(20_000);
+  aliceTransport.online();
+  await alice.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(banner).not.toBeVisible({ timeout: 3_000 });
+});
+
 test("revoking channel visibility reaches an already connected member", async ({
   alice,
   bob,

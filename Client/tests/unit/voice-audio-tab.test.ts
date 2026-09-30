@@ -1155,6 +1155,46 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  // Chrome keeps a detached media element that still has a source among its
+  // pending activities, and the element keeps its whole pane alive: the
+  // long-session soak caught a torn-down pane (~530 DOM nodes) held that way
+  // for the rest of the page. Stopping the tracks alone does not release it.
+  type Teardown = (tab: ReturnType<typeof createVoiceAudioTab>, ac: AbortController) => void;
+  it.each<[string, Teardown]>([
+    ["cleanup (tab switch or overlay close)", (tab) => tab.cleanup()],
+    ["overlay abort", (_tab, ac) => ac.abort()],
+  ])("detaches the camera preview from its stream on %s", async (_label, teardown) => {
+    localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
+    const camStream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const micStream = { getTracks: () => [] } as unknown as MediaStream;
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi
+          .fn()
+          .mockImplementation((constraints: MediaStreamConstraints) =>
+            Promise.resolve(
+              constraints.video && constraints.audio === false ? camStream : micStream,
+            ),
+          ),
+      },
+    });
+
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+    const preview = el.querySelector("video") as HTMLVideoElement;
+    await vi.waitFor(() => {
+      expect(preview.srcObject).toBe(camStream);
+    });
+
+    teardown(tab, ac);
+
+    expect(preview.srcObject).toBeNull();
+    ac.abort();
+  });
+
   it("restores saved stream quality selection", () => {
     localStorage.setItem("owncord:settings:streamQuality", '"low"');
     stubNavigator();

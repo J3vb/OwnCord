@@ -17,7 +17,9 @@ test("connection overlay shows authenticated state until server data is ready", 
   await expect(overlay.locator(".connected-loader .spinner")).toBeVisible();
   await expect(page.getByTestId("app-layout")).not.toBeVisible();
   await emitWsMessage(page, MOCK_READY_PAYLOAD);
-  await expect(overlay.locator(".connected-loader")).toContainText("Ready!");
+  // `ready` hands straight off to the main page: the app layout appears and
+  // the overlay is torn down in the same task, so asserting on the overlay's
+  // "Ready!" state would race its removal. Assert the destination instead.
   await expect(page.getByTestId("app-layout")).toBeVisible();
   await expect(overlay).toHaveCount(0);
 });

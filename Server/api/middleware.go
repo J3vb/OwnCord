@@ -42,6 +42,9 @@ const sessionTouchInterval = 60 * time.Second
 // longer suppress anything.
 const touchThrottleMaxEntries = 4096
 
+// middlewareNow is the touch throttle's clock, a seam for tests.
+var middlewareNow = time.Now
+
 // touchThrottle remembers when each session hash was last touched so
 // TouchSession runs at most once per sessionTouchInterval per session.
 type touchThrottle struct {
@@ -155,7 +158,7 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 			// (sess == nil) is touched off the hot path so it never adds latency
 			// to bot/CI traffic.
 			if sess != nil {
-				if touches.shouldTouch(hash, time.Now()) {
+				if touches.shouldTouch(hash, middlewareNow()) {
 					if err := sessions.TouchSession(r.Context(), hash); err != nil {
 						slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 					}

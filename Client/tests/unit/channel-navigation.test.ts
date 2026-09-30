@@ -3,11 +3,13 @@ import {
   navigateToChannel,
   findChannelById,
   findChannelByName,
+  stepChannel,
 } from "../../src/lib/channel-navigation";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { uiStore } from "../../src/stores/ui.store";
 
 function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
@@ -49,6 +51,7 @@ describe("channel-navigation", () => {
   beforeEach(() => {
     channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
     dmStore.setState(() => ({ channels: [] }));
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeDmUserId: null }));
   });
 
   describe("navigateToChannel", () => {
@@ -175,6 +178,151 @@ describe("channel-navigation", () => {
         return { ...prev, channels: next };
       });
       expect(findChannelByName("bob")).toBeNull();
+    });
+  });
+
+  describe("stepChannel", () => {
+    function seed(channels: Channel[], active: number | null = null): void {
+      channelsStore.setState(() => ({
+        channels: new Map(channels.map((c) => [c.id, c])),
+        activeChannelId: active,
+        roles: [],
+      }));
+    }
+
+    it("steps to the next and previous channel, wrapping at the ends", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0 }),
+        makeChannel({ id: 2, name: "b", position: 1 }),
+        makeChannel({ id: 3, name: "c", position: 2 }),
+      ]);
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(3);
+      // Down past the last wraps to the first.
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      // Up from the first wraps to the last.
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(3);
+    });
+
+    it("steps to unread channels only when asked", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0, unreadCount: 0 }),
+        makeChannel({ id: 2, name: "b", position: 1, unreadCount: 2 }),
+        makeChannel({ id: 3, name: "c", position: 2, mentionCount: 1 }),
+      ]);
+
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(3);
+    });
+
+    it("is a no-op when nothing is unread", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0 }),
+        makeChannel({ id: 2, name: "b", position: 1 }),
+      ]);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+    });
+
+    it("skips voice channels, which only open by joining the call", () => {
+      seed(
+        [
+          makeChannel({ id: 1, name: "a", position: 0 }),
+          makeChannel({ id: 2, name: "lounge", position: 1, type: "voice", unreadCount: 1 }),
+          makeChannel({ id: 3, name: "c", position: 2 }),
+        ],
+        1,
+      );
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(3);
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+    });
+
+    it("is a no-op with no channels", () => {
+      seed([]);
+      expect(() => stepChannel(1)).not.toThrow();
+      expect(channelsStore.getState().activeChannelId).toBeNull();
+    });
+
+    it("steps the plain order by category position, skipping no rows when expanded", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 1, category: "One" }),
+        makeChannel({ id: 2, name: "b", position: 0, category: "Two" }),
+      ]);
+
+      // getChannelsByCategory groups by category insertion order, then position.
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+    });
+
+    it("steps through the DM list in recency order while the DM view is open", () => {
+      seed([makeChannel({ id: 1, name: "general", position: 0 })]);
+      setDmChannels([
+        makeDm({ channelId: 60, unreadCount: 0, mentionCount: 0 }),
+        makeDm({
+          channelId: 61,
+          isGroup: true,
+          unreadCount: 2,
+          mentionCount: 0,
+          recipient: { id: 11, username: "cat", avatar: "", status: "online" },
+        }),
+        makeDm({
+          channelId: 62,
+          unreadCount: 0,
+          mentionCount: 0,
+          recipient: { id: 12, username: "dan", avatar: "", status: "online" },
+        }),
+      ]);
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      // Only the unread group is a stop for the unread step; opening it reads it.
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(61);
+      expect(dmStore.getState().channels.find((c) => c.channelId === 61)?.unreadCount).toBe(0);
+
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+      expect(uiStore.getState().activeDmUserId).toBe(10);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(61);
+      expect(uiStore.getState().activeDmUserId).toBeNull();
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(62);
+      // Wraps within the DM list; never lands on the server channel.
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(62);
+
+      expect(uiStore.getState().sidebarMode).toBe("dms");
+    });
+
+    it("steps server channels, not DMs, in channels mode", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0 }),
+        makeChannel({ id: 2, name: "b", position: 1 }),
+      ]);
+      setDmChannels([makeDm({ channelId: 60 })]);
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
     });
   });
 });

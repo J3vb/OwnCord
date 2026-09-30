@@ -266,7 +266,10 @@ the line above the last _N_ loaded messages. Consequences of that derivation: th
 line is suppressed while the message window is detached (a slice around some old
 message is not the tail), and it clears on the next visit, when the snapshot is 0.
 The message under the line never renders as a grouped continuation of the one
-above it.
+above it. A snapshot at the wire cap (`unread_count` is capped at 100, see
+`docs/protocol.md`) is only a lower bound, so the line stays above the oldest
+loaded message as older history loads rather than latching to a derived row.
+The exact boundary needs the last-read message id, which `ready` does not carry.
 
 **Explicit mark-as-read (✓ implemented 2026-08):** the channel context menu gains
 **Mark as Read** (disabled when the channel is already read, absent for voice
@@ -277,7 +280,7 @@ rather than `channel_focus`: focus also rebinds the connection's focused channel
 which would misroute unread bookkeeping for the channel actually on screen.
 
 **DM badges (✓ implemented 2026-08):** the DM sidebar renders the real unread
-count (and a red mention count that outranks it) instead of a bare dot. The ready
+count ("99+" from 100 up; a red mention count outranks it) instead of a bare dot. The ready
 payload's `dm_channels[]` and `GET /dms` both carry `mention_count` — the
 `GetUserDMChannels` query reads it from `read_states` — so a DM mention badge
 survives a reconnect or a REST reload of the DM list instead of resetting to 0.

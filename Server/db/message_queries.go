@@ -800,10 +800,11 @@ func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int6
 		`SELECT c.id,
 		        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
 		          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
-		        (SELECT COUNT(*) FROM messages m
+		        (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
 		          WHERE m.channel_id = c.id AND m.deleted = 0
 		            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
-		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread,
+		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
+		          LIMIT 100)) AS unread,
 		        COALESCE((SELECT rs.mention_count FROM read_states rs
 		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 		 FROM channels c

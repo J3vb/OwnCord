@@ -576,7 +576,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
 
     // auth_ok landed: the overlay is mounted over #app while the router is
     // still "connect" — it only moves to "main" from the overlay's own
-    // onReady, 800ms after the `ready` event arrives.
+    // onReady, once the `ready` event arrives.
     expect(document.querySelector('[data-testid="connected-overlay"]')).not.toBeNull();
 
     // Simulate a session that ends here — a ban, an auth_error on an
@@ -596,7 +596,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
   });
 
-  it("cancels the overlay's armed onReady timer when the session ends inside the 800ms ready window", async () => {
+  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready` (OC-0107)", async () => {
     const mainPageCallsBefore = vi.mocked(createMainPage).mock.calls.length;
 
     await loginAndReachAuthOk("wide-window.example:8443", "riley", {
@@ -606,26 +606,23 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
 
-    // `ready` arrives and arms the overlay's 800ms onReady timer (which
-    // would otherwise call router.navigate("main") on its own).
+    // `ready` arrives and arms the overlay's onReady hand-off (which would
+    // otherwise call router.navigate("main") on its own on the next task).
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
 
-    // The ban/shutdown lands partway through that 800ms window — well after
-    // `ready`, well before the timer fires.
-    await vi.advanceTimersByTimeAsync(300);
+    // A queued ban/shutdown task lands before the hand-off task runs.
     clearAuth();
     await Promise.resolve();
     await Promise.resolve();
 
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
 
-    // Advance past the timer's original 800ms deadline. Before the fix, the
-    // subscriber never called connectedOverlay.destroy() (its AbortController
-    // is what cancels the pending setTimeout — see ConnectedOverlay.ts), so
-    // the already-armed timer still fires onReady() -> router.navigate("main"),
-    // mounting MainPage on a cleared authStore and a disconnected socket even
-    // though the isAuthenticated subscriber already ran and won't run again.
-    await vi.advanceTimersByTimeAsync(600);
+    // Let the hand-off's deadline pass. Without the subscriber's
+    // connectedOverlay.destroy() (its AbortController is what cancels the
+    // pending setTimeout — see ConnectedOverlay.ts), the already-armed timer
+    // still fires onReady() -> router.navigate("main"), mounting MainPage on a
+    // cleared authStore and a disconnected socket.
+    await vi.advanceTimersByTimeAsync(800);
 
     expect(vi.mocked(createMainPage).mock.calls.length).toBe(mainPageCallsBefore);
   });
@@ -647,10 +644,11 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
-    // ConnectedOverlay.markReady() fires onReady after READY_DELAY_MS (800ms),
-    // which calls router.navigate("main") — main.ts's only route away from
-    // "connect", needed so a later navigate("connect") is a real transition
-    // and not a same-page no-op.
+    // ConnectedOverlay.markReady() hands off on the next task, which starts
+    // router.navigate("main") — main.ts's only route away from "connect",
+    // needed so a later navigate("connect") is a real transition and not a
+    // same-page no-op. The advance flushes both that task and the dynamic
+    // MainPage import the navigation awaits.
     await vi.advanceTimersByTimeAsync(800);
 
     // Quick-switch overlay's flow (SidebarArea.ts:756-760): stash the target

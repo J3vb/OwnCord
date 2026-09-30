@@ -229,6 +229,8 @@ test.describe("@parity Group DM create + leave", () => {
     await expect(leaveItem).toBeVisible({ timeout: 5_000 });
     await expect(leaveItem).toHaveText("Leave Group");
     await leaveItem.click();
+    // Leaving a group is destructive, so it asks first (DP-34).
+    await page.locator("[data-testid='dm-leave-confirm']").click();
 
     const call = await waitForCapturedCall(
       page,

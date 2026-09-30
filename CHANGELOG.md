@@ -49,8 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Login & connection
 
+- **The app opens about 0.8 s sooner after signing in.** The "Connected!" screen held for a fixed 800 ms before showing the server, even once all its data had arrived. It now hands off as soon as the server says it is ready.
 - **An auto-login to a server that is down no longer sits on "Auto-connecting…" forever.** A stored token is resumed straight onto the socket with no health probe, so an offline server left the connecting screen spinning indefinitely while the client retried. The first connection now has a 20-second deadline: if the server never answers, the client returns to the login form and says the server may be offline. A live session's later outages still reconnect in place with the in-app banner.
 - **The desktop app loads faster from a remote server.** Every REST call and server image fetch opened a new encrypted connection, two extra round trips each. Repeat reads now reuse an idle connection to the same server. At a 100 ms round trip a repeat request takes about 100 ms instead of 300 ms. On a fast link (under ~10 ms round trip) a new request also left the client about 40 ms late while the operating system waited to batch it; requests now go out immediately.
+- **"Reconnecting…" clears as soon as the network or the screen comes back.** After Wi-Fi returned or a laptop woke, the client waited out its retry timer first, up to 30 seconds. It now redials at once, still asking before taking the session from another device.
 - **A rejected two-factor code now shows the error where you can see it.** The overlay that asks for the code is opaque and covered the login form's error banner, so a wrong code (or a lockout) looked like nothing happened. The message now appears inside the code card.
 
 ### Accounts & admin
@@ -83,9 +85,11 @@ and only when it changes something a contributor or fork holder must do
 ### Desktop UI
 
 - **The tray's status menu and the app now use the same word for "Invisible".** The tray said "Offline" for the status the app calls Invisible.
+- **Alt+↑/↓ now steps between channels, and Alt+Shift+↑/↓ between unread channels.** Discord's navigation shortcuts had no equivalent here, so the channel list could only be walked with Tab. Alt with the arrow keys moves to the previous or next channel, Shift adds the unread filter, and a bare Alt+Arrow typed into the message box is left to the field.
 - **Settings now shows your uploaded avatar** beside your name, not just its initial letter, and a group DM's header no longer shows a pointer cursor that did nothing when clicked.
 - **Signing in no longer fetches settings data before you open Settings.** The overlay read your sessions, two-factor status and recovery-kit status on every page load even while it was closed — three wasted requests on sign-in and on each reconnect, felt most on a slow link. They now go out the first time you open Settings, which shows the same live data as before.
 - **Every channel is visible on a first login to a server with a long member list.** The Members section claimed its full content height and squeezed the channel list above it down to about three rows, so a fresh profile on a busy server could not see its channels without collapsing Members or scrolling. The channel list now sizes to its rows and the Members section takes the rest and scrolls inside itself, keeping about three member rows (a channel list too long for that scrolls instead); a member height you previously dragged still restores.
+- **Unread badges read "99+" instead of a four-digit number.** A channel or DM with hundreds of unread messages showed the raw count, and the server counted every one of those messages on each connect. Counts are now capped at 100 on the server, so connecting to a server with big never-read channels is faster, and the badge shows "99+" from 100 upward. Mention badges stay uncapped. Opening a channel with 100 or more unread messages keeps the "NEW" line at the top of the loaded history, even as older messages load, so no unread message ever sits above it.
 
 ### Voice
 
@@ -103,6 +107,8 @@ and only when it changes something a contributor or fork holder must do
 - **On Linux, a call now recovers from a suspend or a sound-server restart instead of going silently dead.** A native audio stream torn down by a laptop sleeping, or by restarting PipeWire/PulseAudio, used to be only logged — you stayed in the call but heard nothing, or were silent to everyone, until you muted and unmuted. The stream is now reopened automatically, retrying until the sound server is back; a device you picked that returns a few seconds after the restart (a Bluetooth headset) is switched back to once it reappears, and a USB headset made the system-default microphone mid-call is followed without a manual device switch.
 - **Sharing your screen on Linux no longer hangs if the capturer never produces a frame.** The share stayed stuck on "starting share" with no cancel; a picked screen or window now gives up after 15 seconds and reports that the share failed.
 - **A fast leave-and-rejoin no longer waits behind the previous call's teardown.** The new session is set up without holding the lock that is closing the old one, so switching channels is immediate.
+- **Settings › Voice & Audio no longer keeps a closed copy of itself in memory.** The camera preview stayed attached to its stream after you switched tab or closed Settings, which could hold the whole discarded page in memory until you next signed in. The preview is now let go when the tab closes.
+- **A quick service restart no longer drops you from voice.** A `systemctl restart` or `docker restart` sent users in a call back outside it, because only an update, backup restore or setup restart put them back. A restart from outside the server now rejoins the call too, if it comes back within two minutes; a longer maintenance stop still ends the call.
 
 ### Direct messages & members
 
@@ -110,6 +116,8 @@ and only when it changes something a contributor or fork holder must do
 - **A DM mention badge no longer disappears when the client has to reload its DM list.** Accepting a message request reloads the DM list over REST, which reported a mention count of zero while the list sent on connect reported the real one; both now report the same count.
 - **Starting a DM from the member list now works with a keyboard.** The member picker's rows were click-only divs, so Tab could reach only the group-name box and the Confirm and Cancel buttons, never a person — and in the 1:1 path that picker is the only way to start a DM from the member list. The rows are now a single Tab stop you step with the arrow keys and choose with Enter or Space.
 - **The member list section can be collapsed from the keyboard.** Its header was a click-only div, so only a mouse could fold the section away; the disclosure arrow is now a real button that toggles on Enter or Space, like the channel categories and the DM section.
+- **Leaving a group DM now asks first, and a refused leave puts the row back.** The ✕ and the right-click "Leave Group" removed the conversation on the spot with no way back if the server refused. Leaving a group now opens a confirm (Shift-click or Shift+Enter skips it, as Discord's delete does); if the server rejects the leave, the row returns. Closing a 1:1 DM is still one click.
+- **The DM list is in recency order.** The full DM list sorted conversations with unread ones pinned to the top, contradicting its own "sorted by most recent" label and differing from the sidebar preview. Both now show pure recency, letting the badge mark what is unread.
 
 ### Installing & updating
 

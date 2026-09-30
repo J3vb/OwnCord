@@ -1143,6 +1143,16 @@ export async function emitWsMessage(page: Page, message: unknown): Promise<void>
   await emitWsEvent(page, "ws-message", JSON.stringify(message));
 }
 
+/**
+ * With the mock's `deferReady`, assert the connected overlay shows from
+ * auth_ok, then release `ready` and assert the main app replaces it.
+ */
+export async function expectOverlayUntilReady(page: Page, timeout: number): Promise<void> {
+  await expect(page.getByTestId("connected-overlay")).toBeVisible({ timeout });
+  await emitWsMessage(page, MOCK_READY_PAYLOAD);
+  await expect(page.getByTestId("app-layout")).toBeVisible({ timeout });
+}
+
 // ---------------------------------------------------------------------------
 // Anti-flakiness utilities
 // ---------------------------------------------------------------------------

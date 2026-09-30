@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { formatBadgeCount } from "@lib/formatting";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
@@ -340,7 +341,7 @@ function renderTextChannelItem(
     const badge = createElement(
       "span",
       { class: muted ? "unread-badge muted" : "unread-badge" },
-      String(channel.unreadCount),
+      formatBadgeCount(channel.unreadCount),
     );
     item.appendChild(badge);
   }

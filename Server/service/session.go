@@ -143,9 +143,10 @@ func (s *SessionService) SweepSessions(ctx context.Context, tokenHashes []string
 	return verdicts, nil
 }
 
-// TouchSession records that a login session was used, throttled by the caller
-// — the REST middleware only calls this once per interval per session so hot
-// API traffic does not queue a write per request.
+// TouchSession records that a login session was used and slides its expiry
+// (DP-05), throttled by the caller — the REST middleware and the WebSocket
+// hub each call this at most once per interval per session so hot traffic
+// does not queue a write per request.
 func (s *SessionService) TouchSession(ctx context.Context, tokenHash string) error {
 	return s.st.TouchSession(ctx, tokenHash)
 }

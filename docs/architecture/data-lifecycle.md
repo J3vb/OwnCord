@@ -284,8 +284,9 @@ bounded retry, then a partial-success `warning` the client must surface —
 OC-0314) and the per-session and future all-sessions revocations (B4-7). All
 are single statements; every axis is trivial except A5: a restore revives
 revoked sessions **only** if their rows were in the backup and have not
-expired — session rows are hashed tokens with a 30-day expiry, so a revived
-row is usable again by a client that still holds the token. Sign-out-
+expired — session rows are hashed tokens that expire 30 days after last
+use, so a revived row is usable again by a client that still holds the
+token. Sign-out-
 everywhere after a restore is the operator's recovery; B4-10's marker design
 records whether session revocations are marker-worthy (they are not:
 expiry bounds them).

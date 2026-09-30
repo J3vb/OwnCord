@@ -451,13 +451,20 @@ servers omit it.
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
 raised by the send that mentions them (never by an edit) and reset to 0 by
-`channel_focus` or `mark_read`.
+`channel_focus` or `mark_read`. Unlike `unread_count` it is never capped.
+
+`unread_count` counts unread messages but is **capped at 100**: any channel with
+100 or more unread messages reports exactly `100`, and the client renders the cap
+as `99+`. The cap bounds the per-channel count on every connect — a channel with
+thousands of never-read messages does not scan every row — so a client must not
+read `100` as an exact total.
 
 **dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`
 
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
-every reconnect; the ready payload now ships the stored value.
+every reconnect; the ready payload now ships the stored value. A DM's
+`unread_count` is capped at 100 under the same rule as `channels[]` above.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
 
@@ -1949,8 +1956,8 @@ reconnects with the same token once the server is back and returns to the
 channel it was in. Voice ends when the socket actually drops after an
 announcement, since the server's voice state goes with the process; the
 announcement alone leaves the call, because an update can still be aborted.
-After an `update`, `backup_restore` or `setup` drop, the client re-joins the
-call with one ordinary `voice_join` once `ready` arrives
+After the drop, the client re-joins the call with one ordinary `voice_join`
+once `ready` arrives, within a window that depends on the `reason`
 ([voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md), RT-12).
 A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 

@@ -377,7 +377,7 @@ CREATE TABLE sessions (
 );
 ```
 
-Session TTL: 30 days. Token is stored as SHA-256 hash.
+Session TTL: 30 days after last use (`TouchSession` slides `expires_at`), capped at 365 days after `created_at`. Token is stored as SHA-256 hash.
 
 ---
 
