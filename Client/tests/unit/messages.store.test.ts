@@ -1980,6 +1980,167 @@ describe("messages store", () => {
     });
   });
 
+  // DP-10: a revisit refetches the latest page and reconciles it into the
+  // cached window instead of replacing it.
+  describe("revisit reconcile", () => {
+    /** Newest-first page of ids [from, to], as the REST API returns it. */
+    function page(from: number, to: number): MessageResponse[] {
+      const out: MessageResponse[] = [];
+      for (let id = to; id >= from; id--) out.push(makeMessageResponse({ id, content: `m${id}` }));
+      return out;
+    }
+    /** Leave the channel and come back: the invalidate + fetch start the app runs. */
+    function revisit(): void {
+      invalidateChannelMessageWindow(1);
+      setChannelLoading(1);
+    }
+
+    it("returns the cached array itself when the refetched page matches the cached tail", () => {
+      setMessages(1, page(1, 50), true);
+      const cached = getChannelMessages(1);
+
+      revisit();
+      setMessages(1, page(1, 50), true);
+
+      expect(getChannelMessages(1)).toBe(cached);
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getHistoryLoadState(1)).toBeNull();
+    });
+
+    it("keeps older loaded rows and unchanged row objects when the page overlaps the window", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), true);
+      const cached = getChannelMessages(1);
+
+      revisit();
+      // While away: 101 was posted, 80 edited and 90 deleted.
+      const fresh = page(52, 101)
+        .filter((m) => m.id !== 90)
+        .map((m) =>
+          m.id === 80 ? { ...m, content: "edited", edited_at: "2026-03-15T10:00:00Z" } : m,
+        );
+      setMessages(1, fresh, true);
+
+      const msgs = getChannelMessages(1);
+      const ids = msgs.map((m) => m.id);
+      expect(ids[0]).toBe(1);
+      expect(ids).toHaveLength(100);
+      expect(ids).not.toContain(90);
+      expect(ids.at(-1)).toBe(101);
+      expect(msgs.find((m) => m.id === 80)!.content).toBe("edited");
+      // Rows nothing changed keep their object, so the list can tell them apart.
+      expect(msgs[0]).toBe(cached[0]);
+      expect(msgs.find((m) => m.id === 70)).toBe(cached.find((m) => m.id === 70));
+      // The oldest row is still the cached one, so "more above" is the cached answer.
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+
+    it("keeps a row that arrived live when the page carries its unchanged REST twin", () => {
+      setMessages(1, page(1, 50), true);
+      addMessage(makeChatPayload({ id: 51, content: "m51", timestamp: "2026-03-15T09:00:00Z" }));
+      const live = getChannelMessages(1).at(-1);
+
+      revisit();
+      setMessages(1, page(2, 51), true);
+
+      expect(getChannelMessages(1).at(-1)).toBe(live);
+    });
+
+    it("replaces the window when the page leaves a gap after the cached rows", () => {
+      setMessages(1, page(1, 50), true);
+
+      revisit();
+      setMessages(1, page(151, 200), true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual(
+        page(151, 200)
+          .map((m) => m.id)
+          .reverse(),
+      );
+    });
+
+    it("drops older cached rows when the page is the whole channel", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), false);
+
+      revisit();
+      // No more history above the page: rows 1-59 were deleted while away.
+      setMessages(1, page(60, 100), false);
+
+      expect(getChannelMessages(1).map((m) => m.id)[0]).toBe(60);
+      expect(hasMoreMessages(1)).toBe(false);
+    });
+
+    it("still clears a stale window when the refetch comes back empty (OC-0259)", () => {
+      setMessages(1, page(1, 50), true);
+
+      revisit();
+      setMessages(1, [], false);
+
+      expect(getChannelMessages(1)).toEqual([]);
+    });
+
+    it("keeps a live message that landed mid-fetch and does not bridge a gap with it (OC-0244)", () => {
+      setMessages(1, page(1, 50), true);
+
+      revisit();
+      addMessage(makeChatPayload({ id: 200, channel_id: 1, content: "live" }));
+      // The page was read before 200 existed and does not reach the cache.
+      setMessages(1, page(150, 199), true);
+
+      const ids = getChannelMessages(1).map((m) => m.id);
+      expect(ids[0]).toBe(150);
+      expect(ids.at(-1)).toBe(200);
+      expect(ids).toHaveLength(51);
+    });
+
+    it("carries pending and failed rows across the reconcile, after the tail", () => {
+      setMessages(1, page(1, 50), true);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "in flight",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c2", "SLOW_MODE");
+      const cached = getChannelMessages(1);
+
+      revisit();
+      setMessages(1, page(1, 50), true);
+
+      expect(getChannelMessages(1)).toBe(cached);
+      revisit();
+      setMessages(1, page(2, 51), true);
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id).slice(-3)).toEqual([51, 0, 0]);
+      expect(msgs.map((m) => m.status).slice(-2)).toEqual(["pending", "failed"]);
+    });
+
+    it("reattaches a detached window only through the refetched tail", () => {
+      setAroundMessages(1, page(40, 60).reverse(), true, true);
+      expect(isWindowDetached(1)).toBe(true);
+
+      revisit();
+      // Still detached while the tail is in flight: live appends stay refused.
+      addMessage(makeChatPayload({ id: 500, channel_id: 1 }));
+      expect(getChannelMessages(1).map((m) => m.id)).not.toContain(500);
+
+      setMessages(1, page(451, 500), true);
+      expect(isWindowDetached(1)).toBe(false);
+      expect(getChannelMessages(1).map((m) => m.id)[0]).toBe(451);
+    });
+  });
+
   // 10. First-page history load state
   describe("history load state", () => {
     it("is idle (null) by default", () => {

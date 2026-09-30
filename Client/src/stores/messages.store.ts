@@ -161,7 +161,13 @@ export function setChannelLoadError(channelId: number): void {
  *  replacing wholesale would silently discard them (and loadedChannels then
  *  blocks any refetch until a full reload). Rows from the previous array are
  *  carried over when they are pending/failed, or "sent" but newer than
- *  anything in the snapshot. */
+ *  anything in the snapshot.
+ *
+ *  A revisit's refetch (DP-10) reconciles into the cached window: when the
+ *  page reaches back to the rows present at setChannelLoading, older loaded
+ *  rows stay above it, a row the page left unchanged keeps its object, and a
+ *  page that changes nothing leaves the channel's array reference as it was.
+ *  A page with a gap after the cached rows replaces the window. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
@@ -221,12 +227,13 @@ export function invalidateLoadedMessageWindows(): void {
  * tail. The server only delivers live broadcasts for the focused channel, so
  * a window left behind on a channel switch stops updating the moment focus
  * moves away — the next visit must refetch instead of short-circuiting on
- * "already loaded". The rows themselves are kept (the old window stays
- * rendered until the refetch lands) and setMessages' merge carries
- * pending/failed rows across that refetch. Like reattachToPresent, this
- * leaves detachedChannels alone: setMessages clears it once the tail has
- * actually landed, and until then a detached window must keep refusing live
- * broadcasts.
+ * "already loaded": that refetch is the only way to learn about edits,
+ * deletes and reactions made while away. The rows themselves are kept (the
+ * next visit renders them at once) and setMessages reconciles the refetched
+ * page into them, changing only what changed and carrying pending/failed
+ * rows across. Like reattachToPresent, this leaves detachedChannels alone:
+ * setMessages clears it once the tail has actually landed, and until then a
+ * detached window must keep refusing live broadcasts.
  */
 export function invalidateChannelMessageWindow(channelId: number): void {
   messagesStore.setState((prev) => reduceInvalidateChannelMessageWindow(prev, channelId));

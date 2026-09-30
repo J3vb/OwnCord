@@ -334,6 +334,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * visit regardless of how the window grows around it.
    */
   let newDividerAnchorId: number | null = null;
+  /** Set while the divider waits for a revisit's refetched tail. */
+  let newDividerDeferred = false;
 
   /**
    * Resolve the NEW divider's position for this rebuild. Prefers the latched
@@ -354,6 +356,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (newDividerAnchorId !== null) {
       return messages.findIndex((m) => m.id === newDividerAnchorId);
     }
+    // A revisit renders the cached window while its tail is refetched (DP-10).
+    // Those rows predate what arrived while away, so counting back from their
+    // end would mark messages already read; wait for the fetched tail.
+    newDividerDeferred = unreadOnOpen > 0 && getHistoryLoadState(options.channelId) === "loading";
+    if (newDividerDeferred) return -1;
     const idx = firstUnreadIndex(messages, unreadOnOpen);
     const anchor = idx !== -1 ? messages[idx] : undefined;
     if (anchor !== undefined && anchor.id !== 0 && messages.length >= unreadOnOpen) {
@@ -742,6 +749,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (root === null || contentContainer === null || tree === null) return false;
     if (renderAllRunning || renderedStart < 0) return false;
 
+    // The append path never places the NEW divider; when a revisit's tail
+    // lands with it still deferred, rebuild so it can be.
+    if (newDividerDeferred) return false;
+
     const prev = allMessages;
     const next = getChannelMessages(options.channelId);
     if (prev.length === 0 || next.length <= prev.length) return false;
@@ -1119,12 +1130,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
 
     // Re-render the (empty) region when the first-page fetch transitions
-    // between loading / error / idle.
+    // between loading / error / idle. Shown rows are left alone: a revisit's
+    // refetch finishing must not rebuild them (DP-10), and any change the
+    // fetch made reaches the messagesByChannel subscriber above. The one
+    // exception is a NEW divider still waiting for that fetch.
     unsubscribers.push(
       messagesStore.subscribeSelector(
         (s) => s.historyLoadState.get(options.channelId),
         () => {
-          renderAll();
+          if (virtualItems.length === 0 || newDividerDeferred) renderAll();
         },
       ),
     );
