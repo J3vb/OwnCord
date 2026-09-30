@@ -297,9 +297,10 @@ in its header comments. The important choices it encodes:
   descriptor. The Go runtime already lifts the soft limit to just under the
   hard one at init, and the server raises it the rest of the way, so this hard
   limit is the real cap on how many people can be online (see
-  [Open-file limit](#open-file-limit-file-descriptors)). 65,536 carries about
-  2,000 connections; an old systemd default hard limit of 1,024 would stop at a
-  few hundred online.
+  [Open-file limit](#open-file-limit-file-descriptors)). 65,536 is well above
+  what 2,000 online need (the boot budget for 2,000 is 4,256) and only needs
+  raising past roughly 30,000 connections; an old systemd default hard limit
+  of 1,024 would stop at a few hundred online.
 
 Pair it with the scheduled backups in the admin panel — or an external cron
 line (see Backup Strategy below) if you prefer driving backups outside the

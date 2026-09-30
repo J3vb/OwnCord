@@ -45,9 +45,9 @@ TimeoutStopSec=60
 # lifts the SOFT limit to just under the HARD one at init, and the server
 # raises it the rest of the way, so this hard limit is the real ceiling. The
 # risk is a low hard limit (an old systemd default of 1,024, say), which a few
-# hundred online will reach. 65,536 carries about 2,000 connections with the
-# 2×cap+256 headroom the server warns about; raise it (or use `infinity`) for
-# a larger server.
+# hundred online will reach. 65,536 is well above what 2,000 online need (the
+# server's 2×cap+256 boot budget for 2,000 is 4,256); raise it (or use
+# `infinity`) only past roughly 30,000 connections.
 LimitNOFILE=65536
 
 # ── Hardening ───────────────────────────────────────────────────────────────

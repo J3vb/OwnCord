@@ -115,8 +115,8 @@ few hundred online will reach and 2,000 online (about 2,100 descriptors with
 the process's own files) will not:
 
 - **systemd:** the shipped `deploy/owncord.service` sets `LimitNOFILE=65536`,
-  which carries about 2,000 connections with headroom. Raise it (or set
-  `infinity`) for a larger server.
+  well above what 2,000 online need (the boot budget for 2,000 is 4,256).
+  Raise it (or set `infinity`) only past roughly 30,000 connections.
 - **Docker Compose:** the shipped `Server/docker-compose.yml` sets
   `ulimits.nofile` to 65,536. Without it the hard limit is whatever the host
   daemon passes down, which an old or tuned-down daemon can set to 1,024.

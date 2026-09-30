@@ -66,10 +66,11 @@ services:
     # raises it the rest of the way, so the hard limit here is the real
     # ceiling. Without this, the hard limit is whatever the host daemon passes
     # down, and an old or tuned-down daemon can pass 1,024, which a few hundred
-    # online will reach. Pinning it makes the ceiling explicit. 65,536 carries
-    # about 2,000 connections with headroom; for a larger server raise it to a
-    # bigger number (up to the host's fs.nr_open, usually 1048576). Not -1: the
-    # kernel refuses an unlimited nofile limit and the container fails to start.
+    # online will reach. Pinning it makes the ceiling explicit. 65,536 is well
+    # above what 2,000 online need (the boot budget for 2,000 is 4,256); only
+    # past roughly 30,000 connections raise it to a bigger number (up to the
+    # host's fs.nr_open, usually 1048576). Not -1: the kernel refuses an
+    # unlimited nofile limit and the container fails to start.
     ulimits:
       nofile:
         soft: 65536
