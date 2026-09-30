@@ -177,6 +177,48 @@ describe("renderGenericLinkPreview", () => {
     });
   });
 
+  it("takes no layout space and shows no host or title while the preview is pending", () => {
+    deferredPreview();
+
+    const card = renderGenericLinkPreview("https://pending.example.com/page");
+    document.body.appendChild(card);
+
+    // The row must not grow for a card that has nothing to show yet (DP-44):
+    // zero height and no visible content until the metadata settles.
+    expect(card.classList.contains("msg-embed-link-pending")).toBe(true);
+    expect(card.querySelector(".msg-embed-host")?.textContent).not.toContain("pending.example.com");
+    expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("");
+  });
+
+  it("adds no card when the resolved preview has no title, description or image", async () => {
+    previewMock.mockResolvedValue(previewOk(null));
+
+    const card = renderGenericLinkPreview("https://empty.example.com/page");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("empty");
+    });
+    expect(card.hidden).toBe(true);
+  });
+
+  it("names the host exactly once on a refusal", async () => {
+    previewMock.mockResolvedValue(refused("blocked-destination"));
+
+    const card = renderGenericLinkPreview("https://blocked.example.com/x");
+    document.body.appendChild(card);
+
+    await vi.waitFor(() => {
+      expect(card.dataset.embedState).toBe("failed");
+    });
+
+    const host = "blocked.example.com";
+    const visibleHosts = Array.from(card.querySelectorAll<HTMLElement>("*")).filter(
+      (el) => el.textContent === host && el.style.display !== "none" && !el.hasAttribute("hidden"),
+    );
+    expect(visibleHosts).toHaveLength(1);
+  });
+
   // The renderer no longer classifies destinations: private-address policy is
   // the broker's (Rust corpus tests in src-tauri/src/external_content.rs).
   it.each([

@@ -110,6 +110,9 @@ and only when it changes something a contributor or fork holder must do
 ### Installing & updating
 
 - **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.
+### Fixed
+
+- **Link previews no longer make a message jump.** A message with a link used to grow once while the preview was fetched and again when it arrived, nudging the row (and the scroll position) under the cursor. The preview now stays out of the layout until its metadata is ready and appears once; a page with no title, description or image adds no empty card, and a failed preview that keeps its Retry names the host a single time instead of twice.
 
 ## v2.0.1-beta.1
 

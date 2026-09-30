@@ -483,8 +483,22 @@
   padding: 12px 16px;
   max-width: 520px;
 }
+/* The flex display above would otherwise beat the UA's [hidden] rule. */
+.msg-embed-link[hidden] {
+  display: none;
+}
 .msg-embed-link-content {
   min-width: 0;
+}
+/* DP-44: a link preview holds no space until its metadata settles, so the row
+   grows once rather than twice. Kept focusable (not display:none) so the
+   consent hand-off can focus the card's link. */
+.msg-embed-link-pending {
+  height: 0;
+  margin-top: 0;
+  padding: 0;
+  border-left-width: 0;
+  overflow: hidden;
 }
 .msg-embed-host {
   font-size: var(--font-size-xs);

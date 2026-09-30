@@ -135,7 +135,9 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
 
   const content = createElement("div", { class: "msg-embed-link-content" });
 
-  const hostEl = createElement("div", { class: "msg-embed-host" }, displayHost);
+  // Filled once the metadata settles; a host shown while the fetch is pending
+  // would make the row grow twice (DP-44).
+  const hostEl = createElement("div", { class: "msg-embed-host" });
   content.appendChild(hostEl);
 
   const titleEl = createElement("a", {
@@ -169,8 +171,13 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   retryEl.hidden = true;
   content.appendChild(statusEl);
   content.appendChild(retryEl);
-  wrap.dataset.embedState = "loading";
-  wrap.setAttribute("aria-busy", "true");
+
+  /** Zero-height until the card has something to show, so the row grows once,
+   *  when the metadata lands, instead of twice (DP-44). Not `hidden`: an
+   *  awaiting card that gets consented must stay focusable for its hand-off. */
+  const show = (): void => {
+    wrap.classList.remove("msg-embed-link-pending");
+  };
 
   const apply = (load: OgLoad): void => {
     wrap.removeAttribute("aria-busy");
@@ -183,17 +190,32 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     if (!retryable && document.activeElement === retryEl) titleEl.focus();
     retryEl.hidden = !retryable;
     if (load.ok) {
+      const { meta } = load;
+      // No title, description or image: an empty card with nothing in it, so
+      // render none at all (DP-44). siteName alone still names the host.
+      if (meta.title === null && meta.description === null && meta.image === null) {
+        wrap.dataset.embedState = "empty";
+        wrap.hidden = true;
+        return;
+      }
       wrap.dataset.embedState = "loaded";
+      show();
       statusEl.hidden = true;
-      applyOgMeta(load.meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
+      hostEl.hidden = false;
+      applyOgMeta(meta, titleEl, descEl, hostEl, imageWrap, url, displayHost);
       return;
     }
     wrap.dataset.embedState = "failed";
     wrap.dataset.embedFailure = load.failure;
+    // The host names the failed card once, as the link itself; the separate
+    // host element would repeat it (DP-44).
     setText(titleEl, displayHost);
+    setText(hostEl, "");
+    hostEl.hidden = true;
     descEl.style.display = "none";
     setText(statusEl, t("preview.failed"));
     statusEl.hidden = false;
+    show();
   };
 
   // Check cache first for instant render
@@ -201,14 +223,16 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   if (cached !== undefined) {
     apply(cached);
   } else {
-    // Show URL as fallback title while loading
-    setText(titleEl, displayHost);
+    wrap.dataset.embedState = "loading";
+    wrap.setAttribute("aria-busy", "true");
+    wrap.classList.add("msg-embed-link-pending");
     void fetchOgMeta(url).then(apply);
   }
 
   retryEl.addEventListener("click", () => {
     if (wrap.dataset.embedState === "loading") return;
-    // The retry stays mounted (and focused) while it re-asks.
+    // The retry stays mounted (and focused) while it re-asks, so the card
+    // keeps its height and focus rather than collapsing the row.
     statusEl.hidden = true;
     retryEl.setAttribute("aria-disabled", "true");
     wrap.dataset.embedState = "loading";
@@ -231,9 +255,7 @@ export function applyOgMeta(
   displayHost: string,
 ): void {
   setText(titleEl, meta.title ?? displayHost);
-  if (meta.siteName !== null) {
-    setText(hostEl, meta.siteName);
-  }
+  setText(hostEl, meta.siteName ?? displayHost);
   if (meta.description !== null) {
     const desc =
       meta.description.length > 200 ? meta.description.slice(0, 197) + "..." : meta.description;
