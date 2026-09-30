@@ -196,9 +196,8 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 
 // applyStagedUpdate performs the on-disk swap: verified staged binary ->
 // exePath, previous binary -> a unique exePath.old-*. It reports whether the
-// swap committed —
-// on true the caller must request a restart, because the file at exePath is
-// no longer the binary this process is running.
+// swap committed — on true the caller must request a restart, because the
+// file at exePath is no longer the binary this process is running.
 //
 // The caller has already broadcast "restarting in 5s" to every connected
 // client before invoking this, so every failure path must correct that
