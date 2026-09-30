@@ -893,6 +893,37 @@ describe("MessageList", () => {
     });
   });
 
+  // DP-10: revisiting a channel shows its cached rows while the tail is
+  // refetched; the fetch finishing must not rebuild them.
+  describe("channel revisit", () => {
+    it("does not rebuild shown rows when the history fetch goes from loading to idle", () => {
+      setMessages(1, [
+        makeMessage({ id: 1, content: "First" }),
+        makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
+      ]);
+      setHistoryLoadState(1, "loading");
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      expect(row1).not.toBeNull();
+
+      messagesStore.setState((prev) => ({ ...prev, historyLoadState: new Map() }));
+      messagesStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+    });
+
+    it("still swaps the loading placeholder when no rows are shown", () => {
+      setHistoryLoadState(1, "loading");
+      msgList.mount(container);
+      expect(container.querySelector(".messages-loading")).not.toBeNull();
+
+      setHistoryLoadState(1, "error");
+      messagesStore.flush();
+
+      expect(container.querySelector(".messages-loading")).toBeNull();
+    });
+  });
+
   describe("renderAll rapid-fire breaker", () => {
     beforeEach(() => {
       vi.useFakeTimers();

@@ -1980,6 +1980,252 @@ describe("messages store", () => {
     });
   });
 
+  // DP-10: a revisit refetches the latest page and reconciles it into the
+  // cached window instead of replacing it.
+  describe("revisit reconcile", () => {
+    /** Newest-first page of ids [from, to], as the REST API returns it. */
+    function page(from: number, to: number): MessageResponse[] {
+      const out: MessageResponse[] = [];
+      for (let id = to; id >= from; id--) out.push(makeMessageResponse({ id, content: `m${id}` }));
+      return out;
+    }
+    /** Leave the channel and come back: the invalidate + fetch start the app runs. */
+    function revisit(): void {
+      invalidateChannelMessageWindow(1);
+      setChannelLoading(1);
+    }
+
+    it("returns the cached array itself when the refetched page matches the cached tail", () => {
+      setMessages(1, page(1, 50), true);
+      const cached = getChannelMessages(1);
+
+      revisit();
+      setMessages(1, page(1, 50), true);
+
+      expect(getChannelMessages(1)).toBe(cached);
+      expect(isChannelLoaded(1)).toBe(true);
+      expect(getHistoryLoadState(1)).toBeNull();
+    });
+
+    it("returns a new array without the rows older than the page once the window grew past it", () => {
+      setMessages(1, page(1, 50), true);
+      addMessage(makeChatPayload({ id: 51, content: "m51", timestamp: "2026-03-15T09:00:00Z" }));
+      const cached = getChannelMessages(1);
+
+      revisit();
+      setMessages(1, page(2, 51), true);
+
+      const msgs = getChannelMessages(1);
+      expect(msgs).not.toBe(cached);
+      expect(msgs.map((m) => m.id)).toEqual(cached.slice(1).map((m) => m.id));
+      msgs.forEach((m, i) => expect(m).toBe(cached[i + 1]));
+    });
+
+    it("drops older cached rows beyond the page and keeps unchanged row objects inside it", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), true);
+      const cached = getChannelMessages(1);
+
+      revisit();
+      // While away: 101 was posted, 80 edited and 90 deleted.
+      const fresh = page(52, 101)
+        .filter((m) => m.id !== 90)
+        .map((m) =>
+          m.id === 80 ? { ...m, content: "edited", edited_at: "2026-03-15T10:00:00Z" } : m,
+        );
+      setMessages(1, fresh, true);
+
+      const msgs = getChannelMessages(1);
+      const ids = msgs.map((m) => m.id);
+      expect(ids[0]).toBe(52);
+      expect(ids).toHaveLength(49);
+      expect(ids).not.toContain(90);
+      expect(ids.at(-1)).toBe(101);
+      expect(msgs.find((m) => m.id === 80)!.content).toBe("edited");
+      // Rows nothing changed keep their object, so the list can tell them apart.
+      expect(msgs[0]).toBe(cached.find((m) => m.id === 52));
+      expect(msgs.find((m) => m.id === 70)).toBe(cached.find((m) => m.id === 70));
+      expect(hasMoreMessages(1)).toBe(true);
+    });
+
+    it("does not show a message deleted while away that is older than the refetched page", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), true);
+      expect(getChannelMessages(1).map((m) => m.id)).toContain(20);
+
+      revisit();
+      // While away: 20 was deleted and 101-110 were posted.
+      setMessages(1, page(61, 110), true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).not.toContain(20);
+    });
+
+    it("keeps a row that arrived live when the page carries its REST twin in the server's wire shapes", () => {
+      // The whole channel fits in one page, so the refetch is the cached window.
+      setMessages(1, page(1, 49), false);
+      // chat_message's user carries the role, the nickname and an explicit
+      // null avatar, and the broadcast echoes client_message_id. History's
+      // user has none of them and omits a null avatar.
+      addMessage(
+        makeChatPayload({
+          id: 50,
+          client_message_id: "1773568800000:live",
+          user: {
+            id: 2,
+            username: "bob",
+            avatar: null,
+            display_name: "Bobby",
+            role: "member",
+          } as MessageUser,
+          content: "m50",
+          timestamp: "2026-03-15T09:00:00Z",
+          mentions: [],
+          mentions_everyone: false,
+        }),
+      );
+      const cached = getChannelMessages(1);
+      expect(cached.at(-1)?.clientMessageId).toBe("1773568800000:live");
+
+      revisit();
+      const restTwin = makeMessageResponse({
+        id: 50,
+        user: { id: 2, username: "bob" } as MessageUser,
+        content: "m50",
+        timestamp: "2026-03-15T09:00:00Z",
+        mentions: [],
+        mentions_everyone: false,
+      });
+      setMessages(1, [restTwin, ...page(1, 49)], false);
+
+      expect(getChannelMessages(1)).toBe(cached);
+    });
+
+    it("replaces a live row whose avatar changed while away", () => {
+      setMessages(1, page(1, 49), false);
+      addMessage(
+        makeChatPayload({
+          id: 50,
+          user: { id: 2, username: "bob", avatar: null, role: "member" } as MessageUser,
+          content: "m50",
+          timestamp: "2026-03-15T09:00:00Z",
+        }),
+      );
+      const live = getChannelMessages(1).at(-1);
+
+      revisit();
+      setMessages(
+        1,
+        [
+          makeMessageResponse({
+            id: 50,
+            user: { id: 2, username: "bob", avatar: "bob.png" },
+            content: "m50",
+            timestamp: "2026-03-15T09:00:00Z",
+          }),
+          ...page(1, 49),
+        ],
+        false,
+      );
+
+      expect(getChannelMessages(1).at(-1)).not.toBe(live);
+      expect(getChannelMessages(1).at(-1)?.user.avatar).toBe("bob.png");
+    });
+
+    it("replaces the window when the page leaves a gap after the cached rows", () => {
+      setMessages(1, page(1, 50), true);
+
+      revisit();
+      setMessages(1, page(151, 200), true);
+
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual(
+        page(151, 200)
+          .map((m) => m.id)
+          .reverse(),
+      );
+    });
+
+    it("drops older cached rows when the page is the whole channel", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), false);
+
+      revisit();
+      // No more history above the page: rows 1-59 were deleted while away.
+      setMessages(1, page(60, 100), false);
+
+      expect(getChannelMessages(1).map((m) => m.id)[0]).toBe(60);
+      expect(hasMoreMessages(1)).toBe(false);
+    });
+
+    it("still clears a stale window when the refetch comes back empty (OC-0259)", () => {
+      setMessages(1, page(1, 50), true);
+
+      revisit();
+      setMessages(1, [], false);
+
+      expect(getChannelMessages(1)).toEqual([]);
+    });
+
+    it("keeps a live message that landed mid-fetch and does not bridge a gap with it (OC-0244)", () => {
+      setMessages(1, page(1, 50), true);
+
+      revisit();
+      addMessage(makeChatPayload({ id: 200, channel_id: 1, content: "live" }));
+      // The page was read before 200 existed and does not reach the cache.
+      setMessages(1, page(150, 199), true);
+
+      const ids = getChannelMessages(1).map((m) => m.id);
+      expect(ids[0]).toBe(150);
+      expect(ids.at(-1)).toBe(200);
+      expect(ids).toHaveLength(51);
+    });
+
+    it("carries pending and failed rows across the reconcile, after the tail", () => {
+      setMessages(1, page(1, 50), true);
+      addOptimisticMessage({
+        correlationId: "c1",
+        channelId: 1,
+        user: TEST_USER,
+        content: "in flight",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      addOptimisticMessage({
+        correlationId: "c2",
+        channelId: 1,
+        user: TEST_USER,
+        content: "refused",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:01Z",
+      });
+      markSendFailed("c2", "SLOW_MODE");
+      const cached = getChannelMessages(1);
+
+      revisit();
+      setMessages(1, page(1, 50), true);
+
+      expect(getChannelMessages(1)).toBe(cached);
+      revisit();
+      setMessages(1, page(2, 51), true);
+      const msgs = getChannelMessages(1);
+      expect(msgs.map((m) => m.id).slice(-3)).toEqual([51, 0, 0]);
+      expect(msgs.map((m) => m.status).slice(-2)).toEqual(["pending", "failed"]);
+    });
+
+    it("reattaches a detached window only through the refetched tail", () => {
+      setAroundMessages(1, page(40, 60).reverse(), true, true);
+      expect(isWindowDetached(1)).toBe(true);
+
+      revisit();
+      // Still detached while the tail is in flight: live appends stay refused.
+      addMessage(makeChatPayload({ id: 500, channel_id: 1 }));
+      expect(getChannelMessages(1).map((m) => m.id)).not.toContain(500);
+
+      setMessages(1, page(451, 500), true);
+      expect(isWindowDetached(1)).toBe(false);
+      expect(getChannelMessages(1).map((m) => m.id)[0]).toBe(451);
+    });
+  });
+
   // 10. First-page history load state
   describe("history load state", () => {
     it("is idle (null) by default", () => {

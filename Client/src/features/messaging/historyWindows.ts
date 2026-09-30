@@ -7,8 +7,31 @@
 // compare with ===.
 import type { MessageResponse } from "../../lib/types";
 import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageModel";
-import type { MessagesState } from "./messageModel";
+import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
+
+/** Fields only a live chat_message row carries (the user's role and nickname,
+ *  the echoed client_message_id); history never sends them, so their absence
+ *  from a refetched row is not a change. */
+const LIVE_ONLY_KEYS = new Set(["clientMessageId", "role", "display_name"]);
+
+/** The keys of `o` that count toward sameValue. */
+function present(o: Record<string, unknown>): string[] {
+  return Object.keys(o).filter((k) => o[k] != null && !LIVE_ONLY_KEYS.has(k));
+}
+
+/** Deep equality over plain data; null, undefined and live-only properties
+ *  count as absent and key order is ignored, so a live-built row equals its
+ *  REST twin. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  const keys = present(x);
+  return keys.length === present(y).length && keys.every((k) => sameValue(x[k], y[k]));
+}
 
 /** setChannelLoading's reducer. */
 export function reduceSetChannelLoading(prev: MessagesState, channelId: number): MessagesState {
@@ -66,10 +89,20 @@ export function reduceSetMessages(
     consumedEchoes.add(echoIdx);
     return false;
   });
-  let merged = carried.length > 0 ? [...trimmed, ...carried] : trimmed;
+  // A row nothing changed keeps its object, so the list can keep its DOM row
+  // and the whole array can be returned as-is when nothing changed at all.
+  const cachedById = new Map(previous.filter((m) => m.status === "sent").map((m) => [m.id, m]));
+  const snapshot = trimmed.map((m) => {
+    const cached = cachedById.get(m.id);
+    return cached !== undefined && sameValue(cached, m) ? cached : m;
+  });
+  let merged: readonly Message[] = [...snapshot, ...carried];
   const mergeTrimmed = merged.length > MAX_MESSAGES_PER_CHANNEL;
   if (mergeTrimmed) {
     merged = merged.slice(merged.length - MAX_MESSAGES_PER_CHANNEL);
+  }
+  if (merged.length === previous.length && merged.every((m, i) => m === previous[i])) {
+    merged = previous;
   }
 
   const updatedMessages = new Map(prev.messagesByChannel);

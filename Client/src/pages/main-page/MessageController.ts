@@ -78,8 +78,10 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
-    // Runs synchronously before the first await, so the message region shows
-    // its in-region loading placeholder from the very first render.
+    // Runs synchronously before the first await, so an empty message region
+    // shows its in-region loading placeholder from the very first render. A
+    // revisit's cached rows stay on screen instead, and setMessages below
+    // reconciles the refetched page into them.
     setChannelLoading(channelId);
     try {
       const resp = await api.getMessages(channelId, { limit: PAGE_SIZE }, signal);

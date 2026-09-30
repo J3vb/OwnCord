@@ -161,7 +161,18 @@ export function setChannelLoadError(channelId: number): void {
  *  replacing wholesale would silently discard them (and loadedChannels then
  *  blocks any refetch until a full reload). Rows from the previous array are
  *  carried over when they are pending/failed, or "sent" but newer than
- *  anything in the snapshot. */
+ *  anything in the snapshot.
+ *
+ *  A revisit's refetch (DP-10) reconciles into the cached window: a row the
+ *  page left unchanged keeps its object. While the window is still exactly
+ *  the latest page, a page that changes nothing leaves the channel's array
+ *  reference as it was. A post-only page only appends when the channel's
+ *  whole history fits in one page (hasMore false). Otherwise cached "sent"
+ *  rows older than the page are dropped, so nothing deleted or edited while
+ *  away stays on screen (scrolling up loads them again), the channel gets a
+ *  new array and the list rebuilds once. A revisit that opens with unread
+ *  messages always rebuilds the list once, when this lands, to place the NEW
+ *  divider. */
 export function setMessages(
   channelId: number,
   messages: readonly MessageResponse[],
@@ -221,10 +232,12 @@ export function invalidateLoadedMessageWindows(): void {
  * tail. The server only delivers live broadcasts for the focused channel, so
  * a window left behind on a channel switch stops updating the moment focus
  * moves away — the next visit must refetch instead of short-circuiting on
- * "already loaded". The rows themselves are kept (the old window stays
- * rendered until the refetch lands) and setMessages' merge carries
- * pending/failed rows across that refetch. Like reattachToPresent, this
- * leaves detachedChannels alone: setMessages clears it once the tail has
+ * "already loaded": that refetch is the only way to learn about edits,
+ * deletes and reactions made while away. The rows themselves are kept (the
+ * next visit renders them at once) and setMessages reconciles the refetched
+ * page into them, keeping the rows it left unchanged, dropping older rows
+ * beyond it and carrying pending/failed rows across. Like reattachToPresent,
+ * this leaves detachedChannels alone: setMessages clears it once the tail has
  * actually landed, and until then a detached window must keep refusing live
  * broadcasts.
  */

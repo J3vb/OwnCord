@@ -262,9 +262,11 @@ unread messages renders a red **NEW** line above the first one. Opening the
 channel clears the badge, which destroys the only record of where the reader had
 got to, so `setActiveChannel` snapshots the count first
 (`channels.store.getUnreadOnOpen`); MessageList reads it once at mount and places
-the line above the last _N_ loaded messages. Consequences of that derivation: the
-line is suppressed while the message window is detached (a slice around some old
-message is not the tail), and it clears on the next visit, when the snapshot is 0.
+the line above the last _N_ loaded messages. On a revisit the cached rows predate
+what arrived while away, so the line waits for the refetched tail to land.
+Consequences of that derivation: the line is suppressed while the message window
+is detached (a slice around some old message is not the tail), and it clears on
+the next visit, when the snapshot is 0.
 The message under the line never renders as a grouped continuation of the one
 above it. A snapshot at the wire cap (`unread_count` is capped at 100, see
 `docs/protocol.md`) is only a lower bound, so the line stays above the oldest

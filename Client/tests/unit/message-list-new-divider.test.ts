@@ -339,6 +339,54 @@ describe("MessageList — new-messages divider", () => {
     }
   });
 
+  // DP-10: a revisit mounts on the cached window while the refetch is in
+  // flight. Those rows predate what arrived while away, so counting the unread
+  // messages back from their end would mark rows the reader already saw.
+  it("places the divider on a revisit only once the refetched tail lands", () => {
+    setMessages([1, 2, 3, 4, 5].map(makeMessage));
+    messagesStore.setState((prev) => ({
+      ...prev,
+      historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+    }));
+    openChannelWithUnread(1);
+    mount();
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+
+    // The refetch lands: the cached rows unchanged plus the one posted while away.
+    messagesStore.setState((prev) => {
+      const updated = new Map(prev.messagesByChannel);
+      updated.set(CHANNEL_ID, [...prev.messagesByChannel.get(CHANNEL_ID)!, makeMessage(6)]);
+      return { ...prev, messagesByChannel: updated, historyLoadState: new Map() };
+    });
+    messagesStore.flush();
+
+    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
+      "message-6",
+    );
+  });
+
+  // A DM's messages reach the cached window live while it is not open, so the
+  // refetch can land with nothing to change; the divider must still appear.
+  it("places a deferred divider when the revisit refetch lands unchanged", () => {
+    setMessages([1, 2, 3, 4, 5].map(makeMessage));
+    messagesStore.setState((prev) => ({
+      ...prev,
+      historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+    }));
+    openChannelWithUnread(1);
+    mount();
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+
+    messagesStore.setState((prev) => ({ ...prev, historyLoadState: new Map() }));
+    messagesStore.flush();
+
+    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
+      "message-5",
+    );
+  });
+
   // The line marks a boundary; the message under it must not be rendered as a
   // grouped continuation of the message above the line.
   it("breaks message grouping at the divider", () => {
