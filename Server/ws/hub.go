@@ -210,13 +210,11 @@ type Hub struct {
 	keyHolderMu     syncutil.RWMutex
 	voiceKeyHolders map[int64]int64
 
-	// Presence coalescer (QueuePresence): latest queued presence per user and
-	// whether a flush timer is armed. Guarded by presenceMu.
+	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
 	presenceMu         syncutil.Mutex
 	presenceQueue      map[int64]pendingPresence
 	presenceFlushArmed bool
-
-	members memberCache // the ready payloads' shared member list (serve_ready_members_cache.go)
+	members            memberCache // the ready payloads' shared member list (serve_ready_members_cache.go)
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
