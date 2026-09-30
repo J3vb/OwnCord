@@ -87,6 +87,8 @@ export class NativeRemotePublication {
    *  subscription comes at the top one. */
   isEnabled = true;
   private quality: NativeVideoQuality = "high";
+  /** The host's last view update: the next one waits for it. */
+  private viewSent: Promise<void> = Promise.resolve();
   isMuted: boolean;
   /** Video only, while subscribed. Audio has none: playout is native. */
   track: NativeRemoteVideoTrack | undefined = undefined;
@@ -124,11 +126,16 @@ export class NativeRemotePublication {
     this.isEnabled = true;
     this.quality = "high";
   }
+  /** A layer asked for while hidden goes out with the enable. */
   private setVideoView(enabled: boolean, quality: NativeVideoQuality): void {
     if (enabled === this.isEnabled && quality === this.quality) return;
+    const send = enabled || this.isEnabled;
     this.isEnabled = enabled;
     this.quality = quality;
-    this.room.setVideoView(this.identity, this.trackSid, enabled, quality);
+    if (!send) return;
+    this.viewSent = this.viewSent.then(() =>
+      this.room.setVideoView(this.identity, this.trackSid, enabled, quality),
+    );
   }
 }
 
@@ -542,9 +549,14 @@ export class NativeRoom {
   }
 
   /** Video layer control: forwarded from the publication model. */
-  setVideoView(identity: string, sid: string, enabled: boolean, quality: NativeVideoQuality): void {
+  async setVideoView(
+    identity: string,
+    sid: string,
+    enabled: boolean,
+    quality: NativeVideoQuality,
+  ): Promise<void> {
     if (this.sessionId === null) return;
-    desktop.nativeVoice
+    await desktop.nativeVoice
       .setVideoView(this.sessionId, identity, sid, enabled, quality)
       .catch((err) => log.warn("native setVideoView failed", { identity, sid, enabled, err }));
   }

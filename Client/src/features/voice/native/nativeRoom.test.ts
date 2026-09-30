@@ -39,6 +39,7 @@ const host = vi.hoisted(() => ({
   }),
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
   setDevice: (): Promise<void> => Promise.resolve(),
+  setVideoView: (): Promise<void> => Promise.resolve(),
   pick: (): Promise<unknown> =>
     Promise.resolve({
       source: "screen:7",
@@ -111,7 +112,7 @@ vi.mock("../../../platform/desktop", () => ({
       },
       setVideoView: (...args: unknown[]) => {
         host.calls.push(["setVideoView", args]);
-        return Promise.resolve();
+        return host.setVideoView();
       },
       setVolume: (...args: unknown[]) => {
         host.calls.push(["setVolume", args]);
@@ -187,6 +188,7 @@ beforeEach(() => {
     frames: "ws://127.0.0.1:9/tok",
   });
   host.publishCamera = () => Promise.resolve("TR_cam");
+  host.setVideoView = () => Promise.resolve();
   host.pick = () =>
     Promise.resolve({
       source: "screen:7",
@@ -635,12 +637,13 @@ describe("NativeRoom remote video", () => {
     });
     const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
     const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
+    const settle = () => new Promise<void>((r) => setTimeout(r, 0));
     expect(pub.isEnabled).toBe(true);
 
     // Hidden: the stream stops.
     pub.setEnabled(false);
     expect(pub.isEnabled).toBe(false);
-    // Shown in a 160-px tile: the lowest layer, then enabled.
+    // Shown in a 160-px tile: the layer waits for the enable, one update.
     pub.setVideoDimensions({ width: 160, height: 90 });
     pub.setEnabled(true);
     expect(pub.isEnabled).toBe(true);
@@ -649,9 +652,9 @@ describe("NativeRoom remote video", () => {
     pub.setEnabled(true);
     pub.setVideoQuality(2);
     pub.setEnabled(true);
+    await settle();
     expect(views()).toEqual([
       [1, "user-2", "TR_v", false, "high"],
-      [1, "user-2", "TR_v", false, "low"],
       [1, "user-2", "TR_v", true, "low"],
       [1, "user-2", "TR_v", true, "medium"],
       [1, "user-2", "TR_v", true, "high"],
@@ -665,9 +668,36 @@ describe("NativeRoom remote video", () => {
     });
     expect(pub.isEnabled).toBe(true);
     pub.setEnabled(false);
+    await settle();
     expect(views().slice(-2)).toEqual([
       [1, "user-2", "TR_v", false, "high"],
       [1, "user-2", "TR_v", false, "high"],
+    ]);
+  });
+
+  it("sends a publication's next view only once the host has applied the previous one", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
+    const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+    let applied!: () => void;
+    host.setVideoView = () => new Promise<void>((r) => (applied = r));
+
+    // Hidden, then shown again before the host finished hiding it.
+    pub.setEnabled(false);
+    pub.setEnabled(true);
+    await settle();
+    expect(views()).toEqual([[1, "user-2", "TR_v", false, "high"]]);
+    applied();
+    await settle();
+    expect(views()).toEqual([
+      [1, "user-2", "TR_v", false, "high"],
+      [1, "user-2", "TR_v", true, "high"],
     ]);
   });
 
