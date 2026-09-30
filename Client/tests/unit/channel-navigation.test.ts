@@ -51,6 +51,7 @@ describe("channel-navigation", () => {
   beforeEach(() => {
     channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
     dmStore.setState(() => ({ channels: [] }));
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeDmUserId: null }));
   });
 
   describe("navigateToChannel", () => {
@@ -264,7 +265,64 @@ describe("channel-navigation", () => {
 
       // getChannelsByCategory groups by category insertion order, then position.
       stepChannel(1);
-      expect([1, 2]).toContain(channelsStore.getState().activeChannelId);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+    });
+
+    it("steps through the DM list in recency order while the DM view is open", () => {
+      seed([makeChannel({ id: 1, name: "general", position: 0 })]);
+      setDmChannels([
+        makeDm({ channelId: 60, unreadCount: 0, mentionCount: 0 }),
+        makeDm({
+          channelId: 61,
+          isGroup: true,
+          unreadCount: 2,
+          mentionCount: 0,
+          recipient: { id: 11, username: "cat", avatar: "", status: "online" },
+        }),
+        makeDm({
+          channelId: 62,
+          unreadCount: 0,
+          mentionCount: 0,
+          recipient: { id: 12, username: "dan", avatar: "", status: "online" },
+        }),
+      ]);
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      // Only the unread group is a stop for the unread step; opening it reads it.
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(61);
+      expect(dmStore.getState().channels.find((c) => c.channelId === 61)?.unreadCount).toBe(0);
+
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+      expect(uiStore.getState().activeDmUserId).toBe(10);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(61);
+      expect(uiStore.getState().activeDmUserId).toBeNull();
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(62);
+      // Wraps within the DM list; never lands on the server channel.
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(60);
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(62);
+
+      expect(uiStore.getState().sidebarMode).toBe("dms");
+    });
+
+    it("steps server channels, not DMs, in channels mode", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0 }),
+        makeChannel({ id: 2, name: "b", position: 1 }),
+      ]);
+      setDmChannels([makeDm({ channelId: 60 })]);
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
     });
   });
 });
