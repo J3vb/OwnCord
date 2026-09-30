@@ -204,7 +204,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
 
     // Listen for press/release events
     const unsub = await listen<boolean>("ptt-state", (event) => {
-      if (!isCurrent(attempt)) return;
+      if (!isCurrent(attempt) || !supported) return;
       // Only toggle mute when in a voice channel
       const { currentChannelId: channelId, joinedAt } = voiceStore.getState();
       if (channelId === null) return;

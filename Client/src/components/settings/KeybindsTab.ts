@@ -128,7 +128,6 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
       if (signal.aborted || supported) return;
       setText(pttHint, t("keybinds.pttUnsupported"));
       pttValue.disabled = true;
-      pttClear.disabled = true;
     });
 
   // ── Navigation section ────────────────────────────────────

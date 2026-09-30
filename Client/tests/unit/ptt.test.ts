@@ -133,8 +133,11 @@ function resetAll(): void {
     };
   });
   capturedStoreListener = null;
-  // Default: invoke resolves with undefined; listen resolves with a no-op unlistener
-  mockInvoke.mockResolvedValue(undefined);
+  // Default: key polling is supported and every other command resolves with
+  // undefined; listen resolves with a no-op unlistener
+  mockInvoke.mockImplementation((cmd: string) =>
+    Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
+  );
   mockListen.mockResolvedValue(() => {});
 }
 
@@ -684,6 +687,34 @@ describe("ptt-state event listener", () => {
     await vi.waitFor(() => {
       expect(mockSetMuted).toHaveBeenCalledWith(false);
     });
+  });
+
+  it("ignores key events where key polling is unsupported (a Wayland session)", async () => {
+    const { setMuted } = await import("../../src/lib/livekitSession");
+    const mockSetMuted = vi.mocked(setMuted);
+    mockSetMuted.mockClear();
+
+    mockCurrentChannelId = 7;
+    testPrefs.set("pttVk", 0x20);
+    mockInvoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "ptt_polling_supported" ? false : undefined),
+    );
+
+    let capturedCallback: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, cb: (e: { payload: boolean }) => void) => {
+      capturedCallback = cb;
+      return Promise.resolve(() => {});
+    });
+
+    await initPtt();
+    // A press and release seen through XWayland, with the app's own window
+    // native Wayland: nothing here can lift a gate it would apply.
+    capturedCallback!({ payload: true });
+    capturedCallback!({ payload: false });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(mockSetPttGated).not.toHaveBeenCalled();
+    expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
   it("calls setMuted(true) when PTT is released (payload false) and in a voice channel", async () => {

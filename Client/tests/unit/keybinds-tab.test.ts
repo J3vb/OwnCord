@@ -517,5 +517,8 @@ describe("KeybindsTab", () => {
     });
     // The hint says why, in the same region the capture button lives.
     expect(el.textContent).toContain("Push to Talk needs global key observation");
+    // A key bound before (another session) can still be cleared.
+    const clear = [...el.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
+    expect(clear.disabled).toBe(false);
   });
 });

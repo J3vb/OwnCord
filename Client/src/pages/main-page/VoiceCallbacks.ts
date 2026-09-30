@@ -11,6 +11,7 @@ import {
   leaveVoiceChannel,
   isSelfMuted,
   setPttOwnsMute,
+  isPttPollingLive,
 } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
@@ -68,10 +69,11 @@ export interface SidebarVoiceCallbacks {
 
 /** Lift the user's own mute. With the push-to-talk key up the mic stays
  *  closed: the mute becomes push-to-talk's, which the next press lifts, so a
- *  toggle never opens a live mic while the key is up. */
+ *  toggle never opens a live mic while the key is up. Only where a press can
+ *  arrive: with no live key polling the mute is lifted outright. */
 function releaseOwnMute(): void {
   const state = voiceStore.getState();
-  if (state.pttGated === true && state.localMuted) setPttOwnsMute(true);
+  if (state.pttGated === true && state.localMuted && isPttPollingLive()) setPttOwnsMute(true);
   else voiceSessionSetMuted(false);
 }
 
