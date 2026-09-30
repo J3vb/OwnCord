@@ -962,12 +962,17 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           () => {
             void checkHealth(connectPage, profile.host, wait).then((up) => {
               if (!wait.isCurrent()) return;
+              const current = profileManager.getAll().find((p) => p.host === profile.host);
+              if (current === undefined) {
+                wait.dispose();
+                return;
+              }
               if (!up) {
                 probeAfter(Math.min(delayMs * 2, 30_000));
                 return;
               }
               wait.dispose();
-              void resumeStoredSession(profile);
+              void resumeStoredSession(current);
             });
           },
           delayMs,

@@ -542,6 +542,44 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     expect(peakLiveTransports()).toBe(1);
   });
 
+  it("resumes with the profile's auto-login as it is when the server comes back", async () => {
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      setAutoLogin: ReturnType<typeof vi.fn>;
+    };
+    const original = PROFILES[0]!;
+    await resumeAgainstDownServer();
+    // The user turns auto-login on for A while waiting.
+    PROFILES[0] = { ...original, autoConnect: true };
+    try {
+      manager.setAutoLogin.mockClear();
+      mockGetHealth.mockResolvedValue(HEALTHY);
+      await vi.advanceTimersByTimeAsync(5_000 + 100);
+
+      expect(latestConnectPage().showAutoConnecting).toHaveBeenLastCalledWith("Server A");
+      expect(manager.setAutoLogin).not.toHaveBeenCalledWith(null);
+      expect(manager.setAutoLogin).toHaveBeenCalledWith("p-a");
+    } finally {
+      PROFILES[0] = original;
+    }
+  });
+
+  it("ends the wait without resuming once the profile is deleted", async () => {
+    const original = PROFILES[0]!;
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+    PROFILES.splice(0, 1);
+    try {
+      mockGetHealth.mockResolvedValue(HEALTHY);
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(latestConnectPage().hideServerWait).toHaveBeenCalled();
+      expect(connectsToA()).toBe(before);
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    } finally {
+      PROFILES.unshift(original);
+    }
+  });
+
   it("backs off from 5 s to 30 s between probes", async () => {
     await resumeAgainstDownServer();
     // Only the wait probes A more often than B: the page's own 15 s check
