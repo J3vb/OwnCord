@@ -328,6 +328,52 @@ describe("DM preview follows an edit or delete of its last message", () => {
     expect(dm()).toMatchObject({ lastMessageId: 8, lastMessage: "brand new" });
   });
 
+  it("drops an answer newer than the preview so the live frame still counts as new", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const refetch = deferred<DmChannelsResponse>();
+
+    handleChatDeleted(
+      dmApi(() => refetch.promise),
+      { message_id: 7, channel_id: 1 },
+    );
+    refetch.resolve(serverDms(8, "sent right after", "2026-03-15T11:00:00Z"));
+    await refetch.promise;
+    await Promise.resolve();
+
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+    updateDmLastMessage(1, 8, "sent right after", "2026-03-15T11:00:00Z");
+    expect(dm()).toMatchObject({
+      lastMessageId: 8,
+      lastMessage: "sent right after",
+      unreadCount: 1,
+    });
+  });
+
+  it("reissues the refetch when another delete lands while one is in flight", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const first = deferred<DmChannelsResponse>();
+    const second = deferred<DmChannelsResponse>();
+    const getDmChannels = vi
+      .fn<() => Promise<DmChannelsResponse>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const api = dmApi(getDmChannels);
+
+    handleChatDeleted(api, { message_id: 7, channel_id: 1 });
+    handleChatDeleted(api, { message_id: 6, channel_id: 1 });
+    expect(getDmChannels).toHaveBeenCalledTimes(2);
+
+    first.resolve(serverDms(6, "deleted since", "2026-03-15T09:00:00Z"));
+    await first.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+
+    second.resolve(serverDms(5, "still here", "2026-03-15T08:00:00Z"));
+    await second.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 5, lastMessage: "still here" });
+  });
+
   it("leaves the preview blank when the refetch fails", async () => {
     seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
     const getDmChannels = vi.fn(() => Promise.reject(new Error("offline")));
