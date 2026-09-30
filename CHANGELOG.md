@@ -82,7 +82,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Voice
 
-- **The voice connection panel is tidier.** The transport-stats readout now lays Outgoing and Incoming out as a two-column grid of label/value rows, each value on one line with a single unit — a rate reads "331 kB/s" instead of the old "331.25 kB/s (2.6 Mbps)" that wrapped. A zero rate or a missing RTT is dimmed rather than shown at full strength, and the in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
+- **The voice connection panel is redesigned.** The header is two tidy lines: "Voice Connected" with the call timer, then the channel name with a small "Secured" chip and the ping, so it no longer wraps into a stack of fragments. The connection details show Upload and Download as two tiles, each with its rate in a single unit (for example "331 kB/s") and its packet count; an idle direction reads "Idle" rather than "0 B/s". The round-trip time and the session totals share one footer line, and the round-trip time only appears once it is known. The in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
 
 ### Direct messages & members
 

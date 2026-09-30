@@ -1,7 +1,8 @@
-// The transport-stats pane's redisign pass (captain 2026-09-30): values never
-// wrap, a tidy two-column Outgoing/Incoming grid, empty values softened rather
-// than shown as noise, and the screen-share active state carried by the
-// button's own state instead of a squeezed text label.
+// The voice connection panel redesign (captain 2026-09-30, Option C "detailed
+// but tidy"): a two-line header (status + timer, then channel + a small
+// Secured chip + ping), Upload and Download tiles each with a big rate and a
+// packet count, one quiet footer with the RTT (hidden while unknown) and the
+// session totals, and the screen-share state carried by the button itself.
 //
 // jsdom never applies app.css, so the visual rules are pinned separately in
 // b9-voice-polish-css.test.ts; here we pin the DOM the redesign produces.
@@ -97,91 +98,116 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("VoiceWidget transport stats redesign", () => {
-  it("lays the transport stats out as label/value rows in a two-column grid", () => {
+describe("VoiceWidget connection panel (Option C)", () => {
+  it("splits the header into status + timer, then channel + Secured chip + ping", () => {
     const { widget, container } = mount();
-    const grid = container.querySelector(".vw-stats-grid")!;
-    const cols = grid.querySelectorAll(".vw-stats-col");
-    expect(cols).toHaveLength(2);
+    const header = container.querySelector(".vw-header")!;
+    const main = header.querySelector(".vw-header-main")!;
+    const sub = header.querySelector(".vw-header-sub")!;
+    expect(main.querySelector("[data-testid='vw-status']")).not.toBeNull();
+    expect(main.querySelector(".vw-timer")).not.toBeNull();
+    expect(sub.querySelector(".vw-channel")).not.toBeNull();
+    expect(sub.querySelector("[data-testid='vw-secured']")).not.toBeNull();
+    expect(sub.querySelector("[data-testid='vw-signal']")).not.toBeNull();
 
-    const outRows = cols[0]!.querySelectorAll(".vw-stats-row");
-    // Outgoing: Rate, Packets, RTT — one label/value pair each.
-    expect(outRows).toHaveLength(3);
-    expect(outRows[0]!.querySelector(".vw-stat-label")!.textContent).toBe("Rate");
-    expect(outRows[1]!.querySelector(".vw-stat-label")!.textContent).toBe("Packets");
-    expect(outRows[2]!.querySelector(".vw-stat-label")!.textContent).toBe("RTT");
-    for (const row of outRows) {
-      expect(row.querySelector(".vw-stat-value")).not.toBeNull();
-      // No <br> separators: the redesign uses rows, not line breaks.
-      expect(row.querySelector("br")).toBeNull();
+    // The chip is an icon plus a plain word: no emoji crammed into the line.
+    const chip = sub.querySelector("[data-testid='vw-secured']")!;
+    expect(chip.textContent).toBe("Secured");
+    expect(chip.querySelector("svg")).not.toBeNull();
+
+    widget.destroy?.();
+  });
+
+  it("keeps the degraded chip visible but never reading Secured", () => {
+    voiceStore.setState((prev) => ({ ...prev, encryptionDegraded: true }));
+    const { widget, container } = mount();
+    const chip = container.querySelector("[data-testid='vw-secured']")!;
+    expect(chip.textContent).toBe("Unsecured");
+    expect(chip.classList.contains("vw-secured--degraded")).toBe(true);
+    expect(chip.querySelector("svg")).not.toBeNull();
+    widget.destroy?.();
+  });
+
+  it("shows Upload and Download tiles, each with a rate and a packet count", () => {
+    const { widget, container } = mount();
+    const pane = container.querySelector(".vw-stats")!;
+    // The visible title is gone; the pane keeps it as its accessible name.
+    expect(pane.querySelector(".vw-stats-title")).toBeNull();
+    expect(pane.getAttribute("role")).toBe("group");
+    expect(pane.getAttribute("aria-label")).toBe("Transport Statistics");
+
+    const tiles = pane.querySelectorAll(".vw-stats-grid .vw-stats-tile");
+    expect(tiles).toHaveLength(2);
+    expect(tiles[0]!.querySelector(".vw-stats-tile-label")!.textContent).toContain("Upload");
+    expect(tiles[1]!.querySelector(".vw-stats-tile-label")!.textContent).toContain("Download");
+    for (const tile of tiles) {
+      expect(tile.querySelector(".vw-stat-rate")).not.toBeNull();
+      expect(tile.querySelector(".vw-stat-packets")).not.toBeNull();
     }
 
-    const inRows = cols[1]!.querySelectorAll(".vw-stats-row");
-    expect(inRows).toHaveLength(2);
-    expect(inRows[0]!.querySelector(".vw-stat-label")!.textContent).toBe("Rate");
-    expect(inRows[1]!.querySelector(".vw-stat-label")!.textContent).toBe("Packets");
+    pushStats({ outRate: 331_250, outPackets: 2305, inRate: 42_600, inPackets: 1 });
+    expect(tiles[0]!.querySelector(".vw-stat-rate")!.textContent).toBe("331250 B/s");
+    expect(tiles[0]!.querySelector(".vw-stat-packets")!.textContent).toBe("2,305 packets");
+    expect(tiles[1]!.querySelector(".vw-stat-rate")!.textContent).toBe("42600 B/s");
+    expect(tiles[1]!.querySelector(".vw-stat-packets")!.textContent).toBe("1 packet");
+    for (const tile of tiles) {
+      expect(tile.querySelector(".vw-stat-rate")!.classList.contains("vw-stat-value--empty")).toBe(
+        false,
+      );
+    }
 
     widget.destroy?.();
   });
 
-  it("shows a single-unit compact rate (no separate Mbps figure)", () => {
+  it("reads an idle direction as Idle / no packets, softened", () => {
     const { widget, container } = mount();
-    pushStats({ outRate: 331_250, outPackets: 2305, rtt: 18 });
+    pushStats({ outRate: 331_250, outPackets: 2305, inRate: 0, inPackets: 0 });
 
-    const outValues = container
-      .querySelectorAll(".vw-stats-col")[0]!
-      .querySelectorAll(".vw-stat-value");
-    expect(outValues[0]!.textContent).toBe("331250 B/s");
-    expect(outValues[0]!.textContent).not.toContain("bps");
+    const download = container.querySelectorAll(".vw-stats-tile")[1]!;
+    const rate = download.querySelector(".vw-stat-rate")!;
+    expect(rate.textContent).toBe("Idle");
+    expect(rate.classList.contains("vw-stat-value--empty")).toBe(true);
+    expect(download.querySelector(".vw-stat-packets")!.textContent).toBe("no packets");
 
     widget.destroy?.();
   });
 
-  it("softens empty values (zero rate, zero packets, missing RTT) instead of shouting them", () => {
+  it("shows the RTT in the footer only once it is known", () => {
     const { widget, container } = mount();
-    pushStats({ outRate: 0, inRate: 0, rtt: 0 });
+    const footer = container.querySelector(".vw-stats-footer")!;
 
-    const outRows = container
-      .querySelectorAll(".vw-stats-col")[0]!
-      .querySelectorAll(".vw-stats-row");
-    const rttValue = outRows[2]!.querySelector(".vw-stat-value")!;
-    expect(rttValue.textContent).toBe("—");
-    expect(rttValue.classList.contains("vw-stat-value--empty")).toBe(true);
-    expect((rttValue as HTMLElement).style.color).toBe("");
+    pushStats({ rtt: 0, totalUp: 2360, totalDown: 631 });
+    expect(footer.textContent).not.toContain("RTT");
+    expect(footer.textContent).not.toContain("—");
+    expect(footer.querySelector(".vw-stats-footer-lead")!.textContent).toBe("Session");
 
-    const inRows = container
-      .querySelectorAll(".vw-stats-col")[1]!
-      .querySelectorAll(".vw-stats-row");
-    expect(
-      inRows[0]!.querySelector(".vw-stat-value")!.classList.contains("vw-stat-value--empty"),
-    ).toBe(true);
+    pushStats({ rtt: 42, totalUp: 2360, totalDown: 631 });
+    const lead = footer.querySelector(".vw-stats-footer-lead")!;
+    expect(lead.textContent).toBe("RTT 42.0 ms");
+    expect(lead.querySelector(".vw-stat-value")!.textContent).toBe("42.0 ms");
 
     widget.destroy?.();
   });
 
-  it("does not mark a live value as empty", () => {
+  it("puts the session totals on the footer line", () => {
     const { widget, container } = mount();
-    pushStats({ outRate: 331_250, outPackets: 2305, rtt: 42 });
-
-    const outRows = container
-      .querySelectorAll(".vw-stats-col")[0]!
-      .querySelectorAll(".vw-stats-row");
-    const rttValue = outRows[2]!.querySelector(".vw-stat-value")!;
-    expect(rttValue.textContent).toBe("42.0 ms");
-    expect(rttValue.classList.contains("vw-stat-value--empty")).toBe(false);
-    expect((rttValue as HTMLElement).style.color).not.toBe("");
-
+    pushStats({ totalUp: 2360, totalDown: 631 });
+    const totals = container.querySelectorAll(".vw-stats-footer .vw-stat-total .vw-stat-value");
+    expect(totals).toHaveLength(2);
+    expect(totals[0]!.textContent).toBe("2360 B");
+    expect(totals[1]!.textContent).toBe("631 B");
     widget.destroy?.();
   });
 
-  it("carries the screen-share active state on the button itself, with no text label", () => {
+  it("keeps five equal controls with the screen-share state on the button, no text label", () => {
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
     const { widget, container } = mount();
 
+    expect(container.querySelectorAll(".vw-controls button")).toHaveLength(5);
     const shareBtn = container.querySelector('[aria-label="Screenshare"]')!;
     expect(shareBtn.getAttribute("aria-pressed")).toBe("true");
     expect(shareBtn.classList.contains("active-ctrl")).toBe(true);
-    // The redesign removes the squeezed "Sharing" text label.
+    expect(shareBtn.textContent).toBe("");
     expect(container.querySelector(".vw-share-label")).toBeNull();
 
     widget.destroy?.();

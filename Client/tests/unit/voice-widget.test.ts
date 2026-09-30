@@ -714,7 +714,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("contains transport stats labels (Outgoing, Incoming, Session Totals)", () => {
+  it("contains transport stats labels (Upload, Download, Session)", () => {
     setVoiceChannel(1, []);
 
     const widget = createVoiceWidget({
@@ -727,10 +727,10 @@ describe("VoiceWidget", () => {
     widget.mount(container);
 
     const statsPane = container.querySelector(".vw-stats") as HTMLDivElement;
-    expect(statsPane.textContent).toContain("Transport Statistics");
-    expect(statsPane.textContent).toContain("Outgoing");
-    expect(statsPane.textContent).toContain("Incoming");
-    expect(statsPane.textContent).toContain("Session Totals");
+    expect(statsPane.getAttribute("aria-label")).toBe("Transport Statistics");
+    expect(statsPane.textContent).toContain("Upload");
+    expect(statsPane.textContent).toContain("Download");
+    expect(statsPane.textContent).toContain("Session");
 
     widget.destroy?.();
   });

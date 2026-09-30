@@ -583,10 +583,9 @@ test.describe("B9-20 settings, account and voice text", () => {
     await widget.locator(".vw-signal").click();
     await expect(widget.locator(".vw-stats")).toHaveClass(/visible/);
     for (const [el, english] of [
-      [widget.locator(".vw-stats-title"), "Transport Statistics"],
-      [widget.locator(".vw-stats-col-label.out"), "Outgoing"],
-      [widget.locator(".vw-stats-col-label.in"), "Incoming"],
-      [widget.locator(".vw-stats-totals-label"), "Session Totals"],
+      [widget.locator(".vw-stats-tile-label span:last-child").nth(0), "Upload"],
+      [widget.locator(".vw-stats-tile-label span:last-child").nth(1), "Download"],
+      [widget.locator(".vw-stats-footer-lead"), "Session"],
     ] as const) {
       await expect(el).toHaveText(expanded(english));
       await expectWhole(el);

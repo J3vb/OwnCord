@@ -84,13 +84,27 @@ function setStatValue(el: HTMLSpanElement | null, text: string, empty: boolean):
   el.classList.toggle("vw-stat-value--empty", empty);
 }
 
-/** One label/value stats row: label left, value right. */
-function statRow(label: string): { el: HTMLSpanElement; row: HTMLDivElement } {
-  const row = createElement("div", { class: "vw-stats-row" });
-  const labelEl = createElement("span", { class: "vw-stat-label" }, label);
-  const valueEl = createElement("span", { class: "vw-stat-value" });
-  appendChildren(row, labelEl, valueEl);
-  return { el: valueEl, row };
+/** One direction's tile: an arrow + label, a big rate, and its packet count. */
+function statTile(
+  arrow: string,
+  label: string,
+): { tile: HTMLDivElement; rate: HTMLSpanElement; packets: HTMLSpanElement } {
+  const tile = createElement("div", { class: "vw-stats-tile" });
+  const labelEl = createElement("div", { class: "vw-stats-tile-label" });
+  appendChildren(
+    labelEl,
+    createElement("span", { class: "vw-stat-arrow", "aria-hidden": "true" }, arrow),
+    createElement("span", {}, label),
+  );
+  const rate = createElement("span", { class: "vw-stat-value vw-stat-rate" });
+  const packets = createElement("span", { class: "vw-stat-packets" });
+  appendChildren(tile, labelEl, rate, packets);
+  return { tile, rate, packets };
+}
+
+/** A direction's packet count as prose; zero reads "no packets". */
+function packetText(count: number): string {
+  return count === 0 ? t("widget.noPackets") : t("widget.packetCount", { count });
 }
 
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
@@ -101,6 +115,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let linkedChannelId: number | null = null;
   let statusLabel: HTMLSpanElement | null = null;
   let securedBadge: HTMLSpanElement | null = null;
+  let securedText: HTMLSpanElement | null = null;
   let controlsRow: HTMLDivElement | null = null;
   let muteBtn: HTMLButtonElement | null = null;
   let deafenBtn: HTMLButtonElement | null = null;
@@ -139,9 +154,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   // Stats pane field elements (set during mount)
   let outRateEl: HTMLSpanElement | null = null;
   let outPacketsEl: HTMLSpanElement | null = null;
-  let rttEl: HTMLSpanElement | null = null;
   let inRateEl: HTMLSpanElement | null = null;
   let inPacketsEl: HTMLSpanElement | null = null;
+  /** The footer's leading slot: "RTT 42.0 ms" once known, else "Session". */
+  let footerLeadEl: HTMLSpanElement | null = null;
+  let rttEl: HTMLSpanElement | null = null;
   let totalUpEl: HTMLSpanElement | null = null;
   let totalDownEl: HTMLSpanElement | null = null;
 
@@ -162,16 +179,34 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     setText(pingLabel, rttText);
     pingLabel.style.color = color;
 
-    // Update expanded stats pane fields if they exist. A zero rate or a
-    // missing RTT is shown softly (the CSS dims .vw-stat-value--empty) rather
-    // than as another full-strength number competing for attention.
-    setStatValue(outRateEl, formatRateCompact(stats.outRate), stats.outRate === 0);
-    setStatValue(outPacketsEl, String(stats.outPackets), stats.outPackets === 0);
-    // i18n-exempt: numeric RTT value with its unit, not translatable prose
-    setStatValue(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—", stats.rtt <= 0);
-    if (rttEl) rttEl.style.color = stats.rtt > 0 ? color : "";
-    setStatValue(inRateEl, formatRateCompact(stats.inRate), stats.inRate === 0);
-    setStatValue(inPacketsEl, String(stats.inPackets), stats.inPackets === 0);
+    // Update expanded stats pane fields if they exist. An idle direction
+    // reads "Idle" / "no packets" softly (the CSS dims .vw-stat-value--empty)
+    // rather than as another full-strength zero competing for attention.
+    setStatValue(
+      outRateEl,
+      stats.outRate === 0 ? t("widget.idle") : formatRateCompact(stats.outRate),
+      stats.outRate === 0,
+    );
+    if (outPacketsEl) setText(outPacketsEl, packetText(stats.outPackets));
+    setStatValue(
+      inRateEl,
+      stats.inRate === 0 ? t("widget.idle") : formatRateCompact(stats.inRate),
+      stats.inRate === 0,
+    );
+    if (inPacketsEl) setText(inPacketsEl, packetText(stats.inPackets));
+    // The RTT only takes the footer's lead once it is known; until then the
+    // slot just labels the totals, so no "—" placeholder is ever shown.
+    if (footerLeadEl !== null && rttEl !== null) {
+      if (stats.rtt > 0) {
+        // i18n-exempt: numeric RTT value with its unit, not translatable prose
+        setText(rttEl, `${stats.rtt.toFixed(1)} ms`);
+        if (!rttEl.isConnected) {
+          footerLeadEl.replaceChildren(`${t("widget.rtt")} `, rttEl);
+        }
+      } else if (footerLeadEl.textContent !== t("widget.session")) {
+        setText(footerLeadEl, t("widget.session"));
+      }
+    }
     setStatValue(totalUpEl, formatBytes(stats.totalUp), stats.totalUp === 0);
     setStatValue(totalDownEl, formatBytes(stats.totalDown), stats.totalDown === 0);
   }
@@ -234,15 +269,20 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
     }
-    if (securedBadge !== null) {
+    if (securedBadge !== null && securedText !== null) {
       const connected = status === "connected";
       const degraded = connected && encryptionDegraded;
+      const wasDegraded = securedBadge.classList.contains("vw-secured--degraded");
       securedBadge.classList.toggle("vw-secured--degraded", degraded);
+      if (degraded !== wasDegraded) {
+        securedBadge.querySelector("svg")?.remove();
+        securedBadge.prepend(createIcon(degraded ? "shield-alert" : "shield-check", 12));
+      }
       if (degraded) {
-        setText(securedBadge, t("encryption.unsecured"));
+        setText(securedText, t("widget.unsecured"));
         securedBadge.title = t("encryption.unsecuredLabel");
       } else {
-        setText(securedBadge, t("encryption.secured"));
+        setText(securedText, t("widget.secured"));
         securedBadge.title = t("encryption.securedLabel");
       }
       securedBadge.style.display = connected ? "inline-flex" : "none";
@@ -418,7 +458,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function mount(container: Element): void {
     root = createElement("div", { class: "voice-widget", "data-testid": "voice-widget" });
 
-    // Header row: lifecycle status + secured lock + channel name + signal icon
+    // Header, two lines: lifecycle status + elapsed timer, then the channel
+    // name + a small Secured chip + the signal/ping button.
     const header = createElement("div", { class: "vw-header" });
     statusLabel = createElement("span", {
       class: "vw-connected",
@@ -431,7 +472,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       "data-testid": "vw-secured",
       title: t("encryption.securedLabel"),
     });
-    setText(securedBadge, t("encryption.secured"));
+    securedText = createElement("span", {}, t("widget.secured"));
+    appendChildren(securedBadge, createIcon("shield-check", 12), securedText);
     securedBadge.style.display = "none";
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
@@ -458,56 +500,37 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
     signalWrap.addEventListener("click", toggleStatsPane, { signal: disposable.signal });
 
-    appendChildren(header, statusLabel, securedBadge, timerEl, channelNameEl, signalWrap);
+    const headerMain = createElement("div", { class: "vw-header-main" });
+    appendChildren(headerMain, statusLabel, timerEl);
+    const headerSub = createElement("div", { class: "vw-header-sub" });
+    appendChildren(headerSub, channelNameEl, securedBadge, signalWrap);
+    appendChildren(header, headerMain, headerSub);
 
-    // Expanded stats pane (hidden by default)
-    statsPane = createElement("div", { class: "vw-stats" });
-    const statsTitle = createElement(
-      "div",
-      { class: "vw-stats-title" },
-      t("widget.transportStatistics"),
-    );
+    // Expanded stats pane (hidden by default): Upload and Download tiles,
+    // then one footer line with the RTT (once known) and the session totals.
+    // The old visible "Transport Statistics" title is the pane's name now.
+    statsPane = createElement("div", {
+      class: "vw-stats",
+      role: "group",
+      "aria-label": t("widget.transportStatistics"),
+    });
     const statsGrid = createElement("div", { class: "vw-stats-grid" });
+    const upload = statTile("\u2191", t("widget.upload"));
+    outRateEl = upload.rate;
+    outPacketsEl = upload.packets;
+    const download = statTile("\u2193", t("widget.download"));
+    inRateEl = download.rate;
+    inPacketsEl = download.packets;
+    for (const dir of [upload, download]) {
+      setStatValue(dir.rate, t("widget.idle"), true);
+      setText(dir.packets, packetText(0));
+    }
+    appendChildren(statsGrid, upload.tile, download.tile);
 
-    // Outgoing column
-    const outCol = createElement("div", { class: "vw-stats-col" });
-    const outLabel = createElement(
-      "div",
-      { class: "vw-stats-col-label out" },
-      t("widget.outgoing"),
-    );
-    const outRate = statRow(t("widget.rate"));
-    outRateEl = outRate.el;
-    setStatValue(outRateEl, t("widget.zeroRate"), true);
-    const outPackets = statRow(t("widget.packets"));
-    outPacketsEl = outPackets.el;
-    setStatValue(outPacketsEl, "0", true);
-    const outRtt = statRow(t("widget.rtt"));
-    rttEl = outRtt.el;
-    setStatValue(rttEl, "—", true);
-    appendChildren(outCol, outLabel, outRate.row, outPackets.row, outRtt.row);
-
-    // Incoming column
-    const inCol = createElement("div", { class: "vw-stats-col" });
-    const inLabel = createElement("div", { class: "vw-stats-col-label in" }, t("widget.incoming"));
-    const inRate = statRow(t("widget.rate"));
-    inRateEl = inRate.el;
-    setStatValue(inRateEl, t("widget.zeroRate"), true);
-    const inPackets = statRow(t("widget.packets"));
-    inPacketsEl = inPackets.el;
-    setStatValue(inPacketsEl, "0", true);
-    appendChildren(inCol, inLabel, inRate.row, inPackets.row);
-
-    appendChildren(statsGrid, outCol, inCol);
-
-    // Session totals
-    const totals = createElement("div", { class: "vw-stats-totals" });
-    const totalsLabel = createElement(
-      "div",
-      { class: "vw-stats-totals-label" },
-      t("widget.sessionTotals"),
-    );
-    const totalsRow = createElement("div", { class: "vw-stats-totals-row" });
+    const footer = createElement("div", { class: "vw-stats-footer" });
+    footerLeadEl = createElement("span", { class: "vw-stats-footer-lead" }, t("widget.session"));
+    rttEl = createElement("span", { class: "vw-stat-value" });
+    const totalsRow = createElement("span", { class: "vw-stats-totals" });
     totalUpEl = createElement("span", { class: "vw-stat-value" });
     totalDownEl = createElement("span", { class: "vw-stat-value" });
     setStatValue(totalUpEl, t("widget.zeroBytes"), true);
@@ -519,9 +542,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     downWrap.appendChild(createElement("span", { class: "vw-stat-arrow" }, "\u2193"));
     downWrap.appendChild(totalDownEl);
     appendChildren(totalsRow, upWrap, downWrap);
-    appendChildren(totals, totalsLabel, totalsRow);
+    appendChildren(footer, footerLeadEl, totalsRow);
 
-    appendChildren(statsPane, statsTitle, statsGrid, totals);
+    appendChildren(statsPane, statsGrid, footer);
 
     // Controls row
     const controls = createElement("div", { class: "vw-controls" });
@@ -679,6 +702,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     channelNameEl = null;
     statusLabel = null;
     securedBadge = null;
+    securedText = null;
     controlsRow = null;
     muteBtn = null;
     deafenBtn = null;
@@ -694,6 +718,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     outRateEl = null;
     outPacketsEl = null;
     rttEl = null;
+    footerLeadEl = null;
     inRateEl = null;
     inPacketsEl = null;
     totalUpEl = null;

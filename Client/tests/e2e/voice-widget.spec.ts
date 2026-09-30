@@ -76,7 +76,7 @@ test.describe("Voice Widget", () => {
     expect(hasActive).not.toBe(hadActive);
   });
 
-  test("transport stats read as a tidy two-column grid with no wrapping values", async ({
+  test("the connection panel reads as a two-line header over Upload/Download tiles, nothing wrapping", async ({
     page,
   }) => {
     await mockTauriFullSessionWithVoice(page);
@@ -90,26 +90,33 @@ test.describe("Voice Widget", () => {
     await widget.locator("[data-testid='vw-signal']").click();
     await expect(widget.locator(".vw-stats")).toHaveClass(/visible/);
 
-    // The pane is a real two-column grid: each metric is its own label/value
-    // row (no <br> separators) and the columns are equal tracks.
-    await expect(widget.locator(".vw-stats-col")).toHaveCount(2);
-    await expect(widget.locator(".vw-stats-col").nth(0).locator(".vw-stats-row")).toHaveCount(3);
-    await expect(widget.locator(".vw-stats-col").nth(1).locator(".vw-stats-row")).toHaveCount(2);
-    await expect(widget.locator(".vw-stats-row .vw-stat-label").first()).toHaveText("Rate");
+    // Two tiles, Upload then Download, each a big rate over its packet count,
+    // and one footer line for the RTT/session totals.
+    const tiles = widget.locator(".vw-stats-tile");
+    await expect(tiles).toHaveCount(2);
+    await expect(tiles.nth(0).locator(".vw-stats-tile-label")).toContainText("Upload");
+    await expect(tiles.nth(1).locator(".vw-stats-tile-label")).toContainText("Download");
+    await expect(widget.locator(".vw-stats-footer")).toHaveCount(1);
 
-    // Every value stays on one line and inside its column: the old
-    // "331.25 kB/s (2.6 Mbps)" wrapped; none of these may.
-    const overflow = await widget.locator(".vw-stat-value").evaluateAll((els) =>
-      els.map((el) => ({
-        text: el.textContent,
-        wraps: el.scrollWidth > el.clientWidth + 1,
-      })),
-    );
-    expect(overflow.some((o) => o.wraps)).toBe(false);
-    const rowOverflow = await widget
-      .locator(".vw-stats-row")
-      .evaluateAll((els) => els.some((el) => el.scrollWidth > el.clientWidth + 1));
-    expect(rowOverflow).toBe(false);
+    // Each header line and every value stays on one line: the old header
+    // stacked "Voice / Connected / Secured / 00:15 / General" over several.
+    for (const line of [".vw-header-main", ".vw-header-sub"]) {
+      const lineHeight = await widget
+        .locator(line)
+        .evaluate((el) => el.getBoundingClientRect().height);
+      expect(lineHeight, `${line} height`).toBeLessThan(28);
+    }
+    const overflow = await widget
+      .locator(
+        ".vw-stat-value, .vw-stat-packets, .vw-stats-footer, .vw-header-main, .vw-header-sub",
+      )
+      .evaluateAll((els) =>
+        els.map((el) => ({
+          text: el.textContent,
+          wraps: el.scrollWidth > el.clientWidth + 1,
+        })),
+      );
+    expect(overflow.filter((o) => o.wraps)).toEqual([]);
   });
 
   test("second user joining voice appears in sidebar users list", async ({ page }) => {
