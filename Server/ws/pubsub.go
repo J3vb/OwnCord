@@ -168,7 +168,10 @@ func (ps *PubSub) UnsubscribeAll(client *Client) {
 // there is no PriorityHigh here.
 const (
 	PriorityNormal = 1 // chat messages, reactions, channel events
-	PriorityLow    = 2 // typing indicators, presence updates — dropped on overflow
+	PriorityLow    = 2 // typing indicators — dropped on overflow
+	// PriorityPresence rides the normal queue but drops instead of
+	// disconnecting on overflow (Client.sendPresenceMsg).
+	PriorityPresence = 3
 )
 
 // Publish sends msg to all subscribers of topic at normal priority.
@@ -223,6 +226,9 @@ func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int
 		case PriorityLow:
 			c.sendLowMsg(msg)
 			delivered++ // count attempt, even if dropped
+		case PriorityPresence:
+			c.sendPresenceMsg(msg)
+			delivered++
 		default:
 			c.sendMsg(msg)
 			delivered++

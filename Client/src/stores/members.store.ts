@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import type { ReadyMember, MemberJoinPayload, UserStatus } from "@lib/types";
+import type { ReadyMember, MemberJoinPayload, PresenceBatchEntry, UserStatus } from "@lib/types";
 
 export interface Member {
   readonly id: number;
@@ -173,6 +173,48 @@ export function updatePresence(
       customStatus: customStatus === undefined ? existing.customStatus : customStatus,
     });
     return { ...prev, members: next };
+  });
+}
+
+/** Apply a presence_batch in one store update. An entry with member data adds
+ *  (or refreshes) that member; any other entry only updates a member the list
+ *  already has. A `full` snapshot also marks everyone it leaves out offline.
+ *  An absent custom_status leaves the text alone, except that offline clears
+ *  it (what ready shows for an offline member). */
+export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full: boolean): void {
+  membersStore.setState((prev) => {
+    const next = new Map(prev.members);
+    if (full) {
+      const listed = new Set(updates.map((u) => u.user_id));
+      for (const [id, m] of next) {
+        if (!listed.has(id)) next.set(id, { ...m, status: "offline", customStatus: null });
+      }
+    }
+    let joined = false;
+    for (const u of updates) {
+      const existing = next.get(u.user_id);
+      const keptText = u.status === "offline" ? null : (existing?.customStatus ?? null);
+      const customStatus = u.custom_status === undefined ? keptText : u.custom_status;
+      if (u.member !== undefined) {
+        joined = true;
+        next.set(u.user_id, {
+          id: u.member.id,
+          username: u.member.username,
+          avatar: u.member.avatar,
+          role: u.member.role,
+          status: u.status,
+          displayName: u.member.display_name ?? null,
+          customStatus,
+          identityPublicKey: u.member.identity_public_key ?? null,
+        });
+      } else if (existing !== undefined) {
+        next.set(u.user_id, { ...existing, status: u.status, customStatus });
+      }
+    }
+    // A new member changes the grouped list the way member_join does.
+    return joined
+      ? { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 }
+      : { ...prev, members: next };
   });
 }
 

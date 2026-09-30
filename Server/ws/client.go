@@ -102,6 +102,7 @@ type Client struct {
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
 	sendLow       chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
+	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
 
@@ -312,6 +313,34 @@ func (c *Client) sendMsg(msg []byte) {
 		slog.Warn("ws: client send buffer full, closing connection to force reconnect",
 			"user_id", c.userID)
 		c.closeAllSendLocked()
+	}
+}
+
+// sendPresenceMsg queues a presence frame (presence, presence_batch) on the
+// normal queue, the FIFO every sequenced frame shares. Unlike sendMsg, a full
+// queue does not close the client: in a connect herd every arrival's presence
+// reaches every client, and kicking the slow ones only made them rejoin the
+// herd. The frame is dropped and the client marked stale instead; the next
+// presence flush sends it a full snapshot, and its next resume takes the full
+// ready (presenceDropped), so the seq it never saw is not lost for good.
+func (c *Client) sendPresenceMsg(msg []byte) {
+	c.mu.Lock()
+	if c.sendClosed {
+		c.mu.Unlock()
+		return
+	}
+	select {
+	case c.send <- msg:
+		c.msgsSent++
+		c.mu.Unlock()
+		return
+	default:
+		c.msgsDropped++
+	}
+	c.mu.Unlock()
+	c.presenceStale.Store(true)
+	if c.hub != nil {
+		c.hub.presenceDropped(c.userID)
 	}
 }
 

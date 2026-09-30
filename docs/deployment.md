@@ -1311,6 +1311,7 @@ have chosen the third stage as your normal state.
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
+  "backpressure_presence_drops": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
   "disk_min_free_mb": 256,

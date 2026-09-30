@@ -186,6 +186,23 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 	c.setLiveStatus(status)
 }
 
+// announceFreshConnect tells every other client that c came online after a
+// full ready. Coming online is presence, not a join: every client's ready
+// already lists every member, so the member data rides along only for a
+// member other clients cannot have yet — a first-ever connect (last_seen is
+// still NULL, stamped by applyConnectStatus after c.user was read), or the
+// return of a user whose temporary ban lapsed (member_ban removed them
+// everywhere, and users.banned stays 1 until an unban).
+func (h *Hub) announceFreshConnect(c *Client) {
+	p := pendingPresence{status: c.user.Status, customStatus: c.user.CustomStatus}
+	if c.user.LastSeen == nil || c.user.Banned {
+		m := memberPayloadFor(c.user, c.roleName)
+		p.member = &m
+	}
+	slog.Info("ws announcing connect presence", "user_id", c.userID, "username", c.user.Username, "new_member", p.member != nil)
+	h.queuePresence(c.userID, p)
+}
+
 // announceConnectPresence fans out the status applyConnectStatus settled on,
 // with the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {

@@ -313,15 +313,15 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     expect(alice?.displayName).toBe("Alice Fixture");
   });
 
-  it("fresh-connect: member_join adds the joining user by name", async () => {
-    await dispatch("fresh-connect", "member_join");
+  it("fresh-connect: presence_batch adds a first-ever joiner by name", async () => {
+    await dispatch("fresh-connect", "presence_batch");
     const alice = [...membersStore.getState().members.values()].find((m) => m.username === "alice");
     expect(alice?.status).toBe("online");
   });
 
-  it("fresh-connect: presence fills the custom status", async () => {
-    // presence only patches a member that already exists, and the fixture does
-    // not keep ids stable, so seed the member the frame patches.
+  it("fresh-connect: a presence_batch entry fills the custom status", async () => {
+    // The fixture does not keep ids stable, so seed the member the entry
+    // patches.
     const USER_ID = 8001;
     setMembers([
       {
@@ -335,7 +335,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
         identity_public_key: null,
       },
     ]);
-    await dispatch("fresh-connect", "presence", { user_id: USER_ID });
+    await dispatch("fresh-connect", "presence_batch", { user_id: USER_ID });
     expect(membersStore.getState().members.get(USER_ID)?.customStatus).toBe(
       "fixture custom status",
     );
@@ -473,8 +473,8 @@ describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", (
     // The journey records a disconnect (offline) presence and then a
     // back-online one; replay the back-online frame, which is the effect under
     // test. Its custom_status is the fixture's own literal.
-    const online = s2cFrames("resume-replay", "presence").find(
-      (f) => (f.payload as { status?: string }).status === "online",
+    const online = s2cFrames("resume-replay", "presence_batch").find(
+      (f) => (f.payload as { updates?: { status?: string }[] }).updates?.[0]?.status === "online",
     );
     expect(online, "resume-replay: back-online presence frame").toBeDefined();
     await send(online!, { user_id: USER_ID }, { n: 0 });

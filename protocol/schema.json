@@ -63,6 +63,12 @@
     { "wire": "reaction_update", "go": "MsgTypeReactionUpdate", "ts": "REACTION_UPDATE" },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
+    {
+      "wire": "presence_batch",
+      "go": "MsgTypePresenceBatch",
+      "ts": "PRESENCE_BATCH",
+      "note": "many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence"
+    },
     { "wire": "channel_create", "go": "MsgTypeChannelCreate", "ts": "CHANNEL_CREATE" },
     { "wire": "channel_update", "go": "MsgTypeChannelUpdate", "ts": "CHANNEL_UPDATE" },
     { "wire": "channel_delete", "go": "MsgTypeChannelDelete", "ts": "CHANNEL_DELETE" },

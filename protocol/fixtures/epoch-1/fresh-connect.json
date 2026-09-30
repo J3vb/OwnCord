@@ -149,58 +149,46 @@
         "dir": "s2c",
         "frame": {
           "payload": {
-            "status": "online",
-            "user": {
-              "avatar": "https://fixtures.invalid/alice-avatar.png",
-              "display_name": "Alice Fixture",
-              "id": "<id:number>",
-              "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
-              "role": "member",
-              "username": "alice"
-            }
+            "updates": [
+              {
+                "custom_status": "fixture custom status",
+                "member": {
+                  "avatar": "https://fixtures.invalid/alice-avatar.png",
+                  "display_name": "Alice Fixture",
+                  "id": "<id:number>",
+                  "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
+                  "role": "member",
+                  "username": "alice"
+                },
+                "status": "online",
+                "user_id": "<id:number>"
+              }
+            ]
           },
           "seq": "<seq:number>",
-          "type": "member_join"
+          "type": "presence_batch"
         }
       },
       {
         "dir": "s2c",
         "frame": {
           "payload": {
-            "custom_status": "fixture custom status",
-            "status": "online",
-            "user_id": "<id:number>"
+            "updates": [
+              {
+                "custom_status": null,
+                "member": {
+                  "avatar": null,
+                  "id": "<id:number>",
+                  "role": "member",
+                  "username": "bob"
+                },
+                "status": "online",
+                "user_id": "<id:number>"
+              }
+            ]
           },
           "seq": "<seq:number>",
-          "type": "presence"
-        }
-      },
-      {
-        "dir": "s2c",
-        "frame": {
-          "payload": {
-            "status": "online",
-            "user": {
-              "avatar": null,
-              "id": "<id:number>",
-              "role": "member",
-              "username": "bob"
-            }
-          },
-          "seq": "<seq:number>",
-          "type": "member_join"
-        }
-      },
-      {
-        "dir": "s2c",
-        "frame": {
-          "payload": {
-            "custom_status": null,
-            "status": "online",
-            "user_id": "<id:number>"
-          },
-          "seq": "<seq:number>",
-          "type": "presence"
+          "type": "presence_batch"
         }
       },
       {
@@ -365,28 +353,22 @@
         "dir": "s2c",
         "frame": {
           "payload": {
-            "status": "online",
-            "user": {
-              "avatar": null,
-              "id": "<id:number>",
-              "role": "member",
-              "username": "bob"
-            }
+            "updates": [
+              {
+                "custom_status": null,
+                "member": {
+                  "avatar": null,
+                  "id": "<id:number>",
+                  "role": "member",
+                  "username": "bob"
+                },
+                "status": "online",
+                "user_id": "<id:number>"
+              }
+            ]
           },
           "seq": "<seq:number>",
-          "type": "member_join"
-        }
-      },
-      {
-        "dir": "s2c",
-        "frame": {
-          "payload": {
-            "custom_status": null,
-            "status": "online",
-            "user_id": "<id:number>"
-          },
-          "seq": "<seq:number>",
-          "type": "presence"
+          "type": "presence_batch"
         }
       },
       {

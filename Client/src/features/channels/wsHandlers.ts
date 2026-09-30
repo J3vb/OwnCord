@@ -19,9 +19,10 @@ import {
   updateMemberRole,
   updateMemberProfile,
   updatePresence,
+  applyPresenceBatch,
 } from "../../stores/members.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
-import { updateDmParticipant } from "../../stores/dm.store";
+import { dmStore, updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { isTextLikeChannel } from "../../lib/types";
@@ -137,6 +138,23 @@ export function handlePresence(payload: Payload<"presence">): void {
   // sidebar row (see buildDmConversations) — membersStore alone does not
   // reach it.
   updateDmParticipant(payload.user_id, { status: payload.status });
+}
+
+export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
+  const full = payload.full === true;
+  applyPresenceBatch(payload.updates, full);
+  // Only DM partners need the dmStore copy (see handlePresence); a full
+  // snapshot takes a partner it leaves out offline.
+  const statuses = new Map(payload.updates.map((u) => [u.user_id, u.status]));
+  const partners = new Set<number>();
+  for (const c of dmStore.getState().channels) {
+    partners.add(c.recipient.id);
+    for (const p of c.participants) partners.add(p.id);
+  }
+  for (const id of partners) {
+    const status = statuses.get(id) ?? (full ? "offline" : undefined);
+    if (status !== undefined) updateDmParticipant(id, { status });
+  }
 }
 
 export function handleChannelCreate(payload: Payload<"channel_create">): void {

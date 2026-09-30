@@ -110,6 +110,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatPinned:          false, // ids + flag only, no message body
 	MsgTypeTyping:              false,
 	MsgTypePresence:            false,
+	MsgTypePresenceBatch:       false,
 	MsgTypeChannelCreate:       false, // must reach every viewer, including the one that turns the label on
 	MsgTypeChannelUpdate:       false, // ditto
 	MsgTypeChannelDelete:       false,

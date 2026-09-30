@@ -299,6 +299,11 @@ func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uin
 	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
 }
 
+// PresenceDropCount is the process-lifetime count of presence frames dropped
+// on a full normal buffer, each repaired by a snapshot rather than a
+// disconnect (Client.sendPresenceMsg). Safe to call from any goroutine.
+func (h *Hub) PresenceDropCount() uint64 { return h.presenceRepair.drops.Load() }
+
 // DeliveryDropCount is the attention panel's delivery-pressure counter: hub
 // broadcast drops, topic-limiter sheds, and send-queue overflow disconnects.
 // Low-priority drops are excluded because they lose nothing and disconnect

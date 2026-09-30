@@ -561,6 +561,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			LiveKitHealth:       hub.LiveKitHealthCheck,
 			ReconnectTiers:      hub.ReconnectTierStats,
 			Backpressure:        hub.BackpressureStats,
+			PresenceDrops:       hub.PresenceDropCount,
 			ConnRejects:         hub.ConnRejectCount,
 			PersisterStats:      hub.EventPersisterStats,
 			DBStats:             func() sql.DBStats { return database.SQLDb().Stats() },

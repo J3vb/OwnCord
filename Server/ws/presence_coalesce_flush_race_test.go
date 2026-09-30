@@ -99,8 +99,8 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 	first := <-h.broadcast
 	second := <-h.broadcast
 
-	if !bytes.Contains(first.msg, []byte(`"status":"online"`)) {
-		t.Errorf("expected the stale flush's 'online' frame enqueued FIRST; got first=%s", first.msg)
+	if first.presence[42].status != "online" {
+		t.Errorf("expected the stale flush's 'online' batch enqueued FIRST; got first=%+v", first)
 	}
 	if !bytes.Contains(second.msg, []byte(`"status":"dnd"`)) {
 		t.Errorf("expected the fresh presence_update's 'dnd' frame enqueued LAST (so it gets the higher seq and wins); got second=%s", second.msg)

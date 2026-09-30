@@ -66,6 +66,7 @@ type ServerMetrics struct {
 	BackpressureQueueDisconnects uint64 `json:"backpressure_queue_disconnects"`
 	BackpressureHighFallbacks    uint64 `json:"backpressure_high_fallbacks"`
 	BackpressureLowDrops         uint64 `json:"backpressure_low_drops"`
+	BackpressurePresenceDrops    uint64 `json:"backpressure_presence_drops"`
 
 	// WSConnRejects counts upgrades refused by the max_ws_connections cap.
 	WSConnRejects uint64 `json:"ws_conn_rejects"`
@@ -129,6 +130,7 @@ type MetricsSources struct {
 	LiveKitHealth       func(context.Context) (bool, error)
 	ReconnectTiers      func() (buffer, db, full uint64)
 	Backpressure        func() (queueDisconnects, highFallbacks, lowDrops uint64)
+	PresenceDrops       func() uint64
 	ConnRejects         func() uint64
 	PersisterStats      func() (persisted, dropped, flushes, errs uint64, ok bool)
 	DBStats             func() sql.DBStats // writer pool
@@ -177,6 +179,9 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 		}
 		if src.Backpressure != nil {
 			metrics.BackpressureQueueDisconnects, metrics.BackpressureHighFallbacks, metrics.BackpressureLowDrops = src.Backpressure()
+		}
+		if src.PresenceDrops != nil {
+			metrics.BackpressurePresenceDrops = src.PresenceDrops()
 		}
 		if src.PersisterStats != nil {
 			if persisted, dropped, flushes, errs, ok := src.PersisterStats(); ok {

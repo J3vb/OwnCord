@@ -38,6 +38,7 @@ import {
   handleMemberUpdate,
   handleNsfwAck,
   handlePresence,
+  handlePresenceBatch,
   handleRolesUpdate,
   handleUserUpdate,
   markReadyActiveChannelRead,
@@ -241,6 +242,7 @@ export function wireDispatcher(
   // ── Presence ──────────────────────────────────────────
 
   unsubs.push(ws.on(S.PRESENCE, handlePresence));
+  unsubs.push(ws.on(S.PRESENCE_BATCH, handlePresenceBatch));
 
   // ── Channels ──────────────────────────────────────────
 

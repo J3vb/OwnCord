@@ -32,7 +32,7 @@ import (
 
 // readUntil polls conn until frameType arrives (unmarshalling into want) or
 // the deadline elapses, returning whether it was found. Other frames
-// (presence, member_join, ready) are skipped — this rig has no control over
+// (presence, presence_batch, ready) are skipped — this rig has no control over
 // their timing relative to the frame under test.
 func readUntil(t *testing.T, conn *websocket.Conn, frameType string, want any, deadline time.Time) bool {
 	t.Helper()
@@ -227,21 +227,28 @@ func TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay(t *testing.T)
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
-	// bob connects first and earns a real lastSeq from his own connect
-	// broadcast (member_join, then presence — both sequenced), then
-	// disconnects. Everything else in this test happens while he is away.
+	// bob connects first and earns a real lastSeq from his own sequenced
+	// frames (his connect presence_batch, then his own presence_update),
+	// then disconnects. Everything else in this test happens while he is away.
 	bobWS := dialAndAuthWS(t, srv, bobToken)
-	// ready (frame 1) carries no seq; member_join (frame 2) is the ring
-	// buffer's very first entry ever, seq 1. EventsSinceFiltered treats a
-	// resume AT that oldest seq as unprovable (afterSeq <= oldestSeq) and
-	// forces a full ready — reading connect presence (frame 3, also
-	// sequenced) too gives a lastSeq of 2, past the buffer's floor, so the
-	// resume below actually exercises the ring-buffer replay tier.
+	// ready (frame 1) carries no seq; the connect presence_batch (frame 2) is
+	// the ring buffer's very first entry ever, seq 1. EventsSinceFiltered
+	// treats a resume AT that oldest seq as unprovable (afterSeq <= oldestSeq)
+	// and forces a full ready — a presence_update's sequenced echo (frame 3)
+	// gives a lastSeq of 2, past the buffer's floor, so the resume below
+	// actually exercises the ring-buffer replay tier.
 	var bobLastSeq uint64
-	for range 3 {
+	for range 2 {
 		if _, seq := readSeqFrame(t, bobWS); seq > bobLastSeq {
 			bobLastSeq = seq
 		}
+	}
+	presenceUpdate, _ := json.Marshal(map[string]any{"type": "presence_update", "payload": map[string]any{"status": "online"}})
+	if err := bobWS.Write(context.Background(), websocket.MessageText, presenceUpdate); err != nil {
+		t.Fatalf("write presence_update: %v", err)
+	}
+	if _, seq := readSeqFrame(t, bobWS); seq > bobLastSeq {
+		bobLastSeq = seq
 	}
 	if bobLastSeq < 2 {
 		t.Fatalf("bob's lastSeq = %d, want >= 2 so the resume below is not at the buffer's floor", bobLastSeq)
