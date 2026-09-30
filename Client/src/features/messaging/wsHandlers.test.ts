@@ -269,14 +269,14 @@ describe("DM preview follows an edit or delete of its last message", () => {
 
   it("replaces the preview text when the shown message is edited", () => {
     seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
-    handleChatEdited({ message_id: 7, channel_id: 1, content: "fixed", edited_at: "x" });
+    handleChatEdited(undefined, { message_id: 7, channel_id: 1, content: "fixed", edited_at: "x" });
     expect(dm().lastMessage).toBe("fixed");
     expect(dm().lastMessageAt).toBe("2026-03-15T10:00:00Z");
   });
 
   it("leaves the preview alone when an older message is edited", () => {
     seedDm(7, "latest", "2026-03-15T10:00:00Z");
-    handleChatEdited({ message_id: 6, channel_id: 1, content: "older", edited_at: "x" });
+    handleChatEdited(undefined, { message_id: 6, channel_id: 1, content: "older", edited_at: "x" });
     expect(dm().lastMessage).toBe("latest");
   });
 
@@ -347,6 +347,31 @@ describe("DM preview follows an edit or delete of its last message", () => {
       lastMessage: "sent right after",
       unreadCount: 1,
     });
+  });
+
+  it("reissues the refetch when an edit lands while one is in flight", async () => {
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+    const first = deferred<DmChannelsResponse>();
+    const second = deferred<DmChannelsResponse>();
+    const getDmChannels = vi
+      .fn<() => Promise<DmChannelsResponse>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const api = dmApi(getDmChannels);
+
+    handleChatDeleted(api, { message_id: 7, channel_id: 1 });
+    handleChatEdited(api, { message_id: 6, channel_id: 1, content: "b", edited_at: "x" });
+    expect(getDmChannels).toHaveBeenCalledTimes(2);
+
+    first.resolve(serverDms(6, "a", "2026-03-15T09:00:00Z"));
+    await first.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+
+    second.resolve(serverDms(6, "b", "2026-03-15T09:00:00Z"));
+    await second.promise;
+    await Promise.resolve();
+    expect(dm()).toMatchObject({ lastMessageId: 6, lastMessage: "b" });
   });
 
   it("reissues the refetch when another delete lands while one is in flight", async () => {

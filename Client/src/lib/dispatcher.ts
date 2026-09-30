@@ -220,7 +220,7 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
 
-  unsubs.push(ws.on(S.CHAT_EDITED, handleChatEdited));
+  unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));
 
   unsubs.push(ws.on(S.CHAT_DELETED, (payload) => handleChatDeleted(api, payload)));
 

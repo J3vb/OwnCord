@@ -183,9 +183,15 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   }
 }
 
-export function handleChatEdited(payload: Payload<"chat_edited">): void {
+export function handleChatEdited(
+  api: DispatchApi | undefined,
+  payload: Payload<"chat_edited">,
+): void {
   editMessage(payload);
   reviseDmLastMessage(payload.channel_id, payload.message_id, { lastMessage: payload.content });
+  if (dmPreviewRefetches.has(payload.channel_id)) {
+    reviseDmPreviewAfterDelete(api, payload.channel_id, []);
+  }
 }
 
 export function handleChatDeleted(
