@@ -48,8 +48,14 @@ pub fn active_captures() -> usize {
 }
 
 /// The error a cancelled portal dialog (or any capturer that fails before
-/// its first frame) reports; the webview maps it to a permission refusal.
+/// its first frame) reports; the webview maps it to a silent cancel.
 pub const CANCELLED: &str = "screen capture was cancelled or refused";
+
+/// How long a capture may take to produce its first frame before it is
+/// treated as cancelled. A portal dialog the user is still looking at is not
+/// this case: the dialog is answered before the capturer is built, so a long
+/// wait here means no first frame is coming.
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// What to capture.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -449,11 +455,45 @@ fn run(
             return;
         }
     };
+    run_loop(
+        &mut || producer.grab(),
+        options,
+        shared,
+        stopped,
+        &mut ready,
+        FIRST_FRAME_TIMEOUT,
+        on_end,
+    );
+}
+
+/// The capture loop, over any grab source. Split from `run` so a test can
+/// drive a source that never yields a first frame and pin the timeout.
+#[allow(clippy::too_many_arguments)]
+fn run_loop(
+    grab: &mut dyn FnMut() -> Grab,
+    options: CaptureOptions,
+    shared: &Shared,
+    stopped: &mpsc::Receiver<()>,
+    ready: &mut Option<oneshot::Sender<Result<(u32, u32), String>>>,
+    first_frame_timeout: Duration,
+    on_end: impl FnOnce(),
+) {
     let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
     let started = Instant::now();
     loop {
         let tick = Instant::now();
-        match producer.grab() {
+        // Bound the pre-first-frame phase (voice #9): a capturer that never
+        // produces a first frame (a permanently pending portal dialog, a
+        // transient error that loops) used to spin here forever while the
+        // shared enableScreenshare awaited `ready`, leaving the UI stuck
+        // "starting share" with the picker closed and no cancel.
+        if ready.is_some() && started.elapsed() > first_frame_timeout {
+            if let Some(r) = ready.take() {
+                let _ = r.send(Err(CANCELLED.into()));
+            }
+            return;
+        }
+        match grab() {
             Grab::Frame(mut buffer) => {
                 if let Some((w, h)) = fit(
                     buffer.width(),
@@ -515,6 +555,42 @@ mod tests {
     /// The capture count is process-wide: tests that start captures take
     /// turns.
     static SERIAL: Mutex<()> = Mutex::new(());
+
+    /// voice #9: a producer that never yields a first frame must not spin the
+    /// start loop forever — the shared enableScreenshare awaits `ready`.
+    #[test]
+    fn a_capture_that_never_produces_a_first_frame_times_out_as_cancelled() {
+        let shared = Shared {
+            source: Mutex::new(None),
+            preview: Arc::new(watch::channel(None).0),
+        };
+        let (_stop_tx, stop_rx) = mpsc::channel::<()>();
+        let (ready_tx, mut ready_rx) = oneshot::channel();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let started = std::time::Instant::now();
+        run_loop(
+            &mut || Grab::Pending,
+            CaptureOptions {
+                fps: 30.0,
+                max_width: 0,
+                max_height: 0,
+            },
+            &shared,
+            &stop_rx,
+            &mut Some(ready_tx),
+            Duration::from_millis(20),
+            || {},
+        );
+        // The loop returned promptly with a cancel, not after an unbounded
+        // wait.
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(
+            rt.block_on(&mut ready_rx).unwrap(),
+            Err("screen capture was cancelled or refused".to_string())
+        );
+    }
 
     #[test]
     fn picker_ids_parse_and_synthetic_is_unreachable() {
