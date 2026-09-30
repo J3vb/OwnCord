@@ -347,6 +347,24 @@ Task Scheduler discards the process's stdout: point the action at a redirect
 (wrap it as `cmd /c chatserver.exe >> logs\server.log 2>&1`) or the log is
 gone.
 
+### Running from a console window
+
+A server started by double-clicking `chatserver.exe`, or from cmd or
+PowerShell, is not supervised, so `auto` resolves to `spawn`. After a
+self-update, backup restore or setup-wizard restart, the replacement runs in the
+same console window: its log keeps printing there, and `Ctrl+C` or closing the
+window stops it and LiveKit.
+
+When a shell started the server, the shell prints its prompt again as the old
+process exits, while the replacement keeps logging to that window. The server is
+still running; the prompt only means the shell stopped waiting for it. The old
+process cannot stay behind to keep the shell waiting: on Windows it would hold
+`chatserver.exe.old` locked, so the replacement could not remove it and the next
+update could not move the running binary aside.
+
+A server started without a console (by a service wrapper, for example) gets a
+new console window of its own on a self-restart.
+
 ## TLS Setup
 
 What each mode means for the people connecting — desktop pinning, what a
@@ -1756,13 +1774,8 @@ A managed livekit-server never outlives the server, even when the server dies
 without running this sequence: on Linux the kernel kills it with its parent
 (`Pdeathsig`), and on Windows it runs in a job object that is killed when the
 server exits. On Windows, closing the server's console window stops the server
-and LiveKit together. A self-restart in `spawn` mode (update, backup restore,
-setup wizard) keeps the replacement in the same console window, so its output
-and `Ctrl+C` stay where they were. If a shell (cmd or PowerShell) started the
-server, the shell gets its prompt back when the old process exits while the
-replacement keeps logging to that window; `Ctrl+C` or closing the window still
-stops it. A server started without a console (by a service wrapper, for
-example) gets a new console window of its own.
+and LiveKit together, including after a self-restart (see
+[Running from a console window](#running-from-a-console-window)).
 
 ## See Also
 
