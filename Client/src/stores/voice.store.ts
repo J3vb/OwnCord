@@ -83,6 +83,9 @@ export interface VoiceState {
    *  the store; optional for the same fixture reason as peerVerifications. */
   readonly localServerMuted?: boolean;
   readonly localServerDeafened?: boolean;
+  /** The member had deafened themselves before a moderator deafened them, so
+   *  the moderator's lift hands the deafen back rather than releasing it. */
+  readonly deafenedBeforeModerator?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
    *  i.e. the mic should be gated (silenced) for PTT reasons. This is
    *  deliberately a separate flag from localMuted: PTT must never write the
@@ -134,6 +137,7 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localServerMuted: false,
   localServerDeafened: false,
+  deafenedBeforeModerator: false,
   pttGated: false,
   pttOwnsMute: false,
   localCamera: false,
@@ -157,6 +161,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localServerMuted: false,
     localServerDeafened: false,
+    deafenedBeforeModerator: false,
     pttGated: false,
     pttOwnsMute: false,
     localCamera: false,
@@ -347,6 +352,7 @@ export function leaveVoiceChannel(): void {
       // Server mute lives with the voice session; a new session starts clean.
       localServerMuted: false,
       localServerDeafened: false,
+      deafenedBeforeModerator: false,
       encryptionDegraded: false,
     };
     const channelId = prev.currentChannelId;
@@ -384,6 +390,16 @@ export function setVoiceStatus(status: VoiceStatus): void {
 export function setEncryptionDegraded(degraded: boolean): void {
   voiceStore.setState((prev) =>
     prev.encryptionDegraded === degraded ? prev : { ...prev, encryptionDegraded: degraded },
+  );
+}
+
+/** Record whether the member was deafened by their own choice when a
+ *  moderator deafened them (see VoiceState.deafenedBeforeModerator). */
+export function setDeafenedBeforeModerator(deafened: boolean): void {
+  voiceStore.setState((prev) =>
+    prev.deafenedBeforeModerator === deafened
+      ? prev
+      : { ...prev, deafenedBeforeModerator: deafened },
   );
 }
 

@@ -100,23 +100,51 @@ describe("snapshotReadyVoice", () => {
 
 describe("handleVoiceState moderator enforcement", () => {
   it("applies a moderator mute and deafen to this client", async () => {
-    handleVoiceState(voiceState({ server_muted: true, server_deafened: true }));
+    handleVoiceState(socketStub(), voiceState({ server_muted: true, server_deafened: true }));
 
     await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(true));
     expect(setMuted).toHaveBeenCalledWith(true);
   });
 
   it("releases a moderator mute on its falling edge only", async () => {
-    handleVoiceState(voiceState({ server_muted: true }));
+    handleVoiceState(socketStub(), voiceState({ server_muted: true }));
     await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(true));
     voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
 
-    handleVoiceState(voiceState({ server_muted: false }));
+    handleVoiceState(socketStub(), voiceState({ server_muted: false }));
     await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(false));
   });
 
+  it("keeps a member deafened who had deafened themselves before the moderator did", async () => {
+    // The member deafened themselves; a moderator deafens, then undeafens.
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true, localMuted: true }));
+    const socket = socketStub();
+    handleVoiceState(socket, voiceState({ muted: true, deafened: true, server_deafened: true }));
+    // The lift clears the row's deafen along with the moderator's.
+    handleVoiceState(socket, voiceState({ muted: true, deafened: false, server_deafened: false }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(setDeafened).not.toHaveBeenCalledWith(false);
+    expect(socket.send).toHaveBeenCalledWith({
+      type: "voice_deafen",
+      payload: { deafened: true },
+    });
+  });
+
+  it("releases a deafen only the moderator applied", async () => {
+    const socket = socketStub();
+    handleVoiceState(socket, voiceState({ deafened: true, server_deafened: true }));
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(true));
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
+
+    handleVoiceState(socket, voiceState({ deafened: false, server_deafened: false }));
+
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(false));
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
   it("does nothing to local audio for another user's voice state", async () => {
-    handleVoiceState(voiceState({ user_id: 10, server_muted: true }));
+    handleVoiceState(socketStub(), voiceState({ user_id: 10, server_muted: true }));
     await Promise.resolve();
     expect(setMuted).not.toHaveBeenCalled();
   });
