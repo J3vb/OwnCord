@@ -369,6 +369,7 @@ function showOgImage(
     }
     imageWrap.appendChild(img);
     imageWrap.style.display = "";
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
     return new Promise<void>((resolve) => {
       img.addEventListener("load", () => resolve(), { once: true });
       img.addEventListener("error", () => resolve(), { once: true });

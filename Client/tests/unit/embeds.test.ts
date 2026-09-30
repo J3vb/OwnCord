@@ -232,6 +232,45 @@ describe("renderGenericLinkPreview", () => {
     expect(card.querySelector(".msg-embed-link-img")).toBe(img);
   });
 
+  it("does not collapse a cached image preview on a rebuild when its image is already loaded", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: {
+        title: "Pic",
+        description: null,
+        siteName: null,
+        image: "h1" as ExternalImageHandle,
+      },
+    });
+    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+    const url = "https://cached-pic.example.com/page";
+    const first = renderGenericLinkPreview(url);
+    document.body.appendChild(first);
+    const firstImg = await vi.waitFor(() => {
+      const el = first.querySelector<HTMLImageElement>(".msg-embed-link-img");
+      if (el === null) throw new Error("no image yet");
+      return el;
+    });
+    firstImg.dispatchEvent(new Event("load"));
+    await vi.waitFor(() => {
+      expect(first.classList.contains("msg-embed-link-pending")).toBe(false);
+    });
+
+    const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
+    const width = vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(640);
+    try {
+      const rebuilt = renderGenericLinkPreview(url);
+      document.body.appendChild(rebuilt);
+      await vi.waitFor(() => {
+        expect(rebuilt.classList.contains("msg-embed-link-pending")).toBe(false);
+      });
+      expect(rebuilt.querySelector(".msg-embed-link-img")).not.toBeNull();
+    } finally {
+      complete.mockRestore();
+      width.mockRestore();
+    }
+  });
+
   it("shows the card without its image when the image is slower than the cap", async () => {
     vi.useFakeTimers();
     try {
