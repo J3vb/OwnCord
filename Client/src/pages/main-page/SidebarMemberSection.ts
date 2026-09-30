@@ -125,8 +125,7 @@ export function createSidebarMemberSection(
     (e: MouseEvent) => {
       isDragging = true;
       startY = e.clientY;
-      startHeight =
-        parseFloat(memberListContainer.style.height) || memberListContainer.offsetHeight;
+      startHeight = memberListContainer.getBoundingClientRect().height;
       e.preventDefault();
     },
     { signal: resizeOwner.signal },

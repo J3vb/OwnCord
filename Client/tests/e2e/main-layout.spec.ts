@@ -279,6 +279,26 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(await members.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(before - 10);
   });
 
+  test("a drag follows the cursor from a saved height taller than the column (P1-01)", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await signInFreshProfile(page, { "owncord:member-list-height": "1040" });
+
+    const members = page.locator("[data-testid='sidebar-members']");
+    const before = await members.evaluate((el) => el.getBoundingClientRect().height);
+    expect(before).toBeLessThan(1040);
+
+    await page.locator(".sidebar-resize-handle").evaluate((el) => {
+      el.dispatchEvent(new MouseEvent("mousedown", { clientY: 600, bubbles: true }));
+      document.dispatchEvent(new MouseEvent("mousemove", { clientY: 610, bubbles: true }));
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+
+    const after = await members.evaluate((el) => el.getBoundingClientRect().height);
+    expect(after).toBeCloseTo(before - 10, 0);
+  });
+
   test("the channel list stays reachable at 940x500 with 20px text (B9 Q1, #1780)", async ({
     page,
   }) => {
