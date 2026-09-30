@@ -115,9 +115,10 @@ func (h *Hub) restorePendingModFlags(c *Client, wasServerMuted, wasServerDeafene
 
 // voiceJoinPrecheck runs every gate that must pass before handleVoiceJoin
 // mutates any state: rate limit, payload parse, a moderator's rejoin block
-// (voice_rejoin_block.go), CONNECT_VOICE, channel existence, channel type, DM
-// block, archive, switch capacity, authenticated user and LiveKit
-// availability. It reports the target channel id and row when the join may
+// (voice_rejoin_block.go), channel existence, the join gate
+// (permissions.CanJoinVoice: CONNECT_VOICE, READ_MESSAGES outside a DM,
+// channel type, DM block, archive), switch capacity, authenticated user and
+// LiveKit availability. It reports the target channel id and row when the join may
 // proceed; on refusal it has already sent the error frame and returns false.
 func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.RawMessage) (int64, *db.Channel, bool) {
 	// Rate limit: voice_join broadcasts a voice_state update to every connected
@@ -374,7 +375,7 @@ func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID
 func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64) (canPublish, canVideo, canScreenShare bool) {
 	if h.perms != nil {
 		// PermissionService answers all three bits from one cached
-		// role+overrides snapshot (populated by the CONNECT_VOICE gate
+		// role+overrides snapshot (populated by the join gate
 		// above, so these are cache hits). Same fail-closed posture: an
 		// unresolved role or override map yields no publish grants.
 		canPublish = h.perms.HasChannelPerm(ctx, userID, channelID, permissions.SpeakVoice)
@@ -428,7 +429,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 		}
 
 		// OC-0008: a concurrent eviction (voice_mod_kick/move via
-		// DisconnectFromVoiceInChannel, the CONNECT_VOICE revocation sweep, or
+		// DisconnectFromVoiceInChannel, the voice permission revocation sweep, or
 		// CleanupVoiceForChannel) can land anywhere between c.setVoiceState
 		// (BUG-088, above) and here — all of them delete the voice_states row
 		// and clear the client's in-memory state, then call RemoveParticipant,

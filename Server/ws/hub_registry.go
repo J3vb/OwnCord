@@ -182,7 +182,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
 		// VoiceTopic is the only transport for voice_e2ee_announce relays and
 		// carries nothing else, for a channel the user already joined via the
-		// CONNECT_VOICE-gated voice_join — so no READ gate.
+		// voice_join gate (permissions.CanJoinVoice) — so no separate READ gate.
 		h.pubsub.Subscribe(c, VoiceTopic(voiceChID))
 		// Voice membership can outlive READ_MESSAGES (a mid-call revocation,
 		// or a closed DM), so it must not by itself grant a channel's message stream: subscribe only when the
