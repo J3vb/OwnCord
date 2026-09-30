@@ -3,8 +3,8 @@ package ws_test
 // serve_ready_own_voice_test.go — regression test for finding OC-0028:
 // buildReady filters voice_states through visibleSet, which is seeded only
 // from READ-visible non-DM channels plus the caller's currently-*open* DM
-// channels (dm_open_state). Voice membership needs only CONNECT_VOICE
-// (voice_join.go), not READ_MESSAGES nor an open DM row, so a user's own
+// channels (dm_open_state). Voice membership can outlive READ_MESSAGES and
+// the open DM row (a mid-call revocation, or a closed DM), so a user's own
 // live voice room can be absent from visibleSet -- the exact hole
 // liveVoiceEventsSince patches on the reconnect-replay tier (serve.go) but
 // which buildReady, the full-ready tier, never covered. Concretely: a user

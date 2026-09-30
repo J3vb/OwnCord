@@ -2,8 +2,8 @@ package ws
 
 // reconnect_voice_supplement_test.go — regression test for finding v107.
 //
-// Voice membership is gated on CONNECT_VOICE alone (voice_join.go), and the
-// live fan-out path deliberately unions the READ audience with the room's
+// Voice membership can outlive READ_MESSAGES (a mid-call revocation, or a
+// closed DM), and the live fan-out path deliberately unions the READ audience with the room's
 // current participants for exactly that reason (broadcastVoiceEvent). Replay,
 // though, filtered purely on computeAllowedChannels — READ-visible channels
 // plus open DMs — so a resuming participant silently missed the buffered

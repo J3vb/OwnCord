@@ -8,8 +8,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 )
 
-// Voice membership is gated on CONNECT_VOICE alone (voice_join), but the
-// voice_state / voice_leave fan-out filters its audience on READ_MESSAGES. A
+// Voice membership can outlive READ_MESSAGES (a mid-call revocation, or a
+// closed DM), but the voice_state / voice_leave fan-out filters its audience on READ_MESSAGES. A
 // participant in that gap misses the room's own membership events — and the
 // client's E2EE key-holder election and forward-secrecy rotation run only off
 // the voice_leave WS event, so a departing key holder is never replaced and
@@ -55,8 +55,8 @@ func TestBroadcastVoiceEvent_VoiceParticipantsAlwaysInAudience(t *testing.T) {
 // by the time finishVoiceLeave runs, the caller has already cleared the
 // evicted client's own voice state, so broadcastVoiceEvent's participant
 // union (which checks c.getVoiceChID() == channelID) can no longer find
-// them — and voice membership is gated on CONNECT_VOICE alone, so a
-// participant without READ_MESSAGES is a supported state that would
+// them — and voice membership can outlive READ_MESSAGES (a mid-call
+// revocation, or a closed DM), so a participant without READ_MESSAGES is a supported state that would
 // otherwise never receive its own voice_leave teardown signal (the client's
 // only trigger for E2EE/LiveKit cleanup on a server-initiated eviction).
 // finishVoiceLeave must resolve the audience itself and always include the

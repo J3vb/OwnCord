@@ -318,8 +318,8 @@ func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
 	assertNotReceived(t, s2, "unfocused client must NOT receive channel broadcast")
 }
 
-// Voice membership is gated on CONNECT_VOICE only, so it must never on its own
-// subscribe a client to a channel's message stream — that route requires
+// Voice membership can outlive READ_MESSAGES (a mid-call revocation, or a
+// closed DM), so it must never on its own subscribe a client to a channel's message stream — that route requires
 // READ_MESSAGES (channel_focus). Registration without a READ_MESSAGES set must
 // therefore deliver nothing.
 func TestHub_BroadcastToChannel_NotDeliveredOnVoiceMembershipAlone(t *testing.T) {
