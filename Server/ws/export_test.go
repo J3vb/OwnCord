@@ -447,14 +447,10 @@ func QualityBitrateForTest(quality string) int {
 	return qualityBitrate(quality)
 }
 
-// BuildDMChannelOpenForTest exposes buildDMChannelOpenFor for external tests.
+// BuildDMChannelOpenForTest exposes buildDMChannelOpenFor for external tests,
+// with every participant connected and online.
 func BuildDMChannelOpenForTest(channelID int64, recipient *db.User) []byte {
-	return buildDMChannelOpenFor(channelID, recipient, 0)
-}
-
-// BuildDMChannelOpenInfoForTest exposes the group-aware buildDMChannelOpen.
-func BuildDMChannelOpenInfoForTest(info db.DMChannelInfo) []byte {
-	return buildDMChannelOpen(info)
+	return buildDMChannelOpenFor(channelID, recipient, 0, func(int64) string { return db.StatusOnline })
 }
 
 // BuildCallSignalForTest exposes buildCallSignal for external tests.

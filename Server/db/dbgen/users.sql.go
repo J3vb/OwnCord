@@ -360,8 +360,11 @@ WHERE id IN (/*SLICE:ids*/?)
 // Connect bookkeeping, db.ConnectStatus in SQL: a chosen idle, dnd or
 // invisible survives, anything else comes online, and last_seen is refreshed.
 // It reads the column at write time rather than taking a status from the
-// caller, so a batched stamp (P5-S07) cannot overwrite a presence_update that
-// committed while it waited.
+// caller, so a batched stamp (P5-S07) keeps an idle, dnd or invisible that a
+// presence_update committed while it waited. A legacy 'offline' choice would
+// become 'online', so a committed presence_update drops the pending stamp
+// (ChannelService.HandlePresenceUpdate); only a flush already in flight can
+// still land once over that 'offline'.
 func (q *Queries) StampUsersConnected(ctx context.Context, ids []int64) error {
 	query := stampUsersConnected
 	var queryParams []interface{}

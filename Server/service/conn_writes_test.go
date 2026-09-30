@@ -273,3 +273,26 @@ func TestConnWrites_RunFlushesOnTheInterval(t *testing.T) {
 	}
 	t.Fatal("Run did not flush a pending connect stamp")
 }
+
+// A legacy client's "offline" presence_update, committed while its connect
+// stamp is still pending, is a choice the stamp's SQL would turn back into
+// online; the committed presence_update drops the pending stamp instead.
+func TestConnWrites_PresenceUpdateDropsPendingConnect(t *testing.T) {
+	database, spy, w, _, users := newBatchedServices(t)
+	channels := NewChannelService(spy, nil)
+	channels.SetConnWrites(w)
+	ctx := context.Background()
+	seedUser(t, database, &db.User{ID: 1, Username: "legacy", Status: db.StatusOffline})
+
+	_, _ = users.StampConnect(ctx, 1, db.StatusOffline)
+	if _, err := channels.HandlePresenceUpdate(ctx, 1, db.StatusOffline, nil, nil); err != nil {
+		t.Fatalf("HandlePresenceUpdate: %v", err)
+	}
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	u, _ := database.GetUserByID(ctx, 1)
+	if u.Status != db.StatusOffline {
+		t.Fatalf("status = %q, want the offline chosen after the connect", u.Status)
+	}
+}

@@ -532,8 +532,12 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 // most StampFlushInterval later. The member list does not wait on it (the hub
 // overlays each connection's live status, ws presentableMembers); a reader of
 // the row itself, such as @here, may see the pre-connect value for that long.
-// The SQL re-derives the status from the column at write time, so a
-// presence_update committed meanwhile is not overwritten.
+// The SQL re-derives the status from the column at write time, which keeps
+// a chosen idle/dnd/invisible committed meanwhile, but it would turn a legacy
+// "offline" choice into online, so a committed presence_update drops the
+// pending stamp (ChannelService.HandlePresenceUpdate). A flush already in
+// flight when the presence_update commits can still land once, affecting
+// only that legacy "offline" value.
 //
 // The caller must not cache the returned status unless the error is nil.
 func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {

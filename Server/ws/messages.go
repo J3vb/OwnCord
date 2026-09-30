@@ -800,18 +800,20 @@ func buildChannelDelete(channelID int64) []byte {
 // The payload is a db.DMChannelInfo, the same shape the REST list and the
 // ready payload carry, so a client has exactly one DM shape to parse. It is
 // built per viewer rather than once per channel because `recipient` and
-// `recipients` are both defined relative to who is reading them.
-func buildDMChannelOpen(info db.DMChannelInfo) []byte {
+// `recipients` are both defined relative to who is reading them, and each
+// participant's status is the live one (presentDMStatuses), not the
+// users.status row.
+func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeDMChannelOpen,
-		Payload: info,
+		Payload: presentDMStatuses([]db.DMChannelInfo{info}, viewerID, liveStatus)[0],
 	})
 }
 
 // buildDMChannelOpenFor constructs a dm_channel_open event announcing a 1:1 DM
 // to the user on the other end of it. Returns nil if recipient is nil to avoid
 // a panic on dereferencing.
-func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) []byte {
+func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, liveStatus func(userID int64) string) []byte {
 	if recipient == nil {
 		slog.Warn("buildDMChannelOpenFor called with nil recipient", "channel_id", channelID)
 		return nil
@@ -828,14 +830,13 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) 
 		ID:          recipient.ID,
 		Username:    recipient.Username,
 		Avatar:      avatarStr,
-		Status:      db.StatusForViewer(recipient.Status, recipient.ID, viewerID),
 		DisplayName: displayName,
 	}
 	return buildDMChannelOpen(db.DMChannelInfo{
 		ChannelID:  channelID,
 		Recipient:  other,
 		Recipients: []db.DMUser{other},
-	})
+	}, viewerID, liveStatus)
 }
 
 // dmRequestSenderPayload is the sender profile a dm_request frame carries —

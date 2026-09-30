@@ -106,8 +106,15 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 // Recipient is a copy of Recipients[0], not a shared reference.
 func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
 	live := h.liveStatuses()
+	return presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id] })
+}
+
+// presentDMStatuses is presentableDMChannels over any live-status lookup
+// ("" for no stamped connection), for a caller that presents a single DM and
+// need not snapshot every connection.
+func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []db.DMChannelInfo {
 	status := func(id int64) string {
-		if s := live[id]; s != "" {
+		if s := liveStatus(id); s != "" {
 			return db.StatusForViewer(s, id, viewerID)
 		}
 		return db.StatusOffline

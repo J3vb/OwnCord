@@ -225,7 +225,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
 
 	chatDeps := ChatDeps{
-		Limiter: h.limiter,
+		Limiter:    h.limiter,
+		LiveStatus: h.LiveStatus,
 	}
 	presenceDeps := PresenceDeps{
 		Limiter: h.limiter,

@@ -17,6 +17,7 @@ import (
 type ChannelService struct {
 	st    Store
 	perms *PermissionService
+	batch *ConnWrites
 }
 
 // NewChannelService creates a ChannelService.
@@ -26,6 +27,10 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 		perms: perms,
 	}
 }
+
+// SetConnWrites installs the batch whose pending connect stamp a committed
+// presence_update drops. Call once at startup, before the service is shared.
+func (s *ChannelService) SetConnWrites(w *ConnWrites) { s.batch = w }
 
 // ListVisibleChannels returns channels the user has ReadMessages permission for.
 // DM channels are excluded (they are accessed via DMService).
@@ -204,6 +209,7 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 			slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
 			return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
 		}
+		s.dropConnectStamp(userID)
 		return current.CustomStatus, nil
 	}
 
@@ -213,7 +219,17 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
 		return nil, fmt.Errorf("%w: failed to update status", ErrInternal)
 	}
+	s.dropConnectStamp(userID)
 	return cleaned, nil
+}
+
+// dropConnectStamp keeps a pending batched connect stamp from overwriting the
+// status a presence_update just committed: the stamp's SQL turns a legacy
+// "offline" choice into online.
+func (s *ChannelService) dropConnectStamp(userID int64) {
+	if s.batch != nil {
+		s.batch.dropConnectStamp(userID)
+	}
 }
 
 // HandleChannelFocus processes a channel focus event and updates read state.

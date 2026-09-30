@@ -40,13 +40,14 @@ type ConnWrites struct {
 	stamps  map[int64]bool      // user ID -> connected; the latest stamp wins
 }
 
-// BatchConnWrites installs one ConnWrites over the services' store into Users
-// and Sessions and returns it for the owner to Run and Flush. Without it both
+// BatchConnWrites installs one ConnWrites over the services' store into Users,
+// Sessions and Channels and returns it for the owner to Run and Flush. Without it both
 // services write each stamp and touch at once.
 func (s *Services) BatchConnWrites() *ConnWrites {
 	w := NewConnWrites(s.Users.st)
 	s.Users.SetConnWrites(w)
 	s.Sessions.SetConnWrites(w)
+	s.Channels.SetConnWrites(w)
 	return w
 }
 
@@ -65,6 +66,17 @@ func (w *ConnWrites) queueTouch(tokenHash string) {
 func (w *ConnWrites) queueStamp(userID int64, connected bool) {
 	w.mu.Lock()
 	w.stamps[userID] = connected
+	w.mu.Unlock()
+}
+
+// dropConnectStamp discards userID's pending connect stamp, once a
+// presence_update has committed a newer status for them. Its own write
+// refreshed last_seen, so nothing is lost; a pending disconnect stays.
+func (w *ConnWrites) dropConnectStamp(userID int64) {
+	w.mu.Lock()
+	if w.stamps[userID] {
+		delete(w.stamps, userID)
+	}
 	w.mu.Unlock()
 }
 
