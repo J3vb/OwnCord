@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -46,6 +47,10 @@ func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter
 // Validation failures answer INVALID_INPUT with the service's own message —
 // the S-03 contract's wording is the response body.
 func writeChannelErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrConflict) {
+		writeErr(w, http.StatusConflict, "CHANNEL_NAME_TAKEN", err.Error())
+		return
+	}
 	writeSvcErr(w, err, "channel not found", "INVALID_INPUT", "channel action failed")
 }
 

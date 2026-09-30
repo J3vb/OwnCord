@@ -461,7 +461,7 @@ describe("Server/admin/static — panel behaviour", () => {
         return {
           json: [{ id: 2, username: "member", role_id: 4, status: "online", banned: false }],
         };
-      if (p === "/registrations")
+      if (p.startsWith("/registrations"))
         return { json: [{ id: 3, username: "applicant", created_at: "2026-09-01 10:00:00" }] };
       if (p === "/roles") return { json: roles };
       if (p === "/channels") return { json: [{ id: 5, name: "general", type: "text" }] };
@@ -1501,7 +1501,11 @@ describe("Server/admin/static — panel behaviour", () => {
             version: "1.2.0",
           },
         };
-      if (p === "/registrations") return { json: pending };
+      if (p.startsWith("/registrations")) {
+        // Answers like the route: at most `limit` rows, 50 by default.
+        const limit = /[?&]limit=(\d+)/.exec(p);
+        return { json: pending.slice(0, limit ? Number(limit[1]) : 50) };
+      }
       if (p === "/attention")
         return { json: { warnings: [{ id: "a" }, { id: "b", recovered_at: "x" }] } };
       if (p === "/updates") return { json: { update_available: true } };
@@ -1553,9 +1557,9 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(doc.activeElement).toBe(nav.querySelector('[aria-current="page"]'));
 
-    // A full page of registrations (the route's 50-row default) may be an
-    // undercount, so the badge reads 50+; the nav re-render keeps focus.
-    pending = Array.from({ length: 50 }, (_, i) => ({ id: i + 1 }));
+    // More registrations than one page reads as 50+ (Members over-fetches its
+    // first page by one row to know); the nav re-render keeps focus.
+    pending = Array.from({ length: 51 }, (_, i) => ({ id: i + 1 }));
     await bridge.renderUsers();
     expect(item("users").textContent).toBe("Members50+ (50+ pending registrations)");
     expect(doc.activeElement).toBe(nav.querySelector('[aria-current="page"]'));
