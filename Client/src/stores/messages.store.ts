@@ -236,9 +236,10 @@ export function invalidateLoadedMessageWindows(): void {
  * deletes and reactions made while away. The rows themselves are kept (the
  * next visit renders them at once) and setMessages reconciles the refetched
  * page into them, keeping the rows it left unchanged, dropping older rows
- * beyond it and carrying pending/failed rows across. Like reattachToPresent, this leaves detachedChannels alone:
- * setMessages clears it once the tail has actually landed, and until then a
- * detached window must keep refusing live broadcasts.
+ * beyond it and carrying pending/failed rows across. Like reattachToPresent,
+ * this leaves detachedChannels alone: setMessages clears it once the tail has
+ * actually landed, and until then a detached window must keep refusing live
+ * broadcasts.
  */
 export function invalidateChannelMessageWindow(channelId: number): void {
   messagesStore.setState((prev) => reduceInvalidateChannelMessageWindow(prev, channelId));
