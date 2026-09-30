@@ -4,5 +4,6 @@
   "project": ["src/**/*.ts"],
   "ignore": ["src/lib/protocolTypes.ts"],
   "ignoreExportsUsedInFile": true,
-  "ignoreBinaries": ["go"]
+  "ignoreBinaries": ["go"],
+  "ignoreDependencies": ["@jitsi/rnnoise-wasm"]
 }

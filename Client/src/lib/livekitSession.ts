@@ -413,6 +413,7 @@ export class LiveKitSession {
       },
       leaveVoice: (sendWs) => this.leaveVoice(sendWs),
       applyMicMuteState: (muted) => this.applyMicMuteState(muted),
+      setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
       attemptAutoReconnect: (token, url, channelId, directUrl, signal) =>
         this.attemptAutoReconnect(token, url, channelId, directUrl, signal),
     });

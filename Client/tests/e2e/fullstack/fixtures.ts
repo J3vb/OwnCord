@@ -50,9 +50,9 @@ export const test = base.extend<Fixtures>({
     await login(page, server, "alice");
     await use(page);
   },
-  bobTransport: async ({ browser, server, media }, use) => {
+  bobTransport: async ({ browser, server, media, baseURL }, use) => {
     const context = await browser.newContext({
-      baseURL: "http://localhost:4173",
+      baseURL,
       permissions: ["microphone", "camera"],
     });
     const page = await context.newPage();

@@ -3,7 +3,8 @@
 // Architecture:
 //   rawMicTrack → AudioContext source
 //       ├──→ AnalyserNode (VAD reads raw audio here — always sees real signal)
-//       └──→ GainNode (inputVolume × vadGate) → MediaStreamDestination → WebRTC sender
+//       └──→ DelayNode (gate lookahead) → GainNode (inputVolume × vadGate)
+//                → MediaStreamDestination → WebRTC sender
 //
 // The pipeline is always active while in a voice session. This avoids
 // creating/destroying it when volume changes, and gives the VAD a stable
@@ -16,6 +17,48 @@ import { createRNNoiseProcessor } from "@lib/noise-suppression";
 import { voiceText } from "../i18n/voice";
 
 const log = createLogger("audioPipeline");
+
+/** The gate threshold at sensitivity 0, as the RMS of one 128-sample render
+ *  quantum. The settings meter draws its level on this same scale. */
+export const VAD_MAX_THRESHOLD = 0.1;
+
+/** The RMS a render quantum must reach to count as speech at `sensitivity`
+ *  (0-100). 100 is no gate at all. */
+export function vadThreshold(sensitivity: number): number {
+  return ((100 - sensitivity) / 100) * VAD_MAX_THRESHOLD;
+}
+
+/** How far the voice path runs behind the detector while the gate is on. The
+ *  gate opens only after ~32 ms of sustained level (vad-worklet.js), which is
+ *  what keeps a mouse click from opening it; the delay covers that wait and
+ *  the opening ramp, so the start of a word is not cut off. */
+const GATE_LOOKAHEAD_S = 0.05;
+/** Gain smoothing: opening has to finish inside the lookahead. */
+const GATE_OPEN_TIME_CONSTANT_S = 0.005;
+const GAIN_TIME_CONSTANT_S = 0.015;
+
+/**
+ * The microphone capture request: the processing toggles and the chosen input
+ * device. A restart takes the whole request, so one that names no device
+ * reopens the system default; the settings meter uses the same request so it
+ * measures what the call captures. The device is `exact`, as in
+ * switchActiveDevice: Chromium resolves a merely preferred device id to the
+ * default device.
+ */
+export function micCaptureOptions(): {
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+  deviceId?: { exact: string };
+} {
+  const deviceId = loadPref<string>("audioInputDevice", "");
+  return {
+    echoCancellation: loadPref("echoCancellation", true),
+    noiseSuppression: loadPref("noiseSuppression", true),
+    autoGainControl: loadPref("autoGainControl", true),
+    ...(deviceId === "" ? {} : { deviceId: { exact: deviceId } }),
+  };
+}
 
 /** Upper bound on waiting for the VAD processor's `stopped`; a context that
  *  is not rendering (suspended) never calls process() again. */
@@ -62,6 +105,7 @@ export class AudioPipeline {
   // Pipeline nodes
   private audioPipelineCtx: AudioContext | null = null;
   private audioPipelineGain: GainNode | null = null;
+  private audioPipelineDelay: DelayNode | null = null;
   private audioPipelineAnalyser: AnalyserNode | null = null;
   private audioPipelineDest: MediaStreamAudioDestinationNode | null = null;
   private vadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -107,6 +151,9 @@ export class AudioPipeline {
    * Attach RNNoise processor to the local mic track. Safe to call if already
    * attached. A no-op while the track is muted (its capture is stopped); the
    * unmute path in MediaControl.applyMicMuteState attaches it instead.
+   * Never rejects when the processor cannot start: the microphone stays
+   * published unprocessed, and callers await this beside the publish itself,
+   * where a rejection reads as a microphone failure.
    */
   async applyNoiseSuppressor(): Promise<void> {
     if (this.room === null) return;
@@ -115,8 +162,13 @@ export class AudioPipeline {
     if (micPub.track.isMuted) return;
     if (micPub.track.getProcessor() !== undefined) return;
     const processor = createRNNoiseProcessor();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
-    await micPub.track.setProcessor(processor as any);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LocalTrack.setProcessor uses wide generic, but AudioProcessorOptions is guaranteed at runtime with webAudioMix
+      await micPub.track.setProcessor(processor as any);
+    } catch (err) {
+      log.warn("RNNoise processor failed to start — microphone stays unprocessed", err);
+      return;
+    }
     log.info("RNNoise processor attached to mic track");
     // Rebuild so the gain/VAD chain sources from the processor's output and
     // its own sender.replaceTrack runs last, winning over setProcessor's
@@ -178,13 +230,19 @@ export class AudioPipeline {
 
       const dest = ctx.createMediaStreamDestination();
 
-      // Wire: source → analyser (tap) and source → gain → dest
+      // Lookahead for the gate; zero until VAD starts.
+      const delay = ctx.createDelay(GATE_LOOKAHEAD_S);
+      delay.delayTime.value = 0;
+
+      // Wire: source → analyser (tap) and source → delay → gain → dest
       source.connect(analyser);
-      source.connect(gainNode);
+      source.connect(delay);
+      delay.connect(gainNode);
       gainNode.connect(dest);
 
       this.audioPipelineCtx = ctx;
       this.audioPipelineGain = gainNode;
+      this.audioPipelineDelay = delay;
       this.audioPipelineAnalyser = analyser;
       this.audioPipelineDest = dest;
 
@@ -248,6 +306,10 @@ export class AudioPipeline {
       this.audioPipelineGain.disconnect();
       this.audioPipelineGain = null;
     }
+    if (this.audioPipelineDelay !== null) {
+      this.audioPipelineDelay.disconnect();
+      this.audioPipelineDelay = null;
+    }
     if (this.audioPipelineAnalyser !== null) {
       this.audioPipelineAnalyser.disconnect();
       this.audioPipelineAnalyser = null;
@@ -265,14 +327,21 @@ export class AudioPipeline {
 
   /** Update the effective gain on the pipeline (inputVolume × vadGate).
    *  The pipeline only exists when unmuted — muting tears it down entirely. */
-  updatePipelineGain(): void {
+  updatePipelineGain(timeConstant = GAIN_TIME_CONSTANT_S): void {
     if (this.audioPipelineGain === null || this.audioPipelineCtx === null) return;
     const effectiveGain = this.vadGated ? 0 : this.currentInputGain;
     this.audioPipelineGain.gain.setTargetAtTime(
       effectiveGain,
       this.audioPipelineCtx.currentTime,
-      0.015,
+      timeConstant,
     );
+  }
+
+  /** Apply a detector verdict: close gently, open inside the lookahead. */
+  private setVadGated(gated: boolean): void {
+    if (gated === this.vadGated) return;
+    this.vadGated = gated;
+    this.updatePipelineGain(gated ? GAIN_TIME_CONSTANT_S : GATE_OPEN_TIME_CONSTANT_S);
   }
 
   // --- Volume/sensitivity ---
@@ -337,7 +406,9 @@ export class AudioPipeline {
     const sensitivity = loadPref<number>("voiceSensitivity", 50);
     if (sensitivity >= 100) return;
 
-    const threshold = ((100 - sensitivity) / 100) * 0.1;
+    const threshold = vadThreshold(sensitivity);
+    if (this.audioPipelineDelay !== null)
+      this.audioPipelineDelay.delayTime.value = GATE_LOOKAHEAD_S;
 
     // Try AudioWorklet first
     const gen = this._pipelineGeneration;
@@ -378,11 +449,7 @@ export class AudioPipeline {
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") {
-          const gated = event.data.gated as boolean;
-          if (gated !== this.vadGated) {
-            this.vadGated = gated;
-            this.updatePipelineGain();
-          }
+          this.setVadGated(event.data.gated as boolean);
         } else if (event.data.type === "rms") {
           this._lastVadRms = event.data.value as number;
         }
@@ -441,17 +508,11 @@ export class AudioPipeline {
       if (rms < threshold) {
         speechFrames = 0;
         silentFrames++;
-        if (!this.vadGated && silentFrames >= GATE_ON_FRAMES) {
-          this.vadGated = true;
-          this.updatePipelineGain();
-        }
+        if (silentFrames >= GATE_ON_FRAMES) this.setVadGated(true);
       } else {
         silentFrames = 0;
         speechFrames++;
-        if (this.vadGated && speechFrames >= GATE_OFF_FRAMES) {
-          this.vadGated = false;
-          this.updatePipelineGain();
-        }
+        if (speechFrames >= GATE_OFF_FRAMES) this.setVadGated(false);
       }
 
       this.vadTimer = setTimeout(poll, 16);
@@ -486,6 +547,7 @@ export class AudioPipeline {
     }
     this._vadUsingWorklet = false;
     this._lastVadRms = 0;
+    if (this.audioPipelineDelay !== null) this.audioPipelineDelay.delayTime.value = 0;
     // Ungate if was gated
     if (this.vadGated) {
       this.vadGated = false;
@@ -508,11 +570,7 @@ export class AudioPipeline {
       return;
     }
 
-    const captureOptions = {
-      echoCancellation: loadPref("echoCancellation", true),
-      noiseSuppression: loadPref("noiseSuppression", true),
-      autoGainControl: loadPref("autoGainControl", true),
-    };
+    const captureOptions = micCaptureOptions();
 
     try {
       // restartTrack re-acquires the mic with new constraints without unpublishing
@@ -526,6 +584,10 @@ export class AudioPipeline {
       const enhancedNS = loadPref<boolean>("enhancedNoiseSuppression", false);
       if (enhancedNS) {
         await this.applyNoiseSuppressor();
+        // The user just asked for it: say so when it could not start.
+        if (!micPub.track.isMuted && micPub.track.getProcessor() === undefined) {
+          onError?.(voiceText("audio.settingsFailed"));
+        }
       } else {
         await this.removeNoiseSuppressor();
       }

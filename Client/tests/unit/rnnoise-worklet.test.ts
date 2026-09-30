@@ -119,7 +119,7 @@ describe("rnnoise-worklet", () => {
     expect(port.postMessage).toHaveBeenCalledWith({
       type: "error",
       message: expect.stringContaining(
-        "WASM module missing required RNNoise exports: memory (c), __wasm_call_ctors (d), rnnoise_create (f)",
+        "WASM module missing required RNNoise exports: memory (c), __wasm_call_ctors (d), malloc (e)",
       ),
     });
     expect(processor._ready).toBe(false);

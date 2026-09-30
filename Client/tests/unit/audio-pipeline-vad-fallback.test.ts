@@ -78,6 +78,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "track" }]) },
           disconnect: vi.fn(),
@@ -161,6 +166,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "track" }]) },
           disconnect: vi.fn(),
@@ -251,6 +261,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -352,6 +367,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -431,6 +451,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -506,6 +531,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -592,6 +622,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),

@@ -77,6 +77,7 @@ describe("AudioPipeline", () => {
     let mockAnalyserNode: any;
     let mockDestNode: any;
     let mockSourceNode: any;
+    let mockDelayNode: any;
     let mockAudioCtx: any;
     let mockRoom: any;
 
@@ -103,11 +104,13 @@ describe("AudioPipeline", () => {
         disconnect: vi.fn(),
       };
       mockSourceNode = { connect: vi.fn() };
+      mockDelayNode = { delayTime: { value: 0 }, connect: vi.fn(), disconnect: vi.fn() };
       mockAudioCtx = {
         resume: vi.fn().mockResolvedValue(undefined),
         createMediaStreamSource: vi.fn().mockReturnValue(mockSourceNode),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyserNode),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue(mockDelayNode),
         createMediaStreamDestination: vi.fn().mockReturnValue(mockDestNode),
         currentTime: 0,
         close: vi.fn().mockResolvedValue(undefined),
@@ -212,6 +215,63 @@ describe("AudioPipeline", () => {
       expect(pipeline.isVadGated).toBe(false);
     });
 
+    // The gate needs ~32 ms of speech before it opens. Without a lookahead
+    // the first syllable's onset is already past the gain node by then.
+    it("delays the voice path behind the detector while the gate runs", async () => {
+      setupPipelineWithWorklet("success");
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+      await vi.waitFor(() => {
+        expect(pipeline.vadUsingWorklet).toBe(true);
+      });
+
+      // Detector taps the source directly; the voice goes through the delay.
+      expect(mockSourceNode.connect).toHaveBeenCalledWith(mockAnalyserNode);
+      expect(mockSourceNode.connect).toHaveBeenCalledWith(mockDelayNode);
+      expect(mockSourceNode.connect).not.toHaveBeenCalledWith(mockGainNode);
+      expect(mockDelayNode.connect).toHaveBeenCalledWith(mockGainNode);
+      expect(mockDelayNode.delayTime.value).toBe(0.05);
+    });
+
+    it("adds no delay when sensitivity 100 turns the gate off", () => {
+      setupPipelineWithWorklet("success");
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "voiceSensitivity" ? 100 : defaultVal,
+      );
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+
+      expect(mockDelayNode.delayTime.value).toBe(0);
+    });
+
+    it("drops the delay again when the gate is stopped", async () => {
+      setupPipelineWithWorklet("success");
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+      await vi.waitFor(() => {
+        expect(pipeline.vadUsingWorklet).toBe(true);
+      });
+
+      pipeline.stopVadPolling();
+
+      expect(mockDelayNode.delayTime.value).toBe(0);
+    });
+
+    it("opens faster than it closes, inside the lookahead", async () => {
+      setupPipelineWithWorklet("success");
+      pipeline.setRoom(mockRoom);
+      pipeline.setupAudioPipeline();
+      await vi.waitFor(() => {
+        expect(pipeline.vadUsingWorklet).toBe(true);
+      });
+      const workletInstance = (globalThis as any).AudioWorkletNode.mock.results[0].value;
+
+      workletInstance.port.onmessage({ data: { type: "gate", gated: true } } as any);
+      expect(mockGainNode.gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0, 0.015);
+      workletInstance.port.onmessage({ data: { type: "gate", gated: false } } as any);
+      expect(mockGainNode.gain.setTargetAtTime).toHaveBeenLastCalledWith(1, 0, 0.005);
+    });
+
     it("worklet rms message updates lastVadRms", async () => {
       setupPipelineWithWorklet("success");
       pipeline.setRoom(mockRoom);
@@ -299,6 +359,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -417,6 +482,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -511,6 +581,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -604,6 +679,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -704,6 +784,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -792,6 +877,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue({ connect: vi.fn() }),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),

@@ -37,8 +37,7 @@ describe("VoiceAudioTab camera preview", () => {
           return {
             fftSize: 0,
             smoothingTimeConstant: 0,
-            frequencyBinCount: 32,
-            getByteFrequencyData: vi.fn(),
+            getFloatTimeDomainData: vi.fn(),
           };
         }
 
@@ -156,8 +155,7 @@ describe("VoiceAudioTab mic meter", () => {
           return {
             fftSize: 0,
             smoothingTimeConstant: 0,
-            frequencyBinCount: 32,
-            getByteFrequencyData: vi.fn(),
+            getFloatTimeDomainData: vi.fn(),
           };
         }
 
@@ -266,8 +264,7 @@ describe("VoiceAudioTab UI structure", () => {
           return {
             fftSize: 0,
             smoothingTimeConstant: 0,
-            frequencyBinCount: 32,
-            getByteFrequencyData: vi.fn(),
+            getFloatTimeDomainData: vi.fn(),
           };
         }
         createMediaStreamSource() {
@@ -628,12 +625,15 @@ describe("VoiceAudioTab UI structure", () => {
     });
 
     describe("mic pill against a fixed noise floor", () => {
-      /** Every frequency bin reads this byte, so the meter's RMS is level / 255. */
+      /** Every sample reads this, so each 128-sample block's RMS is `level`. */
       let level = 0;
+      /** How the analyser fills its window; a test may shape it. */
+      let fillWindow = (arr: Float32Array, value: number): Float32Array => arr.fill(value);
       let frames: FrameRequestCallback[] = [];
 
       beforeEach(() => {
         level = 0;
+        fillWindow = (arr, value) => arr.fill(value);
         frames = [];
         vi.stubGlobal(
           "AudioContext",
@@ -642,8 +642,7 @@ describe("VoiceAudioTab UI structure", () => {
               return {
                 fftSize: 0,
                 smoothingTimeConstant: 0,
-                frequencyBinCount: 32,
-                getByteFrequencyData: (arr: Uint8Array) => arr.fill(level),
+                getFloatTimeDomainData: (arr: Float32Array) => fillWindow(arr, level),
               };
             }
             createMediaStreamSource() {
@@ -658,9 +657,9 @@ describe("VoiceAudioTab UI structure", () => {
         vi.stubGlobal("cancelAnimationFrame", vi.fn());
       });
 
-      async function frameAt(now: number, byte: number): Promise<void> {
+      async function frameAt(now: number, rms: number): Promise<void> {
         await vi.waitFor(() => expect(frames.length).toBeGreaterThan(0));
-        level = byte;
+        level = rms;
         const pending = frames;
         frames = [];
         for (const cb of pending) cb(now);
@@ -681,8 +680,8 @@ describe("VoiceAudioTab UI structure", () => {
       it("says Hearing you for speech below a low sensitivity's gate, while the meter stays yellow", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "0");
         const { el, ac } = build();
-        // RMS 0.1: above the noise floor, below the 0.15 gate at sensitivity 0.
-        await frameAt(0, 26);
+        // RMS 0.05: above the noise floor, below the 0.1 gate at sensitivity 0.
+        await frameAt(0, 0.05);
         expect(pillOf(el).textContent).toBe("Hearing you");
         expect(pillOf(el).querySelector(".st-ic.st-ok")).not.toBeNull();
         expect(el.querySelector<HTMLElement>(".mic-meter-level")!.style.background).toBe(
@@ -691,9 +690,52 @@ describe("VoiceAudioTab UI structure", () => {
         ac.abort();
       });
 
+      const meterOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>(".mic-meter-level")!;
+
+      // DP-38: the meter used a frequency-domain level against a x0.15
+      // threshold while the live gate compares a time-domain block RMS
+      // against x0.1, so the meter's green was not the gate opening.
+      it("turns green exactly where the live gate opens", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, ac } = build();
+        await frameAt(0, 0.049);
+        expect(meterOf(el).style.background).toBe("var(--yellow)");
+        await frameAt(16, 0.05);
+        expect(meterOf(el).style.background).toBe("var(--green)");
+        ac.abort();
+      });
+
+      it("draws the level on the threshold handle's own axis", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, ac } = build();
+        const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
+        expect(handle.style.left).toBe("50%");
+        // A level equal to the threshold reaches the handle, no further.
+        await frameAt(0, 0.05);
+        expect(meterOf(el).style.width).toBe("50%");
+        await frameAt(16, 0.025);
+        expect(meterOf(el).style.width).toBe("25%");
+        await frameAt(32, 0.4);
+        expect(meterOf(el).style.width).toBe("100%");
+        ac.abort();
+      });
+
+      it("reads the loudest 128-sample block, the unit the gate measures", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        // One loud render quantum in an otherwise silent window: the gate
+        // sees 0.06, a whole-window RMS would see a fraction of it.
+        fillWindow = (arr, value) => arr.fill(0).fill(value, 256, 384);
+        const { el, ac } = build();
+        await frameAt(0, 0.06);
+        expect(meterOf(el).style.width).toBe("60%");
+        expect(meterOf(el).style.background).toBe("var(--green)");
+        ac.abort();
+      });
+
       it("holds Hearing you through a short pause, then says No input", async () => {
         const { el, ac } = build();
-        await frameAt(0, 60);
+        await frameAt(0, 0.2);
         await frameAt(500, 0);
         expect(pillOf(el).textContent).toBe("Hearing you");
         await frameAt(999, 0);
@@ -731,6 +773,77 @@ describe("VoiceAudioTab UI structure", () => {
     toggleDiv.click();
 
     expect(mockReapplyAudioProcessing).toHaveBeenCalled();
+    ac.abort();
+  });
+
+  // The meter has to hear what the call captures: the browser's gain control
+  // and noise suppression change the level the gate sees, and a second stream
+  // on the same device with other settings can override the call's own.
+  it("opens the meter's microphone with the call's processing settings and device", async () => {
+    localStorage.setItem("owncord:settings:echoCancellation", "false");
+    localStorage.setItem("owncord:settings:noiseSuppression", "false");
+    localStorage.setItem("owncord:settings:audioInputDevice", '"mic-2"');
+    stubNavigator();
+    const ac = new AbortController();
+    document.body.appendChild(createVoiceAudioTab(ac.signal).build());
+
+    await vi.waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: true,
+          deviceId: { exact: "mic-2" },
+        },
+        video: false,
+      }),
+    );
+    ac.abort();
+  });
+
+  it("reopens the meter's microphone when a processing toggle changes", async () => {
+    const stop = vi.fn();
+    stubNavigator();
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
+      getTracks: () => [{ stop }],
+    } as unknown as MediaStream);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    const audioRequests = () =>
+      vi
+        .mocked(navigator.mediaDevices.getUserMedia)
+        .mock.calls.map(([c]) => c?.audio)
+        .filter((audio) => audio !== false && audio !== undefined);
+    await vi.waitFor(() => expect(audioRequests()).toHaveLength(1));
+
+    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise Suppression']")!.click();
+
+    await vi.waitFor(() => expect(audioRequests()).toHaveLength(2));
+    expect(audioRequests()[1]).toMatchObject({ noiseSuppression: false });
+    // The first stream is released; the second is the one now metering.
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    ac.abort();
+  });
+
+  it("moves the meter to a newly chosen input device", async () => {
+    stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    const inputSelect = el.querySelector<HTMLSelectElement>('select[aria-label="Input Device"]')!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+
+    inputSelect.value = "mic-2";
+    inputSelect.dispatchEvent(new Event("change"));
+
+    await vi.waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          audio: expect.objectContaining({ deviceId: { exact: "mic-2" } }),
+        }),
+      ),
+    );
     ac.abort();
   });
 

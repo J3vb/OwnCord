@@ -5,79 +5,21 @@
 // integrates with setProcessor() / stopProcessor() lifecycle, device switching,
 // and mid-call toggling automatically.
 //
-// RNNoise processes 480-sample frames at 48kHz (10ms).
-// Uses AudioWorklet (modern, runs on audio thread) with ScriptProcessorNode
-// fallback (deprecated but widely supported).
+// RNNoise processes 480-sample frames at 48kHz (10ms) in an AudioWorklet
+// (public/rnnoise-worklet.js), which instantiates public/rnnoise.wasm itself.
 // =============================================================================
 
-// Deep import, not the barrel (B7-7 / C-07): the barrel also re-exports
-// createRNNWasmModuleSync, and the package has no `sideEffects` field, so the
-// sync variant — ~1.9 MB with the WASM embedded as base64 — ships in the
-// livekitSession chunk even though nothing calls it. Only the async factory is
-// used; its WASM is still fetched at runtime via locateFile below.
-import createRNNWasmModule from "@jitsi/rnnoise-wasm/dist/rnnoise";
 import { Track, type TrackProcessor, type AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("noise-suppression");
-
-const RNNOISE_FRAME_SIZE = 480;
-const SCRIPT_PROCESSOR_BUFFER = 4096;
-
-// ---------------------------------------------------------------------------
-// Shared WASM module cache
-// ---------------------------------------------------------------------------
-
-interface RNNoiseModule {
-  _rnnoise_create: () => number;
-  _rnnoise_destroy: (state: number) => void;
-  _rnnoise_process_frame: (state: number, out: number, inp: number) => number;
-  _malloc: (bytes: number) => number;
-  _free: (ptr: number) => void;
-  HEAPF32: Float32Array;
-  ready: Promise<unknown>;
-}
-
-let cachedModule: RNNoiseModule | null = null;
-
-async function loadRNNoise(): Promise<RNNoiseModule> {
-  if (cachedModule !== null) return cachedModule;
-  const startMs = performance.now();
-  const mod = (createRNNWasmModule as (opts: Record<string, unknown>) => unknown)({
-    locateFile: (file: string) => {
-      if (file.endsWith(".wasm")) return "/rnnoise.wasm";
-      return file;
-    },
-  }) as RNNoiseModule;
-  await mod.ready;
-  cachedModule = mod;
-  log.info("RNNoise WASM loaded", { durationMs: Math.round(performance.now() - startMs) });
-  return mod;
-}
-
-/** Check if AudioWorklet is available in this browser context. */
-function supportsAudioWorklet(): boolean {
-  try {
-    return (
-      typeof AudioWorkletNode !== "undefined" &&
-      typeof AudioContext !== "undefined" &&
-      "audioWorklet" in AudioContext.prototype
-    );
-  } catch {
-    return false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Internal processing pipeline — shared by both init strategies
-// ---------------------------------------------------------------------------
 
 interface ProcessingPipeline {
   readonly processedTrack: MediaStreamTrack;
   destroy(): void;
 }
 
-/** AudioWorklet-based pipeline (preferred, runs on audio thread). */
+/** The worklet pipeline over one input track. */
 async function createWorkletPipeline(
   inputTrack: MediaStreamTrack,
   audioContext: AudioContext,
@@ -123,107 +65,6 @@ async function createWorkletPipeline(
   };
 }
 
-/** ScriptProcessorNode-based pipeline (fallback). */
-async function createScriptProcessorPipeline(
-  inputTrack: MediaStreamTrack,
-  audioContext: AudioContext,
-): Promise<ProcessingPipeline> {
-  const wasmModule = await loadRNNoise();
-  const rnnoiseState = wasmModule._rnnoise_create();
-  const inputPtr = wasmModule._malloc(RNNOISE_FRAME_SIZE * 4);
-  const outputPtr = wasmModule._malloc(RNNOISE_FRAME_SIZE * 4);
-
-  const inputRing = new Float32Array(RNNOISE_FRAME_SIZE);
-  let inputRingOffset = 0;
-
-  const OUT_RING_CAPACITY = 50;
-  const outRing: Float32Array[] = Array.from({ length: OUT_RING_CAPACITY });
-  let outWriteIdx = 0;
-  let outReadIdx = 0;
-  let outCount = 0;
-  let outSampleOffset = 0;
-
-  function processFrame(): void {
-    const inOff = inputPtr / 4;
-    for (let i = 0; i < RNNOISE_FRAME_SIZE; i++) {
-      wasmModule.HEAPF32[inOff + i] = (inputRing[i] ?? 0) * 32768;
-    }
-    wasmModule._rnnoise_process_frame(rnnoiseState, outputPtr, inputPtr);
-    const outOff = outputPtr / 4;
-    const result = new Float32Array(RNNOISE_FRAME_SIZE);
-    for (let i = 0; i < RNNOISE_FRAME_SIZE; i++) {
-      result[i] = (wasmModule.HEAPF32[outOff + i] ?? 0) / 32768;
-    }
-    if (outCount >= OUT_RING_CAPACITY) {
-      outReadIdx = (outReadIdx + 1) % OUT_RING_CAPACITY;
-      outCount--;
-      outSampleOffset = 0;
-    }
-    outRing[outWriteIdx] = result;
-    outWriteIdx = (outWriteIdx + 1) % OUT_RING_CAPACITY;
-    outCount++;
-  }
-
-  const source = audioContext.createMediaStreamSource(new MediaStream([inputTrack]));
-  const dest = audioContext.createMediaStreamDestination();
-  const processorNode = audioContext.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 1, 1);
-
-  processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
-    const inData = event.inputBuffer.getChannelData(0);
-    const outData = event.outputBuffer.getChannelData(0);
-
-    let inIdx = 0;
-    while (inIdx < inData.length) {
-      const needed = RNNOISE_FRAME_SIZE - inputRingOffset;
-      const toCopy = Math.min(needed, inData.length - inIdx);
-      inputRing.set(inData.subarray(inIdx, inIdx + toCopy), inputRingOffset);
-      inputRingOffset += toCopy;
-      inIdx += toCopy;
-      if (inputRingOffset >= RNNOISE_FRAME_SIZE) {
-        processFrame();
-        inputRingOffset = 0;
-      }
-    }
-
-    let outIdx = 0;
-    while (outIdx < outData.length && outCount > 0) {
-      const chunk = outRing[outReadIdx]!;
-      const available = chunk.length - outSampleOffset;
-      const toWrite = Math.min(available, outData.length - outIdx);
-      outData.set(chunk.subarray(outSampleOffset, outSampleOffset + toWrite), outIdx);
-      outIdx += toWrite;
-      outSampleOffset += toWrite;
-      if (outSampleOffset >= chunk.length) {
-        outReadIdx = (outReadIdx + 1) % OUT_RING_CAPACITY;
-        outCount--;
-        outSampleOffset = 0;
-      }
-    }
-    if (outIdx < outData.length) {
-      outData.fill(0, outIdx);
-    }
-  };
-
-  source.connect(processorNode);
-  processorNode.connect(dest);
-
-  log.info("RNNoise ScriptProcessor processing active (fallback)");
-
-  return {
-    processedTrack: dest.stream.getAudioTracks()[0]!,
-    destroy() {
-      processorNode.onaudioprocess = null;
-      processorNode.disconnect();
-      source.disconnect();
-      dest.disconnect();
-      wasmModule._rnnoise_destroy(rnnoiseState);
-      wasmModule._free(inputPtr);
-      wasmModule._free(outputPtr);
-      log.info("RNNoise ScriptProcessor pipeline destroyed");
-    },
-  };
-}
-
 // ---------------------------------------------------------------------------
 // LiveKit TrackProcessor implementation
 // ---------------------------------------------------------------------------
@@ -253,24 +94,14 @@ export function createRNNoiseProcessor(): TrackProcessor<Track.Kind.Audio, Audio
     name: "rnnoise",
 
     async init(opts: AudioProcessorOptions): Promise<void> {
-      log.debug("RNNoise processor init", { audioWorkletSupported: supportsAudioWorklet() });
+      log.debug("RNNoise processor init");
       const ctx = opts.audioContext ?? cachedCtx;
       if (ctx == null) {
         // i18n-exempt: internal audio guard; the caller keeps the unprocessed track
         throw new Error("RNNoise processor: no AudioContext available");
       }
       cachedCtx = ctx;
-
-      if (supportsAudioWorklet()) {
-        try {
-          pipeline = await createWorkletPipeline(opts.track, ctx);
-          return;
-        } catch (err) {
-          log.warn("AudioWorklet failed, falling back to ScriptProcessorNode", err);
-        }
-      }
-
-      pipeline = await createScriptProcessorPipeline(opts.track, ctx);
+      pipeline = await createWorkletPipeline(opts.track, ctx);
     },
 
     async restart(opts: AudioProcessorOptions): Promise<void> {

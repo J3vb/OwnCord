@@ -606,7 +606,8 @@ device module is no longer acquired at all. Each 10 ms of mono 48 kHz capture
 goes through libwebrtc's standalone APM (`livekit::webrtc::native::apm`: echo
 cancellation, noise suppression and gain control from the same three
 preferences, plus a high-pass filter), then, with Enhanced Noise Suppression
-on, through RNNoise (`nnnoiseless`, a pure-Rust port of the same model), into
+on, through RNNoise (`nnnoiseless`, a pure-Rust port of RNNoise's 2018 model;
+the web path ships the newer one), into
 an unbuffered `NativeAudioSource` that backs the published microphone track.
 Mute closes the input stream (the OS in-use indicator goes out) and keeps the
 publication; unmute reopens it on the device it last resolved, so a

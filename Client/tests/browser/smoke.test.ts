@@ -36,7 +36,6 @@ describe("noise-suppression (real AudioContext)", () => {
 
   it("loads the AudioWorklet pipeline with the shipped minified RNNoise WASM", async () => {
     const audioContext = new AudioContext();
-    const scriptProcessorSpy = vi.spyOn(audioContext, "createScriptProcessor");
     const inputTrack = audioContext.createMediaStreamDestination().stream.getAudioTracks()[0]!;
 
     try {
@@ -47,43 +46,12 @@ describe("noise-suppression (real AudioContext)", () => {
         audioContext,
       });
 
-      // The ScriptProcessor fallback is the only thing that calls this; the
-      // worklet path resolving proves the minified export mapping worked.
-      expect(scriptProcessorSpy).not.toHaveBeenCalled();
+      // init() resolves only once the worklet reports the WASM ready, which
+      // proves the minified export mapping worked.
       expect(processor.processedTrack).toBeInstanceOf(MediaStreamTrack);
 
       await processor.destroy();
     } finally {
-      await audioContext.close();
-    }
-  });
-
-  it("falls back to a ScriptProcessorNode pipeline when AudioWorklet is unsupported", async () => {
-    const originalAudioWorkletNode = window.AudioWorkletNode;
-    // @ts-expect-error -- deleting a required DOM global to force the
-    // module's supportsAudioWorklet() feature check to fail
-    delete window.AudioWorkletNode;
-
-    const audioContext = new AudioContext();
-    const scriptProcessorSpy = vi.spyOn(audioContext, "createScriptProcessor");
-    const inputTrack = audioContext.createMediaStreamDestination().stream.getAudioTracks()[0]!;
-
-    try {
-      const processor = createRNNoiseProcessor();
-      await processor.init({
-        kind: Track.Kind.Audio,
-        track: inputTrack,
-        audioContext,
-      });
-
-      // The fallback pipeline is the only thing that calls createScriptProcessor.
-      expect(scriptProcessorSpy).toHaveBeenCalledTimes(1);
-      expect(processor.processedTrack).toBeInstanceOf(MediaStreamTrack);
-      expect(processor.processedTrack!.kind).toBe("audio");
-
-      await processor.destroy();
-    } finally {
-      window.AudioWorkletNode = originalAudioWorkletNode;
       await audioContext.close();
     }
   });

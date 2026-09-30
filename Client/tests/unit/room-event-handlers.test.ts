@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DisconnectReason, RoomEvent, Track } from "livekit-client";
+import { DisconnectReason, RoomEvent, Track, TrackEvent } from "livekit-client";
 import type {
   LocalTrackPublication,
   Participant,
@@ -61,6 +61,7 @@ interface Harness {
   };
   spies: {
     applyMicMuteState: ReturnType<typeof vi.fn>;
+    setupAudioPipeline: ReturnType<typeof vi.fn>;
     attemptAutoReconnect: ReturnType<typeof vi.fn>;
     teardownForReconnect: ReturnType<typeof vi.fn>;
     leaveVoice: ReturnType<typeof vi.fn>;
@@ -84,6 +85,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
   };
   const spies = {
     applyMicMuteState: vi.fn().mockResolvedValue(undefined),
+    setupAudioPipeline: vi.fn(),
     attemptAutoReconnect: vi.fn().mockResolvedValue(undefined),
     teardownForReconnect: vi.fn(),
     leaveVoice: vi.fn(),
@@ -113,6 +115,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     teardownForReconnect: spies.teardownForReconnect,
     leaveVoice: spies.leaveVoice,
     applyMicMuteState: spies.applyMicMuteState,
+    setupAudioPipeline: spies.setupAudioPipeline,
     isNativeRoom: () => false,
     attemptAutoReconnect: spies.attemptAutoReconnect,
     ...over,
@@ -225,6 +228,54 @@ describe("handleLocalTrackPublished", () => {
       expect(applyMicMuteState).toHaveBeenCalled();
     });
     expectConsole("warn", /\[roomEventHandlers\] applyMicMuteState failed/);
+  });
+
+  // livekit-client republishes every local track after a full reconnect, and
+  // restarts the mic track itself when its device ends. Both put the raw
+  // capture track on the sender, past the input-volume and sensitivity chain.
+  it("rebuilds the audio pipeline when the microphone is (re)published", () => {
+    const h = build();
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.Microphone,
+    } as LocalTrackPublication);
+
+    expect(h.spies.setupAudioPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("rebuilds the audio pipeline when the SDK restarts the microphone track", () => {
+    const h = build();
+    const track = { on: vi.fn(), off: vi.fn() };
+    const publication = {
+      source: Track.Source.Microphone,
+      track,
+    } as unknown as LocalTrackPublication;
+
+    h.handlers.handleLocalTrackPublished(publication);
+    h.handlers.handleLocalTrackPublished(publication);
+    h.spies.setupAudioPipeline.mockClear();
+
+    // One listener however often the same track is republished.
+    expect(track.on).toHaveBeenCalledTimes(2);
+    expect(track.off).toHaveBeenCalledTimes(2);
+    const [event, onRestarted] = track.on.mock.calls[0] as [string, () => void];
+    expect(event).toBe(TrackEvent.Restarted);
+    expect(track.off).toHaveBeenCalledWith(TrackEvent.Restarted, onRestarted);
+    expect(track.on.mock.calls[1]).toEqual([TrackEvent.Restarted, onRestarted]);
+
+    onRestarted();
+
+    expect(h.spies.setupAudioPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the pipeline alone for a published camera or screen share", () => {
+    const h = build();
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.ScreenShare,
+    } as LocalTrackPublication);
+
+    expect(h.spies.setupAudioPipeline).not.toHaveBeenCalled();
   });
 });
 

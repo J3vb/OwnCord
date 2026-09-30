@@ -21,25 +21,6 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-// The ScriptProcessorNode fallback path is what jsdom actually exercises
-// here (AudioWorkletNode/AudioContext are not defined in jsdom, so
-// supportsAudioWorklet() is false) — mock the WASM module it depends on.
-// B7-7 switched noise-suppression.ts to the deep module
-// (@jitsi/rnnoise-wasm/dist/rnnoise) so the barrel's unused sync variant stops
-// shipping 1.9 MB of embedded WASM in the livekitSession chunk; the mock
-// follows the specifier under test.
-vi.mock("@jitsi/rnnoise-wasm/dist/rnnoise", () => ({
-  default: vi.fn(() => ({
-    ready: Promise.resolve(),
-    _rnnoise_create: vi.fn(() => 1),
-    _rnnoise_destroy: vi.fn(),
-    _rnnoise_process_frame: vi.fn(),
-    _malloc: vi.fn(() => 0),
-    _free: vi.fn(),
-    HEAPF32: new Float32Array(4096),
-  })),
-}));
-
 import { createRNNoiseProcessor } from "../../src/lib/noise-suppression";
 import type { AudioProcessorOptions } from "livekit-client";
 
@@ -50,15 +31,10 @@ function makeFakeAudioContext() {
     stream: { getAudioTracks: () => [destTrack] },
     disconnect: vi.fn(),
   };
-  const processorNode = {
-    onaudioprocess: null as unknown,
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-  };
   return {
     createMediaStreamSource: vi.fn().mockReturnValue(sourceNode),
     createMediaStreamDestination: vi.fn().mockReturnValue(destNode),
-    createScriptProcessor: vi.fn().mockReturnValue(processorNode),
+    audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
   } as unknown as AudioContext;
 }
 
@@ -77,6 +53,26 @@ describe("createRNNoiseProcessor restart (OC-0277)", () => {
           this.tracks = tracks;
         }
       },
+    );
+    // jsdom has no AudioWorklet or WASM fetch: stand in for the worklet node,
+    // which answers the init message with "ready" as rnnoise-worklet.js does.
+    vi.stubGlobal(
+      "AudioWorkletNode",
+      class {
+        port = {
+          onmessage: null as ((event: { data: { type: string } }) => void) | null,
+          postMessage: (message: { type: string }) => {
+            if (message.type === "init")
+              queueMicrotask(() => this.port.onmessage?.({ data: { type: "ready" } }));
+          },
+        };
+        connect = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) }),
     );
   });
 

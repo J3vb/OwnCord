@@ -272,6 +272,11 @@ describe("AudioPipeline", () => {
         createMediaStreamSource: vi.fn().mockReturnValue(mockSourceNode),
         createAnalyser: vi.fn().mockReturnValue(mockAnalyserNode),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue(mockDestNode),
         currentTime: 0,
         close: vi.fn().mockResolvedValue(undefined),
@@ -316,7 +321,10 @@ describe("AudioPipeline", () => {
       expect(mockAudioCtx.createAnalyser).toHaveBeenCalled();
       expect(mockAudioCtx.createMediaStreamDestination).toHaveBeenCalled();
       expect(mockSourceNode.connect).toHaveBeenCalledWith(mockAnalyserNode);
-      expect(mockSourceNode.connect).toHaveBeenCalledWith(mockGainNode);
+      // The voice reaches the gain through the gate's lookahead delay.
+      const delayNode = mockAudioCtx.createDelay.mock.results[0].value;
+      expect(mockSourceNode.connect).toHaveBeenCalledWith(delayNode);
+      expect(delayNode.connect).toHaveBeenCalledWith(mockGainNode);
       expect(mockGainNode.connect).toHaveBeenCalledWith(mockDestNode);
     });
 
@@ -527,6 +535,21 @@ describe("AudioPipeline", () => {
       expect(setProcessor).toHaveBeenCalled();
     });
 
+    // Callers await this next to the microphone publish; a rejection there
+    // was read as "no microphone" and dropped the user to listen-only.
+    it("logs a processor that fails to start instead of throwing", async () => {
+      vi.mocked(createRNNoiseProcessor).mockReturnValue({} as any);
+      const track = {
+        getProcessor: vi.fn().mockReturnValue(undefined),
+        setProcessor: vi.fn().mockRejectedValue(new Error("worklet blocked")),
+      };
+      pipeline.setRoom({
+        localParticipant: { getTrackPublication: vi.fn().mockReturnValue({ track }) },
+      } as any);
+
+      await expect(pipeline.applyNoiseSuppressor()).resolves.toBeUndefined();
+    });
+
     it("OC-0474: attaches nothing while the mic track is muted", async () => {
       const setProcessor = vi.fn().mockResolvedValue(undefined);
       const mockRoom = {
@@ -617,6 +640,11 @@ describe("AudioPipeline", () => {
         }),
         createGain: vi.fn().mockReturnValue({
           gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
           connect: vi.fn(),
           disconnect: vi.fn(),
         }),
@@ -739,6 +767,11 @@ describe("AudioPipeline", () => {
           connect: vi.fn(),
           disconnect: vi.fn(),
         }),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -787,6 +820,11 @@ describe("AudioPipeline", () => {
         createAnalyser: vi.fn().mockReturnValue(mockAnalyser),
         createGain: vi.fn().mockReturnValue({
           gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
           connect: vi.fn(),
           disconnect: vi.fn(),
         }),
@@ -846,6 +884,11 @@ describe("AudioPipeline", () => {
           connect: vi.fn(),
           disconnect: vi.fn(),
         }),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -898,6 +941,11 @@ describe("AudioPipeline", () => {
         }),
         createGain: vi.fn().mockReturnValue({
           gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
           connect: vi.fn(),
           disconnect: vi.fn(),
         }),
@@ -973,6 +1021,11 @@ describe("AudioPipeline", () => {
           getFloatTimeDomainData: vi.fn(),
         }),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
@@ -1037,6 +1090,11 @@ describe("AudioPipeline", () => {
           getFloatTimeDomainData: vi.fn(),
         }),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "adjusted" }]) },
           disconnect: vi.fn(),
@@ -1119,6 +1177,11 @@ describe("AudioPipeline", () => {
             connect: vi.fn(),
             disconnect: vi.fn(),
           }),
+          createDelay: vi.fn().mockReturnValue({
+            delayTime: { value: 0 },
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+          }),
           createMediaStreamDestination: vi.fn().mockReturnValue({
             stream: { getAudioTracks: vi.fn().mockReturnValue([]) },
             disconnect: vi.fn(),
@@ -1143,6 +1206,36 @@ describe("AudioPipeline", () => {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+      });
+    });
+
+    // restartTrack() takes the whole capture request: left without a device
+    // it reopens the system default, so toggling echo cancellation quietly
+    // moved a user off the microphone they had picked.
+    it("restarts on the saved input device, not the system default", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "audioInputDevice" ? "usb-mic" : defaultVal,
+      );
+      const restartTrack = vi.fn().mockResolvedValue(undefined);
+      pipeline.setRoom({
+        localParticipant: {
+          getTrackPublication: vi.fn().mockReturnValue({
+            track: {
+              restartTrack,
+              isMuted: true,
+              getProcessor: vi.fn().mockReturnValue(undefined),
+            },
+          }),
+        },
+      } as any);
+
+      await pipeline.reapplyAudioProcessing();
+
+      expect(restartTrack).toHaveBeenCalledWith({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        deviceId: { exact: "usb-mic" },
       });
     });
 
@@ -1186,6 +1279,11 @@ describe("AudioPipeline", () => {
           }),
           createGain: vi.fn().mockReturnValue({
             gain: { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() },
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+          }),
+          createDelay: vi.fn().mockReturnValue({
+            delayTime: { value: 0 },
             connect: vi.fn(),
             disconnect: vi.fn(),
           }),

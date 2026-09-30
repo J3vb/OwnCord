@@ -9,17 +9,20 @@ const FRAME_SIZE = 480;
 const OUTPUT_RING_CAPACITY = 50;
 const RN_NOISE_INT16_SCALE = 32768;
 
-// The shipped @jitsi/rnnoise-wasm build minifies every export to a one-letter
-// name; this is its `Module["asm"]` table from dist/rnnoise.js, e.g.
-// `_rnnoise_create = Module["asm"]["f"]`. The import object in _initWasm is
-// likewise tied to this build, so a different rnnoise.wasm needs both updated.
+// public/rnnoise.wasm is the module @jitsi/rnnoise-wasm's sync build embeds
+// (dist/rnnoise-sync.js): the current RNNoise model. The package's standalone
+// dist/rnnoise.wasm is the 2018 model, which barely touches a mouse click.
+// The build minifies every export to a one-letter name; this is the glue's
+// `Module["_rnnoise_create"] = asm["h"]` table. The import object in _initWasm
+// is likewise tied to this build, so a different rnnoise.wasm needs both
+// updated (tests/unit/rnnoise-click-suppression.test.ts pins the file).
 const EXPORT_NAMES = {
   memory: "c",
   __wasm_call_ctors: "d",
-  rnnoise_create: "f",
-  malloc: "g",
-  rnnoise_destroy: "h",
-  free: "i",
+  malloc: "e",
+  free: "f",
+  rnnoise_create: "h",
+  rnnoise_destroy: "i",
   rnnoise_process_frame: "j",
 };
 

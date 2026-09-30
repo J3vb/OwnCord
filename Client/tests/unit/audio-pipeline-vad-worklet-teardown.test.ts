@@ -72,6 +72,11 @@ describe("AudioPipeline VAD worklet teardown (OC-0231)", () => {
       createMediaStreamSource: vi.fn().mockReturnValue(mockSourceNode),
       createAnalyser: vi.fn().mockReturnValue(mockAnalyserNode),
       createGain: vi.fn().mockReturnValue(mockGainNode),
+      createDelay: vi.fn().mockReturnValue({
+        delayTime: { value: 0 },
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      }),
       createMediaStreamDestination: vi.fn().mockReturnValue(mockDestNode),
       currentTime: 0,
       close: vi.fn().mockResolvedValue(undefined),

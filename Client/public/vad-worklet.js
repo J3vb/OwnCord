@@ -9,7 +9,7 @@
 //   Main → Worklet:  { type: "config", threshold: number, gateOnFrames: number, gateOffFrames: number }
 //   Main → Worklet:  { type: "stop" }
 //   Worklet → Main:  { type: "gate", gated: boolean }
-//   Worklet → Main:  { type: "rms", value: number }  (optional, for VAD indicator)
+//   Worklet → Main:  { type: "rms", value: number }  (loudest quantum since the last one)
 //   Worklet → Main:  { type: "stopped" }  (from the final process() call)
 // =============================================================================
 
@@ -31,6 +31,7 @@ class VadProcessor extends AudioWorkletProcessor {
     this._startupFrames = 0;
     this._startupGrace = 188; // ~500ms grace period
     this._frameCounter = 0; // for throttled RMS updates
+    this._rmsPeak = 0; // loudest quantum since the last RMS update
 
     this.port.onmessage = (event) => {
       if (event.data.type === "config") {
@@ -77,12 +78,15 @@ class VadProcessor extends AudioWorkletProcessor {
       return true;
     }
 
-    // Send RMS value to main thread every ~19 frames (~50ms at 128 samples/frame @ 48kHz)
-    // This is used for the VAD indicator bar in the UI
+    // Send the loudest quantum's RMS to the main thread every ~19 frames
+    // (~50ms at 128 samples/frame @ 48kHz): the level the gate below compared
+    // against, for the VAD indicator bar in the UI
+    if (rms > this._rmsPeak) this._rmsPeak = rms;
     this._frameCounter++;
     if (this._frameCounter >= 19) {
       this._frameCounter = 0;
-      this.port.postMessage({ type: "rms", value: rms });
+      this.port.postMessage({ type: "rms", value: this._rmsPeak });
+      this._rmsPeak = 0;
     }
 
     // Gate logic (identical to the setTimeout version)

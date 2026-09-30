@@ -248,10 +248,18 @@ trust action entirely (a blind accept is refused).
 
 - **Noise suppression:** RNNoise WASM worklet (`lib/noise-suppression.ts`,
   assets `public/rnnoise.wasm` + `public/rnnoise-worklet.js`), toggled in
-  Settings → Voice & Audio; falls back to a ScriptProcessorNode pipeline when
-  AudioWorklet is unavailable (`createScriptProcessorPipeline()` in `lib/noise-suppression.ts`).
+  Settings → Voice & Audio. The WASM is the current RNNoise model, the module
+  `@jitsi/rnnoise-wasm`'s sync build embeds
+  (`tests/unit/rnnoise-click-suppression.test.ts` pins it). If the worklet
+  cannot start, the microphone stays published unprocessed.
 - **Input volume & VAD:** `lib/audioPipeline.ts` applies input gain and
-  voice-activity gating ahead of publish.
+  voice-activity gating ahead of publish. The gate opens after about 32 ms of
+  sustained level, so a mouse click does not open it, and the voice path runs
+  50 ms behind the detector so the start of a word is not cut off. The chain
+  is rebuilt whenever livekit-client republishes or restarts the microphone
+  track (`lib/roomEventHandlers.ts`). The settings meter measures the same
+  128-sample block RMS against the same threshold, on a microphone opened
+  with the call's capture settings.
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
   plug/unplug and re-routes the active input/output without rejoining.
 - **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview

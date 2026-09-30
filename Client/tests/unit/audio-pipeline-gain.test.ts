@@ -226,6 +226,11 @@ describe("AudioPipeline", () => {
           getFloatTimeDomainData: vi.fn(),
         }),
         createGain: vi.fn().mockReturnValue(mockGainNode),
+        createDelay: vi.fn().mockReturnValue({
+          delayTime: { value: 0 },
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+        }),
         createMediaStreamDestination: vi.fn().mockReturnValue({
           stream: { getAudioTracks: vi.fn().mockReturnValue([{ id: "t" }]) },
           disconnect: vi.fn(),
