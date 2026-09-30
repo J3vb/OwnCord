@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -149,6 +150,9 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.requireChannelNameFree(ctx, meta, req.Type, 0); err != nil {
+		return nil, err
+	}
 
 	id, err := s.st.AdminCreateChannel(ctx, meta.Name, req.Type, meta.Category, meta.Topic, req.Position)
 	if err != nil {
@@ -167,6 +171,24 @@ func (s *ChannelService) AdminCreateChannel(ctx context.Context, actorID int64, 
 	db.WriteAudit(tail, s.st, actorID, "channel_create", "channel", id,
 		fmt.Sprintf("created #%s (%s)", meta.Name, req.Type))
 	return ch, nil
+}
+
+// requireChannelNameFree refuses a name another channel of the same type in
+// the same category already has, ignoring case, with ErrConflict. selfID is
+// the channel being renamed (0 on create). A check, not a constraint: rows
+// that already share a name are left as they are.
+func (s *ChannelService) requireChannelNameFree(ctx context.Context, meta ChannelMeta, chType string, selfID int64) error {
+	channels, err := s.st.ListChannels(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: failed to list channels: %w", ErrInternal, err)
+	}
+	for i := range channels {
+		c := &channels[i]
+		if c.ID != selfID && c.Type == chType && c.Category == meta.Category && strings.EqualFold(c.Name, meta.Name) {
+			return fmt.Errorf("a %s channel named %q already exists in this category%.0w", chType, c.Name, ErrConflict)
+		}
+	}
+	return nil
 }
 
 // AdminChannelUpdate carries a full update — the handler pre-fills it from
@@ -209,6 +231,13 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		return nil, fmt.Errorf("voice_max_users must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
 	case req.VoiceMaxVideo < 0 || req.VoiceMaxVideo > maxVoiceLimit:
 		return nil, fmt.Errorf("voice_max_video must be between 0 and %d%.0w", maxVoiceLimit, ErrBadRequest)
+	}
+	// Only a rename or a move is checked, so rows that already share a name
+	// stay editable.
+	if !strings.EqualFold(meta.Name, existing.Name) || meta.Category != existing.Category {
+		if err := s.requireChannelNameFree(ctx, meta, existing.Type, existing.ID); err != nil {
+			return nil, err
+		}
 	}
 
 	update := db.ChannelUpdate{

@@ -178,6 +178,7 @@ async function renderDashboard(){
   const stat=(label,value)=>'<div class="stat-card"><div class="stat-card-label">'+label+'</div><div class="stat-card-value">'+value+'</div></div>';
   html+='<div class="stat-grid compact">'+stat('Members',s.user_count||0)+stat('Messages',(s.message_count||0).toLocaleString())+stat('Channels',s.channel_count||0)+stat('Database',fmtBytes(s.db_size_bytes||0))+'</div>';
   html+=checks;
+  if(can(PERM.ADMINISTRATOR))html+=connectivityCard();
   // The certificate users compare out of band before accepting the client's
   // trust prompt (BPR-051), in every TLS mode: the served one,
   // ACME's once its first handshake has happened, and for TLS off (a reverse
@@ -204,6 +205,69 @@ async function renderDashboard(){
     }
   }catch(e){}
   return html;
+}
+
+/* ═══ Connectivity check ═══ */
+/* GET /api/v1/diagnostics/connectivity (ADMINISTRATOR, five a minute): voice
+   server health, how this server sees the operator's own connection and, when
+   the owner set server.reachability_report_enabled, the ports to forward and
+   what the server cannot see from inside. It runs on request only — the voice
+   probe can take seconds and the route is rate limited — and the result stays
+   in state so a dashboard refresh keeps it. The panel's session token
+   authenticates on /api/v1 unchanged, as it does for invites and emoji. */
+const ADDR_CLASS={loopback:'this machine',private:'private network',unique_local:'private network',cgnat:'carrier NAT or Tailscale',link_local:'link-local',global:'public internet',other:'unrecognised'};
+function connectivityCard(){
+  const c=state.connectivity||{};
+  const body=c.busy?'<p class="card-note">Checking…</p>'
+    :c.error?'<p style="color:var(--text-danger)" role="alert">'+esc(c.error)+'</p>'
+    :c.report?connectivityHtml(c.report)
+    :'<p class="card-note">Checks the voice server and shows how this server sees your connection.</p>';
+  return'<section class="section-card" id="connectivityCard" aria-labelledby="connectivityTitle"><div class="section-card-header"><h3 id="connectivityTitle">Connectivity check</h3>'
+    +'<button class="btn btn-ghost" data-action="runConnectivityCheck"'+(c.busy?' disabled':'')+'>'+(c.report?'Run again':'Run check')+'</button></div>'
+    +'<div class="section-card-body" id="connectivityResult" role="status">'+body+'</div></section>';
+}
+function connectivityHtml(r){
+  const v=r.voice||{},cl=r.client||{},sv=r.server||{};
+  const row=(k,val)=>val===undefined||val===''?'':'<dt>'+k+'</dt><dd>'+val+'</dd>';
+  let html='<dl class="facts">'
+    +row('Voice server',!v.enabled?'Not configured':v.livekit_health?'<span class="badge badge-green">Reachable</span>':'<span class="badge badge-red">Not reachable</span>')
+    +row('Voice address',v.livekit_url?esc(v.livekit_url):'')
+    +row('Voice node IP',v.node_ip?esc(v.node_ip):'')
+    +row('Your address',cl.remote_addr?esc(cl.remote_addr)+(cl.address_class?' ('+esc(ADDR_CLASS[cl.address_class]||cl.address_class)+')':''):'')
+    +row('Server version',sv.version?esc(sv.version):'')
+    +row('Online now',typeof sv.online_users==='number'?String(sv.online_users):'')
+    +'</dl>';
+  const rep=r.reachability;
+  if(!rep)return html+'<p class="card-note" style="margin-top:12px">For the ports to forward and what this server cannot check from inside, set <code>server.reachability_report_enabled: true</code> in config.yaml and restart.</p>';
+  if(rep.cgnat_note)html+='<p class="card-note" style="margin-top:12px">'+esc(rep.cgnat_note)+'</p>';
+  if((rep.required_ports||[]).length)html+='<h4 class="support-heading" style="margin-top:14px">Ports to forward</h4><ul class="support-list">'
+    +rep.required_ports.map(p=>'<li><code>'+esc(p.port)+'/'+esc(p.protocol)+'</code> — '+esc(p.purpose)+'</li>').join('')+'</ul>';
+  if((rep.undeterminable||[]).length)html+='<h4 class="support-heading" style="margin-top:14px">What this server cannot check</h4><ul class="support-list">'
+    +rep.undeterminable.map(u=>'<li><strong>'+esc(u.fact)+'</strong>. '+esc(u.why)+' <span class="muted">How to check: '+esc(u.how_to_check)+'</span></li>').join('')+'</ul>';
+  return html;
+}
+function paintConnectivity(){
+  const el=document.getElementById('connectivityCard');if(!el)return;
+  const focused=el.contains(document.activeElement);
+  el.outerHTML=connectivityCard();
+  const btn=document.querySelector('#connectivityCard [data-action="runConnectivityCheck"]');
+  if(focused&&btn instanceof HTMLElement)btn.focus();
+}
+async function runConnectivityCheck(){
+  if(state.connectivity&&state.connectivity.busy)return;
+  const token=state.token;
+  state.connectivity={busy:true};paintConnectivity();
+  let next;
+  try{
+    const res=await fetch('/api/v1/diagnostics/connectivity',{headers:{'Authorization':'Bearer '+token}});
+    if(state.token!==token){state.connectivity=null;return}
+    if(res.status===401){state.connectivity=null;handleSessionExpired();return}
+    const data=await res.json().catch(()=>null);
+    if(!res.ok)throw new Error((data&&data.message)||'The connectivity check failed ('+res.status+')');
+    next={report:data};
+  }catch(e){next={error:e.message}}
+  if(state.token!==token){state.connectivity=null;return}
+  state.connectivity=next;paintConnectivity();
 }
 
 /* ═══ Audit Log ═══ */
@@ -766,7 +830,7 @@ async function uninstallPlugin(id){
   renderContent();
 }
 
-Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,copyAllLogs,copyAuditLog,copyToken,createToken,
+Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,runConnectivityCheck,copyAllLogs,copyAuditLog,copyToken,createToken,
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,reloadAudit,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
   toggleServerLogLevel,

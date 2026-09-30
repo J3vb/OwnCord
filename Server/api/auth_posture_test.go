@@ -48,11 +48,12 @@ var publicSurface = map[string]string{
 
 	"GET /api/v1/ws": "in-band handshake authentication: the first frame carries the token and an anonymous socket is closed — TestEpoch1Fixtures/auth-failure pins the close",
 
-	"* /admin/*":                      "the admin panel's static files and login page, behind AdminIPRestrict (admin_allowed_cidrs, private networks by default; open in this test config); every /admin/api route beneath is RequireAdminAuth-gated and walked here",
-	"GET /admin/":                     "the admin panel's index, same perimeter as /admin/*",
-	"POST /admin/api/setup":           "first-run bootstrap: creates the owner on an empty server and answers 403 once one exists (Server/admin/setup_handler.go, TestSetup*)",
-	"GET /admin/api/setup/status":     "whether first-run setup is still open; no user data",
-	"GET /admin/api/archive/download": "the full-archive download, authenticated in-band by the single-use link token from the Owner-only POST /admin/api/archive/link; a missing, unknown, expired, consumed or revoked token answers a uniform 403 (Server/admin/archive_link.go, TestArchiveLink_*, docs/security.md)",
+	"* /admin/*":                             "the admin panel's static files and login page, behind AdminIPRestrict (admin_allowed_cidrs, private networks by default; open in this test config); every /admin/api route beneath is RequireAdminAuth-gated and walked here",
+	"GET /admin/":                            "the admin panel's index, same perimeter as /admin/*",
+	"POST /admin/api/setup":                  "first-run bootstrap: creates the owner on an empty server and answers 403 once one exists (Server/admin/setup_handler.go, TestSetup*)",
+	"GET /admin/api/setup/status":            "whether first-run setup is still open; no user data",
+	"GET /admin/api/archive/download":        "the full-archive download, authenticated in-band by the single-use link token from the Owner-only POST /admin/api/archive/link; a missing, unknown, expired, consumed or revoked token answers a uniform 403 (Server/admin/archive_link.go, TestArchiveLink_*, docs/security.md)",
+	"GET /admin/api/backups/{name}/download": "one backup file, authenticated in-band by the single-use link token from the Owner-only POST /admin/api/backups/{name}/link, bound to that file; a missing, unknown, expired, consumed, revoked or other-file token answers a uniform 403 (Server/admin/archive_link.go, TestBackupLink_*, docs/security.md)",
 
 	"GET /api/v1/metrics":          "operational counters for a scraper, behind AdminIPRestrict (metrics_allowed_cidrs); no per-user data",
 	"GET /api/v1/livekit/health":   "LiveKit reachability, behind the webhook perimeter (livekit_webhook_allowed_cidrs)",

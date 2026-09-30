@@ -85,18 +85,8 @@ type setupDefaults struct {
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
-const (
-	maxServerNameLen = 100
-	maxMotdLen       = 500
-	maxUploadSizeMB  = 10240 // 10 GiB
-)
-
 var validTLSModes = map[string]struct{}{
 	"self_signed": {}, "acme": {}, "manual": {}, "off": {},
-}
-
-var validVoiceQualities = map[string]struct{}{
-	"low": {}, "medium": {}, "high": {},
 }
 
 // validateWizard checks and normalises the wizard payload in place. It must
@@ -133,20 +123,19 @@ func wizardValidateIdentity(wr *setupWizardRequest) error {
 		}
 		*wr.RegistrationMode = string(mode)
 	}
+	// The limits are the settings PATCH's too (service.NormalizeServerName,
+	// service.NormalizeMotd); only the sanitizer is the wizard's own.
 	if wr.ServerName != nil {
-		name := strings.TrimSpace(service.SanitizeText(*wr.ServerName))
-		if name == "" {
-			return fmt.Errorf("server_name cannot be empty")
-		}
-		if len(name) > maxServerNameLen {
-			return fmt.Errorf("server_name must be at most %d characters", maxServerNameLen)
+		name, err := service.NormalizeServerName(service.SanitizeText(*wr.ServerName))
+		if err != nil {
+			return err
 		}
 		*wr.ServerName = name
 	}
 	if wr.Motd != nil {
-		motd := strings.TrimSpace(service.SanitizeText(*wr.Motd))
-		if len(motd) > maxMotdLen {
-			return fmt.Errorf("motd must be at most %d characters", maxMotdLen)
+		motd, err := service.NormalizeMotd(service.SanitizeText(*wr.Motd))
+		if err != nil {
+			return err
 		}
 		*wr.Motd = motd
 	}
@@ -185,13 +174,13 @@ func wizardValidateNetwork(wr *setupWizardRequest) error {
 // wizardValidateMedia checks and normalises the upload-size cap and the voice
 // quality preset.
 func wizardValidateMedia(wr *setupWizardRequest) error {
-	if wr.UploadMaxSizeMB != nil && (*wr.UploadMaxSizeMB < 1 || *wr.UploadMaxSizeMB > maxUploadSizeMB) {
-		return fmt.Errorf("upload_max_size_mb must be between 1 and %d", maxUploadSizeMB)
+	if wr.UploadMaxSizeMB != nil && (*wr.UploadMaxSizeMB < 1 || *wr.UploadMaxSizeMB > service.MaxUploadSizeMB) {
+		return fmt.Errorf("upload_max_size_mb must be between 1 and %d", service.MaxUploadSizeMB)
 	}
 	if wr.VoiceQuality != nil {
-		q := strings.ToLower(strings.TrimSpace(*wr.VoiceQuality))
-		if _, ok := validVoiceQualities[q]; !ok {
-			return fmt.Errorf("voice_quality must be one of: low, medium, high")
+		q, err := service.NormalizeVoiceQuality(*wr.VoiceQuality)
+		if err != nil {
+			return err
 		}
 		*wr.VoiceQuality = q
 	}

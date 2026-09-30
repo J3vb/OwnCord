@@ -186,6 +186,8 @@ export const connectText = defineCatalog("connect", {
     "Saved-password login is unavailable here — please type your password.",
   "session.autoLoginFailed": "Auto-login failed",
   "session.autoLoginFailedDetail": "Auto-login failed: {message}",
+  "session.connectTimeout":
+    "Couldn't reach this server — it may be offline. Check your connection and try again.",
   "session.loginFailedStatus": "Login failed ({status})",
   "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
 

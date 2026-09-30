@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -168,6 +172,32 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
 			}
 			return rec, nil
+		}},
+		{"backup download", "backup_download", func(t *testing.T) (*audittest.Recorder, []string) {
+			dir := t.TempDir()
+			admin.SetBackupBaseDir(dir)
+			t.Cleanup(func() { admin.SetBackupBaseDir(filepath.Join("data", "backups")) })
+			if err := os.WriteFile(filepath.Join(dir, "b.db"), []byte("backup"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			handler, database, token, _ := fixture(t)
+			rec := audittest.Install(t, database)
+			w := doRequest(t, handler, http.MethodPost, "/backups/b.db/link", token, map[string]any{})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			var link struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &link)
+			req := httptest.NewRequest(http.MethodGet, strings.TrimPrefix(link.Path, "/admin/api"), nil)
+			dl := httptest.NewRecorder()
+			handler.ServeHTTP(dl, req)
+			if dl.Code != http.StatusOK {
+				t.Fatalf("download status = %d; body = %s", dl.Code, dl.Body.String())
+			}
+			u, _ := url.Parse(link.Path)
+			return rec, []string{token, u.Query().Get("token")}
 		}},
 		{"log level debug on", "log_level_debug_on", func(t *testing.T) (*audittest.Recorder, []string) {
 			handler, database, token := logLevelFixture(t)
