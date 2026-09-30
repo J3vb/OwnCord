@@ -1073,6 +1073,7 @@ function scaleThresholds() {
   const trends = [
     "ws_broadcast_latency_ms",
     "ws_delivery_latency_ms",
+    "ws_connect_time",
     "ws_auth_ok_time",
     "ws_ready_time",
     "auth_time",
@@ -1098,7 +1099,10 @@ function scaleThresholds() {
       out[`obs_backpressure{phase:${p},kind:${k}}`] = ["count>=0"];
     }
     out[`obs_population{phase:${p}}`] = ["min>=0"];
+    out[`ws_message_success{phase:${p}}`] = ["rate>=0"];
   }
+  const steady = scaleMinSamples(SCALE_STEADY_S, SCALE_SEND_MS);
+  const burst = scaleMinSamples(SCALE_BURST_S, SCALE_BURST_SEND_MS);
   return {
     ...out,
     // (a) steady: the published budgets. Its connections open during the
@@ -1106,20 +1110,43 @@ function scaleThresholds() {
     "ws_broadcast_latency_ms{phase:steady}": ["p(95)<150", "p(99)<300", "med>=0"],
     "ws_delivery_latency_ms{phase:steady}": ["p(95)<200", "p(99)<400", "med>=0"],
     "ws_auth_ok_time{phase:ramp}": ["p(95)<200", "p(99)<500", "med>=0"],
+    "ws_connect_time{phase:ramp}": ["p(95)<2000", "med>=0", "p(99)>=0"],
     "obs_population{phase:steady}": [`min>=${PEAK_VUS}`],
+    "ws_message_success{phase:steady}": ["rate>0.95"],
+    // Validity, not a budget (OC-0446): a window that did not carry its
+    // planned load publishes a percentile over whatever few samples arrived.
+    "ws_messages_sent{phase:steady}": [`count>=${steady.sends}`],
+    "ws_deliveries{phase:steady}": [`count>=${steady.deliveries}`],
     // (b) burst minute: the same p95 budgets at the raised rate.
     "ws_broadcast_latency_ms{phase:burst}": ["p(95)<150", "med>=0", "p(99)>=0"],
     "ws_delivery_latency_ms{phase:burst}": ["p(95)<200", "med>=0", "p(99)>=0"],
+    "ws_message_success{phase:burst}": ["rate>0.95"],
+    "ws_messages_sent{phase:burst}": [`count>=${burst.sends}`],
+    "ws_deliveries{phase:burst}": [`count>=${burst.deliveries}`],
     // (c) herd (D3): every VU ready within 30 s of the herd's start, the
     // per-connection ready p95 within 5 s, and no backpressure kick.
     herd_ready_at_ms: ["max<=30000"],
     herd_readies: [`count>=${PEAK_VUS}`],
     "ws_ready_time{phase:herd}": ["p(95)<=5000", "med>=0", "p(99)>=0"],
+    "ws_connect_time{phase:herd}": ["p(95)<2000", "med>=0", "p(99)>=0"],
     "obs_backpressure{phase:herd,kind:queue_disconnects}": ["count==0"],
     // (d) login burst (D3): no user-visible failure, everyone in within 70 s.
     login_burst_giveups: ["count==0"],
     login_burst_ok: [`count>=${SCALE_LOGINS}`],
     login_burst_time: ["max<=70000"],
+    "auth_time{phase:login}": ["p(95)<600", "p(99)<1000", "med>=0"],
+  };
+}
+
+// A deliberately loose floor on a send window's samples, as restartMinSamples:
+// 30% of the planned sends, and of their deliveries to the smallest channel's
+// other members.
+function scaleMinSamples(durationS, sendMs) {
+  const sends = ((PEAK_VUS * SCALE_ACTIVE_PERMILLE) / 1000) * (1000 / sendMs) * durationS;
+  const recipients = Math.floor(PEAK_VUS / CHANNEL_IDS.length) - 1;
+  return {
+    sends: Math.max(1, Math.floor(sends * 0.3)),
+    deliveries: Math.max(1, Math.floor(sends * recipients * 0.3)),
   };
 }
 
@@ -1616,7 +1643,7 @@ export default function () {
             break;
           case "chat_send_ok":
             wsAcks.add(1);
-            wsMessageRate.add(true);
+            wsMessageRate.add(true, scaleTags());
             if (data.id && pendingSends[data.id]) {
               broadcastLatency.add(
                 Date.now() - pendingSends[data.id],
@@ -1699,7 +1726,7 @@ export default function () {
             break;
           case "error":
             wsErrors.add(1);
-            wsMessageRate.add(false);
+            wsMessageRate.add(false, scaleTags());
             // A drain send the server refused classifies as errored: error
             // envelopes echo the request id (protocol.md:1837).
             if (IS_RESTART && data.id && drainPending[data.id]) {
@@ -1930,7 +1957,7 @@ export default function () {
     // Under the drill, a refused connect during the outage is the drill
     // working; it must not drag down the send-success rate that still gates
     // the run (ws_errors is already exempt there for the same reason).
-    if (!IS_RESTART) wsMessageRate.add(false);
+    if (!IS_RESTART) wsMessageRate.add(false, scaleTags());
   }
 
   sleep(1);

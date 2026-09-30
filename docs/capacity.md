@@ -688,12 +688,15 @@ The non-defaults this profile adds to the configuration table above:
 
 **The existing budgets, applied to the window they describe:**
 
-| Window   | Measure                                                                   | Budget         |
-| -------- | ------------------------------------------------------------------------- | -------------- |
-| `steady` | Message send → sender acknowledgement, p95 / p99                          | 150 / 300 ms   |
-| `steady` | Message send → recipient delivery, p95 / p99                              | 200 / 400 ms   |
-| `ramp`   | WebSocket open → `auth_ok` received, p95 / p99 (the connects happen here) | 200 / 500 ms   |
-| `burst`  | Acknowledgement p95; delivery p95                                         | 150 ms; 200 ms |
+| Window            | Measure                                                                   | Budget         |
+| ----------------- | ------------------------------------------------------------------------- | -------------- |
+| `steady`          | Message send → sender acknowledgement, p95 / p99                          | 150 / 300 ms   |
+| `steady`          | Message send → recipient delivery, p95 / p99                              | 200 / 400 ms   |
+| `steady`, `burst` | Sends acknowledged (`ws_message_success`), not answered with an error     | > 95%          |
+| `ramp`            | WebSocket open → `auth_ok` received, p95 / p99 (the connects happen here) | 200 / 500 ms   |
+| `ramp`, `herd`    | WebSocket connect (`ws_connect_time`), p95                                | < 2 s          |
+| `burst`           | Acknowledgement p95; delivery p95                                         | 150 ms; 200 ms |
+| `login`           | REST login (`auth_time`, the successful attempt), p95 / p99               | 600 / 1,000 ms |
 
 **New budgets for the herd and the login burst (owner decision D3,
 2026-09-30).** They apply to this profile, and no existing row changes:
@@ -716,6 +719,10 @@ claims:
 - `login_giveups == 0`: every cohort VU obtained a session.
 - `obs_population{phase:steady}` min ≥ N: the whole population was connected
   at every poll of the steady window.
+- `ws_messages_sent` and `ws_deliveries` in `steady` and in `burst` each reach
+  30% of the window's planned count (planned sends × the smallest channel's
+  other members, for deliveries): a window that never carried its load cannot
+  pass its percentiles over a handful of samples.
 - `obs_ws_conn_rejects == 0`.
 - `topic_sheds_total == 0`, read from the server's own snapshot. This workflow
   gate is shared with the ceiling search.

@@ -848,6 +848,34 @@ test("scale thresholds: existing budgets per phase, D3 herd and login-burst gate
   assert.deepEqual([...t("login_burst_ok")], ["count>=500"]);
   assert.deepEqual([...t("login_giveups")], ["count==0"]);
   assert.deepEqual([...t("obs_ws_conn_rejects")], ["count==0"]);
+  // The remaining existing budgets, each on the window it describes.
+  assert.deepEqual([...t("ws_message_success{phase:steady}")], ["rate>0.95"]);
+  assert.deepEqual([...t("ws_message_success{phase:burst}")], ["rate>0.95"]);
+  assert.ok(t("ws_connect_time{phase:ramp}").includes("p(95)<2000"));
+  assert.ok(t("ws_connect_time{phase:herd}").includes("p(95)<2000"));
+  has("auth_time{phase:login}", "p(95)<600", "p(99)<1000");
+  // Validity floors: 30% of 200 active users' planned sends (25/s steady for
+  // 180 s, 100/s burst for 60 s), each delivered to 99 other members.
+  assert.deepEqual([...t("ws_messages_sent{phase:steady}")], ["count>=1350"]);
+  assert.deepEqual([...t("ws_deliveries{phase:steady}")], ["count>=133650"]);
+  assert.deepEqual([...t("ws_messages_sent{phase:burst}")], ["count>=1800"]);
+  assert.deepEqual([...t("ws_deliveries{phase:burst}")], ["count>=178200"]);
+  assert.equal(t("ws_message_success"), undefined);
+  assert.equal(t("ws_connect_time"), undefined);
+  assert.equal(t("auth_time"), undefined);
+  // A send answered with an error frame counts against its own window.
+  const sender = harness(scaleEnv(), 185);
+  sender.at(370);
+  sender.start();
+  sender.receive({ type: "error", payload: { code: "INTERNAL" } });
+  sender.receive({ type: "chat_send_ok", id: "x" });
+  assert.deepEqual(
+    sender.metrics.ws_message_success.map((m) => [m.value, m.tags.phase]),
+    [
+      [false, "burst"],
+      [true, "burst"],
+    ],
+  );
   // The herd is expected to break a run-wide percentile; each phase is gated
   // on its own instead, so a herd miss cannot hide or fail the steady result.
   assert.equal(t("ws_broadcast_latency_ms"), undefined);
