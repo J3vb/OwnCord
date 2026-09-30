@@ -55,8 +55,9 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 # Minor-pinned per the plugin's own guidance: configure_client hands it a
 # preconfigured rustls ClientConfig, and a 2.x minor bump can change the
-# plugin's bundled reqwest/rustls and break that seam at runtime.
-tauri-plugin-updater = "2.10"
+# plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
+# floor: older releases ignore tauri.conf.json's `requireSignedVersion`.
+tauri-plugin-updater = "2.13"
 tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
@@ -206,3 +207,6 @@ webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
 # Paused virtual time for tests of real-time deadlines (the ws_proxy liveness
 # timeout), so they run instantly and cannot flake on a slow runner.
 tokio = { version = "1", features = ["test-util"] }
+# Mock runtime, so the updater plugin runs against the shipped tauri.conf.json
+# in update_commands tests without a window.
+tauri = { version = "2.12", features = ["test"] }

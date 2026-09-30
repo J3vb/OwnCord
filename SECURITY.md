@@ -323,7 +323,8 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   against a public key committed in the repository. A verification failure
   leaves the installed binary untouched.
 - The Tauri desktop client's own updater performs Ed25519 signature
-  verification before applying an update.
+  verification before applying an update, and requires that signature to name
+  the version the update check offered.
 - Release artifacts also carry SLSA Build L2 provenance attestations (binding
   a file to the workflow and commit that produced it, not to a person), and
   SBOMs for the server binaries (CycloneDX, one per binary or archive) and the
