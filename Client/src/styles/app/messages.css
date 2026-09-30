@@ -44,6 +44,17 @@
   padding: 48px 0;
   color: var(--text-muted);
 }
+/* Older-page spinner: overlays the scroller's top padding, so it moves no row. */
+.messages-older-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
 .messages-loading .spinner {
   width: 24px;
   height: 24px;

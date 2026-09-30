@@ -580,6 +580,70 @@ describe("MessageList", () => {
     await Promise.resolve();
   });
 
+  it("DP-46: starts loading older history about 1.5 viewports before the top, once", () => {
+    setHasMore(1, true);
+    setMessages(
+      1,
+      Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 })),
+    );
+    msgList.mount(container);
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 600 });
+
+    // Three viewports down is still far enough from the top.
+    root.scrollTop = 1800;
+    root.dispatchEvent(new Event("scroll"));
+    expect(options.onScrollTop).not.toHaveBeenCalled();
+
+    // About 1.5 viewports from the top: the older page must already be on its
+    // way, long before the reader hits the top edge.
+    root.scrollTop = 900;
+    root.dispatchEvent(new Event("scroll"));
+    root.dispatchEvent(new Event("scroll"));
+    expect(options.onScrollTop).toHaveBeenCalledOnce();
+  });
+
+  it("DP-46: shows a loading row at the top while the older page is pending, on success and failure", async () => {
+    setHasMore(1, true);
+    setMessages(1, [makeMessage({ id: 10 })]);
+    messagesStore.flush();
+    let resolveLoad: () => void = () => {};
+    const onScrollTop = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLoad = resolve;
+        }),
+    );
+    msgList = createMessageList({ ...options, onScrollTop });
+    msgList.mount(container);
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const loadingRow = (): Element | null => container.querySelector(".messages-older-loading");
+    expect(loadingRow()).toBeNull();
+
+    // Success: the page lands, then the fetch settles.
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(1);
+    expect(loadingRow()).not.toBeNull();
+    setMessages(1, [makeMessage({ id: 9 }), makeMessage({ id: 10 })]);
+    messagesStore.flush();
+    resolveLoad();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(loadingRow()).toBeNull();
+
+    // Failure: the fetch settles without any new page (a real onScrollTop
+    // catches its own error). The row clears and nothing refires on its own.
+    root.dispatchEvent(new Event("scroll"));
+    expect(onScrollTop).toHaveBeenCalledTimes(2);
+    expect(loadingRow()).not.toBeNull();
+    resolveLoad();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(loadingRow()).toBeNull();
+    expect(onScrollTop).toHaveBeenCalledTimes(2);
+  });
+
   it("scrollToMessage returns false before mount", () => {
     // scrollToMessage should be safe to call before mount
     const unmounted = createMessageList(options);
@@ -829,6 +893,49 @@ describe("MessageList", () => {
       expect(rowAfterReset).not.toBeNull();
       expect(rowAfterReset!.textContent).toContain("v25");
     });
+  });
+
+  describe("renderWindow rebuild breaker replay (DP-12)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it(
+      "renders the rows for the final scrollTop once the 2s burst resets",
+      { timeout: 20_000 },
+      () => {
+        setHasMore(1, false);
+        setMessages(
+          1,
+          Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 })),
+        );
+        msgList.mount(container); // rebuild 1
+        const root = container.querySelector(".messages-container") as HTMLDivElement;
+
+        // A fast scrollbar drag: every frame lands somewhere the window has not
+        // rendered, so each one is a range-changing rebuild. 34 of them inside
+        // 2s trip the >30 breaker.
+        for (let i = 0; i < 34; i++) {
+          root.scrollTop = i % 2 === 0 ? 0 : 6000;
+          root.dispatchEvent(new Event("scroll"));
+          vi.advanceTimersByTime(16);
+        }
+        // The drag stops mid-channel (message 134 sits at about 3000px).
+        root.scrollTop = 3000;
+        root.dispatchEvent(new Event("scroll"));
+        vi.advanceTimersByTime(16);
+        expectConsole("error", /\[MessageList\] renderWindow REBUILD called >30 times in 2s/);
+        expect(container.querySelector('[data-testid="message-134"]')).toBeNull();
+
+        // Idle past the reset: the deferred replay renders where the reader stopped.
+        vi.advanceTimersByTime(2100);
+        expect(container.querySelector('[data-testid="message-134"]')).not.toBeNull();
+      },
+    );
   });
 
   describe("scrollToMessage vs renderWindow rebuild breaker", () => {
