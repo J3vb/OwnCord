@@ -312,6 +312,8 @@ describe("NativeRoom device switching", () => {
   });
 });
 
+const micCalls = () => host.calls.filter(([name]) => name === "setMicrophone");
+
 describe("NativeRoom room surface", () => {
   it("routes the microphone toggle to the native session", async () => {
     const room = createNativeRoom(audio);
@@ -324,8 +326,6 @@ describe("NativeRoom room surface", () => {
   });
 
   describe("push-to-talk gate", () => {
-    const micCalls = () => host.calls.filter(([name]) => name === "setMicrophone");
-
     it("enables the microphone closed while the key is up, and a press opens it", async () => {
       const room = createNativeRoom(audio);
       room.setPttGated(true);
