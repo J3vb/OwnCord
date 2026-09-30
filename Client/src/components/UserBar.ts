@@ -233,9 +233,13 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       ),
     );
 
-    // Disable picker (with a reason) when the connection is down
+    // Disable picker (with a reason) when the connection is down. Truly inert
+    // (no Tab stop, no open, no selection): a custom status set while the
+    // socket is down is saved locally, never sent, and overwritten on the next
+    // reconnect (F16).
     const updatePickerDisabled = (): void => {
       const enabled = canSetStatus();
+      statusPicker?.setEnabled(enabled);
       statusPickerWrap.classList.toggle("ub-status-picker--disabled", !enabled);
       if (!enabled) {
         statusPickerWrap.title = shellText("status.offline");

@@ -80,15 +80,51 @@ describe("channel context menu — mute", () => {
     expect(isChannelMuted(5)).toBe(true);
   });
 
-  it("bubbles a mute-changed event so the sidebar can redraw", () => {
-    const el = openMenu(channel());
+  it("fires a mute-changed event so the sidebar can redraw", () => {
+    openMenu(channel());
     const seen: number[] = [];
-    el.addEventListener(CHANNEL_MUTE_CHANGED, (e) => {
-      seen.push((e as CustomEvent<{ channelId: number }>).detail.channelId);
-    });
+    window.addEventListener(
+      CHANNEL_MUTE_CHANGED,
+      (e) => {
+        seen.push((e as CustomEvent<{ channelId: number }>).detail.channelId);
+      },
+      { signal: ac.signal },
+    );
 
     (document.querySelector('[data-testid="ctx-mute-channel"]') as HTMLElement).click();
     expect(seen).toEqual([5]);
+  });
+
+  it("keeps the menu inside the viewport when opened near the bottom edge (F9)", () => {
+    const innerWidth = window.innerWidth;
+    const innerHeight = window.innerHeight;
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      value: 220,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      value: 260,
+    });
+    try {
+      const el = document.createElement("div");
+      container.appendChild(el);
+      attachChannelContextMenu(el, channel(), ac.signal, ac.signal);
+      el.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          clientX: innerWidth - 4,
+          clientY: innerHeight - 4,
+        }),
+      );
+
+      const menu = document.querySelector(".channel-ctx-menu") as HTMLElement;
+      expect(parseInt(menu.style.left, 10)).toBeLessThanOrEqual(innerWidth - 220);
+      expect(menu.style.bottom).not.toBe("");
+    } finally {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
+    }
   });
 
   // A voice channel produces no notifications, so a mute there would be an
@@ -188,6 +224,27 @@ describe("NotificationsTab — muted channel list", () => {
     expect(isChannelMuted(5)).toBe(false);
     expect(tab.querySelector('[data-testid="unmute-5"]')).toBeNull();
     expect(tab.querySelector('[data-testid="muted-empty"]')).not.toBeNull();
+  });
+
+  it("announces a mute change on the window so any sidebar redraws (F16)", () => {
+    // The Settings unmute used to update only its own row; a sidebar listening
+    // for the mute-changed event stayed dimmed. The event now fires from the
+    // channel-mutes store itself, so every writer reaches the sidebars.
+    const seen: number[] = [];
+    muteChannel(5);
+    window.addEventListener(
+      CHANNEL_MUTE_CHANGED,
+      (e) => {
+        seen.push((e as CustomEvent<{ channelId: number }>).detail.channelId);
+      },
+      { signal: ac.signal },
+    );
+
+    const tab = buildNotificationsTab(ac.signal);
+    container.appendChild(tab);
+    (tab.querySelector('[data-testid="unmute-5"]') as HTMLElement).click();
+
+    expect(seen).toEqual([5]);
   });
 
   it("lists several mutes in ascending order", () => {

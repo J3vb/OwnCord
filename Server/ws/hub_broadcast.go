@@ -214,6 +214,14 @@ func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
 	h.BroadcastToChannel(channelID, buildChatBulkDeleted(channelID, messageIDs))
 }
 
+// BroadcastMessagePinned tells every reader of channelID that a message was
+// pinned or unpinned, so other clients and the pinning user's own other
+// devices do not show stale pins (F5). Sequenced like chat_edited, so it
+// replays on reconnect.
+func (h *Hub) BroadcastMessagePinned(channelID, messageID int64, pinned bool) {
+	h.BroadcastToChannel(channelID, buildChatPinned(messageID, channelID, pinned))
+}
+
 // BroadcastMemberBan sends a member_ban message to all connected clients
 // and immediately disconnects the banned user's WebSocket connection (BUG-113).
 func (h *Hub) BroadcastMemberBan(userID int64) {

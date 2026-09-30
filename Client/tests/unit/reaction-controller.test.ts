@@ -246,6 +246,53 @@ describe("createReactionController", () => {
       expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
     });
 
+    it("opens the new message's picker when React is clicked on a second message (F12)", () => {
+      const btnA = document.createElement("button");
+      btnA.setAttribute("data-testid", "msg-react-1");
+      btnA.getBoundingClientRect = vi.fn(() => ({
+        left: 500,
+        right: 530,
+        top: 100,
+        bottom: 130,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 100,
+        toJSON: () => {},
+      }));
+      const btnB = document.createElement("button");
+      btnB.setAttribute("data-testid", "msg-react-2");
+      btnB.getBoundingClientRect = vi.fn(() => ({
+        left: 500,
+        right: 530,
+        top: 200,
+        bottom: 230,
+        width: 30,
+        height: 30,
+        x: 500,
+        y: 200,
+        toJSON: () => {},
+      }));
+      document.body.append(btnA, btnB);
+
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+      ctrl.handleReaction(1, "");
+      expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
+
+      // Clicking React on a DIFFERENT message must move the picker there, not
+      // just close the first and swallow the click.
+      ctrl.handleReaction(2, "");
+
+      // The picker was rebuilt for message 2 (selecting sends to message 2).
+      mockGetChannelMessages.mockReturnValue([{ id: 2, reactions: [] }]);
+      captured.onSelect!("🎉");
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "reaction_add",
+        payload: { message_id: 2, emoji: "🎉" },
+      });
+    });
+
     it("closes existing picker on second open", () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");

@@ -31,6 +31,12 @@ export type StatusPickerComponent = MountableComponent & {
   setStatus(status: UserStatus): void;
   /** Update the custom status input without recreating the picker. */
   setCustomStatus(text: string): void;
+  /**
+   * Enable/disable the picker. A disabled picker is truly inert (no tab stop,
+   * no open, no selection), not merely dimmed — a custom status set while the
+   * socket is down is saved locally, never sent, and overwritten on reconnect.
+   */
+  setEnabled(enabled: boolean): void;
 };
 
 // ---------------------------------------------------------------------------
@@ -78,6 +84,8 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
    *  send, which would otherwise cost a second presence_update against the
    *  server's one-per-ten-seconds limit. */
   let lastCommittedCustom = options.currentCustomStatus ?? "";
+  /** When false the picker refuses to open or change status (offline). */
+  let enabled = true;
 
   // ---- Dropdown visibility --------------------------------------------------
 
@@ -96,6 +104,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
   }
 
   function toggleDropdown(): void {
+    if (!enabled) return;
     if (isOpen()) {
       closeDropdown();
     } else {
@@ -148,6 +157,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     row.addEventListener(
       "click",
       () => {
+        if (!enabled) return;
         applyStatus(def.value);
         closeDropdown();
         options.onStatusChange(def.value);
@@ -187,6 +197,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     customInputEl = input;
 
     const commit = (): void => {
+      if (!enabled) return;
       const text = input.value.trim().slice(0, MAX_CUSTOM_STATUS_LEN);
       if (text === lastCommittedCustom) return;
       lastCommittedCustom = text;
@@ -310,6 +321,20 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     applyStatus(status);
   }
 
+  function setEnabled(value: boolean): void {
+    enabled = value;
+    if (!value) closeDropdown();
+    if (dotEl !== null) {
+      dotEl.setAttribute("aria-disabled", String(!value));
+      // A disabled trigger must not be a Tab stop or activatable by key.
+      if (value) dotEl.setAttribute("tabindex", "0");
+      else dotEl.removeAttribute("tabindex");
+    }
+    if (customInputEl !== null) {
+      customInputEl.disabled = !value;
+    }
+  }
+
   function setCustomStatus(text: string): void {
     // Skip the overwrite while the user is mid-edit (input focused) — an
     // unrelated store push (e.g. a role change) would otherwise clobber
@@ -320,5 +345,5 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     if (customInputEl !== null) customInputEl.value = text;
   }
 
-  return { mount, destroy, setStatus, setCustomStatus };
+  return { mount, destroy, setStatus, setCustomStatus, setEnabled };
 }

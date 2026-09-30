@@ -17,6 +17,7 @@ const {
   mockIsIdle,
   mockScrollToMessage,
   mockSetDisabled,
+  mockSetSendGate,
   mockGetDraft,
   mockRestoreDraft,
 } = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ const {
   mockIsIdle: vi.fn(() => true),
   mockScrollToMessage: vi.fn(() => true),
   mockSetDisabled: vi.fn(),
+  mockSetSendGate: vi.fn(),
   mockGetDraft: vi.fn<
     () => {
       content: string;
@@ -97,6 +99,7 @@ vi.mock("@components/MessageInput", () => ({
       cancelEdit: vi.fn(),
       isIdle: mockIsIdle,
       setDisabled: mockSetDisabled,
+      setSendGate: mockSetSendGate,
       getDraft: mockGetDraft,
       restoreDraft: mockRestoreDraft,
     };
@@ -1626,6 +1629,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1665,6 +1669,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1686,6 +1691,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1722,6 +1728,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1764,6 +1771,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1801,6 +1809,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1839,6 +1848,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1883,23 +1893,25 @@ describe("createChannelController", () => {
       setConnectionStatus("connected");
     });
 
-    it("disables the composer for the cooldown after an accepted send", () => {
+    it("gates only the send for the cooldown, leaving the draft editable (#12)", () => {
       vi.useFakeTimers();
       try {
         seedChannel(5);
         const opts = makeOpts();
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
-        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
 
         wsHandler(opts, "chat_send_ok")({} as never);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 5s");
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 5s");
+        // The composer itself must NOT be disabled — typing continues.
+        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
 
         vi.advanceTimersByTime(3000);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 2s");
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 2s");
 
         vi.advanceTimersByTime(2000);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
       } finally {
         vi.useRealTimers();
       }
@@ -1913,7 +1925,7 @@ describe("createChannelController", () => {
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
-      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
     it("does not charge slow mode again for a deduplicated receipt", () => {
@@ -1922,7 +1934,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       wsHandler(opts, "chat_send_ok")({ deduplicated: true } as never);
-      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
     it("restarts the cooldown when the server refuses with SLOW_MODE", () => {
@@ -1934,13 +1946,13 @@ describe("createChannelController", () => {
         ctrl.mountChannel(42, "general");
 
         wsHandler(opts, "error")({ code: "SLOW_MODE", message: "slow mode" } as never);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 10s");
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 10s");
 
         // An unrelated error must not gate the composer.
         vi.advanceTimersByTime(10_000);
-        mockSetDisabled.mockClear();
+        mockSetSendGate.mockClear();
         wsHandler(opts, "error")({ code: "FORBIDDEN", message: "nope" } as never);
-        expect(mockSetDisabled).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+        expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
       } finally {
         vi.useRealTimers();
       }
@@ -1956,7 +1968,7 @@ describe("createChannelController", () => {
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
-      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
     it("does not gate the newly mounted channel with a late ack for a message sent in the previous channel (OC-0059)", () => {
@@ -1996,7 +2008,7 @@ describe("createChannelController", () => {
       // Switch to channel B before A's ack arrives.
       setActiveChannel(43);
       ctrl.mountChannel(43, "other");
-      mockSetDisabled.mockClear();
+      mockSetSendGate.mockClear();
 
       // A's late chat_send_ok now arrives; only B's handler is subscribed.
       const ackCalls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -2006,7 +2018,7 @@ describe("createChannelController", () => {
       onAck({ message_id: 7, timestamp: "2024-01-01T00:00:00Z" }, "cid-2");
 
       // B was never sent to and must not be gated by A's cooldown.
-      expect(mockSetDisabled).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
     });
 
     it("stops the countdown when the channel unmounts", () => {
@@ -2019,10 +2031,10 @@ describe("createChannelController", () => {
         wsHandler(opts, "chat_send_ok")({} as never);
 
         ctrl.destroyChannel();
-        mockSetDisabled.mockClear();
+        mockSetSendGate.mockClear();
         vi.advanceTimersByTime(5000);
 
-        expect(mockSetDisabled).not.toHaveBeenCalled();
+        expect(mockSetSendGate).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }

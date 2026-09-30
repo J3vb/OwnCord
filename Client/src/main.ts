@@ -67,6 +67,7 @@ import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
+import { setChannelMutesHost } from "@lib/channel-mutes";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
@@ -878,7 +879,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           runHealthChecks(connectPage, getProfileList(), pageOwner);
         },
         onDeleteProfile(profileId) {
+          // Look the host up before removal: deleting a saved profile must
+          // also drop its OS credential, or re-adding the same host resumes
+          // the old remembered password (F11).
+          const host = profileManager.getAll().find((p) => p.id === profileId)?.host;
           profileManager.removeProfile(profileId);
+          if (host) void deleteCredential(host);
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
         },
@@ -1151,6 +1157,12 @@ authStore.subscribeSelector(
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
+      // The per-server scope (channel mutes, notification-level override) is
+      // set by MainPage on mount and never cleared by clearAuth; without this
+      // the connect page's Settings still offers the departed server's
+      // override and writes its key (F13). A server switch re-sets it when the
+      // next MainPage mounts.
+      setChannelMutesHost(null);
       // Clear stored credential on logout. (A server restart never gets
       // here: it keeps the session and reconnects.)
       const host = api.getConfig().host;
@@ -1206,7 +1218,11 @@ function handleInviteDeepLink(code: string, host?: string): void {
     // so the authStore subscriber above runs its full teardown (voice leave,
     // dispatcher/session cleanup, ws.disconnect) and navigates to "connect"
     // itself — whose render branch consumes pendingInviteLink below.
-    clearAuth();
+    //
+    // "server_switch", not the default "user": the invite is not a logout, so
+    // the current server's credential must survive (the user may return to A
+    // later) — the same reason the quick-switch path uses it (F7).
+    clearAuth("server_switch");
     return;
   }
   deactivatePendingMessages();

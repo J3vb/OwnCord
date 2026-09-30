@@ -17,14 +17,15 @@ func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
 	invites := make([]*Invite, 0, len(rows))
 	for _, r := range rows {
 		invites = append(invites, &Invite{
-			ID:        r.ID,
-			Code:      r.Code,
-			CreatedBy: r.CreatedBy,
-			Uses:      int(r.UseCount),
-			MaxUses:   ptrI64toI(r.MaxUses),
-			ExpiresAt: r.ExpiresAt,
-			Revoked:   r.Revoked != 0,
-			CreatedAt: r.CreatedAt,
+			ID:              r.ID,
+			Code:            r.Code,
+			CreatedBy:       r.CreatedBy,
+			CreatorUsername: r.CreatorUsername,
+			Uses:            int(r.UseCount),
+			MaxUses:         ptrI64toI(r.MaxUses),
+			ExpiresAt:       r.ExpiresAt,
+			Revoked:         r.Revoked != 0,
+			CreatedAt:       r.CreatedAt,
 		})
 	}
 	return invites, nil

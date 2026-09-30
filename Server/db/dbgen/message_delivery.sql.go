@@ -12,7 +12,7 @@ import (
 const createMessageForDelivery = `-- name: CreateMessageForDelivery :one
 INSERT INTO messages (channel_id, user_id, content, reply_to, mentions_everyone)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp, mentions_everyone
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp, mentions_everyone, pinned_at
 `
 
 type CreateMessageForDeliveryParams struct {
@@ -43,6 +43,7 @@ func (q *Queries) CreateMessageForDelivery(ctx context.Context, arg CreateMessag
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }

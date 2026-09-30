@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS messages (
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0
+    mentions_everyone INTEGER NOT NULL DEFAULT 0,
+    pinned_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -1020,6 +1021,10 @@ type purgeBroadcast struct {
 func (b *recordingPurgeBroadcaster) BroadcastChatBulkDeleted(channelID int64, ids []int64) {
 	b.calls = append(b.calls, purgeBroadcast{channelID: channelID, ids: ids})
 }
+
+// BroadcastMessagePinned satisfies PurgeBroadcaster; the pin fan-out itself is
+// asserted in ws/messages_test.go.
+func (b *recordingPurgeBroadcaster) BroadcastMessagePinned(_ int64, _ int64, _ bool) {}
 
 // buildPurgeRouter wires the channel routes with a recording broadcaster onto a
 // DB that has the DM and audit tables the purge path touches.

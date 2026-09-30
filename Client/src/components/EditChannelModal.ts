@@ -320,7 +320,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     // Error display
     const errorEl = createElement("div", {
       class: "form-group",
-      style: "color: var(--red); font-size: 13px; display: none;",
+      style: "color: var(--text-danger); font-size: 13px; display: none;",
       "data-testid": "edit-channel-error",
     });
     body.appendChild(errorEl);

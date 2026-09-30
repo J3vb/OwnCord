@@ -47,6 +47,7 @@ import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
 import { messagesStore, setAroundMessages, setMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
+import { setDmChannels } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
@@ -619,6 +620,28 @@ describe("permalink chips in message content", () => {
 
     expect(handler).toHaveBeenCalledWith(1, 5);
     unregister();
+  });
+
+  it("labels a DM permalink chip with '@', not '#' (F15)", () => {
+    setDmChannels([
+      {
+        channelId: 50,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+        name: "",
+        isGroup: false,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+        mentionCount: 0,
+      },
+    ]);
+    container.appendChild(renderMentionSegment("owncord://message/50/99"));
+
+    const chip = container.querySelector<HTMLElement>(".message-link-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.querySelector(".mlc-channel")?.textContent).toBe("@bob");
   });
 
   it("leaves a link to an invisible channel as plain text", () => {

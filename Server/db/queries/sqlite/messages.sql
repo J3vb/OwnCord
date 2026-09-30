@@ -1,11 +1,11 @@
 -- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone;
+          mentions_everyone, pinned_at;
 
 -- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone
+       mentions_everyone, pinned_at
 FROM messages WHERE id = ?;
 
 -- name: GetMessagesForAPI :many
@@ -22,13 +22,15 @@ ORDER BY m.id DESC LIMIT ?;
 -- ErrNotFound rather than a silent success (OC-0358).
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone;
+          mentions_everyone, pinned_at;
 
 -- name: SoftDeleteMessage :execresult
 UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;
 
 -- name: SetMessagePinned :execresult
-UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0;
+-- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
+-- pinning and NULL when unpinning (a re-pin stamps freshly).
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0;
 
 -- name: GetLatestMessageID :one
 SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0;

@@ -436,6 +436,12 @@ export interface ChatBulkDeletedPayload {
   readonly ids: readonly number[];
 }
 
+export interface ChatPinnedPayload {
+  readonly message_id: number;
+  readonly channel_id: number;
+  readonly pinned: boolean;
+}
+
 export interface ReactionUpdatePayload {
   readonly message_id: number;
   readonly channel_id: number;
@@ -886,6 +892,7 @@ export type ServerMessage =
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
+  | (WsEnvelope<ChatPinnedPayload> & { readonly type: "chat_pinned" })
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
   | (WsEnvelope<TypingPayload> & { readonly type: "typing" })
   | (WsEnvelope<PresencePayload> & { readonly type: "presence" })
@@ -1201,6 +1208,9 @@ export interface InviteResponse {
   readonly max_uses: number | null;
   readonly use_count?: number;
   readonly expires_at: string | null;
+  readonly revoked?: boolean;
+  readonly created_at?: string;
+  readonly creator_username?: string;
 }
 
 /** Upload response from POST /api/uploads. */

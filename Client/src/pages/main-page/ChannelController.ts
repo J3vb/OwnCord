@@ -617,6 +617,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
         updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
+        // A group DM has no profile panel to open, so the pointer cursor would
+        // promise a click that does nothing (F24).
+        chatHeaderRefs.nameGroupEl.style.cursor =
+          dmChannel !== undefined && dmChannel.isGroup ? "default" : "pointer";
       };
       refreshDmHeader();
       // Keep the subtitle live across presence and roster changes — otherwise
@@ -968,12 +972,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           ? messagingText("composer.announcementOnly")
           : messagingText("composer.noPermission");
       }
-      const remaining = slowModeRemaining();
-      if (remaining > 0) return messagingText("composer.slowMode", { seconds: String(remaining) });
       return null;
     };
     const refreshComposerState = (): void => {
       messageInput?.setDisabled(computeComposerReason());
+      // Slow mode gates the SEND only: the draft stays editable so the user
+      // can keep typing through the cooldown (Discord parity, F12).
+      const remaining = slowModeRemaining();
+      messageInput?.setSendGate(
+        remaining > 0 ? messagingText("composer.slowMode", { seconds: String(remaining) }) : null,
+      );
     };
 
     /**

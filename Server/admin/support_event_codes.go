@@ -179,6 +179,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"failed to reset stale user statuses":                                                                              "failed_to_reset_stale_user_statuses",
 	"failed to resolve attachment":                                                                                     "failed_to_resolve_attachment",
 	"failed to stage two-factor enrolment":                                                                             "failed_to_stage_two_factor_enrolment",
+	"list sessions: failed to mark seen":                                                                               "list_sessions_failed_to_mark_seen",
 	"failed to start LiveKit process":                                                                                  "failed_to_start_livekit_process",
 	"failed to touch api token":                                                                                        "failed_to_touch_api_token",
 	"failed to touch session":                                                                                          "failed_to_touch_session",

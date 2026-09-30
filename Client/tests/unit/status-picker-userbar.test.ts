@@ -94,7 +94,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("click on status picker dot opens the dropdown", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -185,6 +185,21 @@ describe("StatusPicker wired to UserBar", () => {
     expect(wrap.title).toBe("Offline");
   });
 
+  it("offline picker is inert: no Tab stop, cannot open or select (#16)", () => {
+    setAuthState({ username: "alice" }, true);
+    setConnectionStatus("disconnected");
+    const ws = createMockWs("disconnected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    expect(dot.getAttribute("tabindex")).toBeNull();
+    expect(dot.getAttribute("aria-disabled")).toBe("true");
+
+    dot.click();
+    expect(container.querySelector(".status-picker-dropdown--open")).toBeNull();
+  });
+
   it("status picker reacts to a connection status change through the store", async () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
@@ -205,7 +220,7 @@ describe("StatusPicker wired to UserBar", () => {
     setAuthState({ username: "alice" }, true);
     saveUserStatus("dnd");
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -219,7 +234,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("persists the selected status so the settings panel agrees", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     (container.querySelector(".status-picker-dot") as HTMLElement).click();
@@ -232,7 +247,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("follows a status change made elsewhere (settings Account tab)", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -257,7 +272,7 @@ describe("StatusPicker wired to UserBar", () => {
     saveCustomStatus("stale local value");
     setAuthState({ username: "alice", custom_status: "In a meeting" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -275,7 +290,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("follows a custom-status change delivered through the auth store", async () => {
     setAuthState({ username: "alice", custom_status: "" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;

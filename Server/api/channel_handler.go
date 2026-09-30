@@ -38,6 +38,7 @@ func isInvalidSearchQueryError(err error) bool {
 // WebSocket from a REST handler. Satisfied by *ws.Hub.
 type PurgeBroadcaster interface {
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
+	BroadcastMessagePinned(channelID, messageID int64, pinned bool)
 }
 
 // MountChannelRoutes registers all channel-related routes onto r.
@@ -53,8 +54,8 @@ func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 		r.Post("/{id}/messages/purge", handlePurgeMessages(svc, broadcaster))
 		r.Get("/{id}/messages/{messageId}/reactions/{emoji}/users", handleGetReactionUsers(svc))
 		r.Get("/{id}/pins", handleGetPins(svc))
-		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, true))
-		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, false))
+		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, broadcaster, true))
+		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, broadcaster, false))
 	})
 	r.With(
 		AuthMiddleware(svc.Sessions),
@@ -320,12 +321,20 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 			Messages []db.MessageAPIResponse `json:"messages"`
 			HasMore  bool                    `json:"has_more"`
 		}
-		writeJSON(w, http.StatusOK, response{Messages: msgs, HasMore: false})
+		// Report the real cap state rather than a hardcoded false: with more
+		// than MaxPinnedMessages pins the rest are truncated, and the caller
+		// must be able to tell (F23).
+		writeJSON(w, http.StatusOK, response{
+			Messages: msgs,
+			HasMore:  len(msgs) >= db.MaxPinnedMessages,
+		})
 	}
 }
 
-// handleSetPinned pins or unpins a message in a channel.
-func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
+// handleSetPinned pins or unpins a message in a channel. The change is
+// broadcast to every reader so other clients (and the pinner's own other
+// devices) do not show stale pins (F5).
+func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
 		if !ok {
@@ -344,6 +353,9 @@ func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
 		if err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned); err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
+		}
+		if broadcaster != nil {
+			broadcaster.BroadcastMessagePinned(channelID, messageID, pinned)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

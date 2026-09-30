@@ -129,19 +129,22 @@ func (q *Queries) ListInviteRedemptions(ctx context.Context, arg ListInviteRedem
 }
 
 const listInvites = `-- name: ListInvites :many
-SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
-FROM invites ORDER BY created_at DESC LIMIT 200
+SELECT i.id, i.code, i.created_by, COALESCE(u.username, '') AS creator_username,
+       i.max_uses, i.use_count, i.expires_at, i.revoked, i.created_at
+FROM invites i LEFT JOIN users u ON u.id = i.created_by
+ORDER BY i.created_at DESC LIMIT 200
 `
 
 type ListInvitesRow struct {
-	ID        int64   `json:"id"`
-	Code      string  `json:"code"`
-	CreatedBy int64   `json:"createdBy"`
-	MaxUses   *int64  `json:"maxUses"`
-	UseCount  int64   `json:"useCount"`
-	ExpiresAt *string `json:"expiresAt"`
-	Revoked   int64   `json:"revoked"`
-	CreatedAt string  `json:"createdAt"`
+	ID              int64   `json:"id"`
+	Code            string  `json:"code"`
+	CreatedBy       int64   `json:"createdBy"`
+	CreatorUsername string  `json:"creatorUsername"`
+	MaxUses         *int64  `json:"maxUses"`
+	UseCount        int64   `json:"useCount"`
+	ExpiresAt       *string `json:"expiresAt"`
+	Revoked         int64   `json:"revoked"`
+	CreatedAt       string  `json:"createdAt"`
 }
 
 func (q *Queries) ListInvites(ctx context.Context) ([]ListInvitesRow, error) {
@@ -157,6 +160,7 @@ func (q *Queries) ListInvites(ctx context.Context) ([]ListInvitesRow, error) {
 			&i.ID,
 			&i.Code,
 			&i.CreatedBy,
+			&i.CreatorUsername,
 			&i.MaxUses,
 			&i.UseCount,
 			&i.ExpiresAt,

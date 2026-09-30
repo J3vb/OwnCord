@@ -107,6 +107,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
 	MsgTypeChatDeleted:         false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
+	MsgTypeChatPinned:          false, // ids + flag only, no message body
 	MsgTypeTyping:              false,
 	MsgTypePresence:            false,
 	MsgTypeChannelCreate:       false, // must reach every viewer, including the one that turns the label on

@@ -1521,6 +1521,34 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("shows a server-rejected code inside the opaque TOTP overlay, not just the hidden banner (F2)", async () => {
+    // The TOTP overlay is opaque and covers the form panel's error banner, so
+    // a rejection routed only there is invisible to the user.
+    const onTotpSubmit = vi.fn().mockRejectedValue(new Error("Invalid TOTP"));
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+
+    page.showTotp();
+
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    totpInput.value = "999999";
+    (container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      const totpError = container.querySelector("[data-testid='totp-invalid']")!;
+      expect(totpError.textContent).toBe("Invalid TOTP");
+    });
+
+    const totpInputAfter = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    expect(totpInputAfter.getAttribute("aria-invalid")).toBe("true");
+    // The overlay stays up with the entered code intact for a retry.
+    expect(
+      container.querySelector(".totp-overlay")!.classList.contains("totp-overlay--hidden"),
+    ).toBe(false);
+
+    page.destroy?.();
+  });
+
   it("TOTP submit refused for too many codes shows the lockout copy", async () => {
     const onTotpSubmit = vi
       .fn()

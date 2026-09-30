@@ -56,6 +56,7 @@ import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
+import { markdownToPlainText } from "@lib/markdown";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
@@ -128,7 +129,12 @@ function renderReplyRef(
     { signal },
   );
   if (ref) {
-    const preview = ref.deleted ? messagingText("message.deleted") : ref.content.slice(0, 100);
+    const plain = ref.deleted
+      ? messagingText("message.deleted")
+      : markdownToPlainText(ref.content, messagingText("spoiler.revealed")).slice(0, 100);
+    // A message that is only an attachment (or only a spoiler) has no plain
+    // text; show a placeholder rather than an empty preview (F24).
+    const preview = plain === "" ? messagingText("reply.attachment") : plain;
     const role = getUserRole(ref.user.id);
     const author = resolveAuthor(ref.user);
     const miniAvatar = createAvatarElement(author, {
@@ -231,7 +237,9 @@ export function renderMessage(
         class: "msg-hover-time",
         title: formatFullDate(msg.timestamp),
       },
-      formatTime(msg.timestamp),
+      // Same "Today at 2:34 PM" format the header uses, not a bare 24h HH:MM
+      // that disagreed with it (F24).
+      formatMessageTimestamp(msg.timestamp),
     );
     el.appendChild(hoverTime);
   }
@@ -351,7 +359,13 @@ export function renderMessage(
     pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
       signal,
     });
-    actionsBar.appendChild(pinBtn);
+    // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but
+    // any DM participant may pin — so offering it to a plain member is a
+    // broken affordance (PRD.md: permission is a pre-disabled affordance, not
+    // a rejection after the fact).
+    if (opts.channelType === "dm" || canManageMessages()) {
+      actionsBar.appendChild(pinBtn);
+    }
 
     if (msg.user.id === opts.currentUserId) {
       const editBtn = createElement("button", {

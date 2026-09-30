@@ -135,7 +135,7 @@ describe("channel-navigation", () => {
         next.set(1, makeChannel({ id: 1, name: "general" }));
         return { ...prev, channels: next };
       });
-      expect(findChannelById(1)).toEqual({ id: 1, name: "general" });
+      expect(findChannelById(1)).toEqual({ id: 1, name: "general", isDm: false });
     });
 
     it("returns null for an unknown id", () => {
@@ -154,7 +154,7 @@ describe("channel-navigation", () => {
           recipient: { id: 10, username: "bob", avatar: "", status: "online" },
         }),
       ]);
-      expect(findChannelById(50)).toEqual({ id: 50, name: "bob" });
+      expect(findChannelById(50)).toEqual({ id: 50, name: "bob", isDm: true });
     });
   });
 

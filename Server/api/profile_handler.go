@@ -541,8 +541,10 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			callerSessionID = sess.ID
 		}
 		if err := svc.Users.MarkSessionsSeen(r.Context(), user.ID, callerSessionID); err != nil {
-			writeServiceError(r.Context(), w, err)
-			return
+			// A failed "seen" write must not discard a successfully built
+			// list: the sessions are still correct, so return them and log the
+			// write failure rather than 500ing (F23).
+			slog.WarnContext(r.Context(), "list sessions: failed to mark seen", "err", err)
 		}
 
 		writeJSON(w, http.StatusOK, resp)

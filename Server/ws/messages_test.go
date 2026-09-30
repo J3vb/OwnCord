@@ -528,6 +528,29 @@ func TestBuildChatBulkDeleted_NilIDsEncodesAsEmptyArray(t *testing.T) {
 	}
 }
 
+// ─── buildChatPinned ──────────────────────────────────────────────────────────
+
+func TestBuildChatPinned_TypeAndPayload(t *testing.T) {
+	msg := buildChatPinned(1042, 5, true)
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			MessageID int64 `json:"message_id"`
+			ChannelID int64 `json:"channel_id"`
+			Pinned    bool  `json:"pinned"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(msg, &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env.Type != "chat_pinned" {
+		t.Errorf("type = %q, want chat_pinned", env.Type)
+	}
+	if env.Payload.MessageID != 1042 || env.Payload.ChannelID != 5 || !env.Payload.Pinned {
+		t.Errorf("payload = %+v, want {1042 5 true}", env.Payload)
+	}
+}
+
 // ─── buildReactionUpdate ──────────────────────────────────────────────────────
 
 func TestBuildReactionUpdate_Type(t *testing.T) {

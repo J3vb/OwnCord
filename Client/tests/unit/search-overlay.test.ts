@@ -675,6 +675,74 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("scrolls the active row into view on arrow navigation (#2)", async () => {
+    // The results box is a max-height scroller, so the highlight must be kept
+    // visible; jsdom has no layout, so assert the call.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    const results = [
+      makeResult({ message_id: 1 }),
+      makeResult({ message_id: 2 }),
+      makeResult({ message_id: 3 }),
+    ];
+    const onSearch = vi.fn().mockResolvedValue(results);
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "test";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    scrollIntoView.mockClear();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+    const rows = container.querySelectorAll(".search-result-item");
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(rows[1]);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+
+    overlay.destroy?.();
+  });
+
+  it("aborts the in-flight search when the query falls below the minimum (F5)", async () => {
+    // Clearing/shortening the query must not let the previous request's late
+    // response repopulate the results under an empty box (OC-0467).
+    let abortedSignal: AbortSignal | undefined;
+    let resolveSearch: ((results: SearchResultItem[]) => void) | undefined;
+    const onSearch = vi.fn().mockImplementation(
+      (_q: string, _ch: number | undefined, signal: AbortSignal) =>
+        new Promise<SearchResultItem[]>((resolve) => {
+          abortedSignal = signal;
+          resolveSearch = resolve;
+        }),
+    );
+    const opts = makeOptions({ onSearch });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(onSearch).toHaveBeenCalledTimes(1);
+
+    // Clear the query before the stalled search lands.
+    input.value = "";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(abortedSignal!.aborted).toBe(true);
+
+    // Even if the stale promise still resolves, no results are rendered.
+    resolveSearch?.([makeResult({ message_id: 1, content: "stale" })]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(container.querySelectorAll(".search-result-item")).toHaveLength(0);
+
+    overlay.destroy?.();
+  });
+
   it("shows 'Searching...' status during search", async () => {
     let resolveSearch: ((results: SearchResultItem[]) => void) | undefined;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -1370,6 +1370,44 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 	}
 }
 
+// TestGetPinnedMessages_OrdersByPinRecency pins an older message AFTER a newer
+// one and checks the newer pin sorts first (F5). Ordering by message id put the
+// newer pin at the bottom.
+func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "pinorder")
+	chID := seedChannel(t, database, "pinsorder")
+
+	first, err := database.CreateMessage(context.Background(), chID, userID, "older message", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(first): %v", err)
+	}
+	second, err := database.CreateMessage(context.Background(), chID, userID, "newer message", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(second): %v", err)
+	}
+
+	// Pin the NEWER message first, then the OLDER one, so message-id order and
+	// pin-recency order disagree.
+	if err := database.SetMessagePinned(context.Background(), second, true); err != nil {
+		t.Fatalf("pin second: %v", err)
+	}
+	if err := database.SetMessagePinned(context.Background(), first, true); err != nil {
+		t.Fatalf("pin first: %v", err)
+	}
+
+	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
+	if err != nil {
+		t.Fatalf("GetPinnedMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("got %d pins, want 2", len(msgs))
+	}
+	if msgs[0].ID != first {
+		t.Errorf("most-recently-pinned should sort first: got id %d, want %d", msgs[0].ID, first)
+	}
+}
+
 func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "dmforeignalice")

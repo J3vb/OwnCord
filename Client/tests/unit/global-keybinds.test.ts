@@ -77,6 +77,36 @@ describe("global keybinds", () => {
     expect(h.onUploadFile).toHaveBeenCalledOnce();
   });
 
+  it("does not fire while a dialog/modal owns focus (#17)", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    // A modal (Create Channel, report dialog, confirm) is open. Ctrl+F must
+    // not fire behind it and swallow the key from the field.
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+
+    press("f");
+    expect(h.onSearch).not.toHaveBeenCalled();
+
+    dialog.remove();
+  });
+
+  it("does not fire while a text field is focused (#17)", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
+
+    expect(h.onSearch).not.toHaveBeenCalled();
+
+    input.remove();
+  });
+
   it("ignores voice shortcuts outside a voice channel", () => {
     const h = makeHandlers();
     detach = attachGlobalKeybinds(h);

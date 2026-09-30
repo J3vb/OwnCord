@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -863,7 +864,7 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 		        m.mentions_everyone
 		 FROM messages m JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ? AND m.pinned = 1 AND m.deleted = 0
-		 ORDER BY m.id DESC LIMIT ?`,
+		 ORDER BY m.pinned_at DESC, m.id DESC LIMIT ?`,
 		channelID, MaxPinnedMessages,
 	)
 	if err != nil {
@@ -944,9 +945,18 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 // SetMessagePinned updates the pinned column on a message.
 // Returns ErrNotFound if the message does not exist.
 func (d *DB) SetMessagePinned(ctx context.Context, id int64, pinned bool) error {
+	var pinnedAt *string
+	if pinned {
+		// Stamp pin time so GetPinnedMessages can order by recency. Fixed-width
+		// nanosecond precision keeps lexicographic TEXT ordering correct even
+		// for two pins in the same second.
+		t := time.Now().UTC().Format("2006-01-02 15:04:05.000000000")
+		pinnedAt = &t
+	}
 	res, err := d.q.SetMessagePinned(ctx, dbgen.SetMessagePinnedParams{
-		Pinned: b2i64(pinned),
-		ID:     id,
+		Pinned:   b2i64(pinned),
+		PinnedAt: pinnedAt,
+		ID:       id,
 	})
 	if err != nil {
 		return fmt.Errorf("SetMessagePinned: %w", err)

@@ -21,7 +21,12 @@ export interface PinnedMessage {
 export interface PinnedMessagesOptions {
   readonly channelId: number;
   readonly pinnedMessages: readonly PinnedMessage[];
-  readonly onUnpin: (messageId: number) => void;
+  /**
+   * Unpin a message. Omitted for a reader without MANAGE_MESSAGES (or DM
+   * membership), so the panel is read-only rather than offering an action the
+   * server refuses (F1).
+   */
+  readonly onUnpin?: (messageId: number) => void;
   readonly onJumpToMessage: (messageId: number) => void;
   readonly onClose: () => void;
 }
@@ -71,17 +76,25 @@ function renderPinnedItem(
     "aria-label": messagingText("pins.jump"),
   });
   jumpBtn.appendChild(createIcon("external-link", 14));
-  const unpinBtn = createElement("button", {
-    class: "pinned-msg__unpin",
-    title: messagingText("pins.unpin"),
-    "aria-label": messagingText("pins.unpin"),
-  });
-  unpinBtn.appendChild(createIcon("x", 14));
 
   jumpBtn.addEventListener("click", () => options.onJumpToMessage(msg.id), { signal });
-  unpinBtn.addEventListener("click", () => options.onUnpin(msg.id), { signal });
+  actions.appendChild(jumpBtn);
 
-  appendChildren(actions, jumpBtn, unpinBtn);
+  // Unpin only when the viewer may act; a reader without MANAGE_MESSAGES (or
+  // DM membership) gets a read-only panel instead of a button that always
+  // fails (F1).
+  if (options.onUnpin !== undefined) {
+    const onUnpin = options.onUnpin;
+    const unpinBtn = createElement("button", {
+      class: "pinned-msg__unpin",
+      title: messagingText("pins.unpin"),
+      "aria-label": messagingText("pins.unpin"),
+    });
+    unpinBtn.appendChild(createIcon("x", 14));
+    unpinBtn.addEventListener("click", () => onUnpin(msg.id), { signal });
+    actions.appendChild(unpinBtn);
+  }
+
   appendChildren(card, row, actions);
 
   return card;

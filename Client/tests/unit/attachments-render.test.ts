@@ -46,6 +46,13 @@ vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") 
 vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 
+const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
+vi.mock("@lib/toast", () => ({
+  showToast: showToastMock,
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
+
 // Provide a minimal indexedDB stub that returns null from idbGet
 // so renderAttachment always goes through the network fetch path.
 vi.stubGlobal("indexedDB", {
@@ -314,6 +321,25 @@ describe("renderAttachment — non-image file", () => {
     });
   });
 
+  it("reports a failed download through a toast, not a native alert (F14)", async () => {
+    showToastMock.mockClear();
+    saveMock.mockResolvedValue("C:\\Downloads\\archive.zip");
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    const el = renderAttachment({
+      id: "1",
+      url: "https://myserver.local:8443/file.zip",
+      filename: "archive.zip",
+      size: 2048,
+      mime: "application/zip",
+    });
+    (el.querySelector(".msg-file-download") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith(expect.stringContaining("403"), "error");
+    });
+  });
+
   it("does not write file when user cancels save dialog", async () => {
     saveMock.mockResolvedValue(null); // User cancelled
 
@@ -385,6 +411,25 @@ describe("renderAttachment — image with dimensions", () => {
     });
 
     expect(el.style.minHeight).toBe("200px");
+  });
+
+  it("shows a typed failure with retry when the image fetch fails (F14)", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+    const el = renderAttachment({
+      id: "1",
+      url: "https://myserver.local:8443/missing.png",
+      filename: "missing.png",
+      size: 1000,
+      mime: "image/png",
+    });
+
+    await vi.waitFor(() => {
+      expect(el.querySelector(".msg-media-fallback")).not.toBeNull();
+    });
+    const retry = el.querySelector(".msg-media-retry") as HTMLButtonElement;
+    expect(retry).not.toBeNull();
+    // The filename box must not sit there looking like it is still loading.
+    expect(el.querySelector(".placeholder-img.loading")).toBeNull();
   });
 });
 

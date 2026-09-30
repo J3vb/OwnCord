@@ -91,6 +91,12 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     // pointing at nothing.
     if (filteredChannels.length > 0) {
       input.setAttribute("aria-activedescendant", `qs-option-${activeIndex}`);
+      // The results box is a fixed max-height scroller, so the roving
+      // highlight otherwise walks off the bottom while Enter still opens the
+      // hidden row. Mirrors the inline autocomplete (OC-0370).
+      (resultsDiv.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
+        block: "nearest",
+      });
     } else {
       input.removeAttribute("aria-activedescendant");
     }

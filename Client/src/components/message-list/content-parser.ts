@@ -291,7 +291,9 @@ function buildMessageLinkNode(url: string): HTMLSpanElement | null {
     title: messagingText("message.jumpIn", { channel: channel.name }),
   });
   const label = createElement("span", { class: "mlc-channel" });
-  setText(label, `#${channel.name}`);
+  // A DM channel has no user-visible #name; every other DM-labelling surface
+  // uses '@', so the chip must too (F15).
+  setText(label, `${channel.isDm ? "@" : "#"}${channel.name}`);
   const action = createElement("span", { class: "mlc-action" });
   setText(action, messagingText("message.jump"));
   chip.appendChild(label);

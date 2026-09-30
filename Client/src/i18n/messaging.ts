@@ -86,6 +86,7 @@ export const messagingText = defineCatalog("messaging", {
   "divider.new": "NEW",
   "reply.jumpTitle": "Jump to the replied-to message",
   "reply.unknown": "Reply to unknown message",
+  "reply.attachment": "Attachment",
   "send.slowMode": "Slow mode — wait before sending again",
   "send.rateLimited": "You're sending too fast — try again in a moment",
   "send.forbidden": "You don't have permission to post here",

@@ -20,6 +20,7 @@ import type {
 import { uiStore } from "@stores/ui.store";
 import { settingsText } from "../i18n/settings";
 import { authStore } from "@stores/auth.store";
+import { createAvatarElement } from "./message-list/avatar";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
@@ -317,10 +318,15 @@ export function createSettingsOverlay(
     // User profile section at top of sidebar
     const user = authStore.getState().user;
     const profileSection = createElement("div", { class: "settings-sidebar-profile" });
-    const avatarEl = createElement(
-      "div",
-      { class: "settings-sidebar-avatar" },
-      (user?.username ?? "U").charAt(0).toUpperCase(),
+    // Show the uploaded avatar image, not only the initial, matching every
+    // other identity surface (F24).
+    const avatarEl = createAvatarElement(
+      {
+        username: user?.username ?? "U",
+        displayName: user?.display_name ?? null,
+        avatar: user?.avatar ?? null,
+      },
+      { className: "settings-sidebar-avatar" },
     );
     const profileInfo = createElement("div", {});
     const profileName = createElement(
@@ -350,7 +356,8 @@ export function createSettingsOverlay(
       (s) => s.user?.username,
       (name) => {
         profileName.textContent = name ?? settingsText("common.unknown");
-        avatarEl.textContent = (name ?? "U").charAt(0).toUpperCase();
+        const initial = avatarEl.querySelector(".avatar-initial");
+        if (initial !== null) initial.textContent = (name ?? "U").charAt(0).toUpperCase();
       },
     );
 

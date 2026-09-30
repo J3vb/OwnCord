@@ -787,8 +787,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } else if (formState === "error" && totpPending) {
       // A rejected verify lands here — keep the overlay up (and the
       // already-entered code in place) instead of dropping the user back on
-      // the login form with no way to retry.
+      // the login form with no way to retry. The banner is inside the form
+      // panel, which the opaque overlay covers, so the rejection must also be
+      // written to the in-overlay error node or the user sees nothing (F2).
       totpOverlay.classList.remove("totp-overlay--hidden");
+      if (errorMessage) {
+        setText(totpError, errorMessage);
+        totpInput.classList.add("error");
+        totpInput.setAttribute("aria-invalid", "true");
+      }
     } else {
       totpOverlay.classList.add("totp-overlay--hidden");
     }
