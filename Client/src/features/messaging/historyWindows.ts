@@ -15,6 +15,11 @@ import { isUnreconciledEcho } from "./echoReconcile";
  *  from a refetched row is not a change. */
 const LIVE_ONLY_KEYS = new Set(["clientMessageId", "role", "display_name"]);
 
+/** The keys of `o` that count toward sameValue. */
+function present(o: Record<string, unknown>): string[] {
+  return Object.keys(o).filter((k) => o[k] != null && !LIVE_ONLY_KEYS.has(k));
+}
+
 /** Deep equality over plain data; null, undefined and live-only properties
  *  count as absent and key order is ignored, so a live-built row equals its
  *  REST twin. */
@@ -22,8 +27,6 @@ function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const present = (o: Record<string, unknown>): string[] =>
-    Object.keys(o).filter((k) => o[k] != null && !LIVE_ONLY_KEYS.has(k));
   const x = a as Record<string, unknown>;
   const y = b as Record<string, unknown>;
   const keys = present(x);
