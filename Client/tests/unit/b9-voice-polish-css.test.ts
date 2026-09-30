@@ -50,7 +50,7 @@ describe("B9-24 voice/media polish CSS", () => {
     [".vw-connected.vw-reconnecting", "--text-warning"],
     [".vw-secured", "--text-positive"],
     [".vw-secured.vw-secured--degraded", "--text-danger"],
-    [".vw-timer", "--text-positive"],
+    [".vw-timer", "--text-muted"],
     [".vw-controls button.active-ctrl", "--text-danger"],
     [".vw-controls button.disconnect", "--text-danger"],
   ])("uses the qualified status text token on %s", (selector, token) => {
@@ -58,12 +58,19 @@ describe("B9-24 voice/media polish CSS", () => {
   });
 });
 
-// Transport-stats redesign (captain 2026-09-30): the two columns are equal
-// 1fr tracks that cannot overflow, values use tabular figures and never wrap,
-// and an empty value stays legible by taking the qualified --text-muted token
-// rather than the unqualified --text-faint.
-describe("voice widget transport-stats redesign CSS", () => {
-  it("lays the two columns out as equal, non-overflowing tracks", () => {
+// Connection panel redesign (captain 2026-09-30, Option C): the header never
+// wraps (status and channel stay on their own line and ellipsize), the two
+// Upload/Download tiles are equal 1fr tracks that cannot overflow, values use
+// tabular figures and never wrap, and an empty value stays legible by taking
+// the qualified --text-muted token rather than the unqualified --text-faint.
+describe("voice widget connection panel CSS", () => {
+  it("keeps the header status and channel on one line each", () => {
+    expect(keyword(cascadedDeclaration(".vw-connected", "white-space"))).toBe("nowrap");
+    expect(keyword(cascadedDeclaration(".vw-channel", "white-space"))).toBe("nowrap");
+    expect(keyword(cascadedDeclaration(".vw-channel", "text-overflow"))).toBe("ellipsis");
+  });
+
+  it("lays the two tiles out as equal, non-overflowing tracks", () => {
     // Lightning CSS types grid-template-columns: two minmax(0, 1fr) tracks,
     // the `minmax(0, …)` minimum being what stops a long value overflowing.
     interface Track {

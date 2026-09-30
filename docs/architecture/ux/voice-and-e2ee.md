@@ -79,7 +79,7 @@ stateDiagram-v2
 
 > **✓ Implemented (2026-07).** The VoiceWidget header now renders the E2EE phase
 > from `voiceStatus`: a "Securing…" label (amber) while the key exchange runs and
-> a persistent "🔒 Secured" badge once the room key is ready and the room is
+> a persistent "Secured" chip (shield icon) once the room key is ready and the room is
 > connected — replacing the log-line-only feedback. `joining` shows "Connecting…"
 > and `reconnecting` shows "Reconnecting voice…", neither showing the secured
 > badge. An E2EE-timeout still surfaces its `"e2ee_timeout"` toast and auto-leaves

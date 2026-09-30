@@ -9,46 +9,75 @@
 .voice-widget.visible {
   display: block;
 }
+/* Two header lines: status + timer, then channel + Secured chip + ping. Each
+   line keeps its items on one row; the channel name ellipsizes instead of
+   pushing the others onto a new line. */
 .vw-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px 6px;
   font-size: var(--font-size-xs);
+}
+.vw-header-main,
+.vw-header-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 /* The header is read text, so it uses the qualified --text-* status tokens,
    not the --green/--yellow/--red fills (which miss Q1's 4.5:1 on the widget's
    --bg-secondary: --green reads 4.34:1, --red 3.66:1). */
 .vw-connected {
+  min-width: 0;
   color: var(--text-positive);
+  font-size: var(--font-size-sm);
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* In-progress lifecycle states use amber; the call is not yet secured/live. */
 .vw-connected.vw-securing,
 .vw-connected.vw-reconnecting {
   color: var(--text-warning);
 }
+/* A small chip: shield icon + "Secured", on a faint green tint. */
 .vw-secured {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
   color: var(--text-positive);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 /* OC-0002: the E2EE worker died after the key exchange already succeeded —
    still shown (never silently hidden), but never green/"Secured" again. */
 .vw-secured.vw-secured--degraded {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
   color: var(--text-danger);
 }
 .vw-timer {
-  color: var(--text-positive);
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
   font-size: var(--font-size-xs);
-  opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
 .vw-channel {
+  min-width: 0;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Frozen while the WS socket is down: controls are visibly non-interactive. */
 .vw-controls--frozen button:disabled {
@@ -128,6 +157,7 @@
 }
 .vw-signal {
   margin-left: auto;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -142,98 +172,92 @@
 .vw-ping {
   font-size: var(--font-size-xs);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
+/* The stats pane: Upload and Download tiles over one quiet footer line. */
 .vw-stats {
-  padding: 10px 12px;
+  margin: 0 0 6px;
+  padding: 8px;
   background: var(--bg-tertiary);
-  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-md);
   display: none;
 }
 .vw-stats.visible {
-  display: block;
-}
-.vw-stats-title {
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  color: var(--text-normal);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .vw-stats-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px 12px;
-  margin-bottom: 8px;
-}
-/* Each column is the same flex stack, so the two read as one grid. */
-.vw-stats-col {
-  min-width: 0;
-}
-.vw-stats-col-label {
-  font-size: var(--font-size-xs);
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-.vw-stats-col-label.out {
-  color: var(--green);
-}
-.vw-stats-col-label.in {
-  color: var(--yellow);
-}
-/* One metric per row: label left, value right. min-width: 0 lets a long label
-   or value ellipsize instead of pushing the row wider than its column. */
-.vw-stats-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
   gap: 6px;
-  min-width: 0;
-  font-size: var(--font-size-xs);
-  line-height: 1.7;
 }
-.vw-stat-label {
+.vw-stats-tile {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  padding: 6px 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}
+.vw-stats-tile-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 .vw-stat-value {
-  flex-shrink: 0;
   color: var(--text-normal);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* A zero rate, zero packet count or a missing RTT is de-emphasised, not
-   removed: still readable at rest, quiet next to a live value. --text-muted
-   is qualified (4.5:1), unlike --text-faint, so the value stays legible. */
+.vw-stat-rate {
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--header-primary);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+/* An idle direction ("Idle") is de-emphasised, not removed: still readable
+   at rest, quiet next to a live value. --text-muted is qualified (4.5:1),
+   unlike --text-faint, so the value stays legible. */
 .vw-stat-value--empty {
   color: var(--text-muted);
-  font-weight: 400;
+  font-weight: 500;
 }
-.vw-stats-totals {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-}
-.vw-stats-totals-label {
+.vw-stat-packets {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
   font-size: var(--font-size-xs);
-  font-weight: 700;
-  color: var(--accent-text);
-  margin-bottom: 4px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.vw-stats-totals-row {
+.vw-stats-footer {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  font-size: var(--font-size-xs);
+  padding: 0 2px;
   color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+.vw-stats-totals {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
 }
 .vw-stat-total {
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 .vw-stat-arrow {
