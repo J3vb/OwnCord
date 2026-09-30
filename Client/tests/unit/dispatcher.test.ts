@@ -56,6 +56,8 @@ vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
+  isAutoReconnecting: vi.fn(() => false),
+  failPendingRejoin: vi.fn(),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   disableCamera: vi.fn(async () => {}),
@@ -91,6 +93,8 @@ import {
   disableScreenshare as mockDisableScreenshare,
   isVoiceSessionActive as mockIsVoiceSessionActive,
   handleParticipantLeft as mockHandleParticipantLeft,
+  isAutoReconnecting as mockIsAutoReconnecting,
+  failPendingRejoin as mockFailPendingRejoin,
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
 
@@ -2967,6 +2971,7 @@ describe("WS Dispatcher", () => {
   // rejoins or gives up with its toast, so this frame must not end the call.
   it("leaves the session to the reconnect loop on a self voice_leave while reconnecting", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
+    vi.mocked(mockIsAutoReconnecting).mockReturnValueOnce(true);
     authStore.setState((prev) => ({
       ...prev,
       user: { id: 5, username: "me", avatar: null, role: "member" },
@@ -2986,6 +2991,31 @@ describe("WS Dispatcher", () => {
     expect(mockLeaveVoice).not.toHaveBeenCalled();
     expect(voiceStore.getState().currentChannelId).toBe(3);
     expect(voiceStore.getState().voiceUsers.get(3)?.has(5) ?? false).toBe(false);
+  });
+
+  // The badge also reads "reconnecting" while livekit-client retries on its
+  // own inside a connected session (OC-0015); no reconnect loop owns that
+  // session, so a server eviction must still tear it down.
+  it("tears down on a self voice_leave while the SDK reconnects inside a connected session", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceStatus: "reconnecting",
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBeNull();
   });
 
   // A stale voice_leave for a channel we've already left (and rejoined
@@ -5157,6 +5187,24 @@ describe("WS Dispatcher", () => {
       mock.dispatch("error", { code: "VOICE_ERROR", message: "voice is not configured" });
       expectConsole("error", /\[dispatcher\] Server error/);
 
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+    });
+
+    // P2-T5: a refused rejoin (a moderator removal the reconnect loop tried to
+    // undo) ends the call through the session, which owns the voice-lost toast.
+    it("hands a voice_join refusal to the session's pending reconnect rejoin", async () => {
+      vi.mocked(mockFailPendingRejoin).mockClear();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+
+      mock.dispatch("error", {
+        code: "FORBIDDEN",
+        message: "You were removed from this voice channel",
+      });
+      expectConsole("error", /\[dispatcher\] Server error/);
+      await vi.runAllTimersAsync();
+
+      expect(mockFailPendingRejoin).toHaveBeenCalledTimes(1);
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
     });

@@ -134,6 +134,11 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		return 0, nil, false
 	}
 
+	if h.voiceRejoinBlocks.blocked(c.userID, channelID) {
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, voiceRejoinRefusal))
+		return 0, nil, false
+	}
+
 	// Validate the target channel exists before any state changes (leaving
 	// the current voice channel, persisting join, etc.).
 	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)

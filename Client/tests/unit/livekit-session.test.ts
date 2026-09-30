@@ -3998,6 +3998,36 @@ describe("LiveKitSession", () => {
       expect((session as any)._state.type).toBe("connected");
       expect((session as any)._state.latestToken).toBe("rejoin-token");
       expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      // The answered rejoin is no longer pending: a later, unrelated refusal
+      // is not reported as a lost call.
+      session.failPendingRejoin();
+      expect(errorCb).not.toHaveBeenCalled();
+    });
+
+    it("ends the call without retrying when the server refuses the rejoin after a kick", async () => {
+      mockRoom.connect.mockRejectedValue(new Error("network down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(40_000);
+      // A moderator kicked the reconnecting user: its voice_leave replays when
+      // the socket resumes, and its voice_disconnected was lost with the socket.
+      wsState = "connected";
+      mockVoiceState.voiceUsers = new Map();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+      const joins = () => sendSpy.mock.calls.filter(([m]) => m.type === "voice_join").length;
+      expect(joins()).toBe(1);
+
+      // The server refuses the rejoin; the dispatcher's join rollback reports it.
+      session.failPendingRejoin();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect(joins()).toBe(1);
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("idle");
     });
 
     it("gives up instead of rejoining when the channel is deleted during the fast attempts", async () => {

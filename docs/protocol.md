@@ -1562,6 +1562,12 @@ broadcasts `voice_leave`, then sends them `voice_disconnected`. A target whose
 call is being held for a reconnect is still removed, but gets no
 `voice_disconnected`; on resume it sees only the replayed `voice_leave`.
 
+For 60 seconds after a kick, or after a move that became a removal (above), the
+server refuses a `voice_join` from the removed user to that same channel with
+`FORBIDDEN` ("You were removed from this voice channel"), so a client still
+reconnecting its voice cannot rejoin the call it was removed from. Other
+channels are unaffected.
+
 ### voice_disconnected (Server -> Client, direct)
 
 ```json

@@ -92,6 +92,8 @@ export class LiveKitSession {
   private _tokenReceivedAt = 0;
   /** The reconnect attempt waiting for a voice_token_refresh reply. */
   private _tokenWaiter: (() => void) | null = null;
+  /** P2-T5: the reconnect loop sent voice_join and awaits the server's answer. */
+  private _rejoinPending = false;
 
   // --- Non-connection fields (configuration / callbacks / infrastructure) ---
   private ws: WsClient | null = null;
@@ -473,6 +475,7 @@ export class LiveKitSession {
       },
       rejoinVoice: () => {
         this.leaveVoice(false);
+        this._rejoinPending = true;
         setVoiceStatus("joining");
         this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
       },
@@ -689,7 +692,21 @@ export class LiveKitSession {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<void> {
+    this._rejoinPending = false;
     return this._join.handleVoiceToken(token, url, channelId, directUrl, isKeyHolder);
+  }
+
+  /** A refused voice_join ends a reconnect's rejoin for good: tell the user
+   *  the call was lost, as the loop's own give-up does. */
+  failPendingRejoin(): void {
+    if (!this._rejoinPending) return;
+    this._rejoinPending = false;
+    this.onErrorCallback?.(voiceText("reconnect.voiceLost"));
+  }
+
+  /** True while the auto-reconnect loop owns the session. */
+  isAutoReconnecting(): boolean {
+    return this._state.type === "reconnecting";
   }
 
   // ── Client-side E2EE delegates (state + protocol live in E2EEManager) ───
@@ -740,6 +757,7 @@ export class LiveKitSession {
   }
 
   leaveVoice(sendWs = true): void {
+    this._rejoinPending = false;
     this._lifecycle.leaveVoice(sendWs);
   }
 
@@ -927,6 +945,8 @@ export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
 export const rePinPeerIdentity = session.rePinPeerIdentity.bind(session);
 export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
+export const failPendingRejoin = session.failPendingRejoin.bind(session);
+export const isAutoReconnecting = session.isAutoReconnecting.bind(session);
 export const retryMicPermission = session.retryMicPermission.bind(session);
 export const cleanupAll = session.cleanupAll.bind(session);
 export const setMuted = session.setMuted.bind(session);

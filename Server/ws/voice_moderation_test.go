@@ -992,3 +992,100 @@ func TestVoiceMute_SelfMuteWhileServerMuted_Allowed(t *testing.T) {
 		t.Fatalf("self-mute refused with %q, want no error", code)
 	}
 }
+
+// kickFromVoice has an admin kick target out of chanID and waits for the
+// membership to go.
+func kickFromVoice(t *testing.T, hub *ws.Hub, database *db.DB, chanID int64, target *db.User) {
+	t.Helper()
+	actor := seedVoiceUserWithRole(t, database, "admin-"+target.Username, 2)
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, chanID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+	hub.HandleMessageForTest(c, voiceModKickMsg(target.ID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state == nil
+	}, "target's voice_states row to be deleted")
+}
+
+// P2-T5: a client whose voice was reconnecting when it was kicked answers the
+// released membership with voice_join; the kick must not be undone by it.
+func TestVoiceMod_Kick_RefusesRejoinOfThatChannel(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	chanID := seedVoiceChan(t, database, "vc-kick-rejoin")
+	otherID := seedVoiceChan(t, database, "vc-kick-other")
+	target := seedVoiceUserWithRole(t, database, "member-kick-rejoin", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, chanID)
+	kickFromVoice(t, hub, database, chanID, target)
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(chanID))
+	frame, ok := receiveErrorFrame(targetSend, waitTimeout)
+	want := voiceModErrorFrame{Code: "FORBIDDEN", Message: "You were removed from this voice channel"}
+	if !ok || frame != want {
+		t.Fatalf("rejoin refusal = %+v (ok=%v), want %+v", frame, ok, want)
+	}
+	if state, err := database.GetVoiceState(context.Background(), target.ID); err != nil || state != nil {
+		t.Fatalf("the refused rejoin left a membership: state=%v err=%v", state, err)
+	}
+
+	// Only that channel is refused.
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(otherID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == otherID
+	}, "target to join another channel")
+}
+
+func TestVoiceMod_Kick_RejoinAllowedOnceTheBlockExpires(t *testing.T) {
+	ws.SetVoiceRejoinBlockWindowForTest(t, 100*time.Millisecond)
+	hub, database := newVoiceModHub(t)
+	chanID := seedVoiceChan(t, database, "vc-kick-expiry")
+	target := seedVoiceUserWithRole(t, database, "member-kick-expiry", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, chanID)
+	kickFromVoice(t, hub, database, chanID, target)
+	time.Sleep(150 * time.Millisecond)
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(chanID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == chanID
+	}, "target to rejoin once the block expired")
+}
+
+// A move that lands as a removal (the target was reconnecting) blocks the
+// rejoin of the channel it was removed from, exactly like a kick.
+func TestVoiceMod_Move_RemovalRefusesRejoin(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-removed-from")
+	toID := seedVoiceChan(t, database, "vc-removed-to")
+	actor := seedVoiceUserWithRole(t, database, "admin-removed", 2)
+	target := seedVoiceUserWithRole(t, database, "member-removed", 4)
+
+	targetClient, _ := joinVoice(t, hub, target, fromID)
+	hub.DropSocketForTest(targetClient)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+	if _, ok := receiveErrorFrame(send, waitTimeout); !ok {
+		t.Fatal("the move did not report the removal")
+	}
+
+	// The target's socket resumes and its reconnect loop sends voice_join.
+	resumedSend := make(chan []byte, 32)
+	resumed := ws.NewTestClientWithUser(hub, target, fromID, resumedSend)
+	hub.Register(resumed)
+	waitRegistered(t, hub, resumed)
+	hub.HandleMessageForTest(resumed, voiceJoinMsg(fromID))
+	frame, ok := receiveErrorFrame(resumedSend, waitTimeout)
+	if !ok || frame.Message != "You were removed from this voice channel" {
+		t.Fatalf("rejoin after the removal = %+v (ok=%v), want the removed refusal", frame, ok)
+	}
+}

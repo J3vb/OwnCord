@@ -123,6 +123,8 @@ type Hub struct {
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
 	voiceGrace     voiceGraceState     // RT-8 grace window (voice_grace.go)
 
+	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
+
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
 	reconnectTierDB   atomic.Uint64

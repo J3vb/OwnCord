@@ -309,10 +309,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // elsewhere) must not kill a newer join. Read the store before
   // leaveVoiceChannel() below clears currentChannelId.
   const sameChannel = voiceStore.getState().currentChannelId === payload.channel_id;
-  // P2-T5: while voice is reconnecting, the reconnect loop owns what a
-  // released membership means — it rejoins, or gives up with its toast.
-  const autoReconnecting = voiceStore.getState().voiceStatus === "reconnecting";
-  const shouldTeardownSession = isSelf && sameChannel && !autoReconnecting;
+  const shouldTeardownSession = isSelf && sameChannel;
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.
@@ -322,22 +319,26 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // voice channel so a peer leaving a channel we merely read (and never
   // shared a call with) cannot delete their key, clear their
   // verification, or trigger a room-key rotation in our live session.
-  void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
-    if (sameChannel) void handleParticipantLeft(payload.user_id);
-    if (shouldTeardownSession) void leaveVoice(false);
-  });
-  // Clear local voice state only for the same channel-match case as the
-  // LiveKit teardown above. A channel switch optimistically moves the
-  // store's currentChannelId to the NEW channel before the server
-  // responds (VoiceCallbacks.onVoiceJoin); the server always leaves the
-  // OLD channel first, so an unconditional clear here would blank the
-  // store back to null on every switch — hiding the whole voice widget
-  // (including its leave/mute controls) until a later voice_state
-  // happens to restore it, or forever if the switch then fails
+  // Clear local voice state only for the same channel-match case: a channel
+  // switch optimistically moves the store's currentChannelId to the NEW
+  // channel before the server responds (VoiceCallbacks.onVoiceJoin); the
+  // server always leaves the OLD channel first, so an unconditional clear
+  // here would blank the store back to null on every switch — hiding the
+  // whole voice widget (including its leave/mute controls) until a later
+  // voice_state happens to restore it, or forever if the switch then fails
   // server-side.
-  if (shouldTeardownSession) {
-    leaveVoiceChannel();
-  }
+  // P2-T5: while the auto-reconnect loop owns the session, it decides what a
+  // released membership means — it rejoins, or gives up with its toast. Only a
+  // "reconnecting" badge can mean the loop, so any other clears the store now.
+  const loopMayOwn = voiceStore.getState().voiceStatus === "reconnecting";
+  if (shouldTeardownSession && !loopMayOwn) leaveVoiceChannel();
+  void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
+    if (sameChannel) void handleParticipantLeft(payload.user_id);
+    if (shouldTeardownSession && !isAutoReconnecting()) {
+      void leaveVoice(false);
+      if (loopMayOwn) leaveVoiceChannel();
+    }
+  });
   // RT-12: a self voice_leave means the user is out of voice for real — their
   // own Disconnect, or a server-initiated eviction. Either way a pending
   // restart-rejoin must not fire. Cancelled on `isSelf` rather than the
@@ -418,7 +419,8 @@ export function handleVoiceJoinRollback(): void {
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
   if (voiceStore.getState().voiceStatus === "joining") {
-    void livekitSession().then(({ isVoiceSessionActive, leaveVoice }) => {
+    void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
+      failPendingRejoin();
       if (isVoiceSessionActive()) leaveVoice(true);
     });
     leaveVoiceChannel();
