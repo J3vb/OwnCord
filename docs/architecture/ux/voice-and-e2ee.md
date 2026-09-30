@@ -150,7 +150,8 @@ Each remote tile asks only for what it shows (`setRemoteVideoView`, since
 app hidden or minimised, Stop watching) receives no video, a small tile gets
 the lower simulcast layer that fits it, and the stream you watch (focused,
 full screen or popped out) gets the top one. An open sidebar stream preview
-keeps its stream playing even while the grid is closed.
+keeps its stream playing even while the grid is closed, but not while the app
+is hidden.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
