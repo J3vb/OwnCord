@@ -115,6 +115,15 @@ describe("ConnectedOverlay", () => {
     overlay.destroy();
   });
 
+  it("destroy() cancels a hand-off markReady() already armed", () => {
+    const onReady = vi.fn();
+    const overlay = makeOverlay(onReady);
+    overlay.markReady();
+    overlay.destroy();
+    vi.advanceTimersByTime(0);
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
   it("markReady() after destroy() does not call onReady", () => {
     const onReady = vi.fn();
     const overlay = makeOverlay(onReady);

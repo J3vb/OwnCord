@@ -596,7 +596,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
   });
 
-  it("never mounts MainPage when the session ends before `ready` (OC-0107)", async () => {
+  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready` (OC-0107)", async () => {
     const mainPageCallsBefore = vi.mocked(createMainPage).mock.calls.length;
 
     await loginAndReachAuthOk("wide-window.example:8443", "riley", {
@@ -606,20 +606,23 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
 
-    // auth_ok landed and the overlay is up; `ready` never arrives. Before the
-    // ready delay was removed, a session that ended here left an armed 800ms
-    // onReady timer behind which later fired navigate("main") on a dead
-    // session. markReady() now hands off within a task, so nothing can outlive
-    // the session — the teardown must simply leave no MainPage mounted.
+    // `ready` arrives and arms the overlay's onReady hand-off (which would
+    // otherwise call router.navigate("main") on its own on the next task).
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+
+    // A queued ban/shutdown task lands before the hand-off task runs.
     clearAuth();
     await Promise.resolve();
     await Promise.resolve();
 
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
 
-    // Advance well past where the old 800ms onReady timer would have fired:
-    // nothing may still mount MainPage on a cleared authStore.
-    await vi.advanceTimersByTimeAsync(2000);
+    // Let the hand-off's deadline pass. Without the subscriber's
+    // connectedOverlay.destroy() (its AbortController is what cancels the
+    // pending setTimeout — see ConnectedOverlay.ts), the already-armed timer
+    // still fires onReady() -> router.navigate("main"), mounting MainPage on a
+    // cleared authStore and a disconnected socket.
+    await vi.advanceTimersByTimeAsync(800);
 
     expect(vi.mocked(createMainPage).mock.calls.length).toBe(mainPageCallsBefore);
   });
