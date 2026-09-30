@@ -302,6 +302,28 @@ describe("DM preview follows an edit or delete of its last message", () => {
     });
   });
 
+  it("blanks the deleted text when the loaded rows stop before the deleted message", () => {
+    addMessage({ ...chat(5, "2026-03-15T08:00:00Z"), content: "stale" });
+    seedDm(7, "oops, wrong person", "2026-03-15T10:00:00Z");
+
+    handleChatDeleted({ message_id: 7, channel_id: 1 });
+
+    expect(dm()).toMatchObject({
+      lastMessageId: 7,
+      lastMessage: "",
+      lastMessageAt: "2026-03-15T10:00:00Z",
+    });
+  });
+
+  it("blanks the deleted text on a bulk delete when the loaded rows stop before it", () => {
+    addMessage({ ...chat(5, "2026-03-15T08:00:00Z"), content: "stale" });
+    seedDm(7, "purged", "2026-03-15T10:00:00Z");
+
+    handleChatBulkDeleted({ channel_id: 1, ids: [7, 6] });
+
+    expect(dm()).toMatchObject({ lastMessageId: 7, lastMessage: "" });
+  });
+
   it("applies the same fallback to a bulk delete that includes the shown message", () => {
     addMessage({ ...chat(5, "2026-03-15T08:00:00Z"), content: "kept" });
     addMessage({ ...chat(6, "2026-03-15T09:00:00Z"), content: "purged" });

@@ -200,17 +200,17 @@ export function handleChatBulkDeleted(payload: Payload<"chat_bulk_deleted">): vo
 
 /** A DM whose preview showed a now-deleted message falls back to the newest
  *  surviving message of a window that reaches the live tail, as GET /dms
- *  would report it; with none loaded, or only a detached older window, the
- *  text is blanked rather than left showing the deleted one. */
+ *  would report it; with none loaded, only a detached older window, or a
+ *  window that never held the deleted message, the text is blanked rather
+ *  than left showing the deleted one. */
 function reviseDmPreviewAfterDelete(channelId: number, ids: readonly number[]): void {
   const shown = dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastMessageId;
   if (shown === undefined || shown === null || !ids.includes(shown)) return;
-  const survivor = isWindowDetached(channelId)
-    ? undefined
-    : messagesStore
-        .getState()
-        .messagesByChannel.get(channelId)
-        ?.findLast((m) => !m.deleted && m.status === "sent" && m.id < shown);
+  const list = messagesStore.getState().messagesByChannel.get(channelId);
+  const survivor =
+    isWindowDetached(channelId) || list?.some((m) => m.id === shown) !== true
+      ? undefined
+      : list.findLast((m) => !m.deleted && m.status === "sent" && m.id < shown);
   reviseDmLastMessage(
     channelId,
     shown,
