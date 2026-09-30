@@ -530,6 +530,7 @@ jobs:
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
           go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
+          go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
