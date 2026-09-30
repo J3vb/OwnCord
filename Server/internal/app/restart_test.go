@@ -153,9 +153,9 @@ func TestPerformRestartHandoff(t *testing.T) {
 	}
 	var calls []call
 	prev := spawnReplacement
-	spawnReplacement = func(exePath string, args []string) error {
+	spawnReplacement = func(exePath string, args []string) (func() int, error) {
 		calls = append(calls, call{exePath, args})
-		return nil
+		return nil, nil
 	}
 	defer func() { spawnReplacement = prev }()
 
@@ -175,8 +175,37 @@ func TestPerformRestartHandoff(t *testing.T) {
 
 	// A failing spawn must be survivable (logged, no panic) — there is no
 	// hub left to notify at this point.
-	spawnReplacement = func(string, []string) error { return fmt.Errorf("injected spawn failure") }
+	spawnReplacement = func(string, []string) (func() int, error) { return nil, fmt.Errorf("injected spawn failure") }
 	PerformRestartHandoff("update", restartModeSpawn, log)
+}
+
+// A process that stays behind for its replacement (a Windows server on a
+// console) must exit with the replacement's code, and so must the backstop
+// if it is the caller that loses the race; a detached handoff reports no code.
+func TestRestartCoordinator_HandoffReturnsTheWaitedReplacementsExitCode(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	prev := spawnReplacement
+	defer func() { spawnReplacement = prev }()
+
+	spawnReplacement = func(string, []string) (func() int, error) {
+		return func() int { return 3 }, nil
+	}
+	rc := NewRestartCoordinator(time.Hour, nil)
+	rc.SetMode(restartModeSpawn)
+	rc.Request("update")
+	for range 2 {
+		if code, waited := rc.PerformHandoff(log); !waited || code != 3 {
+			t.Fatalf("PerformHandoff = (%d, %v), want the replacement's (3, true)", code, waited)
+		}
+	}
+
+	spawnReplacement = func(string, []string) (func() int, error) { return nil, nil }
+	rc = NewRestartCoordinator(time.Hour, nil)
+	rc.SetMode(restartModeSpawn)
+	rc.Request("update")
+	if code, waited := rc.PerformHandoff(log); waited || code != 0 {
+		t.Fatalf("PerformHandoff = (%d, %v) for a detached replacement, want (0, false)", code, waited)
+	}
 }
 
 func TestRestartCoordinator_HandoffJoinsCompanionExactlyOnce(t *testing.T) {
@@ -191,16 +220,16 @@ func TestRestartCoordinator_HandoffJoinsCompanionExactlyOnce(t *testing.T) {
 			addr := listener.Addr().String()
 			var spawns, stops atomic.Int32
 			prev := spawnReplacement
-			spawnReplacement = func(string, []string) error {
+			spawnReplacement = func(string, []string) (func() int, error) {
 				spawns.Add(1)
 				// A replacement must be able to bind immediately, including
 				// when the backstop wins before normal teardown reaches LiveKit.
 				next, err := net.Listen("tcp4", addr)
 				if err != nil {
 					t.Errorf("replacement launched before companion released its port: %v", err)
-					return err
+					return nil, err
 				}
-				return next.Close()
+				return nil, next.Close()
 			}
 			defer func() { spawnReplacement = prev }()
 

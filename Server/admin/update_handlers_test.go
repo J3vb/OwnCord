@@ -431,11 +431,10 @@ func TestApplyStagedUpdate_VerifyFails_BroadcastsAbort(t *testing.T) {
 	if err := os.WriteFile(exePath, []byte("old binary"), 0o755); err != nil {
 		t.Fatalf("writing fake exe: %v", err)
 	}
-	oldPath := exePath + ".old"
 	newPath := exePath + ".new" // deliberately never written
 
 	hub := &mockHub{}
-	admin.ApplyStagedUpdate(hub, exePath, oldPath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+	admin.ApplyStagedUpdate(hub, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
 
 	if len(hub.restartCalls) != 1 {
 		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
@@ -454,11 +453,10 @@ func TestApplyStagedUpdate_VerifyFails_BroadcastsAbort(t *testing.T) {
 
 // TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort covers the second
 // abort point: the staged binary verifies fine, but renaming the current
-// executable to its .old backup fails (exePath does not exist).
+// executable aside fails (exePath does not exist).
 func TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort(t *testing.T) {
 	dir := t.TempDir()
 	exePath := filepath.Join(dir, "chatserver") // deliberately never created
-	oldPath := exePath + ".old"
 	newPath := exePath + ".new"
 
 	content := []byte("verified staged bytes")
@@ -469,13 +467,16 @@ func TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort(t *testing.T) {
 	stagedHash := hex.EncodeToString(sum[:])
 
 	hub := &mockHub{}
-	admin.ApplyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash)
+	admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash)
 
 	if len(hub.restartCalls) != 1 {
 		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
 	}
 	if hub.restartCalls[0].reason == "update" {
 		t.Fatalf("only broadcast was the original 'restarting' promise (%+v); no corrective broadcast was sent after the abort", hub.restartCalls[0])
+	}
+	if olds := oldBinaries(t, exePath); len(olds) != 0 {
+		t.Errorf("old binaries after the failed rename = %v, want the reserved name removed", olds)
 	}
 }
 
@@ -485,8 +486,7 @@ func TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort(t *testing.T) {
 func TestApplyStagedUpdate_NilHub_NoPanic(t *testing.T) {
 	dir := t.TempDir()
 	exePath := filepath.Join(dir, "chatserver")
-	oldPath := exePath + ".old"
 	newPath := exePath + ".new" // never written -> verification fails
 
-	admin.ApplyStagedUpdate(nil, exePath, oldPath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+	admin.ApplyStagedUpdate(nil, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
 }

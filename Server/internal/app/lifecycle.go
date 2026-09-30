@@ -151,7 +151,7 @@ func (a *App) start() error {
 	// Only once every stage is up is the previous binary safe to remove. It
 	// used to be the FIRST act of start(), before the data-dir, TLS, database,
 	// migrate and later stages — so a migration error (or any other start
-	// failure) left an operator with no chatserver.old to roll back to, and
+	// failure) left an operator with no chatserver.old-* to roll back to, and
 	// under systemd Restart=always the unit has nothing local to fall back on
 	// (REL-01). Deferring it past the stages preserves the documented rollback
 	// copy through every start-up refusal; the schema-ahead check in

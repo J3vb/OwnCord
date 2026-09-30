@@ -1,5 +1,5 @@
 // Package admin whitebox tests — uses package admin (not admin_test) to access
-// unexported functions like spawnDetached and ownerOnlyMiddleware.
+// unexported functions like SpawnReplacement and ownerOnlyMiddleware.
 package admin
 
 import (
@@ -478,7 +478,7 @@ func (m *mockHubWB) ClientCount() int                                           
 //     is that `go test ./... -coverprofile` reported `admin  coverage: 0.3% of
 //     statements` instead of ~71%, and CI's uploaded coverage.out was wrong for
 //     this package.
-//  2. SpawnDetached wires the child's stdout to the parent's, so anything the
+//  2. SpawnReplacement wires the child's stdout to the parent's, so anything the
 //     child's testing framework prints lands in the stream `go test` parses.
 //     "-test.run=^$" makes it print "testing: warning: no tests to run", which
 //     `go test` reported as "[no tests to run]" for the parent run.
@@ -492,11 +492,11 @@ func isolateSpawnedTestBinary(t *testing.T) []string {
 	return []string{"-test.list=^$"}
 }
 
-// TestSpawnDetached_ValidExecutable verifies that spawnDetached can start a
+// TestSpawnReplacement_ValidExecutable verifies that SpawnReplacement can start a
 // real executable (the Go test binary itself) with a flag that causes immediate
 // exit. The test only checks that cmd.Start() returns without error; it does
 // not wait for the child process to finish.
-func TestSpawnDetached_ValidExecutable(t *testing.T) {
+func TestSpawnReplacement_ValidExecutable(t *testing.T) {
 	// Use the current test binary as the spawned executable so we don't depend
 	// on any external tool being available. See isolateSpawnedTestBinary for
 	// why the child needs its own GOCOVERDIR and a silent exit flag.
@@ -507,25 +507,25 @@ func TestSpawnDetached_ValidExecutable(t *testing.T) {
 		t.Fatalf("abs path of test binary: %v", err)
 	}
 
-	err = updater.SpawnDetached(selfExe, args)
+	_, err = updater.SpawnReplacement(selfExe, args)
 	if err != nil {
-		t.Errorf("spawnDetached returned error: %v", err)
+		t.Errorf("SpawnReplacement returned error: %v", err)
 	}
 }
 
-// TestSpawnDetached_InvalidExecutable verifies that spawnDetached returns an
+// TestSpawnReplacement_InvalidExecutable verifies that SpawnReplacement returns an
 // error when the executable path does not exist.
-func TestSpawnDetached_InvalidExecutable(t *testing.T) {
-	err := updater.SpawnDetached("/nonexistent/path/to/binary", nil)
+func TestSpawnReplacement_InvalidExecutable(t *testing.T) {
+	_, err := updater.SpawnReplacement("/nonexistent/path/to/binary", nil)
 	if err == nil {
 		t.Error("expected error when executable does not exist, got nil")
 	}
 }
 
-// TestSpawnDetached_SetsWindowsFlags verifies on Windows that the function does
+// TestSpawnReplacement_SetsWindowsFlags verifies on Windows that the function does
 // not panic when setting SysProcAttr. On non-Windows, the test is a no-op
 // confirming the GOOS branch is skipped correctly.
-func TestSpawnDetached_SetsWindowsFlags(t *testing.T) {
+func TestSpawnReplacement_SetsWindowsFlags(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("SysProcAttr Windows-specific flag test only runs on Windows")
 	}
@@ -538,18 +538,18 @@ func TestSpawnDetached_SetsWindowsFlags(t *testing.T) {
 	}
 
 	// Just verify it doesn't panic when setting the Windows creation flag.
-	err = updater.SpawnDetached(selfExe, args)
+	_, err = updater.SpawnReplacement(selfExe, args)
 	if err != nil {
-		t.Errorf("spawnDetached on Windows returned error: %v", err)
+		t.Errorf("SpawnReplacement on Windows returned error: %v", err)
 	}
 }
 
-// TestSpawnDetached_CommandConstruction verifies that spawnDetached wires
+// TestSpawnReplacement_CommandConstruction verifies that SpawnReplacement wires
 // stdout/stderr correctly by checking the command's streams are non-nil
 // after construction. We do this by examining what exec.Command would produce
 // for a real path.
-func TestSpawnDetached_CommandConstruction(t *testing.T) {
-	// We build the command manually the same way spawnDetached does and check
+func TestSpawnReplacement_CommandConstruction(t *testing.T) {
+	// We build the command manually the same way SpawnReplacement does and check
 	// that Stdout/Stderr are the process's own streams — confirming the
 	// implementation wires them as documented.
 	selfExe, err := filepath.Abs(os.Args[0])

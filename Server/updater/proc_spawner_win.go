@@ -5,13 +5,16 @@ package updater
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// SpawnDetached starts a new process that is not attached to the current one.
+// SpawnReplacement starts the replacement server. When wait is non-nil this
+// process must stay behind: wait blocks until the replacement exits and
+// returns its exit code, which this process then exits with.
 //
 // The replacement always has a console, never none (DETACHED_PROCESS): a
 // windowless server cannot be stopped by closing its console, and the
@@ -20,28 +23,38 @@ import (
 // LiveKit inherits it and one close stops both.
 //
 // A server started from a console window restarts into that same window: the
-// replacement inherits the console and the standard streams, so its output
-// stays where the operator is looking, and Ctrl+C or closing the window still
-// stops it. This process does not wait for it: a live predecessor would keep
-// its image, chatserver.exe.old, locked, so the replacement could not remove
-// it and the next update could not move the running binary aside. The price
-// is that a shell that started the server gets its prompt back while the
-// replacement keeps writing there.
-func SpawnDetached(exePath string, args []string) error {
+// replacement inherits the console and the standard streams, and this process
+// waits for it. A console host that tracks the process it started (Windows
+// Terminal closes a tab whose process exits) keeps the window open, and a
+// shell that started the server keeps waiting rather than printing its prompt
+// over the replacement's log. The waiter leaves Ctrl+C to the replacement,
+// which drains as usual; closing the window stops both. A live waiter keeps
+// its image locked, which is why an update moves the running binary aside
+// under a unique .old-* name.
+func SpawnReplacement(exePath string, args []string) (wait func() int, err error) {
 	if hasConsole() {
 		cmd := exec.Command(exePath, args...) //nolint:gosec // G204: exePath is the server's own binary path, validated by the caller
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		return cmd.Start()
+		// Not signal.Ignore: on Windows an unwanted Ctrl+C falls through to
+		// the default handler, which ends the process.
+		signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return func() int {
+			_ = cmd.Wait()
+			return cmd.ProcessState.ExitCode()
+		}, nil
 	}
 	// No console (started detached, e.g. by a service wrapper): give the
 	// replacement one of its own.
 	if isConsole(os.Stdout) && isConsole(os.Stderr) {
-		return startInNewConsole(exePath, args)
+		return nil, startInNewConsole(exePath, args)
 	}
-	// Output is redirected (e.g. `chatserver.exe >> server.log`): keep the
-	// redirect, but not a stream still pointing at the old console, whose
-	// window nothing will be attached to once this process exits.
+	// Output is redirected (e.g. to a log file by a wrapper): keep the
+	// redirect. A stream that is not a file or pipe (an unusable handle, or a
+	// character device such as NUL) is left for the new console instead.
 	cmd := exec.Command(exePath, args...) //nolint:gosec // G204: exePath is the server's own binary path, validated by the caller
 	if !isConsole(os.Stdout) {
 		cmd.Stdout = os.Stdout
@@ -50,7 +63,7 @@ func SpawnDetached(exePath string, args []string) error {
 		cmd.Stderr = os.Stderr
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_CONSOLE}
-	return cmd.Start()
+	return nil, cmd.Start()
 }
 
 // startInNewConsole calls CreateProcess directly because os/exec always passes

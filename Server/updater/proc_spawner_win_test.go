@@ -19,7 +19,8 @@ var (
 )
 
 // Re-executed as the "replacement": record whether stdout is a console, or,
-// when told the spawner's pid, whether the spawner is on this same console.
+// when told the spawner's pid, whether the spawner is on this same console,
+// then exit with the requested code.
 func init() {
 	out := os.Getenv("OWNCORD_SPAWN_TEST_REPORT")
 	if out == "" {
@@ -42,7 +43,8 @@ func init() {
 	}
 	_ = os.WriteFile(out+".tmp", []byte(result), 0o600)
 	_ = os.Rename(out+".tmp", out)
-	os.Exit(0)
+	code, _ := strconv.Atoi(os.Getenv("OWNCORD_SPAWN_TEST_EXIT"))
+	os.Exit(code)
 }
 
 // isolateCoverage keeps the re-executed replacement's coverage counters out of
@@ -74,16 +76,23 @@ func awaitReport(t *testing.T, report string) string {
 	}
 }
 
+// attachConsole gives the test process a console when it runs without one.
+func attachConsole(t *testing.T) {
+	t.Helper()
+	if hasConsole() {
+		return
+	}
+	if r, _, err := kernel32.NewProc("AllocConsole").Call(); r == 0 {
+		t.Fatalf("AllocConsole: %v", err)
+	}
+	t.Cleanup(func() { _, _, _ = kernel32.NewProc("FreeConsole").Call() })
+}
+
 // A server started from a console window must restart into that same window:
 // a replacement in a console of its own leaves the operator's window at a
 // prompt (or closed) with the running server somewhere they cannot see.
-func TestSpawnDetached_ReplacementSharesTheSpawnersConsole(t *testing.T) {
-	if !hasConsole() {
-		if r, _, err := kernel32.NewProc("AllocConsole").Call(); r == 0 {
-			t.Fatalf("AllocConsole: %v", err)
-		}
-		t.Cleanup(func() { _, _, _ = kernel32.NewProc("FreeConsole").Call() })
-	}
+func TestSpawnReplacement_ReplacementSharesTheSpawnersConsole(t *testing.T) {
+	attachConsole(t)
 	bin, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -92,11 +101,39 @@ func TestSpawnDetached_ReplacementSharesTheSpawnersConsole(t *testing.T) {
 	t.Setenv("OWNCORD_SPAWN_TEST_REPORT", report)
 	isolateCoverage(t)
 	t.Setenv("OWNCORD_SPAWN_TEST_PARENT", strconv.Itoa(os.Getpid()))
-	if err := SpawnDetached(bin, []string{"-test.run=^$"}); err != nil {
+	wait, err := SpawnReplacement(bin, []string{"-test.run=^$"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got := awaitReport(t, report); got != "shared" {
 		t.Fatalf("replacement console = %s, want the spawner's own console", got)
+	}
+	if wait != nil {
+		wait()
+	}
+}
+
+// The spawner stays behind on the shared console so its host keeps the window
+// open (Windows Terminal closes a tab whose process exits) and a shell keeps
+// waiting; it exits with whatever the replacement exited with.
+func TestSpawnReplacement_WaiterReturnsTheReplacementsExitCode(t *testing.T) {
+	attachConsole(t)
+	bin, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OWNCORD_SPAWN_TEST_REPORT", filepath.Join(t.TempDir(), "report"))
+	t.Setenv("OWNCORD_SPAWN_TEST_EXIT", "7")
+	isolateCoverage(t)
+	wait, err := SpawnReplacement(bin, []string{"-test.run=^$"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wait == nil {
+		t.Fatal("SpawnReplacement on a console returned no waiter; the spawner would exit and take the window with it")
+	}
+	if got := wait(); got != 7 {
+		t.Fatalf("waiter exit code = %d, want the replacement's 7", got)
 	}
 }
 
