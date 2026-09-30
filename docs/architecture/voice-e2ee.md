@@ -563,10 +563,17 @@ for the default sink every 2 s and, while "System default" is selected,
 reopens the stream there when it moves. The same watcher reopens a stream the
 sound server tore down (a suspend and resume, a PipeWire or PulseAudio
 restart): the stream's error callback flags it, and the next tick reopens it
-on the chosen device, or on the current default for "System default". It
-polls through the host connection that opened the stream, adds one thread for
-the call, starts when the stream first opens, and is stopped and joined when
-the session closes.
+on the chosen device, or on the current default for "System default"; a
+reopen or a default-move follow that fails is retried every tick until the
+sound server answers. A chosen device not yet listed after the restart (a
+Bluetooth sink that reconnects seconds later) falls back to the default, and
+the watcher switches back to it on the first tick it is listed again. A
+restart kills the host connection, so the watcher rebuilds it (`WatchedHost`
+in `playout.rs`), never onto a lower backend than the one in use: while the
+server is down `cpal`'s default host is ALSA, whose constant `default` device
+would hide every later move of the real default. It adds one thread for the
+call, starts when the stream first opens, and is stopped and joined when the
+session closes.
 
 **Echo cancellation reference.** At first the echo canceller's reference was
 the device module's synthetic mix (every remote track at unity, on the pump's
@@ -603,9 +610,11 @@ Mute closes the input stream (the OS in-use indicator goes out) and keeps the
 publication; unmute reopens it on the device it last resolved, so a
 push-to-talk press does not enumerate devices. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
-sound server tore down and, while "System default" is selected, follows the
-default source as it moves; while muted it only re-resolves, so the next
-unmute opens the device the selection now names.
+sound server tore down, switches back to a chosen microphone once it is listed
+again, and, while "System default" is selected, follows the default source as
+it moves; while muted it only re-resolves, so the next unmute opens the device
+the selection now names. Unmuted, the device it last resolved changes only
+once the new stream is open, so a failed open is retried on the next tick.
 
 **APM and RNNoise together.** Both stay on when both are enabled, as on the
 web path, where the browser's processing precedes the RNNoise worklet. The
