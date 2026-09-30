@@ -84,10 +84,41 @@ export function qualityFromSignals(rtt: number, loss: number, jitter: number): Q
   );
 }
 
+interface AudioCounters {
+  readonly lost: number;
+  readonly received: number;
+}
+
 interface PrevSnapshot {
   readonly timestamp: number;
   readonly outBytes: number;
   readonly inBytes: number;
+  /** Lifetime counters per inbound audio stream, keyed by stats id, so loss
+   *  is measured over the last poll rather than the whole call. */
+  readonly audioInbound: ReadonlyMap<string, AudioCounters>;
+}
+
+const EMPTY_SNAPSHOT: Omit<PrevSnapshot, "timestamp"> = {
+  outBytes: 0,
+  inBytes: 0,
+  audioInbound: new Map(),
+};
+
+/** Inbound loss percent since the previous poll. A stream seen for the first
+ *  time counts from zero; negative deltas (duplicates lowering packetsLost)
+ *  clamp to zero. */
+function inboundLossSince(
+  prev: ReadonlyMap<string, AudioCounters>,
+  next: ReadonlyMap<string, AudioCounters>,
+): number {
+  let lost = 0;
+  let received = 0;
+  for (const [id, counters] of next) {
+    const before = prev.get(id);
+    lost += Math.max(0, counters.lost - (before?.lost ?? 0));
+    received += Math.max(0, counters.received - (before?.received ?? 0));
+  }
+  return lost + received > 0 ? (lost / (lost + received)) * 100 : 0;
 }
 
 /** Collect stats from both publisher and subscriber PeerConnections.
@@ -118,7 +149,8 @@ function extractMetrics(reports: RTCStatsReport[]): {
   inPackets: number;
   outBytes: number;
   inBytes: number;
-  loss: number;
+  audioInbound: Map<string, AudioCounters>;
+  remoteLoss: number;
   jitter: number;
 } {
   let rtt = 0;
@@ -128,12 +160,12 @@ function extractMetrics(reports: RTCStatsReport[]): {
   let inPackets = 0;
   let outBytes = 0;
   let inBytes = 0;
-  // Inbound loss/jitter are accumulated from every inbound-rtp entry; the
-  // remote-inbound-rtp report carries the fraction the far end lost on our
-  // outbound stream. qualityFromSignals takes the worst, so the two loss
-  // readings never need reconciling here.
-  let packetsLost = 0;
-  let packetsReceivedForLoss = 0;
+  // Loss and jitter come from audio streams only: call quality is about
+  // voice, and video jitter runs high on a healthy link because a frame's
+  // packets share one RTP timestamp. inbound-rtp counters feed the per-poll
+  // inbound loss; remote-inbound-rtp carries the fraction the far end lost on
+  // our outbound stream. The poller takes the worst of the two.
+  const audioInbound = new Map<string, AudioCounters>();
   let remoteLossFraction = 0;
   let jitterMs = 0;
 
@@ -161,15 +193,19 @@ function extractMetrics(reports: RTCStatsReport[]): {
       if (entry.type === "inbound-rtp") {
         if (typeof entry.packetsReceived === "number") inPackets += entry.packetsReceived;
         if (typeof entry.bytesReceived === "number") inBytes += entry.bytesReceived;
-        if (typeof entry.packetsLost === "number") packetsLost += entry.packetsLost;
-        if (typeof entry.packetsReceived === "number")
-          packetsReceivedForLoss += entry.packetsReceived;
+      }
+
+      if (entry.type === "inbound-rtp" && entry.kind === "audio") {
+        audioInbound.set(String(entry.id), {
+          lost: typeof entry.packetsLost === "number" ? entry.packetsLost : 0,
+          received: typeof entry.packetsReceived === "number" ? entry.packetsReceived : 0,
+        });
         // jitter is in seconds (WebRTC stats spec); keep the worst stream.
         if (typeof entry.jitter === "number" && entry.jitter * 1000 > jitterMs)
           jitterMs = entry.jitter * 1000;
       }
 
-      if (entry.type === "remote-inbound-rtp") {
+      if (entry.type === "remote-inbound-rtp" && entry.kind === "audio") {
         if (typeof entry.fractionLost === "number" && entry.fractionLost > remoteLossFraction)
           remoteLossFraction = entry.fractionLost;
         if (typeof entry.jitter === "number" && entry.jitter * 1000 > jitterMs)
@@ -177,12 +213,6 @@ function extractMetrics(reports: RTCStatsReport[]): {
       }
     });
   }
-
-  const inboundLoss =
-    packetsLost + packetsReceivedForLoss > 0
-      ? (packetsLost / (packetsLost + packetsReceivedForLoss)) * 100
-      : 0;
-  const loss = Math.max(inboundLoss, remoteLossFraction * 100);
 
   return {
     rtt,
@@ -192,14 +222,15 @@ function extractMetrics(reports: RTCStatsReport[]): {
     inPackets,
     outBytes,
     inBytes,
-    loss,
+    audioInbound,
+    remoteLoss: remoteLossFraction * 100,
     jitter: jitterMs,
   };
 }
 
 export function createConnectionStatsPoller(getRoom: () => Room | null): ConnectionStatsPoller {
   let current: ConnectionStats = EMPTY_STATS;
-  let prev: PrevSnapshot = { timestamp: Date.now(), outBytes: 0, inBytes: 0 };
+  let prev: PrevSnapshot = { timestamp: Date.now(), ...EMPTY_SNAPSHOT };
   let intervalId: ReturnType<typeof setInterval> | null = null;
   const listeners = new Set<(stats: ConnectionStats) => void>();
   const qualityChangeListeners = new Set<
@@ -223,18 +254,28 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
     const outRate = elapsed > 0 ? (metrics.outBytes - prev.outBytes) / elapsed : 0;
     const inRate = elapsed > 0 ? (metrics.inBytes - prev.inBytes) / elapsed : 0;
 
-    prev = { timestamp: now, outBytes: metrics.outBytes, inBytes: metrics.inBytes };
+    const loss = Math.max(
+      inboundLossSince(prev.audioInbound, metrics.audioInbound),
+      metrics.remoteLoss,
+    );
+
+    prev = {
+      timestamp: now,
+      outBytes: metrics.outBytes,
+      inBytes: metrics.inBytes,
+      audioInbound: metrics.audioInbound,
+    };
 
     current = {
       rtt: metrics.rtt,
-      quality: qualityFromSignals(metrics.rtt, metrics.loss, metrics.jitter),
+      quality: qualityFromSignals(metrics.rtt, loss, metrics.jitter),
       outRate: Math.max(0, outRate),
       inRate: Math.max(0, inRate),
       outPackets: metrics.outPackets,
       inPackets: metrics.inPackets,
       totalUp: metrics.totalUp,
       totalDown: metrics.totalDown,
-      loss: metrics.loss,
+      loss,
       jitter: metrics.jitter,
       available: true,
     };
@@ -268,7 +309,7 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
   function start(): void {
     if (intervalId !== null) return;
     log.info("Starting connection stats poller");
-    prev = { timestamp: Date.now(), outBytes: 0, inBytes: 0 };
+    prev = { timestamp: Date.now(), ...EMPTY_SNAPSHOT };
     current = EMPTY_STATS;
     intervalId = setInterval(() => void poll(), POLL_INTERVAL_MS);
   }
@@ -285,7 +326,7 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
       qualityDebounceTimer = null;
     }
     current = EMPTY_STATS;
-    prev = { timestamp: Date.now(), outBytes: 0, inBytes: 0 };
+    prev = { timestamp: Date.now(), ...EMPTY_SNAPSHOT };
   }
 
   function getStats(): ConnectionStats {
