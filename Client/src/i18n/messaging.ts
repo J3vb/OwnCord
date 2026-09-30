@@ -116,7 +116,7 @@ export const messagingText = defineCatalog("messaging", {
   "spoiler.reveal": "Spoiler — click to reveal",
   "spoiler.revealed": "Spoiler — revealed",
   "channel.goTo": "Go to #{channel}",
-  "message.jumpIn": "Jump to message in #{channel}",
+  "message.jumpIn": "Jump to message in {channel}",
   "message.jump": "Jump",
   "code.copy": "Copy",
   "code.copied": "Copied!",

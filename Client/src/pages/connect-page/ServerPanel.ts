@@ -411,7 +411,8 @@ export function createServerPanel(
         signal: ownerSignal,
         onClose: () => {},
       },
-      serverListEl.parentElement ?? document.body,
+      // Inside .server-panel the login form paints over the buttons (#19).
+      panelEl.closest(".connect-page") ?? document.body,
     );
     cancel.addEventListener("click", () => modal.destroy(), { signal: ownerSignal });
     confirm.addEventListener("click", () => {

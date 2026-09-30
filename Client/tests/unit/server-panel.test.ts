@@ -443,6 +443,21 @@ describe("ServerPanel", () => {
       expect(onDeleteProfile).toHaveBeenCalledWith("profile-1");
     });
 
+    it("mounts the delete confirmation on the page root, not inside the panel (#19)", () => {
+      // Inside .server-panel the dialog shares that panel's stacking context and
+      // the login form paints over its buttons, so pointer users cannot click them.
+      const panel = createServerPanel(makeOpts({ onDeleteProfile: vi.fn() }), [fullProfile()]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".srv-btn.danger") as HTMLElement).click();
+
+      const overlay = container.querySelector(".modal-overlay") as HTMLElement;
+      expect(overlay.parentElement).toBe(container);
+      expect(overlay.closest(".server-panel")).toBeNull();
+      (container.querySelector("[data-testid='cancel-delete-server']") as HTMLElement).click();
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+    });
+
     it("stops event propagation so server click is not also triggered", () => {
       const onServerClick = vi.fn();
       const onDeleteProfile = vi.fn();
