@@ -333,10 +333,10 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 			if len(proxyNets) == 0 && r.Header.Get("X-Forwarded-For") != "" {
 				if peer := net.ParseIP(ip); peer != nil && (peer.IsLoopback() || peer.IsPrivate()) {
 					warnUndeclaredProxy.Do(func() {
-						slog.Warn("a local peer sent X-Forwarded-For but trusted_proxies is empty — the "+
-							"allowlist is checking the reverse proxy's address, not the real client's, "+
-							"so it admits every client; set server.trusted_proxies to the proxy hop(s)",
-							"setting", settingName, "peer", ip)
+						slog.Warn("admin_allowed_cidrs is checked against the connecting address and trusted_proxies is empty — "+
+							"behind a reverse proxy or a container port relay that address is the relay's (loopback or bridge), "+
+							"which the allowlist admits",
+							"setting", settingName, "peer", ip, "fix", "set server.trusted_proxies to the proxy hop(s)")
 					})
 				}
 			}
