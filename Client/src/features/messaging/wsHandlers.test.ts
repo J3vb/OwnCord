@@ -17,6 +17,7 @@ import {
   resetMessagesStore,
 } from "../../stores/messages.store";
 import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.store";
+import { setMembers, setTyping, getTypingUsers } from "../../stores/members.store";
 import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
@@ -56,6 +57,7 @@ function pendingSend(correlationId: string, clientMessageId?: string): void {
 
 beforeEach(() => {
   resetMessagesStore();
+  setMembers([]);
   vi.clearAllMocks();
 });
 
@@ -104,6 +106,46 @@ describe("handleChatMessage replay gate", () => {
     handleChatMessage(createReconnectClock(), chat(1, "2026-03-15T10:00:05Z"));
 
     expect(notifyIncomingMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handleChatMessage clears the sender's typing (DP-15)", () => {
+  const bob = { id: 2, username: "bob", avatar: null, role: "member", status: "online" as const };
+
+  it("clears the sender's typing state when their message lands", () => {
+    setMembers([bob]);
+    setTyping(1, 2);
+    expect(getTypingUsers(1)).toHaveLength(1);
+
+    handleChatMessage(createReconnectClock(), chat(1, "2026-03-15T10:00:00Z"));
+
+    expect(getTypingUsers(1)).toHaveLength(0);
+  });
+
+  it("clears only the sender, leaving other typers in the channel", () => {
+    const carol = {
+      id: 3,
+      username: "carol",
+      avatar: null,
+      role: "member",
+      status: "online" as const,
+    };
+    setMembers([bob, carol]);
+    setTyping(1, 2);
+    setTyping(1, 3);
+
+    handleChatMessage(createReconnectClock(), chat(1, "2026-03-15T10:00:00Z"));
+
+    expect(getTypingUsers(1).map((m) => m.id)).toEqual([3]);
+  });
+
+  it("does not throw for a message from a user who is not typing (replay burst)", () => {
+    setMembers([bob]);
+
+    expect(() =>
+      handleChatMessage(createReconnectClock(), chat(2, "2026-03-15T10:00:00Z")),
+    ).not.toThrow();
+    expect(getTypingUsers(1)).toHaveLength(0);
   });
 });
 

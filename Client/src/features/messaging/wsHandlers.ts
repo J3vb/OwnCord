@@ -22,7 +22,7 @@ import {
   bulkDeleteMessages,
   setMessagePinned,
 } from "../../stores/messages.store";
-import { setTyping } from "../../stores/members.store";
+import { setTyping, clearTyping } from "../../stores/members.store";
 import {
   dmStore,
   reviseDmLastMessage,
@@ -69,6 +69,10 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     channelId: payload.channel_id,
     user: payload.user.username,
   });
+  // DP-15: the sender's message landing clears their "is typing…" at once.
+  // A no-op for an unknown typer (a reconnect replay burst carries no typing
+  // state), and scoped to this channel + this sender so other typers stay.
+  clearTyping(payload.channel_id, payload.user.id);
   addMessage(payload);
   const activeId = channelsStore.select((s) => s.activeChannelId);
 
