@@ -208,7 +208,10 @@ It exists specifically so Main never renders mid-populate. Everything else
 ## 4. Reconnect UX
 
 The WS client auto-reconnects with exponential backoff (base 1 s, cap 30 s, no
-jitter; the `DEFAULT_MAX_RECONNECT_DELAY` constant in `lib/ws.ts`), preserving `last_seq` for replay. The **first**
+jitter; the `DEFAULT_MAX_RECONNECT_DELAY` constant in `lib/ws.ts`), preserving `last_seq` for replay. While it waits
+out a backoff, the network coming back (`online`) or the window becoming visible cancels the wait and dials at once
+(at most once per 2 s, `WAKE_KICK_FLOOR_MS`). That dial takes the timer's own path, so the wake check below still
+applies, and it never fires after `disconnect()`, `auth_error` or a certificate-mismatch latch. The **first**
 authentication is additionally bounded by a 20 s deadline (`PREAUTH_CONNECT_TIMEOUT_MS`): a login or stored-token
 auto-login that never reaches `auth_ok` returns to the form with "Couldn't reach this server — it may be offline"
 rather than retrying forever behind the connecting overlay. Once a session is live the deadline is cleared, so an
