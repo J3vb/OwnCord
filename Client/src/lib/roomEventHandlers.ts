@@ -37,7 +37,9 @@ const DECRYPT_GRACE_MS = 3000;
 const DECRYPT_STREAK_RESET_MS = 2500;
 
 /** Polish #21: how long without a remote decrypt failure before a decrypt
- *  degradation counts as recovered. livekit-client's ErrorRateLimiter lets
+ *  degradation counts as recovered on the browser path (the native room
+ *  re-reports every second while a peer fails, so its streak reset is
+ *  enough). livekit-client's ErrorRateLimiter lets
  *  the worker report a failing peer at most 5 times per 60 s window, so a
  *  failure that persists goes quiet for most of each minute; only a gap
  *  longer than that window means the frames decrypt again. */
@@ -80,6 +82,9 @@ export interface RoomEventDeps {
   teardownForReconnect: () => void;
   leaveVoice: (sendWs: boolean) => void;
   applyMicMuteState: (muted: boolean) => Promise<void>;
+  /** The room is the native backend's, whose decrypt reports are not
+   *  rate-limited (see DECRYPT_QUIET_MS). */
+  isNativeRoom: () => boolean;
   attemptAutoReconnect: (
     token: string,
     url: string,
@@ -118,7 +123,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   let autoplayUnlockHandler: (() => void) | null = null;
   // Polish #21: a transient >3s key-delivery stall set the Secured badge to
   // "Unsecured" and nothing ever cleared it until the next join/leave. A
-  // quiet gap past DECRYPT_QUIET_MS means the peer's frames decrypt again —
+  // quiet gap past the room's quiet window means the peer's frames decrypt
+  // again —
   // clear only what THIS path degraded, leaving a persistent
   // worker-death/MissingKey degradations visible (OC-0002).
   // "other" latches: once anything else degrades the call, a quiet gap
@@ -137,13 +143,16 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  window means delivery resumed. */
   function armDecryptRecovery(): void {
     clearDecryptQuietTimer();
-    decryptQuietTimer = setTimeout(() => {
-      decryptQuietTimer = null;
-      if (degradedBy === "decrypt") {
-        degradedBy = null;
-        setEncryptionDegraded(false);
-      }
-    }, DECRYPT_QUIET_MS);
+    decryptQuietTimer = setTimeout(
+      () => {
+        decryptQuietTimer = null;
+        if (degradedBy === "decrypt") {
+          degradedBy = null;
+          setEncryptionDegraded(false);
+        }
+      },
+      deps.isNativeRoom() ? DECRYPT_STREAK_RESET_MS : DECRYPT_QUIET_MS,
+    );
   }
 
   function resetEncryptionRecovery(): void {

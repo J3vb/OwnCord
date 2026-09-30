@@ -113,6 +113,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     teardownForReconnect: spies.teardownForReconnect,
     leaveVoice: spies.leaveVoice,
     applyMicMuteState: spies.applyMicMuteState,
+    isNativeRoom: () => false,
     attemptAutoReconnect: spies.attemptAutoReconnect,
     ...over,
   };
@@ -667,14 +668,34 @@ describe("handleEncryptionError", () => {
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
     });
 
+    it("clears a native room's stall as soon as its unthrottled reports stop", () => {
+      // The native room re-reports every second until the peer decrypts
+      // again, so a gap past the streak reset already means recovery.
+      const h = build({ isNativeRoom: () => true });
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
     it("stays degraded while a failing peer's reports are held back by livekit's rate limiter", () => {
       const h = build();
       // livekit-client's ErrorRateLimiter: one report a second, at most 5 per
-      // 60 s window, so a peer that never decrypts again reports in bursts.
+      // window, and a new window only once 60 s have passed since the last
+      // report, so a peer that never decrypts again reports in bursts about
+      // 66 s apart with just over 60 s of silence between them.
       const reportFor = (seconds: number): void => {
         for (let s = 0; s < seconds; s++) {
-          const windowSecond = s % 60;
-          if (windowSecond <= 5) h.handlers.handleEncryptionError(decryptFailed(), bob);
+          if (s % 66 <= 5) h.handlers.handleEncryptionError(decryptFailed(), bob);
           vi.advanceTimersByTime(1000);
           expect(voiceStore.getState().encryptionDegraded).toBe(s >= 3);
         }

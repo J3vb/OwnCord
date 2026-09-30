@@ -492,7 +492,7 @@ describe("NativeRoom room surface", () => {
     vi.useFakeTimers();
     try {
       const room = createNativeRoom(audio);
-      const handlers = createRoomEventHandlers({} as RoomEventDeps);
+      const handlers = createRoomEventHandlers({ isNativeRoom: () => true } as RoomEventDeps);
       room.on("encryptionError", (err, p) =>
         handlers.handleEncryptionError(err as Error, p as Participant),
       );
@@ -505,10 +505,9 @@ describe("NativeRoom room surface", () => {
       status(false);
       vi.advanceTimersByTime(3000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
-      // ...and the peer's frames decrypting again clears it, after the same
-      // quiet window the web path needs.
+      // ...and the peer's frames decrypting again clears it.
       status(true);
-      vi.advanceTimersByTime(66_000);
+      vi.advanceTimersByTime(3000);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
 
       // The local E2EE not running is not the peer's to clear.
@@ -519,7 +518,7 @@ describe("NativeRoom room surface", () => {
         event: { type: "encryptionStatus", identity: "user-1", encrypted: false },
       });
       status(true);
-      vi.advanceTimersByTime(70_000);
+      vi.advanceTimersByTime(5000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
       await room.disconnect();
     } finally {
