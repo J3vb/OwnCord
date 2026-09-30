@@ -222,9 +222,9 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHAT_EDITED, handleChatEdited));
 
-  unsubs.push(ws.on(S.CHAT_DELETED, handleChatDeleted));
+  unsubs.push(ws.on(S.CHAT_DELETED, (payload) => handleChatDeleted(api, payload)));
 
-  unsubs.push(ws.on(S.CHAT_BULK_DELETED, handleChatBulkDeleted));
+  unsubs.push(ws.on(S.CHAT_BULK_DELETED, (payload) => handleChatBulkDeleted(api, payload)));
 
   unsubs.push(ws.on(S.CHAT_PINNED, handleChatPinned));
 

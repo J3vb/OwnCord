@@ -188,39 +188,45 @@ export function handleChatEdited(payload: Payload<"chat_edited">): void {
   reviseDmLastMessage(payload.channel_id, payload.message_id, { lastMessage: payload.content });
 }
 
-export function handleChatDeleted(payload: Payload<"chat_deleted">): void {
+export function handleChatDeleted(
+  api: DispatchApi | undefined,
+  payload: Payload<"chat_deleted">,
+): void {
   deleteMessage(payload);
-  reviseDmPreviewAfterDelete(payload.channel_id, [payload.message_id]);
+  reviseDmPreviewAfterDelete(api, payload.channel_id, [payload.message_id]);
 }
 
-export function handleChatBulkDeleted(payload: Payload<"chat_bulk_deleted">): void {
+export function handleChatBulkDeleted(
+  api: DispatchApi | undefined,
+  payload: Payload<"chat_bulk_deleted">,
+): void {
   bulkDeleteMessages(payload);
-  reviseDmPreviewAfterDelete(payload.channel_id, payload.ids);
+  reviseDmPreviewAfterDelete(api, payload.channel_id, payload.ids);
 }
 
-/** A DM whose preview showed a now-deleted message falls back to the newest
- *  surviving message of a window that reaches the live tail, as GET /dms
- *  would report it; with none loaded, only a detached older window, or a
- *  window that never held the deleted message, the text is blanked rather
- *  than left showing the deleted one. */
-function reviseDmPreviewAfterDelete(channelId: number, ids: readonly number[]): void {
+/** A DM whose preview showed a now-deleted message is blanked at once, then
+ *  takes the server's last message from GET /dms — unless a newer message
+ *  has replaced the preview by the time that answers. */
+function reviseDmPreviewAfterDelete(
+  api: DispatchApi | undefined,
+  channelId: number,
+  ids: readonly number[],
+): void {
   const shown = dmStore.getState().channels.find((c) => c.channelId === channelId)?.lastMessageId;
   if (shown === undefined || shown === null || !ids.includes(shown)) return;
-  const list = messagesStore.getState().messagesByChannel.get(channelId);
-  const survivor =
-    isWindowDetached(channelId) || list?.some((m) => m.id === shown) !== true
-      ? undefined
-      : list.findLast((m) => !m.deleted && m.status === "sent" && m.id < shown);
-  reviseDmLastMessage(
-    channelId,
-    shown,
-    survivor === undefined
-      ? { lastMessage: "" }
-      : {
-          lastMessageId: survivor.id,
-          lastMessage: survivor.content,
-          lastMessageAt: survivor.timestamp,
-        },
+  reviseDmLastMessage(channelId, shown, { lastMessage: "" });
+  api?.getDmChannels?.().then(
+    (r) => {
+      const p = r.dm_channels.find((d) => d.channel_id === channelId);
+      if (p === undefined) return;
+      reviseDmLastMessage(channelId, shown, {
+        lastMessageId: p.last_message_id,
+        lastMessage: p.last_message,
+        lastMessageAt: p.last_message_at,
+      });
+    },
+    (err: unknown) =>
+      log.warn("Failed to refetch a DM preview after a delete", { error: String(err) }),
   );
 }
 
