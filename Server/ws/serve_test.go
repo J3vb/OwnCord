@@ -192,6 +192,30 @@ func TestBuildAuthOK_ValidJSON(t *testing.T) {
 	}
 }
 
+// P1-09: auth_ok's upload_policy advertises upload.max_size_mb in bytes so
+// the composer can refuse an oversize file before uploading it.
+func TestBuildAuthOK_UploadPolicy(t *testing.T) {
+	database := openServeTestDB(t)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, UploadPolicy: ws.UploadPolicy{MaxUploadBytes: 150 << 20}})
+	go hub.Run()
+	t.Cleanup(func() { hub.Stop() })
+	user := seedServeUser(t, database, "authok-maxupload")
+
+	var env struct {
+		Payload struct {
+			UploadPolicy struct {
+				MaxUploadBytes int64 `json:"max_upload_bytes"`
+			} `json:"upload_policy"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(hub.BuildAuthOKForTest(user, "member"), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := env.Payload.UploadPolicy.MaxUploadBytes; got != 150<<20 {
+		t.Errorf("payload.upload_policy.max_upload_bytes = %d, want %d", got, 150<<20)
+	}
+}
+
 // ─── buildReady ───────────────────────────────────────────────────────────────
 
 func TestBuildReady_Type(t *testing.T) {

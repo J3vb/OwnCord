@@ -1295,7 +1295,9 @@ describe("createChannelController", () => {
       expect(result).toEqual({ id: 1, url: "/f/1", filename: "f.txt" });
     });
 
-    it("onUploadFile shows toast on failure", async () => {
+    // P1-09: the composer reports a failed upload inline from the rejection,
+    // so the controller must not also toast it.
+    it("onUploadFile rethrows a failure for the composer's inline line, without a toast", async () => {
       const opts = makeOpts();
       (
         opts.api as unknown as { uploadFile: ReturnType<typeof vi.fn> }
@@ -1306,7 +1308,7 @@ describe("createChannelController", () => {
       await expect(
         capturedMessageInputOpts!.onUploadFile(new File(["x"], "test.txt")),
       ).rejects.toThrow("upload failed");
-      expect(opts.showToast).toHaveBeenCalledWith("File upload failed", "error");
+      expect(opts.showToast).not.toHaveBeenCalled();
     });
   });
 

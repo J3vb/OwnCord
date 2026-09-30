@@ -188,3 +188,9 @@ func SetMiddlewareClockForTest(t *testing.T, now func() time.Time) {
 	middlewareNow = now
 	t.Cleanup(func() { middlewareNow = prev })
 }
+
+// UploadBodyCapForTest exposes uploadBodyCap for external tests.
+func UploadBodyCapForTest(fileCap int64) int64 { return uploadBodyCap(fileCap) }
+
+// UploadMultipartMarginForTest is uploadMultipartMargin for external tests.
+const UploadMultipartMarginForTest = uploadMultipartMargin

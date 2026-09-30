@@ -194,7 +194,8 @@ keeps it until one authenticates.
     },
     "server_name": "My Server",
     "motd": "Welcome!",
-    "replay_source": "none"
+    "replay_source": "none",
+    "upload_policy": { "max_upload_bytes": 104857600 }
   }
 }
 ```
@@ -215,6 +216,13 @@ the server already agreed with.
 `"none"` (fresh connection / full re-sync), `"buffer"` (in-memory ring
 buffer), or `"db"` (persistent `events` table). See
 [Reconnection with State Recovery](#reconnection-with-state-recovery).
+
+`upload_policy` is what a client checks before an upload; the upload route
+stays authoritative, and later fields may be added. `max_upload_bytes` is
+`upload.max_size_mb` in bytes, the largest file `POST /api/v1/uploads`
+accepts. `0` means uploads are disabled on this server: the route refuses
+every non-empty file, and clients disable attaching. An older server omits
+`upload_policy`; clients then assume 100 MiB.
 
 ### Step 3: Failure -- auth_error
 

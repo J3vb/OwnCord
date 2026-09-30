@@ -357,7 +357,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"update: rename current to old failed":                                         "update_rename_current_to_old_failed",
 	"update: staged binary re-verification failed, aborting update":                "update_staged_binary_re_verification_failed",
 	"update: writing the outcome audit row failed":                                 "update_outcome_audit_row_failed",
-	"upload.max_size_mb exceeds HTTP body limit, capping":                          "upload_max_size_exceeds_body_limit",
+	"upload.max_size_mb is 0, uploads are disabled":                                "upload_max_size_zero_uploads_disabled",
 	"using default or placeholder LiveKit credentials — voice will be disabled; set voice.livekit_api_key and voice.livekit_api_secret in config.yaml (or LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env under Docker)": "using_default_or_placeholder_livekit_credentials",
 	"verify-totp: GetUserByID failed":                                   "verify_totp_getuserbyid_failed",
 	"voice permission reconciliation deferred":                          "voice_permission_reconcile_deferred",

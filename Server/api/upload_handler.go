@@ -10,6 +10,7 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
+	"math"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -165,13 +166,24 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	if uploads == nil {
 		panic("api: MountUploadRoutes requires a non-nil UploadService")
 	}
-	// Upload requires authentication and a higher body size limit (100 MB).
-	r.With(
-		AuthMiddleware(sessions),
-		MaxBodySize(uploadMaxBodySize),
-	).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
+	// Upload requires authentication; handleUpload applies its own body cap
+	// (uploadBodyCap), which follows upload.max_size_mb.
+	r.With(AuthMiddleware(sessions)).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
 	// File serving requires authentication for channel-level access control.
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+}
+
+// uploadBodyCap is the request body cap for one upload given the per-file
+// cap in bytes (upload.max_size_mb; 0 when unset, or when a max_size_mb of 0
+// disables uploads and storage.Save refuses every non-empty file). It never
+// drops below uploadMaxBodySize, so a file over a smaller per-file cap still
+// reaches storage.Save and its own size rejection; above that it is the
+// per-file cap plus the multipart margin, saturating rather than overflowing.
+func uploadBodyCap(fileCap int64) int64 {
+	if fileCap > math.MaxInt64-uploadMultipartMargin {
+		return math.MaxInt64
+	}
+	return max(uploadMaxBodySize, fileCap+uploadMultipartMargin)
 }
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
@@ -206,7 +218,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		deadlines.touch()
 
 		// Limit request body size to prevent abuse.
-		r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, uploadMaxBodySize), d: deadlines}
+		fileCap := uploads.MaxUploadBytes()
+		r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, uploadBodyCap(fileCap)), d: deadlines}
 
 		// Stream the multipart body instead of buffering or spooling it: no
 		// part is read until the bytes it could cost are admitted below.
@@ -223,14 +236,14 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// sane, otherwise the worst case a single file can ever cost — the
 		// configured per-file cap (upload.max_size_mb, already enforced by
 		// storage.Storage.Save) when one is set, else the full request cap.
-		// A chunked upload otherwise reserves the entire 100 MiB request cap
+		// A chunked upload otherwise reserves the entire request cap
 		// for every user regardless of how small the body turns out to be,
 		// which starves anyone whose quota or headroom is smaller than that.
 		// The deferred Settle returns the charge on every path that does not
 		// reach Record, a panic included.
-		worstCase := int64(uploadMaxBodySize)
-		if fileCap := uploads.MaxUploadBytes(); fileCap > 0 && fileCap < worstCase {
-			worstCase = fileCap
+		worstCase := fileCap
+		if worstCase <= 0 {
+			worstCase = uploadMaxBodySize
 		}
 		envelope := r.ContentLength
 		if envelope <= 0 || envelope > worstCase {

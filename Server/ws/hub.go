@@ -193,6 +193,7 @@ type Hub struct {
 	// construction and never mutated (voice.quality is startup-only), so no
 	// mutex guards it, like livekit/lkProcess below.
 	defaultVoiceQuality string
+	uploadPolicy        UploadPolicy // HubOptions.UploadPolicy for auth_ok; set once, like the above
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation
 	// DB transition with its paired LiveKit call (round 4, Codex review

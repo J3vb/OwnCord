@@ -237,6 +237,16 @@ describe("WS Dispatcher", () => {
     expect(state.serverName).toBe("TestServer");
   });
 
+  it("stores auth_ok's upload_policy, and null from an older server that omits it", () => {
+    const user = { id: 1, username: "alex", avatar: null, role: "admin" };
+    const upload_policy = { max_upload_bytes: 10485760 };
+    mock.dispatch("auth_ok", { user, server_name: "S", motd: "", upload_policy });
+    expect(authStore.getState().uploadPolicy).toEqual(upload_policy);
+
+    mock.dispatch("auth_ok", { user, server_name: "S", motd: "" });
+    expect(authStore.getState().uploadPolicy).toBeNull();
+  });
+
   it("re-sends channel_focus for the active channel on auth_ok", () => {
     // The resume path can land with no ChannelTopic subscription (server
     // restart / proxy close observed before the client's reconnect) — a

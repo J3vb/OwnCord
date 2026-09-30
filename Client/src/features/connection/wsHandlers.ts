@@ -26,7 +26,13 @@ export function handleAuthOk(
     clock.lastReconnectHandshakeAt = Date.now();
   }
   clock.hasAuthenticatedBefore = true;
-  setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
+  setAuth(
+    authStore.getState().token ?? "",
+    payload.user,
+    payload.server_name,
+    payload.motd,
+    payload.upload_policy ?? null,
+  );
 
   // The resume path can land with no ChannelTopic subscription: the hub
   // only transfers a focused channel from an old connection entry, but

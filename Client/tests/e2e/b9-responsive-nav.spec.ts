@@ -56,6 +56,9 @@ async function signIn(page: Page): Promise<void> {
   await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
   await waitForWsReady(page);
   await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
+  // The drawer controller loads on demand and adds its backdrop when it binds
+  // the menu button; a press before that is lost.
+  await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
 }
 
 const toggle = (page: Page) => page.locator("[data-testid='sidebar-toggle']");

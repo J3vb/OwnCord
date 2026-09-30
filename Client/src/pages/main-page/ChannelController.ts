@@ -875,10 +875,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           return { id: result.id, url: result.url, filename: result.filename };
         } catch (err) {
           // A user-cancelled upload is not a failure — the composer already
-          // removed its preview and does not want an error for it.
-          if (uploadSignal?.aborted) throw err;
-          log.error("File upload failed", { error: String(err) });
-          showToast(messagingText("toast.uploadFailed"), "error");
+          // removed its preview and does not want an error for it. A real
+          // failure is reported once, inline, by the composer from this
+          // rejection, so it is not toasted here too.
+          if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
           throw err;
         }
       },

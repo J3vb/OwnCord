@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -1996,7 +1996,7 @@ Upload a file as multipart form data.
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
-**Body size limit:** 100 MiB
+**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB").
 **Content-Type:** `multipart/form-data`
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.

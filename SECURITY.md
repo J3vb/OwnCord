@@ -184,9 +184,9 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
 - IPC commands validate host format, string lengths and character
   allowlists; PTT virtual key codes are range-checked; the LiveKit proxy
   validates `remote_host` against CRLF injection.
-- Uploads: the composer filters attachments by a MIME-prefix allowlist
-  (`ALLOWED_TYPES`, `Client/src/components/MessageInput.ts`) as a convenience,
-  but the server does not rely on it. It sniffs the type from the file bytes,
+- Uploads: the composer accepts any file type and only pre-checks the size
+  against `auth_ok`'s `upload_policy`; the server is authoritative. It
+  sniffs the type from the file bytes,
   refuses executable and script magic bytes (`blockedMagic`,
   `Server/storage/storage.go`), and serves HTML, SVG, XML, PDF and XSL as
   `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff`.

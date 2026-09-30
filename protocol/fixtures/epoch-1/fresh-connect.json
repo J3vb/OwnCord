@@ -20,6 +20,9 @@
             "motd": "Welcome!",
             "replay_source": "none",
             "server_name": "OwnCord Server",
+            "upload_policy": {
+              "max_upload_bytes": 0
+            },
             "user": {
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
@@ -233,6 +236,9 @@
             "motd": "Welcome!",
             "replay_source": "none",
             "server_name": "OwnCord Server",
+            "upload_policy": {
+              "max_upload_bytes": 0
+            },
             "user": {
               "about": null,
               "avatar": null,
