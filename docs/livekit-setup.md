@@ -203,7 +203,7 @@ Client                     OwnCord Server              LiveKit Server
 ## 6. Webhook Integration
 
 Neither shipped LiveKit config (`Server/livekit.yaml.example`, the managed
-`Server/ws/livekit_process.go`) defines a `webhook:` block, so LiveKit sends no
+`Server/ws/livekit_process.go`) enables a `webhook:` block, so LiveKit sends no
 webhooks by default and the server relies on its own server SDK plus client
 `voice_leave` frames. To catch a user whose LiveKit connection died without a
 `voice_leave`, the server polls LiveKit's participant list for every room with

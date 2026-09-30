@@ -12,8 +12,8 @@ package ws
 //
 // This closes the gap by polling: once a tick, ListParticipants for every
 // room that has a row or that the SFU has open, and reconcile the SFU's
-// participant set against the DB. It runs on the startSweep pattern, never on the dispatch goroutine,
-// because ListParticipants is a network round trip.
+// participant set against the DB. It runs on the startSweep pattern, never
+// on the dispatch goroutine, because ListParticipants is a network round trip.
 //
 // The reap is deliberate about false positives: a participant that is absent
 // on one tick is only a candidate (the media path can blip, and an in-flight
