@@ -14,7 +14,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatDmRowTime } from "@lib/formatting";
+import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
@@ -257,9 +257,12 @@ function renderDmItem(
         class: convo.muted === true ? "dm-unread-badge muted" : "dm-unread-badge",
         "data-testid": `dm-unread-${convo.channelId}`,
       },
-      String(unreadCount),
+      formatBadgeCount(unreadCount),
     );
-    badge.title = requestsText("unread.count", { count: unreadCount, n: String(unreadCount) });
+    badge.title = requestsText("unread.count", {
+      count: unreadCount,
+      n: formatBadgeCount(unreadCount),
+    });
     item.appendChild(badge);
   } else if (convo.unread) {
     const unreadDot = createElement("span", { class: "dm-unread" });

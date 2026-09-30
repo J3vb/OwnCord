@@ -6,7 +6,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatDmRowTime } from "@lib/formatting";
+import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -203,7 +203,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
           class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
           style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--danger-fill)"};color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
         },
-        String(dm.unreadCount),
+        formatBadgeCount(dm.unreadCount),
       );
       parts.push(badge);
     }
@@ -243,7 +243,9 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       0,
     );
     if (totalUnread > 0) {
-      setText(dmUnreadBadge, String(totalUnread));
+      // Each row's count is already capped at 100; cap the sum the same way so
+      // the header reads "99+" instead of a four-digit total.
+      setText(dmUnreadBadge, formatBadgeCount(totalUnread));
       dmUnreadBadge.style.display = "";
     } else {
       dmUnreadBadge.style.display = "none";

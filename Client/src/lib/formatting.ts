@@ -134,6 +134,18 @@ export function atEachMidnight(signal: AbortSignal, fn: () => void): void {
   );
 }
 
+/** The server caps `unread_count` here (see GetChannelUnreadCounts): a count
+ *  at or above it is a lower bound, not the real number. */
+export const UNREAD_COUNT_CAP = 100;
+
+/** Display text for an unread badge. Counts at or above the wire cap read as
+ *  "99+"; the raw count is never shown as a four-digit number. Mention counts
+ *  are not capped on the wire, but a muted DM's mentions still reach this
+ *  through the DM header total. */
+export function formatBadgeCount(count: number): string {
+  return count >= UNREAD_COUNT_CAP ? "99+" : String(count);
+}
+
 export function isSameDay(a: string, b: string): boolean {
   const da = parseTimestamp(a);
   const db = parseTimestamp(b);

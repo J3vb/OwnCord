@@ -304,6 +304,41 @@ describe("MessageList — new-messages divider", () => {
     expect(next.dataset.testid).toBe("message-999");
   });
 
+  // The server caps unread_count at 100, so a channel with 137 unread arrives
+  // as 100. Pinning the divider "100 back from the newest" once 100 rows had
+  // loaded would leave the 37 oldest unread messages above the line, rendered
+  // as read, when the next page of history is prepended.
+  it("keeps every unread message below the divider when the count is capped", async () => {
+    const TOTAL = 200;
+    const firstUnreadId = TOTAL - 137 + 1;
+    const range = (from: number): Message[] =>
+      Array.from({ length: TOTAL - from + 1 }, (_, i) => makeMessage(from + i));
+
+    setMessages(range(TOTAL - 49));
+    openChannelWithUnread(100);
+    mount();
+
+    for (const oldest of [TOTAL - 49, TOTAL - 99, TOTAL - 149]) {
+      setMessages(range(oldest));
+      messagesStore.flush();
+      // Scroll to the top of the loaded window so the virtual list renders
+      // the oldest rows, where the divider must sit.
+      const root = container.querySelector(".messages-container") as HTMLDivElement;
+      root.scrollTop = 0;
+      root.dispatchEvent(new Event("scroll"));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const rows = [...container.querySelectorAll(".virtual-content > *")] as HTMLElement[];
+      const divider = dividerIndex();
+      expect(divider).toBeGreaterThanOrEqual(0);
+      const unreadAbove = rows
+        .slice(0, divider)
+        .filter((el) => Number(el.dataset.testid?.replace("message-", "")) >= firstUnreadId);
+      expect(unreadAbove).toEqual([]);
+      expect(rows[divider + 1]?.dataset.testid).toBe(`message-${oldest}`);
+    }
+  });
+
   // The line marks a boundary; the message under it must not be rendered as a
   // grouped continuation of the message above the line.
   it("breaks message grouping at the divider", () => {

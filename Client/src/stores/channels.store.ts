@@ -24,8 +24,8 @@ export interface Channel {
   readonly unreadCount: number;
   /**
    * Unread messages here that mention the current user (directly or via
-   * @everyone/@here). Always a subset of unreadCount; drives the red mention
-   * badge, which outranks the plain unread badge.
+   * @everyone/@here). Not capped like unreadCount, so it can exceed it; drives
+   * the red mention badge, which outranks the plain unread badge.
    */
   readonly mentionCount: number;
   readonly lastMessageId: number | null;

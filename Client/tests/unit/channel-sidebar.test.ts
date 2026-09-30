@@ -418,6 +418,32 @@ describe("ChannelSidebar", () => {
     expect(item.querySelector(".unread-badge")?.textContent).toBe("7");
   });
 
+  it("caps the unread badge at 99+", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 137, mention_count: 0 }]);
+    sidebar.mount(container);
+
+    const badge = container.querySelector('[data-channel-id="1"] .unread-badge');
+    expect(badge?.textContent).toBe("99+");
+  });
+
+  it("shows 99 without the plus at the cap, and 100 as 99+", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 99, mention_count: 0 }]);
+    sidebar.mount(container);
+    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99");
+
+    setChannels([{ ...testChannels[0]!, unread_count: 100, mention_count: 0 }]);
+    channelsStore.flush();
+    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99+");
+  });
+
+  it("leaves the mention badge uncapped", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 0, mention_count: 137 }]);
+    sidebar.mount(container);
+
+    const badge = container.querySelector('[data-channel-id="1"] .mention-badge');
+    expect(badge?.textContent).toBe("137");
+  });
+
   it("clears the mention badge when the channel is activated", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }]);
     sidebar.mount(container);
