@@ -11,6 +11,7 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
   setVoiceConfig,
+  setModeratorDeafened,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
@@ -55,8 +56,18 @@ import { connectText } from "../../i18n/connect";
  * voice_mute/voice_deafen) — requiring them to also be false before
  * releasing means a genuine self-mute that happens to coincide with the
  * moderator's release is never clobbered.
+ *
+ * Lifting a moderator deafen also clears the row's own deafen (the server
+ * cannot tell whose it was), so a member who had deafened themselves before
+ * the moderator did would hear the room again unasked. The client knows:
+ * `moderatorDeafened` marks a deafen it applied for the moderator, so any
+ * other deafen in effect at the lift is the member's own, kept and restated
+ * to the server. It follows the local deafen, not the moderator flags, so a
+ * moderator move (a leave that clears those flags, then a re-join that
+ * restates them) cannot mistake the moderator's deafen for the member's.
  */
 function enforceModeratorAudioState(
+  ws: DispatchWs,
   serverMuted: boolean,
   serverDeafened: boolean,
   prevServerMuted: boolean,
@@ -66,10 +77,14 @@ function enforceModeratorAudioState(
 ): void {
   const voice = voiceStore.getState();
   const applyDeafen = serverDeafened && !voice.localDeafened;
+  if (applyDeafen) setModeratorDeafened(true);
+  const deafenLifted = prevServerDeafened && !serverDeafened;
+  const keepOwnDeafen = deafenLifted && voice.localDeafened && voice.moderatorDeafened !== true;
+  if (deafenLifted) setModeratorDeafened(false);
+  if (keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
   const applyMute = serverMuted && !voice.localMuted;
   const releaseMute = prevServerMuted && !serverMuted && voice.localMuted && !selfMuted;
-  const releaseDeafen =
-    prevServerDeafened && !serverDeafened && voice.localDeafened && !selfDeafened;
+  const releaseDeafen = deafenLifted && !keepOwnDeafen && voice.localDeafened && !selfDeafened;
   if (applyDeafen || applyMute || releaseMute || releaseDeafen) {
     void livekitSession().then(({ setDeafened, setMuted }) => {
       if (applyDeafen) setDeafened(true);
@@ -133,6 +148,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // that produced this `ready` never replays the voice_state that
       // would otherwise have carried it.
       enforceModeratorAudioState(
+        ws,
         selfVoiceState.server_muted === true,
         selfVoiceState.server_deafened === true,
         prevSelfServerMuted,
@@ -189,7 +205,7 @@ export function publishReadyIdentity(
   }
 }
 
-export function handleVoiceState(payload: Payload<"voice_state">): void {
+export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">): void {
   // Auto-join voice channel if the event is for the current user
   const currentUserId = authStore.getState().user?.id ?? 0;
   const isSelf = payload.user_id === currentUserId;
@@ -203,6 +219,7 @@ export function handleVoiceState(payload: Payload<"voice_state">): void {
   if (!isSelf) return;
   joinVoiceChannel(payload.channel_id);
   enforceModeratorAudioState(
+    ws,
     payload.server_muted === true,
     payload.server_deafened === true,
     prevServerMuted,

@@ -91,7 +91,6 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -141,6 +140,10 @@ func volatileClass(key string) (string, bool) {
 		return "", false
 	case key == "id", strings.HasSuffix(key, "_id"):
 		return "id", true
+	case key == "direct_url":
+		// The LiveKit server address, deployment-specific: a loopback test
+		// server's ephemeral port otherwise makes the transcript unstable.
+		return "url", true
 	case strings.HasSuffix(key, "_at"), key == "timestamp", key == "ts", key == "last_seen":
 		return "ts", true
 	case strings.Contains(key, "token"):
@@ -353,16 +356,10 @@ func newEpochRig(t *testing.T, journey string) *epochRig {
 
 	limiter := auth.NewRateLimiter()
 
-	// A LiveKit client so voice_join clears the "voice not configured" guard.
-	// The join token is minted locally; no LiveKit process is contacted.
-	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-12345",
-		LiveKitAPISecret: "test-api-secret-67890abcdef",
-		LiveKitURL:       "ws://localhost:7880",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	// A LiveKit client so voice_join clears the "voice not configured" guard
+	// and the externally-managed reachability probe. Token signing is local;
+	// the stub only answers the probe.
+	lk := healthyLiveKitClient(t)
 	hub := newTestHubWith(t, ws.HubOptions{
 		DB: database, Limiter: limiter,
 		Services: service.New(database, limiter), LiveKit: lk,

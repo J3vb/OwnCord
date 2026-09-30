@@ -3,6 +3,20 @@
 // (`src-tauri/src/native_voice/`) behind this one check. A leaf module: it is
 // imported statically from the voice chunk, so it must stay dependency-free.
 
+/** Chromium's (so WebView2's) `NotAllowedError` message for a screen picker
+ *  the user dismissed. Any other `NotAllowedError` is a real refusal (the OS,
+ *  a policy), so only this one is a silent cancel; the native path raises
+ *  the same one for its own picker and the portal dialog. */
+// i18n-exempt: browser error message compared by value, never displayed
+export const PICKER_DISMISSED = "Permission denied by user";
+
+/** The native host's rejection of a portal capture that ended before its
+ *  first frame (`screen::PORTAL_NOT_STARTED`): the portal does not say
+ *  whether the user cancelled or something refused, so it gets a soft notice
+ *  rather than silence or a denial. */
+// i18n-exempt: host rejection marker compared by value, never displayed
+export const PORTAL_NOT_STARTED = "screen capture portal did not start";
+
 /** True in the Tauri app on a Linux desktop — the only place the native
  *  LiveKit backend exists. Keyed on the host, not on `RTCPeerConnection`, so
  *  a WebKitGTK built with WebRTC still takes the native path; a Linux

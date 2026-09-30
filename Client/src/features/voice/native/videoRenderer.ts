@@ -20,6 +20,9 @@ import { nativeCounters } from "./counters";
 
 const log = createLogger("nativeVideo");
 
+/** How long to wait before reopening a dropped loopback frame socket. */
+const RECONNECT_DELAY_MS = 1000;
+
 // i18n-exempt: WebGL/GLSL vertex shader source, not display text
 const VERTEX = `#version 300 es
 out vec2 uv;
@@ -110,11 +113,12 @@ export class NativeVideoRenderer {
   readonly mediaStreamTrack: MediaStreamTrack;
   private readonly canvas = document.createElement("canvas");
   private readonly gl: WebGL2RenderingContext | null;
-  private readonly socket: WebSocket;
+  private socket: WebSocket;
   private disposed = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** `url`: the frame socket's `/remote/<sid>` route for one track. */
-  constructor(url: string) {
+  constructor(private readonly url: string) {
     this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false });
     try {
       // i18n-exempt: internal WebGL guard, never rendered
@@ -125,14 +129,33 @@ export class NativeVideoRenderer {
       log.error("native video renderer setup failed", err);
     }
     this.mediaStreamTrack = this.canvas.captureStream().getVideoTracks()[0]!;
-    this.socket = new WebSocket(url);
-    this.socket.binaryType = "arraybuffer";
-    this.socket.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => {
+    this.socket = this.openSocket();
+    nativeCounters.videoRenderers++;
+  }
+
+  private openSocket(): WebSocket {
+    const socket = new WebSocket(this.url);
+    socket.binaryType = "arraybuffer";
+    socket.addEventListener("message", (e: MessageEvent<ArrayBuffer>) => {
       if (this.disposed) return;
       this.draw(e.data);
-      this.socket.send(new ArrayBuffer(0));
+      // Only ack while open; a frame arriving as the socket closes would
+      // otherwise throw.
+      if (socket.readyState === WebSocket.OPEN) socket.send(new ArrayBuffer(0));
     });
-    nativeCounters.videoRenderers++;
+    // A dropped loopback socket (the host restarted) used to freeze the tile
+    // for the rest of the call; reopen it (voice #13).
+    socket.addEventListener("close", () => this.scheduleReconnect());
+    return socket;
+  }
+
+  private scheduleReconnect(): void {
+    if (this.disposed || this.reconnectTimer !== null) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.disposed) return;
+      this.socket = this.openSocket();
+    }, RECONNECT_DELAY_MS);
   }
 
   private draw(data: ArrayBuffer): void {
@@ -162,6 +185,10 @@ export class NativeVideoRenderer {
     if (this.disposed) return;
     this.disposed = true;
     nativeCounters.videoRenderers--;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.socket.close();
     this.mediaStreamTrack.stop();
     this.gl?.getExtension("WEBGL_lose_context")?.loseContext();

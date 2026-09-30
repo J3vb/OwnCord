@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -61,14 +60,7 @@ func newVoiceTraceHub(t *testing.T, name string) (*Hub, *db.DB, *Client, int64) 
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	t.Cleanup(h.Stop)
-	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "trace-key",
-		LiveKitAPISecret: "trace-secret-0123456789abcdef",
-		LiveKitURL:       "ws://127.0.0.1:9",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyTestLiveKit(t)
 	h.livekit = lk
 
 	user, err := database.GetUserByID(ctx, uid)

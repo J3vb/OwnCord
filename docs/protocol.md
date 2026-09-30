@@ -1366,6 +1366,10 @@ restricted by the user's permissions.
 }
 ```
 
+`quality` is the server's `voice.quality` setting; there is no per-channel
+override. `threshold_mode`, `mixing_threshold` and `top_speakers` are reserved:
+they are always sent, but no client reads them.
+
 Quality presets:
 
 | Preset   | Bitrate     |
@@ -1418,6 +1422,9 @@ Quality presets:
 Moderation](#voice-moderation)). `muted` / `deafened` are always set alongside
 them, so a client that ignores the two new fields still renders the user as
 silenced; they exist so the UI can show that the user may not lift it.
+
+`speaking` is always `false`: the speaking indicator comes from LiveKit's active
+speakers, not from the server. The field is kept for compatibility.
 
 `voice_state` also arrives **unsequenced** in one case: when a client joins a
 voice channel, the states of participants already in the room are relayed to
@@ -1509,7 +1516,11 @@ Sets `server_deafened` (and `deafened`) and broadcasts `voice_state`. Deafen has
 no SFU equivalent — it governs what the target plays back — so it is enforced by
 the target's client honoring the flag plus the server refusing their own
 undeafen. Deafening also applies a server mute, so a user who cannot hear the
-room cannot keep talking into it.
+room cannot keep talking into it. Clearing it clears `deafened` too, so the
+target hears the room again; `muted` is left as-is, and the target unmutes
+themselves. The server cannot tell a deafen the target chose from the one the
+moderator applied, so the desktop client keeps a deafen the target set before
+the moderator did and restates it with `voice_deafen`.
 
 ### voice_mod_move (Client -> Server)
 

@@ -59,14 +59,17 @@ fn combo_matches(mods: Modifiers, key_down: bool) -> bool {
 
 /// Whether the session is Wayland, from `WAYLAND_DISPLAY` and
 /// `XDG_SESSION_TYPE`.
-fn is_wayland_session(wayland_display: Option<&str>, session_type: Option<&str>) -> bool {
+pub(crate) fn is_wayland_session(
+    wayland_display: Option<&str>,
+    session_type: Option<&str>,
+) -> bool {
     wayland_display.is_some_and(|d| !d.is_empty())
         || session_type.is_some_and(|t| t.eq_ignore_ascii_case("wayland"))
 }
 
 /// Whether global key state is observable while another app is in front: not
 /// on a Wayland session, and only where key polling works at all.
-fn global_keys_observable(wayland: bool, polling_supported: bool) -> bool {
+pub(crate) fn global_keys_observable(wayland: bool, polling_supported: bool) -> bool {
     !wayland && polling_supported
 }
 

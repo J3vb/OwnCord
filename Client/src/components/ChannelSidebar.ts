@@ -531,18 +531,23 @@ function renderVoiceChannelItem(
 
       // A moderator-imposed mute/deafen gets its own class and tooltip: the
       // same mic-off glyph would otherwise read as an ordinary self-mute.
+      // Deafen implies mute, so a deafened user shows only headphones-off
+      // (Discord parity) rather than a duplicate mic-off beside it; that one
+      // icon still carries a moderator's mute.
       if (user.deafened) {
-        const muteIcon = createElement("span", {
-          class: user.serverMuted === true ? "vu-muted vu-server-muted" : "vu-muted",
-        });
-        if (user.serverMuted === true) muteIcon.title = shellText("channel.mutedByModerator");
-        muteIcon.appendChild(createIcon("mic-off", 14));
         const deafIcon = createElement("span", {
-          class: user.serverDeafened === true ? "vu-muted vu-server-muted" : "vu-muted",
+          class:
+            user.serverDeafened === true || user.serverMuted === true
+              ? "vu-muted vu-server-muted"
+              : "vu-muted",
+          title:
+            user.serverDeafened === true
+              ? shellText("channel.deafenedByModerator")
+              : user.serverMuted === true
+                ? shellText("channel.mutedByModerator")
+                : shellText("channel.deafened"),
         });
-        if (user.serverDeafened === true) deafIcon.title = shellText("channel.deafenedByModerator");
         deafIcon.appendChild(createIcon("headphones-off", 14));
-        row.appendChild(muteIcon);
         row.appendChild(deafIcon);
       } else if (user.muted) {
         const muteIcon = createElement("span", {

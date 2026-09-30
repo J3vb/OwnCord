@@ -17,6 +17,11 @@ export interface ConnectionStats {
   readonly inPackets: number;
   readonly totalUp: number;
   readonly totalDown: number;
+  /** False until a real sample has been extracted. The native Linux path has
+   *  no browser peer connection (NativeRoom.engine.pcManager is undefined), so
+   *  no sample ever arrives; the widget must render "not available" rather
+   *  than its hardcoded initial "4 green bars, —" (voice #7). */
+  readonly available: boolean;
 }
 
 export interface ConnectionStatsPoller {
@@ -36,6 +41,7 @@ const EMPTY_STATS: ConnectionStats = {
   inPackets: 0,
   totalUp: 0,
   totalDown: 0,
+  available: false,
 };
 
 function qualityFromRtt(rtt: number): QualityLevel {
@@ -156,6 +162,7 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
       inPackets: metrics.inPackets,
       totalUp: metrics.totalUp,
       totalDown: metrics.totalDown,
+      available: true,
     };
 
     listeners.forEach((cb) => cb(current));

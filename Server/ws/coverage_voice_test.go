@@ -589,44 +589,51 @@ func TestHandleVoiceJoin_ChannelNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleVoiceJoin_WithQualityOverride(t *testing.T) {
-	hub, database := newCoverageHub(t)
-	user := seedCoverageOwner(t, database, "vj-quality-user")
+// ─── Voice join quality comes from the global config only ───────────────────
 
-	vcID, err := database.CreateChannel(context.Background(), "quality-vc", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	_, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_quality = 'high' WHERE id = ?", vcID)
-	if err != nil {
-		t.Fatalf("UPDATE: %v", err)
-	}
+func TestHandleVoiceJoin_PerChannelQualityOverrideIsNotRead(t *testing.T) {
+	// voice report #14: channels.voice_quality was read here but nothing ever
+	// wrote the column (not CreateChannel, not the admin channel update), so
+	// the per-channel override was dead code and is dropped. A value forced
+	// into the column directly must not change the join's quality; the global
+	// voice.quality is authoritative.
+	for _, forced := range []string{"high", "garbage"} {
+		t.Run(forced, func(t *testing.T) {
+			hub, database := newCoverageHub(t)
+			user := seedCoverageOwner(t, database, "vj-quality-user")
 
-	send := make(chan []byte, 64)
-	c := ws.NewTestClientWithUser(hub, user, 0, send)
-	hub.Register(c)
-	waitRegistered(t, hub, c)
-
-	raw, _ := json.Marshal(map[string]any{
-		"type": "voice_join",
-		"payload": map[string]any{
-			"channel_id": vcID,
-		},
-	})
-	hub.HandleMessageForTest(c, raw)
-
-	msgs := drainChanTimeout(send, 300*time.Millisecond)
-	for _, msg := range msgs {
-		var env map[string]any
-		if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_config" {
-			p := env["payload"].(map[string]any)
-			if p["quality"] != "high" {
-				t.Errorf("voice_config quality = %v, want high", p["quality"])
+			vcID, err := database.CreateChannel(context.Background(), "quality-vc", "voice", "", "", 0)
+			if err != nil {
+				t.Fatalf("CreateChannel: %v", err)
 			}
-			return
-		}
+			if _, err = database.ExecContext(context.Background(), "UPDATE channels SET voice_quality = ? WHERE id = ?", forced, vcID); err != nil {
+				t.Fatalf("UPDATE: %v", err)
+			}
+
+			send := make(chan []byte, 64)
+			c := ws.NewTestClientWithUser(hub, user, 0, send)
+			hub.Register(c)
+			waitRegistered(t, hub, c)
+
+			raw, _ := json.Marshal(map[string]any{
+				"type":    "voice_join",
+				"payload": map[string]any{"channel_id": vcID},
+			})
+			hub.HandleMessageForTest(c, raw)
+
+			for _, msg := range drainChanTimeout(send, 300*time.Millisecond) {
+				var env map[string]any
+				if json.Unmarshal(msg, &env) == nil && env["type"] == "voice_config" {
+					p := env["payload"].(map[string]any)
+					if p["quality"] != "medium" {
+						t.Errorf("voice_config quality = %v, want medium (the unreachable per-channel override is ignored)", p["quality"])
+					}
+					return
+				}
+			}
+			t.Error("expected voice_config")
+		})
 	}
-	t.Error("expected voice_config with quality override")
 }
 
 func TestHandleVoiceJoin_MultipleParticipants(t *testing.T) {

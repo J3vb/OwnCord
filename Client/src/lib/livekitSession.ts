@@ -330,6 +330,7 @@ export class LiveKitSession {
       getLatestToken: () => this._latestToken,
       getLastUrl: () => this._lastUrl,
       getLastDirectUrl: () => this._lastDirectUrl,
+      isNativeRoom: isLinuxDesktop,
       setReconnectAc: (ac) => {
         if (ac !== null && this._pendingReconnectFields !== null) {
           // Transition from idle → reconnecting atomically using the fields

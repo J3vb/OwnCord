@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -22,14 +21,7 @@ func TestVoiceJoin_UsesConfiguredQualityFallback(t *testing.T) {
 	database := openVoiceTestDB(t)
 	limiter := auth.NewRateLimiter()
 
-	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-12345",
-		LiveKitAPISecret: "test-api-secret-67890abcdef",
-		LiveKitURL:       "ws://localhost:7880",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyLiveKitClient(t)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: lk, VoiceQuality: "high"})
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })

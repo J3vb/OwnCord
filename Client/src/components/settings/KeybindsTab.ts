@@ -117,6 +117,19 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(pttHint);
 
+  // voice #12: where the desktop cannot observe global key state (macOS or a
+  // Wayland session), a bound PTT key can never gate the mic — say so and
+  // disable the binding control rather than promising a privacy behaviour
+  // that will not happen.
+  void desktop.pushToTalk
+    .supported()
+    .catch(() => false)
+    .then((supported) => {
+      if (signal.aborted || supported) return;
+      setText(pttHint, t("keybinds.pttUnsupported"));
+      pttValue.disabled = true;
+    });
+
   // ── Navigation section ────────────────────────────────────
   section.appendChild(createElement("div", { class: "settings-separator" }));
 

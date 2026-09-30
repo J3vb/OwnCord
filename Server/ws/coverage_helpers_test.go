@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -86,15 +85,9 @@ func newCoverageHub(t *testing.T) (*ws.Hub, *db.DB) {
 	st := database
 	svc := service.New(st, limiter)
 
-	// A test LiveKit client so voice_join passes the livekit!=nil guard.
-	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-12345",
-		LiveKitAPISecret: "test-api-secret-67890abcdef",
-		LiveKitURL:       "ws://localhost:7880",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	// A test LiveKit client so voice_join passes the livekit!=nil guard and
+	// the externally-managed reachability probe (voice_join.go).
+	lk := healthyLiveKitClient(t)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, Services: svc, LiveKit: lk})
 
 	go hub.Run()

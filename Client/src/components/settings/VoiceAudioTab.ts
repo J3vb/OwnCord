@@ -618,11 +618,21 @@ function buildVoiceAudioTabInner(
     { signal },
   );
 
-  // Start initial camera preview only if a device has been explicitly selected
+  // Start the camera preview on the saved device, or on the default when
+  // none was explicitly chosen: an unexplained empty 16:9 box reads as broken
+  // (voice #22). The default device is only previewed when a camera exists.
   const savedVideoDevice = loadPref<string>("videoInputDevice", "");
-  if (savedVideoDevice !== "") {
-    startCameraPreview(savedVideoDevice);
-  }
+  void (async () => {
+    const device = savedVideoDevice;
+    if (device === "" && navigator.mediaDevices?.enumerateDevices !== undefined) {
+      const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+      if (!devices.some((d) => d.kind === "videoinput")) {
+        setText(previewLabel, t("voiceAudio.noCamera"));
+        return;
+      }
+    }
+    startCameraPreview(device);
+  })();
 
   // Camera teardown on overlay close is already covered by the factory's
   // single signal.addEventListener("abort", cleanupMic), registered once

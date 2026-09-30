@@ -655,9 +655,10 @@ impl NativeSession {
     /// already running. Returns the capture's id and a receiver that resolves
     /// with the first frame's size — on Wayland only once the user has
     /// completed the portal's dialog — or with why capture never began
-    /// ([`screen::CANCELLED`] for a cancelled dialog). The caller awaits it
-    /// without holding the session, so a leave or a stop is never blocked
-    /// behind the dialog: either drops the capture, which resolves it.
+    /// ([`screen::PORTAL_NOT_STARTED`] for a portal dialog that ended without
+    /// one). The caller awaits it without holding the session, so a leave or
+    /// a stop is never blocked behind the dialog: either drops the capture,
+    /// which resolves it.
     pub async fn start_screen(
         &mut self,
         target: Target,

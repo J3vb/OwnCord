@@ -57,6 +57,7 @@ function makeVideoGrid(): VideoModeControllerOptions["videoGrid"] {
     hasStreams: vi.fn(() => false),
     setFocusedTile: vi.fn(),
     getFocusedTileId: vi.fn(() => null),
+    setExitVisible: vi.fn(),
   } as unknown as VideoModeControllerOptions["videoGrid"];
 }
 

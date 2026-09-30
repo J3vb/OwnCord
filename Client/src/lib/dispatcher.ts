@@ -275,7 +275,7 @@ export function wireDispatcher(
 
   // ── Voice ─────────────────────────────────────────────
 
-  unsubs.push(ws.on(S.VOICE_STATE, handleVoiceState));
+  unsubs.push(ws.on(S.VOICE_STATE, (payload) => handleVoiceState(ws, payload)));
 
   unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ws, payload, clock)));
 

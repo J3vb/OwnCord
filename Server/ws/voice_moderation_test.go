@@ -540,6 +540,9 @@ func TestVoiceMod_Deafen_ClearingRestoresSelfUnmute(t *testing.T) {
 	if state.ServerDeafened {
 		t.Error("ServerDeafened = true after clearing, want false")
 	}
+	if state.Deafened {
+		t.Error("Deafened = true after clearing, want false: an undeafen must clear the self-deafen the server set, or the client's release path never fires")
+	}
 	if state.ServerMuted {
 		t.Error("ServerMuted = true after clearing the deafen that implied it, want false")
 	}

@@ -1368,9 +1368,9 @@ the webhook, and stale voice seats then wait for the slower reconcile to clear.
 
 `/health` checks the hub, database and disk, but **not voice**. A green
 `/health` therefore does not mean voice works: LiveKit can be down while
-`/health` says `ok`, and the failure that follows — a call that connects and
-then carries no audio — is invisible from the server, which never probes the
-media path. To catch a voice outage, poll both endpoints:
+`/health` says `ok` (joins are then refused), and a blocked media path — a call
+that connects and then carries no audio — is invisible from the server, which
+never probes it. To catch a voice outage, poll both endpoints:
 
 - **Server liveness:** `GET /health` (public, no allowlist entry). Any `503`
   is actionable; `reason` names the subsystem (`hub`, `database`, `disk`).
@@ -1471,6 +1471,12 @@ The supervised LiveKit process is down. `livekit_healthy: false` on
 exponential backoff (3 s up to 60 s) and gives up after ten consecutive rapid
 failures; the recovery steps are in
 [LiveKit Setup](livekit-setup.md).
+
+An externally managed LiveKit (no `voice.livekit_binary`, auto-download off)
+is probed at each join instead: when it does not answer at
+`voice.livekit_url` within 3 s, the join is refused with "voice is temporarily
+unavailable — LiveKit is not reachable" and the server logs
+`handleVoiceJoin: external LiveKit unreachable`.
 
 ### Clients see a certificate mismatch
 

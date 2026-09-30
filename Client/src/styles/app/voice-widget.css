@@ -116,6 +116,16 @@
   background: color-mix(in srgb, var(--red) 20%, transparent);
   color: var(--text-danger);
 }
+/* Listen-only: there is no microphone to mute, so the control is visibly
+   inert rather than a hot mic that ignores clicks. */
+.vw-controls button.vw-listen-only {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.vw-controls button.vw-listen-only:hover {
+  background: var(--bg-active);
+  color: var(--text-muted);
+}
 .vw-controls button.disconnect {
   background: transparent;
   color: var(--text-danger);

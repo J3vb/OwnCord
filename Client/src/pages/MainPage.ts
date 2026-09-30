@@ -32,7 +32,7 @@ import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
@@ -1255,10 +1255,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
+      // The grid header's exit control: back to chat without leaving voice.
+      onExitGrid: () => videoModeCtrl?.showChat(),
     });
 
     let prevVideoSignature = "";
     let prevSpeaking = "";
+    let prevAudioState = "";
     let prevCallState = "";
     const prevTileLabels = new Map<number, string>();
     // Subscribe to voice store for camera/screenshare state changes, voice
@@ -1280,10 +1283,30 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             prevSpeaking = speakingKey;
             videoGrid?.setSpeaking(talking);
           }
-          const callKey = `${String(state.localMuted)}|${String(state.localDeafened)}`;
+          // Mute/deafen badges on the camera tiles, from the same roster state.
+          let audioKey = "";
+          const audioState = new Map<number, { muted: boolean; deafened: boolean }>();
+          for (const u of channelId !== null
+            ? (state.voiceUsers.get(channelId)?.values() ?? [])
+            : []) {
+            if (u.muted || u.deafened) {
+              audioState.set(u.userId, { muted: u.muted, deafened: u.deafened });
+              audioKey += `${String(u.userId)}:${String(u.muted)}${String(u.deafened)};`;
+            }
+          }
+          if (audioKey !== prevAudioState) {
+            prevAudioState = audioKey;
+            videoGrid?.setUserAudioState(audioState);
+          }
+          const selfMuted = isSelfMuted(state);
+          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}`;
           if (callKey !== prevCallState) {
             prevCallState = callKey;
-            videoGrid?.setCallState({ muted: state.localMuted, deafened: state.localDeafened });
+            videoGrid?.setCallState({
+              muted: selfMuted,
+              deafened: state.localDeafened,
+              listenOnly: state.listenOnly,
+            });
           }
 
           // Seed the signature with the channel id so ANY voice-channel

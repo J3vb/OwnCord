@@ -15,13 +15,9 @@ import type {
   NativeVoiceScreenCapture,
   NativeVoiceScreenStarted,
 } from "../../../platform/contracts/nativeVoice";
+import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "./platform";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";
-
-/** The host's rejection of a start whose portal dialog was cancelled or
- *  refused (`screen::CANCELLED`). */
-// i18n-exempt: host rejection marker compared with includes(), never displayed
-const CANCELLED = "screen capture was cancelled or refused";
 
 /** The capture-option slice of livekit-client's `ScreenShareCaptureOptions`
  *  that the shared screen-share code sets. */
@@ -41,11 +37,29 @@ export function captureOptions(options: ScreenCaptureRequest): NativeVoiceScreen
   };
 }
 
-/** A host start failure as the shared code classifies getDisplayMedia's:
- *  a cancelled or refused portal dialog is a `NotAllowedError`. */
+/** The rejection a dismissed picker raises, as a dismissed browser picker's:
+ *  the shared code keeps it silent. */
+export function pickerDismissed(): DOMException {
+  return new DOMException(PICKER_DISMISSED, "NotAllowedError");
+}
+
+/** A host start failure as the shared code classifies getDisplayMedia's: a
+ *  portal capture that never started is a `NotAllowedError` the shared code
+ *  answers with a soft notice; any other failure (a capturer that failed, no
+ *  first frame in time) stays an error it reports. */
 export function startError(err: unknown): unknown {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes(CANCELLED) ? new DOMException(message, "NotAllowedError") : err;
+  return message.includes(PORTAL_NOT_STARTED)
+    ? new DOMException(PORTAL_NOT_STARTED, "NotAllowedError")
+    : err;
+}
+
+/** A device switch the host actually completed by falling back to the default
+ *  (capture.rs/playout.rs report it as a rejection). The caller should treat
+ *  it as success, not a switch failure (voice #19). */
+export function isDeviceFallback(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("switched to the default");
 }
 
 /** The publish encoding the picker chose for this share. */

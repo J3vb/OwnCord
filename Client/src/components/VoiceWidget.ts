@@ -10,7 +10,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { voiceStore, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
@@ -166,18 +166,21 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   function updateSignalIcon(stats: ConnectionStats): void {
     if (signalWrap === null || pingLabel === null) return;
-    const color = QUALITY_COLORS[stats.quality];
-    const bars = QUALITY_BARS[stats.quality];
+    const color = stats.available ? QUALITY_COLORS[stats.quality] : "var(--text-muted)";
+    const bars = stats.available ? QUALITY_BARS[stats.quality] : 0;
 
     // Replace signal icon
     const oldSvg = signalWrap.querySelector("svg");
     if (oldSvg) oldSvg.remove();
     signalWrap.insertBefore(createSignalIcon(bars, color, 14), pingLabel);
 
-    // Update ping text
-    const rttText = stats.rtt > 0 ? `${Math.round(stats.rtt)}ms` : "—";
+    // Update ping text. No transport to measure (native Linux voice, the
+    // SDK's internals changed, or the first sample has not landed yet) reads
+    // as unavailable, not a false 4-green-bars "excellent".
+    const rttText = stats.available && stats.rtt > 0 ? `${Math.round(stats.rtt)}ms` : "—";
     setText(pingLabel, rttText);
     pingLabel.style.color = color;
+    signalWrap.classList.toggle("vw-signal--unavailable", !stats.available);
 
     // Update expanded stats pane fields if they exist. An idle direction
     // reads "Idle" / "no packets" softly (the CSS dims .vw-stat-value--empty)
@@ -224,6 +227,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       }
     });
     statsPoller.start();
+    // Paint the initial state now. updateSignalIcon only runs on a sample;
+    // where none ever arrives (native Linux voice has no peer connection)
+    // the widget would otherwise keep its constructed 4-green-bars default.
+    updateSignalIcon(statsPoller.getStats());
   }
 
   function stopStatsPoller(): void {
@@ -342,24 +349,44 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback")),
     );
 
-    // Toggle button active states, swap icons, and update aria-pressed
-    muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
+    // Toggle button active states, swap icons, and update aria-pressed.
+    // The mic "active" (red/muted) state reflects the user's OWN mute, not the
+    // one a PTT release applied: PTT routes through setMuted and writes
+    // localMuted, so a PTT user would otherwise read as permanently muted
+    // between presses. An idle PTT gate gets its own (non-active) affordance.
+    const userMuted = isSelfMuted(voice);
+    const serverMuted = voice.localServerMuted === true;
+    const serverDeafened = voice.localServerDeafened === true;
+    // Joined listen-only (no mic permission/track): there is nothing to mute,
+    // so the control reads mic-off and visibly inert. "Grant Microphone" is
+    // the action that changes this state.
+    const listenOnly = voice.listenOnly && !serverMuted;
+    const pttGated = voice.pttGated === true && !userMuted && !listenOnly;
+    muteBtn?.classList.toggle("active-ctrl", userMuted);
+    muteBtn?.classList.toggle("ptt-gated", pttGated);
+    muteBtn?.classList.toggle("vw-listen-only", listenOnly);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
     // A moderator-imposed mute/deafen is not ours to lift: the server refuses
     // the unmute, so disable the control and say why instead of letting the
     // click bounce off with an error toast.
-    const serverMuted = voice.localServerMuted === true;
-    const serverDeafened = voice.localServerDeafened === true;
     if (muteBtn) {
-      swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic");
-      muteBtn.setAttribute("aria-pressed", String(voice.localMuted));
+      swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
+      muteBtn.setAttribute("aria-pressed", String(userMuted));
+      // A PTT gate gets its own title; the ordinary mute case leaves the
+      // title to updateFrozen (which owns the freeze reason) as before.
+      if (pttGated) {
+        muteBtn.title = t("widget.control.pttGated");
+      }
       // Only ever tighten: updateFrozen ran above and owns the socket-down
       // disable, which must not be relaxed here.
       if (serverMuted) {
         muteBtn.disabled = true;
         muteBtn.title = t("widget.mutedByModerator");
+      } else if (listenOnly) {
+        muteBtn.disabled = true;
+        muteBtn.title = t("widget.control.listenOnly");
       }
     }
     if (deafenBtn) {
@@ -646,6 +673,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           camera: s.localCamera,
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
+          pttGated: s.pttGated === true,
+          pttOwnsMute: s.pttOwnsMute === true,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
         }),
@@ -659,6 +688,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&
+          a.pttGated === b.pttGated &&
+          a.pttOwnsMute === b.pttOwnsMute &&
           a.voiceStatus === b.voiceStatus &&
           a.encryptionDegraded === b.encryptionDegraded,
       ),

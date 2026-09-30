@@ -131,6 +131,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.typingSlot.style.display = "none";
     slots.inputSlot.style.display = "none";
     slots.videoGridSlot.style.display = "block";
+    videoGrid.setExitVisible(true);
   }
 
   /** Close the grid without recording a dismissal. Used by the paths that
@@ -150,6 +151,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     slots.typingSlot.style.display = "";
     slots.inputSlot.style.display = "";
     slots.videoGridSlot.style.display = "none";
+    videoGrid.setExitVisible(false);
   }
 
   function showChat(): void {

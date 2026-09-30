@@ -139,6 +139,7 @@ const {
         setSpeaking: ReturnType<typeof vi.fn>;
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
+        setExitVisible: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -222,6 +223,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setSpeaking: vi.fn(),
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
+      setExitVisible: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
@@ -1086,7 +1088,19 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // The full-screen controls show your mute state.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: true }));
     voiceStore.flush();
-    expect(grid.setCallState).toHaveBeenLastCalledWith({ muted: true, deafened: false });
+    expect(grid.setCallState).toHaveBeenLastCalledWith({
+      muted: true,
+      deafened: false,
+      listenOnly: false,
+    });
+    // Joined without a microphone: the controls read listen-only.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: false, listenOnly: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith({
+      muted: false,
+      deafened: false,
+      listenOnly: true,
+    });
     setFullscreen.mockRestore();
   });
 

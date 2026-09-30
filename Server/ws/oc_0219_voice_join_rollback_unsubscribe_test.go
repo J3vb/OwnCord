@@ -26,7 +26,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -39,14 +38,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 	uid := seedHarvestVoiceUser(t, database, "join-0219-victim")
 	chID := mustCreateVoiceChannel(t, database, "voice-join-0219")
 
-	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-0219",
-		LiveKitAPISecret: "test-api-secret-0219-xyz",
-		LiveKitURL:       "ws://127.0.0.1:1", // never dialed: GenerateToken is local
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyTestLiveKit(t)
 
 	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 

@@ -10,6 +10,7 @@
 //! `NativeAudioSource`. RNNoise runs after the APM, as on the web path, where
 //! the browser's processing precedes the RNNoise worklet: the echo canceller
 //! needs the linear echo path that RNNoise would break.
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -19,8 +20,13 @@ use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::native::apm::AudioProcessingModule;
 use nnnoiseless::DenoiseState;
 
-use super::playout::host_devices;
+use super::playout::{host_devices, pinned_listed, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
+
+/// A lock helper mirroring playout's, for the shared input-stream slot.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
 
 pub const SAMPLE_RATE: u32 = 48_000;
 /// One 10 ms frame: the APM's unit and RNNoise's (`nnnoiseless::FRAME_SIZE`).
@@ -189,54 +195,99 @@ pub fn list_inputs() -> Vec<DeviceInfo> {
 /// input stream feeding the published track's source.
 #[derive(Default)]
 pub struct Capture {
-    /// The selected id (empty: the default).
-    selected: String,
+    /// The selected id (empty: the default), shared with the watcher.
+    selected: Selected,
     /// The device `selected` last resolved to (its id and handle), reused on
-    /// unmute so a push-to-talk press does not enumerate devices.
-    resolved: Option<(String, cpal::Device)>,
-    stream: Option<cpal::Stream>,
-    processing: Option<(Arc<Apm>, bool)>,
-    source: Option<NativeAudioSource>,
+    /// unmute so a push-to-talk press does not enumerate devices. The watcher
+    /// updates it when it re-resolves, so an unmute opens where it moved.
+    resolved: Resolved,
+    /// The open input stream, shared with the recovery watcher that replaces
+    /// it after the sound server tears it down.
+    stream: Input,
+    feed: Feed,
+    /// Set by the input stream's error callback when the sound server tears
+    /// it down; the watcher reopens it.
+    dead: Arc<AtomicBool>,
+    /// Reopens a dead stream and, while "System default" is selected, follows
+    /// the default source. Always-on so a torn-down stream recovers.
+    watcher: Option<Watcher>,
+}
+
+/// The open input stream, shared with the watcher that replaces it.
+type Input = Arc<Mutex<Option<cpal::Stream>>>;
+
+/// The resolved device, shared with the watcher that re-resolves it.
+type Resolved = Arc<Mutex<Option<(String, cpal::Device)>>>;
+
+/// The audio processing and whether RNNoise follows it, shared with the
+/// watcher.
+type Processing = Arc<Mutex<Option<(Arc<Apm>, bool)>>>;
+
+/// What an input stream feeds: the processing and the published track's
+/// source, shared with the watcher so a reopen feeds the current ones.
+#[derive(Default, Clone)]
+struct Feed {
+    processing: Processing,
+    source: Arc<Mutex<Option<NativeAudioSource>>>,
+}
+
+impl Feed {
+    fn ready(&self) -> bool {
+        lock(&self.processing).is_some() && lock(&self.source).is_some()
+    }
+
+    fn open(&self, device: &cpal::Device, dead: Arc<AtomicBool>) -> Result<cpal::Stream, String> {
+        let (apm, denoise) = lock(&self.processing)
+            .clone()
+            .ok_or("audio processing is not set up")?;
+        let source = lock(&self.source).clone().ok_or("no microphone track")?;
+        open_input(device, Processor::new(apm, denoise), source, dead)
+    }
 }
 
 impl Capture {
     pub fn configure(&mut self, apm: Arc<Apm>, enhanced_noise_suppression: bool) {
-        self.processing = Some((apm, enhanced_noise_suppression));
+        *lock(&self.feed.processing) = Some((apm, enhanced_noise_suppression));
     }
 
     pub fn streams(&self) -> usize {
-        usize::from(self.stream.is_some())
+        usize::from(self.stream().is_some())
     }
 
     /// Start capturing into `source` (the first unmute publishes it). A cached
     /// device that no longer opens (unplugged) is resolved again once.
     pub fn start(&mut self, source: NativeAudioSource) -> Result<(), String> {
-        self.source = Some(source);
-        if self.stream.is_some() {
+        *lock(&self.feed.source) = Some(source);
+        if self.stream().is_some() {
             return Ok(());
         }
-        if let Some((_, device)) = &self.resolved {
-            if let Ok(stream) = self.open(device) {
-                self.stream = Some(stream);
+        let cached = lock(&self.resolved).as_ref().map(|(_, d)| d.clone());
+        if let Some(device) = cached {
+            if let Ok(stream) = self.open(&device) {
+                *lock(&self.stream) = Some(stream);
+                self.ensure_watcher();
                 return Ok(());
             }
         }
+        let selected = lock(&self.selected).clone();
         let listed = input_devices(&cpal::default_host());
-        let (resolved, fell_back) = pick(&self.selected, listed)?;
+        let (resolved, fell_back) = pick(&selected, listed)?;
         if fell_back {
-            log::warn!(
-                "[native_voice] capture device {} not found; using the default",
-                self.selected
-            );
+            log::warn!("[native_voice] capture device {selected} not found; using the default");
         }
-        self.stream = Some(self.open(&resolved.1)?);
-        self.resolved = Some(resolved);
+        *lock(&self.stream) = Some(self.open(&resolved.1)?);
+        *lock(&self.resolved) = Some(resolved);
+        self.ensure_watcher();
         Ok(())
     }
 
     /// Stop the input stream (mute), so the system's in-use indicator goes out.
     pub fn stop(&mut self) {
-        self.stream = None;
+        *lock(&self.stream) = None;
+    }
+
+    fn stream(&self) -> Option<()> {
+        lock(&self.stream).as_ref().map(|_| ())
     }
 
     /// Select device `id` (empty: the default), switching a running stream
@@ -247,16 +298,17 @@ impl Capture {
     /// an error.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
         let (resolved, fell_back) = pick(id, input_devices(&cpal::default_host()))?;
-        let moved = self.resolved.as_ref().map(|(r, _)| r) != Some(&resolved.0);
-        if self.stream.is_some() && moved {
-            self.stream = Some(self.open(&resolved.1)?);
+        let moved = lock(&self.resolved).as_ref().map(|(r, _)| r) != Some(&resolved.0);
+        if self.stream().is_some() && moved {
+            *lock(&self.stream) = Some(self.open(&resolved.1)?);
         }
-        self.resolved = Some(resolved);
-        self.selected = if fell_back {
+        *lock(&self.resolved) = Some(resolved);
+        *lock(&self.selected) = if fell_back {
             String::new()
         } else {
             id.to_string()
         };
+        self.ensure_watcher();
         if fell_back {
             return Err(format!(
                 "capture device {id} not found; switched to the default"
@@ -265,14 +317,89 @@ impl Capture {
         Ok(())
     }
 
-    fn open(&self, device: &cpal::Device) -> Result<cpal::Stream, String> {
-        let (apm, denoise) = self
-            .processing
-            .clone()
-            .ok_or("audio processing is not set up")?;
-        let source = self.source.clone().ok_or("no microphone track")?;
-        open_input(device, Processor::new(apm, denoise), source)
+    /// Start the recovery watcher once. It reopens a stream the sound server
+    /// tore down and, while the empty default id is selected, follows the
+    /// default source as it moves (voice #3/#4). Muted, it only re-resolves,
+    /// so the next unmute opens the device the selection now names.
+    fn ensure_watcher(&mut self) {
+        if self.watcher.is_some() || !self.feed.ready() {
+            return;
+        }
+        let host = WatchedHost::new();
+        let poll_host = host.clone();
+        let selected = self.selected.clone();
+        let resolved = self.resolved.clone();
+        let dead = self.dead.clone();
+        let feed = self.feed.clone();
+        let stream = self.stream.clone();
+        let pinned_returned = {
+            let (host, resolved, selected) =
+                (host.clone(), self.resolved.clone(), self.selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let current = lock(&resolved).as_ref().map(|(id, _)| id.clone());
+                host.with(|h| {
+                    let listed = std::iter::once(h).flat_map(input_devices);
+                    pinned_listed(&target, current.as_deref(), listed.map(|(d, _)| d.id))
+                })
+            }
+        };
+        let follow = move || {
+            // The watcher owns recovery: re-resolve (the default may have
+            // moved) and replace the dead stream in the shared slot.
+            let id = lock(&selected).clone();
+            // Muted (no stream) means the user is not publishing; a pending
+            // dead flag from just before the mute must not reopen the mic.
+            let muted = lock(&stream).is_none();
+            let Some(Ok((picked, _))) = host.reopen(|fresh| pick(&id, input_devices(fresh))) else {
+                log::warn!("[native_voice] reopening the capture stream: no device");
+                return muted;
+            };
+            match move_stream(&stream, &resolved, picked, |device| {
+                feed.open(device, dead.clone())
+            }) {
+                Ok(()) => true,
+                Err(e) => {
+                    log::warn!("[native_voice] reopening the capture stream: {e}");
+                    false
+                }
+            }
+        };
+        self.watcher = Some(Watcher::start(
+            FOLLOW_EVERY,
+            lock(&self.resolved).as_ref().map(|(id, _)| id.clone()),
+            self.dead.clone(),
+            self.selected.clone(),
+            move || poll_host.default_id(|h| h.default_input_device()),
+            pinned_returned,
+            follow,
+        ));
     }
+
+    fn open(&self, device: &cpal::Device) -> Result<cpal::Stream, String> {
+        self.feed.open(device, self.dead.clone())
+    }
+}
+
+/// Record `picked` as the resolved device and, while a stream runs, move it
+/// there. The record follows the stream: a failed open leaves both on the old
+/// device, so the watcher's next tick retries, and a mute while the new one
+/// opened drops it (the next unmute opens `picked`).
+fn move_stream<D, S>(
+    stream: &Mutex<Option<S>>,
+    resolved: &Mutex<Option<(String, D)>>,
+    picked: (String, D),
+    open: impl FnOnce(&D) -> Result<S, String>,
+) -> Result<(), String> {
+    if lock(stream).is_some() {
+        let reopened = open(&picked.1)?;
+        let mut slot = lock(stream);
+        if slot.is_some() {
+            *slot = Some(reopened);
+        }
+    }
+    *lock(resolved) = Some(picked);
+    Ok(())
 }
 
 /// The listed device `id` resolves to (its id and handle), and whether that
@@ -293,6 +420,7 @@ fn open_input(
     device: &cpal::Device,
     processor: Processor,
     source: NativeAudioSource,
+    dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
     let channels = device
         .default_input_config()
@@ -303,6 +431,7 @@ fn open_input(
     let state = Arc::new(Mutex::new((processor, source)));
     let build = |buffer_size| {
         let state = state.clone();
+        let dead = dead.clone();
         device.build_input_stream::<f32, _, _>(
             cpal::StreamConfig {
                 channels,
@@ -327,7 +456,14 @@ fn open_input(
                         .now_or_never();
                 });
             },
-            |e| log::warn!("[native_voice] capture stream: {e}"),
+            // A stream the sound server tore down (suspend/resume, a
+            // pulseaudio restart) is reported only here: flag it so the
+            // watcher reopens it, or the user goes silent to peers with no
+            // signal (voice #3).
+            move |e| {
+                log::warn!("[native_voice] capture stream: {e}");
+                dead.store(true, Ordering::Relaxed);
+            },
             None,
         )
     };
@@ -428,6 +564,70 @@ mod tests {
         assert!(
             cancelled < echo * 0.1,
             "echo cancellation should remove over 90% (10 dB): {cancelled} vs {echo}"
+        );
+    }
+
+    /// The watcher is built once, around the feed as it was then; a source
+    /// published later (a first publish that failed and was retried) must be
+    /// what its reopens feed, not the orphaned first one.
+    #[test]
+    fn the_watchers_feed_follows_the_captures_current_source() {
+        let mut capture = Capture::default();
+        let watchers = capture.feed.clone();
+        capture.configure(Apm::new(&opts(false, false)), false);
+        assert!(!watchers.ready(), "no source yet");
+        let source = NativeAudioSource::new(
+            livekit::webrtc::audio_source::AudioSourceOptions::default(),
+            SAMPLE_RATE,
+            1,
+            0,
+        );
+        *lock(&capture.feed.source) = Some(source);
+        assert!(watchers.ready(), "the watcher sees the source set after it");
+        *lock(&capture.feed.source) = None;
+        assert!(!watchers.ready());
+    }
+
+    #[test]
+    fn a_failed_move_leaves_the_record_on_the_running_device() {
+        // After a restart the stream fell back to the default mic; the
+        // pinned one is listed again but does not open yet.
+        let stream = Mutex::new(Some("default-stream"));
+        let resolved = Mutex::new(Some(("default".to_string(), "default")));
+        let moved = move_stream(&stream, &resolved, ("bt".to_string(), "bt"), |_| {
+            Err("busy".to_string())
+        });
+        assert_eq!(moved, Err("busy".to_string()));
+        assert_eq!(*lock(&stream), Some("default-stream"));
+        let current = lock(&resolved).as_ref().map(|(id, _)| id.clone());
+        assert!(
+            pinned_listed("bt", current.as_deref(), ["default", "bt"].iter()),
+            "still missing its pin: the next tick retries"
+        );
+        // The next tick's open succeeds.
+        move_stream(&stream, &resolved, ("bt".to_string(), "bt"), |d| {
+            Ok(if *d == "bt" { "bt-stream" } else { "wrong" })
+        })
+        .unwrap();
+        assert_eq!(*lock(&stream), Some("bt-stream"));
+        assert_eq!(
+            lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
+            Some("bt")
+        );
+    }
+
+    #[test]
+    fn a_muted_move_only_records_where_the_next_unmute_opens() {
+        let stream: Mutex<Option<&str>> = Mutex::new(None);
+        let resolved = Mutex::new(Some(("default".to_string(), "default")));
+        move_stream(&stream, &resolved, ("usb".to_string(), "usb"), |_| {
+            panic!("muted: the mic must not open")
+        })
+        .unwrap();
+        assert_eq!(*lock(&stream), None);
+        assert_eq!(
+            lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
+            Some("usb")
         );
     }
 

@@ -23,7 +23,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -41,14 +40,7 @@ func TestRollbackVoiceJoin_BroadcastReachesLeaverWithoutReadAccess(t *testing.T)
 		t.Fatalf("UpsertChannelOverride: %v", err)
 	}
 
-	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-0267",
-		LiveKitAPISecret: "test-api-secret-0267-xyz",
-		LiveKitURL:       "ws://127.0.0.1:1", // never dialed: GenerateToken is local
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyTestLiveKit(t)
 
 	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 

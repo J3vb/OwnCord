@@ -58,7 +58,7 @@ func (q *Queries) ClearAllVoiceStates(ctx context.Context) error {
 }
 
 const clearVoiceServerDeafen = `-- name: ClearVoiceServerDeafen :execresult
-UPDATE voice_states SET server_deafened = 0 WHERE user_id = ? AND channel_id = ?
+UPDATE voice_states SET server_deafened = 0, deafened = 0 WHERE user_id = ? AND channel_id = ?
 `
 
 type ClearVoiceServerDeafenParams struct {
@@ -66,6 +66,12 @@ type ClearVoiceServerDeafenParams struct {
 	ChannelID int64 `json:"channelId"`
 }
 
+// Clears the self-deafen that ApplyVoiceServerDeafen set along with
+// server_deafened: leaving deafened=1 here would strand the target unable to
+// subscribe remote audio (the client's release path requires !selfDeafened)
+// even though the moderator's deafen is gone. muted is left alone, as
+// ClearVoiceServerMute leaves it: the target unmutes themselves. Same "no way
+// to tell explicit from implied" caveat the mute path documents.
 func (q *Queries) ClearVoiceServerDeafen(ctx context.Context, arg ClearVoiceServerDeafenParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, clearVoiceServerDeafen, arg.UserID, arg.ChannelID)
 }

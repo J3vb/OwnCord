@@ -16,7 +16,7 @@
         "frame": {
           "payload": {
             "channel_id": 2,
-            "direct_url": "ws://localhost:7880",
+            "direct_url": "<url:string>",
             "is_key_holder": true,
             "token": "<token:string>",
             "url": "/livekit"
@@ -174,7 +174,7 @@
         "frame": {
           "payload": {
             "channel_id": 2,
-            "direct_url": "ws://localhost:7880",
+            "direct_url": "<url:string>",
             "is_key_holder": false,
             "token": "<token:string>",
             "url": "/livekit"
