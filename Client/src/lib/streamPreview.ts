@@ -162,7 +162,7 @@ function showPreview(
           setRemoteVideoView(userId, type, { enabled: !document.hidden, size }, true);
         report();
         const visibility = new Disposable();
-        visibility.onEvent(document, "visibilitychange", report);
+        document.addEventListener("visibilitychange", report, { signal: visibility.signal });
         state.trackCleanup = () => {
           track.removeEventListener("ended", onTrackDead);
           track.removeEventListener("mute", onTrackDead);
