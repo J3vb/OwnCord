@@ -204,6 +204,7 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { createApiClient } from "@lib/api";
@@ -349,6 +350,23 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     setActivePresenceSender(null);
 
     expect(() => emitTauriEvent("status-change", "idle")).not.toThrow();
+  });
+});
+
+describe("main.ts pre-auth connection deadline", () => {
+  it("returns to the form with an error when a manual login never reaches auth_ok", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("offline.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The socket was asked to open, but the offline server never answers — so
+    // the deadline must give up rather than leave the spinner running forever.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(uiStore.getState().transientError).toContain("offline");
+
+    clearAuth();
   });
 });
 

@@ -18,7 +18,12 @@ import {
 } from "@lib/notifications";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
-import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
+import {
+  bracketBareIPv6Host,
+  createWsClient,
+  normalizeHostForCertCompare,
+  PREAUTH_CONNECT_TIMEOUT_MS,
+} from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
@@ -491,9 +496,31 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     owner.addCleanup(dispatcherCleanup);
     log.info("Dispatcher wired, connecting WS");
 
+    // A stored-token resume (auto-login / quick switch) sends no REST preflight,
+    // so a server that is down leaves this handshake behind the "Auto-connecting…"
+    // overlay (or a manual login's spinner) while ws.ts retries forever. Bound the
+    // FIRST authentication with a deadline: a never-authenticated attempt returns
+    // to the form and says why, while a live session's later outages keep the
+    // in-app reconnect banner and its retry loop. Cleared on the first "connected"
+    // (auth_ok) or when the session tears down.
+    const preauthTimer = setTimeout(() => {
+      if (!owner.isCurrent()) return;
+      log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
+      // Stop the retry loop and tear the dead attempt down exactly as a
+      // cancelled auto-login does, then tell the user on the connect form.
+      ws.disconnect();
+      sessionCleanup?.();
+      sessionCleanup = null;
+      dispatcherCleanup?.();
+      dispatcherCleanup = null;
+      lastConnectHost = "";
+      lastConnectToken = "";
+      setTransientError(connectText("session.connectTimeout"));
+    }, PREAUTH_CONNECT_TIMEOUT_MS);
+
     // Session-scoped WS listeners — collected so they're all removed together
     // on logout/disconnect (or the next wirePostAuth).
-    const sessionUnsubs: Array<() => void> = [];
+    const sessionUnsubs: Array<() => void> = [() => clearTimeout(preauthTimer)];
 
     // BUG-135: Only persist credentials when the user opted in. Declining is
     // an active instruction, not just an absence of one (OCV-022): a password
@@ -550,6 +577,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {
+        // Authenticated: the pre-auth deadline has nothing left to bound, and
+        // keeping it would bounce a live session out on its first later outage.
+        clearTimeout(preauthTimer);
         // Stop listening once connected so a later transition can't fire this
         // handler again.
         unsubState();

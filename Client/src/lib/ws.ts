@@ -116,6 +116,15 @@ const PONG_GRACE_MS = 15_000;
 // process was frozen (sleep, suspend) in between: Chromium's intensive
 // throttling of a long-hidden page spaces ticks ~60 s apart, well under this.
 const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
+// How long the login/auto-login handshake may stay in "connecting" before the
+// app gives up and returns to the login form. The native proxy already bounds
+// one dial at 10 s, but ws.ts's backoff retries a dead server forever, so
+// without an app-level deadline a stored-token auto-login to an offline server
+// sits on the "Auto-connecting…" screen indefinitely. Two proxy windows, so a
+// single slow handshake never trips it. Only the FIRST authentication is
+// bounded: once the session is live, an outage keeps the in-app reconnect
+// banner and its retry loop instead of bouncing the user out.
+export const PREAUTH_CONNECT_TIMEOUT_MS = 20_000;
 // U4: a wall-clock gap past WAKE_GAP_MS means the process was suspended, so
 // the next dial is marked a wake (`auth.wake = true`). The SERVER arbitrates
 // whether that wake would displace another device's live session: a lone
