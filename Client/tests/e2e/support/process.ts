@@ -64,15 +64,17 @@ export function startProcess(command: string, args: string[], cwd: string, env =
   });
   let output = "";
   let error: Error | undefined;
+  let firstOutputAt: number | undefined;
   child.on("error", (e) => {
     error = e;
   });
   for (const stream of [child.stdout, child.stderr]) {
     stream?.on("data", (chunk: Buffer) => {
+      firstOutputAt ??= Date.now();
       output = (output + chunk.toString()).slice(-256_000);
     });
   }
-  return { child, log: () => output, error: () => error };
+  return { child, log: () => output, error: () => error, firstOutputAt: () => firstOutputAt };
 }
 
 export async function waitForHttp(
