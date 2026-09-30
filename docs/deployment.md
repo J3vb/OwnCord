@@ -293,6 +293,12 @@ in its header comments. The important choices it encodes:
 - `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
   `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
   user.
+- `LimitNOFILE=65536` — the open-file ceiling. Each WebSocket holds a
+  descriptor, and the server raises its soft limit to the hard one at
+  start-up, so this hard limit is the real cap on how many people can be
+  online (see [Open-file limit](#open-file-limit-file-descriptors)). 65,536
+  carries about 2,000 connections; systemd's inherited default is often 1,024,
+  which a few hundred online will reach.
 
 Pair it with the scheduled backups in the admin panel — or an external cron
 line (see Backup Strategy below) if you prefer driving backups outside the
@@ -1158,6 +1164,8 @@ than none:
 
 ## Capacity limits
 
+What one server carries on which hardware, and the size to buy for a
+community of 1,000–2,000 online, is in [Capacity](capacity.md#sizing-for-10002000-online).
 The qualified profile is **250 registered users, 100 simultaneous connections
 and 25 concurrent voice sessions on 2 vCPU / 4 GB RAM** — see
 [The profile](capacity.md#the-profile) and
@@ -1186,6 +1194,32 @@ which one is near:
 
 The reading of these and the other growth signals is covered once, under
 [Metrics Endpoint](#metrics-endpoint); that list is the one to alert on.
+
+### Open-file limit (file descriptors)
+
+Every WebSocket holds a file descriptor, so the number of people who can be
+online at once is bounded by the process's `RLIMIT_NOFILE`. The traditional
+Linux soft limit is **1,024** — enough for a small community but not for
+1,000–2,000, which need about 2,100 descriptors. The server **raises its soft
+limit to the hard limit at start-up** and logs the result under `open-file
+limit`; the number that matters is therefore the **hard** limit, which the
+supervisor or shell sets:
+
+- **systemd:** `LimitNOFILE=65536` in the unit (the shipped
+  [`deploy/owncord.service`](../deploy/owncord.service) sets it), or
+  `infinity`. `systemctl edit owncord` overrides it without touching the file.
+- **Docker Compose:** `ulimits.nofile` on the `owncord` service (the shipped
+  `Server/docker-compose.yml` sets 65,536). Docker's own default is inherited
+  from the host daemon and is often 1,024.
+- **Bare binary or another supervisor:** set the soft and hard limit with
+  `ulimit -n` (or `LimitNOFILE`-equivalent) before the server starts.
+
+With `server.max_ws_connections` set, the server also warns at boot when the
+resulting limit is below `2 × max_ws_connections + 256` — the descriptors that
+many connections need plus a fixed allowance for the database, LiveKit, TLS
+and the rest of the process. A server started under `ulimit -n 1024` reports a
+raised limit or a warning naming this setting, never a silent fall-over at
+1,000 connections.
 
 ## Monitoring
 

@@ -81,6 +81,54 @@ Why each part of that is load-bearing:
   was recorded on a 16-core developer workstation. It is a relative
   before/after instrument for Go benchmarks. It is not capacity either.
 
+### Sizing for 1,000–2,000 online
+
+The profile above is the **published floor** — the cheapest box an owner is
+likely to buy, qualified at 2 vCPU / 4 GB for 100 connections. The scaling
+target is larger, and on this hardware the two tiers below are the size to
+buy. They are a **recommendation for a community that size**, not a measured
+qualification: the qualifying runs for 1,000–2,000 are tracked by the scaling
+phase and will be published here as they land, per this document's rule that
+hardware is named before the numbers.
+
+| Tier  | Hardware            | Qualifies                                      | Why this one                                                                                        |
+| ----- | ------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Base  | 2 vCPU / 4 GB / SSD | the published profile and roughly 1,000 online | Steady state at realistic chat rates fits on 2 vCPU; the published 100-connection profile has room  |
+| 2,000 | 4 vCPU / 8 GB / SSD | about 2,000 online                             | Roughly doubles bcrypt login throughput and fan-out CPU headroom, which are the two 2-vCPU ceilings |
+
+Memory is not the constraint at either tier: 2,000 idle connections measure
+about 266 MB resident, 324 MB at 100 messages/s and 443 MB at 200 messages/s,
+with 3 goroutines per connection. Buy the **4 vCPU tier for 2,000** for the
+CPU, not the RAM. Beyond 2,000, CPU fan-out is the next wall rather than
+SQLite; the single SQLite writer is the limit on server-wide sustained message
+rate, which the writer remedies in the scaling phase target.
+
+#### Open-file limit (file descriptors)
+
+Every WebSocket holds one file descriptor, so a server's connection count is
+bounded by `RLIMIT_NOFILE`. The traditional Linux soft limit is **1,024**,
+which a few hundred online will reach and 2,000 online (about 2,100
+descriptors with the process's own files) will not. The server **raises its
+soft limit to the hard limit at start-up** and logs the result, so the number
+that matters is the **hard limit** the supervisor or the shell sets:
+
+- **systemd:** the shipped `deploy/owncord.service` sets `LimitNOFILE=65536`,
+  which carries about 2,000 connections with headroom. Raise it (or set
+  `infinity`) for a larger server.
+- **Docker Compose:** the shipped `Server/docker-compose.yml` sets
+  `ulimits.nofile` to 65,536. Docker's default is inherited from the host
+  daemon and is often 1,024.
+- **Bare binary:** set `ulimit -n` (soft and hard) in the shell or run script
+  that starts the server, or the `LimitNOFILE` equivalent in your supervisor.
+
+When `server.max_ws_connections` is configured, the server warns at boot if
+the resulting limit is below `2 × max_ws_connections + 256` — the descriptors
+that many connections need, with a fixed allowance for the database, LiveKit,
+TLS and the rest of the process. A server started under `ulimit -n 1024`
+therefore either reports a raised limit in its log or warns that the hard
+limit is too low, rather than failing at 1,000 connections with
+`too many open files`.
+
 ## Configuration
 
 Everything else is the shipped default. The non-defaults are:

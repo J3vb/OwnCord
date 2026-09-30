@@ -61,6 +61,16 @@ services:
     # only SURFACES unhealthy (docker ps, events); pair with an external
     # watchdog (or an autoheal container) if you want automatic restarts on hang.
     #
+    # Open-file limit. Each WebSocket holds a descriptor, and the server raises
+    # its SOFT limit to the HARD one at start-up, so the hard limit here is the
+    # real ceiling. Docker's default is inherited from the host daemon and is
+    # often 1,024, which a few hundred online will reach. 65,536 carries about
+    # 2,000 connections with headroom; raise it, or use soft/hard -1 for
+    # unlimited, for a larger server.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     # Minimal privilege. The image already runs as uid 65532 on distroless (no
     # shell, no package manager); these two drop what is left. The server binds
     # 8443, above the privileged-port range, so it needs no capability at all.

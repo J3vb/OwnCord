@@ -41,6 +41,14 @@ RestartSec=3
 # restart backstop (RestartBackstopDelay).
 TimeoutStopSec=60
 
+# Open-file limit. Each WebSocket holds a descriptor, and the server raises its
+# SOFT limit to the HARD one at start-up, so this hard limit is the real
+# ceiling. systemd's inherited default is often 1,024, which a community of a
+# few hundred online will reach. 65,536 carries about 2,000 connections with
+# the 2×cap+256 headroom the server warns about; raise it (or use `infinity`)
+# for a larger server.
+LimitNOFILE=65536
+
 # ── Hardening ───────────────────────────────────────────────────────────────
 NoNewPrivileges=true
 ProtectSystem=strict
