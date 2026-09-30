@@ -360,6 +360,7 @@ describe("main.ts pre-auth connection deadline", () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("offline.example:8443", "alex", "hunter2");
     await vi.advanceTimersByTimeAsync(10);
+    const attempt = vi.mocked(createApiClient).mock.results[0]!.value.getSession();
 
     // The socket was asked to open, but the offline server never answers — so
     // the deadline must give up rather than leave the spinner running forever.
@@ -367,6 +368,8 @@ describe("main.ts pre-auth connection deadline", () => {
     expectConsole("warn", /Pre-auth connection timed out/);
     expectConsole("warn", /\[main\] Credential delete failed/);
     expect(uiStore.getState().transientError).toContain("offline");
+    // Ended like a cancelled auto-login: the dead attempt's scope is no longer live.
+    expect(attempt.isCurrent()).toBe(false);
 
     clearAuth();
   });

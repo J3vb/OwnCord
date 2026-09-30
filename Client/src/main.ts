@@ -508,6 +508,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
       // Stop the retry loop and tear the dead attempt down exactly as a
       // cancelled auto-login does, then tell the user on the connect form.
+      api.endSession();
       ws.disconnect();
       sessionCleanup?.();
       sessionCleanup = null;
