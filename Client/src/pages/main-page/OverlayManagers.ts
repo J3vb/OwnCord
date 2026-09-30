@@ -367,9 +367,9 @@ export function createPinnedPanelController(opts: {
                 void opts.api
                   .unpinMessage(id, msgId)
                   .then(() => {
-                    // The server has no pin/unpin broadcast — this store write is
-                    // the row's only local authority for `pinned`. Without it the
-                    // row still says "Unpin" after this panel closes.
+                    // Update the row now rather than waiting for the server's
+                    // chat_pinned broadcast, so it cannot still say "Unpin"
+                    // after this panel closes.
                     setMessagePinned(id, msgId, false);
                     close();
                   })

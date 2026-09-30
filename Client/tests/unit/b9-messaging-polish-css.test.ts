@@ -53,6 +53,10 @@ describe("B9-22 messaging hover/focus parity and target size", () => {
     expect(px(cascadedDeclaration(".attachment-preview-remove", "height"))).toBe(24);
   });
 
+  it("marks a slow-mode-gated Send as unavailable", () => {
+    expect(keyword(cascadedDeclaration(".input-btn.send-gated", "opacity"))).toBe("0.5");
+  });
+
   it("gives the add-reaction chip a 24px minimum height", () => {
     expect(px(cascadedDeclaration(".reaction-chip", "min-height"))).toBe(24);
   });

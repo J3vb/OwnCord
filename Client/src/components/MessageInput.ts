@@ -595,6 +595,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setSendGate(reason: string | null): void {
+    if (uploadErrorEl?.textContent === sendGateReason) {
+      if (reason === null) clearUploadError();
+      else showUploadError(reason);
+    }
     sendGateReason = reason;
     applyDisabledState();
   }

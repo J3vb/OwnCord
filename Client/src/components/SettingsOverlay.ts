@@ -320,14 +320,16 @@ export function createSettingsOverlay(
     const profileSection = createElement("div", { class: "settings-sidebar-profile" });
     // Show the uploaded avatar image, not only the initial, matching every
     // other identity surface (F24).
-    const avatarEl = createAvatarElement(
-      {
-        username: user?.username ?? "U",
-        displayName: user?.display_name ?? null,
-        avatar: user?.avatar ?? null,
-      },
-      { className: "settings-sidebar-avatar" },
-    );
+    const buildAvatar = (u: typeof user): HTMLDivElement =>
+      createAvatarElement(
+        {
+          username: u?.username ?? "U",
+          displayName: u?.display_name ?? null,
+          avatar: u?.avatar ?? null,
+        },
+        { className: "settings-sidebar-avatar" },
+      );
+    let avatarEl = buildAvatar(user);
     const profileInfo = createElement("div", {});
     const profileName = createElement(
       "div",
@@ -350,14 +352,16 @@ export function createSettingsOverlay(
     appendChildren(profileSection, avatarEl, profileInfo);
     sidebar.appendChild(profileSection);
 
-    // Keep the sidebar identity in step with the store — renaming yourself on
-    // the Account tab used to leave the old name sitting here until restart.
+    // Keep the sidebar identity in step with the store — renaming yourself or
+    // changing your avatar on the Account tab used to leave the old one
+    // sitting here until restart.
     unsubAuth = authStore.subscribeSelector(
-      (s) => s.user?.username,
-      (name) => {
-        profileName.textContent = name ?? settingsText("common.unknown");
-        const initial = avatarEl.querySelector(".avatar-initial");
-        if (initial !== null) initial.textContent = (name ?? "U").charAt(0).toUpperCase();
+      (s) => s.user,
+      (u) => {
+        profileName.textContent = u?.username ?? settingsText("common.unknown");
+        const next = buildAvatar(u);
+        avatarEl.replaceWith(next);
+        avatarEl = next;
       },
     );
 

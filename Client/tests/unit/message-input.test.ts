@@ -832,6 +832,29 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
+    it("keeps the send-gate refusal line in step with the countdown and clears it at the end", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "next message";
+      comp.setSendGate("Slow mode — 7s");
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 7s",
+      );
+
+      comp.setSendGate("Slow mode — 6s");
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 6s",
+      );
+
+      comp.setSendGate(null);
+      expect(container.querySelector(".attachment-upload-error")).toBeNull();
+      expect(textarea.value).toBe("next message");
+      comp.destroy?.();
+    });
+
     it("shows the reason when Enter is pressed mid-sentence during reconnect", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);

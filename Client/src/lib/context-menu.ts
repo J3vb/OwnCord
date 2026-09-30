@@ -206,7 +206,7 @@ const dismissOwners = new WeakMap<Element, Disposable>();
 
 /**
  * Keep a menu inside the viewport, anchored by its top-left, flipping to its
- * bottom/right edge when it does not fit. Shared by the menus that are mounted
+ * bottom/right edge when it does not fit — and never above the top margin. Shared by the menus that are mounted
  * directly (showContextMenu) and the channel sidebar's own menus, so they
  * cannot drift — a menu opened low in a short window otherwise runs off and
  * its last actions are unreachable (F9).
@@ -218,7 +218,7 @@ export function clampMenuToViewport(menu: HTMLElement, x: number, y: number): vo
   menu.style.left = `${Math.max(margin, left)}px`;
   if (y + menu.offsetHeight > vh - margin) {
     menu.style.top = "";
-    menu.style.bottom = `${Math.max(margin, vh - y)}px`;
+    menu.style.bottom = `${Math.max(margin, Math.min(vh - y, vh - menu.offsetHeight - margin))}px`;
   } else {
     menu.style.bottom = "";
     menu.style.top = `${y}px`;

@@ -190,8 +190,9 @@ export function handleChatBulkDeleted(payload: Payload<"chat_bulk_deleted">): vo
   bulkDeleteMessages(payload);
 }
 
-/** A message was pinned or unpinned elsewhere — keep this client's row and
- *  open pin panel in sync (F5). */
+/** A message was pinned or unpinned elsewhere — keep this client's row in
+ *  sync (F5). An open pinned panel is a fetched snapshot and does not follow
+ *  this until it is reopened. */
 export function handleChatPinned(payload: Payload<"chat_pinned">): void {
   setMessagePinned(payload.channel_id, payload.message_id, payload.pinned);
 }
