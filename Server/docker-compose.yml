@@ -65,8 +65,9 @@ services:
     # its SOFT limit to the HARD one at start-up, so the hard limit here is the
     # real ceiling. Docker's default is inherited from the host daemon and is
     # often 1,024, which a few hundred online will reach. 65,536 carries about
-    # 2,000 connections with headroom; raise it, or use soft/hard -1 for
-    # unlimited, for a larger server.
+    # 2,000 connections with headroom; for a larger server raise it to a bigger
+    # number (up to the host's fs.nr_open, usually 1048576). Not -1: the kernel
+    # refuses an unlimited nofile limit and the container fails to start.
     ulimits:
       nofile:
         soft: 65536

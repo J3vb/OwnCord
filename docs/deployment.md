@@ -1214,10 +1214,11 @@ supervisor or shell sets:
 - **Bare binary or another supervisor:** set the soft and hard limit with
   `ulimit -n` (or `LimitNOFILE`-equivalent) before the server starts.
 
-With `server.max_ws_connections` set, the server also warns at boot when the
-resulting limit is below `2 × max_ws_connections + 256` — the descriptors that
-many connections need plus a fixed allowance for the database, LiveKit, TLS
-and the rest of the process. A server started under `ulimit -n 1024` reports a
+The server also warns at boot when the resulting limit is below
+`2 × max_ws_connections + 256` — the descriptors that many connections need,
+doubled for headroom, plus a fixed allowance for the database, LiveKit, TLS
+and the rest of the process. With `server.max_ws_connections` unset
+(unlimited), the budget is the 2,000-online target: 4,256. A server started under `ulimit -n 1024` reports a
 raised limit or a warning naming this setting, never a silent fall-over at
 1,000 connections.
 

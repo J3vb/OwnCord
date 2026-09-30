@@ -242,7 +242,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"notifyDMRequestTransition: marshal failed":                                                                    "notifydmrequesttransition_marshal_failed",
 	"notifyDMRequestTransition: sender lookup failed, dropping the dm_request push":                                "notifydmrequesttransition_sender_lookup_failed",
 	"notifyNSFWAck: marshal failed":                                                                                "notifynsfwack_marshal_failed",
-	"open-file limit is below what server.max_ws_connections needs":                                                "open_file_limit_below_connection_budget",
+	"open-file limit is below the connection budget":                                                               "open_file_limit_below_connection_budget",
 	"partial-auth: consuming a persisted challenge failed":                                                         "partial_auth_consuming_a_persisted_challenge",
 	"partial-auth: deleting an exhausted challenge failed":                                                         "partial_auth_deleting_an_exhausted_challenge",
 	"partial-auth: persisting a failure count failed":                                                              "partial_auth_persisting_a_failure_count",

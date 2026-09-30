@@ -121,10 +121,11 @@ that matters is the **hard limit** the supervisor or the shell sets:
 - **Bare binary:** set `ulimit -n` (soft and hard) in the shell or run script
   that starts the server, or the `LimitNOFILE` equivalent in your supervisor.
 
-When `server.max_ws_connections` is configured, the server warns at boot if
-the resulting limit is below `2 × max_ws_connections + 256` — the descriptors
-that many connections need, with a fixed allowance for the database, LiveKit,
-TLS and the rest of the process. A server started under `ulimit -n 1024`
+The server warns at boot if the resulting limit is below
+`2 × max_ws_connections + 256` — the descriptors that many connections need,
+doubled for headroom, with a fixed allowance for the database, LiveKit, TLS and
+the rest of the process. When `server.max_ws_connections` is unset
+(unlimited), the budget is the 2,000-online target: 4,256. A server started under `ulimit -n 1024`
 therefore either reports a raised limit in its log or warns that the hard
 limit is too low, rather than failing at 1,000 connections with
 `too many open files`.

@@ -34,15 +34,16 @@ func testLogger() (*slog.Logger, *bytes.Buffer) {
 
 // TestRaiseFileLimit_RaisesSoftToHard: the start-up step lifts the soft limit
 // to the hard one, so a host with `ulimit -n 1024` and a high hard limit does
-// not run out of descriptors at 2,000 connections.
+// not run out of descriptors at 2,000 connections. The hard limit stays under
+// macOS's kern.maxfilesperproc so the raise reaches it on both platforms.
 func TestRaiseFileLimit_RaisesSoftToHard(t *testing.T) {
-	cur := fileLimit{soft: 1024, hard: 1_048_576}
+	cur := fileLimit{soft: 1024, hard: 8192}
 	stubFileLimit(t, &cur, nil)
 	log, logs := testLogger()
 
 	raiseFileLimit(log, 0)
 
-	if cur.soft != 1_048_576 {
+	if cur.soft != 8192 {
 		t.Fatalf("soft limit = %d, want it raised to the hard limit %d", cur.soft, cur.hard)
 	}
 	if !strings.Contains(logs.String(), "open-file limit") {
@@ -77,7 +78,7 @@ func TestRaiseFileLimit_AlreadyAtHardIsQuiet(t *testing.T) {
 
 	raiseFileLimit(log, 0)
 
-	if strings.Contains(logs.String(), "could not raise") || strings.Contains(logs.String(), "below what") {
+	if strings.Contains(logs.String(), "could not raise") || strings.Contains(logs.String(), "below the connection budget") {
 		t.Errorf("an already-hard limit must not warn: %s", logs.String())
 	}
 	if !strings.Contains(logs.String(), "open-file limit") {
@@ -95,22 +96,42 @@ func TestRaiseFileLimit_WarnsBelowTheConnectionBudget(t *testing.T) {
 
 	raiseFileLimit(log, 2000) // needs 2*2000+256 = 4256
 
-	if !strings.Contains(logs.String(), "below what server.max_ws_connections needs") {
+	if !strings.Contains(logs.String(), "below the connection budget") {
 		t.Errorf("a limit under the connection budget was not warned about: %s", logs.String())
 	}
 }
 
-// TestRaiseFileLimit_NoCapNoBudgetWarning: with server.max_ws_connections
-// unset (0 = unlimited) there is no budget to compare against, so the
-// below-budget warning stays silent.
-func TestRaiseFileLimit_NoCapNoBudgetWarning(t *testing.T) {
+// TestRaiseFileLimit_UncappedWarnsBelowTheTargetBudget: a plain
+// `ulimit -n 1024` sets soft and hard alike, so nothing can be raised. With
+// server.max_ws_connections unset (0 = unlimited) the server is budgeted for
+// the 2,000-online target (2*2000+256 = 4256) and must warn rather than fall
+// over silently at about 1,000 connections.
+func TestRaiseFileLimit_UncappedWarnsBelowTheTargetBudget(t *testing.T) {
 	cur := fileLimit{soft: 1024, hard: 1024}
 	stubFileLimit(t, &cur, nil)
 	log, logs := testLogger()
 
 	raiseFileLimit(log, 0)
 
-	if strings.Contains(logs.String(), "below what server.max_ws_connections needs") {
-		t.Errorf("an uncapped server must not warn about a connection budget: %s", logs.String())
+	out := logs.String()
+	if !strings.Contains(out, "below the connection budget") || !strings.Contains(out, "needed=4256") {
+		t.Errorf("an uncapped server at 1024 was not warned about the 2,000-online budget: %s", out)
+	}
+	if !strings.Contains(out, "server.max_ws_connections") || !strings.Contains(out, "LimitNOFILE") {
+		t.Errorf("the warning does not name the setting and the fix: %s", out)
+	}
+}
+
+// TestRaiseFileLimit_RealLimitRaisesCleanly: against the test process's own
+// limits, the raise is one the host accepts. On macOS the default hard limit
+// is unlimited, and a soft limit above kern.maxfilesperproc is refused, so an
+// unclamped raise would warn on every boot.
+func TestRaiseFileLimit_RealLimitRaisesCleanly(t *testing.T) {
+	log, logs := testLogger()
+
+	raiseFileLimit(log, 0)
+
+	if strings.Contains(logs.String(), "could not") {
+		t.Errorf("raising the real open-file limit failed: %s", logs.String())
 	}
 }
