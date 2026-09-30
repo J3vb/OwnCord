@@ -45,7 +45,7 @@ var voiceJoinPostTokenRaceHook func(*Client)
 
 // handleVoiceJoin processes a voice_join message.
 // 1. Parses channel_id.
-// 2. Checks CONNECT_VOICE permission.
+// 2. Checks the voice join gate (permissions.CanJoinVoice).
 // 3. If already in a different voice channel, leaves it first.
 // 4. Checks channel capacity (voice_max_users).
 // 5. Persists join in DB.
@@ -611,7 +611,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// Re-run the join gate (permissions.CanJoinVoice, exactly as voice_join
 	// applies it) where the credential is minted. The channel comes from the
 	// client's own session state, and voice_join used to be the only place
-	// the bit was checked — so a user whose CONNECT_VOICE was revoked
+	// the gate was checked — so a user whose CONNECT_VOICE was revoked
 	// mid-session kept minting fresh SFU room-join grants, and a block imposed
 	// mid-session (OC-0018) kept re-issuing one for the blocker's DM. Refusing
 	// alone would leave the live session in place, so the refusal also evicts:
@@ -621,7 +621,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	ch, chErr := d.Reader.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return Result{
-			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing permission to join this voice channel"},
 			LeaveVoice:       true,
 			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}
@@ -629,7 +629,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	sub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, userID, ch, true)
 	if subErr != nil {
 		return Result{
-			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing permission to join this voice channel"},
 			LeaveVoice:       true,
 			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}

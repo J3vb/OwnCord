@@ -339,7 +339,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"storage: failed to remove partial file":                                            "storage_failed_to_remove_partial_file",
 	"sweepStaleVoiceStates: AllStates failed":                                           "sweepstalevoicestates_allstates_failed",
 	"sweepStaleVoiceStates: LeaveIfMatch failed":                                        "sweepstalevoicestates_leaveifmatch_failed",
-	"sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked":        "sweepstalevoicestates_evicted_revoked_participant",
+	"sweepStaleVoiceStates: evicted participant who may no longer join the channel":     "sweepstalevoicestates_evicted_revoked_participant",
 	"sweepStaleVoiceStates: permission check failed, skipping this tick":                "sweepstalevoicestates_permission_check_failed",
 	"sweepStaleVoiceStates: removed ghost voice state":                                  "voice_ghost_removed",
 	"telemetry init failed; continuing without OpenTelemetry":                           "telemetry_init_failed",

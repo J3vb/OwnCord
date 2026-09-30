@@ -256,7 +256,8 @@ func channelSubject(ctx context.Context, database DispatchReader, perms *permiss
 }
 
 // joinDenial maps a CanJoinVoice refusal to the error frame the voice_join
-// gate has always sent for that reason.
+// gate sends for that reason. A missing permission bit gets one neutral
+// message that does not name the bit.
 func joinDenial(err error) ClientError {
 	switch {
 	case errors.Is(err, permissions.ErrNotVoiceChannel):
@@ -268,7 +269,7 @@ func joinDenial(err error) ClientError {
 	case errors.Is(err, permissions.ErrTimedOut):
 		return ClientError{Code: ErrCodeTimedOut, Message: "you are timed out"}
 	default:
-		return ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"}
+		return ClientError{Code: ErrCodeForbidden, Message: "missing permission to join this voice channel"}
 	}
 }
 

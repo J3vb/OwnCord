@@ -167,8 +167,9 @@ func (h *Hub) sweepRevokedSessions() {
 }
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-checks CONNECT_VOICE for every client currently in voice, evicts the
-// ones who no longer hold it, and reconciles active media source permissions.
+// re-runs the voice join gate (permissions.CanJoinVoice) for every client
+// currently in voice, evicts the ones it now refuses, and reconciles active
+// media source permissions.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// The whole SFU reconciliation pass shares a budget. An unavailable
 	// companion cannot hold the hub loop for one network timeout per user.
@@ -223,9 +224,9 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
 			continue
 		}
-		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",
+		slog.Warn("sweepStaleVoiceStates: evicted participant who may no longer join the channel",
 			"user_id", c.userID, "channel_id", chID)
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to join this voice channel"))
 	}
 }
 
