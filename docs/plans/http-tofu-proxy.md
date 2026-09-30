@@ -233,10 +233,13 @@ cold open that pools 12 of the 14 calls listed above; `POST /auth/login` and
   Response heads are capped at 64 KiB and the data phase keeps its 600 s
   deadline.
 - **Dead paths fail fast.** A pooled socket has TCP keepalive on (first
-  probe after 10 s idle, then every 5 s, failing after 3 unanswered) and, on
-  Linux, a 25 s TCP user timeout, so a network path that died with no FIN or
-  RST (a Wi-Fi roam, a VPN toggle) fails the socket within tens of seconds
-  instead of holding a request until the 600 s data-phase deadline.
+  probe after 10 s idle, then every 5 s, failing after 3 unanswered; Windows
+  keeps its own probe count, since TCP_KEEPCNT does not exist before Windows
+  10 1703) and, on Linux, a 25 s TCP user timeout, so a network path that
+  died with no FIN or RST (a Wi-Fi roam, a VPN toggle) fails the socket
+  within tens of seconds instead of holding a request until the 600 s
+  data-phase deadline. Setting these is best-effort: an option the system
+  refuses is logged at debug and the verified connection is still used.
 - **One retry, for a dropped connection only.** If a pooled connection fails
   with an I/O error before any response byte reaches the webview (the server
   closed it as the request arrived, a reset, or a dead path), the request is

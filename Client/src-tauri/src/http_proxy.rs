@@ -277,7 +277,7 @@ async fn handle_connection<R: Runtime>(
             || async {
                 let fresh = connect_verified(&app, remote_host, &store_key).await?;
                 if let Fresh::Verified(tls, _) = &fresh {
-                    http_pool::detect_dead_path(tls.get_ref().0)?;
+                    http_pool::detect_dead_path(tls.get_ref().0);
                 }
                 Ok::<_, BoxError>(fresh)
             },

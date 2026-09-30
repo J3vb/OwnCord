@@ -28,7 +28,8 @@
 // - A pooled socket probes its network path (TCP keepalive, and on Linux a
 //   TCP user timeout), so a path that died with no FIN or RST fails the
 //   socket within tens of seconds rather than holding a request until the
-//   data-phase deadline.
+//   data-phase deadline. This is best-effort: a socket option the system
+//   refuses is logged and the verified connection is used anyway.
 // - A pooled connection that fails with an I/O error before any response
 //   byte reaches the webview (closed, reset, or a dead path) is retried once
 //   on a fresh connection. That is safe only because pooled requests are
@@ -62,9 +63,11 @@ pub(crate) const MAX_IDLE_PER_HOST: usize = 4;
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// TCP keepalive on a pooled socket: the first probe after KEEPALIVE_IDLE
 /// without traffic, then one every KEEPALIVE_INTERVAL; the socket fails after
-/// KEEPALIVE_PROBES go unanswered.
+/// KEEPALIVE_PROBES go unanswered. Windows keeps its own probe count:
+/// TCP_KEEPCNT does not exist before Windows 10 1703.
 const KEEPALIVE_IDLE: Duration = Duration::from_secs(10);
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+#[cfg(not(windows))]
 const KEEPALIVE_PROBES: u32 = 3;
 
 /// The reply the webview gets when the TOFU check refuses a connection.
@@ -188,17 +191,24 @@ impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
 /// Make a dead network path fail `tcp` within tens of seconds. Keepalive
 /// probes cover an idle socket; on Linux the user timeout also covers a
 /// request the server never acknowledged, which keepalive does not probe.
-pub(crate) fn detect_dead_path(tcp: &TcpStream) -> std::io::Result<()> {
+/// Best-effort: an option the system refuses is logged at debug, since the
+/// connection already passed the TOFU check and the idle cap still bounds it.
+pub(crate) fn detect_dead_path(tcp: &TcpStream) {
     let sock = socket2::SockRef::from(tcp);
-    sock.set_tcp_keepalive(
-        &socket2::TcpKeepalive::new()
-            .with_time(KEEPALIVE_IDLE)
-            .with_interval(KEEPALIVE_INTERVAL)
-            .with_retries(KEEPALIVE_PROBES),
-    )?;
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(KEEPALIVE_IDLE)
+        .with_interval(KEEPALIVE_INTERVAL);
+    #[cfg(not(windows))]
+    let keepalive = keepalive.with_retries(KEEPALIVE_PROBES);
+    if let Err(e) = sock.set_tcp_keepalive(&keepalive) {
+        debug!("[http_proxy] TCP keepalive not set on a pooled connection: {e}");
+    }
     #[cfg(target_os = "linux")]
-    sock.set_tcp_user_timeout(Some(KEEPALIVE_IDLE + KEEPALIVE_INTERVAL * KEEPALIVE_PROBES))?;
-    Ok(())
+    if let Err(e) =
+        sock.set_tcp_user_timeout(Some(KEEPALIVE_IDLE + KEEPALIVE_INTERVAL * KEEPALIVE_PROBES))
+    {
+        debug!("[http_proxy] TCP user timeout not set on a pooled connection: {e}");
+    }
 }
 
 /// Whether an idle connection has nothing to read: not closed, not errored,
@@ -859,7 +869,7 @@ mod tests {
         let tcp = TcpStream::connect(listener.local_addr().expect("addr"))
             .await
             .expect("connect");
-        detect_dead_path(&tcp).expect("set keepalive");
+        detect_dead_path(&tcp);
         let sock = socket2::SockRef::from(&tcp);
         assert!(sock.keepalive().expect("keepalive"));
         assert_eq!(sock.tcp_keepalive_time().expect("time"), KEEPALIVE_IDLE);
