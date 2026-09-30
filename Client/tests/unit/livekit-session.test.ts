@@ -3625,6 +3625,9 @@ describe("LiveKitSession", () => {
             lastUrl: "/livekit",
             lastDirectUrl: "ws://localhost:7880",
           };
+          // ...and the chat socket closes for good, so the loop breaks straight
+          // into the post-loop give-up check instead of an in-loop checkpoint.
+          session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
         }
         return Promise.reject(new Error("always fails"));
       });
@@ -3637,8 +3640,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      // Past the fast attempts to the next checkpoint, which sees the newer session.
-      await vi.advanceTimersByTimeAsync(42_000);
+      // Exhaust the fast attempts so the loop reaches the post-loop check.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       // The give-up path must not have run: no error toast, no leaveVoiceChannel,
@@ -3682,6 +3685,9 @@ describe("LiveKitSession", () => {
             lastUrl: "/livekit",
             lastDirectUrl: "ws://localhost:7880",
           };
+          // ...and the chat socket closes for good, so the loop breaks straight
+          // into the post-loop give-up check instead of an in-loop checkpoint.
+          session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
         }
         return Promise.reject(new Error("always fails"));
       });
@@ -3694,8 +3700,8 @@ describe("LiveKitSession", () => {
         ac.signal,
       );
 
-      // Past the fast attempts to the next checkpoint, which sees the newer session.
-      await vi.advanceTimersByTimeAsync(42_000);
+      // Exhaust the fast attempts so the loop reaches the post-loop check.
+      await vi.advanceTimersByTimeAsync(27_000);
       await reconnectPromise;
 
       expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
