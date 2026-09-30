@@ -232,42 +232,38 @@ cold open that pools 12 of the 14 calls listed above; `POST /auth/login` and
   suspend (which the monotonic clock does not count) is not handed out.
   Response heads are capped at 64 KiB and the data phase keeps its 600 s
   deadline.
-- **One retry.** If a pooled connection fails before any response byte
-  reaches the webview (the server closed it as the request arrived), or does
-  not start answering within 10 s (the connect and handshake bound; its
-  network path died while it sat idle, so no FIN or RST ever arrives), the
-  request is sent once more on a fresh, fully verified connection, which
-  keeps the full 600 s deadline. A failure after that, or after bytes reached
-  the webview, is returned to the webview as before.
+- **Dead paths fail fast.** A pooled socket has TCP keepalive on (first
+  probe after 10 s idle, then every 5 s, failing after 3 unanswered) and, on
+  Linux, a 25 s TCP user timeout, so a network path that died with no FIN or
+  RST (a Wi-Fi roam, a VPN toggle) fails the socket within tens of seconds
+  instead of holding a request until the 600 s data-phase deadline.
+- **One retry, for a dropped connection only.** If a pooled connection fails
+  with an I/O error before any response byte reaches the webview (the server
+  closed it as the request arrived, a reset, or a dead path), the request is
+  sent once more on a fresh, fully verified connection. A slow answer from a
+  live server is waited for under the data-phase deadline and never sent
+  twice. A failure after the retry, or after bytes reached the webview, ends
+  the webview's connection as before and is logged at debug, as on the
+  one-shot path.
 
-**TCP_NODELAY.** Measuring this showed a second, separate cost on the one-shot
-path: with Nagle's algorithm on, the request waited behind the handshake's
-last flight for the server's delayed ACK, about 40 ms per fresh connection at
-low RTT (visible in the 0 ms and 5 ms rows; at 20 ms RTT and above the gate's
-own delay hides it). `connect_verified` now sets TCP_NODELAY on the REST
-tunnel's upstream socket. The WS and LiveKit proxies are unchanged.
+**Measured** on 2026-09-30 with a one-off harness that timed one request
+through the tunnel's own upstream code, over the same server, upload and
+delay gate as the table above: the one-shot path, and the second request on a
+pooled connection. "Saved" is before minus pooled. Medians of 15 samples,
+debug build:
 
-**Measured.** `node tests/e2e/scripts/measure-tunnel-tls.mjs --tunnel` (from
-`Client/`, after `npm run test:e2e:build-server`; on Linux with the webrtc
-toolchain set up, since it runs `cargo test`) uses the same server, upload and
-delay gate as the table above, and times one request through the tunnel's own
-upstream code (the ignored `measure_tunnel_reuse` test in `http_proxy.rs`):
-the one-shot path as it was, the one-shot path with TCP_NODELAY, and the second
-request on a pooled connection. "Saved" is before minus pooled. Medians of 15
-samples, debug build, 2026-09-30:
-
-| One-way delay | RTT    | Request | Before (one-shot) | One-shot, no Nagle | Pooled   | Saved    |
-| ------------- | ------ | ------- | ----------------- | ------------------ | -------- | -------- |
-| 0 ms          | 0 ms   | REST    | 49.1 ms           | 8.3 ms             | 2.7 ms   | 46.4 ms  |
-| 0 ms          | 0 ms   | Image   | 48.3 ms           | 7.2 ms             | 3.0 ms   | 45.3 ms  |
-| 5 ms          | 10 ms  | REST    | 73.6 ms           | 33.6 ms            | 10.9 ms  | 62.7 ms  |
-| 5 ms          | 10 ms  | Image   | 73.8 ms           | 33.1 ms            | 11.4 ms  | 62.4 ms  |
-| 10 ms         | 20 ms  | REST    | 63.2 ms           | 62.9 ms            | 21.0 ms  | 42.2 ms  |
-| 10 ms         | 20 ms  | Image   | 63.6 ms           | 63.6 ms            | 21.4 ms  | 42.2 ms  |
-| 25 ms         | 50 ms  | REST    | 153.1 ms          | 152.9 ms           | 51.0 ms  | 102.1 ms |
-| 25 ms         | 50 ms  | Image   | 153.5 ms          | 153.9 ms           | 51.4 ms  | 102.1 ms |
-| 50 ms         | 100 ms | REST    | 303.0 ms          | 302.8 ms           | 101.0 ms | 202.1 ms |
-| 50 ms         | 100 ms | Image   | 303.3 ms          | 303.1 ms           | 101.4 ms | 201.9 ms |
+| One-way delay | RTT    | Request | Before (one-shot) | Pooled   | Saved    |
+| ------------- | ------ | ------- | ----------------- | -------- | -------- |
+| 0 ms          | 0 ms   | REST    | 49.1 ms           | 2.7 ms   | 46.4 ms  |
+| 0 ms          | 0 ms   | Image   | 48.3 ms           | 3.0 ms   | 45.3 ms  |
+| 5 ms          | 10 ms  | REST    | 73.6 ms           | 10.9 ms  | 62.7 ms  |
+| 5 ms          | 10 ms  | Image   | 73.8 ms           | 11.4 ms  | 62.4 ms  |
+| 10 ms         | 20 ms  | REST    | 63.2 ms           | 21.0 ms  | 42.2 ms  |
+| 10 ms         | 20 ms  | Image   | 63.6 ms           | 21.4 ms  | 42.2 ms  |
+| 25 ms         | 50 ms  | REST    | 153.1 ms          | 51.0 ms  | 102.1 ms |
+| 25 ms         | 50 ms  | Image   | 153.5 ms          | 51.4 ms  | 102.1 ms |
+| 50 ms         | 100 ms | REST    | 303.0 ms          | 101.0 ms | 202.1 ms |
+| 50 ms         | 100 ms | Image   | 303.3 ms          | 101.4 ms | 201.9 ms |
 
 A pooled request costs one RTT plus ~1-3 ms, the same as the keep-alive
 column above. At 100 ms RTT that is ~101 ms instead of ~303 ms per repeat

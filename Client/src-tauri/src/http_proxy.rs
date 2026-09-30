@@ -274,7 +274,13 @@ async fn handle_connection<R: Runtime>(
             pin.as_deref(),
             head.as_bytes(),
             &mut local,
-            || connect_verified(&app, remote_host, &store_key),
+            || async {
+                let fresh = connect_verified(&app, remote_host, &store_key).await?;
+                if let Fresh::Verified(tls, _) = &fresh {
+                    http_pool::detect_dead_path(tls.get_ref().0)?;
+                }
+                Ok::<_, BoxError>(fresh)
+            },
         )
         .await;
     }
@@ -328,10 +334,6 @@ async fn connect_verified<R: Runtime>(
         Duration::from_secs(10),
     )
     .await?;
-    // Nagle's algorithm held the request behind the handshake's last flight
-    // until the server's delayed ACK, about 40 ms per fresh connection at a
-    // low RTT (docs/plans/http-tofu-proxy.md "Upstream connection reuse").
-    tls.get_ref().0.set_nodelay(true)?;
 
     let observed = captured_fp
         .lock()
@@ -666,128 +668,5 @@ mod tests {
             !state.claim_trusted_report("other.example:8443"),
             "clearing one host leaves another host's claim in place"
         );
-    }
-
-    // Before/after timing for upstream reuse (docs/plans/http-tofu-proxy.md).
-    // Times one GET through the tunnel's upstream code three ways: the one-shot
-    // path as it was (a fresh TCP + TLS connection per request with Nagle's
-    // algorithm on, `Connection: close`, the bidirectional copy), the same with
-    // TCP_NODELAY as `connect_verified` now sets it, and the pooled path (the
-    // second request through `forward_replayable`, on the connection the
-    // first one left idle). The
-    // TOFU store lookup is skipped: it is an in-memory map read. Run it through
-    // `node tests/e2e/scripts/measure-tunnel-tls.mjs --tunnel`, which starts the
-    // server and the delay gates and passes them in.
-    #[tokio::test]
-    #[ignore = "measurement; run through tests/e2e/scripts/measure-tunnel-tls.mjs --tunnel"]
-    async fn measure_tunnel_reuse() {
-        use std::time::Instant;
-        use tokio::io::AsyncReadExt;
-
-        async fn dial(host: &str, nodelay: bool) -> (TlsConn, String) {
-            let (verifier, captured) = tofu::CaptureVerifier::new();
-            let config = rustls::ClientConfig::builder()
-                .dangerous()
-                .with_custom_certificate_verifier(Arc::new(verifier))
-                .with_no_client_auth();
-            let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
-            let (name, target) = resolve_remote_target(host).expect("target");
-            let tls = connect_tls(&connector, name, &target, Duration::from_secs(10))
-                .await
-                .expect("dial");
-            tls.get_ref().0.set_nodelay(nodelay).expect("nodelay");
-            let fingerprint = captured.lock().unwrap().clone().expect("fingerprint");
-            (tls, fingerprint.fingerprint)
-        }
-
-        async fn one_shot(host: &str, raw: &[u8], nodelay: bool) -> f64 {
-            let start = Instant::now();
-            let (mut local, mut webview) = tokio::io::duplex(1 << 20);
-            let (mut tls, _) = dial(host, nodelay).await;
-            tls.write_all(rewrite_request_headers(raw, host, "close").as_bytes())
-                .await
-                .expect("write");
-            let proxy = tokio::spawn(async move {
-                let _ = copy_with_deadline(&mut local, &mut tls, DATA_PHASE_TIMEOUT).await;
-            });
-            let mut response = Vec::new();
-            webview.read_to_end(&mut response).await.expect("read");
-            let ms = start.elapsed().as_secs_f64() * 1000.0;
-            drop(webview);
-            let _ = proxy.await;
-            assert!(
-                response.starts_with(b"HTTP/1.1 200"),
-                "one-shot request failed"
-            );
-            ms
-        }
-
-        async fn pooled(pool: &Arc<ConnPool<TlsConn>>, host: &str, pin: &str, raw: &[u8]) -> f64 {
-            let start = Instant::now();
-            let (mut local, mut webview) = tokio::io::duplex(1 << 20);
-            let head = rewrite_request_headers(raw, host, "keep-alive");
-            http_pool::forward_replayable(
-                pool,
-                host,
-                Some(pin),
-                head.as_bytes(),
-                &mut local,
-                || async {
-                    let (tls, fingerprint) = dial(host, true).await;
-                    Ok(Fresh::Verified(tls, fingerprint))
-                },
-            )
-            .await
-            .expect("pooled request");
-            drop(local);
-            let mut response = Vec::new();
-            webview.read_to_end(&mut response).await.expect("read");
-            let ms = start.elapsed().as_secs_f64() * 1000.0;
-            assert!(
-                response.starts_with(b"HTTP/1.1 200"),
-                "pooled request failed"
-            );
-            ms
-        }
-
-        fn median(mut values: Vec<f64>) -> f64 {
-            values.sort_by(f64::total_cmp);
-            values[values.len() / 2]
-        }
-
-        const SAMPLES: usize = 15;
-        let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name} unset"));
-        let (gates, requests, token) = (
-            var("OWNCORD_MEASURE_GATES"),
-            var("OWNCORD_MEASURE_REQUESTS"),
-            var("OWNCORD_MEASURE_TOKEN"),
-        );
-        println!("| One-way delay | RTT | Request | Before (one-shot) | One-shot, no Nagle | Pooled | Saved |");
-        println!("| --- | --- | --- | --- | --- | --- | --- |");
-        for gate in gates.split(',') {
-            let (delay, port) = gate.split_once(':').expect("delay:port");
-            let host = format!("127.0.0.1:{port}");
-            let pin = dial(&host, true).await.1;
-            for request in requests.split(',') {
-                let (name, path) = request.split_once('=').expect("name=path");
-                let raw = format!(
-                    "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:1\r\nAuthorization: Bearer {token}\r\n\r\n"
-                );
-                let (mut before, mut no_nagle, mut after) = (Vec::new(), Vec::new(), Vec::new());
-                for _ in 0..SAMPLES {
-                    before.push(one_shot(&host, raw.as_bytes(), false).await);
-                    no_nagle.push(one_shot(&host, raw.as_bytes(), true).await);
-                    let pool = ConnPool::new();
-                    pooled(&pool, &host, &pin, raw.as_bytes()).await;
-                    after.push(pooled(&pool, &host, &pin, raw.as_bytes()).await);
-                }
-                let (before, no_nagle, after) = (median(before), median(no_nagle), median(after));
-                let rtt = 2 * delay.parse::<u32>().expect("delay");
-                println!(
-                    "| {delay} ms | {rtt} ms | {name} | {before:.1} ms | {no_nagle:.1} ms | {after:.1} ms | {:.1} ms |",
-                    before - after
-                );
-            }
-        }
     }
 }

@@ -50,7 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Login & connection
 
 - **An auto-login to a server that is down no longer sits on "Auto-connecting…" forever.** A stored token is resumed straight onto the socket with no health probe, so an offline server left the connecting screen spinning indefinitely while the client retried. The first connection now has a 20-second deadline: if the server never answers, the client returns to the login form and says the server may be offline. A live session's later outages still reconnect in place with the in-app banner.
-- **The desktop app loads faster from a remote server.** Every REST call and server image fetch opened a new encrypted connection, two extra round trips each. Repeat reads now reuse an idle connection to the same server, and a new connection no longer waits about 40 ms before sending. At a 100 ms round trip a repeat request takes about 100 ms instead of 300 ms.
+- **The desktop app loads faster from a remote server.** Every REST call and server image fetch opened a new encrypted connection, two extra round trips each. Repeat reads now reuse an idle connection to the same server. At a 100 ms round trip a repeat request takes about 100 ms instead of 300 ms.
 - **A rejected two-factor code now shows the error where you can see it.** The overlay that asks for the code is opaque and covered the login form's error banner, so a wrong code (or a lockout) looked like nothing happened. The message now appears inside the code card.
 
 ### Accounts & admin

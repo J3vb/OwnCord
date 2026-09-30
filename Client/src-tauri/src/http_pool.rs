@@ -25,12 +25,16 @@
 //   after IDLE_TIMEOUT, well under the server's 120 s idle timeout. Idle age
 //   also counts on the wall clock, so a connection idle across a system
 //   suspend (which the monotonic clock skips) is not handed out.
-// - A pooled connection that fails before any response byte reaches the
-//   webview, or does not start answering within REUSED_ANSWER_TIMEOUT (its
-//   network path died while idle), is retried once on a fresh connection,
-//   which keeps the full data-phase deadline. That is safe only because
-//   pooled requests are bodyless and safe-method (GET, HEAD, OPTIONS); every
-//   other request keeps the one-connection-per-request path in http_proxy.
+// - A pooled socket probes its network path (TCP keepalive, and on Linux a
+//   TCP user timeout), so a path that died with no FIN or RST fails the
+//   socket within tens of seconds rather than holding a request until the
+//   data-phase deadline.
+// - A pooled connection that fails with an I/O error before any response
+//   byte reaches the webview (closed, reset, or a dead path) is retried once
+//   on a fresh connection. That is safe only because pooled requests are
+//   bodyless and safe-method (GET, HEAD, OPTIONS); every other request keeps
+//   the one-connection-per-request path in http_proxy. A slow answer is
+//   waited for under the data-phase deadline and never replayed.
 
 use log::debug;
 use std::collections::HashMap;
@@ -43,6 +47,7 @@ use tokio::io::{
     AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
     ErrorKind, ReadBuf,
 };
+use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration, Instant};
 
 use crate::proxy_common::header_value;
@@ -55,11 +60,12 @@ pub(crate) const MAX_IDLE_PER_HOST: usize = 4;
 /// How long an idle connection is kept. Well under the server's 120 s
 /// `IdleTimeout`, so the server rarely closes one first.
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a reused connection may take to start answering, the same bound
-/// `connect_tls` puts on a fresh connect and handshake. A connection whose
-/// network path died while it sat idle gets no FIN or RST, so without this it
-/// would hold the request until the data-phase deadline instead of retrying.
-const REUSED_ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
+/// TCP keepalive on a pooled socket: the first probe after KEEPALIVE_IDLE
+/// without traffic, then one every KEEPALIVE_INTERVAL; the socket fails after
+/// KEEPALIVE_PROBES go unanswered.
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(10);
+const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+const KEEPALIVE_PROBES: u32 = 3;
 
 /// The reply the webview gets when the TOFU check refuses a connection.
 pub(crate) const BAD_GATEWAY: &[u8] =
@@ -179,6 +185,22 @@ impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
     }
 }
 
+/// Make a dead network path fail `tcp` within tens of seconds. Keepalive
+/// probes cover an idle socket; on Linux the user timeout also covers a
+/// request the server never acknowledged, which keepalive does not probe.
+pub(crate) fn detect_dead_path(tcp: &TcpStream) -> std::io::Result<()> {
+    let sock = socket2::SockRef::from(tcp);
+    sock.set_tcp_keepalive(
+        &socket2::TcpKeepalive::new()
+            .with_time(KEEPALIVE_IDLE)
+            .with_interval(KEEPALIVE_INTERVAL)
+            .with_retries(KEEPALIVE_PROBES),
+    )?;
+    #[cfg(target_os = "linux")]
+    sock.set_tcp_user_timeout(Some(KEEPALIVE_IDLE + KEEPALIVE_INTERVAL * KEEPALIVE_PROBES))?;
+    Ok(())
+}
+
 /// Whether an idle connection has nothing to read: not closed, not errored,
 /// and no unsolicited bytes that would be mistaken for the next response.
 fn is_quiet<S: AsyncRead + Unpin>(stream: &mut S) -> bool {
@@ -241,8 +263,7 @@ struct ResponseHead {
 }
 
 /// Send `head` on `stream` and relay the response to `local`, then return the
-/// connection to the pool if the response left it reusable. A `reused`
-/// connection must start answering within REUSED_ANSWER_TIMEOUT.
+/// connection to the pool if the response left it reusable.
 pub(crate) async fn exchange<S, L>(
     pool: &Arc<ConnPool<S>>,
     host: &str,
@@ -250,7 +271,6 @@ pub(crate) async fn exchange<S, L>(
     mut stream: S,
     head: &[u8],
     local: &mut L,
-    reused: bool,
 ) -> Result<(), ExchangeError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -258,7 +278,7 @@ where
 {
     let reusable = timeout(
         crate::http_proxy::DATA_PHASE_TIMEOUT,
-        relay(&mut stream, head, local, reused),
+        relay(&mut stream, head, local),
     )
     .await
     .map_err(|_| ExchangeError::fatal("data phase timed out"))??;
@@ -269,12 +289,7 @@ where
 }
 
 /// Returns whether the connection may carry another request.
-async fn relay<S, L>(
-    stream: &mut S,
-    head: &[u8],
-    local: &mut L,
-    reused: bool,
-) -> Result<bool, ExchangeError>
+async fn relay<S, L>(stream: &mut S, head: &[u8], local: &mut L) -> Result<bool, ExchangeError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
     L: AsyncWrite + Unpin,
@@ -286,15 +301,6 @@ where
     let mut remote = BufReader::new(stream);
     remote.get_mut().write_all(head).await.map_err(unsent)?;
     remote.get_mut().flush().await.map_err(unsent)?;
-    if reused {
-        timeout(REUSED_ANSWER_TIMEOUT, remote.fill_buf())
-            .await
-            .map_err(|_| ExchangeError {
-                retryable: true,
-                source: "pooled connection did not answer".into(),
-            })?
-            .map_err(unsent)?;
-    }
 
     let mut forwarded = false;
     let (raw, response) = loop {
@@ -551,7 +557,9 @@ pub(crate) enum Fresh<S> {
 /// Relay one replayable request: on an idle pooled connection if one verified
 /// against the current `pin` exists, otherwise, or once if that connection
 /// fails before any response byte reaches the webview, on a fresh one from
-/// `dial`.
+/// `dial`. Only a failed dial or a TOFU rejection is returned as an error; a
+/// failed exchange (the webview aborting a fetch, the server closing) is
+/// logged at debug, as on the one-shot path.
 pub(crate) async fn forward_replayable<S, L, D, F>(
     pool: &Arc<ConnPool<S>>,
     host: &str,
@@ -567,13 +575,15 @@ where
     F: Future<Output = Result<Fresh<S>, BoxError>>,
 {
     if let (Some(stream), Some(pin)) = (pool.checkout(host, pin), pin) {
-        match exchange(pool, host, pin.to_string(), stream, head, local, true).await {
-            Ok(()) => return Ok(()),
+        match exchange(pool, host, pin.to_string(), stream, head, local).await {
             Err(e) if e.retryable => debug!(
                 "[http_proxy] pooled connection to {host} failed before a response ({}); retrying on a fresh one",
                 e.source
             ),
-            Err(e) => return Err(e.source),
+            result => {
+                log_exchange(result);
+                return Ok(());
+            }
         }
     }
     let (stream, fingerprint) = match dial().await? {
@@ -583,9 +593,14 @@ where
             return Err(e);
         }
     };
-    exchange(pool, host, fingerprint, stream, head, local, false)
-        .await
-        .map_err(|e| e.source)
+    log_exchange(exchange(pool, host, fingerprint, stream, head, local).await);
+    Ok(())
+}
+
+fn log_exchange(result: Result<(), ExchangeError>) {
+    if let Err(e) = result {
+        debug!("[http_proxy] pooled exchange ended: {}", e.source);
+    }
 }
 
 #[cfg(test)]
@@ -673,7 +688,7 @@ mod tests {
         let (conn, _) = upstream(vec![Some(reply)], then_close);
         let (mut local, mut webview) = duplex(64 * 1024);
         let request = if is_head { HEAD } else { GET };
-        let result = exchange(&pool, HOST, FP.into(), conn, request, &mut local, false).await;
+        let result = exchange(&pool, HOST, FP.into(), conn, request, &mut local).await;
         assert!(
             result.is_ok(),
             "exchange failed: {}",
@@ -807,11 +822,17 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_pooled_connection_that_never_answers_falls_back_to_a_fresh_one() {
+    async fn a_slow_answer_on_a_pooled_connection_is_waited_for_not_replayed() {
         let pool = ConnPool::new();
-        // Answers once, then reads the next request and never answers (a
-        // path that died while the connection sat idle).
-        let (conn, _) = upstream(vec![Some(OK)], false);
+        let (conn, mut server) = duplex(64 * 1024);
+        tokio::spawn(async move {
+            for delay in [0, 20] {
+                read_request_headers(&mut server).await.expect("request");
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+                server.write_all(OK).await.expect("reply");
+            }
+            let _ = server.read_to_end(&mut Vec::new()).await;
+        });
         fetch(&pool, HOST, Some(FP), Some(conn))
             .await
             .0
@@ -821,15 +842,39 @@ mod tests {
         let (fresh, fresh_seen) = upstream(vec![Some(OK)], false);
         let (result, dialed) = fetch(&pool, HOST, Some(FP), Some(fresh)).await;
         assert!(
-            dialed,
-            "the unanswered pooled request is retried on a fresh connection"
+            !dialed,
+            "a live server's slow answer must not be replayed on a fresh connection"
         );
-        assert!(result.expect("retried request").ends_with("\r\n\r\nok"));
-        assert_eq!(fresh_seen.load(SeqCst), 1);
-        assert!(
-            start.elapsed() <= REUSED_ANSWER_TIMEOUT,
-            "the retry waits {:?}, not the data-phase deadline",
-            start.elapsed()
+        assert_eq!(fresh_seen.load(SeqCst), 0);
+        assert!(result.expect("slow request").ends_with("\r\n\r\nok"));
+        assert!(start.elapsed() >= Duration::from_secs(20));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_pooled_socket_fails_within_seconds_once_its_path_dies() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let tcp = TcpStream::connect(listener.local_addr().expect("addr"))
+            .await
+            .expect("connect");
+        detect_dead_path(&tcp).expect("set keepalive");
+        let sock = socket2::SockRef::from(&tcp);
+        assert!(sock.keepalive().expect("keepalive"));
+        assert_eq!(sock.tcp_keepalive_time().expect("time"), KEEPALIVE_IDLE);
+        assert_eq!(
+            sock.tcp_keepalive_interval().expect("interval"),
+            KEEPALIVE_INTERVAL
+        );
+        assert_eq!(
+            sock.tcp_keepalive_retries().expect("retries"),
+            KEEPALIVE_PROBES
+        );
+        assert_eq!(
+            sock.tcp_user_timeout().expect("user timeout"),
+            Some(Duration::from_secs(25)),
+            "unacknowledged request bytes fail the socket as fast as unanswered probes"
         );
     }
 
@@ -845,8 +890,9 @@ mod tests {
         let (fresh, _) = upstream(vec![None], false);
         let (result, dialed) = fetch(&pool, HOST, Some(FP), Some(fresh)).await;
         assert!(dialed);
-        assert!(
-            result.is_err(),
+        assert_eq!(
+            result.expect("a failed exchange is logged, not returned"),
+            "",
             "a fresh connection that also fails is not retried again"
         );
     }
