@@ -60,7 +60,7 @@ stateDiagram-v2
 | `read-only` (announcement, no MANAGE_MESSAGES) | Textarea replaced by a disabled bar                                                                                                          | "Only moderators can post in announcement channels." |
 | `no-permission`                                | Disabled bar                                                                                                                                 | "You don't have permission to send messages here."   |
 | `offline`                                      | Gated — "Reconnecting…" while retrying, "Not connected" when disconnected; the textarea uses `aria-disabled` + `readOnly` so the caret stays | connection status (README §3)                        |
-| `slow-mode`                                    | Send held back with a live countdown; the textarea stays editable (`MessageInput.setSendGate`)                                               | "Slow mode: wait Ns."                                |
+| `slow-mode`                                    | Send held back with a live countdown; the textarea stays editable (`MessageInput.setSendGate`)                                               | "Slow mode — Ns"                                     |
 | `uploading`                                    | Send disabled until uploads settle or are removed (an in-flight upload's owner blocks `handleSend()`, `components/MessageInput.ts`)          | per-attachment progress bar                          |
 
 **Per-channel drafts (UX-1).** Switching away from a channel stashes its unsent
