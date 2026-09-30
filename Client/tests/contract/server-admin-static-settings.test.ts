@@ -666,6 +666,43 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
     expect(modal.classList.contains("visible")).toBe(true);
   });
 
+  // A single backup can be large, so like the full archive it is never
+  // fetched into a Blob: the panel asks for that file's single-use link with
+  // its Bearer auth and opens the link as a plain navigation.
+  it("downloads one backup through its single-use link, never a Blob", async () => {
+    const fetchCalls: FetchCall[] = [];
+    const booted = await boot(
+      fetchCalls,
+      respondWith({
+        [`POST /backups/${BACKUP}/link`]: {
+          json: { path: `/admin/api/backups/${BACKUP}/download?token=TOK-B` },
+        },
+      }),
+    );
+    dom = booted.dom;
+    const { window } = dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.token = "SESSION";
+    booted.bridge.state.section = "backups";
+    const content = await render(booted.bridge, window, booted.bridge.renderBackups);
+    const clicked: string[] = [];
+    window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      clicked.push(this.href);
+    };
+
+    const button = content.querySelector<HTMLButtonElement>('[data-action="downloadBackup"]');
+    expect(button?.getAttribute("aria-label")).toBe(`Download ${BACKUP}`);
+    fetchCalls.length = 0;
+    button!.click();
+    await expect
+      .poll(() => clicked)
+      .toEqual([`http://localhost:8080/admin/api/backups/${BACKUP}/download?token=TOK-B`]);
+    expect(fetchCalls.map((c) => `${c.method} ${c.path}`)).toContain(
+      `POST /backups/${BACKUP}/link`,
+    );
+    expect(fetchCalls.some((c) => c.path.includes("/download"))).toBe(false);
+  });
+
   it("lets a failed restore close again", async () => {
     const booted = await boot(
       [],

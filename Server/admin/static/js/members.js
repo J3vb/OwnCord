@@ -32,7 +32,7 @@ async function confirmDenyRegistration(id){
    filter and the Banned tab are server-side (GET /users?q=&role_id=&banned=1),
    so they narrow every page rather than the fetched one. Each row has one
    visible Manage button and an overflow menu of the moderation actions. */
-state.membersTab='all';state.membersQuery='';state.membersRole=0;
+state.membersTab='all';state.membersQuery='';state.membersRole=0;state.pendingPage=1;
 let membersRows={};let membersSearchTimer=null;let membersListSeq=0;
 const MORE_ICON='<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>';
 const MEMBER_TABS=[['all','All'],['pending','Pending'],['banned','Banned']];
@@ -75,12 +75,12 @@ async function renderUsers(){
   /* Approval-mode applications wait on the Pending tab until someone with
      MANAGE_SERVER decides. The fetch also keeps the nav badge current. */
   let pending=[];
-  if(pendingAllowed){try{pending=await api('GET','/registrations')||[]}catch(e){pending=[]}}
+  if(pendingAllowed)pending=await pendingPageRows();
   const tab=state.membersTab;
   let html='<div class="page-title">Members</div><div class="page-desc">Search, review and moderate the people on this server</div>';
   html+='<div class="member-tabs" role="tablist" aria-label="Member lists">'+MEMBER_TABS.filter(t=>t[0]!=='pending'||pendingAllowed).map(([id,label])=>{
     const sel=tab===id;
-    const count=id==='pending'&&pending.length?'<span class="tab-count">'+(pending.length>=REGISTRATIONS_PAGE?REGISTRATIONS_PAGE+'+':pending.length)+'</span>':'';
+    const count=id==='pending'&&state.badges.pending?'<span class="tab-count">'+state.badges.pending+'</span>':'';
     return'<button class="member-tab" role="tab" id="membersTab-'+id+'" aria-selected="'+sel+'" aria-controls="membersPanel" tabindex="'+(sel?0:-1)+'" data-action="setMembersTab" data-args="'+actArgs(id)+'">'+label+count+'</button>';
   }).join('')+'</div>';
   html+='<div role="tabpanel" id="membersPanel" aria-labelledby="membersTab-'+tab+'">';
@@ -100,7 +100,19 @@ async function renderUsers(){
   return html;
 }
 
-function pendingHtml(pending){
+/* The queue a page at a time, over-fetched by one row like the member list so
+   the next button knows whether there is more. The first page also keeps the
+   nav badge and the tab count current (noteBadgeSource). A page emptied by
+   the decisions on it steps back one page. */
+async function pendingPageRows(){
+  const fetchPage=async()=>{try{const r=await api('GET','/registrations?limit='+(REGISTRATIONS_PAGE+1)+'&offset='+(state.pendingPage-1)*REGISTRATIONS_PAGE);return Array.isArray(r)?r:[]}catch(e){return[]}};
+  let rows=await fetchPage();
+  if(!rows.length&&state.pendingPage>1){state.pendingPage--;rows=await fetchPage()}
+  return rows;
+}
+
+function pendingHtml(rows){
+  const hasMore=rows.length>REGISTRATIONS_PAGE;const pending=rows.slice(0,REGISTRATIONS_PAGE);const page=state.pendingPage;
   if(!pending.length)return'<div class="section-card"><div class="section-card-body members-empty">No registrations are waiting for a decision.</div></div>';
   let html='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th scope="col">Applicant</th><th scope="col">Applied</th><th scope="col" class="col-actions">Decision</th></tr></thead><tbody>';
   pending.forEach(p=>{
@@ -108,7 +120,12 @@ function pendingHtml(pending){
       +'<button class="btn btn-outline member-btn" data-action="decideRegistration" data-args="'+actArgs(p.id,'approve')+'">Approve<span class="sr-only"> '+esc(p.username)+'</span></button>'
       +'<button class="btn btn-outline member-btn danger" data-action="decideRegistration" data-args="'+actArgs(p.id,'deny',p.username)+'">Deny<span class="sr-only"> '+esc(p.username)+'</span></button></div></td></tr>';
   });
-  return html+'</tbody></table></div></div>';
+  html+='</tbody></table></div></div>';
+  if(page===1&&!hasMore)return html;
+  return html+'<div class="pagination"><div class="pagination-info">Page '+page+'</div><div class="pagination-btns">'
+    +'<button class="page-btn" '+(page<=1?'disabled':'')+' data-action="turnPendingPage" data-args="[-1]" aria-label="Previous page">&lt;</button>'
+    +'<button class="page-btn active" aria-current="page">'+page+'</button>'
+    +'<button class="page-btn" '+(hasMore?'':'disabled')+' data-action="turnPendingPage" data-args="[1]" aria-label="Next page">&gt;</button></div></div>';
 }
 
 /* The table and pager, without the toolbar, so a search keystroke can
@@ -247,7 +264,7 @@ document.getElementById('content').addEventListener('scroll',()=>closeMemberMenu
    chosen tab. */
 async function setMembersTab(tab){
   if(tab===state.membersTab&&document.getElementById('membersPanel'))return;
-  state.membersTab=tab;state.usersPage=1;
+  state.membersTab=tab;state.usersPage=1;state.pendingPage=1;
   const html=await renderUsers();
   if(state.section!=='users'||state.membersTab!==tab)return;
   document.getElementById('content').innerHTML=html;
@@ -307,8 +324,13 @@ async function saveUserRole(uid){
   try{await api('PATCH','/users/'+uid,{role_id:parseInt(sel.value)});closeModal();showToast('Role updated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
+/* Hours, as PATCH /users/{id} takes them (ban_duration_hours, at most a
+   year); 0 is a permanent ban. */
+const BAN_DURATIONS=[[0,'Permanent'],[1,'1 hour'],[24,'1 day'],[168,'7 days'],[720,'30 days']];
 function openBanUser(uid,uname){
-  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server?</p><div class="form-group"><label class="form-label" for="banReason">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmBan" data-args="'+actArgs(uid)+'">Ban User</button></div>');
+  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server?</p>'
+    +'<div class="form-group"><label class="form-label" for="banDuration">Duration</label><select class="form-input" id="banDuration" style="appearance:auto">'+BAN_DURATIONS.map(([h,l])=>'<option value="'+h+'">'+l+'</option>').join('')+'</select></div>'
+    +'<div class="form-group"><label class="form-label" for="banReason">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmBan" data-args="'+actArgs(uid)+'">Ban User</button></div>');
 }
 
 function openIssueRecovery(uid,uname){
@@ -326,7 +348,10 @@ async function confirmIssueRecovery(uid){
 
 async function confirmBan(uid){
   const reason=document.getElementById('banReason')?.value||'';
-  try{await api('PATCH','/users/'+uid,{banned:true,ban_reason:reason});closeModal();showToast('User banned');renderContent()}catch(e){showToast(e.message,'error')}
+  const sel=document.getElementById('banDuration');
+  const hours=sel instanceof HTMLSelectElement?parseInt(sel.value,10)||0:0;
+  const body=hours>0?{banned:true,ban_reason:reason,ban_duration_hours:hours}:{banned:true,ban_reason:reason};
+  try{await api('PATCH','/users/'+uid,body);closeModal();showToast('User banned');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
 async function unbanUser(uid){
@@ -366,4 +391,5 @@ async function confirmForceLogout(uid){
 Object.assign(ACTIONS,{confirmBan,confirmDenyRegistration,confirmEraseUser,confirmForceLogout,confirmIssueRecovery,decideRegistration,
   forceLogout,openBanUser,openEditUser,openEraseUser,openIssueRecovery,saveUserRole,unbanUser,
   setMembersTab,toggleMemberMenu,searchMembers,filterMembersRole,
-  turnUsersPage(delta){state.usersPage+=delta;renderContent()}});
+  turnUsersPage(delta){state.usersPage+=delta;renderContent()},
+  turnPendingPage(delta){state.pendingPage=Math.max(1,state.pendingPage+delta);renderContent()}});

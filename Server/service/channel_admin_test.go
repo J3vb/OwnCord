@@ -193,3 +193,34 @@ func TestAdminDeleteChannel_ArchivesBeforeEviction(t *testing.T) {
 		t.Fatalf("channel row survived the delete: %+v", ch)
 	}
 }
+
+// ─── Channel name uniqueness ─────────────────────────────────────────────────
+
+func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
+	svc, _ := newChannelAdminService(t)
+	ctx := context.Background()
+	first, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "Lobby", Type: "text", Category: "Chat"}, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "LOBBY", Type: "text", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate create: err = %v, want ErrConflict", err)
+	}
+	second, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", Type: "voice", Category: "Chat"}, nil)
+	if err != nil {
+		t.Fatalf("same name, other type: %v", err)
+	}
+	third, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "hall", Type: "text", Category: "Chat"}, nil)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("rename onto a sibling: err = %v, want ErrConflict", err)
+	}
+	if _, err := svc.AdminUpdateChannel(ctx, 1, first, AdminChannelUpdate{Name: "lobby", Category: "Chat"}, nil); err != nil {
+		t.Fatalf("case-only rename of itself: %v", err)
+	}
+	if _, err := svc.AdminUpdateChannel(ctx, 1, second, AdminChannelUpdate{Name: "lobby", Category: "Chat", Topic: "t"}, nil); err != nil {
+		t.Fatalf("unchanged name on another type: %v", err)
+	}
+}
