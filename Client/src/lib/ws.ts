@@ -125,6 +125,9 @@ const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
 // bounded: once the session is live, an outage keeps the in-app reconnect
 // banner and its retry loop instead of bouncing the user out.
 export const PREAUTH_CONNECT_TIMEOUT_MS = 20_000;
+// DP-02: the least time between two wake-signal redials, so a flapping network
+// or a burst of focus changes cannot spin the reconnect loop.
+const WAKE_KICK_FLOOR_MS = 2_000;
 // U4: a wall-clock gap past WAKE_GAP_MS means the process was suspended, so
 // the next dial is marked a wake (`auth.wake = true`). The SERVER arbitrates
 // whether that wake would displace another device's live session: a lone
@@ -225,8 +228,11 @@ export function createWsClient({
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
   let livenessDueAt = 0;
   // U7d: owns the visibilitychange / online wake-probe listeners.
-  // Armed on auth_ok and released on close or disconnect().
+  // Armed on auth_ok; kept through the reconnect loop (DP-02) and released on
+  // an intentional or certificate-blocked close, or disconnect().
   let wakeOwner: Disposable | null = null;
+  // DP-02: when a wake signal last cut a reconnect backoff short.
+  let lastWakeKickAt = -Infinity;
   // U4: the last time the app could observe the clock running: a parsed
   // inbound frame (handleMessage), a heartbeat tick (handleWakeSignal), a dial
   // (connect()) or a reconnect-point check (suspendGapExceeded). A jump larger
@@ -375,16 +381,36 @@ export function createWsClient({
     setLivenessTimer(Math.max(0, Math.min(PONG_GRACE_MS, livenessDueAt - Date.now())));
   }
 
-  // Armed on auth_ok and released on close or disconnect(); the next auth_ok
-  // re-arms them. A signal owns each listener so the lifecycle inventory sees
-  // them as owned.
+  // DP-02: while the loop waits out a backoff, the network or the screen coming
+  // back means the next dial is likely to work now, so dial at once instead of
+  // after up to 30 s. It fires the pending timer's own callback, so the U4
+  // wake check still runs, and it never dials past a close the loop itself
+  // would not retry (disconnect(), auth_error, a TOFU mismatch latch).
+  function onWakeSignal(): void {
+    if (state === "connected") {
+      onWake();
+      return;
+    }
+    if (state !== "reconnecting" || reconnectTimer === null) return;
+    if (intentionalClose || certMismatchBlock || !config) return;
+    const now = Date.now();
+    if (now - lastWakeKickAt < WAKE_KICK_FLOOR_MS) return;
+    lastWakeKickAt = now;
+    cancelReconnect();
+    redial();
+  }
+
+  // Armed on auth_ok and kept through the reconnect loop (DP-02); released on
+  // an intentional or certificate-blocked close, or disconnect(). The next
+  // auth_ok re-arms them. A signal owns each listener so the lifecycle
+  // inventory sees them as owned.
   function armWakeListeners(): void {
     if (wakeOwner !== null) return;
     const owner = new Disposable();
-    window.addEventListener("online", onWake, { signal: owner.signal });
+    window.addEventListener("online", onWakeSignal, { signal: owner.signal });
     document.addEventListener(
       "visibilitychange",
-      () => document.visibilityState === "visible" && onWake(),
+      () => document.visibilityState === "visible" && onWakeSignal(),
       { signal: owner.signal },
     );
     wakeOwner = owner;
@@ -452,22 +478,26 @@ export function createWsClient({
       lastSeq,
     });
     setState("reconnecting");
-    reconnectTimer = clock.setTimeout(() => {
-      reconnectAttempt++;
-      // U4: the process may have been suspended while this timer was pending
-      // (a wake often outlives the backoff window), or a previous wake dial
-      // may have failed at the transport — `pendingWake` persists across
-      // retries until auth_ok. Mark the dial a wake so the server can refuse
-      // it rather than displacing another device.
-      if (suspendGapExceeded()) pendingWake = true;
-      const nextConfig = config;
-      if (!nextConfig) {
-        log.warn("Reconnect aborted: missing config");
-        setState("disconnected");
-        return;
-      }
-      void connect(nextConfig);
-    }, delay);
+    reconnectTimer = clock.setTimeout(redial, delay);
+  }
+
+  // The backoff timer's callback, and a wake signal's early redial (DP-02).
+  function redial(): void {
+    reconnectTimer = null;
+    reconnectAttempt++;
+    // U4: the process may have been suspended while this timer was pending
+    // (a wake often outlives the backoff window), or a previous wake dial
+    // may have failed at the transport — `pendingWake` persists across
+    // retries until auth_ok. Mark the dial a wake so the server can refuse
+    // it rather than displacing another device.
+    if (suspendGapExceeded()) pendingWake = true;
+    const nextConfig = config;
+    if (!nextConfig) {
+      log.warn("Reconnect aborted: missing config");
+      setState("disconnected");
+      return;
+    }
+    void connect(nextConfig);
   }
 
   function cancelReconnect(): void {
@@ -624,6 +654,7 @@ export function createWsClient({
     // permanently kill this socket's reconnect loop.
     if (config !== null && raw.host === normalizeHostForCertCompare(config.host)) {
       certMismatchBlock = true;
+      stopWakeListeners();
       // A reconnect armed before the mismatch arrived would still fire and
       // call connect(), which clears the latch — resuming the loop against
       // the very host whose certificate just changed. Latching only blocks
@@ -680,7 +711,9 @@ export function createWsClient({
       });
       stopHeartbeat();
       stopLiveness();
-      stopWakeListeners();
+      // DP-02: a close the loop will retry keeps the wake listeners, so the
+      // network or the screen coming back can cut the backoff short.
+      if (intentionalClose || certMismatchBlock) stopWakeListeners();
       if (!intentionalClose) {
         scheduleReconnect(retryHint?.retryAfterMs);
       } else {
