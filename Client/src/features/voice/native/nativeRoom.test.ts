@@ -505,9 +505,10 @@ describe("NativeRoom room surface", () => {
       status(false);
       vi.advanceTimersByTime(3000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
-      // ...and the peer's frames decrypting again clears it.
+      // ...and the peer's frames decrypting again clears it, after the same
+      // quiet window the web path needs.
       status(true);
-      vi.advanceTimersByTime(3000);
+      vi.advanceTimersByTime(66_000);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
 
       // The local E2EE not running is not the peer's to clear.
@@ -518,7 +519,7 @@ describe("NativeRoom room surface", () => {
         event: { type: "encryptionStatus", identity: "user-1", encrypted: false },
       });
       status(true);
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(70_000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
       await room.disconnect();
     } finally {

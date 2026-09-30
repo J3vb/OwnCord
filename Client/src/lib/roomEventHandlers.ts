@@ -36,6 +36,13 @@ const log = createLogger("roomEventHandlers");
 const DECRYPT_GRACE_MS = 3000;
 const DECRYPT_STREAK_RESET_MS = 2500;
 
+/** Polish #21: how long without a remote decrypt failure before a decrypt
+ *  degradation counts as recovered. livekit-client's ErrorRateLimiter lets
+ *  the worker report a failing peer at most 5 times per 60 s window, so a
+ *  failure that persists goes quiet for most of each minute; only a gap
+ *  longer than that window means the frames decrypt again. */
+const DECRYPT_QUIET_MS = 65_000;
+
 /** RT-9: the status a room that has just finished joining reports. The key
  *  can arrive over WS after the SFU dropped and livekit-client is already
  *  retrying on its own; that room reads "reconnecting" until
@@ -110,11 +117,10 @@ export interface RoomEventHandlers {
 export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers {
   let autoplayUnlockHandler: (() => void) | null = null;
   // Polish #21: a transient >3s key-delivery stall set the Secured badge to
-  // "Unsecured" and nothing ever cleared it until the next join/leave. The
-  // worker re-reports a failing remote decrypt once a second, so a quiet gap
-  // past the streak reset (same window the streak logic uses) means the peer's
-  // frames decrypt again — clear only what THIS path degraded, leaving a
-  // persistent worker-death/MissingKey degradations visible (OC-0002).
+  // "Unsecured" and nothing ever cleared it until the next join/leave. A
+  // quiet gap past DECRYPT_QUIET_MS means the peer's frames decrypt again —
+  // clear only what THIS path degraded, leaving a persistent
+  // worker-death/MissingKey degradations visible (OC-0002).
   // "other" latches: once anything else degrades the call, a quiet gap
   // must not clear it.
   let degradedBy: "decrypt" | "other" | null = null;
@@ -127,7 +133,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }
   }
 
-  /** Arm the recovery: no further remote decrypt failure for the streak reset
+  /** Arm the recovery: no further remote decrypt failure for the quiet
    *  window means delivery resumed. */
   function armDecryptRecovery(): void {
     clearDecryptQuietTimer();
@@ -137,7 +143,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
         degradedBy = null;
         setEncryptionDegraded(false);
       }
-    }, DECRYPT_STREAK_RESET_MS);
+    }, DECRYPT_QUIET_MS);
   }
 
   function resetEncryptionRecovery(): void {
@@ -326,12 +332,13 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
           error,
           participant: participant.identity,
         });
+        // Still failing: a degradation this path set is not recovered yet.
+        if (degradedBy === "decrypt") armDecryptRecovery();
         return;
       }
       // A remote sender's failure past the grace window: its frames stopped
       // decrypting. This is the class that recovers on its own once key
-      // delivery resumes, so arm the quiet-gap recovery — the worker keeps
-      // re-reporting once a second while it fails, so a gap means resumed.
+      // delivery resumes, so arm the quiet-gap recovery.
       if (degradedBy !== "other") {
         degradedBy = "decrypt";
         armDecryptRecovery();

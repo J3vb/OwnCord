@@ -659,10 +659,33 @@ describe("handleEncryptionError", () => {
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
 
       // The key finally lands: the worker stops reporting, so a quiet gap
-      // past the streak reset clears the latch instead of leaving
-      // "Unsecured" for the rest of the call.
-      vi.advanceTimersByTime(3000);
+      // longer than livekit's 60 s error-rate window clears the latch instead
+      // of leaving "Unsecured" for the rest of the call.
+      vi.advanceTimersByTime(30_000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+      vi.advanceTimersByTime(40_000);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("stays degraded while a failing peer's reports are held back by livekit's rate limiter", () => {
+      const h = build();
+      // livekit-client's ErrorRateLimiter: one report a second, at most 5 per
+      // 60 s window, so a peer that never decrypts again reports in bursts.
+      const reportFor = (seconds: number): void => {
+        for (let s = 0; s < seconds; s++) {
+          const windowSecond = s % 60;
+          if (windowSecond <= 5) h.handlers.handleEncryptionError(decryptFailed(), bob);
+          vi.advanceTimersByTime(1000);
+          expect(voiceStore.getState().encryptionDegraded).toBe(s >= 3);
+        }
+      };
+
+      reportFor(180);
+      // Three bursts: each restarts a streak (3 tolerated, 3 past the grace).
+      for (let i = 0; i < 9; i++) {
+        expectConsole("warn", /receive-side decrypt failure/);
+        expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      }
     });
 
     it("keeps the badge degraded when the worker dies while a decrypt recovery is pending", () => {
