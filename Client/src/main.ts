@@ -976,7 +976,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
                 return;
               }
               wait.dispose();
-              void resumeStoredSession(current);
+              void resumeStoredSession(current, false);
             });
           },
           delayMs,
@@ -987,8 +987,12 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
 
     // Resume a profile's session from its stored token — startup auto-login
     // and a quick switch back to a server share this path. No-op when the
-    // host has no stored token.
-    async function resumeStoredSession(profile: ResumableProfile): Promise<void> {
+    // host has no stored token. A resume the wait itself started does not wait
+    // again: a server that answers but never signs in gets the offline error.
+    async function resumeStoredSession(
+      profile: ResumableProfile,
+      waitIfDown = true,
+    ): Promise<void> {
       const attempt = api.getSession();
       try {
         const cred = await loadCredential(profile.host);
@@ -1024,7 +1028,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             undefined,
             profile.rememberPassword,
             false,
-            () => waitForServer(profile),
+            waitIfDown ? () => waitForServer(profile) : undefined,
           );
         }
       } catch (err) {

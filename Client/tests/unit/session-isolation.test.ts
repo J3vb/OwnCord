@@ -542,6 +542,27 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     expect(peakLiveTransports()).toBe(1);
   });
 
+  it("gives up after one resume when the server answers but never signs in", async () => {
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+
+    // Healthy, but the socket never authenticates.
+    mockGetHealth.mockResolvedValue(HEALTHY);
+    await vi.advanceTimersByTimeAsync(5_000 + 100);
+    expect(connectsToA()).toBe(before + 1);
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expect(latestConnectPage().showServerWait).toHaveBeenCalledTimes(1);
+    expect(uiStore.getState().transientError).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(connectsToA()).toBe(before + 1);
+    expect(latestConnectPage().showServerWait).toHaveBeenCalledTimes(1);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+  });
+
   it("resumes with the profile's auto-login as it is when the server comes back", async () => {
     const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
       setAutoLogin: ReturnType<typeof vi.fn>;
