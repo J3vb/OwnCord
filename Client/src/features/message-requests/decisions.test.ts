@@ -233,7 +233,7 @@ describe("message request decisions", () => {
       }),
     );
     // Like a real fetch, the request dies with the signal it was given.
-    let answer = (): void => {};
+    let answer: (() => void) | undefined;
     Object.assign(fx.api, {
       getDmChannels: (signal?: AbortSignal) =>
         new Promise((resolve, reject) => {
@@ -254,7 +254,7 @@ describe("message request decisions", () => {
     await settle();
     unmount();
     expect(owner.signal.aborted).toBe(true);
-    answer();
+    answer?.();
     await settle();
     expect(channelsStore.getState().activeChannelId).toBe(101);
     expect(dmStore.getState().channels.find((c) => c.channelId === 101)).toMatchObject({
