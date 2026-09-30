@@ -271,16 +271,18 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
 
   // A blip longer than the grace window does end the membership: the expiry
-  // removes the SFU participant, which ends the client's LiveKit room, then a
-  // fresh authorized join and key exchange works as before.
+  // removes the SFU participant, which ends the client's LiveKit room. P2-T5:
+  // the voice reconnect loop then sees the released membership once the chat
+  // socket is back and rejoins on its own — a fresh authorized join and key
+  // exchange, with the camera off as after any join.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
   await alice.waitForTimeout(16_000); // outlast the 15 s server grace window
   aliceTransport.online();
   await expect(alice.locator(".reconnecting-banner")).not.toBeVisible();
-  await expect(alice.locator(".voice-widget")).not.toHaveClass(/visible/);
-  await expect.poll(async () => (await mediaStats(alice)).liveCapture).toBe(0);
-  await joinVoice(alice);
+  await expect(alice.locator(".voice-widget.visible")).toContainText("Voice Connected", {
+    timeout: 45_000,
+  });
   await expectDecodedMedia(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
   await expectDecodedMedia(bob, true);

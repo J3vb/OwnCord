@@ -25,6 +25,9 @@ const mockVoiceState = vi.hoisted(() => ({
   listenOnly: false,
   currentChannelId: 1 as number | null,
   voiceConfigs: new Map<number, { bitrate: number }>(),
+  // The server still holds our membership, so the reconnect loop reuses the
+  // token rather than rejoining.
+  voiceUsers: { get: () => ({ has: () => true }) },
 }));
 
 vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
@@ -227,6 +230,7 @@ globalThis.Worker = vi.fn(function () {
 
 import { LiveKitSession } from "../../src/lib/livekitSession";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
+import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
 import { initToast, teardownToast } from "@lib/toast";
 import type { ToastContainer } from "@components/Toast";
@@ -264,7 +268,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     nativeCounters.listeners = 0;
     nativeCounters.rust = null;
     session = new LiveKitSession();
-    session.setWsClient({ send: vi.fn(), on: vi.fn() } as never);
+    // The reconnect loop only retries into a channel that still exists, over a
+    // chat socket that is not closed for good.
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, { id: 1, type: "voice" } as never]]),
+    }));
+    session.setWsClient({ send: vi.fn(), on: vi.fn(), getState: () => "connected" } as never);
     session.setServerHost("chat.example");
     // MainPage registers the screen-share dialog through the layer slot
     // (ARCH-06); mirror that here so the native share path reaches the real
