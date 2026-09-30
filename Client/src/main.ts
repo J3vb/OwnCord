@@ -590,7 +590,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       } else if (wsState === "disconnected") {
         // Terminal non-connected transition (auth_error, cert-mismatch reject,
         // or intentional disconnect before ever connecting): drop the handler
-        // so it doesn't linger and fire on a later connect.
+        // so it doesn't linger and fire on a later connect. The pre-auth
+        // deadline goes with it: it bounds only the endless retry loop, and
+        // with this handler gone nothing would clear it on a later auth_ok
+        // (a certificate re-dial after a mismatch).
+        clearTimeout(preauthTimer);
         unsubState();
       }
     });

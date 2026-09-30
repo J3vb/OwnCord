@@ -368,6 +368,28 @@ describe("main.ts pre-auth connection deadline", () => {
 
     clearAuth();
   });
+
+  it("does not fire after a certificate mismatch ends the attempt, so a later accept is not torn down", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("rotated.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "rotated.example:8443",
+      fingerprint: "sha256:CHANGED",
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    // The user is still reading the fingerprint in the mismatch modal: the
+    // deadline must not claim the server is offline or drop the redial target.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    clearAuth();
+  });
 });
 
 describe("main.ts connected overlay (OC-0063)", () => {
