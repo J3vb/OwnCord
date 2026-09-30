@@ -474,7 +474,8 @@ to reconstruct them:
 1. A member with no live connection is `"offline"`, whatever status they last
    chose — a chosen `idle`/`dnd`/`invisible` is preserved server-side across a
    disconnect so the next connect can honour it, but it must not render as
-   "present" in the meantime.
+   "present" in the meantime. A member whose connection has not come online
+   yet is `"offline"` too; their `presence` broadcast follows once it does.
 2. An `"invisible"` member is `"offline"` to everyone but themselves. The
    viewer's own entry carries their true status.
 
