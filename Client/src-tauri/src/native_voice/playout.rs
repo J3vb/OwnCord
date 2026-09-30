@@ -561,7 +561,8 @@ impl Playout {
 /// and, while `selected` is the empty "System default" id, calls `follow`
 /// each time that default moves. `follow` reports whether it reopened; a
 /// failed reopen of a dead stream (the sound server still restarting) is
-/// retried on the next tick. A reopen that fell back from a pinned device
+/// retried on the next tick, as is a failed follow of a default move. A
+/// reopen that fell back from a pinned device
 /// (not listed yet after the restart) is followed again once
 /// `pinned_returned` says that device is listed. `selected` is read on every tick, so a
 /// device chosen after the watcher started is honoured. Dropping it stops
@@ -605,8 +606,8 @@ impl Watcher {
                 if let Some(now) = default_device() {
                     if last.as_ref() != Some(&now) {
                         last = Some(now);
-                        if lock(&selected).is_empty() {
-                            follow();
+                        if lock(&selected).is_empty() && !follow() {
+                            dead.store(true, Ordering::Relaxed);
                         }
                     }
                 }
@@ -1017,6 +1018,31 @@ mod tests {
         assert_eq!(better_backend(Alsa, &[Alsa], false), None);
         // A machine with only ALSA still recovers through ALSA.
         assert_eq!(better_backend(Alsa, &[Alsa], true), Some(Alsa));
+    }
+
+    #[test]
+    fn a_failed_follow_of_a_default_move_is_retried() {
+        let default = Arc::new(Mutex::new(Some("speakers".to_string())));
+        let (attempted, attempts) = mpsc::channel();
+        let mut n = 0;
+        let source = default.clone();
+        let _watcher = Watcher::start(
+            Duration::from_millis(2),
+            Some("speakers".to_string()),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(String::new())),
+            move || lock(&source).clone(),
+            || false,
+            move || {
+                n += 1;
+                attempted.send(n).unwrap();
+                n >= 2
+            },
+        );
+        *lock(&default) = Some("headphones".to_string());
+        assert_eq!(attempts.recv_timeout(Duration::from_secs(5)), Ok(1));
+        assert_eq!(attempts.recv_timeout(Duration::from_secs(5)), Ok(2));
+        assert!(attempts.recv_timeout(QUIET).is_err(), "followed: no more");
     }
 
     #[test]

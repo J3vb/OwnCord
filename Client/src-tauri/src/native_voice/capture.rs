@@ -351,20 +351,10 @@ impl Capture {
                 log::warn!("[native_voice] reopening the capture stream: no device");
                 return muted;
             };
-            let device = picked.1.clone();
-            *lock(&resolved) = Some(picked);
-            if muted {
-                return true;
-            }
-            match feed.open(&device, dead.clone()) {
-                Ok(reopened) => {
-                    // A mute while this opened wins: its stream is dropped.
-                    let mut slot = lock(&stream);
-                    if slot.is_some() {
-                        *slot = Some(reopened);
-                    }
-                    true
-                }
+            match move_stream(&stream, &resolved, picked, |device| {
+                feed.open(device, dead.clone())
+            }) {
+                Ok(()) => true,
                 Err(e) => {
                     log::warn!("[native_voice] reopening the capture stream: {e}");
                     false
@@ -385,6 +375,27 @@ impl Capture {
     fn open(&self, device: &cpal::Device) -> Result<cpal::Stream, String> {
         self.feed.open(device, self.dead.clone())
     }
+}
+
+/// Record `picked` as the resolved device and, while a stream runs, move it
+/// there. The record follows the stream: a failed open leaves both on the old
+/// device, so the watcher's next tick retries, and a mute while the new one
+/// opened drops it (the next unmute opens `picked`).
+fn move_stream<D, S>(
+    stream: &Mutex<Option<S>>,
+    resolved: &Mutex<Option<(String, D)>>,
+    picked: (String, D),
+    open: impl FnOnce(&D) -> Result<S, String>,
+) -> Result<(), String> {
+    if lock(stream).is_some() {
+        let reopened = open(&picked.1)?;
+        let mut slot = lock(stream);
+        if slot.is_some() {
+            *slot = Some(reopened);
+        }
+    }
+    *lock(resolved) = Some(picked);
+    Ok(())
 }
 
 /// The listed device `id` resolves to (its id and handle), and whether that
@@ -571,6 +582,49 @@ mod tests {
         assert!(watchers.ready(), "the watcher sees the source set after it");
         *lock(&capture.feed.source) = None;
         assert!(!watchers.ready());
+    }
+
+    #[test]
+    fn a_failed_move_leaves_the_record_on_the_running_device() {
+        // After a restart the stream fell back to the default mic; the
+        // pinned one is listed again but does not open yet.
+        let stream = Mutex::new(Some("default-stream"));
+        let resolved = Mutex::new(Some(("default".to_string(), "default")));
+        let moved = move_stream(&stream, &resolved, ("bt".to_string(), "bt"), |_| {
+            Err("busy".to_string())
+        });
+        assert_eq!(moved, Err("busy".to_string()));
+        assert_eq!(*lock(&stream), Some("default-stream"));
+        let current = lock(&resolved).as_ref().map(|(id, _)| id.clone());
+        assert!(
+            pinned_listed("bt", current.as_deref(), ["default", "bt"].iter()),
+            "still missing its pin: the next tick retries"
+        );
+        // The next tick's open succeeds.
+        move_stream(&stream, &resolved, ("bt".to_string(), "bt"), |d| {
+            Ok(if *d == "bt" { "bt-stream" } else { "wrong" })
+        })
+        .unwrap();
+        assert_eq!(*lock(&stream), Some("bt-stream"));
+        assert_eq!(
+            lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
+            Some("bt")
+        );
+    }
+
+    #[test]
+    fn a_muted_move_only_records_where_the_next_unmute_opens() {
+        let stream: Mutex<Option<&str>> = Mutex::new(None);
+        let resolved = Mutex::new(Some(("default".to_string(), "default")));
+        move_stream(&stream, &resolved, ("usb".to_string(), "usb"), |_| {
+            panic!("muted: the mic must not open")
+        })
+        .unwrap();
+        assert_eq!(*lock(&stream), None);
+        assert_eq!(
+            lock(&resolved).as_ref().map(|(id, _)| id.as_str()),
+            Some("usb")
+        );
     }
 
     #[test]
