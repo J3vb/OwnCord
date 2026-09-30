@@ -83,6 +83,7 @@ and only when it changes something a contributor or fork holder must do
 ### Voice
 
 - **The voice connection panel is tidier.** The transport-stats readout now lays Outgoing and Incoming out as a two-column grid of label/value rows, each value on one line with a single unit — a rate reads "331 kB/s" instead of the old "331.25 kB/s (2.6 Mbps)" that wrapped. A zero rate or a missing RTT is dimmed rather than shown at full strength, and the in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
+
 ### Direct messages & members
 
 - **The DM list now shows each conversation's last message and when it arrived.** The sidebar and the embedded DM preview drew only names and avatars, even though the last-message text and time were already loaded — so a DM looked the same whether or not it had news in it. Both now show the last line (spoilers stay hidden) and its time — the clock time for today, a short date such as "Sep 29" before that — and follow new, edited and deleted messages.
