@@ -3543,7 +3543,8 @@ person exists to leak into the audit log.
 | 400    | `BAD_REQUEST`  | Unknown verification wording, or an account this cannot help |
 | 403    | `FORBIDDEN`    | Not the owner                                                |
 | 404    | `NOT_FOUND`    | No such account                                              |
-| 429    | `RATE_LIMITED` | Issuance budget spent, or the admission budget full          |
+| 429    | `RATE_LIMITED` | Issuance budget spent                                        |
+| 429    | `AUTH_BUSY`    | The admission budget for password checks is full             |
 
 ---
 

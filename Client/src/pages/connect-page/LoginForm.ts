@@ -1035,8 +1035,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
    * Retry-After and AUTH_BUSY_MIN_RETRY_MS (plus jitter) until it succeeds,
    * fails any other way, or the next wait would overrun the retry budget —
    * that refusal is the one shown. The busy line shows while it retries; its
-   * Cancel sends no further attempt and returns the form to idle once any
-   * attempt in flight settles (a success still signs in).
+   * Cancel, or picking another host, sends no further attempt, reports
+   * `onAutoLoginCancel` (which ends the attempt in flight) and returns the
+   * form to idle.
    */
   async function loginRetryingWhileBusy(login: () => Promise<void>): Promise<void> {
     const deadline = Date.now() + AUTH_BUSY_RETRY_BUDGET_MS;
@@ -1046,6 +1047,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       cancelled = true;
       authBusyRetry.hidden = true;
       wake?.();
+      onAutoLoginCancel?.();
     };
     try {
       for (;;) {
@@ -1289,6 +1291,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setHost(host: string): void {
+      if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
       hostInput.value = host;
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();

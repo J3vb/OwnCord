@@ -70,6 +70,7 @@ describe("LoginForm retries a busy server", () => {
   const banner = (): HTMLElement => container.querySelector(".error-banner") as HTMLElement;
 
   it("retries a typed-password login on AUTH_BUSY until it succeeds", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     const onLogin = vi
       .fn()
       .mockRejectedValueOnce(busy(20_000))
@@ -92,9 +93,9 @@ describe("LoginForm retries a busy server", () => {
     await vi.advanceTimersByTimeAsync(1_100);
     expect(onLogin).toHaveBeenCalledTimes(2);
     // No Retry-After: the 15 s floor applies.
-    await vi.advanceTimersByTimeAsync(14_900);
+    await vi.advanceTimersByTimeAsync(13_900);
     expect(onLogin).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1_100);
+    await vi.advanceTimersByTimeAsync(200);
     expect(onLogin).toHaveBeenCalledTimes(3);
     expect(banner().classList.contains("visible")).toBe(false);
     expect(busyShown()).toBe(false);
@@ -230,6 +231,54 @@ describe("LoginForm retries a busy server", () => {
 
     page.destroy?.();
   });
+
+  it.each([
+    ["waiting", false],
+    ["with a retry in flight", true],
+  ] as const)(
+    "picking another server %s stops the retry and ends the attempt",
+    async (_label, inFlight) => {
+      let refuseInFlight: ((err: unknown) => void) | undefined;
+      const onLogin = vi.fn().mockRejectedValueOnce(busy());
+      if (inFlight) {
+        onLogin.mockImplementationOnce(
+          () =>
+            new Promise<void>((_resolve, reject) => {
+              refuseInFlight = reject;
+            }),
+        );
+      }
+      onLogin.mockRejectedValue(busy());
+      const onAutoLoginCancel = vi.fn(() => refuseInFlight?.(new Error("session ended")));
+      const page = createConnectPage(makeCallbacks({ onLogin, onAutoLoginCancel }), [
+        ...testProfiles,
+        { name: "Other Server", host: "other.example:8443" },
+      ]);
+      page.mount(container);
+
+      submitTyped();
+      await vi.advanceTimersByTimeAsync(inFlight ? 16_000 : 0);
+      expect(onLogin).toHaveBeenCalledTimes(inFlight ? 2 : 1);
+      expect(busyShown()).toBe(true);
+
+      (container.querySelectorAll(".server-item")[1] as HTMLElement).click();
+      expect(onAutoLoginCancel).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(onLogin).toHaveBeenCalledTimes(inFlight ? 2 : 1);
+      expect(busyShown()).toBe(false);
+      expect(banner().classList.contains("visible")).toBe(false);
+      expect((container.querySelector("#host") as HTMLInputElement).value).toBe(
+        "other.example:8443",
+      );
+      const submit = container.querySelector(
+        ".connect-form button[type=submit]",
+      ) as HTMLButtonElement;
+      expect(submit.disabled).toBe(false);
+
+      page.destroy?.();
+    },
+  );
 
   it("does not retry a per-IP RATE_LIMITED refusal", async () => {
     const onLogin = vi

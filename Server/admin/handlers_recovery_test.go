@@ -119,3 +119,38 @@ func TestAdminAPI_RecoveryCredential_OwnerOnlyIssueAndRedeem(t *testing.T) {
 		t.Fatal("the credential was redeemed twice")
 	}
 }
+
+// An admission refusal answers AUTH_BUSY, the code apart from the per-IP and
+// issuance RATE_LIMITED, and stores no credential.
+func TestAdminAPI_RecoveryCredential_AdmissionRefusalIsAuthBusy(t *testing.T) {
+	ctx := context.Background()
+	database := openAdminTestDB(t)
+	svc := newTestServices(database)
+	limiter := auth.NewRateLimiter()
+	limiter.SetAdmissionBudget(1)
+	svc.Auth = service.NewAuthService(database, limiter, nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{}, svc)
+	ownerToken := createAdminUser(t, database)
+	target, _ := seedUserInRole(t, database, "busy-target", 3)
+
+	release, ok := limiter.Admission().TryAcquire()
+	if !ok {
+		t.Fatal("could not take the only admission slot")
+	}
+	defer release()
+
+	w := doRequest(t, handler, http.MethodPost, "/users/"+itoa(target)+"/recovery-credential", ownerToken,
+		map[string]string{"verification": "in_person"})
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("issue over budget = %d, want 429; body = %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil || body.Error != "AUTH_BUSY" {
+		t.Fatalf("error code = %q (%v), want AUTH_BUSY", body.Error, err)
+	}
+	if a, _ := database.GetRecoveryAssist(ctx, target); a != nil {
+		t.Fatalf("a refused issuance stored a credential: %+v", a)
+	}
+}
