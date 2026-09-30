@@ -162,9 +162,13 @@
 }
 .vw-stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 12px;
   margin-bottom: 8px;
+}
+/* Each column is the same flex stack, so the two read as one grid. */
+.vw-stats-col {
+  min-width: 0;
 }
 .vw-stats-col-label {
   font-size: var(--font-size-xs);
@@ -177,13 +181,37 @@
 .vw-stats-col-label.in {
   color: var(--yellow);
 }
+/* One metric per row: label left, value right. min-width: 0 lets a long label
+   or value ellipsize instead of pushing the row wider than its column. */
 .vw-stats-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
   font-size: var(--font-size-xs);
-  color: var(--text-muted);
   line-height: 1.7;
 }
-.vw-stats-row span {
+.vw-stat-label {
+  min-width: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vw-stat-value {
+  flex-shrink: 0;
   color: var(--text-normal);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A zero rate, zero packet count or a missing RTT is de-emphasised, not
+   removed: still readable at rest, quiet next to a live value. --text-muted
+   is qualified (4.5:1), unlike --text-faint, so the value stays legible. */
+.vw-stat-value--empty {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 .vw-stats-totals {
   border-top: 1px solid var(--border);
@@ -198,9 +226,16 @@
 .vw-stats-totals-row {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
-.vw-stats-totals-row span {
-  color: var(--text-normal);
+.vw-stat-total {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.vw-stat-arrow {
+  color: var(--text-muted);
 }

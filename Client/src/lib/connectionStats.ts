@@ -259,6 +259,21 @@ export function formatRate(bytesPerSec: number): string {
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
+/**
+ * Compact transfer rate for the voice widget's stats pane: one unit, a
+ * rounded value and no second Mbps figure, so a value never wraps at the
+ * widget's narrow width (`331 kB/s`, not `331.25 kB/s (2.6 Mbps)`).
+ */
+export function formatRateCompact(bytesPerSec: number): string {
+  const bytes = Math.max(0, bytesPerSec);
+  if (bytes < 1000) return `${Math.round(bytes)} B/s`;
+  const kb = bytes / 1000;
+  if (kb < 100) return `${kb.toFixed(1)} kB/s`;
+  if (kb < 1000) return `${kb.toFixed(0)} kB/s`;
+  const mb = bytes / 1_000_000;
+  return `${mb >= 10 ? mb.toFixed(0) : mb.toFixed(1)} MB/s`;
+}
+
 /** Format bytes/sec as human-readable Mbps (for bandwidth display). */
 export function formatBitrate(bytesPerSec: number): string {
   const mbps = (bytesPerSec * 8) / 1_000_000;

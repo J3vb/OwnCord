@@ -13,6 +13,7 @@ import {
   createConnectionStatsPoller,
   formatBytes,
   formatRate,
+  formatRateCompact,
   formatBitrate,
   type ConnectionStatsPoller,
   type QualityLevel,
@@ -46,6 +47,18 @@ describe("formatRate", () => {
     expect(formatRate(0)).toBe("0 B/s");
     expect(formatRate(1500)).toBe("1.50 kB/s");
     expect(formatRate(2_000_000)).toBe("2.00 MB/s");
+  });
+});
+
+describe("formatRateCompact", () => {
+  it("keeps a single unit and drops the redundant bitrate figure", () => {
+    expect(formatRateCompact(0)).toBe("0 B/s");
+    expect(formatRateCompact(331)).toBe("331 B/s");
+    expect(formatRateCompact(1500)).toBe("1.5 kB/s");
+    // The widget's old "331.25 kB/s (2.6 Mbps)" wrapped; compact keeps one unit.
+    expect(formatRateCompact(331_250)).toBe("331 kB/s");
+    expect(formatRateCompact(2_000_000)).toBe("2.0 MB/s");
+    expect(formatRateCompact(12_000_000)).toBe("12 MB/s");
   });
 });
 

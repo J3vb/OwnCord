@@ -79,6 +79,27 @@ and only when it changes something a contributor or fork holder must do
 - **Half-written messages are no longer lost when you switch channels.** Each channel keeps its own draft — the text, the reply you had selected and any files you had staged — and restores it when you come back. And when the connection drops or slow mode gates the composer, the textarea is locked rather than disabled, so your caret stays exactly where you left it, and pressing Send says why it is blocked. An unfinished edit is not kept, and a file staged more than about 50 minutes ago must be attached again.
 - **`@`-mentions and search results now show display names.** Typing `@Ali` used to find only usernames, so it missed a member displayed as Alice; the mention list now matches display names too and shows each member's display name with their `@username` beside it, and search results show the author the same way.
 - **A file upload now shows its progress instead of an indefinite spinner.** The chip on each attachment fills as the bytes move, so a large file on a slow connection no longer looks stuck. Until the transfer reports its first byte the bar is indeterminate, as before.
+
+### Messages & files
+
+- **Large attachments no longer fail on a slow connection.** Uploads and
+  downloads used to be cut after 30 seconds no matter how steadily they were
+  moving, so a 25 MB file on a 1 Mbit/s uplink was lost mid-transfer and a
+  download stopped without an error. The server now keeps a transfer alive
+  while it is making progress and gives up on one that has stalled; any
+  single transfer is still closed after 10 minutes.
+- **Removing an attachment that is still uploading now cancels it.** The ×
+  only hid the preview while the upload kept running, and Send stayed blocked
+  until it finished or failed. The upload is now stopped, Send is available at
+  once, and no error is shown for it.
+- **A file upload now shows its progress instead of an indefinite spinner.**
+  The chip on each attachment fills as the bytes move, so a large file on a
+  slow connection no longer looks stuck. Until the transfer reports its first
+  byte the bar is indeterminate, as before.
+
+### Voice
+
+- **The voice connection panel is tidier.** The transport-stats readout now lays Outgoing and Incoming out as a two-column grid of label/value rows, each value on one line with a single unit — a rate reads "331 kB/s" instead of the old "331.25 kB/s (2.6 Mbps)" that wrapped. A zero rate or a missing RTT is dimmed rather than shown at full strength, and the in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
 - **The global Mute and Deafen shortcuts are now rebindable.** They shipped fixed as Ctrl+Shift+M / Ctrl+Shift+D, so anyone whose game or another app already owned that combination could not use them. Settings → Keybinds now has a Global Shortcuts section that captures Ctrl+Shift plus a letter, digit, function key, Space or navigation key (Escape cancels the capture, Tab moves on), rejects a combination already used by the other action or by the in-app Toggle Camera (Ctrl+Shift+V), and applies the change immediately — the running poller picks up the new keys without a restart. The choice is remembered per device. The section is hidden where global keys cannot fire (macOS and Wayland), where the tray items and the in-app shortcuts still work; on Linux/X11 the global keys still use the key positions of a US layout.
 - **Voice can now run on a single UDP port.** By default LiveKit sends media across the 10,000-port UDP range `50000-60000`, which is awkward on a restrictive firewall or a router with a small port-forwarding table. Setting `voice.udp_port` (for example `7882`) makes OwnCord write LiveKit's single-port `udp_port` into the generated `livekit.yaml` instead, so you forward one UDP port. `0` (the default) keeps the range, so nothing changes on an existing install; the reachability report and the "joins but no audio" guidance name whichever form you chose. On the Docker stack, edit `livekit.yaml` and `docker-compose.yml` directly (the example shows how).
 - **Mute and Deafen now work while OwnCord is in the background.** Ctrl+M and Ctrl+D fire only with the window focused, so anyone in a call with a game or another app in front had to switch windows to mute. Ctrl+Shift+M and Ctrl+Shift+D now mute and deafen whether or not OwnCord is focused, on Windows and on Linux/X11 (exactly those keys — with Alt or Win/Super also held they are left to the other app; on Linux/X11 they use the key positions of a US layout), and the tray menu gains Mute / Unmute and Deafen / Undeafen items that work everywhere. On a Wayland desktop the global keys are not available yet, even with XWayland (the desktop portal API is not wired); Settings says so, and the tray items still work.

@@ -149,35 +149,26 @@ describe("Screen Share Button in VoiceWidget", () => {
     expect(shareBtn.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("share button has active-ctrl and sharing-active class when screensharing", () => {
+  it("share button has active-ctrl and a swapped icon when screensharing", () => {
     setVoiceConnected(true);
     comp = createVoiceWidget(handlers);
     comp.mount(container);
 
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
     expect(shareBtn.classList.contains("active-ctrl")).toBe(true);
-    expect(shareBtn.classList.contains("sharing-active")).toBe(true);
+    expect(shareBtn.querySelector("svg")?.getAttribute("data-icon")).toBe("monitor-off");
   });
 
-  it("share button shows 'Sharing' label when active", () => {
+  // The redesign (captain 2026-09-30) removed the squeezed "Sharing" text
+  // label: the active state is carried by the button's own aria-pressed
+  // state, icon swap and tint.
+  it("share button keeps its active state on the button, with no text label", () => {
     setVoiceConnected(true);
     comp = createVoiceWidget(handlers);
     comp.mount(container);
 
-    const label = container.querySelector(".vw-share-label") as HTMLElement;
-    expect(label).not.toBeNull();
-    expect(label.textContent).toBe("Sharing");
-    expect(label.style.display).toBe("inline");
-  });
-
-  it("share button hides 'Sharing' label when inactive", () => {
-    setVoiceConnected(false);
-    comp = createVoiceWidget(handlers);
-    comp.mount(container);
-
-    const label = container.querySelector(".vw-share-label") as HTMLElement;
-    expect(label).not.toBeNull();
-    expect(label.textContent).toBe("");
-    expect(label.style.display).toBe("none");
+    const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
+    expect(shareBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".vw-share-label")).toBeNull();
   });
 });
