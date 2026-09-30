@@ -630,6 +630,7 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 | `/admin/api/backups`                | GET    | List all backups (newest first)                                                     |
 | `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                                        |
 | `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first)           |
+| `/admin/api/backups/{name}/link`    | POST   | Issue a short-lived single-use download link for one backup (owner-only)            |
 | `/admin/api/archive`                | GET    | Download the full archive (owner-only; database snapshot + `data/` + `config.yaml`) |
 | `/admin/api/archive/link`           | POST   | Issue a short-lived single-use archive download link (owner-only)                   |
 

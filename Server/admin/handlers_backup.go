@@ -158,17 +158,27 @@ func handleListBackups() http.HandlerFunc {
 	}
 }
 
+// resolveBackupName reads the {name} path parameter and joins it onto the
+// backup directory, refusing a name that could leave it. On false it has
+// already written the 400.
+func resolveBackupName(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	name := chi.URLParam(r, "name")
+	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+		return "", "", false
+	}
+	target := filepath.Join(backupBaseDir, name)
+	if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+		return "", "", false
+	}
+	return name, target, true
+}
+
 func handleDeleteBackup(database *db.DB) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := chi.URLParam(r, "name")
-		if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
-			return
-		}
-
-		target := filepath.Join(backupBaseDir, name)
-		if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+		name, target, ok := resolveBackupName(w, r)
+		if !ok {
 			return
 		}
 
@@ -224,15 +234,8 @@ func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target st
 
 func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := chi.URLParam(r, "name")
-		if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
-			return
-		}
-
-		target := filepath.Join(backupBaseDir, name)
-		if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+		name, target, ok := resolveBackupName(w, r)
+		if !ok {
 			return
 		}
 

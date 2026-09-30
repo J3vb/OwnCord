@@ -380,7 +380,7 @@ async function renderBackups(){
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></section>';
   return html;
@@ -458,6 +458,15 @@ async function downloadArchive(){
     if(state.token===token)showToast(e.message,'error')
   }
   finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}
+}
+
+/* One backup, on the archive's pattern: a single-use link for that file,
+   opened as a plain navigation so the browser streams it to disk. */
+async function downloadBackup(name){
+  try{
+    const r=await api('POST','/backups/'+encodeURIComponent(name)+'/link',{});
+    const a=document.createElement('a');a.href=r.path;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  }catch(e){showToast(e.message,'error')}
 }
 
 /* Restore overwrites the live database and restarts the server, so it asks
@@ -598,7 +607,7 @@ async function confirmApplyUpdate(){
 }
 
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
-  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,discardSettings,markBackupPolicyChanged,markSettingsChanged,
+  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,
   reloadPage(){location.reload()},

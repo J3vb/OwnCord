@@ -122,7 +122,10 @@ minute, and never written to a log or audit row. Like the log-stream ticket it
 stores the hash of the credential that asked for it and re-resolves it on
 redemption, so a revoked session, a ban or a lost Owner role voids an
 outstanding link; redeeming an unknown, expired, spent or voided token is a
-uniform `403`.
+uniform `403`. Downloading a single backup from the panel uses the same
+pattern (`POST /admin/api/backups/{name}/link`), with the token additionally
+bound to that one file and kept in a separate store, so an archive token opens
+no backup and a backup token opens neither the archive nor another backup.
 
 `POST /admin/api/setup` is unauthenticated: it is how the first Owner account
 comes to exist, and until B4-10 the only thing standing in front of it was
@@ -272,7 +275,7 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`,
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_download`,
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
   `update_failed`, `ws_connect`
 
