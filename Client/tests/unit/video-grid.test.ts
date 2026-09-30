@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -1494,8 +1495,17 @@ describe("VideoGrid", () => {
       const mute = calls.querySelector<HTMLButtonElement>("[data-call-control='mute']")!;
       mute.click();
       expect(onMuteToggle).toHaveBeenCalledTimes(1);
-      grid.setCallState({ muted: true, deafened: false });
+      grid.setCallState({ muted: true, deafened: false, listenOnly: false });
       expect(mute.getAttribute("aria-pressed")).toBe("true");
+      // Listen-only: no mic to mute, so the control reads mic-off and is inert.
+      grid.setCallState({ muted: false, deafened: false, listenOnly: true });
+      expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(mute.disabled).toBe(true);
+      expect(mute.title).toBe("Listening only — no microphone access");
+      expect(keyword(cascadedDeclaration(".video-fs-btn:disabled", "opacity"))).toBe("0.5");
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false });
+      expect(mute.disabled).toBe(false);
+      expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
       calls.querySelector<HTMLButtonElement>("[data-call-control='leave']")!.click();
       expect(onLeave).toHaveBeenCalledTimes(1);
 

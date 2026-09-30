@@ -1299,10 +1299,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             videoGrid?.setUserAudioState(audioState);
           }
           const selfMuted = isSelfMuted(state);
-          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}`;
+          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}`;
           if (callKey !== prevCallState) {
             prevCallState = callKey;
-            videoGrid?.setCallState({ muted: selfMuted, deafened: state.localDeafened });
+            videoGrid?.setCallState({
+              muted: selfMuted,
+              deafened: state.localDeafened,
+              listenOnly: state.listenOnly,
+            });
           }
 
           // Seed the signature with the channel id so ANY voice-channel

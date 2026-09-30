@@ -318,6 +318,10 @@
 .video-fs-btn[aria-pressed="true"] {
   background: var(--danger-fill);
 }
+.video-fs-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .video-fs-btn--leave {
   width: 56px;
   border-radius: var(--radius-pill);

@@ -93,7 +93,12 @@ export interface VideoGridComponent extends MountableComponent {
   setUserAudioState(state: ReadonlyMap<number, { muted: boolean; deafened: boolean }>): void;
   setCallbacks(callbacks: VideoGridCallbacks): void;
   /** Your mute and deafen state, for a full-screen tile's call controls. */
-  setCallState(state: { readonly muted: boolean; readonly deafened: boolean }): void;
+  setCallState(state: {
+    readonly muted: boolean;
+    readonly deafened: boolean;
+    /** Joined without a microphone: the mute control reads mic-off, inert. */
+    readonly listenOnly: boolean;
+  }): void;
   /** Show or hide the grid header's exit control (video mode only). */
   setExitVisible(visible: boolean): void;
 }
@@ -360,7 +365,7 @@ export function createVideoGrid(): VideoGridComponent {
   /** The tile in HTML full screen, or in the theatre fallback. */
   let fullscreenTile: number | null = null;
   let theatreTile: number | null = null;
-  let callState = { muted: false, deafened: false };
+  let callState = { muted: false, deafened: false, listenOnly: false };
   let exitBtn: HTMLButtonElement | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let statsTile: number | null = null;
@@ -730,12 +735,16 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function drawCallState(bar: Element): void {
-    const mute = bar.querySelector<HTMLElement>("[data-call-control='mute']");
+    const mute = bar.querySelector<HTMLButtonElement>("[data-call-control='mute']");
     const deafen = bar.querySelector<HTMLElement>("[data-call-control='deafen']");
     if (mute !== null) {
       mute.setAttribute("aria-pressed", String(callState.muted));
       mute.querySelector("svg")?.remove();
-      mute.appendChild(createIcon(callState.muted ? "mic-off" : "mic", 18));
+      mute.appendChild(createIcon(callState.muted || callState.listenOnly ? "mic-off" : "mic", 18));
+      mute.disabled = callState.listenOnly;
+      mute.title = voiceText(
+        callState.listenOnly ? "widget.control.listenOnly" : "widget.control.mute",
+      );
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(callState.deafened));
@@ -1354,8 +1363,12 @@ export function createVideoGrid(): VideoGridComponent {
     setCallbacks(next: VideoGridCallbacks): void {
       callbacks = next;
     },
-    setCallState(next: { readonly muted: boolean; readonly deafened: boolean }): void {
-      callState = { muted: next.muted, deafened: next.deafened };
+    setCallState(next: {
+      readonly muted: boolean;
+      readonly deafened: boolean;
+      readonly listenOnly: boolean;
+    }): void {
+      callState = { muted: next.muted, deafened: next.deafened, listenOnly: next.listenOnly };
       for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
     },
     setExitVisible(visible: boolean): void {

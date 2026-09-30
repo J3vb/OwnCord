@@ -20,6 +20,7 @@ import { membersStore, updateMemberProfile, updatePresence } from "../../src/sto
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
 import type { RingState, OutgoingCallState } from "../../src/lib/call-ring";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 const SELF = 1;
 const OTTO = 2;
@@ -427,6 +428,26 @@ describe("DmCallPanel — connected", () => {
     const selfBadge = root.querySelector(`.dcp-avatar[data-user-id='${SELF}'] .dcp-avatar-badge`)!;
     expect((selfBadge as HTMLElement).hidden).toBe(false);
     expect(selfBadge.getAttribute("title")).toBe("Muted");
+  });
+
+  it("shows a listen-only join's mic as off and inert, not a live mic", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root, opts } = mount();
+    patchVoice({ listenOnly: true, localMuted: false });
+
+    const mute = q(root, "dcp-mute")!;
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.disabled).toBe(true);
+    expect(mute.title).toBe("Listening only — no microphone access");
+    expect(keyword(cascadedDeclaration(".dcp-btn:disabled", "opacity"))).toBe("0.5");
+    mute.click();
+    expect(opts.onMuteToggle).not.toHaveBeenCalled();
+
+    // A granted microphone makes it a live control again.
+    patchVoice({ listenOnly: false });
+    expect(mute.disabled).toBe(false);
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
   });
 
   it("does not read a push-to-talk user as muted between presses", () => {

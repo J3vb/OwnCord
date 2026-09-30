@@ -789,12 +789,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (mute !== null) {
       const selfMuted = isSelfMuted(voice);
       mute.setAttribute("aria-pressed", String(selfMuted));
-      swapIcon(mute, selfMuted ? "mic-off" : "mic", 20);
-      mute.disabled = frozen || voice.localServerMuted === true;
+      swapIcon(mute, selfMuted || voice.listenOnly ? "mic-off" : "mic", 20);
+      mute.disabled = frozen || voice.localServerMuted === true || voice.listenOnly;
       mute.title =
         voice.localServerMuted === true
           ? t("widget.mutedByModerator")
-          : reason || t("widget.control.mute");
+          : voice.listenOnly
+            ? t("widget.control.listenOnly")
+            : reason || t("widget.control.mute");
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(voice.localDeafened));
