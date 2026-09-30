@@ -273,7 +273,6 @@ async fn handle_connection<R: Runtime>(
             remote_host,
             pin.as_deref(),
             head.as_bytes(),
-            http_pool::is_head_request(&buf),
             &mut local,
             || connect_verified(&app, remote_host, &store_key),
         )
@@ -732,7 +731,6 @@ mod tests {
                 host,
                 Some(pin),
                 head.as_bytes(),
-                false,
                 &mut local,
                 || async {
                     let (tls, fingerprint) = dial(host, true).await;

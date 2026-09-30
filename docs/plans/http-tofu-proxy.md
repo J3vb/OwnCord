@@ -227,13 +227,18 @@ cold open that pools 12 of the 14 calls listed above; `POST /auth/login` and
   dropped at checkout. Bytes are relayed unchanged apart from the response's
   `Connection` field, which the webview gets as one `Connection: close`.
 - **Bounded.** At most 4 idle connections per host, each closed 30 s after
-  it went idle (the server's own idle timeout is 120 s). Response heads are
-  capped at 64 KiB and the data phase keeps its 600 s deadline.
+  it went idle (the server's own idle timeout is 120 s). Idle age is also
+  measured on the wall clock, so a connection that sat idle across a system
+  suspend (which the monotonic clock does not count) is not handed out.
+  Response heads are capped at 64 KiB and the data phase keeps its 600 s
+  deadline.
 - **One retry.** If a pooled connection fails before any response byte
-  reaches the webview (the server closed it as the request arrived), the
-  request is sent once more on a fresh, fully verified connection. A failure
-  after that, or after bytes reached the webview, is returned to the webview
-  as before.
+  reaches the webview (the server closed it as the request arrived), or does
+  not start answering within 10 s (the connect and handshake bound; its
+  network path died while it sat idle, so no FIN or RST ever arrives), the
+  request is sent once more on a fresh, fully verified connection, which
+  keeps the full 600 s deadline. A failure after that, or after bytes reached
+  the webview, is returned to the webview as before.
 
 **TCP_NODELAY.** Measuring this showed a second, separate cost on the one-shot
 path: with Nagle's algorithm on, the request waited behind the handshake's

@@ -22,9 +22,13 @@
 //   that did not ask to close, with nothing unread after it, returns its
 //   connection to the pool. Anything else is relayed until close and dropped.
 // - Bounded: at most MAX_IDLE_PER_HOST idle connections per host, each closed
-//   after IDLE_TIMEOUT, well under the server's 120 s idle timeout.
+//   after IDLE_TIMEOUT, well under the server's 120 s idle timeout. Idle age
+//   also counts on the wall clock, so a connection idle across a system
+//   suspend (which the monotonic clock skips) is not handed out.
 // - A pooled connection that fails before any response byte reaches the
-//   webview is retried once on a fresh connection. That is safe only because
+//   webview, or does not start answering within REUSED_ANSWER_TIMEOUT (its
+//   network path died while idle), is retried once on a fresh connection,
+//   which keeps the full data-phase deadline. That is safe only because
 //   pooled requests are bodyless and safe-method (GET, HEAD, OPTIONS); every
 //   other request keeps the one-connection-per-request path in http_proxy.
 
@@ -34,6 +38,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
+use std::time::SystemTime;
 use tokio::io::{
     AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
     ErrorKind, ReadBuf,
@@ -50,6 +55,11 @@ pub(crate) const MAX_IDLE_PER_HOST: usize = 4;
 /// How long an idle connection is kept. Well under the server's 120 s
 /// `IdleTimeout`, so the server rarely closes one first.
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a reused connection may take to start answering, the same bound
+/// `connect_tls` puts on a fresh connect and handshake. A connection whose
+/// network path died while it sat idle gets no FIN or RST, so without this it
+/// would hold the request until the data-phase deadline instead of retrying.
+const REUSED_ANSWER_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The reply the webview gets when the TOFU check refuses a connection.
 pub(crate) const BAD_GATEWAY: &[u8] =
@@ -70,6 +80,19 @@ struct IdleConn<S> {
     /// The fingerprint this connection's handshake verified.
     fingerprint: String,
     since: Instant,
+    /// `since` on the wall clock, which unlike `Instant` keeps counting while
+    /// the system is suspended.
+    since_wall: SystemTime,
+}
+
+impl<S> IdleConn<S> {
+    fn is_expired(&self, now: Instant) -> bool {
+        now.duration_since(self.since) >= IDLE_TIMEOUT
+            || !self
+                .since_wall
+                .elapsed()
+                .is_ok_and(|age| age < IDLE_TIMEOUT)
+    }
 }
 
 impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
@@ -95,9 +118,7 @@ impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
         let mut idle = self.lock();
         let conns = idle.get_mut(host)?;
         let now = Instant::now();
-        conns.retain(|conn| {
-            pin == Some(conn.fingerprint.as_str()) && now.duration_since(conn.since) < IDLE_TIMEOUT
-        });
+        conns.retain(|conn| pin == Some(conn.fingerprint.as_str()) && !conn.is_expired(now));
         let mut found = None;
         while let Some(mut conn) = conns.pop() {
             if is_quiet(&mut conn.stream) {
@@ -124,6 +145,7 @@ impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
                 stream,
                 fingerprint,
                 since: Instant::now(),
+                since_wall: SystemTime::now(),
             });
         }
         let expiry = Instant::now() + IDLE_TIMEOUT;
@@ -146,7 +168,7 @@ impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
     fn prune_expired(&self) {
         let now = Instant::now();
         self.lock().retain(|_, conns| {
-            conns.retain(|conn| now.duration_since(conn.since) < IDLE_TIMEOUT);
+            conns.retain(|conn| !conn.is_expired(now));
             !conns.is_empty()
         });
     }
@@ -183,7 +205,7 @@ pub(crate) fn is_replayable(head: &[u8]) -> bool {
         && header_value(head, "expect").is_none()
 }
 
-pub(crate) fn is_head_request(head: &[u8]) -> bool {
+fn is_head_request(head: &[u8]) -> bool {
     method(head) == b"HEAD"
 }
 
@@ -219,15 +241,16 @@ struct ResponseHead {
 }
 
 /// Send `head` on `stream` and relay the response to `local`, then return the
-/// connection to the pool if the response left it reusable.
+/// connection to the pool if the response left it reusable. A `reused`
+/// connection must start answering within REUSED_ANSWER_TIMEOUT.
 pub(crate) async fn exchange<S, L>(
     pool: &Arc<ConnPool<S>>,
     host: &str,
     fingerprint: String,
     mut stream: S,
     head: &[u8],
-    is_head: bool,
     local: &mut L,
+    reused: bool,
 ) -> Result<(), ExchangeError>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -235,7 +258,7 @@ where
 {
     let reusable = timeout(
         crate::http_proxy::DATA_PHASE_TIMEOUT,
-        relay(&mut stream, head, is_head, local),
+        relay(&mut stream, head, local, reused),
     )
     .await
     .map_err(|_| ExchangeError::fatal("data phase timed out"))??;
@@ -249,8 +272,8 @@ where
 async fn relay<S, L>(
     stream: &mut S,
     head: &[u8],
-    is_head: bool,
     local: &mut L,
+    reused: bool,
 ) -> Result<bool, ExchangeError>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -263,6 +286,15 @@ where
     let mut remote = BufReader::new(stream);
     remote.get_mut().write_all(head).await.map_err(unsent)?;
     remote.get_mut().flush().await.map_err(unsent)?;
+    if reused {
+        timeout(REUSED_ANSWER_TIMEOUT, remote.fill_buf())
+            .await
+            .map_err(|_| ExchangeError {
+                retryable: true,
+                source: "pooled connection did not answer".into(),
+            })?
+            .map_err(unsent)?;
+    }
 
     let mut forwarded = false;
     let (raw, response) = loop {
@@ -273,7 +305,7 @@ where
                 unsent(e)
             }
         })?;
-        let response = parse_head(&raw, is_head).map_err(ExchangeError::fatal)?;
+        let response = parse_head(&raw, is_head_request(head)).map_err(ExchangeError::fatal)?;
         match response.status {
             101 => return Err(ExchangeError::fatal("unexpected protocol switch")),
             100..=199 => {
@@ -525,7 +557,6 @@ pub(crate) async fn forward_replayable<S, L, D, F>(
     host: &str,
     pin: Option<&str>,
     head: &[u8],
-    is_head: bool,
     local: &mut L,
     dial: D,
 ) -> Result<(), BoxError>
@@ -536,7 +567,7 @@ where
     F: Future<Output = Result<Fresh<S>, BoxError>>,
 {
     if let (Some(stream), Some(pin)) = (pool.checkout(host, pin), pin) {
-        match exchange(pool, host, pin.to_string(), stream, head, is_head, local).await {
+        match exchange(pool, host, pin.to_string(), stream, head, local, true).await {
             Ok(()) => return Ok(()),
             Err(e) if e.retryable => debug!(
                 "[http_proxy] pooled connection to {host} failed before a response ({}); retrying on a fresh one",
@@ -552,7 +583,7 @@ where
             return Err(e);
         }
     };
-    exchange(pool, host, fingerprint, stream, head, is_head, local)
+    exchange(pool, host, fingerprint, stream, head, local, false)
         .await
         .map_err(|e| e.source)
 }
@@ -569,6 +600,7 @@ mod tests {
     const OTHER_FP: &str = "bb:bb";
     const GET: &[u8] =
         b"GET /api/v1/server-info HTTP/1.1\r\nHost: chat.example:8443\r\nConnection: keep-alive\r\n\r\n";
+    const HEAD: &[u8] = b"HEAD /api/v1/server-info HTTP/1.1\r\nHost: chat.example:8443\r\n\r\n";
     const OK: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
 
     /// A scripted upstream connection. It reads one request head per entry in
@@ -618,20 +650,12 @@ mod tests {
         let (mut local, mut webview) = duplex(64 * 1024);
         let dialed = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&dialed);
-        let result = forward_replayable(
-            pool,
-            host,
-            pin,
-            GET,
-            false,
-            &mut local,
-            move || async move {
-                flag.store(true, SeqCst);
-                fresh
-                    .map(|stream| Fresh::Verified(stream, FP.to_string()))
-                    .ok_or_else(|| BoxError::from("no fresh connection scripted"))
-            },
-        )
+        let result = forward_replayable(pool, host, pin, GET, &mut local, move || async move {
+            flag.store(true, SeqCst);
+            fresh
+                .map(|stream| Fresh::Verified(stream, FP.to_string()))
+                .ok_or_else(|| BoxError::from("no fresh connection scripted"))
+        })
         .await;
         drop(local);
         let mut got = String::new();
@@ -648,7 +672,8 @@ mod tests {
         let pool = ConnPool::new();
         let (conn, _) = upstream(vec![Some(reply)], then_close);
         let (mut local, mut webview) = duplex(64 * 1024);
-        let result = exchange(&pool, HOST, FP.into(), conn, GET, is_head, &mut local).await;
+        let request = if is_head { HEAD } else { GET };
+        let result = exchange(&pool, HOST, FP.into(), conn, request, &mut local, false).await;
         assert!(
             result.is_ok(),
             "exchange failed: {}",
@@ -779,6 +804,33 @@ mod tests {
         );
         assert!(result.expect("retried request").ends_with("\r\n\r\nok"));
         assert_eq!(fresh_seen.load(SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pooled_connection_that_never_answers_falls_back_to_a_fresh_one() {
+        let pool = ConnPool::new();
+        // Answers once, then reads the next request and never answers (a
+        // path that died while the connection sat idle).
+        let (conn, _) = upstream(vec![Some(OK)], false);
+        fetch(&pool, HOST, Some(FP), Some(conn))
+            .await
+            .0
+            .expect("first request");
+
+        let start = Instant::now();
+        let (fresh, fresh_seen) = upstream(vec![Some(OK)], false);
+        let (result, dialed) = fetch(&pool, HOST, Some(FP), Some(fresh)).await;
+        assert!(
+            dialed,
+            "the unanswered pooled request is retried on a fresh connection"
+        );
+        assert!(result.expect("retried request").ends_with("\r\n\r\nok"));
+        assert_eq!(fresh_seen.load(SeqCst), 1);
+        assert!(
+            start.elapsed() <= REUSED_ANSWER_TIMEOUT,
+            "the retry waits {:?}, not the data-phase deadline",
+            start.elapsed()
+        );
     }
 
     #[tokio::test]
