@@ -13,6 +13,7 @@ use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
 use livekit::options::{TrackPublishOptions, VideoEncoding};
 use livekit::prelude::*;
+use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
@@ -51,6 +52,45 @@ fn key_provider_options() -> KeyProviderOptions {
         failure_tolerance: -1,
         ..Default::default()
     }
+}
+
+/// How long a resumed video's enable request gets before its layer is asked
+/// for (`set_video_view`).
+const LAYER_AFTER_ENABLE: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// The webview's name for a simulcast layer.
+pub fn video_quality(name: &str) -> Result<VideoQuality, String> {
+    match name {
+        "low" => Ok(VideoQuality::Low),
+        "medium" => Ok(VideoQuality::Medium),
+        "high" => Ok(VideoQuality::High),
+        other => Err(format!("unknown video quality {other}")),
+    }
+}
+
+/// Layer control for one remote video (P3-07, the web path's
+/// `setEnabled`/`setVideoQuality`): a stream no one sees stops, a shown one
+/// comes at `quality`. The webview maps a tile's size to a quality
+/// (`video_quality`) by choice; livekit 0.9.3's `update_video_dimensions` is
+/// not used. Runs without the session lock;
+/// the webview sends a publication's next view only once this returns.
+pub async fn set_video_view(
+    publication: &RemoteTrackPublication,
+    enabled: bool,
+    quality: VideoQuality,
+) {
+    let resumed = enabled && !publication.is_enabled();
+    publication.set_enabled(enabled);
+    if !enabled || !publication.simulcasted() {
+        return;
+    }
+    if resumed {
+        // The SDK sends each request from its own task, and the enable
+        // carries the full published size, which the SFU prefers over a
+        // quality: let it go first.
+        tokio::time::sleep(LAYER_AFTER_ENABLE).await;
+    }
+    publication.set_video_quality(quality);
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -757,6 +797,22 @@ impl NativeSession {
         self.screen.take();
     }
 
+    pub fn remote_publication(
+        &self,
+        identity: &str,
+        sid: &str,
+    ) -> Result<RemoteTrackPublication, String> {
+        let participants = self.room.remote_participants();
+        let participant = participants
+            .get(&ParticipantIdentity::from(identity.to_string()))
+            .ok_or_else(|| format!("unknown participant {identity}"))?;
+        let track_sid =
+            TrackSid::try_from(sid.to_string()).map_err(|_| format!("bad track sid {sid}"))?;
+        participant
+            .get_track_publication(&track_sid)
+            .ok_or_else(|| format!("unknown track {sid}"))
+    }
+
     /// Deafen support: (un)subscribe one remote publication.
     pub fn set_subscribed(
         &mut self,
@@ -764,16 +820,8 @@ impl NativeSession {
         sid: &str,
         subscribed: bool,
     ) -> Result<(), String> {
-        let participants = self.room.remote_participants();
-        let participant = participants
-            .get(&ParticipantIdentity::from(identity.to_string()))
-            .ok_or_else(|| format!("unknown participant {identity}"))?;
-        let track_sid =
-            TrackSid::try_from(sid.to_string()).map_err(|_| format!("bad track sid {sid}"))?;
-        let publication = participant
-            .get_track_publication(&track_sid)
-            .ok_or_else(|| format!("unknown track {sid}"))?;
-        publication.set_subscribed(subscribed);
+        self.remote_publication(identity, sid)?
+            .set_subscribed(subscribed);
         Ok(())
     }
 
@@ -960,6 +1008,14 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains(r#""type":"disconnected""#));
+    }
+
+    #[test]
+    fn video_qualities_are_the_web_names() {
+        assert_eq!(video_quality("low"), Ok(VideoQuality::Low));
+        assert_eq!(video_quality("medium"), Ok(VideoQuality::Medium));
+        assert_eq!(video_quality("high"), Ok(VideoQuality::High));
+        assert!(video_quality("off").is_err());
     }
 
     #[test]

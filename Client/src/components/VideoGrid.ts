@@ -20,10 +20,12 @@ import {
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
-import type { StreamSample } from "../features/voice/remoteTracks";
+import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 
 /** How often a watched stream's quality chip refreshes. */
 const STATS_POLL_MS = 2000;
+/** How long tile sizes settle (a window drag) before their views are sent. */
+const VIEW_RESIZE_MS = 150;
 
 const log = createLogger("VideoGrid");
 
@@ -57,6 +59,8 @@ export interface VideoGridCallbacks {
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
   readonly getStreamStats?: (tileId: number) => Promise<StreamSample | null>;
+  /** What a remote tile shows now, so its stream sends only that. */
+  readonly setStreamView?: (tileId: number, view: VideoView) => void;
   /** Leave video mode entirely (grid or focus) back to the chat. The grid's
    *  own header control offers this, so no state is a dead end. */
   readonly onExitGrid?: () => void;
@@ -239,6 +243,8 @@ interface CellEntry {
   applyVolume?: (volume: number, muted: boolean) => void;
   /** The previous receiver sample, for the frame rate. */
   prevSample?: StreamSample;
+  /** The view last reported for the tile, as JSON. */
+  view?: string;
 }
 
 /** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
@@ -369,6 +375,7 @@ export function createVideoGrid(): VideoGridComponent {
   let exitBtn: HTMLButtonElement | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let statsTile: number | null = null;
+  let viewResizeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Owns the grid's document listeners (full-screen changes, theatre keys). */
   const gridListeners = new Disposable();
 
@@ -612,6 +619,7 @@ export function createVideoGrid(): VideoGridComponent {
     focusedTileId = tileId;
     rebuildFocusLayout();
     syncStatsPolling();
+    syncViews();
   }
 
   // --- Full screen -----------------------------------------------------------
@@ -710,6 +718,7 @@ export function createVideoGrid(): VideoGridComponent {
       }
     }
     syncStatsPolling();
+    syncViews();
   }
 
   function buildCallControls(cc: NonNullable<VideoGridCallbacks["callControls"]>): HTMLElement {
@@ -843,6 +852,52 @@ export function createVideoGrid(): VideoGridComponent {
     pop.focus();
   }
 
+  // --- Video layers (P3-07) -------------------------------------------------------
+
+  /** Nothing while no one can see the tile (grid closed, app hidden or
+   *  minimised, stopped); the top layer for the stream you are watching
+   *  (focused, full screen or popped out); otherwise its rendered size. */
+  function viewOf(id: number, entry: CellEntry): VideoView {
+    const video = entry.el.querySelector("video");
+    if (video !== null && document.pictureInPictureElement === video) return { enabled: true };
+    const { width, height } = entry.el.getBoundingClientRect();
+    if (document.hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
+      return { enabled: false };
+    }
+    if (id === focusedTileId || isFullscreen(id)) return { enabled: true };
+    return {
+      enabled: true,
+      size: {
+        width: Math.round(width * devicePixelRatio),
+        height: Math.round(height * devicePixelRatio),
+      },
+    };
+  }
+
+  /** Report each remote tile's view when it changes. adaptiveStream is off
+   *  (it froze tiles, OC-0455), so this is what keeps hidden and small tiles
+   *  from pulling the top layer. */
+  function syncViews(): void {
+    for (const [id, entry] of cells) {
+      if (entry.config === undefined || entry.config.isSelf) continue;
+      const view = viewOf(id, entry);
+      const key = JSON.stringify(view);
+      if (key === entry.view) continue;
+      entry.view = key;
+      callbacks.setStreamView?.(id, view);
+    }
+  }
+
+  /** Resizes come every frame while the window drags: send the views once
+   *  the sizes settle. */
+  function scheduleViewSync(): void {
+    if (viewResizeTimer !== null) clearTimeout(viewResizeTimer);
+    viewResizeTimer = setTimeout(() => {
+      viewResizeTimer = null;
+      syncViews();
+    }, VIEW_RESIZE_MS);
+  }
+
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
   }
@@ -854,6 +909,7 @@ export function createVideoGrid(): VideoGridComponent {
     if (entry === undefined) return;
     const cell = entry.el;
     cell.classList.toggle("video-cell--stopped", stopped);
+    syncViews();
     const video = cell.querySelector("video");
     if (video !== null) video.hidden = stopped;
     cell.querySelector(".video-stopped")?.remove();
@@ -954,6 +1010,9 @@ export function createVideoGrid(): VideoGridComponent {
             log.debug("Video autoplay rejected (track replacement)", { userId, err });
           });
           attachTrackLifecycle(userId, stream);
+          // A new track can come with a new publication (a reconnect): tell it too.
+          existing.view = undefined;
+          syncViews();
         }
       }
       applyNames(existing, username, config?.name ?? username);
@@ -1101,6 +1160,10 @@ export function createVideoGrid(): VideoGridComponent {
         { signal: entry.listeners.signal },
       );
       openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
+      for (const type of ["enterpictureinpicture", "leavepictureinpicture"]) {
+        video.addEventListener(type, syncViews, { signal: entry.listeners.signal });
+      }
+      resizeObserver?.observe(cell);
     }
 
     // Your own screen share: say what is going out instead of showing a
@@ -1116,6 +1179,7 @@ export function createVideoGrid(): VideoGridComponent {
     applyUserAudioState();
     syncTileNav();
     relayout();
+    syncViews();
   }
 
   /** The tile's label, and the person's name on its controls and menu. */
@@ -1174,6 +1238,7 @@ export function createVideoGrid(): VideoGridComponent {
       entry.trackCleanup = undefined;
     }
     entry.listeners.destroy();
+    resizeObserver?.unobserve(entry.el);
     if (theatreTile === userId) leaveTheatre();
     lastInfo.delete(userId);
 
@@ -1298,10 +1363,13 @@ export function createVideoGrid(): VideoGridComponent {
       signal: gridListeners.signal,
     });
     document.addEventListener("keydown", onTheatreKey, { signal: gridListeners.signal });
+    document.addEventListener("visibilitychange", syncViews, { signal: gridListeners.signal });
 
-    // Observe container size changes to recalculate tile layout
+    // Observe container size changes to recalculate tile layout, and the
+    // remote tiles' sizes (0 once the grid is closed) for their video views.
     resizeObserver = new ResizeObserver(() => {
       scheduleResize();
+      scheduleViewSync();
     });
     resizeObserver.observe(root);
   }
@@ -1321,6 +1389,8 @@ export function createVideoGrid(): VideoGridComponent {
     statsTile = null;
     if (resizeRafId !== 0) cancelAnimationFrame(resizeRafId);
     resizeRafId = 0;
+    if (viewResizeTimer !== null) clearTimeout(viewResizeTimer);
+    viewResizeTimer = null;
 
     if (resizeObserver !== null) {
       resizeObserver.disconnect();

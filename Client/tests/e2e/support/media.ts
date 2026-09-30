@@ -15,6 +15,8 @@ type MediaProbe = {
     audioSamples: number;
     videoFrames: number;
     receivedBytes: number;
+    /** Inbound video payload bytes. */
+    videoBytes: number;
     sentBytes: number;
     liveCapture: number;
     senders: number;
@@ -66,6 +68,7 @@ export async function installMediaProbe(page: Page) {
           audioSamples = 0,
           videoFrames = 0,
           receivedBytes = 0,
+          videoBytes = 0,
           sentBytes = 0,
           senders = 0;
         for (const peer of probe.peers) {
@@ -85,7 +88,10 @@ export async function installMediaProbe(page: Page) {
                 (entry.totalSamplesReceived ?? 0) - (entry.concealedSamples ?? 0),
               );
             }
-            if (entry.kind === "video") videoFrames += entry.framesDecoded ?? 0;
+            if (entry.kind === "video") {
+              videoFrames += entry.framesDecoded ?? 0;
+              videoBytes += entry.bytesReceived ?? 0;
+            }
           });
         }
         return {
@@ -93,6 +99,7 @@ export async function installMediaProbe(page: Page) {
           audioSamples,
           videoFrames,
           receivedBytes,
+          videoBytes,
           sentBytes,
           senders,
           liveCapture: probe.tracks.filter((track) => track.readyState === "live").length,

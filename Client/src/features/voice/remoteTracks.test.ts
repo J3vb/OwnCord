@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Room } from "livekit-client";
+import { VideoQuality, type Room } from "livekit-client";
 
 vi.mock("../../lib/screenShare", () => ({
   getLocalCameraStream: vi.fn(() => "camera"),
@@ -22,6 +22,20 @@ function roomWith(identity: string, source: string, track: unknown): Room {
         {
           identity,
           getTrackPublication: (s: string) => (s === source ? { track } : undefined),
+        },
+      ],
+    ]),
+  } as unknown as Room;
+}
+
+function roomWithPublication(identity: string, source: string, publication: unknown): Room {
+  return {
+    remoteParticipants: new Map([
+      [
+        identity,
+        {
+          identity,
+          getTrackPublication: (s: string) => (s === source ? publication : undefined),
         },
       ],
     ]),
@@ -93,6 +107,97 @@ describe("RemoteTracks", () => {
       await expect(other.getRemoteVideoStats(7, "camera")).resolves.toBeNull();
       const native = new RemoteTracks(() => roomWith("user-7", "camera", {}));
       await expect(native.getRemoteVideoStats(7, "camera")).resolves.toBeNull();
+    });
+  });
+
+  describe("setRemoteVideoView", () => {
+    it("asks for the layer before enabling, and only disables a hidden tile", () => {
+      const calls: string[] = [];
+      const publication = {
+        setEnabled: (on: boolean) => calls.push(`enabled ${String(on)}`),
+        setVideoQuality: (q: VideoQuality) => calls.push(`quality ${String(q)}`),
+        setVideoDimensions: (d: { width: number; height: number }) =>
+          calls.push(`size ${String(d.width)}x${String(d.height)}`),
+      };
+      const tracks = new RemoteTracks(() =>
+        roomWithPublication("user-7", "screen_share", publication),
+      );
+
+      tracks.setRemoteVideoView(7, "screenshare", {
+        enabled: true,
+        size: { width: 160, height: 90 },
+      });
+      tracks.setRemoteVideoView(7, "screenshare", { enabled: true });
+      tracks.setRemoteVideoView(7, "screenshare", { enabled: false });
+      expect(calls).toEqual([
+        "size 160x90",
+        "enabled true",
+        `quality ${String(VideoQuality.HIGH)}`,
+        "enabled true",
+        "enabled false",
+      ]);
+    });
+
+    it("does nothing without a room or a matching user", () => {
+      const view = { enabled: false };
+      expect(() =>
+        new RemoteTracks(() => null).setRemoteVideoView(7, "camera", view),
+      ).not.toThrow();
+      const setEnabled = vi.fn();
+      new RemoteTracks(() =>
+        roomWithPublication("user-8", "camera", { setEnabled }),
+      ).setRemoteVideoView(7, "camera", view);
+      expect(setEnabled).not.toHaveBeenCalled();
+    });
+
+    it("keeps a stream the grid hides playing at the hover preview's size while it is open", () => {
+      const publication = {
+        setEnabled: vi.fn(),
+        setVideoQuality: vi.fn(),
+        setVideoDimensions: vi.fn(),
+      };
+      const tracks = new RemoteTracks(() => roomWithPublication("user-7", "camera", publication));
+      const enabled = () => publication.setEnabled.mock.lastCall?.[0] as boolean | undefined;
+      const preview = { enabled: true, size: { width: 480, height: 270 } };
+
+      // The grid is closed: its tile sends nothing.
+      tracks.setRemoteVideoView(7, "camera", { enabled: false });
+      expect(enabled()).toBe(false);
+
+      // Hovering the voice row opens the preview on the same track.
+      tracks.setRemoteVideoView(7, "camera", preview, true);
+      expect(publication.setVideoDimensions).toHaveBeenLastCalledWith(preview.size);
+      expect(enabled()).toBe(true);
+      // The grid reporting again does not stop the open preview.
+      tracks.setRemoteVideoView(7, "camera", { enabled: false });
+      expect(enabled()).toBe(true);
+
+      // The preview closes: the grid's view applies again.
+      tracks.setRemoteVideoView(7, "camera", { enabled: false }, true);
+      expect(enabled()).toBe(false);
+    });
+
+    it("never lowers the grid's view for a preview", () => {
+      const publication = {
+        setEnabled: vi.fn(),
+        setVideoQuality: vi.fn(),
+        setVideoDimensions: vi.fn(),
+      };
+      const tracks = new RemoteTracks(() => roomWithPublication("user-7", "camera", publication));
+      tracks.setRemoteVideoView(7, "camera", { enabled: true });
+      tracks.setRemoteVideoView(
+        7,
+        "camera",
+        { enabled: true, size: { width: 480, height: 270 } },
+        true,
+      );
+      expect(publication.setVideoDimensions).not.toHaveBeenCalled();
+      expect(publication.setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+
+      tracks.setRemoteVideoView(7, "camera", { enabled: true, size: { width: 960, height: 540 } });
+      expect(publication.setVideoDimensions).toHaveBeenLastCalledWith({ width: 960, height: 540 });
+      tracks.setRemoteVideoView(7, "camera", { enabled: true, size: { width: 160, height: 90 } });
+      expect(publication.setVideoDimensions).toHaveBeenLastCalledWith({ width: 480, height: 270 });
     });
   });
 });

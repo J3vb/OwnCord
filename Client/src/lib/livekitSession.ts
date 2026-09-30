@@ -1,6 +1,6 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
 import { Room, Track } from "livekit-client";
-import type { StreamSample } from "../features/voice/remoteTracks";
+import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -887,6 +887,16 @@ export class LiveKitSession {
     return this._remoteTracks.getRemoteVideoStats(userId, type);
   }
 
+  /** Ask for only what a remote video tile, or the hover preview, shows (P3-07). */
+  setRemoteVideoView(
+    userId: number,
+    type: "camera" | "screenshare",
+    view: VideoView,
+    preview?: boolean,
+  ): void {
+    this._remoteTracks.setRemoteVideoView(userId, type, view, preview);
+  }
+
   getRoom(): Room | null {
     return this._room;
   }
@@ -968,6 +978,7 @@ export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
+export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);
