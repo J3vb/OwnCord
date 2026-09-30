@@ -17,10 +17,14 @@ export interface ConnectionStats {
   readonly inPackets: number;
   readonly totalUp: number;
   readonly totalDown: number;
-  /** Inbound packet loss, percent. A low-RTT link that drops packets is not
-   *  excellent, so quality weighs this alongside RTT (DP-41). */
+  /** Worst recent audio packet loss, percent, in either direction: what we
+   *  receive (inbound-rtp) or what the far end receives from us
+   *  (remote-inbound-rtp), over the recent history window. A low-RTT link that
+   *  drops packets is not excellent, so quality weighs this alongside RTT
+   *  (DP-41). */
   readonly loss: number;
-  /** Interarrival jitter, milliseconds. */
+  /** Worst interarrival jitter, milliseconds, among audio streams in either
+   *  direction that carried packets since the last poll. */
   readonly jitter: number;
   /** False until a real sample has been extracted. The native Linux path has
    *  no browser peer connection (NativeRoom.engine.pcManager is undefined), so
