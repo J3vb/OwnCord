@@ -177,10 +177,13 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 		// that users.status disagrees with, and buildReady's ListMembers read
 		// of users.status (via presentableMembers, which only ever downgrades
 		// a connected user to offline, never upgrades one) would then never
-		// self-correct for the rest of this session (OC-0298).
+		// self-correct for the rest of this session (OC-0298). The live
+		// status follows the row for the same reason.
+		c.setLiveStatus(c.user.Status)
 		return
 	}
 	c.user.Status = status
+	c.setLiveStatus(status)
 }
 
 // announceConnectPresence fans out the status applyConnectStatus settled on,

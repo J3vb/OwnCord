@@ -57,20 +57,31 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 
 // presentableMembers rewrites each member's status into what viewerID may see.
 //
-// Two rules, both applied here so no payload builder can implement only one:
+// Three rules, all applied here so no payload builder can implement only one:
 //
 //  1. A member with no live connection is offline, whatever the row says.
 //     users.status keeps a *chosen* idle/dnd/invisible across a disconnect so
 //     the next connect can honour it, which would otherwise leave a signed-out
 //     user showing as "Do Not Disturb" indefinitely.
-//  2. An invisible member is offline to everyone but themselves
+//  2. A connected member shows the status their connection last stamped or
+//     chose, never the row's: members comes from the shared read
+//     (readyMembers), which may predate that write, since users.status does
+//     not move the member generation. A connection that has not stamped one
+//     yet shows as offline, like no connection; its connect presence is
+//     announced after the stamp, so the viewer still converges.
+//  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
+//
+// members is shared with other ready payloads: each element is copied, never
+// changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) []db.MemberSummary {
-	connected := h.connectedUserIDs()
+	live := h.liveStatuses()
 	out := make([]db.MemberSummary, 0, len(members))
 	for _, m := range members {
-		if !connected[m.ID] {
+		if status := live[m.ID]; status != "" {
+			m.Status = status
+		} else {
 			m.Status = db.StatusOffline
 			m.CustomStatus = nil
 		}
@@ -369,7 +380,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
 	}
 
-	members, err := database.ListMembers(ctx)
+	members, err := h.readyMembers(ctx, database)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
 	}

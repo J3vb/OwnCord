@@ -19,7 +19,11 @@ before the native external-content broker; its current policy is
 history owned by the invite-management surface rather than any of the seven
 services below, so it adds no data class here either. **Amended 2026-09-30
 (pin order):** `056_message_pinned_at.sql` only adds a `pinned_at` pin-time
-column to the existing `messages` row, so it adds no data class here. Other
+column to the existing `messages` row, so it adds no data class here.
+**Amended 2026-09-30 (DP-37):** `057_member_generation.sql` adds
+`member_generation`, a one-row counter the ready path uses to know when its
+shared member list is stale; it holds no user data, so it adds no data class
+here. Other
 historical
 status statements retain their `cbebd37c` baseline.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each

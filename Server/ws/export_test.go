@@ -289,6 +289,17 @@ func (h *Hub) BuildReadyWithRoleForTest(database *db.DB, userID int64, role *db.
 	return h.buildReady(context.Background(), database, userID, role)
 }
 
+// BuildReadyWithReaderForTest exposes Hub.buildReady over any snapshot reader,
+// so a test can count or stall its reads.
+func (h *Hub) BuildReadyWithReaderForTest(database ReadySnapshotReader, userID int64) ([]byte, error) {
+	return h.buildReady(context.Background(), database, userID, nil)
+}
+
+// ApplyConnectStatusForTest runs the handshake's connect-status stamp for c.
+func (h *Hub) ApplyConnectStatusForTest(c *Client) {
+	h.applyConnectStatus(context.Background(), c)
+}
+
 // ComputeAllowedChannelsForTest exposes Hub.computeAllowedChannels for external
 // tests (the REST/WS channel-visibility agreement test).
 func (h *Hub) ComputeAllowedChannelsForTest(database *db.DB, user *db.User) (map[int64]bool, error) {

@@ -72,14 +72,19 @@ func TestReady_InvisibleMemberIsOfflineToOthersAndTrueToSelf(t *testing.T) {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
 
-	// Both must be connected — a member with no live session renders offline
-	// regardless, which would mask the mapping this test is about.
+	ghost.Status, watcher.Status = db.StatusInvisible, db.StatusOnline
+
+	// Both must be connected and stamped — a member with no live status
+	// renders offline regardless, which would mask the mapping this test is
+	// about.
 	gc := ws.NewTestClientWithUser(hub, ghost, 0, make(chan []byte, 8))
 	wc := ws.NewTestClientWithUser(hub, watcher, 0, make(chan []byte, 8))
 	hub.Register(gc)
 	hub.Register(wc)
 	waitRegistered(t, hub, gc)
 	waitRegistered(t, hub, wc)
+	hub.ApplyConnectStatusForTest(gc)
+	hub.ApplyConnectStatusForTest(wc)
 
 	forWatcher, err := hub.BuildReadyForTest(database, watcher.ID)
 	if err != nil {

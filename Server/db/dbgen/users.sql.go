@@ -142,6 +142,19 @@ func (q *Queries) DenyPendingUser(ctx context.Context, arg DenyPendingUserParams
 	return q.db.ExecContext(ctx, denyPendingUser, arg.Username, arg.ID)
 }
 
+const getMemberGeneration = `-- name: GetMemberGeneration :one
+SELECT generation FROM member_generation WHERE id = 1
+`
+
+// The member generation (migration 057): bumped by every write that can
+// change what ListMembers returns, except users.status.
+func (q *Queries) GetMemberGeneration(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getMemberGeneration)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
+}
+
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
@@ -320,6 +333,25 @@ WHERE id = ?
 func (q *Queries) MarkUserDisconnected(ctx context.Context, id int64) error {
 	_, err := q.db.ExecContext(ctx, markUserDisconnected, id)
 	return err
+}
+
+const nextMemberBanLapse = `-- name: NextMemberBanLapse :one
+SELECT CAST(COALESCE(MIN(replace(ban_expires, ' ', 'T')), '') AS TEXT)
+FROM users
+WHERE banned != 0
+  AND ban_expires IS NOT NULL
+  AND replace(ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+`
+
+// The earliest instant at which a user ListMembers currently hides for a
+// temporary ban will reappear, as the same normalised text ListMembers
+// compares against strftime('now'), or ” when no such ban is pending. A
+// lapse is a change nothing writes, so a cached member list must expire here.
+func (q *Queries) NextMemberBanLapse(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, nextMemberBanLapse)
+	var column_1 string
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const resetAllUserStatuses = `-- name: ResetAllUserStatuses :exec

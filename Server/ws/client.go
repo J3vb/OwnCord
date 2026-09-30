@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -103,6 +104,11 @@ type Client struct {
 	sendLow       chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
+
+	// status is the presence status this connection last stamped
+	// (applyConnectStatus) or chose (presence_update); nil until the connect
+	// stamp. presentableMembers reads it from other goroutines, hence atomic.
+	status atomic.Pointer[string]
 }
 
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.
@@ -149,6 +155,20 @@ func (c *Client) getChannelID() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.channelID
+}
+
+// liveStatus returns the connection's live presence status, "" before the
+// connect stamp.
+func (c *Client) liveStatus() string {
+	if s := c.status.Load(); s != nil {
+		return *s
+	}
+	return ""
+}
+
+// setLiveStatus records the status this connection just stamped or chose.
+func (c *Client) setLiveStatus(status string) {
+	c.status.Store(&status)
 }
 
 // getVoiceChID returns the voice channel ID under voiceMu.

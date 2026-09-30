@@ -153,19 +153,20 @@ var DBImportAllow = map[string]DBImportEntry{
 	// seam would skip rows a previous enabled boot persisted — an erasure
 	// regression. The two calls stay direct and are pinned here instead, so
 	// moving one is a visible edit to this row rather than a side effect.
-	"ws/hub_events.go":       {Disposition: "boundary", Note: "replay purge: ring drop and persisted-row delete are one seqMu critical section (HP-4 decision 1), so the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1}},
-	"ws/hub_options.go":      {Disposition: "boundary", Note: "construction validates and stores the handle, and gives it to the permission checker; no calls of its own", Hands: calls{"permissions.NewChecker": 1}},
-	"ws/hub_broadcast.go":    {Disposition: "adapter", Note: "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
-	"ws/hub_presence.go":     {Disposition: "adapter", Note: "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
-	"ws/hub_visibility.go":   {Disposition: "adapter", Note: "visibility and audience resolve through the VisibilityReader seam; db types in signatures"},
-	"ws/messages.go":         {Disposition: "adapter", Note: "wire types + pure status helpers"},
-	"ws/readers.go":          {Disposition: "adapter", Note: "the hub's read seams plus the service-backed VoiceStore, PresenceStamper and SocketAuthenticator: db types in the interface signatures, and DBReaders wiring the handle behind the read seams"},
-	"ws/replay.go":           {Disposition: "adapter", Note: "PersistedEvent type in the cold-tier filter; the resume path's reads bind the VisibilityReader seam and its status stamp goes through PresenceStamper"},
-	"ws/serve_auth.go":       {Disposition: "adapter", Note: "db.User on the handshake result and the pure StatusOffline const; SessionService resolves the token and writes the connect audit"},
-	"ws/serve_pumps.go":      {Disposition: "adapter", Note: "pure StatusOffline const; the disconnect write goes through the PresenceStamper seam (readers.go)"},
-	"ws/serve_ready.go":      {Disposition: "adapter", Note: "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
-	"ws/voice_join.go":       {Disposition: "adapter", Note: "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},
-	"ws/voice_moderation.go": {Disposition: "adapter", Note: "Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row"},
+	"ws/hub_events.go":                {Disposition: "boundary", Note: "replay purge: ring drop and persisted-row delete are one seqMu critical section (HP-4 decision 1), so the delete is never gated on the persistence seam being wired", Calls: calls{"DeleteEventsForMessages": 1, "DeleteEventsForUser": 1}},
+	"ws/hub_options.go":               {Disposition: "boundary", Note: "construction validates and stores the handle, and gives it to the permission checker; no calls of its own", Hands: calls{"permissions.NewChecker": 1}},
+	"ws/hub_broadcast.go":             {Disposition: "adapter", Note: "member payloads read through the MemberPayloadReader seam; db types + pure BroadcastStatus"},
+	"ws/hub_presence.go":              {Disposition: "adapter", Note: "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
+	"ws/hub_visibility.go":            {Disposition: "adapter", Note: "visibility and audience resolve through the VisibilityReader seam; db types in signatures"},
+	"ws/messages.go":                  {Disposition: "adapter", Note: "wire types + pure status helpers"},
+	"ws/readers.go":                   {Disposition: "adapter", Note: "the hub's read seams plus the service-backed VoiceStore, PresenceStamper and SocketAuthenticator: db types in the interface signatures, and DBReaders wiring the handle behind the read seams"},
+	"ws/replay.go":                    {Disposition: "adapter", Note: "PersistedEvent type in the cold-tier filter; the resume path's reads bind the VisibilityReader seam and its status stamp goes through PresenceStamper"},
+	"ws/serve_auth.go":                {Disposition: "adapter", Note: "db.User on the handshake result and the pure StatusOffline const; SessionService resolves the token and writes the connect audit"},
+	"ws/serve_pumps.go":               {Disposition: "adapter", Note: "pure StatusOffline const; the disconnect write goes through the PresenceStamper seam (readers.go)"},
+	"ws/serve_ready.go":               {Disposition: "adapter", Note: "ready snapshot reads through ReadySnapshotReader; fresh-connect stale-voice cleanup through VoiceService"},
+	"ws/serve_ready_members_cache.go": {Disposition: "adapter", Note: "the ready payload's shared member-list read (DP-37), through ReadySnapshotReader; MemberSummary type"},
+	"ws/voice_join.go":                {Disposition: "adapter", Note: "Channel/VoiceState/ChannelOverride types in the join sequence; VoiceService owns the voice_states reads and writes"},
+	"ws/voice_moderation.go":          {Disposition: "adapter", Note: "Role/VoiceState types in the moderation gate; VoiceService owns the writes, the rollback and the audit row"},
 }
 
 // dbImportBoundary fails on any production file above the domain layer that
