@@ -12,8 +12,7 @@ vi.mock("@lib/logger", () => ({
 import {
   createConnectionStatsPoller,
   formatBytes,
-  formatRate,
-  formatBitrate,
+  formatRateCompact,
   type ConnectionStatsPoller,
   type QualityLevel,
 } from "../../src/lib/connectionStats";
@@ -41,33 +40,22 @@ describe("formatBytes", () => {
   });
 });
 
-describe("formatRate", () => {
-  it("appends /s to formatted bytes", () => {
-    expect(formatRate(0)).toBe("0 B/s");
-    expect(formatRate(1500)).toBe("1.50 kB/s");
-    expect(formatRate(2_000_000)).toBe("2.00 MB/s");
-  });
-});
-
-describe("formatBitrate", () => {
-  it("returns 0 Mbps for very low rates", () => {
-    expect(formatBitrate(0)).toBe("0 Mbps");
-    // Less than 0.01 Mbps = 1250 bytes/s * 8 = 10000 bits = 0.01 Mbps
-    expect(formatBitrate(1000)).toBe("0 Mbps");
+describe("formatRateCompact", () => {
+  it("keeps a single unit and drops the redundant bitrate figure", () => {
+    expect(formatRateCompact(0)).toBe("0 B/s");
+    expect(formatRateCompact(331)).toBe("331 B/s");
+    expect(formatRateCompact(1500)).toBe("1.5 kB/s");
+    // The widget's old "331.25 kB/s (2.6 Mbps)" wrapped; compact keeps one unit.
+    expect(formatRateCompact(331_250)).toBe("331 kB/s");
+    expect(formatRateCompact(2_000_000)).toBe("2.0 MB/s");
+    expect(formatRateCompact(12_000_000)).toBe("12 MB/s");
   });
 
-  it("returns Kbps for sub-1 Mbps rates", () => {
-    // 0.05 Mbps = 6250 bytes/s
-    expect(formatBitrate(6250)).toBe("50 Kbps");
-    // 0.5 Mbps = 62500 bytes/s
-    expect(formatBitrate(62500)).toBe("500 Kbps");
-  });
-
-  it("returns Mbps for rates above 1 Mbps", () => {
-    // 1 Mbps = 125000 bytes/s
-    expect(formatBitrate(125_000)).toBe("1.0 Mbps");
-    // 10 Mbps = 1250000 bytes/s
-    expect(formatBitrate(1_250_000)).toBe("10.0 Mbps");
+  it("picks the unit after rounding so a value never rolls past its threshold", () => {
+    expect(formatRateCompact(999.6)).toBe("1.0 kB/s");
+    expect(formatRateCompact(99_960)).toBe("100 kB/s");
+    expect(formatRateCompact(999_600)).toBe("1.0 MB/s");
+    expect(formatRateCompact(9_960_000)).toBe("10 MB/s");
   });
 });
 

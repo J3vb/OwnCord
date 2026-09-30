@@ -176,9 +176,10 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
 
   // Local UI: the control reports sharing and a self screen tile (offset id)
   // is published under the grid, which auto-opens for local video.
+  // The active state lives on the button itself (aria-pressed + the
+  // active-control tint); the redesign removed the "Sharing" text label.
   await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
-  await expect(shareBtn).toHaveClass(/sharing-active/);
-  await expect(alice.locator(".vw-share-label")).toHaveText("Sharing");
+  await expect(shareBtn).toHaveClass(/active-ctrl/);
   const selfScreen = alice.locator(`.video-cell[data-user-id='${1 + SCREENSHARE_TILE_ID_OFFSET}']`);
   await expect(selfScreen).toBeVisible({ timeout: 10_000 });
   await expect(selfScreen).toHaveAttribute("data-stream-type", "screenshare");
@@ -205,7 +206,7 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   // Stop: UI clears, the announcement goes out, and every tile/stream is gone.
   await shareBtn.click();
   await expect(shareBtn).toHaveAttribute("aria-pressed", "false", { timeout: 20_000 });
-  await expect(alice.locator(".vw-share-label")).not.toHaveText("Sharing");
+  await expect(shareBtn).not.toHaveClass(/active-ctrl/);
   await expect(selfScreen).toHaveCount(0);
   await expect(alice.locator("[data-testid='video-grid'] .video-cell")).toHaveCount(0);
   await expect(alice.locator("[data-testid='video-grid-slot']")).toBeHidden();

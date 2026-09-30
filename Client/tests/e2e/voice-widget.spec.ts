@@ -76,6 +76,42 @@ test.describe("Voice Widget", () => {
     expect(hasActive).not.toBe(hadActive);
   });
 
+  test("transport stats read as a tidy two-column grid with no wrapping values", async ({
+    page,
+  }) => {
+    await mockTauriFullSessionWithVoice(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
+
+    await emitWsMessage(page, VOICE_STATE_EVENT);
+    const widget = page.locator("[data-testid='voice-widget'].visible");
+    await expect(widget).toBeVisible({ timeout: 5_000 });
+
+    await widget.locator("[data-testid='vw-signal']").click();
+    await expect(widget.locator(".vw-stats")).toHaveClass(/visible/);
+
+    // The pane is a real two-column grid: each metric is its own label/value
+    // row (no <br> separators) and the columns are equal tracks.
+    await expect(widget.locator(".vw-stats-col")).toHaveCount(2);
+    await expect(widget.locator(".vw-stats-col").nth(0).locator(".vw-stats-row")).toHaveCount(3);
+    await expect(widget.locator(".vw-stats-col").nth(1).locator(".vw-stats-row")).toHaveCount(2);
+    await expect(widget.locator(".vw-stats-row .vw-stat-label").first()).toHaveText("Rate");
+
+    // Every value stays on one line and inside its column: the old
+    // "331.25 kB/s (2.6 Mbps)" wrapped; none of these may.
+    const overflow = await widget.locator(".vw-stat-value").evaluateAll((els) =>
+      els.map((el) => ({
+        text: el.textContent,
+        wraps: el.scrollWidth > el.clientWidth + 1,
+      })),
+    );
+    expect(overflow.some((o) => o.wraps)).toBe(false);
+    const rowOverflow = await widget
+      .locator(".vw-stats-row")
+      .evaluateAll((els) => els.some((el) => el.scrollWidth > el.clientWidth + 1));
+    expect(rowOverflow).toBe(false);
+  });
+
   test("second user joining voice appears in sidebar users list", async ({ page }) => {
     await mockTauriFullSessionWithVoice(page);
     await page.goto("/");

@@ -17,8 +17,7 @@ import { uiStore } from "@stores/ui.store";
 import {
   createConnectionStatsPoller,
   formatBytes,
-  formatRate,
-  formatBitrate,
+  formatRateCompact,
   type ConnectionStats,
   type ConnectionStatsPoller,
   type QualityLevel,
@@ -75,6 +74,23 @@ function swapIcon(btn: HTMLButtonElement, name: IconName): void {
   const existing = btn.querySelector("svg");
   if (existing) existing.remove();
   btn.appendChild(createIcon(name, 18));
+}
+
+/** Update a stats value and mark it empty (zero/missing) so the CSS can
+ *  soften it instead of showing it at full strength. */
+function setStatValue(el: HTMLSpanElement | null, text: string, empty: boolean): void {
+  if (el === null) return;
+  setText(el, text);
+  el.classList.toggle("vw-stat-value--empty", empty);
+}
+
+/** One label/value stats row: label left, value right. */
+function statRow(label: string): { el: HTMLSpanElement; row: HTMLDivElement } {
+  const row = createElement("div", { class: "vw-stats-row" });
+  const labelEl = createElement("span", { class: "vw-stat-label" }, label);
+  const valueEl = createElement("span", { class: "vw-stat-value" });
+  appendChildren(row, labelEl, valueEl);
+  return { el: valueEl, row };
 }
 
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
@@ -146,19 +162,18 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     setText(pingLabel, rttText);
     pingLabel.style.color = color;
 
-    // Update expanded stats pane fields if they exist
-    if (outRateEl)
-      setText(outRateEl, `${formatRate(stats.outRate)} (${formatBitrate(stats.outRate)})`);
-    if (outPacketsEl) setText(outPacketsEl, String(stats.outPackets));
-    if (rttEl) {
-      // i18n-exempt: numeric RTT value with its unit, not translatable prose
-      setText(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—");
-      rttEl.style.color = color;
-    }
-    if (inRateEl) setText(inRateEl, `${formatRate(stats.inRate)} (${formatBitrate(stats.inRate)})`);
-    if (inPacketsEl) setText(inPacketsEl, String(stats.inPackets));
-    if (totalUpEl) setText(totalUpEl, formatBytes(stats.totalUp));
-    if (totalDownEl) setText(totalDownEl, formatBytes(stats.totalDown));
+    // Update expanded stats pane fields if they exist. A zero rate or a
+    // missing RTT is shown softly (the CSS dims .vw-stat-value--empty) rather
+    // than as another full-strength number competing for attention.
+    setStatValue(outRateEl, formatRateCompact(stats.outRate), stats.outRate === 0);
+    setStatValue(outPacketsEl, String(stats.outPackets), stats.outPackets === 0);
+    // i18n-exempt: numeric RTT value with its unit, not translatable prose
+    setStatValue(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—", stats.rtt <= 0);
+    if (rttEl) rttEl.style.color = stats.rtt > 0 ? color : "";
+    setStatValue(inRateEl, formatRateCompact(stats.inRate), stats.inRate === 0);
+    setStatValue(inPacketsEl, String(stats.inPackets), stats.inPackets === 0);
+    setStatValue(totalUpEl, formatBytes(stats.totalUp), stats.totalUp === 0);
+    setStatValue(totalDownEl, formatBytes(stats.totalDown), stats.totalDown === 0);
   }
 
   let qualityUnlisten: (() => void) | null = null;
@@ -333,17 +348,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
               : "";
       if (modStatusEl.textContent !== text) setText(modStatusEl, text);
     }
+    // The screen-share active state lives entirely on the button: the
+    // aria-pressed state, the icon swap and the active-control tint. The old
+    // squeezed "Sharing" text label is gone.
     shareBtn?.classList.toggle("active-ctrl", voice.localScreenshare);
-    shareBtn?.classList.toggle("sharing-active", voice.localScreenshare);
     if (shareBtn) {
       swapIcon(shareBtn, voice.localScreenshare ? "monitor-off" : "monitor");
       shareBtn.setAttribute("aria-pressed", String(voice.localScreenshare));
-      // Update button label to show "Sharing" when active
-      const labelSpan = shareBtn.querySelector(".vw-share-label");
-      if (labelSpan !== null) {
-        labelSpan.textContent = voice.localScreenshare ? t("widget.sharing") : "";
-        (labelSpan as HTMLElement).style.display = voice.localScreenshare ? "inline" : "none";
-      }
     }
 
     // Leaving listen-only clears the "retry failed" memory, so a later join
@@ -459,43 +470,33 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const statsGrid = createElement("div", { class: "vw-stats-grid" });
 
     // Outgoing column
-    const outCol = createElement("div", {});
+    const outCol = createElement("div", { class: "vw-stats-col" });
     const outLabel = createElement(
       "div",
       { class: "vw-stats-col-label out" },
       t("widget.outgoing"),
     );
-    outRateEl = createElement("span", {}, t("widget.zeroRate"));
-    outPacketsEl = createElement("span", {}, "0");
-    rttEl = createElement("span", {}, "—");
-    rttEl.style.fontWeight = "600";
-    const outBody = createElement("div", { class: "vw-stats-row" });
-    for (const [label, el] of [
-      [t("widget.rate"), outRateEl],
-      [t("widget.packets"), outPacketsEl],
-      [t("widget.rtt"), rttEl],
-    ] as const) {
-      outBody.appendChild(document.createTextNode(label));
-      outBody.appendChild(el);
-      outBody.appendChild(createElement("br", {}));
-    }
-    appendChildren(outCol, outLabel, outBody);
+    const outRate = statRow(t("widget.rate"));
+    outRateEl = outRate.el;
+    setStatValue(outRateEl, t("widget.zeroRate"), true);
+    const outPackets = statRow(t("widget.packets"));
+    outPacketsEl = outPackets.el;
+    setStatValue(outPacketsEl, "0", true);
+    const outRtt = statRow(t("widget.rtt"));
+    rttEl = outRtt.el;
+    setStatValue(rttEl, "—", true);
+    appendChildren(outCol, outLabel, outRate.row, outPackets.row, outRtt.row);
 
     // Incoming column
-    const inCol = createElement("div", {});
+    const inCol = createElement("div", { class: "vw-stats-col" });
     const inLabel = createElement("div", { class: "vw-stats-col-label in" }, t("widget.incoming"));
-    inRateEl = createElement("span", {}, t("widget.zeroRate"));
-    inPacketsEl = createElement("span", {}, "0");
-    const inBody = createElement("div", { class: "vw-stats-row" });
-    for (const [label, el] of [
-      [t("widget.rate"), inRateEl],
-      [t("widget.packets"), inPacketsEl],
-    ] as const) {
-      inBody.appendChild(document.createTextNode(label));
-      inBody.appendChild(el);
-      inBody.appendChild(createElement("br", {}));
-    }
-    appendChildren(inCol, inLabel, inBody);
+    const inRate = statRow(t("widget.rate"));
+    inRateEl = inRate.el;
+    setStatValue(inRateEl, t("widget.zeroRate"), true);
+    const inPackets = statRow(t("widget.packets"));
+    inPacketsEl = inPackets.el;
+    setStatValue(inPacketsEl, "0", true);
+    appendChildren(inCol, inLabel, inRate.row, inPackets.row);
 
     appendChildren(statsGrid, outCol, inCol);
 
@@ -507,13 +508,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       t("widget.sessionTotals"),
     );
     const totalsRow = createElement("div", { class: "vw-stats-totals-row" });
-    totalUpEl = createElement("span", {}, t("widget.zeroBytes"));
-    totalDownEl = createElement("span", {}, t("widget.zeroBytes"));
-    const upWrap = createElement("span", {});
-    upWrap.appendChild(document.createTextNode("\u2191 "));
+    totalUpEl = createElement("span", { class: "vw-stat-value" });
+    totalDownEl = createElement("span", { class: "vw-stat-value" });
+    setStatValue(totalUpEl, t("widget.zeroBytes"), true);
+    setStatValue(totalDownEl, t("widget.zeroBytes"), true);
+    const upWrap = createElement("span", { class: "vw-stat-total" });
+    upWrap.appendChild(createElement("span", { class: "vw-stat-arrow" }, "\u2191"));
     upWrap.appendChild(totalUpEl);
-    const downWrap = createElement("span", {});
-    downWrap.appendChild(document.createTextNode("\u2193 "));
+    const downWrap = createElement("span", { class: "vw-stat-total" });
+    downWrap.appendChild(createElement("span", { class: "vw-stat-arrow" }, "\u2193"));
     downWrap.appendChild(totalDownEl);
     appendChildren(totalsRow, upWrap, downWrap);
     appendChildren(totals, totalsLabel, totalsRow);
@@ -536,9 +539,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onScreenshareToggle,
       "vw-share-btn",
     );
-    const shareLabelSpan = createElement("span", { class: "vw-share-label" });
-    shareLabelSpan.style.display = "none";
-    shareBtn.appendChild(shareLabelSpan);
     disconnectBtn = createControlButton(
       t("widget.control.disconnect"),
       "phone",
