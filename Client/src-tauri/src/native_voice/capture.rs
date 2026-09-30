@@ -20,7 +20,7 @@ use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::native::apm::AudioProcessingModule;
 use nnnoiseless::DenoiseState;
 
-use super::playout::{host_devices, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
+use super::playout::{host_devices, pinned_listed, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
 
 /// A lock helper mirroring playout's, for the shared input-stream slot.
@@ -334,9 +334,10 @@ impl Capture {
             move || {
                 let target = lock(&selected).clone();
                 let current = lock(&resolved).as_ref().map(|(id, _)| id.clone());
-                !target.is_empty()
-                    && current.as_ref() != Some(&target)
-                    && host.with(|h| input_devices(h).iter().any(|(d, _)| d.id == target))
+                host.with(|h| {
+                    let listed = std::iter::once(h).flat_map(input_devices);
+                    pinned_listed(&target, current.as_deref(), listed.map(|(d, _)| d.id))
+                })
             }
         };
         let follow = move || {

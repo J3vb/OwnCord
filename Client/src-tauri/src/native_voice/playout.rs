@@ -311,6 +311,17 @@ type Output = Arc<Mutex<Option<(String, cpal::Stream)>>>;
 /// with the watcher so a later choice takes effect on its next tick.
 pub(super) type Selected = Arc<Mutex<String>>;
 
+/// Whether `target`, a pinned device the stream is not on (`current`), is
+/// listed again. Nothing is pinned under "System default" (an empty
+/// `target`), and `listed` is only walked while a pin is missing.
+pub(super) fn pinned_listed(
+    target: &str,
+    current: Option<&str>,
+    mut listed: impl Iterator<Item = impl AsRef<str>>,
+) -> bool {
+    !target.is_empty() && current != Some(target) && listed.any(|id| id.as_ref() == target)
+}
+
 /// Where a backend stands in cpal's own preference (PipeWire, PulseAudio,
 /// then ALSA).
 fn rank(id: cpal::HostId) -> usize {
@@ -490,9 +501,10 @@ impl Playout {
             move || {
                 let target = lock(&selected).clone();
                 let playing = lock(&output).as_ref().map(|(id, _)| id.clone());
-                !target.is_empty()
-                    && playing.as_ref() != Some(&target)
-                    && host.with(|h| output_devices(h).iter().any(|(d, _)| d.id == target))
+                host.with(|h| {
+                    let listed = std::iter::once(h).flat_map(output_devices);
+                    pinned_listed(&target, playing.as_deref(), listed.map(|(d, _)| d.id))
+                })
             }
         };
         let follow = move || {
@@ -930,7 +942,7 @@ mod tests {
             move || {
                 let target = lock(&selected).clone();
                 let playing = lock(&output).as_ref().map(|(id, _)| id.clone());
-                playing.as_ref() != Some(&target) && lock(&listed).iter().any(|s| *s == target)
+                pinned_listed(&target, playing.as_deref(), lock(&listed).iter())
             }
         };
         let follow = {
@@ -966,6 +978,24 @@ mod tests {
             lock(&output).as_ref().map(|(id, _)| id.clone()),
             Some("bt".to_string())
         );
+    }
+
+    #[test]
+    fn only_a_missing_pin_that_is_listed_again_is_reacquired() {
+        let listed = ["speakers", "bt"];
+        assert!(pinned_listed("bt", Some("speakers"), listed.iter()));
+        assert!(
+            !pinned_listed("bt", Some("bt"), listed.iter()),
+            "already on it"
+        );
+        assert!(
+            !pinned_listed("bt", Some("speakers"), ["speakers"].iter()),
+            "not back yet"
+        );
+        assert!(pinned_listed("bt", None, listed.iter()), "nothing plays");
+        // "System default" pins nothing, even with the stream on no listed id.
+        assert!(!pinned_listed("", Some("gone"), listed.iter()));
+        assert!(!pinned_listed("", None, ["", "speakers"].iter()));
     }
 
     #[test]
