@@ -3538,8 +3538,8 @@ describe("LiveKitSession", () => {
       };
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
-      // The chat socket is down, so the D-4 slow phase does not run and the
-      // loop gives up once the fast attempts are spent.
+      // The chat socket is closed for good, so the D-4 slow phase does not run
+      // and the loop gives up once the fast attempts are spent.
       session.setWsClient({ send: sendSpy, getState: () => "disconnected" } as any);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -3568,11 +3568,10 @@ describe("LiveKitSession", () => {
       // its room key still resident, and only the reconnect-flavoured audio
       // cleanup having run — so per-call screenshare mute/volume state survives
       // until some later explicit leave or join.
-      expect(leaveVoiceSpy).toHaveBeenCalledWith(true);
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(false);
       expect((session as any)._state.type).toBe("idle");
-      // ...and exactly one voice_leave reaches the server: leaveVoice(true)
-      // sends it, so the give-up path must not send its own as well.
-      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(1);
+      // ...and no voice_leave goes out over a socket that is not connected.
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(0);
     });
 
     // v004 regression: if the user leaves/switches channels while the FINAL
@@ -3909,18 +3908,56 @@ describe("LiveKitSession", () => {
       expect(errorCb).not.toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
     });
 
-    it("ends the loop when the chat socket drops", async () => {
+    it("ends the loop when the chat socket closes for good", async () => {
       mockRoom.connect.mockRejectedValue(new Error("SFU down"));
 
       const loop = startLoop();
       await vi.advanceTimersByTimeAsync(30_000); // the five fast attempts have failed
-      wsState = "reconnecting";
+      wsState = "disconnected";
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       await loop;
 
       expect(mockRoom.connect).toHaveBeenCalledTimes(5);
       expect(leaveVoiceChannel).toHaveBeenCalled();
       expect((session as any)._state.type).toBe("idle");
+      expect(sendSpy.mock.calls.filter(([m]) => m.type === "voice_leave")).toHaveLength(0);
+    });
+
+    it("resumes the call when the chat socket reconnects within the ceiling", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      mockRoom.connect.mockImplementation(async () => {
+        if (wsState !== "connected") throw new Error("network down");
+      });
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting"; // the Wi-Fi drop takes the chat socket down too
+      await vi.advanceTimersByTimeAsync(94_000);
+      wsState = "connected";
+      // Slow attempts at 42, 57, 72 and 87 s fail; the one at 102 s resumes.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await loop;
+
+      expect(mockRoom.connect).toHaveBeenCalledTimes(10);
+      expect(leaveVoiceSpy).not.toHaveBeenCalled();
+      expect(leaveVoiceChannel).not.toHaveBeenCalled();
+      expect((session as any)._state.type).toBe("connected");
+    });
+
+    it("gives up at the ceiling without sending while the chat socket is still reconnecting", async () => {
+      const leaveVoiceSpy = vi.spyOn(session, "leaveVoice");
+      mockRoom.connect.mockRejectedValue(new Error("network down"));
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000);
+      await loop;
+
+      expect(leaveVoiceSpy).toHaveBeenCalledWith(false);
+      expect(errorCb).toHaveBeenCalledWith("Voice connection lost — failed to reconnect");
+      expect((session as any)._state.type).toBe("idle");
+      expect(sendSpy).not.toHaveBeenCalled();
     });
 
     it("ends the loop when the channel is deleted", async () => {

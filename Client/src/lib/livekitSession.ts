@@ -459,10 +459,11 @@ export class LiveKitSession {
       refreshTokenAndWait: () => this.refreshTokenAndWait(),
       tokenAgeMs: () => Date.now() - this._tokenReceivedAt,
       canKeepRetrying: () =>
-        this.ws?.getState() === "connected" &&
+        this.ws !== null &&
+        this.ws.getState() !== "disconnected" &&
         (channelsStore.getState().channels.has(channelId) ||
           dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
-      leaveVoice: () => this.leaveVoice(true),
+      leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),
       disconnectSupersededLocalRoom: (room) => this._join.disconnectSupersededLocalRoom(room),
@@ -495,8 +496,10 @@ export class LiveKitSession {
   }
 
   /** Request a refresh and resolve once a token lands, or after
-   *  RECONNECT_TOKEN_WAIT_MS (rate-limited or unanswered). */
+   *  RECONNECT_TOKEN_WAIT_MS (rate-limited or unanswered). Resolves at once
+   *  while the chat socket is down: nothing could carry the request. */
   private refreshTokenAndWait(): Promise<void> {
+    if (this.ws?.getState() !== "connected") return Promise.resolve();
     return new Promise((resolve) => {
       const timer = setTimeout(resolve, RECONNECT_TOKEN_WAIT_MS);
       this._tokenWaiter = () => {

@@ -48,10 +48,13 @@ export interface ReconnectDeps {
   refreshTokenAndWait: () => Promise<void>;
   /** Milliseconds since the current token arrived. */
   tokenAgeMs: () => number;
-  /** True while the chat socket is connected and the channel still exists —
-   *  the slow phase's precondition (P2-T5). */
+  /** True while the chat socket is connected or reconnecting (not closed for
+   *  good: sign-out, session replaced, auth failure) and the channel still
+   *  exists — the slow phase's precondition (P2-T5). */
   canKeepRetrying: () => boolean;
-  /** Full session teardown, sending voice_leave to the server.
+  /** Full session teardown, sending voice_leave to the server when the chat
+   *  socket is connected (a socket still reconnecting cannot carry it; the
+   *  server's RT-8 grace window and reaper retire the membership instead).
    *
    *  Not a bare voice_leave frame: the give-up path is a real leave, so it owes
    *  the session everything leaveVoice(true) does — state back to "idle", the
@@ -89,10 +92,10 @@ export interface ReconnectDeps {
  *
  *  P2-T5 (DP-39, owner decision D-4): after those fast attempts the loop keeps
  *  trying every 15 s — a longer SFU restart or Wi-Fi drop resumes the call
- *  instead of ejecting the user — while the chat socket is connected and the
- *  channel still exists, and gives up 5 minutes after the drop. The ceiling
- *  bounds how long a dropped user stays in everyone's voice roster. The status
- *  badge shows "Reconnecting voice…" for the whole window. */
+ *  instead of ejecting the user — while the chat socket is connected or
+ *  reconnecting and the channel still exists, and gives up 5 minutes after the
+ *  drop. The ceiling bounds how long a dropped user stays in everyone's voice
+ *  roster. The status badge shows "Reconnecting voice…" for the whole window. */
 const FAST_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 3000;
 const RECONNECT_MAX_DELAY_MS = 6000;
@@ -146,7 +149,7 @@ export async function attemptAutoReconnect(
     const delay = reconnectDelayMs(attempt);
     if (slow) {
       // D-4: no attempt starts past the ceiling, and none waits on a chat
-      // socket or channel that is already gone.
+      // socket closed for good or a channel that is already gone.
       if (Date.now() - startedAt + delay > RECONNECT_CEILING_MS || !deps.canKeepRetrying()) break;
       // OC-0014: the attempt after this delay must carry a live token.
       if (deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
@@ -338,9 +341,9 @@ export async function attemptAutoReconnect(
         deps.syncModuleRooms();
     }
   }
-  // Out of time (D-4), or the chat socket or channel is gone — give up and
-  // clean up. But first check this loop is still current (see OC-0009 in
-  // connectAndSetup).
+  // Out of time (D-4), or the chat socket closed for good or the channel is
+  // gone — give up and clean up. But first check this loop is still current
+  // (see OC-0009 in connectAndSetup).
   if (superseded()) {
     log.info("Auto-reconnect give-up skipped — superseded");
     return;
