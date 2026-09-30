@@ -1554,6 +1554,13 @@ jobs:
       - run: node tests/e2e/scripts/native-test-config.mjs
       - id: native_build
         run: npm run tauri build -- --no-bundle --config tests/e2e/.bin/tauri.native.json
+      # The first launch of the freshly linked, unsigned exe opened its CDP port
+      # after 13.7 s against ~0.4 s for every later launch, and a slower one
+      # past startNativeApp's 60 s budget failed whichever spec ran first.
+      - name: Exclude the native test app from Defender real-time scanning
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\Client\src-tauri\target" -ExclusionProcess owncord-client.exe, msedgewebview2.exe
+          Get-MpPreference | Format-List ExclusionPath, ExclusionProcess
       - name: Test actual Rust transport and WebView2
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
