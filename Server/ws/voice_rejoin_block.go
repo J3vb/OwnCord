@@ -2,11 +2,11 @@ package ws
 
 // voice_rejoin_block.go — a moderator's removal is not undone by a reconnect.
 //
-// A client whose voice was reconnecting when a moderator kicked it (or moved
-// it, which lands as a removal while its socket is gone) can miss the
-// unsequenced voice_disconnected, and its reconnect loop answers the released
-// membership with voice_join (P2-T5). For voiceRejoinBlockWindow after such a
-// removal, voice_join from that user to that channel is refused.
+// A client whose voice was reconnecting when a moderator kicked or moved it
+// can miss the unsequenced voice_disconnected or voice_moved, and its
+// reconnect loop answers the released membership with voice_join (P2-T5). For
+// voiceRejoinBlockWindow after any moderator kick or move, voice_join from
+// that user to the channel it was removed from is refused.
 
 import (
 	"time"

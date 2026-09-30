@@ -1089,3 +1089,43 @@ func TestVoiceMod_Move_RemovalRefusesRejoin(t *testing.T) {
 		t.Fatalf("rejoin after the removal = %+v (ok=%v), want the removed refusal", frame, ok)
 	}
 }
+
+// A delivered voice_moved can still be lost with a half-open socket, so every
+// move blocks the rejoin of the channel the target was moved out of; the
+// destination the client joins in answer stays open.
+func TestVoiceMod_Move_RefusesRejoinOfTheSourceChannel(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-moved-from")
+	toID := seedVoiceChan(t, database, "vc-moved-to")
+	actor := seedVoiceUserWithRole(t, database, "admin-moved", 2)
+	target := seedVoiceUserWithRole(t, database, "member-moved", 4)
+
+	targetClient, targetSend := joinVoice(t, hub, target, fromID)
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, actor, fromID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+	if receiveMsgOfType(targetSend, "voice_moved", waitTimeout) == nil {
+		t.Fatal("target did not receive voice_moved")
+	}
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state == nil
+	}, "target to be removed from the source channel")
+	drainChanTimeout(targetSend, 30*time.Millisecond)
+
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(fromID))
+	frame, ok := receiveErrorFrame(targetSend, waitTimeout)
+	want := voiceModErrorFrame{Code: "FORBIDDEN", Message: "You were removed from this voice channel"}
+	if !ok || frame != want {
+		t.Fatalf("rejoin of the source = %+v (ok=%v), want %+v", frame, ok, want)
+	}
+
+	hub.HandleMessageForTest(targetClient, voiceJoinMsg(toID))
+	waitFor(t, waitTimeout, func() bool {
+		state, err := database.GetVoiceState(context.Background(), target.ID)
+		return err == nil && state != nil && state.ChannelID == toID
+	}, "target to join the destination")
+}
