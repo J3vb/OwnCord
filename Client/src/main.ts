@@ -629,12 +629,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           if (!owner.isCurrent()) return;
           connectedOverlay?.destroy();
           connectedOverlay = null;
+          // This handler's closures (the owner cleanup, the `ready` listener in
+          // sessionUnsubs) outlive the overlay until logout; drop their shared
+          // reference so the destroyed overlay's DOM can be collected.
+          ownedOverlay = null;
           navigate("main");
         },
       });
-      const ownedOverlay = connectedOverlay;
+      let ownedOverlay: ConnectedOverlayControl | null = connectedOverlay;
       owner.addCleanup(() => {
-        ownedOverlay.destroy();
+        ownedOverlay?.destroy();
         if (connectedOverlay === ownedOverlay) connectedOverlay = null;
       });
       appEl!.appendChild(connectedOverlay.element);
