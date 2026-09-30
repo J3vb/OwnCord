@@ -3,6 +3,7 @@ import {
   ACTIVITY_THROTTLE_MS,
   AUTO_IDLE_DELAY_MS,
   nextAutoStatus,
+  SYSTEM_IDLE_POLL_MS,
   startAutoIdle,
   type AutoIdleController,
 } from "@lib/autoIdle";
@@ -275,5 +276,177 @@ describe("startAutoIdle", () => {
 
     vi.advanceTimersByTime(5000);
     expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+  });
+});
+
+describe("startAutoIdle with an OS idle source", () => {
+  // DP-33: working in another app must not turn you Idle. Where the platform
+  // reports system-wide input idle time, that — not in-window DOM input —
+  // decides when the status goes Idle.
+  let controller: AutoIdleController | null = null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    controller?.destroy();
+    controller = null;
+    vi.useRealTimers();
+  });
+
+  it("with the platform reporting 2 min OS idle after 10 min without DOM input, status stays Online", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    const systemIdleMs = vi.fn(async () => 2 * 60 * 1000);
+    controller = startAutoIdle({ onStatusChange, target: createTarget(), systemIdleMs });
+
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS + SYSTEM_IDLE_POLL_MS);
+
+    expect(systemIdleMs).toHaveBeenCalled();
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(loadUserStatus()).toBe("online");
+  });
+
+  it("with OS idle ≥ 10 min, it goes Idle", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: async () => AUTO_IDLE_DELAY_MS,
+    });
+
+    // The first poll decides; the DOM timer's ten minutes are not waited out.
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+    expect(loadUserStatus()).toBe("idle");
+    expect(loadUserStatusOrigin()).toBe("auto");
+
+    // No flap: further polls reporting the same idleness change nothing.
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS * 4);
+    expect(onStatusChange).toHaveBeenCalledOnce();
+  });
+
+  it("returns to Online when the OS reports input elsewhere after an automatic Idle", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    let idleMs = AUTO_IDLE_DELAY_MS;
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: async () => idleMs,
+    });
+
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    expect(onStatusChange).toHaveBeenLastCalledWith("idle");
+
+    // Typing in another app: no DOM event reaches the webview.
+    idleMs = 1000;
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    expect(onStatusChange).toHaveBeenLastCalledWith("online");
+    expect(loadUserStatus()).toBe("online");
+    expect(loadUserStatusOrigin()).toBe("manual");
+
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS * 4);
+    expect(onStatusChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("with the platform returning null, the current DOM behaviour is unchanged", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    const target = createTarget();
+    controller = startAutoIdle({ onStatusChange, target, systemIdleMs: async () => null });
+
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS - 1);
+    expect(onStatusChange).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+
+    target.fire();
+    expect(onStatusChange).toHaveBeenLastCalledWith("online");
+  });
+
+  it("treats a failing platform query like null", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: () => Promise.reject(new Error("no host")),
+    });
+
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+  });
+
+  it("treats a non-numeric platform answer like null", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: async () => undefined as unknown as null,
+    });
+
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_DELAY_MS);
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("idle");
+  });
+
+  it.each(["dnd", "invisible", "idle"] as const)(
+    "leaves a manual %s alone whatever the OS reports",
+    async (status) => {
+      saveUserStatus(status);
+      const onStatusChange = vi.fn();
+      let idleMs = AUTO_IDLE_DELAY_MS * 2;
+      controller = startAutoIdle({
+        onStatusChange,
+        target: createTarget(),
+        systemIdleMs: async () => idleMs,
+      });
+      await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS * 2);
+      idleMs = 0;
+      await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS * 2);
+
+      expect(onStatusChange).not.toHaveBeenCalled();
+      expect(loadUserStatus()).toBe(status);
+    },
+  );
+
+  it("stops polling on teardown", async () => {
+    saveUserStatus("online");
+    const systemIdleMs = vi.fn(async () => 0);
+    controller = startAutoIdle({ onStatusChange: vi.fn(), target: createTarget(), systemIdleMs });
+
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    const calls = systemIdleMs.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    controller.destroy();
+    controller = null;
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS * 10);
+
+    expect(systemIdleMs).toHaveBeenCalledTimes(calls);
+  });
+
+  it("drops a poll answer that lands after teardown", async () => {
+    saveUserStatus("online");
+    const onStatusChange = vi.fn();
+    let answer: ((ms: number) => void) | undefined;
+    controller = startAutoIdle({
+      onStatusChange,
+      target: createTarget(),
+      systemIdleMs: () => new Promise((resolve) => (answer = resolve)),
+    });
+
+    await vi.advanceTimersByTimeAsync(SYSTEM_IDLE_POLL_MS);
+    controller.destroy();
+    controller = null;
+    expect(answer).toBeDefined();
+    answer?.(AUTO_IDLE_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onStatusChange).not.toHaveBeenCalled();
   });
 });

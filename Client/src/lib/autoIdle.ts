@@ -20,6 +20,12 @@
  * Input listening is throttled to one bookkeeping call per second: mousemove
  * fires hundreds of times a second and the timer's resolution is minutes, so
  * anything finer is pure cost.
+ *
+ * Where the platform reports system-wide input idle time (DP-33), a poll of
+ * it decides when to go idle, so working in another app no longer counts as
+ * being away. The DOM listeners stay: they are the fallback whenever the OS
+ * cannot say, and they still bring the status back the instant the user
+ * touches the window rather than at the next poll.
  */
 
 import { Disposable } from "./disposable";
@@ -31,6 +37,10 @@ export const AUTO_IDLE_DELAY_MS = 10 * 60 * 1000;
 
 /** Minimum gap between two activity bookkeeping runs. */
 export const ACTIVITY_THROTTLE_MS = 1000;
+
+/** How often the OS idle source is asked. The delay is minutes, so a 30 s
+ *  late flip is invisible, and the query stays off the hot path. */
+export const SYSTEM_IDLE_POLL_MS = 30 * 1000;
 
 /** Events that count as "the user is here". */
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"] as const;
@@ -44,6 +54,10 @@ export interface AutoIdleOptions {
   readonly target?: Pick<Window, "addEventListener" | "removeEventListener">;
   /** Injected in tests. Defaults to AUTO_IDLE_DELAY_MS. */
   readonly delayMs?: number;
+  /** Milliseconds since the last keyboard or mouse input anywhere on the
+   *  system, or null where the OS cannot say. Omitted, or answering null,
+   *  leaves the DOM listeners in sole charge. */
+  readonly systemIdleMs?: () => Promise<number | null>;
 }
 
 export interface AutoIdleController {
@@ -83,6 +97,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   const disposable = new Disposable();
 
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let poll: ReturnType<typeof setInterval> | null = null;
+  let polling = false;
+  /** True while the last poll got an answer from the OS: the OS, not the
+   *  DOM timer, then decides when the status goes idle. */
+  let osKnowsIdle = false;
   let lastActivityRun = 0;
   let destroyed = false;
   /** True while the timer is the reason the status is idle. Kept in memory so
@@ -108,7 +127,9 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     timer = setTimeout(() => {
       timer = null;
       if (destroyed) return;
-      apply(true);
+      // The DOM only sees input to this window; while the OS can see all of
+      // it, ten quiet minutes here may just mean the user is in another app.
+      if (!osKnowsIdle) apply(true);
       // Re-check: apply() invokes options.onStatusChange synchronously, and a
       // caller reacting to that (e.g. tearing down the page) may call
       // destroy() from inside it. `timer` is already null at this point, so
@@ -143,6 +164,36 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     arm();
   }
 
+  async function pollSystemIdle(source: () => Promise<number | null>): Promise<void> {
+    // One query at a time: a slow D-Bus answer must not stack up behind the
+    // interval.
+    if (polling) return;
+    polling = true;
+    let idleMs: number | null;
+    try {
+      idleMs = await source();
+    } catch {
+      idleMs = null;
+    } finally {
+      polling = false;
+    }
+    if (destroyed) return;
+    // Anything but a finite count (an absent host answering undefined) is
+    // the OS not knowing.
+    osKnowsIdle = typeof idleMs === "number" && Number.isFinite(idleMs);
+    if (!osKnowsIdle || idleMs === null) return;
+    // nextAutoStatus makes a repeat of the same answer a no-op, so a steady
+    // stream of polls cannot flap the status. Coming back goes through the
+    // same onStatusChange as the DOM path, and so through the caller's
+    // shared presence limiter.
+    apply(idleMs >= delayMs);
+  }
+
+  if (options.systemIdleMs !== undefined) {
+    const source = options.systemIdleMs;
+    poll = setInterval(() => void pollSystemIdle(source), SYSTEM_IDLE_POLL_MS);
+  }
+
   for (const evt of ACTIVITY_EVENTS) {
     target.addEventListener(evt, onActivity, { passive: true, signal: disposable.signal });
   }
@@ -155,6 +206,10 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     destroy(): void {
       destroyed = true;
       disposable.destroy();
+      if (poll !== null) {
+        clearInterval(poll);
+        poll = null;
+      }
       if (timer !== null) {
         clearTimeout(timer);
         timer = null;

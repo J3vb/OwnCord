@@ -130,7 +130,9 @@ tauri-plugin-deep-link = "2"
 notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
-# Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs).
+# Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,
+# with Win32_System_SystemInformation's GetTickCount, the last-input time
+# auto-idle reads (idle.rs).
 # Data_Xml_Dom + UI_Notifications: the protocol-activation message toast
 # (message_notification.rs), whose click must survive a banner timeout by
 # launching the owncord:// handler. These are features on the existing 0.58
@@ -138,6 +140,7 @@ notify-rust = "4"
 # its own separate windows 0.61 copy, so nothing here is shared with it.
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_SystemInformation",
     "Data_Xml_Dom",
     "UI_Notifications",
 ] }
@@ -154,6 +157,10 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
+# IdleMonitor and the freedesktop ScreenSaver interface. Already in the tree
+# as keyring's sync-secret-service transport, same libdbus, no new build.
+dbus = "0.9"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
 # WebRTC (the system webview's RTCPeerConnection is undefined on every distro),
 # so on Linux the LiveKit SDK runs in this Rust backend instead of the webview

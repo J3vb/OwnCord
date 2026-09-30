@@ -89,6 +89,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Desktop UI
 
+- **Working in another app no longer turns you Idle.** Auto-idle counted only input inside the OwnCord window, so ten minutes in a browser or editor set you Idle. It now follows keyboard and mouse input anywhere on the computer on Windows, GNOME (X11 and Wayland) and KDE on X11, and keeps the in-window rule elsewhere, such as KDE on Wayland and macOS.
 - **The tray's status menu and the app now use the same word for "Invisible".** The tray said "Offline" for the status the app calls Invisible.
 - **Alt+↑/↓ now steps between channels, and Alt+Shift+↑/↓ between unread channels.** Discord's navigation shortcuts had no equivalent here, so the channel list could only be walked with Tab. Alt with the arrow keys moves to the previous or next channel, Shift adds the unread filter, and a bare Alt+Arrow typed into the message box is left to the field.
 - **Settings now shows your uploaded avatar** beside your name, not just its initial letter, and a group DM's header no longer shows a pointer cursor that did nothing when clicked.
