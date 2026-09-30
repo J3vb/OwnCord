@@ -347,6 +347,29 @@ Task Scheduler discards the process's stdout: point the action at a redirect
 (wrap it as `cmd /c chatserver.exe >> logs\server.log 2>&1`) or the log is
 gone.
 
+### Running from a console window
+
+A server started by double-clicking `chatserver.exe`, or from cmd or
+PowerShell, is not supervised, so `auto` resolves to `spawn`. After a
+self-update, backup restore or setup-wizard restart, the replacement runs in the
+same console window and its log keeps printing there. The old process stays
+behind, idle, until the replacement exits, and then exits with the
+replacement's exit code. That keeps the window open under Windows Terminal,
+which closes a tab when the process it started exits, and a shell that started
+the server keeps waiting instead of printing its prompt over the log.
+
+`Ctrl+C` stops the replacement, which drains as usual, and then the old process
+exits with it. Closing the window stops both, and LiveKit. Each self-restart
+leaves one more idle process behind until the window closes or the server stops.
+
+The one exception is a restart whose teardown wedges past the 90-second restart
+backstop. The old process may still hold the port or the database lock, so it
+exits instead of staying behind, and the replacement opens in a new console
+window of its own.
+
+A server started without a console (by a service wrapper, for example) gets a
+new console window of its own on a self-restart.
+
 ## TLS Setup
 
 What each mode means for the people connecting — desktop pinning, what a
@@ -1044,9 +1067,9 @@ how recent the archive is.
 
 You also need the version you are rolling back **to**. Keep the binary, or the
 image tag, you upgraded from: GitHub Releases usually still has it, but an
-in-place self-update leaves nothing local (it rotates the old binary to `.old`
-and the replacement deletes that), and a yanked or air-gapped release leaves
-you no rollback at all. Step 4 of the archive above is that copy.
+in-place self-update leaves nothing local (it rotates the old binary to
+`.old-*` and the replacement deletes that), and a yanked or air-gapped release
+leaves you no rollback at all. Step 4 of the archive above is that copy.
 
 **Standalone:**
 
@@ -1470,7 +1493,7 @@ per-file or per-user limit ([Capacity limits](#capacity-limits));
 
 ### An update did not come back
 
-[If the update fails](#if-the-update-fails) — audit rows, the `.old`
+[If the update fails](#if-the-update-fails) — audit rows, the `.old-*`
 fallback and the Docker refusal are there.
 
 ### What to send when asking for help
@@ -1501,7 +1524,9 @@ Applying an update runs in this order:
 
 1. Download and verify the replacement beside the installed executable.
 2. Give connected clients a "restarting in 5s" notice, then rotate the current
-   binary to `.old` and put the verified download at the installation path.
+   binary to a uniquely named `.old-*` beside it (for example
+   `chatserver.exe.old-123456789`) and put the verified download at the
+   installation path.
 3. Drain HTTP requests, stop the WebSocket hub and the managed `livekit-server`,
    flush queued event/audit writes, and close the database and its process lock.
    LiveKit's process must finish exiting before the handoff can continue. Unix
@@ -1513,16 +1538,20 @@ Applying an update runs in this order:
    emergency restart backstop share one handoff, so only one replacement is
    launched. The backstop also waits for the managed LiveKit process to exit.
 5. Once every start-up stage has come up — data dir, TLS, database, migrations,
-   and the rest — the new process removes `.old`, retrying briefly while
-   Windows finishes releasing the predecessor's executable file. A start-up
-   stage that fails before then leaves `.old` in place.
+   and the rest — the new process removes every `.old-*` (and a `.old` left by
+   an older release). One that Windows still holds open, because that binary
+   is still running, is left for a later start: a server started from a
+   console window stays behind until its replacement exits (see
+   [Running from a console window](#running-from-a-console-window)). A
+   start-up stage that fails before then leaves `.old-*` in place.
 6. That removal is the only recovery start-up performs. A new process does not
-   put `.old` back if the installed binary turns out to be broken after it has
+   put `.old-*` back if the installed binary turns out to be broken after it has
    started serving, and it does not delete a stale `.new` left by an interrupted
    download — staging refuses to write through an existing `.new`, and the next
    update attempt removes it before downloading. If the server dies between
    step 2 and step 5, the previous binary is still beside the installation path
-   as `.old`; restoring it is a manual rename.
+   as a `.old-*` (the most recently modified one, if there are several);
+   restoring it is a manual rename.
 
 #### If the update fails
 
@@ -1535,10 +1564,10 @@ then `update_applied` or `update_failed` (see
   The installed binary is untouched and the admin panel says why; retry, and
   if it persists compare your version against the release page.
 - **The rotation succeeded and the server died before or during the handoff**
-  — the previous binary is still beside the installation path as `.old` until
-  a successor passes its start-up stages. If the new one never boots, put
-  `.old` back by hand (rename it over the broken binary) and start. This is a
-  rollback of the binary only: if the failed start was a migration, the
+  — the previous binary is still beside the installation path as a `.old-*`
+  until a successor passes its start-up stages. If the new one never boots,
+  put that file back by hand (rename it over the broken binary) and start.
+  This is a rollback of the binary only: if the failed start was a migration, the
   database has already moved forward, and an older binary refuses to start on
   it rather than corrupting it (restore the pre-upgrade database first).
 - **Docker refuses the whole flow** — the panel answers `503
@@ -1756,8 +1785,8 @@ A managed livekit-server never outlives the server, even when the server dies
 without running this sequence: on Linux the kernel kills it with its parent
 (`Pdeathsig`), and on Windows it runs in a job object that is killed when the
 server exits. On Windows, closing the server's console window stops the server
-and LiveKit together; after a self-restart in `spawn` mode, the replacement
-opens a new console window of its own.
+and LiveKit together, including after a self-restart (see
+[Running from a console window](#running-from-a-console-window)).
 
 ## See Also
 

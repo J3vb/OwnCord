@@ -63,6 +63,8 @@ type RestartCoordinator struct {
 	backstop      *time.Timer
 	stopCompanion func()
 	handoffOnce   sync.Once
+	exitCode      int
+	waited        bool
 }
 
 // NewRestartCoordinator builds a coordinator whose Context() is the parent
@@ -170,13 +172,25 @@ func (rc *RestartCoordinator) setCompanionStop(stop func()) {
 }
 
 // PerformHandoff joins the managed companion and hands off exactly once.
-// Both main's normal return and the restart backstop use this method: stopping
-// a timer cannot recall a callback that already started. Concurrent callers
-// wait for the same handoff instead of spawning two replacement servers.
-func (rc *RestartCoordinator) PerformHandoff(log *slog.Logger) {
+// Both main's normal return and the restart backstop (PerformBackstopHandoff)
+// go through the same handoff: stopping a timer cannot recall a callback that
+// already started. Concurrent callers wait for the same handoff instead of
+// spawning two replacement servers. When waited is true every caller must
+// exit with exitCode (see PerformRestartHandoff).
+func (rc *RestartCoordinator) PerformHandoff(log *slog.Logger) (exitCode int, waited bool) {
+	return rc.handoff(log, false)
+}
+
+// PerformBackstopHandoff is PerformHandoff for the restart backstop: the
+// teardown is wedged, so this process never stays behind for its replacement.
+func (rc *RestartCoordinator) PerformBackstopHandoff(log *slog.Logger) (exitCode int, waited bool) {
+	return rc.handoff(log, true)
+}
+
+func (rc *RestartCoordinator) handoff(log *slog.Logger, wedged bool) (exitCode int, waited bool) {
 	reason, requested := rc.Requested()
 	if !requested {
-		return
+		return 0, false
 	}
 	rc.handoffOnce.Do(func() {
 		rc.Disarm()
@@ -186,8 +200,9 @@ func (rc *RestartCoordinator) PerformHandoff(log *slog.Logger) {
 		if stop != nil {
 			stop()
 		}
-		PerformRestartHandoff(reason, mode, log)
+		rc.exitCode, rc.waited = PerformRestartHandoff(reason, mode, wedged, log)
 	})
+	return rc.exitCode, rc.waited
 }
 
 // resolveRestartMode turns cfg.Server.RestartMode into the effective handoff
@@ -210,9 +225,12 @@ func resolveRestartMode(cfgVal string, log *slog.Logger) string {
 	return restartModeSpawn
 }
 
-// spawnReplacement is the replacement-process spawner, swappable in tests
-// (which must not start real processes).
-var spawnReplacement = updater.SpawnDetached
+// spawnReplacement and spawnDetached are the replacement-process spawners,
+// swappable in tests (which must not start real processes).
+var (
+	spawnReplacement = updater.SpawnReplacement
+	spawnDetached    = updater.SpawnDetached
+)
 
 // PerformRestartHandoff completes a requested restart after Run has fully
 // drained. In supervised mode the handoff IS the exit — the supervisor
@@ -221,21 +239,41 @@ var spawnReplacement = updater.SpawnDetached
 // started directly; every resource is already released, so the successor
 // boots with no lock or port contention. A failed spawn leaves the server
 // down — loudly logged; there is no hub left to notify clients through.
-func PerformRestartHandoff(reason, mode string, log *slog.Logger) {
+//
+// A Windows server on a console stays behind until its replacement exits
+// (see updater.SpawnReplacement): waited is then true and exitCode is the
+// replacement's, which this process must exit with. Not when wedged: a
+// teardown that never finished may still hold the listener, the database lock
+// or SQLite handles, which only this process exiting releases.
+func PerformRestartHandoff(reason, mode string, wedged bool, log *slog.Logger) (exitCode int, waited bool) {
 	if mode == restartModeSupervised {
 		log.Info("restart: exiting for the supervisor to relaunch", "reason", reason, "mode", mode)
-		return
+		return 0, false
 	}
 	exePath, err := updater.ExecutablePath()
 	if err != nil {
 		log.Error("restart: cannot determine executable path — manual restart required",
 			"reason", reason, "error", err)
-		return
+		return 0, false
 	}
-	if err := spawnReplacement(exePath, os.Args[1:]); err != nil {
+	var wait func() int
+	if wedged {
+		log.Warn("restart: teardown is wedged, so this process exits to release what it still holds "+
+			"instead of staying behind; on a Windows console the replacement opens in a new console window",
+			"reason", reason)
+		err = spawnDetached(exePath, os.Args[1:])
+	} else {
+		wait, err = spawnReplacement(exePath, os.Args[1:])
+	}
+	if err != nil {
 		log.Error("restart: spawning the replacement process FAILED — manual restart required",
 			"reason", reason, "error", err)
-		return
+		return 0, false
 	}
 	log.Info("restart: replacement process spawned", "reason", reason, "path", exePath)
+	if wait == nil {
+		return 0, false
+	}
+	log.Info("restart: staying behind on this console until the replacement exits")
+	return wait(), true
 }

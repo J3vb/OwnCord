@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"time"
+	"strings"
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/updater"
@@ -13,16 +13,11 @@ import (
 
 // removeOldBinaryFn is the self-update cleanup App.start invokes once every
 // start stage has succeeded. A var so a test can observe when it runs relative
-// to the stages without writing a .old beside the real test binary.
+// to the stages without touching the binaries beside the real test binary.
 var removeOldBinaryFn = removeOldBinary
 
-// removeOldBinary deletes the binary a previous self-update left behind.
+// removeOldBinary deletes the binaries previous self-updates left behind.
 func removeOldBinary(log *slog.Logger) {
-	// Clean up old binary from a previous update. Bounded retry: in spawn
-	// mode the predecessor spawns this process as its very last act, so for
-	// the first few hundred milliseconds it may not have fully exited — and
-	// on Windows its image file (the .old after the swap) stays locked until
-	// it does.
 	exePath, exeErr := updater.ExecutablePath()
 	if exeErr != nil {
 		log.Warn("failed to determine executable path", "error", exeErr)
@@ -31,24 +26,28 @@ func removeOldBinary(log *slog.Logger) {
 	removeOldBinaryAt(exePath, log)
 }
 
+// removeOldBinaryAt removes exePath.old (what releases before unique names
+// left) and every exePath.old-*, one attempt each. On Windows a binary that is
+// still running cannot be removed: a predecessor staying behind on its console
+// for this process (see updater.SpawnReplacement), or one still exiting. It is
+// left for a later start rather than waited on.
 func removeOldBinaryAt(exePath string, log *slog.Logger) {
-	oldPath := exePath + ".old"
-	var rmErr error
-	for attempt := range 21 {
-		if attempt > 0 {
-			time.Sleep(250 * time.Millisecond)
-		}
-		rmErr = os.Remove(oldPath)
-		if os.IsNotExist(rmErr) {
-			return
-		}
-		if rmErr == nil {
-			break
-		}
+	entries, err := os.ReadDir(filepath.Dir(exePath))
+	if err != nil {
+		log.Warn("failed to list old binaries", "error", err)
+		return
 	}
-	if rmErr != nil {
-		log.Warn("failed to remove old binary", "path", oldPath, "error", rmErr)
-	} else {
+	base := filepath.Base(exePath)
+	for _, e := range entries {
+		name := e.Name()
+		if name != base+".old" && !strings.HasPrefix(name, base+".old-") {
+			continue
+		}
+		oldPath := filepath.Join(filepath.Dir(exePath), name)
+		if err := os.Remove(oldPath); err != nil {
+			log.Info("old binary not removed yet, a later start retries", "path", oldPath, "error", err)
+			continue
+		}
 		log.Info("removed old binary from previous update", "path", oldPath)
 	}
 }

@@ -64,6 +64,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **The voice connection panel is tidier.** The transport-stats readout now lays Outgoing and Incoming out as a two-column grid of label/value rows, each value on one line with a single unit — a rate reads "331 kB/s" instead of the old "331.25 kB/s (2.6 Mbps)" that wrapped. A zero rate or a missing RTT is dimmed rather than shown at full strength, and the in-call controls are equal-size icon buttons, with a screen share shown by the button's own active state instead of a squeezed "Sharing" label.
 
+### Installing & updating
+
+- **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.
+
 ## v2.0.1-beta.1
 
 **OwnCord 2.0.1 beta 1** is the second public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It hardens the rough edges of the first beta: a server update, backup restore or restart no longer signs everyone out, voice survives a network blip or a media-server restart, a laptop waking no longer takes over your desktop call, routine certificate renewals stop prompting, and the admin panel now answers before you dig. Existing `2.0.0-beta.1` servers and clients upgrade in place. It is still a beta and a hobby project — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive.

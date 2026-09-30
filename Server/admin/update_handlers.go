@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -113,7 +114,6 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 		newPath := exePath + ".new"
-		oldPath := exePath + ".old"
 
 		// Download and verify.
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
@@ -151,7 +151,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// goroutine takes over the busy state claimed above, so the deferred
 		// release must stand down.
 		claimed = false
-		go applyAndRestart(auditCtx, database, actor, info.Latest, hub, exePath, oldPath, newPath, stagedHash)
+		go applyAndRestart(auditCtx, database, actor, info.Latest, hub, exePath, newPath, stagedHash)
 	})
 }
 
@@ -161,12 +161,12 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 // exclusive slot claimed by the handler so a corrected release can be applied
 // without a manual restart (the corrective update_aborted broadcast is sent
 // by applyStagedUpdate's deferred guard).
-func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) {
+func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, newPath, stagedHash string) {
 	if hub != nil {
 		hub.BroadcastServerRestart(ws.RestartReasonUpdate, 5)
 	}
 	time.Sleep(applyRestartDelay)
-	if applyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
+	if applyStagedUpdate(hub, exePath, newPath, stagedHash) {
 		// Synchronous, like the backup restore's row and for the same reason:
 		// the next thing this process does is hand itself over to the restart
 		// coordinator, and a row still sitting in the async writer's buffer
@@ -195,9 +195,9 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 }
 
 // applyStagedUpdate performs the on-disk swap: verified staged binary ->
-// exePath, previous binary -> .old. It reports whether the swap committed —
-// on true the caller must request a restart, because the file at exePath is
-// no longer the binary this process is running.
+// exePath, previous binary -> a unique exePath.old-*. It reports whether the
+// swap committed — on true the caller must request a restart, because the
+// file at exePath is no longer the binary this process is running.
 //
 // The caller has already broadcast "restarting in 5s" to every connected
 // client before invoking this, so every failure path must correct that
@@ -212,7 +212,12 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 // Keeping
 // the swap free of process side effects is also what makes the success path
 // unit-testable.
-func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash string) bool {
+//
+// The name is unique because an earlier binary can still be running: on
+// Windows a server on a console stays behind until its replacement exits
+// (updater.SpawnReplacement), and its image cannot be replaced or removed
+// until then.
+func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string) bool {
 	committed := false
 	defer func() {
 		if !committed && hub != nil {
@@ -231,16 +236,23 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, oldPath, newPath, stagedHash
 	}
 	defer staged.Close() //nolint:errcheck
 
-	// Rename: current -> .old, verified staged binary -> current
-	_ = os.Remove(oldPath) // remove any stale .old
+	// Rename: current -> .old-*, verified staged binary -> current
+	reserved, err := os.CreateTemp(filepath.Dir(exePath), filepath.Base(exePath)+".old-*")
+	if err != nil {
+		slog.Error("update: reserving a name for the previous binary failed", "error", err)
+		return false
+	}
+	oldPath := reserved.Name()
+	_ = reserved.Close()
 	if err := os.Rename(exePath, oldPath); err != nil {
+		_ = os.Remove(oldPath)
 		slog.Error("update: rename current to old failed", "error", err)
 		return false
 	}
 	if err := staged.Commit(exePath); err != nil {
 		slog.Error("update: committing staged binary failed, restoring original binary", "error", err)
 		// Whatever is at exePath now (if anything) is not the verified
-		// binary; restoring .old replaces it.
+		// binary; restoring the previous one replaces it.
 		if restoreErr := os.Rename(oldPath, exePath); restoreErr != nil {
 			slog.Error("update: CRITICAL — recovery rename also failed, server binary may be missing",
 				"restore_error", restoreErr, "original_error", err,

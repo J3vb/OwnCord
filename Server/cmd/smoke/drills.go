@@ -506,8 +506,8 @@ func (d *drill) failures(problems []failure) error {
 // awaitRestart waits out a restart the server performed on its own, and points
 // the harness at whatever comes next.
 //
-// D9: the replacement is not this harness's child. updater.SpawnDetached starts
-// it detached — its own session on Unix, its own new console on Windows — and
+// D9: the replacement is not this harness's child. updater.SpawnReplacement starts
+// it detached — its own session on Unix, where the drills run — and
 // there is no PID file to find it by, so `drain` and `waitErr` are both
 // unavailable for it. What IS shared is the log file (the replacement inherits
 // the parent's stdout/stderr) and the install directory (it inherits its cwd),

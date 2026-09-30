@@ -24,12 +24,11 @@ import (
 // is what keeps concurrent applies/restores/restarts from racing each other.
 
 // stageFakeUpdate lays out a fake current binary and a staged .new whose
-// hash matches, returning the three paths plus the staged hash.
-func stageFakeUpdate(t *testing.T) (exePath, oldPath, newPath, stagedHash string) {
+// hash matches, returning both paths plus the staged hash.
+func stageFakeUpdate(t *testing.T) (exePath, newPath, stagedHash string) {
 	t.Helper()
 	dir := t.TempDir()
 	exePath = filepath.Join(dir, "chatserver")
-	oldPath = exePath + ".old"
 	newPath = exePath + ".new"
 	if err := os.WriteFile(exePath, []byte("old binary"), 0o755); err != nil {
 		t.Fatalf("writing fake exe: %v", err)
@@ -39,17 +38,27 @@ func stageFakeUpdate(t *testing.T) (exePath, oldPath, newPath, stagedHash string
 		t.Fatalf("writing staged binary: %v", err)
 	}
 	sum := sha256.Sum256(staged)
-	return exePath, oldPath, newPath, hex.EncodeToString(sum[:])
+	return exePath, newPath, hex.EncodeToString(sum[:])
+}
+
+// oldBinaries lists the previous binaries an update moved aside.
+func oldBinaries(t *testing.T, exePath string) []string {
+	t.Helper()
+	olds, err := filepath.Glob(exePath + ".old-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return olds
 }
 
 // The success path: the verified staged binary ends up at exePath, the
-// previous binary at .old, no corrective broadcast is sent, and the swap
-// reports committed.
+// previous binary at a .old-* beside it, no corrective broadcast is sent, and
+// the swap reports committed.
 func TestApplyStagedUpdate_Success_SwapsWithoutAbortBroadcast(t *testing.T) {
-	exePath, oldPath, newPath, stagedHash := stageFakeUpdate(t)
+	exePath, newPath, stagedHash := stageFakeUpdate(t)
 
 	hub := &mockHub{}
-	if !admin.ApplyStagedUpdate(hub, exePath, oldPath, newPath, stagedHash) {
+	if !admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash) {
 		t.Fatal("ApplyStagedUpdate = false, want committed swap")
 	}
 
@@ -59,8 +68,12 @@ func TestApplyStagedUpdate_Success_SwapsWithoutAbortBroadcast(t *testing.T) {
 	if got, err := os.ReadFile(exePath); err != nil || string(got) != "verified staged bytes" {
 		t.Errorf("exePath contents = %q, err=%v; want the staged bytes", got, err)
 	}
-	if got, err := os.ReadFile(oldPath); err != nil || string(got) != "old binary" {
-		t.Errorf(".old contents = %q, err=%v; want the previous binary", got, err)
+	olds := oldBinaries(t, exePath)
+	if len(olds) != 1 {
+		t.Fatalf("old binaries = %v, want exactly the previous one", olds)
+	}
+	if got, err := os.ReadFile(olds[0]); err != nil || string(got) != "old binary" {
+		t.Errorf("%s contents = %q, err=%v; want the previous binary", filepath.Base(olds[0]), got, err)
 	}
 	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
 		t.Errorf(".new still exists after commit (stat err=%v)", err)
@@ -71,7 +84,7 @@ func TestApplyStagedUpdate_Success_SwapsWithoutAbortBroadcast(t *testing.T) {
 // promoted to restart-pending, restart requested through the hook with
 // reason "update".
 func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
-	exePath, oldPath, newPath, stagedHash := stageFakeUpdate(t)
+	exePath, newPath, stagedHash := stageFakeUpdate(t)
 
 	admin.ResetRestartState()
 	admin.ForceRestartState(true) // the handler claims busy before spawning the goroutine
@@ -80,7 +93,7 @@ func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, oldPath, newPath, stagedHash)
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath, stagedHash)
 
 	if len(hub.restartCalls) != 1 || hub.restartCalls[0].reason != "update" {
 		t.Fatalf("restartCalls = %+v, want exactly the update countdown", hub.restartCalls)
@@ -99,7 +112,6 @@ func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
 func TestApplyAndRestart_Abort_ReleasesGuard(t *testing.T) {
 	dir := t.TempDir()
 	exePath := filepath.Join(dir, "chatserver")
-	oldPath := exePath + ".old"
 	newPath := exePath + ".new" // never written → re-verification fails
 
 	admin.ResetRestartState()
@@ -109,7 +121,7 @@ func TestApplyAndRestart_Abort_ReleasesGuard(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, oldPath, newPath,
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath,
 		"0000000000000000000000000000000000000000000000000000000000000000")
 
 	if got := reasons(); len(got) != 0 {

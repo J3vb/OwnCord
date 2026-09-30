@@ -39,8 +39,9 @@ func lockFilePath(dbPath string) string { return dbPath + ".lock" }
 // a bounded window before giving up with errAlreadyLocked.
 //
 // The restart handoff no longer overlaps by design — the old process closes
-// the database (releasing this lock) and exits before its replacement is
-// started, in both spawn and supervised restart modes
+// the database (releasing this lock) before its replacement is started, in
+// both spawn and supervised restart modes, and then exits or, on a Windows
+// console, stays behind idle until the replacement exits
 // (Server/internal/app/restart.go).
 // The retry survives as a safety net for the cases that can still race: a
 // supervisor relaunching the service while a wedged predecessor is being

@@ -47,7 +47,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 # The install directory must stay WRITABLE: the admin panel's self-update
-# renames the new binary into place (chatserver -> chatserver.old swap), and
+# renames the new binary into place (chatserver -> chatserver.old-* swap), and
 # the data dir (SQLite, uploads, certs, backups) lives beneath it by default.
 # If you disable self-update and move data_dir elsewhere, narrow this.
 #
