@@ -118,7 +118,9 @@ role grouping.
 **Target:** show "X is typing…" / "X and Y are typing…" / "Several people are
 typing…" below the message list, excluding the current user (already
 `formatTypingText()` in `components/TypingIndicator.ts`). The client emits `typing_start` while composing
-(debounced), never per-keystroke.
+(debounced), never per-keystroke. A `chat_message` clears its sender's entry at
+once (`handleChatMessage`, `features/messaging/wsHandlers.ts`), and the bar keeps
+its 24 px row while empty so typing start/stop never shifts the message list.
 
 ### 2.2 Member actions (context menu)
 
