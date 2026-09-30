@@ -69,8 +69,9 @@ SELECT EXISTS (
 ) AS active
 `
 
-// The one indexed lookup permissions.Checker / service.PermissionService.Subject
-// run, uncached, to fill Subject.TimedOut.
+// The indexed lookup permissions.Checker.Subject runs, uncached, to fill
+// Subject.TimedOut (service.PermissionService.Subject reads its active-timeout
+// mirror instead, P5-O02).
 func (q *Queries) HasActiveTimeout(ctx context.Context, targetID int64) (int64, error) {
 	row := q.db.QueryRowContext(ctx, hasActiveTimeout, targetID)
 	var active int64

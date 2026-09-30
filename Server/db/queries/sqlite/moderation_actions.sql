@@ -13,8 +13,9 @@ VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: HasActiveTimeout :one
--- The one indexed lookup permissions.Checker / service.PermissionService.Subject
--- run, uncached, to fill Subject.TimedOut.
+-- The indexed lookup permissions.Checker.Subject runs, uncached, to fill
+-- Subject.TimedOut (service.PermissionService.Subject reads its active-timeout
+-- mirror instead, P5-O02).
 SELECT EXISTS (
     SELECT 1 FROM moderation_actions
      WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')

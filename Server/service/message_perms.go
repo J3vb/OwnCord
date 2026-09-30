@@ -150,8 +150,8 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, 
 // channelSubject resolves what the channel predicates need for userID in ch:
 // role bits and both override layers from the permission cache, the
 // channel's flags, and for a DM its membership and, when withBlock is set,
-// the two-party block state. A perms.Subject failure (which now includes an
-// uncached HasActiveTimeout lookup, B5-9) is PROPAGATED rather than
+// the two-party block state. A perms.Subject failure (which now includes the
+// timeout lookup, B5-9) is PROPAGATED rather than
 // collapsed into a permissive zero-bit Subject (P2-11, Codex review): a
 // zero Subject fails closed for a non-DM channel (no SEND_MESSAGES bit,
 // TimedOut also defaults false) but a DM's CanSendMessage/CanAddReaction

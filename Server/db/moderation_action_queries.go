@@ -411,8 +411,9 @@ func LiftTimeoutActionsByID(ctx context.Context, tx *sql.Tx, ids []int64, lifted
 	return out, rows.Err()
 }
 
-// HasActiveTimeout is the one indexed lookup permissions.Checker.Subject and
-// service.PermissionService.Subject run, uncached, to fill Subject.TimedOut.
+// HasActiveTimeout is the indexed lookup permissions.Checker.Subject runs,
+// uncached, to fill Subject.TimedOut (service.PermissionService.Subject reads
+// its active-timeout mirror instead, P5-O02).
 func (d *DB) HasActiveTimeout(ctx context.Context, userID int64) (bool, error) {
 	active, err := d.q.HasActiveTimeout(ctx, userID)
 	if err != nil {

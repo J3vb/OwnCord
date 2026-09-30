@@ -58,10 +58,12 @@ type Subject struct {
 	// caller resolves it live, never from a cache — CanReadContent's whole
 	// point is that a revocation takes effect on the very next read.
 	NSFWAcknowledged bool
-	// TimedOut is filled from a live, uncached lookup ("an active timeout
-	// row exists for this subject") by permissions.Checker.Subject and
-	// service.PermissionService.Subject — never from the 30s permission
-	// cache, and never for an Administrator (B5-9, decision 6). It gates
+	// TimedOut ("an active timeout row exists for this subject") is filled
+	// by permissions.Checker.Subject from a live lookup and by
+	// service.PermissionService.Subject from its active-timeout mirror,
+	// reloaded by every timeout write and judged against the clock (P5-O02)
+	// — never from the 30s permission cache, and never for an Administrator
+	// (B5-9, decision 6). It gates
 	// CanSendMessage, CanAddReaction and CanJoinVoice independent of every
 	// channel-scoped bit: a timeout is a restriction on the subject, not a
 	// property of any one channel.

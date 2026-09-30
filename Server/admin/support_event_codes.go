@@ -35,6 +35,8 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"DispatchV2 panic recovered":                                                                              "dispatchv2_panic_recovered",
 	"DispatchV2: hardware fault, exiting for supervisor restart":                                              "dispatchv2_hardware_fault_exiting",
 	"EmitEvents: unknown event type":                                                                          "emitevents_unknown_event_type",
+	"ModerationService: RefreshTimeouts":                                                                      "moderationservice_refreshtimeouts",
+	"boot: load active timeouts":                                                                              "boot_load_active_timeouts",
 	"FinalizeTimeoutLift: HasActiveTimeout":                                                                   "finalizetimeoutlift_hasactivetimeout",
 	"LeaveVoiceChannelIfMatch exhausted retries — ghost state may persist":                                    "voice_cleanup_exhausted",
 	"LeaveVoiceChannelIfMatch failed, retrying in background":                                                 "leavevoicechannelifmatch_failed_retrying_in_background",

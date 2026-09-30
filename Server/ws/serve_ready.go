@@ -140,7 +140,7 @@ func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions
 // round-trip. It is permissions.CanSendMessage, the same predicate the send
 // path enforces, so the affordance cannot drift from the rule (S-12).
 //
-// timedOut is the caller's live HasActiveTimeout verdict (via subjectFor),
+// timedOut is the caller's current timeout verdict (via subjectFor),
 // threaded through as a plain bool so the lookup happens once per ready
 // payload instead of once per channel — a timed-out user must not see
 // can_send: true anywhere (OC-0434).
@@ -223,7 +223,7 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 // carries the caller's own acknowledgement per NSFW-labelled channel id
 // (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
 // gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there. timedOut is the caller's live HasActiveTimeout verdict,
+// acknowledging there. timedOut is the caller's current timeout verdict,
 // fed into every channel's can_send — see channelCanSend (OC-0434).
 func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
@@ -397,7 +397,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
-	// Live, uncached timeout verdict (OC-0434): channelCanSend's Subject must
+	// Current timeout verdict (OC-0434): channelCanSend's Subject must
 	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
 	// live socket (via the identical subjectFor), or a just-timed-out user's
 	// fresh-connect ready payload ships can_send: true on every channel right
