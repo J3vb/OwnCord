@@ -110,6 +110,7 @@ and only when it changes something a contributor or fork holder must do
 - **A fast leave-and-rejoin no longer waits behind the previous call's teardown.** The new session is set up without holding the lock that is closing the old one, so switching channels is immediate.
 - **Settings › Voice & Audio no longer keeps a closed copy of itself in memory.** The camera preview stayed attached to its stream after you switched tab or closed Settings, which could hold the whole discarded page in memory until you next signed in. The preview is now let go when the tab closes.
 - **A quick service restart no longer drops you from voice.** A `systemctl restart` or `docker restart` sent users in a call back outside it, because only an update, backup restore or setup restart put them back. A restart from outside the server now rejoins the call too, if it comes back within two minutes; a longer maintenance stop still ends the call.
+- **Camera-heavy calls use less bandwidth and CPU.** Every remote camera and screen share arrived at its top quality, even while the video grid was closed, the app was minimised or the tile was a small thumbnail. A hidden or stopped tile now receives no video, a small tile gets a lower quality that fits it, and the stream you are watching (focused, full screen or popped out) keeps the top quality; re-opening the grid resumes the video within about a second.
 
 ### Direct messages & members
 

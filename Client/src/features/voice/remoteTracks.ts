@@ -2,7 +2,7 @@
 // Owns the remote-video callbacks the room event handlers fire, and the
 // local/remote video stream lookups the UI polls. The stream implementations
 // stay in screenShare.ts; the room is read from LiveKitSession on every call.
-import type { Room } from "livekit-client";
+import { VideoQuality, type Room } from "livekit-client";
 import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
@@ -25,6 +25,13 @@ export interface StreamSample {
   readonly codec?: string;
   readonly packetsLost?: number;
   readonly packetsReceived?: number;
+}
+
+/** What a remote video tile shows: nothing, or its rendered device pixels
+ *  (no size: the top layer, for the stream you are watching). */
+export interface VideoView {
+  readonly enabled: boolean;
+  readonly size?: { readonly width: number; readonly height: number };
 }
 
 /** What a receiver-stats lookup needs of a subscribed remote video track. */
@@ -82,15 +89,7 @@ export class RemoteTracks {
     userId: number,
     type: "camera" | "screenshare",
   ): Promise<StreamSample | null> {
-    const room = this.getRoom();
-    if (room === null) return null;
-    const source = type === "screenshare" ? "screen_share" : "camera";
-    let track: StatsTrack | undefined;
-    for (const participant of room.remoteParticipants.values()) {
-      if (parseUserId(participant.identity) !== userId) continue;
-      track = participant.getTrackPublication(source as never)?.track;
-      break;
-    }
+    const track: StatsTrack | undefined = this.publication(userId, type)?.track;
     if (typeof track?.getReceiverStats !== "function") return null;
     const stats = await track.getReceiverStats();
     if (stats === undefined) return null;
@@ -104,5 +103,27 @@ export class RemoteTracks {
       packetsLost: stats.packetsLost,
       packetsReceived: stats.packetsReceived,
     };
+  }
+
+  /** Ask the SFU for only what a user's tile shows (P3-07): the grid drives
+   *  the layer because adaptiveStream is off (roomLifecycle.ts). The layer is
+   *  set before enabling, so a re-shown tile resumes at its own size. The
+   *  Linux native room's publications have no layer controls (a follow-up). */
+  setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
+    const pub = this.publication(userId, type);
+    if (typeof pub?.setEnabled !== "function") return;
+    if (view.size !== undefined) pub.setVideoDimensions(view.size);
+    else if (view.enabled) pub.setVideoQuality(VideoQuality.HIGH);
+    pub.setEnabled(view.enabled);
+  }
+
+  private publication(userId: number, type: "camera" | "screenshare") {
+    for (const participant of this.getRoom()?.remoteParticipants.values() ?? []) {
+      if (parseUserId(participant.identity) !== userId) continue;
+      return participant.getTrackPublication(
+        (type === "screenshare" ? "screen_share" : "camera") as never,
+      );
+    }
+    return undefined;
   }
 }

@@ -31,6 +31,8 @@ import {
   type VideoGridComponent,
   type TileConfig,
 } from "../../src/components/VideoGrid";
+import { RemoteTracks } from "../../src/features/voice/remoteTracks";
+import { VideoQuality, type Room } from "livekit-client";
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
@@ -1706,6 +1708,194 @@ describe("VideoGrid", () => {
       await vi.advanceTimersByTimeAsync(6000);
       expect(getStreamStats.mock.calls.length).toBe(calls);
       container.remove();
+    });
+  });
+
+  describe("video layers follow what each tile shows (P3-07)", () => {
+    const SCREEN = 3 + 1_000_000;
+    /** Rendered tile sizes by data-user-id; an absent tile renders 0 × 0. */
+    let sizes: Map<string, { width: number; height: number }>;
+    let observers: Array<() => void>;
+    let hidden: boolean;
+    let pubs: Map<string, ReturnType<typeof publication>>;
+
+    function publication() {
+      return {
+        track: {},
+        setEnabled: vi.fn(),
+        setVideoQuality: vi.fn(),
+        setVideoDimensions: vi.fn(),
+      };
+    }
+    /** The room the grid's views land on, through the real RemoteTracks. */
+    function room(): Room {
+      const participants = new Map<string, unknown>();
+      for (const uid of [2, 3]) {
+        participants.set(`user-${uid}`, {
+          identity: `user-${uid}`,
+          getTrackPublication: (source: string) => pubs.get(`${uid}:${source}`),
+        });
+      }
+      return { remoteParticipants: participants } as unknown as Room;
+    }
+    const pub = (uid: number, source = "camera") => pubs.get(`${uid}:${source}`)!;
+    /** The last enabled state asked of a publication. */
+    const enabled = (uid: number, source = "camera") =>
+      pub(uid, source).setEnabled.mock.lastCall?.[0] as boolean | undefined;
+    function resize(entries: Record<number, [number, number]>): void {
+      for (const [id, [width, height]] of Object.entries(entries)) sizes.set(id, { width, height });
+      for (const fire of observers) fire();
+    }
+    const cellOf = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+
+    beforeEach(() => {
+      grid.destroy?.();
+      sizes = new Map();
+      observers = [];
+      hidden = false;
+      pubs = new Map([
+        ["2:camera", publication()],
+        ["3:camera", publication()],
+        ["3:screen_share", publication()],
+      ]);
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: () => void) {
+            observers.push(cb);
+          }
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const size = sizes.get(this.dataset["userId"] ?? "") ?? { width: 0, height: 0 };
+        return { ...size, top: 0, left: 0, right: size.width, bottom: size.height } as DOMRect;
+      });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+
+      const tracks = new RemoteTracks(room);
+      grid = createVideoGrid();
+      grid.mount(container);
+      grid.setCallbacks({
+        setStreamView: (tileId, view) =>
+          tileId >= 1_000_000
+            ? tracks.setRemoteVideoView(tileId - 1_000_000, "screenshare", view)
+            : tracks.setRemoteVideoView(tileId, "camera", view),
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      delete (document as { hidden?: unknown }).hidden;
+      delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
+    });
+
+    function addCameras(): void {
+      grid.addStream(1, "me (You)", fakeStream(), makeTileConfig({ isSelf: true, audioUserId: 1 }));
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Ada", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      resize({ 1: [320, 180], 2: [320, 180], 3: [320, 180] });
+    }
+
+    it("hiding the grid calls setEnabled(false) on every remote camera publication, and showing it re-enables them", () => {
+      addCameras();
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+
+      // The grid slot goes display:none (back to chat): every tile renders 0 × 0.
+      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
+      expect(enabled(2)).toBe(false);
+      expect(enabled(3)).toBe(false);
+
+      resize({ 1: [320, 180], 2: [320, 180], 3: [320, 180] });
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+    });
+
+    it("stops the video while the app is hidden (minimised), and resumes it when shown", () => {
+      addCameras();
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(false);
+      expect(enabled(3)).toBe(false);
+
+      hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+    });
+
+    it("a 160-px tile requests a lower quality than a focused tile", () => {
+      addCameras();
+      pub(2).setVideoDimensions.mockClear();
+      grid.setFocusedTile(2);
+      resize({ 2: [1280, 720], 3: [160, 90] });
+
+      expect(pub(3).setVideoDimensions).toHaveBeenLastCalledWith({ width: 160, height: 90 });
+      expect(pub(2).setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+      expect(pub(2).setVideoDimensions).not.toHaveBeenCalled();
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+
+      // Back to the grid: tile 2 is sized like any other again.
+      grid.setFocusedTile(null);
+      resize({ 2: [320, 180], 3: [320, 180] });
+      expect(pub(2).setVideoDimensions).toHaveBeenLastCalledWith({ width: 320, height: 180 });
+    });
+
+    it("a focused screen share keeps its top layer however small its tile renders", () => {
+      grid.addStream(
+        SCREEN,
+        "Ada (Screen)",
+        fakeStream(),
+        makeTileConfig({ audioUserId: 3, isScreenshare: true }),
+      );
+      grid.setFocusedTile(SCREEN);
+      resize({ [SCREEN]: [200, 112] });
+      expect(pub(3, "screen_share").setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+      expect(pub(3, "screen_share").setVideoDimensions).not.toHaveBeenCalled();
+      expect(enabled(3, "screen_share")).toBe(true);
+    });
+
+    it("a stopped tile stops its video, and Watch brings it back", () => {
+      addCameras();
+      cellOf(2).querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+      expect(enabled(2)).toBe(false);
+      expect(enabled(3)).toBe(true);
+      cellOf(2).querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
+      expect(enabled(2)).toBe(true);
+    });
+
+    it("a popped-out tile keeps its video at the top layer while the grid is hidden", () => {
+      addCameras();
+      const video = cellOf(2).querySelector("video")!;
+      Object.defineProperty(document, "pictureInPictureElement", {
+        configurable: true,
+        get: () => video,
+      });
+      video.dispatchEvent(new Event("enterpictureinpicture"));
+      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(true);
+      expect(pub(2).setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+      expect(enabled(3)).toBe(false);
+    });
+
+    it("asks a replacement publication (after a reconnect) for the tile's view again", () => {
+      addCameras();
+      resize({ 2: [0, 0] });
+      expect(enabled(2)).toBe(false);
+      pubs.set("2:camera", publication());
+      const { stream } = fakeStreamWithTrack();
+      grid.addStream(2, "Otto", stream, makeTileConfig({ audioUserId: 2 }));
+      expect(enabled(2)).toBe(false);
     });
   });
 });

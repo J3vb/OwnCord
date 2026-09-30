@@ -62,6 +62,7 @@ vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
   getRemoteVideoStats: vi.fn().mockResolvedValue(null),
+  setRemoteVideoView: vi.fn(),
 }));
 
 vi.mock("@lib/notificationSound", () => ({
@@ -1057,7 +1058,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect([...last]).toEqual([10]);
   });
 
-  it("wires full screen, the full-screen call controls and stream stats into the video grid", async () => {
+  it("wires full screen, the full-screen call controls, stream stats and video views into the video grid", async () => {
     const lk = await import("@lib/livekitSession");
     const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
     const ws = fakeWs();
@@ -1069,6 +1070,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       setWindowFullscreen: (on: boolean) => Promise<void>;
       callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
       getStreamStats: (tileId: number) => Promise<unknown>;
+      setStreamView: (tileId: number, view: { enabled: boolean }) => void;
     };
 
     await cbs.setWindowFullscreen(true);
@@ -1079,6 +1081,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "screenshare");
     await cbs.getStreamStats(10);
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
+    // A tile's view goes to that user's screen share or camera the same way.
+    cbs.setStreamView(10 + SCREENSHARE_TILE_ID_OFFSET, { enabled: false });
+    expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "screenshare", { enabled: false });
+    cbs.setStreamView(10, { enabled: true });
+    expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "camera", { enabled: true });
 
     // Leave from a full-screen tile leaves the call.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));

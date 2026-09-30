@@ -45,6 +45,7 @@ import {
   setOnError as setVoiceOnError,
   enableCamera,
   getRemoteVideoStats,
+  setRemoteVideoView,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -1260,6 +1261,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
+      setStreamView: (tileId, view) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)
+          : setRemoteVideoView(tileId, "camera", view),
       // The grid header's exit control: back to chat without leaving voice.
       onExitGrid: () => videoModeCtrl?.showChat(),
     });
