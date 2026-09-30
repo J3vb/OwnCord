@@ -219,11 +219,15 @@ type Input = Arc<Mutex<Option<cpal::Stream>>>;
 /// The resolved device, shared with the watcher that re-resolves it.
 type Resolved = Arc<Mutex<Option<(String, cpal::Device)>>>;
 
+/// The audio processing and whether RNNoise follows it, shared with the
+/// watcher.
+type Processing = Arc<Mutex<Option<(Arc<Apm>, bool)>>>;
+
 /// What an input stream feeds: the processing and the published track's
 /// source, shared with the watcher so a reopen feeds the current ones.
 #[derive(Default, Clone)]
 struct Feed {
-    processing: Arc<Mutex<Option<(Arc<Apm>, bool)>>>,
+    processing: Processing,
     source: Arc<Mutex<Option<NativeAudioSource>>>,
 }
 
