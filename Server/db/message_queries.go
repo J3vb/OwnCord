@@ -790,9 +790,9 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 // GetChannelUnreadCounts returns per-channel unread counts and last message IDs
 // for a given user. Text and announcement channels are included, with 0,0 for
 // channels that have no messages. DM channels are included too, but only the
-// ones this user participates in — without them the ready payload carried no
-// mention_count for DMs, so a DM mention badge silently reset on every
-// reconnect. Correlated subqueries range-scan idx_messages_channel per channel
+// ones this user participates in; the ready payload's dm_channels[] takes its
+// mention_count from GetUserDMChannels instead, the same source as GET /dms.
+// Correlated subqueries range-scan idx_messages_channel per channel
 // instead of the old LEFT JOIN fan-out that touched every message row on every
 // WS connect; the DM predicate hits idx_dm_participants_user.
 func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
