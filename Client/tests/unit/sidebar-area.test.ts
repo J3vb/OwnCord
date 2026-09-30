@@ -1884,6 +1884,27 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("restores a rejected closeDm row at its old place, not the top", async () => {
+      addDmChannel(makeDm({ channelId: 103 }));
+      addDmChannel(makeDm({ channelId: 102 }));
+      addDmChannel(makeDm({ channelId: 101 }));
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const opts = defaultOpts();
+      (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      dmSidebarCalls[dmSidebarCalls.length - 1]![0].onCloseDm(102);
+
+      await vi.waitFor(() => {
+        expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([101, 102, 103]);
+      });
+
+      cleanup(result);
+    });
+
     it("tracks the rename-group prompt so page teardown removes it (every other modal in this file does)", () => {
       const dm = makeDm({ channelId: 100, isGroup: true, name: "Old Name" });
       addDmChannel(dm);

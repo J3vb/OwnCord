@@ -49,7 +49,7 @@ import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.sto
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import { dmStore, closeDmLocally, addDmChannel } from "@stores/dm.store";
+import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
@@ -569,16 +569,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    * be a second place to get it wrong. Locally, both mean "drop it from the
    * list" — the row is removed optimistically so the sidebar reacts at once.
    *
-   * If the server refuses, the row comes back (DP-34): the DmChannel is kept
-   * from just before the removal and re-inserted with `addDmChannel`, which
-   * also restores it to the top of the list and preserves nothing else it
-   * should not. The failure toast still fires so the user knows why.
+   * If the server refuses, the row comes back (DP-34): the DmChannel and its
+   * index are kept from just before the removal and it is re-inserted at that
+   * index, so the list's recency order is unchanged. The failure toast still
+   * fires so the user knows why.
    */
   function closeOrLeaveDm(channelId: number): void {
-    const removed = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    const channels = dmStore.getState().channels;
+    const index = channels.findIndex((c) => c.channelId === channelId);
+    const removed = channels[index];
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
-      if (removed !== undefined) addDmChannel(removed);
+      if (removed !== undefined) restoreDmChannel(removed, index);
       getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
   }

@@ -232,6 +232,24 @@ describe("channel-navigation", () => {
       expect(channelsStore.getState().activeChannelId).toBeNull();
     });
 
+    it("skips voice channels, which only open by joining the call", () => {
+      seed(
+        [
+          makeChannel({ id: 1, name: "a", position: 0 }),
+          makeChannel({ id: 2, name: "lounge", position: 1, type: "voice", unreadCount: 1 }),
+          makeChannel({ id: 3, name: "c", position: 2 }),
+        ],
+        1,
+      );
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(3);
+      stepChannel(-1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+    });
+
     it("is a no-op with no channels", () => {
       seed([]);
       expect(() => stepChannel(1)).not.toThrow();

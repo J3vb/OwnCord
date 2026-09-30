@@ -83,13 +83,15 @@ export function findChannelByName(name: string): { id: number; name: string } | 
 /**
  * The channels Alt+↑/↓ steps through, in the order they appear on screen:
  * the grouped channel list (categories as headers, rows by position), with
- * collapsed categories' hidden rows skipped.
+ * collapsed categories' hidden rows skipped. Voice channels are skipped too:
+ * opening one means joining the call, which a keyboard step must never do,
+ * and a bare setActiveChannel would mount its chat unjoined (F8).
  */
 function navigableChannelIds(): number[] {
   const ids: number[] = [];
   for (const [category, channels] of getChannelsByCategory()) {
     if (category !== null && isCategoryCollapsed(category)) continue;
-    for (const ch of channels) ids.push(ch.id);
+    for (const ch of channels) if (ch.type !== "voice") ids.push(ch.id);
   }
   return ids;
 }

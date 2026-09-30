@@ -18,7 +18,7 @@ import { atEachMidnight, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "./message-list/avatar";
@@ -158,14 +158,15 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
 /**
  * The destructive group-leave confirm, modelled on DeleteChannelModal: Cancel
  * first and focused, Escape and the backdrop cancel, focus returns to the
- * opener. Kept local to the sidebar so a leave prompt cannot outlive the row
- * that opened it — the signal is the row's own.
+ * opener. Tied to the sidebar's lifetime, not the row's: a row is rebuilt on
+ * every new message or call change, and that must not dismiss the prompt. The
+ * sidebar closes it instead when the row leaves the list.
  */
 function openLeaveConfirm(
   convo: DmConversation,
   onClose: (channelId: number) => void,
-  rowSignal: AbortSignal,
-): void {
+  sidebarSignal: AbortSignal,
+): ModalInstance {
   const owner = new Disposable();
   const titleId = `dm-leave-title-${convo.channelId}`;
   const content = createElement("div");
@@ -197,9 +198,7 @@ function openLeaveConfirm(
     content,
     ariaLabelledBy: titleId,
     overlayAttrs: { "data-testid": "dm-leave-modal" },
-    // The row's own lifetime also closes the prompt, so a re-render that
-    // disposes the row cannot leave its confirm behind.
-    signal: rowSignal,
+    signal: sidebarSignal,
     // The modal owns its own listeners; drop this prompt's with it.
     onClose: () => owner.destroy(),
   });
@@ -212,12 +211,14 @@ function openLeaveConfirm(
     },
     { signal: owner.signal },
   );
+  return modal;
 }
 
 function renderDmItem(
   convo: DmConversation,
   options: DmSidebarOptions,
   signal: AbortSignal,
+  confirmLeave: (convo: DmConversation, onClose: (channelId: number) => void) => void,
 ): HTMLDivElement {
   const item = createElement("div", {
     class: "dm-item",
@@ -295,7 +296,7 @@ function renderDmItem(
       // the prompt, as Discord's delete confirm does. A 1:1 close is only a
       // hide, so it stays one click.
       if (convo.isGroup === true && !(e instanceof MouseEvent && e.shiftKey)) {
-        openLeaveConfirm(convo, close, signal);
+        confirmLeave(convo, close);
         return;
       }
       close(convo.channelId);
@@ -378,7 +379,7 @@ function renderDmItem(
         testId: `dm-close-${convo.channelId}`,
         // The menu item has no Shift modifier, so a group always confirms here
         // too — the destructive action is destructive whichever path opens it.
-        onClick: () => (isGroup ? openLeaveConfirm(convo, close, signal) : close(convo.channelId)),
+        onClick: () => (isGroup ? confirmLeave(convo, close) : close(convo.channelId)),
       });
     }
     if (items.length === 0) return;
@@ -461,6 +462,14 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   let query = "";
   // Each row's listeners die with the row, not with the sidebar (OC-0229).
   const rowOwners = new Map<Element, Disposable>();
+  let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
+
+  function confirmLeave(convo: DmConversation, onClose: (channelId: number) => void): void {
+    leavePrompt = {
+      channelId: convo.channelId,
+      modal: openLeaveConfirm(convo, onClose, disposable.signal),
+    };
+  }
 
   /** Apply the current search query to the current rows. */
   function applyFilter(): void {
@@ -484,7 +493,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       signature: convoSignature,
       create: (convo) => {
         const owner = new Disposable();
-        const el = renderDmItem(convo, options, owner.signal);
+        const el = renderDmItem(convo, options, owner.signal, confirmLeave);
         rowOwners.set(el, owner);
         return el;
       },
@@ -493,6 +502,10 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
         rowOwners.delete(el);
       },
     });
+    if (leavePrompt !== null && !rendered.some((c) => c.channelId === leavePrompt?.channelId)) {
+      leavePrompt.modal.close();
+      leavePrompt = null;
+    }
     applyFilter();
   }
 

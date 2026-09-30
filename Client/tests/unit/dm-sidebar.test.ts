@@ -312,6 +312,34 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
+  it("keeps the group-leave confirm open while its row is rebuilt, and closes it when the row goes", () => {
+    const onCloseDm = vi.fn();
+    const group = makeConvo({ channelId: 7, isGroup: true, username: "Crew" });
+    const sidebar = createDmSidebar({
+      conversations: [group],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    // A new message rebuilds the row; the prompt must survive it.
+    sidebar.update([{ ...group, lastMessage: "new!", unread: true, unreadCount: 1 }]);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+    (document.querySelector("[data-testid='dm-leave-confirm']") as HTMLButtonElement).click();
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+
+    // Reopened, then the group leaves the list some other way: the prompt goes.
+    sidebar.update([group]);
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+    sidebar.update([]);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
   it("shift-click skips the group-leave confirm", () => {
     const onCloseDm = vi.fn();
     const sidebar = createDmSidebar({
