@@ -1317,11 +1317,12 @@ when there are no more results. It is always `null` for `sort=relevance`.
 
 #### Error Responses
 
-| Status | Code          | When                                                                                       |
-| ------ | ------------- | ------------------------------------------------------------------------------------------ |
-| 400    | `BAD_REQUEST` | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent` |
-| 403    | `FORBIDDEN`   | `channel_id` names a channel the caller cannot read                                        |
-| 404    | `NOT_FOUND`   | `channel_id` names no channel                                                              |
+| Status | Code                            | When                                                                                       |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent` |
+| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                        |
+| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                         |
+| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                              |
 
 ---
 
