@@ -62,8 +62,8 @@ function withSkinTone(char, segments, mod) {
 /** A Unicode name as a shortcode: "flag: Côte d’Ivoire" → "flag_cote_d_ivoire". */
 function shortcode(name) {
   return name
-    .replace("#", "number sign")
-    .replace("*", "asterisk")
+    .replaceAll("#", "number sign")
+    .replaceAll("*", "asterisk")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()

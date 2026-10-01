@@ -164,6 +164,10 @@
   grid-template-columns: repeat(8, 1fr);
   gap: 2px;
   padding: 4px 8px 8px;
+  /* The full Unicode set is ~1,900 glyphs: lay out and paint only the groups
+     near the viewport, or opening the picker stalls the first frame. */
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 600px;
 }
 .ep-emoji {
   width: 100%;
