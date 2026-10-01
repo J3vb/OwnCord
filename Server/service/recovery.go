@@ -18,8 +18,8 @@ import (
 // The recovery kit (B4-5, BPR-044; owner decision 2): a secret the account
 // holder keeps offline. The server stores only an argon2id verifier; using
 // the kit means "I lost my devices", so it signs the user in without the
-// second factor, replaces the password, revokes every other session and
-// spends the kit in one transaction. Five failed attempts lock recovery for
+// second factor, replaces the password, revokes every session and API token
+// and spends the kit in one transaction. Five failed attempts lock recovery for
 // 15 minutes per account and per address, audited.
 const (
 	recoveryKitFailureThreshold = 5
@@ -168,8 +168,8 @@ func (s *AuthService) RecoveryKitStatus(ctx context.Context, p Principal) (*Reco
 }
 
 // RecoverWithKit redeems a kit: on success the password is replaced, every
-// existing session revoked, the kit spent and the audit row written in one
-// transaction, and a fresh session is issued without the second factor
+// session and API token revoked, the kit spent and the audit row written in
+// one transaction, and a fresh session is issued without the second factor
 // (owner decision 2). Every failure — unknown account, no kit, spent kit,
 // wrong secret — is the same refusal, costs the same argon2id compare, and
 // counts towards the per-address and per-account lockouts.

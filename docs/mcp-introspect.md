@@ -227,5 +227,6 @@ subcommands. Key points:
   first**, so existing login behavior is unchanged; API tokens are a fallback.
 - `expires_at IS NULL` means never expires; `revoked_at IS NULL` means active. Revocation takes
   effect immediately.
-- Kept in a separate table from `sessions`, so bulk logout and the per-user session cap never
-  affect them.
+- Kept in a separate table from `sessions`, so the per-user session cap never touches them.
+  `server token revoke` kills one at once; which other actions revoke them is in
+  [`docs/api.md`](api.md#api-tokens).

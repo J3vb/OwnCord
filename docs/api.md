@@ -649,7 +649,9 @@ disabling 2FA removes it.
 
 ### POST /api/v1/users/me/totp/confirm
 
-Confirm a pending TOTP enrollment.
+Confirm a pending TOTP enrollment. On success the account's other sessions are
+revoked, and its live WebSocket closes in the same request if it rode one of
+them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -669,7 +671,7 @@ Confirm a pending TOTP enrollment.
 
 ### DELETE /api/v1/users/me/totp
 
-Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret.
+Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret, and its other sessions are revoked; the account's live WebSocket closes in the same request if it rode one of them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
