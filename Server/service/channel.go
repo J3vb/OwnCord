@@ -178,6 +178,14 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 		}
 		cleaned = nullable(text)
 	}
+	// A custom status line is the user's own text shown to every member, so
+	// a timeout refuses setting one; a plain status change or clearing the
+	// line publishes nothing of theirs and stays allowed.
+	if cleaned != nil {
+		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+			return nil, err
+		}
+	}
 
 	// Read the stored custom status BEFORE either write, unconditionally.
 	// custom_status is *string with no omitempty on the wire (see

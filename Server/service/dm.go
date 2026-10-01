@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -12,7 +13,8 @@ import (
 
 // DMService handles direct message channel operations.
 type DMService struct {
-	st Store
+	st    Store
+	perms *PermissionService
 	// online reports whether userID currently holds a live WebSocket
 	// connection. It is wired by the ws layer (Hub.IsUserConnected) after
 	// both are constructed, mirroring MessageService.online (see its doc
@@ -30,9 +32,10 @@ type DMService struct {
 	online func(userID int64) bool
 }
 
-// NewDMService creates a DMService.
-func NewDMService(st Store) *DMService {
-	return &DMService{st: st}
+// NewDMService creates a DMService. perms answers whether an actor is timed
+// out, which refuses the writes here that publish to other participants.
+func NewDMService(st Store, perms *PermissionService) *DMService {
+	return &DMService{st: st, perms: perms}
 }
 
 // SetOnlineChecker wires the live-connection predicate every DM payload this
@@ -140,6 +143,21 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 	}
 	if blocked {
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
+	}
+
+	// A new channel can notify the recipient (dm_channel_open), which a
+	// timeout refuses like a send; reopening an existing one notifies nobody.
+	if timeoutErr := requireNotTimedOut(ctx, s.perms, userID); timeoutErr != nil {
+		if !errors.Is(timeoutErr, ErrTimedOut) {
+			return nil, timeoutErr
+		}
+		_, exists, err := s.st.FindDMChannelIDBetween(ctx, userID, recipientID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to look up DM: %w", ErrInternal, err)
+		}
+		if !exists {
+			return nil, timeoutErr
+		}
 	}
 
 	// B5-6 (Codex review round 2, P1): the recipient's visibility is decided
@@ -285,6 +303,10 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	)
 	defer done()
 
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
+	}
+
 	// De-duplicate and drop the caller: a payload naming the same person twice
 	// is a client bug, not a reason to refuse, but it must not inflate the
 	// participant count or double-insert.
@@ -395,6 +417,10 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 	if err != nil || !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
 	}
+	// The new name is pushed to every participant: text of the caller's own.
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
+	}
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
@@ -465,7 +491,8 @@ func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (i
 }
 
 // RingTargets returns the other participants of a DM the caller is in — the
-// people a call_ring or call_decline is addressed to.
+// people a call_ring is addressed to. A timed-out caller is refused, as for a
+// send.
 //
 // Ringing carries no state: a "call" in a DM *is* somebody being present in
 // that DM's voice channel, and the ring is a nudge to come look. That is why
@@ -473,6 +500,16 @@ func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (i
 // there is nothing to persist that presence does not already say, and a
 // persisted call would be one more thing that can be left dangling by a crash.
 func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
+	return s.callTargets(ctx, userID, channelID, true)
+}
+
+// DeclineTargets is RingTargets for a call_decline. A decline carries no text
+// and only stops the ringer's client ringing, so a timeout does not refuse it.
+func (s *DMService) DeclineTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
+	return s.callTargets(ctx, userID, channelID, false)
+}
+
+func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ring bool) ([]int64, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
@@ -489,6 +526,11 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	// sink — blocks are enforced at group creation instead.
 	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
 		return nil, err
+	}
+	if ring {
+		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+			return nil, err
+		}
 	}
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)

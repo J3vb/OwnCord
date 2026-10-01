@@ -111,7 +111,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Channels:        NewChannelService(st, permSvc),
 		Permissions:     permSvc,
 		Users:           NewUserService(st),
-		DMs:             NewDMService(st),
+		DMs:             NewDMService(st, permSvc),
 		Invites:         NewInviteService(st),
 		Blocks:          blocks,
 		Moderation:      moderation,

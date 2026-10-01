@@ -850,7 +850,8 @@ Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
 server-side. **Omitting the field leaves the stored text alone**; sending `""`
 clears it. The distinction matters because a client's auto-idle timer sends a
 bare status flip several times an hour and must not blank the text the user
-typed.
+typed. While the user is timed out a non-empty `custom_status` is refused with
+`TIMED_OUT`; a bare status change and `""` still apply.
 
 The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
@@ -1953,7 +1954,8 @@ dangling, in exchange for information the presence already carries.
 }
 ```
 
-Only a participant of the DM may ring it (`FORBIDDEN` otherwise). Rate limited
+Only a participant of the DM may ring it (`FORBIDDEN` otherwise), and not
+while timed out (`TIMED_OUT`; `call_decline` still works). Rate limited
 to one ring every 3 seconds per user — per _user_, not per channel, because the
 abuse it prevents is spamming somebody with call banners.
 
@@ -2071,6 +2073,7 @@ A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 | `INVALID_JSON`          | Message is not valid JSON                                                                                                                                                                                                                                                        |
 | `UNKNOWN_TYPE`          | Unrecognized message type                                                                                                                                                                                                                                                        |
 | `SLOW_MODE`             | Channel has slow mode enabled                                                                                                                                                                                                                                                    |
+| `TIMED_OUT`             | A send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)                                                                                                                                                                     |
 | `CONFLICT`              | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
 | `ALREADY_DELETED`       | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
 | `SERVER_MUTED`          | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
