@@ -1019,6 +1019,17 @@ describe("MessageList", () => {
       expect(row(3)!.querySelector(".msg-reply-ref")!.textContent).toContain("Parent edited");
     });
 
+    it("keeps a loaded reply's row when its parent only gains a reaction", () => {
+      setMessages(1, [ungrouped(1), ungrouped(2), { ...ungrouped(3), replyTo: 1 }]);
+      msgList.mount(container);
+      const [row1, row3] = [row(1), row(3)];
+
+      replace(1, { reactions: [{ emoji: "👍", count: 1, me: false }] });
+
+      expect(row(1)).not.toBe(row1);
+      expect(row(3)).toBe(row3);
+    });
+
     it("re-renders a loaded reply whose parent arrives", () => {
       setMessages(1, [ungrouped(1), ungrouped(4), { ...ungrouped(5), replyTo: 2 }]);
       msgList.mount(container);

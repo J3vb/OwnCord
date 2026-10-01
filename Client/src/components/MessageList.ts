@@ -810,15 +810,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const anchorKey = prevKeys[anchor];
     const anchorOffset = root.scrollTop - offsetBefore(anchor);
 
-    // Messages whose object changed, left or arrived: a reply quoting one
-    // re-renders its quote (renderReplyRef reads the parent from allMessages).
-    const prevSet = new Set(allMessages);
-    const nextSet = new Set(next);
-    const changedIds = new Set(
-      [...allMessages.filter((m) => !nextSet.has(m)), ...next.filter((m) => !prevSet.has(m))].map(
-        (m) => m.id,
-      ),
-    );
+    // A reply re-renders its quote when its parent left, arrived, or changed
+    // what the quote draws (renderReplyRef reads the parent from allMessages);
+    // a reaction or pin on the parent leaves the reply alone.
+    const prevById = new Map(allMessages.map((m) => [m.id, m]));
+    const nextById = new Map(next.map((m) => [m.id, m]));
+    const quoteChanged = (id: number | null): boolean => {
+      if (id === null) return false;
+      const a = prevById.get(id);
+      const b = nextById.get(id);
+      return a?.content !== b?.content || a?.deleted !== b?.deleted || a?.user !== b?.user;
+    };
 
     const focused = captureRowFocus();
     const shown = [...contentContainer.children] as HTMLElement[];
@@ -839,7 +841,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         (was?.kind === "message" &&
           was.message === now.message &&
           was.isGrouped === now.isGrouped &&
-          !changedIds.has(now.message.replyTo ?? -1));
+          !quoteChanged(now.message.replyTo));
       if (el !== undefined && same) {
         rows.push(el);
         reused.add(el);
