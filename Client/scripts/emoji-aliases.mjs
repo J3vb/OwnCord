@@ -26,8 +26,8 @@ export const EMOJI_NAMES = {
 };
 
 // Search keywords merged ahead of each emoji's names, so the words the
-// hand-picked set had before the full Unicode set (B9-19) still find what they
-// always did.
+// hand-picked set (B9-19) had before the full Unicode set (P4-14) still find
+// what they always did.
 export const EMOJI_ALIASES = {
   "😀": "grinning face happy smile",
   "😃": "smiley face happy smile",
