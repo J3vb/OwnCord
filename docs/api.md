@@ -1675,6 +1675,7 @@ Every participant — the creator included — also receives a `dm_channel_open`
 | ------ | ------------- | --------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
 | 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 403    | `TIMED_OUT`   | The caller is timed out                                               |
 | 404    | `NOT_FOUND`   | A recipient does not exist                                            |
 
 ---
@@ -1708,6 +1709,7 @@ The DM summary shape, from the caller's seat. Every participant also receives a
 | Status | Code          | Reason                                                      |
 | ------ | ------------- | ----------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | The channel is a 1:1 DM, or the name exceeds 100 characters |
+| 403    | `TIMED_OUT`   | The caller is timed out                                     |
 | 404    | `NOT_FOUND`   | Not a participant of this DM                                |
 
 ---
