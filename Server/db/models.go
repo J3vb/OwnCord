@@ -197,6 +197,17 @@ type MessageSearchResult struct {
 	MentionsEveryone bool       `json:"mentions_everyone"`
 }
 
+// SearchPage selects one page of full-text search results. The zero values
+// keep the original behaviour: best match first, no cursor.
+type SearchPage struct {
+	Limit int
+	// Recent orders newest first (message id descending) instead of by rank.
+	Recent bool
+	// Before, when positive, keeps only messages with an id below it — the
+	// cursor for the next page of a Recent search.
+	Before int64
+}
+
 // UserPublic is the public-facing user shape for API responses.
 type UserPublic struct {
 	ID       int64   `json:"id"`

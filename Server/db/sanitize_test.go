@@ -47,3 +47,22 @@ func TestSanitizeFTSQuery_StripsOperators(t *testing.T) {
 		}
 	}
 }
+
+// DP-20: only the last sanitized term becomes a prefix, and a query that
+// sanitizes to nothing stays empty rather than becoming a bare "*".
+func TestFTSMatchQuery_PrefixesLastTermOnly(t *testing.T) {
+	for in, want := range map[string]string{
+		"deplo":          "deplo*",
+		"deploy the app": "deploy the app*",
+		"well-known":     "well known*",
+		`hello* "world"`: "hello world*",
+		"foo AND":        "foo*",
+		"AND":            "",
+		"*":              "",
+		"   ":            "",
+	} {
+		if got := ftsMatchQuery(in); got != want {
+			t.Errorf("ftsMatchQuery(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

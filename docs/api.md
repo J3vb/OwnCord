@@ -1281,11 +1281,13 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 
 #### Query Parameters
 
-| Param        | Type   | Default        | Range     | Description                         |
-| ------------ | ------ | -------------- | --------- | ----------------------------------- |
-| `q`          | string | (required)     | non-empty | Search query (FTS5 syntax)          |
-| `channel_id` | int64  | (all channels) | > 0       | Restrict search to a single channel |
-| `limit`      | int    | 50             | 1-100     | Maximum results to return           |
+| Param        | Type   | Default        | Range                   | Description                                                                                                |
+| ------------ | ------ | -------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `q`          | string | (required)     | non-empty               | Search words. Punctuation separates words; the last word also matches as a prefix (`deplo` finds `deploy`) |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                        |
+| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                  |
+| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first                                                  |
+| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before` |
 
 #### Response 200 OK
 
@@ -1305,9 +1307,21 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
       "mentions": [7],
       "mentions_everyone": false
     }
-  ]
+  ],
+  "next_before": 1042
 }
 ```
+
+`next_before` is the `before` value for the next `sort=recent` page, or `null`
+when there are no more results. It is always `null` for `sort=relevance`.
+
+#### Error Responses
+
+| Status | Code          | When                                                                                       |
+| ------ | ------------- | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST` | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent` |
+| 403    | `FORBIDDEN`   | `channel_id` names a channel the caller cannot read                                        |
+| 404    | `NOT_FOUND`   | `channel_id` names no channel                                                              |
 
 ---
 

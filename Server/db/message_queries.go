@@ -83,6 +83,39 @@ func sanitizeFTSQuery(q string) string {
 	return strings.Join(kept, " ")
 }
 
+// ftsMatchQuery is the MATCH expression for a user's search text: the
+// sanitized terms with the last one made a prefix ("deplo" finds "deploy"),
+// so a half-typed word still matches. Only the last term — the earlier ones
+// were finished when the user typed past them. Empty when nothing searchable
+// is left.
+func ftsMatchQuery(q string) string {
+	q = sanitizeFTSQuery(q)
+	if q == "" {
+		return ""
+	}
+	return q + "*"
+}
+
+// searchPageSQL is the tail of a search query for page: the cursor filter,
+// the order and the limit, with their arguments.
+func searchPageSQL(page SearchPage) (string, []any) {
+	var (
+		sb   strings.Builder
+		args []any
+	)
+	if page.Before > 0 {
+		sb.WriteString(" AND m.id < ?")
+		args = append(args, page.Before)
+	}
+	if page.Recent {
+		sb.WriteString(" ORDER BY m.id DESC")
+	} else {
+		sb.WriteString(" ORDER BY rank")
+	}
+	sb.WriteString(" LIMIT ?")
+	return sb.String(), append(args, page.Limit)
+}
+
 // CreateMessage inserts a new message and returns the assigned ID.
 // Content should already be sanitized before calling this function.
 func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error) {
@@ -487,48 +520,32 @@ func (d *DB) GetReactionUsers(ctx context.Context, messageID int64, emoji string
 // SearchMessages performs a full-text search against the messages_fts virtual table.
 // When channelID is non-nil the search is scoped to that channel.
 // Deleted messages are excluded from results.
-func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]MessageSearchResult, error) {
-	if query == "" {
-		return []MessageSearchResult{}, nil
-	}
-	query = sanitizeFTSQuery(query)
-	if query == "" {
-		return []MessageSearchResult{}, nil
-	}
-	if limit < 1 {
+func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64, page SearchPage) ([]MessageSearchResult, error) {
+	match := ftsMatchQuery(query)
+	if match == "" || page.Limit < 1 {
 		return []MessageSearchResult{}, nil
 	}
 
-	var (
-		rows *sql.Rows
-		err  error
-	)
-
+	where := "messages_fts MATCH ? AND m.deleted = 0"
+	args := []any{match}
 	if channelID != nil {
-		rows, err = d.reader.QueryContext(ctx,
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
-			        m.timestamp, m.mentions_everyone
-			 FROM messages_fts f
-			 JOIN messages m ON f.rowid = m.id
-			 JOIN channels c ON m.channel_id = c.id
-			 JOIN users u ON m.user_id = u.id
-			 WHERE messages_fts MATCH ? AND m.channel_id = ? AND m.deleted = 0
-			 ORDER BY rank LIMIT ?`,
-			query, *channelID, limit,
-		)
-	} else {
-		rows, err = d.reader.QueryContext(ctx,
-			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
-			        m.timestamp, m.mentions_everyone
-			 FROM messages_fts f
-			 JOIN messages m ON f.rowid = m.id
-			 JOIN channels c ON m.channel_id = c.id
-			 JOIN users u ON m.user_id = u.id
-			 WHERE messages_fts MATCH ? AND m.deleted = 0
-			 ORDER BY rank LIMIT ?`,
-			query, limit,
-		)
+		where += " AND m.channel_id = ?"
+		args = append(args, *channelID)
 	}
+	tail, tailArgs := searchPageSQL(page)
+
+	rows, err := d.reader.QueryContext(ctx,
+		fmt.Sprintf(
+			`SELECT m.id, m.channel_id, c.name, u.id, u.username, u.avatar, m.content,
+			        m.timestamp, m.mentions_everyone
+			 FROM messages_fts f
+			 JOIN messages m ON f.rowid = m.id
+			 JOIN channels c ON m.channel_id = c.id
+			 JOIN users u ON m.user_id = u.id
+			 WHERE %s%s`,
+			where, tail),
+		append(args, tailArgs...)...,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("SearchMessages: %w", err)
 	}
@@ -544,27 +561,24 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 // SearchMessagesInChannels performs a full-text search scoped to the given
 // channel IDs. This prevents information leakage by filtering at the DB level
 // rather than post-filtering in application code.
-func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]MessageSearchResult, error) {
-	if query == "" || len(channelIDs) == 0 {
+func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, page SearchPage) ([]MessageSearchResult, error) {
+	if len(channelIDs) == 0 {
 		return []MessageSearchResult{}, nil
 	}
-	query = sanitizeFTSQuery(query)
-	if query == "" {
-		return []MessageSearchResult{}, nil
-	}
-	if limit < 1 {
+	match := ftsMatchQuery(query)
+	if match == "" || page.Limit < 1 {
 		return []MessageSearchResult{}, nil
 	}
 
 	// Build IN clause placeholders.
 	placeholders := make([]string, len(channelIDs))
-	args := make([]any, 0, len(channelIDs)+2)
-	args = append(args, query)
+	args := make([]any, 0, len(channelIDs)+3)
+	args = append(args, match)
 	for i, id := range channelIDs {
 		placeholders[i] = "?"
 		args = append(args, id)
 	}
-	args = append(args, limit)
+	tail, tailArgs := searchPageSQL(page)
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf(
@@ -574,10 +588,9 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 			 JOIN messages m ON f.rowid = m.id
 			 JOIN channels c ON m.channel_id = c.id
 			 JOIN users u ON m.user_id = u.id
-			 WHERE messages_fts MATCH ? AND m.channel_id IN (%s) AND m.deleted = 0
-			 ORDER BY rank LIMIT ?`,
-			strings.Join(placeholders, ",")),
-		args...,
+			 WHERE messages_fts MATCH ? AND m.channel_id IN (%s) AND m.deleted = 0%s`,
+			strings.Join(placeholders, ","), tail),
+		append(args, tailArgs...)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("SearchMessagesInChannels: %w", err)
