@@ -1281,13 +1281,13 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 
 #### Query Parameters
 
-| Param        | Type   | Default        | Range                   | Description                                                                                                |
-| ------------ | ------ | -------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `q`          | string | (required)     | non-empty               | Search words. Punctuation separates words; the last word also matches as a prefix (`deplo` finds `deploy`) |
-| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                        |
-| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                  |
-| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first                                                  |
-| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before` |
+| Param        | Type   | Default        | Range                   | Description                                                                                                                                                    |
+| ------------ | ------ | -------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`          | string | (required)     | non-empty               | Search words. Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`) |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                            |
+| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                      |
+| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first                                                                                                      |
+| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                     |
 
 #### Response 200 OK
 

@@ -767,7 +767,7 @@ func TestSearchMessages_LastTermIsAPrefix(t *testing.T) {
 
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "please deploy the app", nil)
 
-	for _, q := range []string{"deplo", "app deplo", "deploy-th"} {
+	for _, q := range []string{"deplo", "app deplo", "please-dep"} {
 		results, err := database.SearchMessages(context.Background(), q, nil, db.SearchPage{Limit: 10})
 		if err != nil {
 			t.Fatalf("SearchMessages(%q): %v", q, err)
@@ -790,6 +790,28 @@ func TestSearchMessages_LastTermIsAPrefix(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Errorf("SearchMessages(%q) = %d results, want 0: only the last term is a prefix", "deplo app", len(results))
+	}
+}
+
+// DP-20: a last term shorter than three runes matches only that exact word,
+// so "de" does not find "deploy" but still finds the word "de"; three runes
+// are enough to prefix.
+func TestSearchMessages_ShortLastTermIsExact(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "shortuser")
+	chID := seedChannel(t, database, "shortch")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "please deploy the app", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "ciao de mi amigo", nil)
+
+	for q, want := range map[string]int{"de": 1, "please de": 0, "dep": 1} {
+		results, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10})
+		if err != nil {
+			t.Fatalf("SearchMessagesInChannels(%q): %v", q, err)
+		}
+		if len(results) != want {
+			t.Errorf("SearchMessagesInChannels(%q) = %d results, want %d", q, len(results), want)
+		}
 	}
 }
 

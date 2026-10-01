@@ -48,8 +48,9 @@ func TestSanitizeFTSQuery_StripsOperators(t *testing.T) {
 	}
 }
 
-// DP-20: only the last sanitized term becomes a prefix, and a query that
-// sanitizes to nothing stays empty rather than becoming a bare "*".
+// DP-20: only the last sanitized term becomes a prefix, only when it has at
+// least three runes, and a query that sanitizes to nothing stays empty rather
+// than becoming a bare "*".
 func TestFTSMatchQuery_PrefixesLastTermOnly(t *testing.T) {
 	for in, want := range map[string]string{
 		"deplo":          "deplo*",
@@ -57,6 +58,12 @@ func TestFTSMatchQuery_PrefixesLastTermOnly(t *testing.T) {
 		"well-known":     "well known*",
 		`hello* "world"`: "hello world*",
 		"foo AND":        "foo*",
+		"de":             "de",
+		"deploy de":      "deploy de",
+		"dep":            "dep*",
+		"de dep":         "de dep*",
+		"héé":            "héé*",
+		"hé":             "hé",
 		"AND":            "",
 		"*":              "",
 		"   ":            "",
