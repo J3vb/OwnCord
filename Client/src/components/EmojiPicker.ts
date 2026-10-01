@@ -425,7 +425,8 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   root.appendChild(categoryBar);
 
   // The picker grid is `.ep-grid { grid-template-columns: repeat(8, 1fr) }`,
-  // so roving navigation is a grid with eight columns (ArrowDown = one row).
+  // so roving navigation is a grid with eight columns (ArrowDown = one row
+  // within a category's grid).
   const GRID_COLUMNS = 8;
 
   // Scrollable content area (holds category labels + grids). Announced as a
@@ -579,6 +580,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     "keydown",
     (e) => {
       if (e.key !== "Enter") return;
+      if (e.isComposing || e.keyCode === 229) return;
       const first = scrollArea.querySelector<HTMLElement>(".ep-emoji");
       if (first === null) return;
       e.preventDefault();

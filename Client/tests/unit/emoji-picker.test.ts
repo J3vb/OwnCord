@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
@@ -306,6 +306,26 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
+  it("Enter that commits an IME composition in the search input does not pick", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+
+    input.value = "smile";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(onSelect).not.toHaveBeenCalled();
+    picker.destroy();
+  });
+
   it("Enter in the search input does nothing when nothing matches", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
@@ -322,8 +342,12 @@ describe("EmojiPicker", () => {
   });
 
   it("clicking a category button scrolls its label into view", () => {
+    const original = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
     const { picker } = makePicker();
 
     const foodBtn = Array.from(
