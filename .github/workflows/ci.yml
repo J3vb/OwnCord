@@ -1536,7 +1536,7 @@ jobs:
       # Release optimization, separate identity and API-configured WebView2 debugging.
       - run: node tests/e2e/scripts/native-test-config.mjs
       - id: native_build
-        run: npm run tauri build -- --no-bundle --config tests/e2e/.bin/tauri.native.json
+        run: npm run tauri build -- --no-bundle --features e2e-auto-confirm --config tests/e2e/.bin/tauri.native.json
       - name: Test actual Rust transport and WebView2
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe

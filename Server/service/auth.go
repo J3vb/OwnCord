@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -127,12 +126,6 @@ const (
 	// loginUserLockoutDuration is how long a username is locked after exceeding
 	// loginUserFailureThreshold.
 	loginUserLockoutDuration = 15 * time.Minute
-
-	// loginSuccessWindow is how long a successful login from an IP vouches for
-	// that (username, IP) pair. Within it the per-username failure budget does
-	// not apply to that IP: a flood cannot lock the account out from under a
-	// device that just authenticated. The per-IP budget still bounds abuse.
-	loginSuccessWindow = 24 * time.Hour
 
 	// deleteAccountFailureThreshold is the number of wrong-password attempts
 	// before the per-user lockout kicks in.
@@ -619,17 +612,10 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// two rows, and must never share a bucket (OC-0324).
 	unameKey := db.LowerASCII(in.Username)
 	userLockKey := "login_user_lock:" + unameKey
-	// A flood from many addresses can trip the per-username lockout and hold
-	// any account — the owner's included — out for 15 minutes at a time. An
-	// address that authenticated this account within loginSuccessWindow is not
-	// the flood, so it still reaches the password check; the per-IP budget
-	// below still bounds it. The voucher needs the correct password, so only an
-	// address that already proved it holds one.
-	successKey := "login_user_ok:" + unameKey + ":" + clientip.RateKey(in.IP)
-	// Check is "allowed" — true for an absent key and for a key whose only
-	// timestamp fell out of the window — so negating a limit of 1 means
-	// exactly "at least one success was recorded in the last 24h".
-	successVouched := !s.limiter.Check(successKey, 1, loginSuccessWindow)
+	// An address that signed in to this account recently is exempt from the
+	// per-username lockout and budget (see loginVouchWindow).
+	successKey := loginVouchKey(unameKey, in.IP)
+	successVouched := s.loginVouched(successKey)
 	if s.limiter.IsLockedOut(userLockKey) && !successVouched {
 		return nil, ErrLockedOut
 	}
@@ -680,9 +666,8 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
 		return nil, ErrLockedOut
 	}
-	// A vouched address skips the per-username reservation, which the flood
-	// has already exhausted; the per-IP budget above still bounds it. An
-	// unvouched attempt reserves as before.
+	// A vouched address skips the per-username reservation; the per-IP budget
+	// above still bounds it.
 	if !successVouched && !s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
 	}
@@ -714,13 +699,10 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrInvalidCredentials
 	}
 
-	// Reset failure counters on success, and record that this address
-	// authenticated this account — the voucher the per-username lockout
-	// honours above. Reset first so each success refreshes the window.
+	// Reset failure counters on success, and vouch for this address.
 	s.limiter.Reset(ctx, failKey)
 	s.limiter.Reset(ctx, userFailKey)
-	s.limiter.Reset(ctx, successKey)
-	s.limiter.Allow(successKey, 2, loginSuccessWindow)
+	s.recordLoginVouch(ctx, successKey)
 	return user, nil
 }
 
@@ -1253,28 +1235,6 @@ func issueSession(ctx context.Context, st Store, userID int64, device, ip string
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
 	return getBooleanSetting(ctx, s.st, "require_2fa", false)
-}
-
-func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {
-	value, err := st.GetSetting(ctx, key)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return defaultValue, nil
-		}
-		return false, err
-	}
-	return parseBooleanSettingValue(value)
-}
-
-func parseBooleanSettingValue(value string) (bool, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true":
-		return true, nil
-	case "0", "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid boolean setting value %q", value)
-	}
 }
 
 // requirePasswordConfirmation checks the confirming password inside one

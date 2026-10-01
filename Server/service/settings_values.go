@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 // Limits on the settings the first-run wizard and the admin settings PATCH
@@ -87,4 +90,26 @@ func normalizeValueSetting(key, value string) (normalized string, ok bool, err e
 		return "", false, nil
 	}
 	return normalized, true, err
+}
+
+func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {
+	value, err := st.GetSetting(ctx, key)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return defaultValue, nil
+		}
+		return false, err
+	}
+	return parseBooleanSettingValue(value)
+}
+
+func parseBooleanSettingValue(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true":
+		return true, nil
+	case "0", "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean setting value %q", value)
+	}
 }

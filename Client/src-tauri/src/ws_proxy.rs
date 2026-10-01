@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_dialog::DialogExt;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
@@ -456,6 +455,29 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
         })
 }
 
+/// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
+/// `host`. Called from an async command: the body runs off Tauri's main thread,
+/// so `blocking_show` (which itself dispatches onto the main thread) cannot
+/// deadlock.
+#[cfg(not(feature = "e2e-auto-confirm"))]
+fn confirm_pin_natively<R: Runtime>(app: &AppHandle<R>, host: &str, fingerprint: &str) -> bool {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .message(crate::text::cert_accept_prompt(host, fingerprint))
+        .title(crate::text::CERT_ACCEPT_TITLE)
+        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+        .buttons(tauri_plugin_dialog::MessageDialogButtons::YesNo)
+        .blocking_show()
+}
+
+/// The E2E lane drives the renderer through Playwright, which cannot see a
+/// native dialog, so its test-only build (identity `com.owncord.e2e`, never a
+/// release artifact) answers yes. Shipped builds never enable this feature.
+#[cfg(feature = "e2e-auto-confirm")]
+fn confirm_pin_natively<R: Runtime>(_: &AppHandle<R>, _: &str, _: &str) -> bool {
+    true
+}
+
 /// Accept a certificate fingerprint for a host — the only path that writes a pin
 /// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
@@ -478,16 +500,7 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
     }
 
-    // async command: the body runs off Tauri's main thread, so blocking_show
-    // (which itself dispatches onto the main thread) cannot deadlock.
-    let confirmed = app
-        .dialog()
-        .message(crate::text::cert_accept_prompt(&host, &fingerprint))
-        .title(crate::text::CERT_ACCEPT_TITLE)
-        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
-        .buttons(tauri_plugin_dialog::MessageDialogButtons::YesNo)
-        .blocking_show();
-    if !confirmed {
+    if !confirm_pin_natively(&app, &host, &fingerprint) {
         return Err("certificate not accepted".into());
     }
 
