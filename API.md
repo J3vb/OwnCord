@@ -162,25 +162,25 @@ Full per-type payloads, permission gates and rate limits are in [docs/protocol.m
 - Every sequenced broadcast gets the next value from an atomic `uint64` counter and is stored in an in-memory ring buffer (`event_persistence.replay_ring_size`, default 1000).
 - On reconnect the client sends `last_seq`, and the server picks the cheapest tier of a replay pipeline:
 
-| Tier | Condition                                                                                      | Behaviour                                                               | `replay_source` |
-| ---- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------- |
-| 0    | `last_seq == 0`                                                                                | Full flow: `auth_ok` + `ready` + `member_join` + `presence`             | `none`          |
-| 1    | seq within the ring buffer                                                                     | `auth_ok` + missed events + `presence`, permission-filtered fail-closed | `buffer`        |
-| 2    | seq within the persistent `events` table (`event_persistence.replay_cold_limit`, default 5000) | The same replay flow, served from the cold tier                         | `db`            |
-| 3    | Too far behind, or channel visibility changed while disconnected                               | Full-flow fallback                                                      | `none`          |
+| Tier | Condition                                                                                      | Behaviour                                                                     | `replay_source` |
+| ---- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------- |
+| 0    | `last_seq == 0`                                                                                | Full flow: `auth_ok` + `ready` + `presence_batch`                             | `none`          |
+| 1    | seq within the ring buffer                                                                     | `auth_ok` + missed events + `presence_batch`, permission-filtered fail-closed | `buffer`        |
+| 2    | seq within the persistent `events` table (`event_persistence.replay_cold_limit`, default 5000) | The same replay flow, served from the cold tier                               | `db`            |
+| 3    | Too far behind, channel visibility changed while disconnected, or a presence frame was dropped | Full-flow fallback                                                            | `none`          |
 
-- Unsequenced (ephemeral) frames are never replayed: `typing`, `mod_queue`, `mod_action`, `appeal_status`, targeted `channel_create`, `nsfw_ack`, `dm_channel_open`/`close`, `dm_request`, `call_incoming`/`declined`, and the owner's own copy of an invisible-status `presence`. Every broadcast `presence`, from connect/disconnect or a `presence_update`, is sequenced and replayed (OC-0214). Clients recover unsequenced state from the next `ready` or a targeted REST GET.
+- Unsequenced (ephemeral) frames are never replayed: `typing`, `mod_queue`, `mod_action`, `appeal_status`, targeted `channel_create`, `nsfw_ack`, `dm_channel_open`/`close`, `dm_request`, `call_incoming`/`declined`, and the owner's own copy of an invisible-status `presence`. Every broadcast `presence` (from a `presence_update`) and `presence_batch` (connect/disconnect) is sequenced and replayed (OC-0214); a full `presence_batch` snapshot is not. Clients recover unsequenced state from the next `ready` or a targeted REST GET.
 - `active_channel_id` in the `auth` frame lets a resuming client re-declare its focused channel without waiting for a post-`auth_ok` `channel_focus` round trip; clients should still send `channel_focus` for backward compatibility.
 
 ### Backpressure
 
 Broadcasts fan out through per-topic pub/sub (global, `channel:N`, `voice:N`, `user:N`). Only channel-scoped broadcasts pass a 100 msg/s per-channel limiter, which sheds a frame before it gets a seq. Each client has three queues, drained high-first by `writePump`:
 
-- `send` (256): every sequenced frame (chat including DMs, reactions, channel events, every broadcast `presence`) plus unsequenced direct replies, so the client's max(`seq`) ack never passes an undelivered frame.
+- `send` (256): every sequenced frame (chat including DMs, reactions, channel events, every broadcast `presence` and `presence_batch`) plus unsequenced direct replies, so the client's max(`seq`) ack never passes an undelivered frame.
 - `sendHigh` (64): unsequenced user-targeted frames only (DM-channel opens, DM requests, call signals); when full it spills into `send`.
 - `sendLow` (64): typing indicators and targeted moderation/appeal notices, unsequenced and never replayed.
 
-A full `send` queue **disconnects the client**, forcing it through the replay pipeline to restore consistency; a full `sendLow` **silently drops**. The global broadcast channel (capacity 1024) drops with a counted metric when saturated. Details: [docs/architecture/websocket.md](docs/architecture/websocket.md).
+A full `send` queue **disconnects the client**, forcing it through the replay pipeline to restore consistency, except for a presence frame, which is dropped and repaired by a full presence snapshot; a full `sendLow` **silently drops**. The global broadcast channel (capacity 1024) drops with a counted metric when saturated. Details: [docs/architecture/websocket.md](docs/architecture/websocket.md).
 
 ## Protocol epoch and compatibility
 

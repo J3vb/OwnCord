@@ -73,8 +73,8 @@ flowchart LR
     EV --> PS["PubSub topics<br/>global / channel:N / voice:N / user:N<br/>(per-topic 100 msg/s limit)"]
     PS --> CH{"per-client queues"}
     CH --> HI["sendHigh (64)<br/>DMs, mentions"]
-    CH --> NO["send (256)<br/>chat, reactions"]
-    CH --> LO["sendLow (64)<br/>typing, presence"]
+    CH --> NO["send (256)<br/>chat, reactions, presence"]
+    CH --> LO["sendLow (64)<br/>typing, moderation notices"]
     HI --> WP["writePump<br/>drains high-first"]
     NO --> WP
     LO --> WP
@@ -84,7 +84,10 @@ flowchart LR
 
 **What this shows.** Overflow policy is intentional: dropping a chat message
 would corrupt state, so a full normal/high queue disconnects the client and the
-replay pipeline restores consistency; typing/presence are lossy by design. The
+replay pipeline restores consistency. Presence shares the normal queue but is
+the exception: a presence frame that finds it full is dropped and repaired by a
+full presence snapshot (`Client.sendPresenceMsg`), so a reconnect herd cannot
+kick clients. Typing and moderation notices are lossy by design. The
 global `broadcast` channel (1024) drops with a `broadcastDrops` counter when
 saturated.
 

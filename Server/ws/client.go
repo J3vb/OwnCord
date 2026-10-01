@@ -13,7 +13,7 @@ import (
 const (
 	sendBufSize     = 256 // per-client outbound send-channel capacity (normal priority)
 	sendHighBufSize = 64  // high-priority buffer (DMs, mentions)
-	sendLowBufSize  = 64  // low-priority buffer (typing, presence)
+	sendLowBufSize  = 64  // low-priority buffer (typing, moderation notices)
 )
 
 // SessionCheckInterval is the number of messages processed between periodic
@@ -101,7 +101,7 @@ type Client struct {
 	terminalKick  bool           // set by markTerminalKick: the server ended this session for good; guarded by mu
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
-	sendLow       chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
+	sendLow       chan []byte    // low-priority outbound messages (typing, moderation notices) — dropped on overflow
 	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
@@ -384,7 +384,7 @@ func (c *Client) sendHighMsg(msg []byte) {
 	}
 }
 
-// sendLowMsg queues a low-priority message (typing indicators, presence updates).
+// sendLowMsg queues a low-priority message (typing indicators, moderation notices).
 // If the buffer is full the message is silently dropped — the client is NOT
 // disconnected, since these events are ephemeral and can be safely lost.
 func (c *Client) sendLowMsg(msg []byte) {
