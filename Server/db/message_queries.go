@@ -104,11 +104,11 @@ func searchPageSQL(page SearchPage) (string, []any) {
 		args []any
 	)
 	if page.Before > 0 {
-		sb.WriteString(" AND m.id < ?")
+		sb.WriteString(" AND f.rowid < ?")
 		args = append(args, page.Before)
 	}
 	if page.Recent {
-		sb.WriteString(" ORDER BY m.id DESC")
+		sb.WriteString(" ORDER BY f.rowid DESC")
 	} else {
 		sb.WriteString(" ORDER BY rank")
 	}
