@@ -1,7 +1,8 @@
 package ws
 
 // hub_connected.go — live-connection status snapshots, split out of
-// serve_ready.go (at its line ceiling). See livePresences.
+// serve_ready.go (at its line ceiling), and the graceful-stop user snapshot
+// kept out of hub.go (at its line ceiling). See livePresences, StoppedUserIDs.
 
 // livePresences snapshots each connected user's live presence
 // (Client.livePresence), status "" for a connection that has not stamped one
@@ -36,4 +37,26 @@ func (h *Hub) StoppedUserIDs() []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return append([]int64(nil), h.stopUsers...)
+}
+
+// recordStopUsers adds every user the hub holds to stopUsers; the first step
+// of GracefulStopContext.
+func (h *Hub) recordStopUsers() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for uid := range h.clients {
+		h.stopUsers = append(h.stopUsers, uid)
+	}
+}
+
+// closeClientsForStop closes every remaining client's send channel, adding
+// each user to stopUsers first so one who connected during the notice window
+// is stamped too.
+func (h *Hub) closeClientsForStop() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for uid, c := range h.clients {
+		h.stopUsers = append(h.stopUsers, uid)
+		c.closeSend()
+	}
 }

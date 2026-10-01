@@ -36,8 +36,7 @@ type Hub struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	gracefulOnce sync.Once
-	// stopUsers is every user held when GracefulStopContext began, plus any
-	// it closed. Guarded by mu. See StoppedUserIDs.
+	// stopUsers: see StoppedUserIDs. Guarded by mu.
 	stopUsers   []int64
 	livekit     *LiveKitClient
 	lkProcess   *LiveKitProcess
@@ -368,12 +367,7 @@ func (h *Hub) GracefulStop() {
 // first call's ctx and reason are used).
 func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 	h.gracefulOnce.Do(func() {
-		h.mu.Lock()
-		for uid := range h.clients {
-			h.stopUsers = append(h.stopUsers, uid)
-		}
-		h.mu.Unlock()
-
+		h.recordStopUsers()
 		// The notice window matters only when someone is connected to hear
 		// it — an idle server (and every early-return startup path) skips
 		// straight to teardown.
@@ -393,12 +387,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		}
 
 		// Close all remaining client connections.
-		h.mu.Lock()
-		for uid, c := range h.clients {
-			h.stopUsers = append(h.stopUsers, uid)
-			c.closeSend()
-		}
-		h.mu.Unlock()
+		h.closeClientsForStop()
 
 		// Stop LiveKit only now, so a client leaves voice on the socket drop
 		// while its room is still up instead of reconnecting to a dead one.
