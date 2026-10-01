@@ -465,7 +465,11 @@ func ReversalAuditActionFor(kind string) (action string, ok bool) {
 // so a decider lacking THOSE gates — or a crash between the two writes —
 // could leave the appellant told "overturned" while still sanctioned; it is
 // now a store-level consequence of the decision, not a second moderation
-// action, so it never calls ModerationService and never re-checks outrank).
+// action, so it never calls ModerationService). The actor's authority for an
+// overturn — outranking the target and, for a ban, holding BAN_MEMBERS — is
+// enforced by AppealService.Decide's requireOverturnAuthority BEFORE this
+// transaction opens, mirroring the direct reversal path; the reversal itself
+// stays a mechanical store write.
 // Zero rows affected is NOT an error (N1: the appealed timeout may already
 // be superseded/lifted, or the appealed ban may already be superseded by a
 // later ban action — "nothing to reverse" is a valid outcome and the

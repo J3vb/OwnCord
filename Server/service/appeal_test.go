@@ -1150,57 +1150,112 @@ func latestActionOfKind(t *testing.T, ctx context.Context, f *appealFixture, tar
 	return latest
 }
 
-// TestAppeal_OverturnSucceedsWithoutOutrankOrMuteMembers is F1's own test:
-// a decider who holds MODERATE_MEMBERS but does NOT outrank the sanctioned
-// target — the gate ModerationService.LiftTimeout itself would refuse —
-// must still be able to overturn the appeal and have the timeout lifted,
-// because the reversal is a store-level consequence of the DECISION (which
-// only ever required MODERATE_MEMBERS), not a second moderation action
-// routed back through LiftTimeout's own outrank/MUTE_MEMBERS gates.
-func TestAppeal_OverturnSucceedsWithoutOutrankOrMuteMembers(t *testing.T) {
-	f := newAppealFixture(t)
+// TestAppeal_OverturnRequiresOutrankAndKindPermission: overturning an appeal
+// reverses the appealed action, so the decider must carry the same authority
+// the direct reversal path does — outrank the target, and (for a ban) hold
+// BAN_MEMBERS. Before this, any MODERATE_MEMBERS holder could overturn a
+// timeout/warning a higher-ranked moderator issued, or clear a ban without
+// BAN_MEMBERS, because Decide only checked CanModerate.
+func TestAppeal_OverturnRequiresOutrankAndKindPermission(t *testing.T) {
 	ctx := context.Background()
 
-	// A moderator role that holds MODERATE_MEMBERS but sits BELOW
-	// fixtureMember's own rank (position 40) — LiftTimeout's outrank check
-	// would refuse this actor outright.
-	seedRole(t, f.database, &db.Role{ID: 6, Name: "lowrankmod", Permissions: permissions.ModerateMembers, Position: 10})
-	const lowRankModID = int64(7)
-	seedUser(t, f.database, &db.User{ID: lowRankModID, Username: "lowrankmod"})
-	seedUserRole(t, f.database, lowRankModID, 6)
+	t.Run("equal-rank target", func(t *testing.T) {
+		f := newAppealFixture(t)
 
-	result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil)
-	if err != nil {
-		t.Fatalf("Timeout: %v", err)
-	}
-	publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
-	if err != nil {
-		t.Fatalf("Submit: %v", err)
-	}
+		// The owner (position 100) times out fixturePeerMod (position 80).
+		// fixtureMod is that target's equal-rank peer (both position 80), so
+		// it may not overturn the owner's action against it.
+		result, err := f.mod.Timeout(ctx, fixtureOwner, fixturePeerMod, "cool off", time.Hour, nil)
+		if err != nil {
+			t.Fatalf("Timeout: %v", err)
+		}
+		publicID, err := f.appeals.Submit(ctx, fixturePeerMod, result.ID, "please")
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
 
-	// Sanity: the OLD path (ModerationService.LiftTimeout) really does
-	// refuse this actor, so the test below is not accidentally vacuous.
-	if err := f.mod.LiftTimeout(ctx, lowRankModID, fixtureMember); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("sanity: ModerationService.LiftTimeout(lowRankModID): want ErrForbidden, got %v", err)
-	}
+		// Sanity: the direct lift path refuses this actor for the same
+		// reason, so the assertion below is not accidentally vacuous.
+		if err := f.mod.LiftTimeout(ctx, fixtureMod, fixturePeerMod); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("sanity: ModerationService.LiftTimeout(fixtureMod, fixturePeerMod): want ErrForbidden, got %v", err)
+		}
 
-	if err := f.appeals.Decide(ctx, lowRankModID, publicID, "overturned", "fine"); err != nil {
-		t.Fatalf("Decide by a non-outranking MODERATE_MEMBERS holder: %v", err)
-	}
-	active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
-	if err != nil {
-		t.Fatalf("HasActiveTimeout: %v", err)
-	}
-	if active {
-		t.Fatal("timeout still active after a non-outranking decider overturned the appeal")
-	}
-	appeal, err := f.database.GetAppealByPublicID(ctx, publicID)
-	if err != nil {
-		t.Fatalf("GetAppealByPublicID: %v", err)
-	}
-	if appeal.State != "overturned" {
-		t.Fatalf("appeal state = %q, want overturned (the decision must commit)", appeal.State)
-	}
+		if err := f.appeals.Decide(ctx, fixtureMod, publicID, "overturned", "fine"); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("Decide by an equal-rank peer: want ErrForbidden, got %v", err)
+		}
+		active, err := f.database.HasActiveTimeout(ctx, fixturePeerMod)
+		if err != nil {
+			t.Fatalf("HasActiveTimeout: %v", err)
+		}
+		if !active {
+			t.Fatal("timeout was lifted despite the overturn being refused")
+		}
+		appeal, err := f.database.GetAppealByPublicID(ctx, publicID)
+		if err != nil {
+			t.Fatalf("GetAppealByPublicID: %v", err)
+		}
+		if appeal.State != "open" {
+			t.Fatalf("appeal state = %q, want open (nothing may commit)", appeal.State)
+		}
+	})
+
+	t.Run("ban without BAN_MEMBERS", func(t *testing.T) {
+		f := newAppealFixture(t)
+
+		// A moderator above the target (position 90, so it outranks
+		// fixtureMember's 40) but holding only MODERATE_MEMBERS, never
+		// BAN_MEMBERS.
+		seedRole(t, f.database, &db.Role{ID: 6, Name: "warnmod", Permissions: permissions.ModerateMembers, Position: 90})
+		const warnModID = int64(7)
+		seedUser(t, f.database, &db.User{ID: warnModID, Username: "warnmod"})
+		seedUserRole(t, f.database, warnModID, 6)
+
+		if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil); err != nil {
+			t.Fatalf("BanUser: %v", err)
+		}
+		banID := latestActionOfKind(t, ctx, f, fixtureMember, "ban")
+		publicID, err := f.appeals.Submit(ctx, fixtureMember, banID, "please")
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+
+		if err := f.appeals.Decide(ctx, warnModID, publicID, "overturned", "fine"); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("Decide on a ban without BAN_MEMBERS: want ErrForbidden, got %v", err)
+		}
+		target, err := f.database.GetUserByID(ctx, fixtureMember)
+		if err != nil {
+			t.Fatalf("GetUserByID: %v", err)
+		}
+		if !target.Banned {
+			t.Fatal("ban was lifted despite the overturn being refused")
+		}
+	})
+
+	t.Run("outranking decider below the original actor may overturn", func(t *testing.T) {
+		f := newAppealFixture(t)
+
+		// The owner (100) issues the timeout; fixtureMod (80) outranks the
+		// member target (40), so — exactly like the direct lift path — it may
+		// overturn even though it does not outrank the original actor.
+		result, err := f.mod.Timeout(ctx, fixtureOwner, fixtureMember, "cool off", time.Hour, nil)
+		if err != nil {
+			t.Fatalf("Timeout: %v", err)
+		}
+		publicID, err := f.appeals.Submit(ctx, fixtureMember, result.ID, "please")
+		if err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+		if err := f.appeals.Decide(ctx, fixtureMod, publicID, "overturned", "fine"); err != nil {
+			t.Fatalf("Decide by an outranking moderator: %v", err)
+		}
+		active, err := f.database.HasActiveTimeout(ctx, fixtureMember)
+		if err != nil {
+			t.Fatalf("HasActiveTimeout: %v", err)
+		}
+		if active {
+			t.Fatal("timeout still active after an outranking moderator overturned the appeal")
+		}
+	})
 }
 
 // TestAppeal_DecideDoesNotNotifyOnFailure is the notification half of F1: a

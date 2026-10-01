@@ -2812,6 +2812,18 @@ one-moderator install, not a bug this route papers over.
 Decide the appeal. `{id}` is the opaque public id. **Auth:** Required.
 **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 
+**Overturning carries the reversal's own authority.** Reversing an appeal
+against a warning, timeout or ban requires the decider to strictly outrank
+the sanctioned target — the same hierarchy rule the direct lift paths
+enforce — so a moderator cannot reverse an action taken against a peer or a
+higher-ranked user, even one the owner issued. Overturning a **ban**
+additionally requires `BAN_MEMBERS`, mirroring `UnbanUser`; a
+`MODERATE_MEMBERS`-only holder cannot clear a ban through the appeal queue.
+Overturning a **removal** is record-only (the content is already gone) and
+keeps the direct removal path's channel-scoped `MANAGE_MESSAGES` rule with
+no rank requirement. Upholding reverses nothing and needs no such
+authority.
+
 **Two self-review rules apply, and they are different:** the moderator who
 took the appealed action may not decide its appeal **where another eligible
 moderator exists** — eligible meaning a different user holding
@@ -2872,7 +2884,7 @@ live session was already ended when the ban landed.
 | Status | Code              | Cause                                                                                                            |
 | ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                     |
-| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, or the decider's own authority no longer holds when re-checked at decision time |
+| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, an overturn the caller may not apply (does not outrank the target, or lacks `BAN_MEMBERS` for a ban), or the decider's own authority no longer holds when re-checked at decision time |
 | 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists             |
 | 404    | `NOT_FOUND`       | no such appeal                                                                                                   |
 | 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                       |
