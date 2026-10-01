@@ -154,8 +154,8 @@ test.describe("Emoji Picker", () => {
     await openEmojiPicker(nativePage);
 
     await expect(nativePage.locator(".ep-search")).toBeVisible();
-    const emojis = nativePage.locator(".ep-emoji");
-    expect(await emojis.count()).toBeGreaterThan(0);
+    // The emoji data is a lazy chunk; wait for its cells rather than count early.
+    await expect(nativePage.locator(".ep-emoji").first()).toBeVisible();
   });
 
   test("clicking emoji inserts it into the textarea", async ({ nativePage }) => {

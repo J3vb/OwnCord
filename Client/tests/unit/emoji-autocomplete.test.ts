@@ -4,7 +4,7 @@
  * how it shares the composer with the @-mention popup).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi, type Mock } from "vitest";
 
 vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
@@ -35,6 +35,7 @@ import { createMessageInput } from "../../src/components/MessageInput";
 import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
+import { loadEmojiCatalog, setSkinTone } from "../../src/features/messaging/emojiCatalog";
 
 const EMOJI = [
   { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
@@ -42,7 +43,13 @@ const EMOJI = [
   { id: 3, shortcode: "blob_wave", url: "/api/v1/emoji/3/image" },
 ];
 
+// The unicode set is a lazy chunk; load it once so the filter sees it.
+beforeAll(async () => {
+  await loadEmojiCatalog();
+});
+
 beforeEach(() => {
+  localStorage.clear();
   clearCustomEmoji();
   emojiStore.flush();
   setCustomEmoji(EMOJI);
@@ -94,6 +101,19 @@ describe("filterEmojiSuggestions", () => {
   it("searches the unicode keyword list, not just primary names", () => {
     const out = filterEmojiSuggestions("flame");
     expect(out.some((s) => s.insert === "🔥")).toBe(true);
+  });
+
+  it("finds the full Unicode set by its underscore-free shortcode", () => {
+    const thumbs = filterEmojiSuggestions("thumbsup").find((s) => s.kind === "unicode");
+    expect(thumbs?.insert).toBe("👍");
+    expect(filterEmojiSuggestions("astronaut").some((s) => s.insert === "🧑‍🚀")).toBe(true);
+  });
+
+  it("inserts the remembered skin tone", () => {
+    setSkinTone(3);
+    const thumbs = filterEmojiSuggestions("thumbsup").find((s) => s.kind === "unicode");
+    expect(thumbs?.insert).toBe("👍🏽");
+    expect(thumbs?.char).toBe("👍🏽");
   });
 
   it("is case-insensitive", () => {

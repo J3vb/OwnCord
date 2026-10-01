@@ -20,6 +20,7 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi } from "@lib/gifProvider";
@@ -422,6 +423,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (active === null) {
       closeEmojiPopup();
       return;
+    }
+    // The Unicode set is a lazy chunk: the first `:token` loads it, and the
+    // popup re-syncs once it lands, so a Unicode-only match still opens. A
+    // failed load leaves custom emoji only until the next keystroke retries.
+    if (emojiCatalog() === null) {
+      void loadEmojiCatalog().then(
+        () => {
+          if (!signal.aborted) syncEmojiPopup();
+        },
+        () => undefined,
+      );
     }
     if (emojiPopup === null) {
       emojiPopup = createEmojiAutocomplete({
