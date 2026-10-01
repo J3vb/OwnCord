@@ -53,6 +53,7 @@ The client connects via the Tauri Rust backend's WS proxy rather than native Web
 | Limit                  | Value        |
 | ---------------------- | ------------ |
 | Max read size          | 1 MB         |
+| Max read size pre-auth | 8 KiB        |
 | Max message content    | 4000 runes   |
 | Write timeout          | 10 seconds   |
 | Auth deadline          | 10 seconds   |

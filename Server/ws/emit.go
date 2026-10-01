@@ -17,7 +17,15 @@ import (
 // VoiceChannelEvent MUST be checked before ExcludeSenderEvent because voice
 // events implement a superset of ExcludeSender semantics but target by voice
 // channel membership rather than channel focus.
+//
+// EmitEvents emits on the server's own behalf; emitEventsFrom names the user
+// whose request produced the events, so their channel frames are rate limited
+// per sender (allowTopicFrame).
 func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
+	h.emitEventsFrom(ctx, 0, events)
+}
+
+func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event) {
 	for _, ev := range events {
 		switch e := ev.(type) {
 		case SequencedDMEvent:
@@ -110,7 +118,7 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			}
 			h.SendToUserHigh(e.TargetUserID(), e.Payload())
 		case ChannelEvent:
-			h.broadcastChannelEvent(ctx, e)
+			h.broadcastChannelEvent(ctx, senderID, e)
 		case VoiceVisibilityEvent:
 			// Server-wide, but never to a client that cannot read the channel.
 			// ctx is threaded from the dispatching connection so the audience

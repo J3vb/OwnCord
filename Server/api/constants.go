@@ -48,6 +48,12 @@ const (
 	// clientUpdateRateLimitPerMinute is the maximum client-update checks per IP per minute.
 	clientUpdateRateLimitPerMinute = 30
 
+	// wsUpgradeRateLimitPerMinute is the maximum WebSocket upgrade requests per
+	// IP per minute, before any auth. A client reconnects with backoff, so one
+	// a second is ample; shared-NAT communities raise it with the auth rate
+	// multiplier.
+	wsUpgradeRateLimitPerMinute = 60
+
 	// gifRateLimitPerMinute is the maximum GIF proxy requests per IP per minute.
 	// The picker debounces at 300ms, so a user typing continuously for a minute
 	// stays under this; it exists to bound abuse of the operator's Klipy quota.

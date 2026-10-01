@@ -266,9 +266,9 @@ type ServerConfig struct {
 	// text the CRS false-positives on, so blocking needs tuning against real
 	// traffic first. Unknown values fall back to "detect".
 	WAFCRSMode string `yaml:"waf_crs_mode"`
-	// MaxWSConnections caps concurrently connected WebSocket clients; new
-	// upgrade requests beyond the cap are refused with 503 before the
-	// upgrade. 0 (the default) means unlimited — every connection costs
+	// MaxWSConnections caps concurrently connected WebSocket clients,
+	// counting sockets still authenticating; new upgrade requests beyond the
+	// cap are refused with 503 before the upgrade. 0 (the default) means unlimited — every connection costs
 	// goroutines and buffered send queues, so set a ceiling that matches the
 	// host's memory before pointing a large community at it.
 	MaxWSConnections int `yaml:"max_ws_connections"`
@@ -411,7 +411,8 @@ type BackupConfig struct {
 // defaults.
 type SecurityConfig struct {
 	// AuthRateLimitMultiplier scales the per-IP auth rate limits and failure
-	// thresholds (registration, login, TOTP, sensitive endpoints). The
+	// thresholds (registration, login, TOTP, sensitive endpoints, WebSocket
+	// upgrades). The
 	// defaults assume roughly one person per IP address; a community behind a
 	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
 	// clamped to [0.1, 100].

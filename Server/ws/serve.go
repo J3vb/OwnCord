@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -22,6 +23,10 @@ const (
 	// wsReadLimitBytes is the maximum size of a single inbound WebSocket
 	// message. Must match the client-side upload cap.
 	wsReadLimitBytes = config.MaxMessageBytes
+
+	// preAuthReadLimitBytes caps inbound messages until the auth frame is
+	// accepted; an auth frame is a few hundred bytes.
+	preAuthReadLimitBytes = 8 << 10
 )
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
@@ -33,34 +38,50 @@ const (
 // Pass explicit origins such as []string{"https://example.com"} to restrict access.
 //
 // maxConns, when > 0, refuses new connections with 503 once that many clients
-// are registered — a static capacity guardrail (server.max_ws_connections).
-// The check runs before the upgrade so a refused connection costs one HTTP
-// request, not a socket plus goroutines. Registered count trails pre-auth
-// connections by design; the 10s auth deadline bounds that gap.
+// are registered or still handshaking — a static capacity guardrail
+// (server.max_ws_connections). The check runs before the upgrade so a refused
+// connection costs one HTTP request, not a socket plus goroutines.
 func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
+	// pending counts this handler's upgraded sockets that have not yet
+	// registered (still in their auth window).
+	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
-		if maxConns > 0 && hub.ClientCount() >= maxConns {
+		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
 			hub.connRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
 			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
 			return
 		}
+		// Pending until the pumps start: by then the client is registered and
+		// ClientCount carries it.
+		pending.Add(1)
+		var ended bool
+		endPending := func() {
+			if !ended {
+				ended = true
+				pending.Add(-1)
+			}
+		}
+		defer endPending()
+
 		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			slog.Warn("ws upgrade failed", "err", err)
 			return
 		}
-		conn.SetReadLimit(wsReadLimitBytes) // match client-side upload cap
+		conn.SetReadLimit(preAuthReadLimitBytes)
 
 		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
 		if err != nil {
 			return
 		}
+		conn.SetReadLimit(wsReadLimitBytes) // match client-side upload cap
 
 		ctx := r.Context()
 
 		startPumps := func() {
+			endPending()
 			writeCtx, writeCancel := context.WithCancel(ctx)
 			go writePump(writeCtx, conn, c)
 			go pingPump(writeCtx, conn, c, pingInterval)

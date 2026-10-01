@@ -246,7 +246,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		}
 	}
 	if len(result.Events) > 0 {
-		h.EmitEvents(c.ctx, result.Events)
+		h.emitEventsFrom(c.ctx, c.userID, result.Events)
 	}
 	// Voice join/leave hand off to the hub-internal routines (also called
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id

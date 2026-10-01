@@ -254,7 +254,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 
-	r.Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
+	r.With(RateLimitMiddleware(limiter, "ws_upgrade:", scaledAuthLimit(wsUpgradeRateLimitPerMinute), time.Minute, cfg.Server.TrustedProxies)).
+		Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
 	routerMetricsRoutes(r, cfg, database, svc, hub)
 

@@ -3007,7 +3007,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
 `voice_sessions` is the number of active voice connections. `broadcast_drops`
 is the cumulative count of events dropped because the **hub-wide broadcast
 queue** was full — sequenced events lost before delivery, worth alerting on
-if it ever grows. `topic_sheds_total` counts frames the **per-channel topic
+if it ever grows. `topic_sheds_total` counts frames the **per-sender channel topic
 limiter** dropped before a sequence was assigned; like `broadcast_drops`, replay
 cannot recover them, so alert on any growth. A **content** frame (a message
 body, or one that discloses it) lost to either counter additionally forces the

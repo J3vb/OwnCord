@@ -93,7 +93,7 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   AES-256-GCM ciphertext under the TOTP key (a pending enrolment's secret),
   never as a token, code or secret in the clear.
 - Auth routes are rate-limited per IP: login 5/min, registration 3/min, 2FA
-  verification 10/min, account recovery 5/min, each scaled by
+  verification 10/min, account recovery 5/min, WebSocket upgrades 60/min, each scaled by
   `security.auth_rate_limit_multiplier` (default 1.0). Ten failed logins
   within 15 minutes lock the username for 15 minutes whatever the source IP
   (never scaled: it is the only cross-IP defence); the same count, scaled,
