@@ -12,7 +12,8 @@ import (
 
 // DMService handles direct message channel operations.
 type DMService struct {
-	st Store
+	st    Store
+	perms *PermissionService
 	// online reports whether userID currently holds a live WebSocket
 	// connection. It is wired by the ws layer (Hub.IsUserConnected) after
 	// both are constructed, mirroring MessageService.online (see its doc
@@ -30,9 +31,10 @@ type DMService struct {
 	online func(userID int64) bool
 }
 
-// NewDMService creates a DMService.
-func NewDMService(st Store) *DMService {
-	return &DMService{st: st}
+// NewDMService creates a DMService. perms answers whether an actor is timed
+// out, which refuses the writes here that publish to other participants.
+func NewDMService(st Store, perms *PermissionService) *DMService {
+	return &DMService{st: st, perms: perms}
 }
 
 // SetOnlineChecker wires the live-connection predicate every DM payload this
@@ -285,6 +287,10 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	)
 	defer done()
 
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
+	}
+
 	// De-duplicate and drop the caller: a payload naming the same person twice
 	// is a client bug, not a reason to refuse, but it must not inflate the
 	// participant count or double-insert.
@@ -395,6 +401,10 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 	if err != nil || !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
 	}
+	// The new name is pushed to every participant: text of the caller's own.
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
+	}
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {
@@ -488,6 +498,11 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	// Group DMs are exempt inside RequireDMNotBlocked, matching every other
 	// sink — blocks are enforced at group creation instead.
 	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+		return nil, err
+	}
+	// Ringing (and declining) notifies the other participants, which a
+	// timeout refuses like a send.
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
 		return nil, err
 	}
 

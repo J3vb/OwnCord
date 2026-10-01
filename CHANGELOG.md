@@ -147,6 +147,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Direct messages & members
 
+- **A timeout now also covers group DMs, call rings, DM pins and custom status.** A timed-out member could still create or rename a group DM, ring or decline a DM call, pin in a DM, or set a custom status line; each now answers `TIMED_OUT`, as a message send does. Changing only the online status, or clearing the custom status, still works.
 - **The DM list now shows each conversation's last message and when it arrived.** The sidebar and the embedded DM preview drew only names and avatars, even though the last-message text and time were already loaded — so a DM looked the same whether or not it had news in it. Both now show the last line (spoilers stay hidden) and its time — the clock time for today, a short date such as "Sep 29" before that — and follow new, edited and deleted messages.
 - **A DM mention badge no longer disappears when the client has to reload its DM list.** Accepting a message request reloads the DM list over REST, which reported a mention count of zero while the list sent on connect reported the real one; both now report the same count.
 - **Starting a DM from the member list now works with a keyboard.** The member picker's rows were click-only divs, so Tab could reach only the group-name box and the Confirm and Cancel buttons, never a person — and in the 1:1 path that picker is the only way to start a DM from the member list. The rows are now a single Tab stop you step with the arrow keys and choose with Enter or Space.

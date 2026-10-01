@@ -243,6 +243,9 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		if blkErr := RequireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
 			return blkErr
 		}
+		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+			return err
+		}
 	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
 		// Require READ_MESSAGES alongside MANAGE_MESSAGES so a role locked out
 		// of a private channel cannot mutate its pins — the admin panel's

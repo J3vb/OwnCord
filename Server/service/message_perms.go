@@ -201,6 +201,22 @@ func denial(err error) error {
 	}
 }
 
+// requireNotTimedOut is CanSendMessage's timeout clause for a write that
+// publishes to other users outside a message send and has no channel
+// predicate of its own: naming a group DM, ringing a DM, pinning in one, a
+// custom status line. TimedOut is resolved exactly as for a send
+// (administrators exempt) and refused with the same ErrTimedOut.
+func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID int64) error {
+	sub, err := perms.Subject(ctx, userID, 0)
+	if err != nil {
+		return fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
+	}
+	if sub.TimedOut {
+		return denial(permissions.ErrTimedOut)
+	}
+	return nil
+}
+
 // readSubject resolves what CanReadContent needs for userID in ch: role bits
 // and overrides from the permission cache, the channel's flags, and for a DM
 // the participant flag. Unlike channelSubject (the send path's builder) a DM
