@@ -72,6 +72,25 @@ describe("connection diagnostics", () => {
     expect(final("microphone")?.status).toBe("not-tested");
   });
 
+  it("checks the system default microphone when the saved one is unplugged", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("gone-mic"));
+    services.getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("gone", "OverconstrainedError"))
+      .mockResolvedValueOnce(stream);
+    try {
+      await run();
+    } finally {
+      localStorage.removeItem("owncord:settings:audioInputDevice");
+    }
+    expect(services.getUserMedia).toHaveBeenLastCalledWith({
+      audio: { deviceId: "default" },
+      video: false,
+    });
+    expect(final("microphone")?.status).toBe("passed");
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
   it("reports denied microphone access without treating the call as tested", async () => {
     services.getUserMedia = vi
       .fn()

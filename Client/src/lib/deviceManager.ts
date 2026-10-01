@@ -2,11 +2,12 @@
 //
 // Delegates to Room.switchActiveDevice and rebuilds the audio pipeline
 // after a device switch so the new source track flows through the GainNode.
-// Monitors navigator.mediaDevices.ondevicechange for hot-swap (unplug/plug).
+// Monitors navigator.mediaDevices.ondevicechange for hot-swap: an unplugged
+// saved device falls back to the default and is switched back to on replug.
 
 import { Room } from "livekit-client";
 import { voiceStore } from "@stores/voice.store";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import { nativeAudioDevices } from "../features/voice/native/devices";
@@ -42,14 +43,42 @@ export class DeviceManager {
   private onToast: ((message: string) => void) | null = null;
   private deviceChangeHandler: (() => void) | null = null;
   private deviceChangeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The saved device id each kind fell back to the default from after it
+   *  was unplugged. Kept across rooms so a reconnect still restores it. */
+  private fallbackFrom: { audioinput?: string; audiooutput?: string } = {};
 
   setRoom(room: Room | null): void {
     this.room = room;
     if (room !== null) {
       this.startDeviceChangeListener();
+      void this.reconcileFallbacks(room);
     } else {
       this.stopDeviceChangeListener();
     }
+  }
+
+  /** Match the fallback record to the devices listed when a room attaches.
+   *  Join and reconnect open the saved device when it is listed and degrade
+   *  to the default when it is not, so a missing saved device counts as
+   *  fallen back (restored when it is listed again) and a listed one does
+   *  not (its next unplug falls back again). */
+  private async reconcileFallbacks(room: Room): Promise<void> {
+    const saved = [
+      ["audioinput", "audioInputDevice"],
+      ["audiooutput", "audioOutputDevice"],
+    ] as const;
+    await Promise.all(
+      saved.map(async ([kind, key]) => {
+        const deviceId = loadPref<string>(key, "");
+        if (deviceId === "") return;
+        const devices = (await nativeAudioDevices(kind)) ?? (await Room.getLocalDevices(kind));
+        if (this.room !== room || loadPref<string>(key, "") !== deviceId) return;
+        if (devices.some((d) => d.deviceId === deviceId)) delete this.fallbackFrom[kind];
+        else this.fallbackFrom[kind] = deviceId;
+      }),
+    ).catch((err: unknown) => {
+      log.warn("Failed to enumerate devices on room attach", err);
+    });
   }
 
   setAudioPipeline(pipeline: AudioPipeline | null): void {
@@ -122,34 +151,43 @@ export class DeviceManager {
     // available" error after the user already left voice (v096).
     const room = this.room;
     if (room === null) return;
+    if (room.state === "connecting" || room.state === "disconnected") {
+      await this.reconcileFallbacks(room);
+      return;
+    }
     log.info("Device change detected");
 
     try {
       const nativeInputs = await nativeAudioDevices("audioinput");
       const devices = nativeInputs ?? (await Room.getLocalDevices("audioinput"));
       if (this.room !== room) return;
+      // Kinds this run switched back, which the native re-apply below skips.
+      const restored = new Set<MediaDeviceKind>();
       const savedInput = loadPref<string>("audioInputDevice", "");
+      const inputListed = devices.some((d) => d.deviceId === savedInput);
 
-      // Check if the saved input device was removed
-      if (savedInput !== "" && !devices.some((d) => d.deviceId === savedInput)) {
+      if (savedInput !== "" && !inputListed && this.fallbackFrom.audioinput !== savedInput) {
         log.warn("Saved audio input device removed — falling back to default", { savedInput });
-        // Reset to default
-        savePref("audioInputDevice", "");
-        // Switch to default device
+        this.fallbackFrom.audioinput = savedInput;
+        await this.fallBackToDefaultInput(room);
+        if (this.room !== room) return;
+      } else if (inputListed && this.fallbackFrom.audioinput === savedInput) {
+        log.info("Saved audio input device is back — switching to it", { savedInput });
+        delete this.fallbackFrom.audioinput;
+        restored.add("audioinput");
         try {
-          await this.cycleMicForDeviceSwitch(room);
+          // While muted this only records the device (OC-0474).
+          await room.switchActiveDevice("audioinput", savedInput);
           if (this.room !== room) return;
-          try {
-            this.audioPipeline?.setupAudioPipeline();
-          } catch (pipelineErr) {
-            log.warn("Audio pipeline setup failed after device fallback", pipelineErr);
-            this.onToast?.(voiceText("device.pipelineError"));
-          }
-          this.onToast?.(voiceText("device.inputDisconnected"));
+          this.setupPipelineAfterSwitch();
         } catch (err) {
           if (this.room !== room) return;
-          log.error("Failed to fallback to default input device", err);
-          this.onErrorCallback?.(voiceText("device.noInput"));
+          // The failed restart already stopped the capture: re-acquire the
+          // default rather than leave a dead mic that reads as unmuted.
+          log.warn("Failed to switch back to the saved input device", err);
+          this.fallbackFrom.audioinput = savedInput;
+          await this.fallBackToDefaultInput(room);
+          if (this.room !== room) return;
         }
       }
 
@@ -158,15 +196,22 @@ export class DeviceManager {
         (await nativeAudioDevices("audiooutput")) ?? (await Room.getLocalDevices("audiooutput"));
       if (this.room !== room) return;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
-      if (savedOutput !== "" && !outputDevices.some((d) => d.deviceId === savedOutput)) {
+      const outputListed = outputDevices.some((d) => d.deviceId === savedOutput);
+      // LiveKit's own undebounced devicechange handler moves output to the
+      // default the moment the saved device disappears, so a replug inside
+      // our debounce finds it listed with no fallback recorded. The native
+      // room has no getActiveDevice; its re-apply loop below covers it.
+      const activeOutput = room.getActiveDevice?.("audiooutput");
+      if (outputListed && activeOutput !== undefined && activeOutput !== savedOutput) {
+        this.fallbackFrom.audiooutput = savedOutput;
+      }
+      if (savedOutput !== "" && !outputListed && this.fallbackFrom.audiooutput !== savedOutput) {
         log.warn("Saved audio output device removed — falling back to default", { savedOutput });
         try {
-          // Clearing the preference only affects a future join. Move the
-          // current room's attached audio away from the removed device too.
           await room.switchActiveDevice("audiooutput", "");
           if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
             return;
-          savePref("audioOutputDevice", "");
+          this.fallbackFrom.audiooutput = savedOutput;
           this.onToast?.(voiceText("device.outputDisconnected"));
         } catch (err) {
           if (this.room !== room || loadPref<string>("audioOutputDevice", "") !== savedOutput)
@@ -174,6 +219,19 @@ export class DeviceManager {
           log.error("Failed to fallback to default output device", err);
           this.onErrorCallback?.(voiceText("device.defaultSpeakerFailed"));
         }
+      } else if (outputListed && this.fallbackFrom.audiooutput === savedOutput) {
+        log.info("Saved audio output device is back — switching to it", { savedOutput });
+        delete this.fallbackFrom.audiooutput;
+        restored.add("audiooutput");
+        try {
+          await room.switchActiveDevice("audiooutput", savedOutput);
+        } catch (err) {
+          if (this.room !== room) return;
+          log.error("Failed to switch back to the saved output device", err);
+          this.fallbackFrom.audiooutput = savedOutput;
+          this.onErrorCallback?.(voiceText("device.speakerFailed"));
+        }
+        if (this.room !== room) return;
       }
 
       // The native backend opens its capture and playout streams on concrete
@@ -187,9 +245,10 @@ export class DeviceManager {
         ["audiooutput", "audioOutputDevice", outputDevices],
       ] as const;
       for (const [kind, key, listed] of saved) {
-        const deviceId = loadPref<string>(key, "");
+        const pref = loadPref<string>(key, "");
+        const deviceId = this.fallbackFrom[kind] === pref ? "" : pref;
         const reapply = deviceId === "" || listed.some((d) => d.deviceId === deviceId);
-        if (!reapply) continue;
+        if (!reapply || restored.has(kind)) continue;
         try {
           // oxlint-disable-next-line no-await-in-loop -- sequential by design: the room-supersession check must run between the two switches
           await room.switchActiveDevice(kind, deviceId);
@@ -203,7 +262,37 @@ export class DeviceManager {
     }
   }
 
+  /** Move capture to the system default while the saved input is unusable.
+   *  The pref keeps the user's pick so the device is restored when it is
+   *  listed again (DP-31). */
+  private async fallBackToDefaultInput(room: Room): Promise<void> {
+    try {
+      await this.cycleMicForDeviceSwitch(room);
+      if (this.room !== room) return;
+      this.setupPipelineAfterSwitch();
+      this.onToast?.(voiceText("device.inputDisconnected"));
+    } catch (err) {
+      if (this.room !== room) return;
+      log.error("Failed to fallback to default input device", err);
+      this.onErrorCallback?.(voiceText("device.noInput"));
+    }
+  }
+
+  /** The mic processor rides the SDK's restart: its gated output stays on
+   *  the sender and only the capture behind it changed. This only attaches
+   *  one where a track has none. */
+  private setupPipelineAfterSwitch(): void {
+    try {
+      this.audioPipeline?.setupAudioPipeline();
+    } catch (pipelineErr) {
+      log.warn("Audio pipeline setup failed after device switch", pipelineErr);
+      this.onToast?.(voiceText("device.pipelineError"));
+    }
+  }
+
   async switchInputDevice(deviceId: string): Promise<void> {
+    // A manual pick replaces whatever a hot-unplug fell back from.
+    delete this.fallbackFrom.audioinput;
     const room = this.room;
     if (room === null) {
       log.debug("Skipping input device switch — no active voice session");
@@ -216,15 +305,7 @@ export class DeviceManager {
         await this.cycleMicForDeviceSwitch(room);
       }
       if (this.room !== room) return;
-      // The mic processor rides the SDK's restart: its gated output stays on
-      // the sender and only the capture behind it changed. This only attaches
-      // one where a track has none.
-      try {
-        this.audioPipeline?.setupAudioPipeline();
-      } catch (pipelineErr) {
-        log.warn("Audio pipeline setup failed after input device switch", pipelineErr);
-        this.onToast?.(voiceText("device.pipelineError"));
-      }
+      this.setupPipelineAfterSwitch();
       log.info("Switched input device", { deviceId });
     } catch (err) {
       if (this.room !== room) return;
@@ -234,6 +315,7 @@ export class DeviceManager {
   }
 
   async switchOutputDevice(deviceId: string): Promise<void> {
+    delete this.fallbackFrom.audiooutput;
     const room = this.room;
     if (room === null) {
       log.debug("Skipping output device switch — no active voice session");

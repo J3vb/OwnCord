@@ -276,6 +276,25 @@ describe("AudioPipeline", () => {
       expect(ctx.latest("source").track.id).toBe("mic-2");
     });
 
+    it("restarts on the system default while the saved mic is unplugged (DP-31)", async () => {
+      prefs.set("audioInputDevice", "usb-mic");
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      pipeline.setRoom(roomWith(track));
+      const restartTrack = vi
+        .spyOn(track, "restartTrack")
+        .mockRejectedValueOnce(Object.assign(new Error("gone"), { name: "OverconstrainedError" }));
+      const onError = vi.fn();
+
+      await pipeline.reapplyAudioProcessing(onError);
+
+      expect(restartTrack).toHaveBeenLastCalledWith(
+        expect.objectContaining({ deviceId: "default", echoCancellation: true }),
+      );
+      expect(onError).not.toHaveBeenCalled();
+    });
+
     it("reports a failed restart", async () => {
       const pipeline = new AudioPipeline();
       const track = micTrack();

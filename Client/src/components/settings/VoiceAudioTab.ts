@@ -17,6 +17,7 @@ import {
 import {
   VAD_MAX_THRESHOLD,
   micCaptureOptions,
+  isMissingDeviceError,
   startVadDetector,
   vadThreshold,
 } from "@lib/audioPipeline";
@@ -480,13 +481,17 @@ function buildVoiceAudioTabInner(
   cameraCard.appendChild(previewWrap);
   cameraCard.append(...qualityGroup, ...fpsGroup);
 
+  // Device names seen while this tab is open, to name one that is unplugged.
+  const deviceLabels = new Map<string, string>();
   /**
    * (Re)fill the three device dropdowns from the current device list.
    *
    * Called on build and again on every `devicechange`, so unplugging a headset
    * with the panel open removes it from the list instead of leaving a dead
-   * entry the user can select. A saved device that has vanished falls back to
-   * "Default" — the same thing the voice session does on hot-swap.
+   * entry the user can select. A saved microphone or speaker that has vanished
+   * stays the selection as a disabled "(disconnected)" entry: the voice
+   * session keeps it too and switches back to it when it returns (DP-31). A
+   * vanished camera reads as "Default".
    */
   async function populateDevices(): Promise<void> {
     const selects: Array<[HTMLSelectElement, MediaDeviceKind, string, string]> = [
@@ -516,15 +521,22 @@ function buildVoiceAudioTabInner(
         for (const d of devices) {
           if (d.kind !== kind) continue;
           if (d.deviceId === saved) savedStillPresent = true;
+          const name = d.label || `${label} (${d.deviceId.slice(0, 8)})`;
+          deviceLabels.set(d.deviceId, name);
+          select.appendChild(createElement("option", { value: d.deviceId }, name));
+        }
+        const keepSaved = savedStillPresent || kind !== "videoinput";
+        if (saved !== "" && !savedStillPresent && keepSaved) {
+          const device = deviceLabels.get(saved) ?? `${label} (${saved.slice(0, 8)})`;
           select.appendChild(
             createElement(
               "option",
-              { value: d.deviceId },
-              d.label || `${label} (${d.deviceId.slice(0, 8)})`,
+              { value: saved, disabled: "" },
+              t("voiceAudio.deviceDisconnected", { device }),
             ),
           );
         }
-        select.value = saved !== "" && savedStillPresent ? saved : "";
+        select.value = keepSaved ? saved : "";
       }
     } catch {
       const errOpt = createElement(
@@ -668,8 +680,16 @@ function buildVoiceAudioTabInner(
     stopMic();
     void (async () => {
       try {
-        const constraints: MediaStreamConstraints = { audio: micCaptureOptions(), video: false };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const captureOptions = micCaptureOptions();
+        const stream = await navigator.mediaDevices
+          .getUserMedia({ audio: captureOptions, video: false })
+          .catch((err: unknown) => {
+            if (!isMissingDeviceError(err, captureOptions)) throw err;
+            return navigator.mediaDevices.getUserMedia({
+              audio: micCaptureOptions(true),
+              video: false,
+            });
+          });
         const stopStream = (): void => {
           for (const track of stream.getTracks()) track.stop();
         };

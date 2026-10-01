@@ -27,11 +27,7 @@ import { vadThreshold } from "@lib/audioPipeline";
 // so the singleton stays one.
 import * as appLogger from "@lib/logger";
 import { expectConsole } from "../helpers/console";
-import {
-  FakeAudioContext,
-  FakeAudioWorkletNode,
-  installFakeAudio,
-} from "../helpers/fakeAudioContext";
+import { FakeAudioWorkletNode, installFakeAudio } from "../helpers/fakeAudioContext";
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -360,13 +356,66 @@ describe("VoiceAudioTab UI structure", () => {
     ]);
     emitDeviceChange();
 
+    // The saved device is gone: it stays the selection, marked disconnected
+    // and not pickable, rather than silently reading as Default (DP-31).
     await vi.waitFor(() => {
       const values = Array.from(inputSelect.querySelectorAll("option")).map((o) => o.value);
-      expect(values).toEqual(["", "mic-2"]);
+      expect(values).toEqual(["", "mic-2", "mic-1"]);
     });
-    // The saved device is gone — fall back to Default rather than a dead entry.
-    expect(inputSelect.value).toBe("");
+    expect(inputSelect.value).toBe("mic-1");
+    expect(inputSelect.selectedOptions[0]!.textContent).toBe("Mic 1 (disconnected)");
+    expect(inputSelect.selectedOptions[0]!.disabled).toBe(true);
 
+    // Plugged back in: the entry is an ordinary one again.
+    nav.setDevices([
+      { kind: "audioinput", deviceId: "mic-1", label: "Mic 1" },
+      { kind: "audioinput", deviceId: "mic-2", label: "Mic 2" },
+      { kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" },
+    ]);
+    emitDeviceChange();
+    await vi.waitFor(() => expect(inputSelect.selectedOptions[0]!.textContent).toBe("Mic 1"));
+    expect(inputSelect.value).toBe("mic-1");
+    expect(inputSelect.selectedOptions[0]!.disabled).toBe(false);
+
+    ac.abort();
+  });
+
+  it("names a saved device unplugged before the tab opened by its id", async () => {
+    stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("abcdef0123456789"));
+
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.value).toBe("abcdef0123456789"));
+    expect(inputSelect.selectedOptions[0]!.textContent).toBe(
+      "Microphone (abcdef01) (disconnected)",
+    );
+    ac.abort();
+  });
+
+  it("meters the system default while the saved microphone is unplugged", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", '"mic-gone"');
+    stubNavigator();
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(
+      Object.assign(new Error("gone"), { name: "OverconstrainedError" }),
+    );
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    await vi.waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenLastCalledWith({
+        audio: expect.objectContaining({ deviceId: "default" }),
+        video: false,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(el.querySelector<HTMLElement>("[data-testid='mic-status']")!.textContent).not.toBe(
+      "No microphone access",
+    );
     ac.abort();
   });
 

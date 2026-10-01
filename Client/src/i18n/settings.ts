@@ -334,6 +334,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.kind.speaker": "Speaker",
   "voiceAudio.kind.camera": "Camera",
   "voiceAudio.enumerateFailed": "Could not enumerate devices",
+  "voiceAudio.deviceDisconnected": "{device} (disconnected)",
   "voiceAudio.cameraUnavailable": "Camera unavailable",
   "voiceAudio.echo.label": "Echo Cancellation",
   "voiceAudio.echo.desc": "Reduce echo from speakers feeding back into microphone",
