@@ -191,7 +191,7 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   await doomed.hover();
   const del = doomed.locator("[data-testid^='msg-delete-']");
   await del.click();
-  await del.click();
+  await bob.locator("[data-testid='msg-delete-confirm']").click();
   await expect(row(bob, gone)).toHaveCount(0);
 
   await open("general");

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -42,10 +42,7 @@ vi.mock("@stores/messages.store", () => ({
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import {
-  createMessageController,
-  createPendingDeleteManager,
-} from "../../src/pages/main-page/MessageController";
+import { createMessageController } from "../../src/pages/main-page/MessageController";
 import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
 
 // ---------------------------------------------------------------------------
@@ -311,55 +308,5 @@ describe("createMessageController", () => {
 
       expect(mockPrependMessages).not.toHaveBeenCalled();
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// PendingDeleteManager
-// ---------------------------------------------------------------------------
-
-describe("createPendingDeleteManager", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  it("returns 'pending' on first click", () => {
-    const mgr = createPendingDeleteManager();
-    expect(mgr.tryDelete(1)).toBe("pending");
-  });
-
-  it("returns 'confirmed' on second click within timeout", () => {
-    const mgr = createPendingDeleteManager();
-    mgr.tryDelete(1);
-    expect(mgr.tryDelete(1)).toBe("confirmed");
-  });
-
-  it("returns 'pending' again after timeout expires", () => {
-    const mgr = createPendingDeleteManager();
-    mgr.tryDelete(1);
-    vi.advanceTimersByTime(5001); // just past the 5000ms pending timeout
-    expect(mgr.tryDelete(1)).toBe("pending");
-  });
-
-  it("tracks multiple messages independently", () => {
-    const mgr = createPendingDeleteManager();
-    mgr.tryDelete(1);
-    mgr.tryDelete(2);
-    expect(mgr.tryDelete(1)).toBe("confirmed");
-    expect(mgr.tryDelete(2)).toBe("confirmed");
-  });
-
-  it("cleanup clears all pending timeouts", () => {
-    const mgr = createPendingDeleteManager();
-    mgr.tryDelete(1);
-    mgr.tryDelete(2);
-    mgr.cleanup();
-    // After cleanup, both should be fresh "pending" again
-    expect(mgr.tryDelete(1)).toBe("pending");
-    expect(mgr.tryDelete(2)).toBe("pending");
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 });

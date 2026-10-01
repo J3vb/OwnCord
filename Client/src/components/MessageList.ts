@@ -47,7 +47,7 @@ export interface MessageListOptions {
   readonly onScrollTop: () => void | Promise<void>;
   readonly onReplyClick: (messageId: number) => void;
   readonly onEditClick: (messageId: number) => void;
-  readonly onDeleteClick: (messageId: number) => void;
+  readonly onDeleteClick: (messageId: number, shiftKey: boolean) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
   /** Report someone else's message or one of its attachments (B9-10). No button without it. */

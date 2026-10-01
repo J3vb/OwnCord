@@ -30,16 +30,15 @@ test.describe("Toast Notifications", () => {
   });
 
   test("toast auto-dismisses after timeout", async ({ page }) => {
-    // Trigger a real toast through the delete-confirmation flow: the first
-    // click on a message's Delete action shows the info toast
-    // "Click delete again to confirm".
+    // Trigger a real toast through the pin flow: pinning a message shows the
+    // success toast "Message pinned", which auto-dismisses.
     await mockTauriFullSessionWithMessagesAndEcho(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
     const ownMessage = page.locator("[data-testid='message-101']");
     await ownMessage.hover();
-    await page.locator("[data-testid='msg-delete-101']").click();
+    await page.locator("[data-testid='msg-pin-101']").click();
 
     const toast = page.locator("[data-testid='toast']");
     await expect(toast.first()).toBeVisible({ timeout: 5_000 });
@@ -109,13 +108,15 @@ test.describe("Toast Notifications", () => {
       timeout: 5_000,
     });
 
-    // …and the first delete click asks for confirmation, without replacing
-    // the pin toast — both live in the same container at once.
-    await page.locator("[data-testid='msg-delete-101']").click();
-    const deleteToast = page.locator("[data-testid='toast']", {
-      hasText: "Click delete again to confirm",
+    // …and unpinning shows its own, without replacing the pin toast — both
+    // live in the same container at once.
+    await ownMessage.hover();
+    await page.locator("[data-testid='msg-pin-101']").click();
+    await expect(
+      page.locator("[data-testid='toast']", { hasText: "Message unpinned" }),
+    ).toBeVisible({
+      timeout: 5_000,
     });
-    await expect(deleteToast).toBeVisible({ timeout: 5_000 });
     await expect(page.locator("[data-testid='toast']")).toHaveCount(2);
 
     const containerChildren = page.locator(

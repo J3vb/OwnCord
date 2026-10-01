@@ -232,7 +232,7 @@ test.describe("Local report intake (real server)", () => {
     await own.hover();
     const del = own.locator("[data-testid^='msg-delete-']");
     await del.click();
-    await del.click();
+    await alice.locator("[data-testid='msg-delete-confirm']").click();
     await expect(bob.locator(".message", { hasText: text })).toHaveCount(0);
     const dialog = await submit(bob, "Spam");
     await expect(dialog.getByRole("alert").filter({ hasText: "it was deleted" })).toBeVisible();
