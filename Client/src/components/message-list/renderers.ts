@@ -97,6 +97,50 @@ export function renderNewDivider(): HTMLDivElement {
 }
 
 /**
+ * A stable key for the identity a row's author is drawn from — the avatar URL,
+ * the displayed name and the role colour. MessageList compares it against the
+ * last render to repaint only the rows whose author actually changed (P4-02),
+ * so a role change or a rename does not rebuild every other row.
+ */
+export function authorAvatarKey(
+  author: {
+    readonly username: string;
+    readonly displayName: string | null;
+    readonly avatar: string | null;
+  },
+  roleColor: string,
+): string {
+  return `${author.avatar ?? ""}\u0000${resolveDisplayName(author)}\u0000${roleColor}`;
+}
+
+/** Apply the connection gate to one delete button in place (CLI-08). */
+function applyDeleteGate(
+  btn: HTMLButtonElement,
+  status: "connected" | "reconnecting" | "disconnected",
+): void {
+  if (status === "connected") {
+    btn.disabled = false;
+    btn.removeAttribute("aria-disabled");
+    btn.title = messagingText("action.delete");
+    return;
+  }
+  btn.disabled = true;
+  btn.setAttribute("aria-disabled", "true");
+  btn.title = shellText(
+    status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
+  );
+}
+
+/** Toggle the delete gate on every rendered delete control for the current
+ *  connection status. Called on a connection flip; no row is rebuilt. */
+export function refreshConnectionControls(root: ParentNode): void {
+  const status = uiStore.getState().connectionStatus;
+  for (const btn of root.querySelectorAll<HTMLButtonElement>("[data-testid^='msg-delete-']")) {
+    applyDeleteGate(btn, status);
+  }
+}
+
+/**
  * The quoted bar above a reply. Clicking it jumps to the replied-to message —
  * including when that message is outside the loaded window, which is why the
  * bar stays clickable even in the "unknown message" case: the id is known, and
@@ -137,9 +181,13 @@ function renderReplyRef(
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
     const role = getUserRole(ref.user.id);
     const author = resolveAuthor(ref.user);
+    const roleColor = roleColorVar(role);
+    // Tag the quoted author so a rename/role change repaints it in place,
+    // without rebuilding the row (P4-02).
+    bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const miniAvatar = createAvatarElement(author, {
       className: "rr-avatar",
-      background: roleColorVar(role),
+      background: roleColor,
     });
     appendChildren(
       bar,
@@ -224,9 +272,13 @@ export function renderMessage(
   // The author's current identity, not the one frozen into the payload: a
   // rename or a new avatar has to show up on the messages already on screen.
   const author = resolveAuthor(msg.user);
+  const roleColor = roleColorVar(role);
+  // Tag the row with the identity it was drawn from, so MessageList can repaint
+  // only the rows whose author actually changed on a roleRevision bump (P4-02).
+  el.dataset["authorKey"] = authorAvatarKey(author, roleColor);
   const avatar = createAvatarElement(author, {
     className: "msg-avatar",
-    background: roleColorVar(role),
+    background: roleColor,
   });
   el.appendChild(avatar);
 
@@ -249,7 +301,6 @@ export function renderMessage(
   }
 
   const header = createElement("div", { class: "msg-header" });
-  const roleColor = roleColorVar(role);
   const authorEl = createElement(
     "span",
     {
@@ -277,7 +328,13 @@ export function renderMessage(
     setText(text, messagingText("message.deleted"));
     el.appendChild(text);
   } else {
-    el.appendChild(renderMessageContent(msg.content, mentionInfo));
+    // Key the parse cache by the message's identity plus its edit stamp: an
+    // unchanged message reuses its parse when a row is re-materialised, and an
+    // edit changes the key so the new content is parsed (P4-02). Id 0 is the
+    // unconfirmed-optimistic sentinel shared by every pending row, so it is not
+    // a unique identity — those parse uncached.
+    const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
+    el.appendChild(renderMessageContent(msg.content, mentionInfo, cacheKey));
     if (msg.editedAt !== null) {
       el.appendChild(
         createElement("span", { class: "msg-edited" }, messagingText("message.edited")),
@@ -333,6 +390,8 @@ export function renderMessage(
     });
     reactBtn.appendChild(createIcon("smile", 16));
     reactBtn.title = messagingText("action.react");
+    // The lock is applied at render from the current timeout, then updated in
+    // place by refreshReactionLocks when the timeout changes (P4-02).
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
@@ -385,19 +444,19 @@ export function renderMessage(
         "aria-label": messagingText("action.delete"),
       });
       deleteBtn.appendChild(createIcon("trash-2", 16));
-      const connectionStatus = uiStore.getState().connectionStatus;
-      if (connectionStatus === "connected") {
-        deleteBtn.title = messagingText("action.delete");
-        deleteBtn.addEventListener("click", (e) => opts.onDeleteClick(msg.id, e.shiftKey), {
-          signal,
-        });
-      } else {
-        deleteBtn.disabled = true;
-        deleteBtn.setAttribute("aria-disabled", "true");
-        deleteBtn.title = shellText(
-          connectionStatus === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
-        );
-      }
+      // The listener is attached once; whether the button is disabled is read
+      // at click time, so a connection flip is a class/attribute change on the
+      // already-rendered button (refreshConnectionControls) rather than a row
+      // rebuild (CLI-08).
+      deleteBtn.addEventListener(
+        "click",
+        (e) => {
+          if (deleteBtn.disabled) return;
+          opts.onDeleteClick(msg.id, e.shiftKey);
+        },
+        { signal },
+      );
+      applyDeleteGate(deleteBtn, uiStore.getState().connectionStatus);
       actionsBar.appendChild(deleteBtn);
     }
 

@@ -67,38 +67,69 @@ export function renderReactions(
   return container;
 }
 
-/** Wire a reaction control, or mark it disabled with the lock reason. */
+/** Each wired control's unlocked title, so refreshReactionLocks can lift a
+ *  timeout's lock back to it without a row rebuild (P4-02). */
+const defaultTitles = new WeakMap<HTMLElement, string>();
+
+/** Wire a reaction control: attach its activation listener once, then apply
+ *  the current lock. The listener stays attached across a timeout; the lock is
+ *  read at activation time so it can be toggled in place (P4-02). */
 export function wireReactionControl(
   el: HTMLElement,
   onActivate: () => void,
   locked: string | null,
   signal: AbortSignal,
 ): void {
-  if (locked !== null) {
-    el.setAttribute("aria-disabled", "true");
-    el.title = locked;
-    return;
-  }
-  el.addEventListener("click", onActivate, { signal });
-  if (el.tagName !== "BUTTON") addKeyActivation(el, onActivate, signal);
-}
-
-/**
- * A bare <span role="button"> gets no native key activation, unlike a real
- * <button>. Mirror Enter/Space onto the same handler the click listener
- * uses, so a chip is actually usable from the keyboard once it is reachable
- * (mirrors QuickSwitchOverlay.ts's item/keydown pattern).
- */
-function addKeyActivation(el: Element, onActivate: () => void, signal: AbortSignal): void {
+  // Remember the unlocked title the caller set (the action label, or none for
+  // a chip) so a timeout's lock can be lifted back to it in place.
+  const defaultTitle = el.title;
+  defaultTitles.set(el, defaultTitle);
+  const lockedNow = (): boolean => el.getAttribute("aria-disabled") === "true";
   el.addEventListener(
-    "keydown",
-    (e) => {
-      const key = (e as KeyboardEvent).key;
-      if (key === "Enter" || key === " ") {
-        e.preventDefault();
-        onActivate();
-      }
+    "click",
+    () => {
+      if (!lockedNow()) onActivate();
     },
     { signal },
   );
+  // A bare <span role="button"> gets no native key activation, unlike a real
+  // <button>. Mirror Enter/Space onto the same handler so a chip is usable
+  // from the keyboard once it is reachable (QuickSwitchOverlay's pattern).
+  if (el.tagName !== "BUTTON") {
+    el.addEventListener(
+      "keydown",
+      (e) => {
+        if (lockedNow()) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onActivate();
+        }
+      },
+      { signal },
+    );
+  }
+  applyReactionLock(el, locked, defaultTitle);
+}
+
+/** Toggle a control's disabled state in place. `locked` is the reason from
+ *  {@link reactionLockReason}, or null to enable it back to `defaultTitle`. */
+export function applyReactionLock(el: HTMLElement, locked: string | null, defaultTitle = ""): void {
+  if (locked === null) {
+    el.removeAttribute("aria-disabled");
+    el.title = defaultTitle;
+    return;
+  }
+  el.setAttribute("aria-disabled", "true");
+  el.title = locked;
+}
+
+/** Apply the current timeout lock to every reaction control under `root`.
+ *  Called when the timeout changes; no row is rebuilt. */
+export function refreshReactionLocks(root: ParentNode): void {
+  const locked = reactionLockReason();
+  for (const el of root.querySelectorAll<HTMLElement>(
+    ".reaction-chip, [data-testid^='msg-react-']",
+  )) {
+    applyReactionLock(el, locked, defaultTitles.get(el) ?? "");
+  }
 }

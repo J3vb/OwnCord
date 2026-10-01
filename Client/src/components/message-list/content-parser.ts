@@ -28,11 +28,10 @@ import {
   parseInline,
   parseBlocks,
   splitCodeFences,
-  type BlockNode,
   type InlineNode,
   type InlineStyle,
 } from "@lib/markdown";
-import { highlightCode, resolveLanguage } from "./syntax-highlight";
+import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
 
 // -- Regex constants ----------------------------------------------------------
 
@@ -376,11 +375,118 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
   return fragment;
 }
 
+// -- Parsed content (the parse cache's payload) -------------------------------
+//
+// Parsing (splitCodeFences + parseBlocks + parseInline + highlightCode) is the
+// expensive half of rendering a message; building the DOM from it is cheap.
+// renderMessageContent caches the parse under a key the caller derives from the
+// message's identity (id + editedAt), so a row re-materialised by virtual
+// scrolling — or one of many rows repainted for a connection or role change —
+// does not re-tokenise content that has not changed. Mention resolution and
+// emoji lookup stay at render time, because they depend on live stores, not on
+// the parse.
+
+interface ParsedListItem {
+  readonly inline: readonly InlineNode[];
+  readonly level: 0 | 1;
+  readonly ordered: boolean;
+}
+
+type ParsedBlock =
+  | { readonly type: "paragraph"; readonly inline: readonly InlineNode[] }
+  | { readonly type: "heading"; readonly level: 1 | 2 | 3; readonly inline: readonly InlineNode[] }
+  | { readonly type: "quote"; readonly blocks: readonly ParsedBlock[] }
+  | {
+      readonly type: "list";
+      readonly ordered: boolean;
+      readonly start: number;
+      readonly items: readonly ParsedListItem[];
+    };
+
+type ParsedSegment =
+  | { readonly kind: "prose"; readonly blocks: readonly ParsedBlock[] }
+  | {
+      readonly kind: "code";
+      readonly code: string;
+      readonly lang: string | null;
+      readonly canonical: string | null;
+      readonly tokens: readonly CodeToken[];
+    };
+
+interface ParsedMessage {
+  readonly jumboClass: string;
+  readonly segments: readonly ParsedSegment[];
+}
+
+function parseBlocksInto(text: string, depth: number): readonly ParsedBlock[] {
+  const out: ParsedBlock[] = [];
+  for (const block of parseBlocks(text)) {
+    switch (block.type) {
+      case "heading":
+        out.push({ type: "heading", level: block.level, inline: parseInline(block.text) });
+        break;
+      case "quote":
+        if (depth + 1 >= MAX_BLOCK_DEPTH) {
+          out.push({
+            type: "quote",
+            blocks: [{ type: "paragraph", inline: parseInline(block.text) }],
+          });
+        } else {
+          out.push({ type: "quote", blocks: parseBlocksInto(block.text, depth + 1) });
+        }
+        break;
+      case "list":
+        out.push({
+          type: "list",
+          ordered: block.ordered,
+          start: block.start,
+          items: block.items.map((item) => ({
+            inline: parseInline(item.text),
+            level: item.level,
+            ordered: item.ordered,
+          })),
+        });
+        break;
+      default:
+        out.push({ type: "paragraph", inline: parseInline(block.text) });
+        break;
+    }
+  }
+  return out;
+}
+
+function parseMessageContent(content: string): ParsedMessage {
+  // A message that is nothing but emoji renders them large, the way Discord
+  // does. Decided once over the whole content — the class is what sizes both
+  // the unicode glyphs and the custom-emoji images, so nothing downstream has
+  // to be told about it.
+  const jumboClass = isEmojiOnlyMessage(content) ? "msg-text msg-text-jumbo" : "msg-text";
+  const segments: ParsedSegment[] = [];
+  for (const segment of splitCodeFences(content)) {
+    if (segment.kind === "code") {
+      const canonical = resolveLanguage(segment.lang);
+      segments.push({
+        kind: "code",
+        code: segment.text,
+        lang: segment.lang,
+        canonical,
+        tokens: highlightCode(segment.text, canonical),
+      });
+      continue;
+    }
+    // Blank lines hugging a fence are formatting, not content.
+    const prose = segment.text.replace(/^\n+/, "").replace(/\n+$/, "");
+    if (prose.trim().length === 0) continue;
+    segments.push({ kind: "prose", blocks: parseBlocksInto(prose, 0) });
+  }
+  return { jumboClass, segments };
+}
+
 // -- Block rendering ----------------------------------------------------------
 
 /** Render list items, folding indented ones into a single nested level. */
-function buildList(
-  block: Extract<BlockNode, { type: "list" }>,
+function renderParsedList(
+  block: Extract<ParsedBlock, { type: "list" }>,
   info: MentionInfo | undefined,
 ): HTMLElement {
   const root = createElement(block.ordered ? "ol" : "ul", { class: "md-list" });
@@ -389,7 +495,7 @@ function buildList(
 
   for (const item of block.items) {
     const li = createElement("li", { class: "md-li" });
-    appendInline(li, parseInline(item.text), info);
+    appendInline(li, item.inline, info);
 
     const parentLi = root.lastElementChild;
     if (item.level === 1 && parentLi !== null) {
@@ -406,36 +512,34 @@ function buildList(
   return root;
 }
 
-/** Append the block structure of `text` to `parent`. */
-function appendBlocks(parent: HTMLElement, text: string, info?: MentionInfo, depth = 0): void {
-  for (const block of parseBlocks(text)) {
+/** Append a parsed block structure to `parent`. */
+function renderParsedBlocks(
+  parent: HTMLElement,
+  blocks: readonly ParsedBlock[],
+  info?: MentionInfo,
+): void {
+  for (const block of blocks) {
     switch (block.type) {
       case "heading": {
         const heading = createElement(`h${block.level}`, {
           class: `md-heading md-h${block.level}`,
         });
-        appendInline(heading, parseInline(block.text), info);
+        appendInline(heading, block.inline, info);
         parent.appendChild(heading);
         break;
       }
       case "quote": {
         const quote = createElement("blockquote", { class: "md-quote" });
-        if (depth + 1 >= MAX_BLOCK_DEPTH) {
-          const para = createElement("div", { class: "md-p" });
-          appendInline(para, parseInline(block.text), info);
-          quote.appendChild(para);
-        } else {
-          appendBlocks(quote, block.text, info, depth + 1);
-        }
+        renderParsedBlocks(quote, block.blocks, info);
         parent.appendChild(quote);
         break;
       }
       case "list":
-        parent.appendChild(buildList(block, info));
+        parent.appendChild(renderParsedList(block, info));
         break;
       default: {
         const para = createElement("div", { class: "md-p" });
-        appendInline(para, parseInline(block.text), info);
+        appendInline(para, block.inline, info);
         parent.appendChild(para);
       }
     }
@@ -444,9 +548,10 @@ function appendBlocks(parent: HTMLElement, text: string, info?: MentionInfo, dep
 
 // -- Code fences --------------------------------------------------------------
 
-/** A code block: language label, highlighted body, copy button. */
-function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
+/** A code block from its parsed form: language label, highlighted body, copy button. */
+function renderParsedCodeBlock(segment: Extract<ParsedSegment, { kind: "code" }>): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-codeblock-wrap" });
+  const { code, lang } = segment;
 
   if (lang !== null) {
     const label = createElement("span", { class: "msg-codeblock-lang" });
@@ -455,9 +560,8 @@ function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
   }
 
   const block = createElement("div", { class: "msg-codeblock" });
-  const canonical = resolveLanguage(lang);
-  if (canonical !== null) block.setAttribute("data-lang", canonical);
-  for (const token of highlightCode(code, canonical)) {
+  if (segment.canonical !== null) block.setAttribute("data-lang", segment.canonical);
+  for (const token of segment.tokens) {
     if (token.cls === null) {
       block.appendChild(document.createTextNode(token.text));
       continue;
@@ -487,25 +591,66 @@ function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
   return wrap;
 }
 
-export function renderMessageContent(content: string, info?: MentionInfo): DocumentFragment {
+// -- Parse cache --------------------------------------------------------------
+
+/** Bounded LRU of parsed message content, keyed by the caller's identity
+ *  string (message id + editedAt). Bounded so a long session does not retain a
+ *  parse per message ever scrolled past; the cap is well above the rendered
+ *  window. Cleared on teardown (clearContentParseCache) and invalidated by the
+ *  key whenever a message is edited. */
+const PARSE_CACHE_MAX = 200;
+const parseCache = new Map<string, ParsedMessage>();
+
+/** Drop every cached parse. The message list calls this on destroy. */
+export function clearContentParseCache(): void {
+  parseCache.clear();
+}
+
+function parsedFor(content: string, cacheKey: string | undefined): ParsedMessage {
+  if (cacheKey === undefined) return parseMessageContent(content);
+  // The content is part of the internal key, not just the caller's id/editedAt:
+  // a row whose content changed without its identity key moving (an in-flight
+  // edit, or a test) must never be served the previous parse.
+  const key = `${cacheKey}\u0001${content}`;
+  const hit = parseCache.get(key);
+  if (hit !== undefined) {
+    // Re-insert to keep the entry at the LRU tail.
+    parseCache.delete(key);
+    parseCache.set(key, hit);
+    return hit;
+  }
+  const parsed = parseMessageContent(content);
+  parseCache.set(key, parsed);
+  if (parseCache.size > PARSE_CACHE_MAX) {
+    const oldest = parseCache.keys().next().value;
+    if (oldest !== undefined) parseCache.delete(oldest);
+  }
+  return parsed;
+}
+
+/**
+ * Render message content to DOM.
+ *
+ * `cacheKey` (the message id plus its editedAt) opts into the parse cache: an
+ * unchanged key reuses the parse and only rebuilds DOM, an edit changes the key
+ * and re-parses. Omitted, every call parses afresh (the behaviour callers that
+ * render ad-hoc strings rely on).
+ */
+export function renderMessageContent(
+  content: string,
+  info?: MentionInfo,
+  cacheKey?: string,
+): DocumentFragment {
+  const parsed = parsedFor(content, cacheKey);
   const fragment = document.createDocumentFragment();
 
-  // A message that is nothing but emoji renders them large, the way Discord
-  // does. Decided once over the whole content — the class is what sizes both
-  // the unicode glyphs and the custom-emoji images, so nothing downstream has
-  // to be told about it.
-  const jumboClass = isEmojiOnlyMessage(content) ? "msg-text msg-text-jumbo" : "msg-text";
-
-  for (const segment of splitCodeFences(content)) {
+  for (const segment of parsed.segments) {
     if (segment.kind === "code") {
-      fragment.appendChild(renderCodeBlock(segment.text, segment.lang));
+      fragment.appendChild(renderParsedCodeBlock(segment));
       continue;
     }
-    // Blank lines hugging a fence are formatting, not content.
-    const prose = segment.text.replace(/^\n+/, "").replace(/\n+$/, "");
-    if (prose.trim().length === 0) continue;
-    const text = createElement("div", { class: jumboClass });
-    appendBlocks(text, prose, info);
+    const text = createElement("div", { class: parsed.jumboClass });
+    renderParsedBlocks(text, segment.blocks, info);
     fragment.appendChild(text);
   }
 
