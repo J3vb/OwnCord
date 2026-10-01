@@ -141,6 +141,12 @@ func (p *EventPersister) Start(ctx context.Context) {
 // copy is taken here. This matters because Enqueue is invoked under the hub's
 // seqMu lock and any per-call allocation directly serializes broadcast
 // throughput.
+//
+// Connect and disconnect presence frames are persisted like any other global
+// broadcast (P5-S07 decision). Cold-tier replay requires every seq in its
+// range to be persisted (reconnectVetColdTail's contiguity check), so
+// unpersisted presence would force a full ready on almost every cold resume;
+// the rows ride this persister's existing batches.
 func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, payload []byte) {
 	if p == nil {
 		return

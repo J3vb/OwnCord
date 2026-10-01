@@ -37,7 +37,9 @@ func (d *DB) StampConnections(ctx context.Context, connected, disconnected []int
 // TouchSessions records a use of each named session: it updates last_used and
 // slides expires_at to sessionTTL from now, capped at a year from sign-in
 // (DP-05), in one transaction. A session that has already expired is left
-// alone, so a touch never revives it.
+// alone, so a touch never revives it. Expiry is judged at the flush, not at
+// the use it records: a session used in the last minute before its idle
+// expiry can lapse before the flush slides it, signing the user out.
 func (d *DB) TouchSessions(ctx context.Context, tokenHashes []string) error {
 	now := time.Now().UTC()
 	return d.inWriteTx(ctx, "TouchSessions", func(q *dbgen.Queries) error {

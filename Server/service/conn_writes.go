@@ -30,7 +30,10 @@ const (
 //
 // It holds nothing a security decision reads: revocation deletes the session
 // row and is checked on a separate read path, and a touch never revives a
-// lapsed row (TouchSessions' WHERE). A crash loses at most one interval of
+// lapsed row (TouchSessions' WHERE). That rule is judged at the flush, so a
+// use in the last TouchFlushInterval before a session's idle expiry can let
+// it lapse before the queued touch lands, signing the user out; the edge is
+// accepted rather than reviving a lapsed row. A crash loses at most one interval of
 // pending writes; the boot-time ResetAllUserStatuses clears the "online" a
 // lost disconnect stamp leaves behind.
 type ConnWrites struct {

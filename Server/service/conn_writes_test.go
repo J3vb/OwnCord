@@ -124,6 +124,39 @@ func TestConnWrites_FlushedTouchSlidesTheSession(t *testing.T) {
 	}
 }
 
+// A touch is judged at the flush, not at the use: a session queued for a
+// touch while live, whose expires_at passes before the flush, stays lapsed
+// after it. A batched touch never revives a lapsed row (P5-S07 decision).
+func TestConnWrites_TouchQueuedBeforeExpiryNeverRevives(t *testing.T) {
+	database, _, w, sessions, _ := newBatchedServices(t)
+	ctx := context.Background()
+	seedUser(t, database, &db.User{ID: 1, Username: "edge"})
+	if _, err := database.CreateSession(ctx, 1, "tok", "dev", "127.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if err := sessions.TouchSession(ctx, "tok"); err != nil {
+		t.Fatalf("TouchSession: %v", err)
+	}
+	lapsed := time.Now().UTC().Add(-time.Second).Format("2006-01-02T15:04:05Z")
+	if _, err := database.ExecContext(ctx,
+		`UPDATE sessions SET expires_at = ? WHERE token = 'tok'`, lapsed); err != nil {
+		t.Fatalf("expire session: %v", err)
+	}
+	if err := w.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	var expiresAt string
+	if err := database.QueryRowContext(ctx,
+		`SELECT expires_at FROM sessions WHERE token = 'tok'`).Scan(&expiresAt); err != nil {
+		t.Fatalf("read session: %v", err)
+	}
+	if expiresAt != lapsed {
+		t.Fatalf("expires_at = %q after the flush, want it left at the lapsed %q", expiresAt, lapsed)
+	}
+}
+
 // The latest stamp per user wins inside a window, and each flush is one
 // writer call however many users it covers.
 func TestConnWrites_StampsCoalescePerUser(t *testing.T) {

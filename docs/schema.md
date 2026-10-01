@@ -382,7 +382,7 @@ CREATE TABLE sessions (
 );
 ```
 
-Session TTL: 30 days after last use (`TouchSessions` slides `expires_at`), capped at 365 days after `created_at`. Touches are batched and flushed once a minute (and at shutdown), so `last_used` and the slide lag the use by at most 60 seconds; a flush never revives a lapsed row, and revocation deletes the row without waiting on it. Token is stored as SHA-256 hash.
+Session TTL: 30 days after last use (`TouchSessions` slides `expires_at`), capped at 365 days after `created_at`. Touches are batched and flushed once a minute (and at shutdown), so `last_used` and the slide lag the use by at most 60 seconds; a flush never revives a lapsed row, so a session used in the last 60 seconds before its idle expiry can lapse before the flush slides it, signing the user out. Revocation deletes the row without waiting on it. Token is stored as SHA-256 hash.
 
 ---
 
