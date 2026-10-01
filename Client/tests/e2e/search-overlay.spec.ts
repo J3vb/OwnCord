@@ -205,6 +205,12 @@ test.describe("Search overlay", () => {
       "aria-checked",
       "true",
     );
+
+    // Escape closes from the scope radiogroup too, not just the input (the
+    // keydown handler is owned by the overlay, not the input).
+    await page.locator("[data-testid='search-scope-channel']").focus();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
   });
 
   test("a below-minimum query shows the hint and clears prior results", async ({ page }) => {
@@ -295,6 +301,11 @@ test.describe("Search overlay", () => {
 
     await expect(page.locator(OVERLAY)).toBeVisible();
     await expect(page.locator("[data-testid='message-101']")).toHaveClass(/highlight-flash/);
+
+    // A result row is a non-focusable div, so the click parks focus on the
+    // body; Escape must still close the panel from there (regression fix).
+    await page.keyboard.press("Escape");
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
   });
 
   test("jumping to a hit in another channel switches channels and lands on it", async ({
@@ -327,6 +338,39 @@ test.describe("Search overlay", () => {
     await openOverlay(page);
     await page.locator(OVERLAY).click({ position: { x: 10, y: 10 } });
     await expect(page.locator(OVERLAY)).toHaveCount(0);
+  });
+});
+
+test.describe("Search overlay — paging (DP-20)", () => {
+  // A page that carries the newest-first cursor for an older page.
+  const PAGED_SEARCH_RESULTS = {
+    results: SEARCH_RESULTS.results,
+    next_before: 201,
+  };
+
+  test('"Load more" pages with the next_before cursor and appends the older page', async ({
+    page,
+  }) => {
+    await loginAndWait(page, PAGED_SEARCH_RESULTS);
+    await openOverlay(page);
+    await page.locator(INPUT).fill("hello");
+    await expect(page.locator("[data-testid='search-result-1']")).toBeVisible();
+
+    // The first page returned a cursor, so the control is offered.
+    const loadMore = page.locator("[data-testid='search-load-more']");
+    await expect(loadMore).toBeVisible();
+
+    await loadMore.click();
+
+    // The paged request keeps the query, stays whole-server, and carries the
+    // cursor from the first page newest-first.
+    await expect
+      .poll(async () => (await searchRequests(page)).at(-1))
+      .toEqual({ q: "hello", channelId: "", sort: "recent", before: "201" });
+
+    // Appended, not replaced: the first page's hits are still shown alongside
+    // the second page's.
+    await expect(page.locator(".search-result-item")).toHaveCount(4);
   });
 });
 
