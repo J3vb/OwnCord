@@ -321,15 +321,15 @@ A1 cannot even produce a partial file.
 
 Written as the model the implementation must satisfy. B4-5's kit satisfies
 it as follows: A1 and A2 by `DB.RedeemRecoveryKit` (consume, password,
-sessions and the audit row in one transaction, rolled back as a whole); A3
-by `GET /api/v1/users/me/recovery-kit` (the account's own "enrolled or
-not"); A4 by the conditional consume (`used_at IS NULL`, affected-row count)
-and by enrolment's upsert leaving exactly one verifier; `DeleteAccount`
-purges the row (class 5).
+sessions, API tokens and the audit row in one transaction, rolled back as a
+whole); A3 by `GET /api/v1/users/me/recovery-kit` (the account's own
+"enrolled or not"); A4 by the conditional consume (`used_at IS NULL`,
+affected-row count) and by enrolment's upsert leaving exactly one verifier;
+`DeleteAccount` purges the row (class 5).
 
 | Axis | Requirement                                                                                                                                                                                                                                                                                                         |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1   | Consuming a recovery kit, resetting the password, revoking every session and writing the audit row commit in **one** transaction: a kill leaves either the old kit valid and the old sessions live, or the new state complete — never a reset password beside live old sessions.                                    |
+| A1   | Consuming a recovery kit, resetting the password, revoking every session and API token and writing the audit row commit in **one** transaction: a kill leaves either the old kit valid and the old sessions live, or the new state complete — never a reset password beside live old sessions.                      |
 | A2   | The transaction rolls back; the kit is not consumed; the user retries.                                                                                                                                                                                                                                              |
 | A3   | Enrolment generates the kit client-side and stores only a verifier server-side; a lost response means the user holds a kit the server never stored. The account's own state must make that visible ("no recovery kit enrolled") so the user re-enrols rather than trusting a dead kit.                              |
 | A4   | Two concurrent redemptions of one kit admit at most one (the consume is a conditional `UPDATE … WHERE used_at IS NULL` whose affected-row count decides); two concurrent enrolments leave exactly one verifier valid.                                                                                               |

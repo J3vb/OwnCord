@@ -3562,9 +3562,10 @@ Owner-assisted recovery (B4-6, BPR-045; owner decision 3). The server owner,
 having verified the person out of band, receives a **15-minute, single-use**
 recovery credential for the account, shown once. The user redeems it at
 [`POST /api/v1/auth/recover`](#post-apiv1authrecover) in the `credential`
-field: the password is replaced, every session revoked and a session issued
-without the second factor. Only an argon2id verifier is stored; issuing again
-replaces the outstanding credential, and a recovery by kit withdraws it.
+field: the password is replaced, every session and API token revoked, and a
+session issued without the second factor. Only an argon2id verifier is
+stored; issuing again replaces the outstanding credential, and a recovery by
+kit withdraws it.
 Refused for the caller's own account, a banned or pending account and an
 anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
 Audited as `recovery_assist_issued` with the verification wording only.
