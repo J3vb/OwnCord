@@ -40,6 +40,7 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 // An image the server does not shrink — one already inside thumbBox, a GIF,
 // a format it cannot encode, one too large to decode within
 // thumbMaxDecodeBytes or one that does not decode — is served as the original.
+// A failed generation is kept as an empty thumbnail, so it is never retried.
 // A file that is not an image is a 404.
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
 	slots := make(chan struct{}, thumbConcurrency)
@@ -53,12 +54,15 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 			return
 		}
 		format := thumbFormat(aa.MimeType)
-		if format != "" {
-			if t, err := store.OpenThumb(aa.StoredAs); err == nil {
+		passThrough := format == ""
+		if !passThrough {
+			t, found := keptThumb(store, aa.StoredAs)
+			if t != nil {
 				defer t.Close() //nolint:errcheck
 				serveFileContent(w, r, aa, aa.MimeType, fileModTime(t), t, allowedOrigins)
 				return
 			}
+			passThrough = found
 		}
 		f, err := store.Open(aa.StoredAs)
 		if err != nil {
@@ -67,21 +71,22 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 		}
 		defer f.Close() //nolint:errcheck
 		var thumb []byte
-		if format != "" {
+		if !passThrough {
 			if orientation, ok := thumbOrientation(f, format); ok {
 				select {
 				case slots <- struct{}{}:
 				case <-r.Context().Done():
 					return
 				}
-				kept, err := store.OpenThumb(aa.StoredAs)
-				if err != nil {
+				t, found := keptThumb(store, aa.StoredAs)
+				if !found {
 					thumb, _ = makeThumbnail(f, format, orientation)
+					keepThumbnail(r.Context(), uploads, store, aa.StoredAs, thumb)
 				}
 				<-slots
-				if err == nil {
-					defer kept.Close() //nolint:errcheck
-					serveFileContent(w, r, aa, aa.MimeType, fileModTime(kept), kept, allowedOrigins)
+				if t != nil {
+					defer t.Close() //nolint:errcheck
+					serveFileContent(w, r, aa, aa.MimeType, fileModTime(t), t, allowedOrigins)
 					return
 				}
 			}
@@ -94,14 +99,30 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 			serveFileContent(w, r, aa, aa.MimeType, fileModTime(f), f, allowedOrigins)
 			return
 		}
-		keepThumbnail(r.Context(), uploads, store, aa.StoredAs, thumb)
 		serveFileContent(w, r, aa, aa.MimeType, time.Now(), bytes.NewReader(thumb), allowedOrigins)
 	}
 }
 
-// keepThumbnail stores a generated thumbnail for the next request. It is a
-// cache, so a failure only costs a regeneration; it still passes the
-// disk-headroom floor like every other write into upload storage.
+// keptThumb reports what is kept for the original storedAs: its thumbnail
+// (t), an empty one recording that the original is served instead (t nil,
+// found), or nothing yet.
+func keptThumb(store FileStore, storedAs string) (t storage.File, found bool) {
+	t, err := store.OpenThumb(storedAs)
+	if err != nil {
+		return nil, false
+	}
+	info, err := t.Stat()
+	if err == nil && info.Size() > 0 {
+		return t, true
+	}
+	_ = t.Close()
+	return nil, err == nil
+}
+
+// keepThumbnail stores a generated thumbnail for the next request, or an
+// empty one when generation failed. It is a cache, so a failure only costs a
+// regeneration; it still passes the disk-headroom floor like every other
+// write into upload storage.
 func keepThumbnail(ctx context.Context, uploads *service.UploadService, store FileStore, storedAs string, thumb []byte) {
 	res, err := uploads.ReserveHeadroom(ctx, int64(len(thumb)))
 	if err != nil {

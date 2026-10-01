@@ -582,6 +582,29 @@ func TestDelete_RemovesThumbnail(t *testing.T) {
 	}
 }
 
+// TestDelete_RemovesNoThumbnailMarker: the empty thumbnail that records an
+// original with no thumbnail goes with the original too.
+func TestDelete_RemovesNoThumbnailMarker(t *testing.T) {
+	s := newTestStorage(t)
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.SaveThumb("orig", nil); err != nil {
+		t.Fatalf("SaveThumb(nil): %v", err)
+	}
+	if f, err := s.OpenThumb("orig"); err != nil {
+		t.Fatalf("OpenThumb of the marker: %v", err)
+	} else {
+		_ = f.Close()
+	}
+	if err := s.Delete("orig"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := s.OpenThumb("orig"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("marker survived Delete: %v", err)
+	}
+}
+
 // TestDelete_RetryRemovesThumbnailOfMissingOriginal: a retried removal (the
 // erasure journal's) whose original is already gone still removes the
 // thumbnail, and still reports the original as not existing.

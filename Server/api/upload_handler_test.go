@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -1769,6 +1770,86 @@ func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
 	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("a thumbnail was made of the 16-bit PNG: %v", err)
 	}
+}
+
+// A JPEG's decode is counted at three times its decoded image, for the
+// coefficient blocks a progressive decode holds: this 20-megapixel greyscale
+// JPEG, small on disk, is under the cap counted as a plain image but over it
+// counted as a JPEG, and is passed through without a decode.
+func TestServeThumb_LargeJPEGIsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbigjpg", 4)
+	content := encodeJPEG(t, image.NewGray(image.Rect(0, 0, 5000, 4000)))
+	id := uploadForThumb(t, router, token, "wide.jpg", content)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("large JPEG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the large JPEG: %v", err)
+	}
+}
+
+// A JPEG whose header is valid but whose body does not decode is decoded
+// once; the failure is kept, and later requests pass the original through
+// without decoding it again. The original is swapped for a decodable one
+// after the first request to show the second never decodes.
+func TestServeThumb_UndecodableJPEGIsDecodedOnce(t *testing.T) {
+	database := newUploadTestDB(t)
+	dir := t.TempDir()
+	store, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbroken", 4)
+	full := encodeJPEG(t, solidImage(1200, 900))
+	broken := full[:len(full)/2]
+	id := uploadForThumb(t, router, token, "broken.jpg", broken)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), broken) {
+		t.Fatalf("broken JPEG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	assertNoThumbKept := func() {
+		t.Helper()
+		f, err := store.OpenThumb(id)
+		if err != nil {
+			t.Fatalf("the failed decode was not kept: %v", err)
+		}
+		defer f.Close() //nolint:errcheck
+		if info, err := f.Stat(); err != nil || info.Size() != 0 {
+			t.Fatalf("kept thumbnail of a broken JPEG: %v, %v", info, err)
+		}
+	}
+	assertNoThumbKept()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originals []string
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			originals = append(originals, e.Name())
+		}
+	}
+	if len(originals) != 1 {
+		t.Fatalf("storage holds %v, want one original", originals)
+	}
+	decodable := encodeJPEG(t, solidImage(1200, 2400))
+	if err := os.WriteFile(filepath.Join(dir, originals[0]), decodable, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rr = doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), decodable) {
+		t.Errorf("second request: %d, %d bytes; want the original passed through undecoded", rr.Code, rr.Body.Len())
+	}
+	assertNoThumbKept()
 }
 
 func TestServeThumb_Unauthenticated(t *testing.T) {

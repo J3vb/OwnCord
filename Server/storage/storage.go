@@ -238,7 +238,8 @@ func (s *Storage) OpenThumb(uuid string) (File, error) {
 	return os.Open(p)
 }
 
-// SaveThumb stores data as the thumbnail of the original named uuid. The
+// SaveThumb stores data as the thumbnail of the original named uuid; empty
+// data records that the original has no thumbnail. The
 // write is atomic (a temporary file renamed into place), so a reader never
 // sees a partial thumbnail. If the original is gone once the thumbnail is in
 // place — deleted while it was being generated — the thumbnail is removed

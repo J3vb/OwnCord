@@ -30,7 +30,8 @@ type FileStore interface {
 	// Open opens the stored file named uuid for seekable reading.
 	Open(uuid string) (storage.File, error)
 	// OpenThumb and SaveThumb read and keep the thumbnail of the original
-	// named uuid; Delete removes it with the original.
+	// named uuid; Delete removes it with the original. An empty thumbnail
+	// records that the original is served instead.
 	OpenThumb(uuid string) (storage.File, error)
 	SaveThumb(uuid string, data []byte) error
 }

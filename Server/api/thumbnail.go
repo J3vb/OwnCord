@@ -52,7 +52,7 @@ func thumbFormat(mimeType string) string {
 func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool) {
 	cfg, got, err := image.DecodeConfig(r)
 	if err != nil || got != format || cfg.Width <= 0 || cfg.Height <= 0 ||
-		int64(cfg.Width)*int64(cfg.Height) > thumbMaxDecodeBytes/decodedBytesPerPixel(cfg.ColorModel) {
+		int64(cfg.Width)*int64(cfg.Height) > thumbMaxDecodeBytes/decodedBytesPerPixel(cfg.ColorModel, format) {
 		return 0, false
 	}
 	if cfg.Width <= thumbBox && cfg.Height <= thumbBox {
@@ -67,14 +67,20 @@ func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool)
 	return jpegOrientation(r), true
 }
 
-// decodedBytesPerPixel bounds what a decoded pixel of model m costs: 8 bytes
-// for any 16-bit model (the largest, RGBA64, takes 8), 4 for the rest.
-func decodedBytesPerPixel(m color.Model) int64 {
+// decodedBytesPerPixel bounds what decoding a pixel of model m costs: 8 bytes
+// for any 16-bit model (the largest, RGBA64, takes 8), 4 for the rest, and
+// three times that for a JPEG, whose progressive decode also holds a
+// coefficient block per component.
+func decodedBytesPerPixel(m color.Model, format string) int64 {
+	n := int64(4)
 	switch m {
 	case color.RGBA64Model, color.NRGBA64Model, color.Gray16Model:
-		return 8
+		n = 8
 	}
-	return 4
+	if format == "jpeg" {
+		n *= 3
+	}
+	return n
 }
 
 // makeThumbnail decodes the image in r, which thumbOrientation accepted, and
