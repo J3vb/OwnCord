@@ -1,8 +1,8 @@
 /**
  * DP-24: the OS-level half of an incoming DM call — the notification, the
  * urgent taskbar flash and the missed-call notice. The banner, the ring state
- * and the ringtone stay on the main page, which loads this on the first ring
- * so none of it lands in its chunk.
+ * and the ringtone stay on the main page, which loads this in DmCallPanel's
+ * lazy chunk at mount so none of it lands in the page's chunk.
  *
  * Clicking either notification opens the DM through the same target path a
  * message notification uses, so a call from another server is dropped there.
