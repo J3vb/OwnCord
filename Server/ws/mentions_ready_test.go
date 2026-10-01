@@ -138,7 +138,11 @@ func TestBuildReady_CarriesMentionCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	if err := database.IncrementMentionCounts(ctx, chID, 1, []int64{user.ID}); err != nil {
+	msgID, err := database.CreateMessage(ctx, chID, user.ID, "@you", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, chID, msgID, []int64{user.ID}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 

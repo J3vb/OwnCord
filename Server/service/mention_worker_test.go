@@ -160,6 +160,30 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 	}
 }
 
+// TestMentionWorker_DeleteBeforeFlushLeavesNoBadge locks the invariant the
+// deferred increment broke: a message deleted while its job is still in the
+// coalesce window must not raise a mention badge when the window finally
+// flushes. DeleteMessage runs its DecrementMentionCounts reversal synchronously
+// and the increment had not landed yet, so without a liveness guard the flush
+// raises a permanent phantom badge on a channel with nothing unread.
+func TestMentionWorker_DeleteBeforeFlushLeavesNoBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	res := sendAs(t, svc, 1, "@bob look")
+	if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Errorf("bob mention_count = %d after deleting a message whose increment was still queued, want 0", got)
+	}
+}
+
 // TestMentionWorker_DropsWhenStopped locks the non-blocking contract: a send
 // after the worker stopped counts the job as dropped and never blocks.
 func TestMentionWorker_DropsWhenStopped(t *testing.T) {

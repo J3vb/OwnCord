@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -49,6 +50,15 @@ func (d *DB) IncrementMentionCounts(ctx context.Context, channelID, msgID int64,
 // (P5-O05). Each entry's semantics are exactly IncrementMentionCounts' (see its
 // doc); batching only shares the transaction, and entries for distinct messages
 // keep their own read-state guard (last_message_id < entry.MsgID).
+//
+// An entry whose message is no longer live — soft-deleted by a delete/purge
+// that ran while the job was still in the coalesce window, or hard-deleted by
+// an account erasure — is skipped. Those reversal paths run synchronously at
+// removal time and their statement can only reverse a bump that already
+// landed, so a deferred increment for an already-removed message would raise a
+// badge nothing ever takes back. The liveness check is inside the writer
+// transaction, which is serialized against every removal (the writer pool is a
+// single connection), so it sees a stable state.
 func (d *DB) IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []MentionBatchEntry) error {
 	if len(entries) == 0 {
 		return nil
@@ -60,6 +70,13 @@ func (d *DB) IncrementMentionCountsBatch(ctx context.Context, channelID int64, e
 	defer tx.Rollback() //nolint:errcheck
 
 	for _, e := range entries {
+		live, err := messageLiveForMention(ctx, tx, e.MsgID)
+		if err != nil {
+			return err
+		}
+		if !live {
+			continue
+		}
 		if err := insertMentionCountChunks(ctx, tx, channelID, e.MsgID, e.UserIDs); err != nil {
 			return err
 		}
@@ -68,6 +85,21 @@ func (d *DB) IncrementMentionCountsBatch(ctx context.Context, channelID int64, e
 		return fmt.Errorf("IncrementMentionCountsBatch commit: %w", err)
 	}
 	return nil
+}
+
+// messageLiveForMention reports whether msgID is still a live, undeleted
+// message. A missing row (erased) and a tombstones row (deleted = 1) are both
+// not live; the increment is skipped for either.
+func messageLiveForMention(ctx context.Context, tx *sql.Tx, msgID int64) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE id = ? AND deleted = 0`, msgID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("IncrementMentionCounts liveness: %w", err)
+	}
+	return true, nil
 }
 
 // insertMentionCountChunks writes one message's per-recipient upserts inside
