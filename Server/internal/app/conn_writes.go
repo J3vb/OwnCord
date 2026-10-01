@@ -10,20 +10,26 @@ import (
 // (P5-S07). Called from afterHubStart, before startHub registers the hub's own
 // close, so the reverse walk closes this step AFTER the hub, and its final
 // flush, which still runs before database.Close, writes the stamps queued
-// before it runs. A disconnect stamp a connection's readPump defer queues
-// after that is lost like a crash, and the boot-time ResetAllUserStatuses
-// clears the "online" it leaves.
+// before it runs. The hub's close step does not wait for the readPump defers
+// that queue each connection's disconnect stamp, so the step first stamps
+// every user the hub still holds disconnected (Hub.ConnectedUserIDs): a
+// graceful stop leaves them offline with last_seen at stop time.
 func (a *App) installConnWrites(services *service.Services) {
 	if services == nil || services.Users == nil || services.Sessions == nil {
 		return
 	}
 	w := services.BatchConnWrites()
-	a.onClose("conn-writes", startConnWrites(a.bgCtx, w))
+	var connected func() []int64
+	if a.hub != nil {
+		connected = a.hub.ConnectedUserIDs
+	}
+	a.onClose("conn-writes", startConnWrites(a.bgCtx, w, services.Users, connected))
 }
 
 // startConnWrites runs w's flush loop and returns its close step: stop the
-// loop, then flush what is still pending (P5-S07).
-func startConnWrites(bgCtx context.Context, w *service.ConnWrites) func(context.Context) error {
+// loop, queue a disconnect stamp for each user connected still reports, then
+// flush what is pending (P5-S07). A nil connected stamps no one.
+func startConnWrites(bgCtx context.Context, w *service.ConnWrites, users *service.UserService, connected func() []int64) func(context.Context) error {
 	ctx, cancel := context.WithCancel(bgCtx)
 	done := make(chan struct{})
 	go func() {
@@ -33,6 +39,12 @@ func startConnWrites(bgCtx context.Context, w *service.ConnWrites) func(context.
 	return func(ctx context.Context) error {
 		cancel()
 		<-done
+		if connected != nil {
+			for _, id := range connected() {
+				// Batched, so this only queues and cannot fail.
+				_ = users.StampDisconnect(ctx, id)
+			}
+		}
 		return w.Flush(ctx)
 	}
 }

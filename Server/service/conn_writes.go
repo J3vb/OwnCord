@@ -88,9 +88,9 @@ func (w *ConnWrites) dropConnectStamp(userID int64) {
 // Run flushes stamps every StampFlushInterval and touches every
 // TouchFlushInterval until ctx ends. The owner calls Flush once more after
 // Run returns and the hub has stopped, which writes the last touches and the
-// stamps queued by then; a disconnect stamp queued later is lost like a
-// crash, and the boot-time ResetAllUserStatuses clears the "online" it
-// leaves.
+// stamps queued by then; the owner first queues a disconnect stamp for every
+// user the stopped hub still holds, whose own readPump stamp would come too
+// late.
 func (w *ConnWrites) Run(ctx context.Context) {
 	stamps := time.NewTicker(StampFlushInterval)
 	defer stamps.Stop()
