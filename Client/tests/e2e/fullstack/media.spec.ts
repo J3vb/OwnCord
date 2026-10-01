@@ -453,6 +453,10 @@ for (const fault of ["missing", "wrong"] as const) {
       await expect(bobWidget).not.toHaveClass(/visible/);
     }
     await joinVoice(bob);
+    // A closed grid receives no remote video (P3-07), so the recovery control
+    // must watch alice's camera first — the two control steps in the
+    // signaling-loss test above do the same.
+    await watchCamera(bob, 1);
     await expectDecodedMedia(bob, true);
   });
 }
