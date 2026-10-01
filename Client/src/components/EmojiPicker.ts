@@ -414,15 +414,17 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   header.appendChild(searchInput);
   root.appendChild(header);
 
-  // Category bar: one button per category jumps its heading into view. Built
+  // Category bar: one button per category jumps its heading into view, as a
+  // single roving Tab stop (Left/Right between buttons). Built
   // once from the unfiltered set and rebuilt only on mount, so the targets
   // stay put while a search filters the grids underneath.
   const categoryBar = createElement("div", {
     class: "ep-categories",
-    role: "group",
+    role: "toolbar",
     "aria-label": messagingText("emoji.categoriesLabel"),
   });
   root.appendChild(categoryBar);
+  enableRovingNavigation(categoryBar, ".ep-category-btn", signal);
 
   // The picker grid is `.ep-grid { grid-template-columns: repeat(8, 1fr) }`,
   // so roving navigation is a grid with eight columns (ArrowDown = one row
@@ -481,6 +483,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       );
       categoryBar.appendChild(btn);
     }
+    setRovingTabindex(categoryBar, ".ep-category-btn");
   }
 
   // Build categories with recent + custom

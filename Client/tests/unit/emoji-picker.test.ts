@@ -368,6 +368,53 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
+  it("the category bar is a single Tab stop between the search and the grid", () => {
+    const { picker } = makePicker();
+    const tabOrder = Array.from(
+      picker.element.querySelectorAll<HTMLElement>("input, button, [tabindex]"),
+    ).filter((el) => el.tabIndex >= 0);
+    const search = picker.element.querySelector(".ep-search") as HTMLElement;
+    const at = tabOrder.indexOf(search);
+
+    expect(picker.element.querySelectorAll(".ep-category-btn").length).toBeGreaterThan(1);
+    expect(tabOrder[at + 1]!.classList.contains("ep-category-btn")).toBe(true);
+    expect(tabOrder[at + 2]!.classList.contains("ep-emoji")).toBe(true);
+    expect(tabOrder.filter((el) => el.classList.contains("ep-category-btn")).length).toBe(1);
+    picker.destroy();
+  });
+
+  it("ArrowRight steps the category bar and Enter jumps to that category", () => {
+    const original = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    const { picker } = makePicker();
+    const buttons = Array.from(
+      picker.element.querySelectorAll<HTMLButtonElement>(".ep-category-btn"),
+    );
+
+    buttons[0]!.focus();
+    buttons[0]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(buttons[1]);
+    expect(buttons[0]!.getAttribute("tabindex")).toBe("-1");
+    expect(buttons[1]!.getAttribute("tabindex")).toBe("0");
+
+    scrollIntoView.mockClear();
+    buttons[1]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    const label = picker.element.querySelector(
+      `.ep-category-label[data-category="${buttons[1]!.dataset.category}"]`,
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(label);
+    picker.destroy();
+  });
+
   it("ArrowRight moves focus and the tabbable cell to the next emoji", () => {
     const { picker } = makePicker();
     const cells = picker.element.querySelectorAll(".ep-emoji") as NodeListOf<HTMLElement>;
