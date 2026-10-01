@@ -19,7 +19,7 @@ const (
 	// image in at most 400×350 CSS px, so 800 stays sharp at 2× scaling.
 	thumbBox = 800
 	// thumbMaxDecodeBytes caps the memory a decode may take, estimated from
-	// the header (decodedBytesPerPixel): an image declaring more is passed
+	// the header (thumbOrientation): an image declaring more is passed
 	// through without a decode.
 	thumbMaxDecodeBytes = 160 << 20
 	// thumbConcurrency is how many thumbnails are generated at once; the rest
@@ -52,35 +52,35 @@ func thumbFormat(mimeType string) string {
 func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool) {
 	cfg, got, err := image.DecodeConfig(r)
 	if err != nil || got != format || cfg.Width <= 0 || cfg.Height <= 0 ||
-		int64(cfg.Width)*int64(cfg.Height) > thumbMaxDecodeBytes/decodedBytesPerPixel(cfg.ColorModel, format) {
+		(cfg.Width <= thumbBox && cfg.Height <= thumbBox) {
 		return 0, false
 	}
-	if cfg.Width <= thumbBox && cfg.Height <= thumbBox {
+	orientation, perPixel := 1, decodedBytesPerPixel(cfg.ColorModel)
+	if format == "jpeg" {
+		if _, err := r.Seek(0, io.SeekStart); err != nil {
+			return 0, false
+		}
+		var progressive bool
+		if orientation, progressive = jpegHeader(r); progressive {
+			perPixel *= 3
+		}
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > thumbMaxDecodeBytes/perPixel {
 		return 0, false
 	}
-	if format != "jpeg" {
-		return 1, true
-	}
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return 0, false
-	}
-	return jpegOrientation(r), true
+	return orientation, true
 }
 
 // decodedBytesPerPixel bounds what decoding a pixel of model m costs: 8 bytes
-// for any 16-bit model (the largest, RGBA64, takes 8), 4 for the rest, and
-// three times that for a JPEG, whose progressive decode also holds a
-// coefficient block per component.
-func decodedBytesPerPixel(m color.Model, format string) int64 {
-	n := int64(4)
+// for any 16-bit model (the largest, RGBA64, takes 8), 4 for the rest. A
+// progressive JPEG costs three times that, for the coefficient block it also
+// holds per component.
+func decodedBytesPerPixel(m color.Model) int64 {
 	switch m {
 	case color.RGBA64Model, color.NRGBA64Model, color.Gray16Model:
-		n = 8
+		return 8
 	}
-	if format == "jpeg" {
-		n *= 3
-	}
-	return n
+	return 4
 }
 
 // makeThumbnail decodes the image in r, which thumbOrientation accepted, and
@@ -112,38 +112,46 @@ func makeThumbnail(r io.ReadSeeker, format string, orientation int) (thumb []byt
 	return buf.Bytes(), true
 }
 
-// jpegOrientation reads the EXIF Orientation (1–8) from a JPEG's APP1
-// segment, or 1 when there is none or it does not parse. Only the segments
-// before the image data are read.
-func jpegOrientation(r io.Reader) int {
+// jpegHeader reads a JPEG's EXIF Orientation (1–8, or 1 when there is none
+// or it does not parse) and whether its frame is progressive, from the
+// segments before the image data. A frame it does not reach, past a segment
+// it cannot walk, counts as progressive.
+func jpegHeader(r io.Reader) (orientation int, progressive bool) {
+	orientation, progressive = 1, true
 	br := bufio.NewReader(r)
 	var hdr [4]byte
 	if _, err := io.ReadFull(br, hdr[:2]); err != nil || hdr[0] != 0xFF || hdr[1] != 0xD8 {
-		return 1
+		return orientation, progressive
 	}
+	sawFrame, sawExif := false, false
 	for range 64 {
 		if _, err := io.ReadFull(br, hdr[:]); err != nil || hdr[0] != 0xFF {
-			return 1
+			return orientation, progressive
 		}
-		n := int(binary.BigEndian.Uint16(hdr[2:])) - 2
-		if hdr[1] == 0xDA || n < 0 { // start of scan: no Exif after it
-			return 1
+		marker, n := hdr[1], int(binary.BigEndian.Uint16(hdr[2:]))-2
+		// Start of scan, fill bytes, stuffed zeros and restart markers end
+		// the walk: the decoder reads them differently from a segment.
+		if marker == 0xDA || marker == 0xFF || marker == 0x00 || (marker >= 0xD0 && marker <= 0xD7) || n < 0 {
+			return orientation, progressive
 		}
-		if hdr[1] != 0xE1 {
-			if _, err := br.Discard(n); err != nil {
-				return 1
+		switch {
+		case !sawFrame && (marker == 0xC0 || marker == 0xC1 || marker == 0xC2):
+			sawFrame, progressive = true, marker == 0xC2
+		case !sawExif && marker == 0xE1:
+			seg := make([]byte, n)
+			if _, err := io.ReadFull(br, seg); err != nil {
+				return orientation, progressive
+			}
+			if tiff, found := bytes.CutPrefix(seg, []byte("Exif\x00\x00")); found {
+				orientation, sawExif = exifOrientation(tiff), true
 			}
 			continue
 		}
-		seg := make([]byte, n)
-		if _, err := io.ReadFull(br, seg); err != nil {
-			return 1
-		}
-		if tiff, found := bytes.CutPrefix(seg, []byte("Exif\x00\x00")); found {
-			return exifOrientation(tiff)
+		if _, err := br.Discard(n); err != nil {
+			return orientation, progressive
 		}
 	}
-	return 1
+	return orientation, progressive
 }
 
 // exifOrientation finds tag 0x0112 in IFD0 of a TIFF block.

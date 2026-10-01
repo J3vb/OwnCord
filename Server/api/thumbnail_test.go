@@ -43,7 +43,7 @@ func fuzzThumbSeed(format string, w, h int) []byte {
 // FuzzMakeThumbnail throws untrusted bytes at the thumbnail path the way an
 // uploaded "image" reaches it. The only allowed outcomes are a pass-through,
 // or a thumbnail in the same format that fits thumbBox; a panic or a hang is a
-// bug. jpegOrientation must stay within 1–8 whatever it reads.
+// bug. jpegHeader must keep the orientation within 1–8 whatever it reads.
 func FuzzMakeThumbnail(f *testing.F) {
 	for _, s := range [][]byte{
 		nil,
@@ -57,8 +57,8 @@ func FuzzMakeThumbnail(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		if o := jpegOrientation(bytes.NewReader(data)); o < 1 || o > 8 {
-			t.Fatalf("jpegOrientation = %d", o)
+		if o, _ := jpegHeader(bytes.NewReader(data)); o < 1 || o > 8 {
+			t.Fatalf("jpegHeader orientation = %d", o)
 		}
 		for _, format := range []string{"jpeg", "png"} {
 			r := bytes.NewReader(data)

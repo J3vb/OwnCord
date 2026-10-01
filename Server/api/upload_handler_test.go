@@ -1772,24 +1772,49 @@ func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
 	}
 }
 
-// A JPEG's decode is counted at three times its decoded image, for the
-// coefficient blocks a progressive decode holds: this 20-megapixel greyscale
-// JPEG, small on disk, is under the cap counted as a plain image but over it
-// counted as a JPEG, and is passed through without a decode.
-func TestServeThumb_LargeJPEGIsNotDecoded(t *testing.T) {
+// A baseline JPEG is counted at its decoded image alone, so a 24-megapixel
+// camera photo gets a real thumbnail.
+func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbaseline", 4)
+	id := uploadForThumb(t, router, token, "camera.jpg", encodeJPEG(t, solidImage(6000, 4000)))
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("thumb: %d %q", rr.Code, rr.Header().Get("Content-Type"))
+	}
+	cfg, format, err := image.DecodeConfig(rr.Body)
+	if err != nil || format != "jpeg" || cfg.Width != 800 || cfg.Height != 533 {
+		t.Fatalf("thumbnail = %dx%d %s (%v), want an 800x533 JPEG", cfg.Width, cfg.Height, format, err)
+	}
+}
+
+// A progressive JPEG's decode is counted at three times its decoded image,
+// for the coefficient blocks it holds: this 20-megapixel greyscale JPEG, small
+// on disk, is under the cap counted as a baseline JPEG but over it counted as
+// a progressive one, and is passed through without a decode. Go encodes only
+// baseline, so its SOF0 marker is patched to SOF2; the body is never decoded.
+func TestServeThumb_LargeProgressiveJPEGIsNotDecoded(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
 	token := uploadCreateToken(t, database, "thumbbigjpg", 4)
 	content := encodeJPEG(t, image.NewGray(image.Rect(0, 0, 5000, 4000)))
+	sof := bytes.Index(content, []byte{0xFF, 0xC0})
+	if sof < 0 {
+		t.Fatal("no SOF0 marker in the encoded JPEG")
+	}
+	content[sof+1] = 0xC2
 	id := uploadForThumb(t, router, token, "wide.jpg", content)
 
 	rr := doServeThumb(t, router, id, token)
 	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
-		t.Errorf("large JPEG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+		t.Errorf("large progressive JPEG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
 	}
 	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("a thumbnail was made of the large JPEG: %v", err)
+		t.Errorf("a thumbnail was made of the large progressive JPEG: %v", err)
 	}
 }
 
