@@ -53,8 +53,8 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
 			return
 		}
-		// Pending until the pumps start: by then the client is registered and
-		// ClientCount carries it.
+		// Pending only for the auth window: once auth succeeds the client is
+		// about to register and ClientCount carries it.
 		pending.Add(1)
 		var ended bool
 		endPending := func() {
@@ -73,6 +73,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		conn.SetReadLimit(preAuthReadLimitBytes)
 
 		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
+		endPending()
 		if err != nil {
 			return
 		}
@@ -81,7 +82,6 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		ctx := r.Context()
 
 		startPumps := func() {
-			endPending()
 			writeCtx, writeCancel := context.WithCancel(ctx)
 			go writePump(writeCtx, conn, c)
 			go pingPump(writeCtx, conn, c, pingInterval)
