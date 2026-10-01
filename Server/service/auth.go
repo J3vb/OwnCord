@@ -28,11 +28,14 @@ type AuthBroadcaster interface {
 
 // SessionDisconnector is the hub's half of dropping a live socket once its
 // session is gone — the service layer's counterpart to api.SessionDisconnector,
-// satisfied by *ws.Hub. It is exported so the admin package can pin *ws.Hub to
-// it (service cannot import ws). A broadcaster that does not implement it
-// (tests, a nil hub) simply skips the disconnect.
+// satisfied by *ws.Hub. DisconnectRevokedUser drops the account's socket
+// outright; DisconnectIfSessionRevoked drops it only if the session it rode
+// is gone. It is exported so the admin package can pin *ws.Hub to it (service
+// cannot import ws). A broadcaster that does not implement it (tests, a nil
+// hub) simply skips the disconnect.
 type SessionDisconnector interface {
 	DisconnectRevokedUser(userID int64)
+	DisconnectIfSessionRevoked(userID int64)
 }
 
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
@@ -1228,6 +1231,11 @@ func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, us
 	}
 	if revoked > 0 {
 		slog.Info("revoked other sessions after "+action, "user_id", userID, "revoked", revoked)
+		// Drop the account's socket now if it rode one of them, rather than
+		// at the sweep's next tick; the kept session's socket stays.
+		if d, ok := s.broadcaster.(SessionDisconnector); ok {
+			d.DisconnectIfSessionRevoked(userID)
+		}
 	}
 	return revoked, false
 }

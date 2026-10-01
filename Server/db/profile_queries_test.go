@@ -131,35 +131,74 @@ func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
 	}
 }
 
-// ─── DeleteUserSessions tests (B4-7, sign-out-everywhere) ────────────────────
+// ─── SignOutEverywhere tests (B4-7, sign-out-everywhere) ─────────────────────
 
-func TestDeleteUserSessions_RemovesEveryOneOfTheUsersOnly(t *testing.T) {
-	database := newSchemaTestDB(t, testSchema)
+func TestSignOutEverywhere_RevokesEveryOneOfTheUsersOnly(t *testing.T) {
+	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice, _ := database.CreateUser(ctx, "alice-all", "hash", 4)
 	bob, _ := database.CreateUser(ctx, "bob-all", "hash", 4)
 	database.CreateSession(ctx, alice, "alice-a", "Chrome", "1.2.3.4")
 	database.CreateSession(ctx, bob, "bob-a", "Firefox", "5.6.7.8")
 	database.CreateSession(ctx, alice, "alice-b", "Phone", "9.9.9.9")
-
-	n, err := database.DeleteUserSessions(ctx, alice)
-	if err != nil {
-		t.Fatalf("DeleteUserSessions: %v", err)
+	if _, err := database.CreateAPIToken(ctx, alice, "alice-tok", "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	if n != 2 {
-		t.Fatalf("revoked = %d, want 2", n)
+	if _, err := database.CreateAPIToken(ctx, bob, "bob-tok", "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+
+	sessions, tokens, err := database.SignOutEverywhere(ctx, alice)
+	if err != nil {
+		t.Fatalf("SignOutEverywhere: %v", err)
+	}
+	if sessions != 2 || tokens != 1 {
+		t.Fatalf("revoked = (%d sessions, %d tokens), want (2, 1)", sessions, tokens)
 	}
 	if left, _ := database.ListUserSessions(ctx, alice); len(left) != 0 {
 		t.Errorf("alice still has %d session(s)", len(left))
 	}
+	if tok, _ := database.GetActiveAPIToken(ctx, "alice-tok"); tok != nil {
+		t.Error("alice's API token is still active")
+	}
 	if left, _ := database.ListUserSessions(ctx, bob); len(left) != 1 {
 		t.Errorf("bob has %d session(s), want 1 untouched", len(left))
 	}
+	if tok, _ := database.GetActiveAPIToken(ctx, "bob-tok"); tok == nil {
+		t.Error("bob's API token was revoked")
+	}
 
 	// Nothing left to revoke is not an error, just zero.
-	n, err = database.DeleteUserSessions(ctx, alice)
-	if err != nil || n != 0 {
-		t.Fatalf("second DeleteUserSessions = (%d, %v), want (0, nil)", n, err)
+	sessions, tokens, err = database.SignOutEverywhere(ctx, alice)
+	if err != nil || sessions != 0 || tokens != 0 {
+		t.Fatalf("second SignOutEverywhere = (%d, %d, %v), want (0, 0, nil)", sessions, tokens, err)
+	}
+}
+
+// A failure deleting the sessions leaves the API tokens live too: the two
+// revocations commit together or not at all.
+func TestSignOutEverywhere_RollsBackAsAWhole(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid, _ := database.CreateUser(ctx, "unlucky-all", "hash", 4)
+	if _, err := database.CreateSession(ctx, uid, "tok-live", "laptop", "10.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if _, err := database.CreateAPIToken(ctx, uid, "api-live", "ci", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		"CREATE TRIGGER fault_delete_sessions BEFORE DELETE ON sessions BEGIN SELECT RAISE(FAIL, 'injected fault'); END"); err != nil {
+		t.Fatalf("install fault: %v", err)
+	}
+	if _, _, err := database.SignOutEverywhere(ctx, uid); err == nil {
+		t.Fatal("SignOutEverywhere succeeded through an injected session-delete failure")
+	}
+	if tok, _ := database.GetActiveAPIToken(ctx, "api-live"); tok == nil {
+		t.Error("the API token was revoked by a sign-out-everywhere that failed")
+	}
+	if left, _ := database.ListUserSessions(ctx, uid); len(left) != 1 {
+		t.Errorf("sessions = %d, want the live one kept", len(left))
 	}
 }
 

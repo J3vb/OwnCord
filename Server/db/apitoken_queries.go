@@ -95,16 +95,6 @@ func (d *DB) RevokeAPITokenByLabel(ctx context.Context, label string) (int64, er
 	return res.RowsAffected()
 }
 
-// RevokeUserAPITokens marks every live token of the user revoked and returns
-// how many it revoked.
-func (d *DB) RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error) {
-	res, err := d.q.RevokeUserAPITokens(ctx, userID)
-	if err != nil {
-		return 0, fmt.Errorf("RevokeUserAPITokens: %w", err)
-	}
-	return res.RowsAffected()
-}
-
 // TouchAPIToken updates last_used_at for the token with the given hash.
 // Best-effort: callers run this off the hot auth path.
 func (d *DB) TouchAPIToken(ctx context.Context, tokenHash string) error {

@@ -160,6 +160,8 @@ type recordingRecoveryDisconnector struct {
 
 func (r *recordingRecoveryDisconnector) BroadcastMemberBan(int64) {}
 
+func (*recordingRecoveryDisconnector) DisconnectIfSessionRevoked(int64) {}
+
 func (r *recordingRecoveryDisconnector) DisconnectRevokedUser(userID int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

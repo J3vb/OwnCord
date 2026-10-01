@@ -429,11 +429,7 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 // a stolen credential anywhere stops working now and the caller
 // re-authenticates. Returns how many sessions were revoked.
 func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
-	tokens, err := s.st.RevokeUserAPITokens(ctx, userID)
-	if err != nil {
-		return 0, fmt.Errorf("%w: failed to revoke API tokens: %w", ErrInternal, err)
-	}
-	n, err := s.st.DeleteUserSessions(ctx, userID)
+	n, tokens, err := s.st.SignOutEverywhere(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
 	}

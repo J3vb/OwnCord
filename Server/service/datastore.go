@@ -110,7 +110,6 @@ type Store interface {
 	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
 	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error)
-	RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error)
 	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
@@ -190,7 +189,7 @@ type Store interface {
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
-	DeleteUserSessions(ctx context.Context, userID int64) (int64, error)
+	SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
 	TouchSessions(ctx context.Context, tokenHashes []string) error
