@@ -1,6 +1,7 @@
 //! The taskbar and tray unread badge (DP-27). The renderer computes the count
-//! (`src/features/unread-badge/unreadBadge.ts`) and pushes it only when it
-//! changes; this draws it:
+//! (`src/features/unread-badge/unreadBadge.ts`) and pushes it when it changes,
+//! and again when the window is shown or focused (Windows drops the overlay
+//! when the taskbar button is recreated); this draws it:
 //!
 //! - Windows: a taskbar overlay icon, the count up to 9 and "9+" above;
 //! - Linux and macOS: the launcher/dock count (Linux through the Unity

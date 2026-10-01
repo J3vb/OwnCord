@@ -60,7 +60,9 @@ export interface Notifier {
   requestAttention(): Promise<void>;
   /**
    * Show `count` unread mentions on the taskbar button and the tray tooltip;
-   * 0 clears both. The caller pushes only when the count changes.
+   * 0 clears both. The caller pushes when the count changes, and again when
+   * the window is shown or focused (Windows drops the overlay when the taskbar
+   * button is recreated); never per message while the count is unchanged.
    */
   setUnreadBadge(count: number): Promise<void>;
 }

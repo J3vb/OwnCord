@@ -10,8 +10,9 @@
  *     (`channel-mutes.ts`);
  *   - the `nothing` notification level counts nothing.
  *
- * The count is pushed to the native host only when it changes, so a message
- * that does not move it costs no IPC call.
+ * The count is pushed to the native host when it changes, and again when the
+ * window is shown or focused (Windows drops the overlay when the taskbar
+ * button is recreated), so a message that does not move it costs no IPC call.
  */
 
 import { channelsStore } from "../../stores/channels.store";
