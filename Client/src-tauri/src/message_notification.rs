@@ -7,7 +7,8 @@
 //! Two mechanisms, by platform:
 //!
 //! * **Windows** — a WinRT toast with `activationType="protocol"` whose launch
-//!   URI is `owncord://message/<channel>/<message>?host=<server>`. Clicking it
+//!   URI is `owncord://message/<channel>/<message>?host=<server>` (or, for a
+//!   call notification, `owncord://channel/<channel>?host=<server>`). Clicking it
 //!   anywhere, including from Action Center after the banner has timed out,
 //!   makes Windows launch the registered `owncord://` handler; the app's
 //!   existing deep-link path turns that into the jump. (The `notify-rust`
@@ -71,16 +72,19 @@ impl Drop for WaiterSlot<'_> {
     }
 }
 
-/// The message a clicked notification should open.
+/// The message a clicked notification should open, or with no `message_id` the
+/// channel itself: a call notification opens its DM.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageTarget {
     pub host: String,
     pub channel_id: i64,
-    pub message_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<i64>,
 }
 
-/// Show a notification that opens `channel_id`/`message_id` when clicked.
+/// Show a notification that opens `channel_id`/`message_id` (or just the
+/// channel, when there is no message id) when clicked.
 /// Async so showing it never blocks the UI thread on the notification server.
 #[tauri::command(async)]
 pub fn notify_message<R: Runtime>(
@@ -89,7 +93,7 @@ pub fn notify_message<R: Runtime>(
     body: String,
     host: String,
     channel_id: i64,
-    message_id: i64,
+    message_id: Option<i64>,
 ) -> Result<(), String> {
     show_message_notification(
         &app,
@@ -105,17 +109,20 @@ pub fn notify_message<R: Runtime>(
 
 /// The launch URI a Windows toast carries: the registered `owncord://` handler
 /// is launched with it on activation, and the app's deep-link path parses it
-/// back (the same `owncord://message/…?host=` shape `lib/deep-link.ts` reads).
-/// The host is percent-encoded so a value with `&` or `#` cannot forge extra
-/// query parameters or a fragment; the ids are integers, so they need none.
+/// back (the same `owncord://message/…?host=` and `owncord://channel/…?host=`
+/// shapes `lib/deep-link.ts` reads). The host is percent-encoded so a value
+/// with `&` or `#` cannot forge extra query parameters or a fragment; the ids
+/// are integers, so they need none.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn message_launch_uri(target: &MessageTarget) -> String {
-    format!(
-        "owncord://message/{}/{}?host={}",
-        target.channel_id,
-        target.message_id,
-        url::form_urlencoded::byte_serialize(target.host.as_bytes()).collect::<String>(),
-    )
+    let host = url::form_urlencoded::byte_serialize(target.host.as_bytes()).collect::<String>();
+    match target.message_id {
+        Some(message_id) => format!(
+            "owncord://message/{}/{message_id}?host={host}",
+            target.channel_id
+        ),
+        None => format!("owncord://channel/{}?host={host}", target.channel_id),
+    }
 }
 
 /// The toast's XML: a protocol-activation toast whose title and body are the
@@ -196,7 +203,7 @@ fn show_message_notification<R: Runtime>(
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
 
     log::debug!(
-        "[notify] showing protocol-activation toast (channel {}, message {})",
+        "[notify] showing protocol-activation toast (channel {}, message {:?})",
         target.channel_id,
         target.message_id
     );
@@ -339,7 +346,7 @@ mod tests {
         let target = MessageTarget {
             host: "chat.example:8443".into(),
             channel_id: 7,
-            message_id: 42,
+            message_id: Some(42),
         };
         let json = serde_json::to_value(target).expect("serialize");
         assert_eq!(
@@ -352,7 +359,7 @@ mod tests {
         MessageTarget {
             host: host.into(),
             channel_id,
-            message_id,
+            message_id: Some(message_id),
         }
     }
 
@@ -364,6 +371,66 @@ mod tests {
         assert_eq!(
             message_launch_uri(&target("chat.example:8443", 7, 42)),
             "owncord://message/7/42?host=chat.example%3A8443"
+        );
+    }
+
+    #[test]
+    fn a_call_target_launch_uri_names_the_dm_and_the_server_it_came_from() {
+        // A call notification has no message: it opens the DM. The deep-link
+        // path parses `owncord://channel/<channel>?host=` back with the same
+        // id and host validation as a message link (Client/src/lib/deep-link.ts).
+        let call = MessageTarget {
+            host: "chat.example:8443".into(),
+            channel_id: 7,
+            message_id: None,
+        };
+        assert_eq!(
+            message_launch_uri(&call),
+            "owncord://channel/7?host=chat.example%3A8443"
+        );
+        let forged = MessageTarget {
+            host: "evil.example&x=1#y".into(),
+            channel_id: 1,
+            message_id: None,
+        };
+        assert_eq!(
+            message_launch_uri(&forged),
+            "owncord://channel/1?host=evil.example%26x%3D1%23y"
+        );
+    }
+
+    #[test]
+    fn a_call_target_toast_escapes_its_text_and_launch_attribute() {
+        let call = MessageTarget {
+            host: "a&b".into(),
+            channel_id: 1,
+            message_id: None,
+        };
+        let xml = toast_xml("<Al> is calling you", "Voice \"call\"", &call);
+        assert!(
+            xml.contains("launch=\"owncord://channel/1?host=a%26b\""),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<text id=\"1\">&lt;Al&gt; is calling you</text>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("<text id=\"2\">Voice &quot;call&quot;</text>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn a_call_target_serializes_without_a_message_id() {
+        let call = MessageTarget {
+            host: "h".into(),
+            channel_id: 7,
+            message_id: None,
+        };
+        assert_eq!(
+            serde_json::to_value(call).expect("serialize"),
+            serde_json::json!({ "host": "h", "channelId": 7 })
         );
     }
 

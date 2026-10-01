@@ -1,13 +1,14 @@
 /**
  * owncord:// deep links.
  *
- * Two routes share the scheme:
+ * Three routes share the scheme:
  *
  *   owncord://invite/<code>              registration invite
  *   owncord://invite/<code>?host=<host>
  *   owncord://<code>                     (bare code — invite)
  *   owncord://message/<channelId>/<messageId>            message permalink
  *   owncord://message/<channelId>/<messageId>?host=<host>  a toast's launch URI
+ *   owncord://channel/<channelId>?host=<host>  a call toast's launch URI (DP-24)
  *
  * OwnCord invites are *registration* invites (a code you supply when creating
  * an account on a server), so an invite link can only pre-fill and open the
@@ -27,6 +28,8 @@ const SCHEME = "owncord";
 const PREFIX = `${SCHEME}://`;
 /** Route segment that owns the message-permalink form. */
 const MESSAGE_ROUTE = "message";
+/** Route segment of a call notification's launch URI: it opens the DM. */
+const CHANNEL_ROUTE = "channel";
 
 export interface InviteLink {
   readonly code: string;
@@ -42,6 +45,12 @@ export interface MessageLink {
    * says which server it was for; channel and message ids are only unique per
    * server, so the app must ignore a target for a server it is not signed into.
    */
+  readonly host?: string;
+}
+
+/** A call notification's target: the DM, on the server `host` names. */
+export interface ChannelLink {
+  readonly channelId: number;
   readonly host?: string;
 }
 
@@ -84,9 +93,27 @@ export function parseMessageLink(url: string): MessageLink | null {
   const channelId = parseIdSegment(parts.segments[1]);
   const messageId = parseIdSegment(parts.segments[2]);
   if (channelId === null || messageId === null) return null;
-  const host =
-    parts.query === "" ? "" : (new URLSearchParams(parts.query).get("host") ?? "").trim();
+  const host = hostParam(parts.query);
   return host === "" ? { channelId, messageId } : { channelId, messageId, host };
+}
+
+/**
+ * Parse an `owncord://channel/<channelId>` link, with an optional `?host=`: a
+ * call notification's launch URI. Validated exactly as a message permalink is.
+ * Returns null for any other route, another scheme, or a non-numeric id. Pure.
+ */
+export function parseChannelLink(url: string): ChannelLink | null {
+  const parts = linkSegments(url);
+  if (parts === null || parts.segments[0] !== CHANNEL_ROUTE) return null;
+  const channelId = parseIdSegment(parts.segments[1]);
+  if (channelId === null) return null;
+  const host = hostParam(parts.query);
+  return host === "" ? { channelId } : { channelId, host };
+}
+
+/** The trimmed `host` query parameter, or "" when there is none. */
+function hostParam(query: string): string {
+  return query === "" ? "" : (new URLSearchParams(query).get("host") ?? "").trim();
 }
 
 /**
@@ -105,8 +132,8 @@ export function parseInviteLink(url: string): InviteLink | null {
   }
 
   const segments = parts.segments;
-  // A message permalink is not a bare invite code.
-  if (segments[0] === MESSAGE_ROUTE) return null;
+  // A message permalink or a channel link is not a bare invite code.
+  if (segments[0] === MESSAGE_ROUTE || segments[0] === CHANNEL_ROUTE) return null;
   // `owncord://invite/<code>` or bare `owncord://<code>`.
   const codeSegment = segments[0] === "invite" ? segments[1] : segments[0];
   if (!codeSegment) return null;

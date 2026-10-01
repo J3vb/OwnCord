@@ -77,6 +77,8 @@ export const settingsText = defineCatalog("settings", {
   "notifications.suppress.desc": "Mute @everyone and @here — messages that name you still notify",
   "notifications.sounds.label": "Notification Sounds",
   "notifications.sounds.desc": "Play sounds for notifications",
+  "notifications.callSound.label": "Incoming Call Sound",
+  "notifications.callSound.desc": "Ring when someone calls you, even with notification sounds off",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All",

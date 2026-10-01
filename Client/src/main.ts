@@ -1323,13 +1323,18 @@ function handleInviteDeepLink(code: string, host?: string): void {
     pendingInviteLink = null;
   }
 }
-// Route owncord://message/<channelId>/<messageId> permalinks to the main
+// Route owncord://message/<channelId>/<messageId> permalinks, and a call
+// toast's owncord://channel/<channelId> (no message id), to the main
 // page's jumper. Before the main page mounts (or when the channel isn't
 // visible to this user) the jump is a logged no-op — a link into a server the
 // user is not signed into has nothing to open. A link that named a server (a
 // Windows toast's launch URI) is ignored when another server is signed in now,
 // the same guard a clicked notification goes through.
-function handleMessageDeepLink(channelId: number, messageId: number, host?: string): void {
+function handleMessageDeepLink(
+  channelId: number,
+  messageId: number | undefined,
+  host?: string,
+): void {
   openMessageTarget(channelId, messageId, host);
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);

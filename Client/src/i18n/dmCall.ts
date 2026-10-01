@@ -28,6 +28,8 @@ export const dmCallText = defineCatalog("dmCall", {
   stillInCall: "You're still in the call, so {name} can join later.",
   ringAgain: "Ring again",
   isCalling: "{name} is calling…",
+  notifyIncoming: "{name} is calling you",
+  missed: "Missed call from {name}",
   voiceCall: "Voice call",
   accept: "Accept call",
   acceptVideo: "Join with video",
