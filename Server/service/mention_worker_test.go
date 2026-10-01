@@ -153,6 +153,29 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 	}
 }
 
+// TestMentionWorker_PlainSendsDoNotQueue locks the queue-capacity guarantee: a
+// message with no mention must not take a slot, otherwise ordinary chat fills
+// the bounded queue and genuine mention jobs are dropped.
+func TestMentionWorker_PlainSendsDoNotQueue(t *testing.T) {
+	svc, _, _ := newMentionFixture(t)
+	// A started worker with no loop, so queued jobs stay countable.
+	w := newMentionWorker(svc.st)
+	w.started.Store(true)
+	svc.mentionWorker.Store(w)
+
+	for range 50 {
+		sendAs(t, svc, 4, "just chatting")
+	}
+	sendAs(t, svc, 4, "@everyone one real mention")
+
+	if got := len(w.queue); got != 1 {
+		t.Fatalf("queued jobs = %d, want 1 (only the @everyone send)", got)
+	}
+	if got := w.dropped.Load(); got != 0 {
+		t.Fatalf("dropped = %d, want 0", got)
+	}
+}
+
 // TestMentionWorker_DeleteBeforeFlushLeavesNoBadge locks the invariant the
 // deferred increment broke: a message deleted while its job is still in the
 // coalesce window must not raise a mention badge when the window finally

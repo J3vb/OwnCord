@@ -97,24 +97,28 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// bg, so the counts are readable as soon as SendMessage returns.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
 	bgCtx := context.WithoutCancel(ctx)
-	applyMentions := func(ctx context.Context) []db.MentionBatchEntry {
-		return s.mentionEntries(ctx, channelID, msgID, authorID, mentions, isDM, participantIDs)
-	}
-	if w := s.mentionWorkerForSend(); w != nil {
-		// Production: hand the job to the single bounded worker on the caller's
-		// goroutine. Enqueue never blocks, so no goroutine is spawned per send.
-		w.enqueue(mentionJob{enqueueAt: time.Now(), channelID: channelID, msgID: msgID, apply: applyMentions})
-	} else {
-		// No worker (tests, and any caller built via NewMessageService directly):
-		// resolve and write inline via bg so counts are readable right after the
-		// send. This is the pre-worker behaviour.
-		s.bg(func() {
-			if entries := applyMentions(bgCtx); len(entries) > 0 {
-				if err := s.st.IncrementMentionCountsBatch(bgCtx, channelID, entries); err != nil {
-					slog.Error("MessageService.mention fan-out IncrementMentionCounts", "err", err, "channel_id", channelID)
+	// A message with no @user, @everyone or @here raises no badge, so it never
+	// takes a queue slot or a goroutine.
+	if len(mentions.UserIDs) > 0 || mentions.Everyone {
+		applyMentions := func(ctx context.Context) []db.MentionBatchEntry {
+			return s.mentionEntries(ctx, channelID, msgID, authorID, mentions, isDM, participantIDs)
+		}
+		if w := s.mentionWorkerForSend(); w != nil {
+			// Production: hand the job to the single bounded worker on the caller's
+			// goroutine. Enqueue never blocks, so no goroutine is spawned per send.
+			w.enqueue(mentionJob{enqueueAt: time.Now(), channelID: channelID, msgID: msgID, apply: applyMentions})
+		} else {
+			// No worker (tests, and any caller built via NewMessageService directly):
+			// resolve and write inline via bg so counts are readable right after the
+			// send. This is the pre-worker behaviour.
+			s.bg(func() {
+				if entries := applyMentions(bgCtx); len(entries) > 0 {
+					if err := s.st.IncrementMentionCountsBatch(bgCtx, channelID, entries); err != nil {
+						slog.Error("MessageService.mention fan-out IncrementMentionCounts", "err", err, "channel_id", channelID)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 	// Web Push dispatch (B5-11, behind HP-5): nil when dispatch is off. It is
 	// independent of the mention worker, so it keeps its own background hop
