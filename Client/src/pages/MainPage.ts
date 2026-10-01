@@ -69,7 +69,7 @@ import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
-import { createMessageController, createPendingDeleteManager } from "./main-page/MessageController";
+import { createMessageController } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import type { ReactionController } from "./main-page/ReactionController";
@@ -270,9 +270,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let banner: ServerBannerControl | null = null;
   // Video grid (owned by ChatArea, referenced for remote video wiring)
   let videoGrid: VideoGridComponent | null = null;
-
-  // Pending delete confirmations (double-click to delete pattern)
-  const pendingDeleteManager = createPendingDeleteManager();
 
   // Extracted controllers (created in mount)
   let msgCtrl: MessageController | null = null;
@@ -1176,7 +1173,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ws,
       api,
       msgCtrl: msgCtrl,
-      pendingDeleteManager,
       reactionCtrl: reactionCtrl,
       typingLimiter: limiters.typing,
       showToast: (msg, type) => showToast(msg, type as "success" | "error" | "info"),

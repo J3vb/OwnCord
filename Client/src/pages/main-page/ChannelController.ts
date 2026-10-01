@@ -4,7 +4,11 @@
  * Extracted from MainPage to reduce god-object coupling and enable unit testing.
  */
 
-import { clearChildren, setText } from "@lib/dom";
+import { clearChildren, createElement, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { markdownToPlainText } from "@lib/markdown";
+import { resolveDisplayName } from "@lib/avatar";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -31,7 +35,6 @@ import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
-import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
@@ -73,7 +76,6 @@ export interface ChannelControllerOptions {
   readonly ws: WsClient;
   readonly api: ApiClient;
   readonly msgCtrl: MessageController;
-  readonly pendingDeleteManager: PendingDeleteManager;
   readonly reactionCtrl: ReactionController;
   readonly typingLimiter: { tryConsume(key?: string): boolean };
   readonly showToast: (msg: string, type: string) => void;
@@ -121,7 +123,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     ws,
     api,
     msgCtrl,
-    pendingDeleteManager,
     reactionCtrl,
     typingLimiter,
     showToast,
@@ -135,6 +136,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
   let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
+  // The open delete-confirm dialog, if any. Scoped to the mounted channel:
+  // the modal carries channelAbort.signal, so a switch or destroy closes it.
+  let deleteConfirm: ModalInstance | null = null;
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
@@ -264,7 +268,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   }
 
   function destroyChannel(): void {
-    pendingDeleteManager.cleanup();
+    deleteConfirm = null;
     // The reaction picker is a body-mounted overlay keyed to a message in
     // this channel — every other teardown path already routes through here,
     // so this is the one choke point to close it before the channel it was
@@ -739,6 +743,90 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     void msgCtrl.loadMessages(channelId, signal);
 
+    /** Send the delete frame. CLI-08: a destructive menu action is gated on
+     *  the connection; a closed or half-open socket would drop the frame and
+     *  leave the moderator thinking the message was deleted. */
+    function sendDelete(msgId: number): void {
+      if (uiStore.getState().connectionStatus !== "connected") {
+        showToast(messagingText("toast.deleteFailed"), "error");
+        return;
+      }
+      const id = ws.send({
+        type: "chat_delete",
+        payload: { message_id: msgId },
+      });
+      track(pendingDeletes, id, { channelId, messageId: msgId });
+    }
+
+    /** P4-12: the destructive delete confirm, modelled on DmSidebar's
+     *  openLeaveConfirm / DeleteChannelModal: Cancel first and focused, Escape
+     *  and the backdrop cancel, focus returns to the opener. Tied to the
+     *  mounted channel's signal, so a switch or destroy closes it. */
+    function openDeleteConfirm(msgId: number): void {
+      const msg = getChannelMessages(channelId).find((m) => m.id === msgId);
+      const promptOwner = new Disposable();
+      const titleId = `msg-delete-title-${msgId}`;
+      const content = createElement("div");
+      const header = createElement("div", { class: "modal-header" });
+      header.appendChild(createElement("h3", { id: titleId }, messagingText("delete.title")));
+      const body = createElement("div", { class: "modal-body" });
+      body.appendChild(
+        createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
+      );
+      if (msg !== undefined) {
+        const preview = createElement("div", {
+          class: "modal-danger-text delete-confirm-preview",
+        });
+        preview.appendChild(
+          createElement(
+            "strong",
+            {},
+            resolveDisplayName({
+              username: msg.user.username,
+              displayName: msg.user.display_name ?? null,
+            }),
+          ),
+        );
+        const text = createElement("div");
+        setText(text, markdownToPlainText(msg.content, messagingText("spoiler.revealed")));
+        preview.appendChild(text);
+        body.appendChild(preview);
+      }
+      const footer = createElement("div", { class: "modal-footer" });
+      const cancel = createElement(
+        "button",
+        { class: "btn-modal-cancel", type: "button", "data-testid": "msg-delete-cancel" },
+        shellText("common.cancel"),
+      );
+      const confirm = createElement(
+        "button",
+        { class: "btn-danger", type: "button", "data-testid": "msg-delete-confirm" },
+        messagingText("delete.confirm"),
+      );
+      footer.append(cancel, confirm);
+      content.append(header, body, footer);
+
+      deleteConfirm = createModal({
+        content,
+        ariaLabelledBy: titleId,
+        overlayAttrs: { "data-testid": "msg-delete-modal" },
+        signal,
+        // The modal owns its own listeners; drop this prompt's with it.
+        onClose: () => promptOwner.destroy(),
+      });
+      cancel.addEventListener("click", () => deleteConfirm?.close(), {
+        signal: promptOwner.signal,
+      });
+      confirm.addEventListener(
+        "click",
+        () => {
+          deleteConfirm?.close();
+          sendDelete(msgId);
+        },
+        { signal: promptOwner.signal },
+      );
+    }
+
     // MessageList
     messageList = createMessageList({
       channelId,
@@ -787,24 +875,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           messageInput?.startEdit(msgId, msg.content);
         }
       },
-      onDeleteClick: (msgId: number) => {
-        const result = pendingDeleteManager.tryDelete(msgId);
-        if (result !== "confirmed") {
-          showToast(messagingText("toast.deleteConfirm"), "info");
+      onDeleteClick: (msgId: number, shiftKey: boolean) => {
+        // Shift-click skips the prompt, as Discord's delete confirm does
+        // (P4-12). A plain click opens a confirm with the message preview.
+        if (!shiftKey) {
+          openDeleteConfirm(msgId);
           return;
         }
-        // CLI-08: a destructive menu action is gated on the connection. A
-        // closed or half-open socket would drop the frame and leave the
-        // moderator thinking the message was deleted.
-        if (uiStore.getState().connectionStatus !== "connected") {
-          showToast(messagingText("toast.deleteFailed"), "error");
-          return;
-        }
-        const id = ws.send({
-          type: "chat_delete",
-          payload: { message_id: msgId },
-        });
-        track(pendingDeletes, id, { channelId, messageId: msgId });
+        sendDelete(msgId);
       },
       onReactionClick: (msgId: number, emoji: string) => {
         reactionCtrl.handleReaction(msgId, emoji);

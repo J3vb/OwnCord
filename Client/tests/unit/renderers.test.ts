@@ -1268,7 +1268,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("calls onDeleteClick when delete button is clicked", () => {
+    it("calls onDeleteClick with shiftKey=false when delete button is clicked", () => {
       const opts = makeOpts();
       const msg = makeMessage();
       const ac = new AbortController();
@@ -1277,7 +1277,21 @@ describe("renderers", () => {
 
       const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
       deleteBtn.click();
-      expect(opts.onDeleteClick).toHaveBeenCalledWith(1);
+      expect(opts.onDeleteClick).toHaveBeenCalledWith(1, false);
+
+      ac.abort();
+    });
+
+    it("passes the shift state through to onDeleteClick (P4-12)", () => {
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
+      deleteBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+      expect(opts.onDeleteClick).toHaveBeenCalledWith(1, true);
 
       ac.abort();
     });

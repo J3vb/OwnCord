@@ -388,7 +388,9 @@ export function renderMessage(
       const connectionStatus = uiStore.getState().connectionStatus;
       if (connectionStatus === "connected") {
         deleteBtn.title = messagingText("action.delete");
-        deleteBtn.addEventListener("click", () => opts.onDeleteClick(msg.id), { signal });
+        deleteBtn.addEventListener("click", (e) => opts.onDeleteClick(msg.id, e.shiftKey), {
+          signal,
+        });
       } else {
         deleteBtn.disabled = true;
         deleteBtn.setAttribute("aria-disabled", "true");

@@ -62,7 +62,17 @@ vi.mock("@lib/logger", () => ({
 }));
 
 vi.mock("@lib/dom", () => ({
-  createElement: vi.fn((tag: string) => document.createElement(tag)),
+  createElement: vi.fn((tag: string, attrs?: Record<string, string>, textContent?: string) => {
+    const el = document.createElement(tag);
+    if (attrs) {
+      for (const [key, value] of Object.entries(attrs)) {
+        if (key === "class") el.className = value;
+        else el.setAttribute(key, value);
+      }
+    }
+    if (textContent !== undefined) el.textContent = textContent;
+    return el;
+  }),
   clearChildren: vi.fn((el: HTMLElement) => {
     el.innerHTML = "";
   }),
@@ -335,7 +345,6 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
       loadMessages: vi.fn(),
       loadOlderMessages: vi.fn(),
     } as unknown as ChannelControllerOptions["msgCtrl"],
-    pendingDeleteManager: { tryDelete: vi.fn(() => "pending" as const), cleanup: vi.fn() },
     reactionCtrl: {
       handleReaction: vi.fn(),
       destroy: vi.fn(),
@@ -664,35 +673,154 @@ describe("createChannelController", () => {
 
     expect(ctrl.currentChannelId).toBeNull();
     expect(ctrl.messageList).toBeNull();
-    expect(opts.pendingDeleteManager.cleanup).toHaveBeenCalled();
   });
 
-  describe("MessageList callbacks", () => {
-    it("onDeleteClick sends delete on confirmed", () => {
+  describe("MessageList callbacks (P4-12 delete confirmation dialog)", () => {
+    function deleteModal(): HTMLElement | null {
+      return document.querySelector("[data-testid='msg-delete-modal']");
+    }
+    function confirmBtn(): HTMLButtonElement {
+      return document.querySelector("[data-testid='msg-delete-confirm']") as HTMLButtonElement;
+    }
+    function cancelBtn(): HTMLButtonElement {
+      return document.querySelector("[data-testid='msg-delete-cancel']") as HTMLButtonElement;
+    }
+
+    it("opens a dialog with a preview and sends nothing on the first click", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "hello **world**", user: { id: 2, username: "Bob" } },
+      ]);
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, false);
 
-      expect(opts.pendingDeleteManager.tryDelete).toHaveBeenCalledWith(5);
+      expect(deleteModal()).not.toBeNull();
+      const preview = deleteModal()!.querySelector(".delete-confirm-preview");
+      expect(preview?.textContent).toContain("hello world");
+      expect(deleteModal()!.textContent).toContain("Bob");
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toHaveLength(0);
+      ctrl.destroyChannel();
+    });
+
+    it("sends exactly one chat_delete when the dialog is confirmed", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      confirmBtn().click();
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([f]) => (f as { type: string }).type === "chat_delete",
+      );
+      expect(sends).toHaveLength(1);
+      expect(sends[0]![0]).toEqual({ type: "chat_delete", payload: { message_id: 5 } });
+      expect(deleteModal()).toBeNull();
+      ctrl.destroyChannel();
+    });
+
+    it("cancelling the dialog sends nothing and closes it", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      cancelBtn().click();
+
+      expect(deleteModal()).toBeNull();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toHaveLength(0);
+      ctrl.destroyChannel();
+    });
+
+    it("Escape cancels the dialog without deleting", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+      expect(deleteModal()).toBeNull();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toHaveLength(0);
+      ctrl.destroyChannel();
+    });
+
+    it("Shift-click deletes immediately with no dialog", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, true);
+
+      expect(deleteModal()).toBeNull();
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_delete",
         payload: { message_id: 5 },
       });
+      ctrl.destroyChannel();
     });
 
-    it("onDeleteClick shows info toast on pending", () => {
+    it("keeps the CLI-08 gate: confirming while disconnected shows one error and sends nothing", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      setConnectionStatus("disconnected");
+      vi.clearAllMocks();
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      confirmBtn().click();
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([f]) => (f as { type: string }).type === "chat_delete",
+      );
+      expect(sends).toHaveLength(0);
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("delete"), "error");
+      ctrl.destroyChannel();
+    });
+
+    it("closes an open dialog when the channel is destroyed", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      expect(deleteModal()).not.toBeNull();
+      ctrl.destroyChannel();
 
-      expect(opts.showToast).toHaveBeenCalledWith("Click delete again to confirm", "info");
+      expect(deleteModal()).toBeNull();
     });
 
     it("onReactionClick delegates to reactionCtrl", () => {
@@ -2712,13 +2840,10 @@ describe("createChannelController", () => {
 
     it("does not toast success when a delete is sent and acknowledged", () => {
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, true);
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_delete",
@@ -2731,14 +2856,11 @@ describe("createChannelController", () => {
     it("shows one error and sends nothing when deleting while disconnected", () => {
       setConnectionStatus("disconnected");
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       vi.clearAllMocks();
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, true);
 
       const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([frame]) => (frame as { type: string }).type === "chat_delete",
@@ -2833,14 +2955,11 @@ describe("createChannelController", () => {
 
     it("shows one error when a delete frame fails to send", () => {
       const { opts, ids } = optsWithIds();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       const onSendFailure = sendFailureListener(opts);
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, true);
       const deleteId = ids().find((id) => id.endsWith("chat_delete"))!;
       vi.clearAllMocks();
 
@@ -2907,13 +3026,10 @@ describe("createChannelController", () => {
       try {
         mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
         const { opts } = optsWithIds();
-        (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-          "confirmed",
-        );
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
         capturedMessageInputOpts!.onEditMessage(5, "new content");
-        capturedMessageListOpts!.onDeleteClick(6);
+        capturedMessageListOpts!.onDeleteClick(6, true);
 
         // The user moves on; the server unsubscribes channel 42's topic
         // before the echoes are delivered, so none ever arrives.

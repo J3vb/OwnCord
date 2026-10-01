@@ -778,7 +778,7 @@ describe("MessageList", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     deleteBtn().click();
-    expect(options.onDeleteClick).toHaveBeenCalledWith(1);
+    expect(options.onDeleteClick).toHaveBeenCalledWith(1, false);
   });
 
   it("does not re-render when a DIFFERENT channel's messages update", () => {

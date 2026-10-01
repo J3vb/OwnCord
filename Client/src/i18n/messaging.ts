@@ -130,7 +130,9 @@ export const messagingText = defineCatalog("messaging", {
   "toast.retryExpired": "This message's retry window expired. Copy the text to send a new message.",
   "toast.retryUnsupported":
     "This server cannot safely retry a saved message. Copy its text to send it again.",
-  "toast.deleteConfirm": "Click delete again to confirm",
+  "delete.title": "Delete message?",
+  "delete.body": "This message will be permanently deleted for everyone.",
+  "delete.confirm": "Delete",
   "toast.editFailed": "Couldn't edit the message",
   "toast.editFailedRestored": "Couldn't edit the message — your text is back in the composer",
   "toast.deleteFailed": "Couldn't delete the message",

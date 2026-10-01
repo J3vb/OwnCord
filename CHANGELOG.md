@@ -70,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Messages
 
+- **Deleting a message now asks first, with a preview.** Delete used to arm a "click again within 5 s" toast, so a second stray click removed the message. It now opens a confirmation dialog showing the author and the message's plain text; Shift-click still deletes at once.
 - **Pin is no longer offered to members who cannot pin.** The hover Pin button appeared on every message for every member, but the server only allows it with Manage Messages (or in a DM) — so a plain member saw a button that always failed. It now shows only where the action will work, including in the pinned-messages panel.
 - **A pin or unpin now reaches everyone, and the pinned list is ordered by when things were pinned.** Pinning used to update only the device that did it, so your other devices and everyone else kept showing a stale pin; the list was ordered by message id, so an old message pinned later appeared at the bottom. A pin change is now broadcast to the channel, and the list is newest-pinned first.
 - **Enter no longer sends a half-finished word in Japanese, Chinese or Korean input.** Committing an IME candidate with Enter used to send the raw composition text; it now lets the input method finish the word first.
