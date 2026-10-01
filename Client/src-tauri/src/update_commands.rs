@@ -179,7 +179,7 @@ fn build_updater(
         .map_err(|e| format!("failed to set endpoints: {e}"))?
         .configure_client(move |client| {
             // This callback applies to both metadata checks and downloads.
-            // UpdaterBuilder::timeout only bounds checks in updater 2.10.1;
+            // UpdaterBuilder::timeout only bounds checks through updater 2.13;
             // its returned Update has no timeout. Bound idle reads instead
             // of total download time so slow, progressing downloads finish.
             let client = client

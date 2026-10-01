@@ -194,9 +194,7 @@ cargo install cargo-audit@0.22.1 --quiet && cargo audit   # CI runs this in taur
 
 `cargo audit` is the one gate here that turns red with **zero** local changes —
 an advisory published upstream breaks a branch that was clean yesterday. Check the
-advisory date before hunting your diff. It is skipped on Dependabot PRs by design
-(it overlaps the scanning that opened them), so a clean Dependabot run does not
-mean the advisory set is clean. The client equivalents, `npm audit --omit=dev
+advisory date before hunting your diff. The client equivalents, `npm audit --omit=dev
 --audit-level=high` and `knip`, **block** in `Client Static Checks`.
 
 `fallback_crypto` is `cfg(not(windows))`, so its tests compile to nothing on a

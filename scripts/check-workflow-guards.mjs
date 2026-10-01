@@ -70,10 +70,7 @@ const SIGNING_KEY_HOLDER = "release.yml";
 
 export function signingKeyHolders(workflows) {
   return workflows
-    .filter(
-      ({ name, src }) =>
-        name !== SIGNING_KEY_HOLDER && /TAURI_SIGNING_PRIVATE_KEY/.test(src),
-    )
+    .filter(({ name, src }) => name !== SIGNING_KEY_HOLDER && /TAURI_SIGNING_PRIVATE_KEY/.test(src))
     .map(({ name }) => name);
 }
 
