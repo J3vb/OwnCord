@@ -105,6 +105,24 @@ func rolePosition(ctx context.Context, tx *sql.Tx, userID int64) (int, bool) {
 	return pos, true
 }
 
+// strictlyOutranks reports whether actorID strictly outranks targetID by role
+// position, read live inside tx — the shared re-check recordModerationAction,
+// LiftTimeout and an appeal OVERTURN all apply so a demotion that lands
+// between a caller's earlier (possibly cached) check and the write governs
+// the outcome. A missing actor role refuses; a missing target role is
+// unbeatable, matching both callers' posture.
+func strictlyOutranks(ctx context.Context, tx *sql.Tx, actorID, targetID int64) bool {
+	actorPos, ok := rolePosition(ctx, tx, actorID)
+	if !ok {
+		return false
+	}
+	targetPos, ok := rolePosition(ctx, tx, targetID)
+	if !ok {
+		targetPos = math.MaxInt
+	}
+	return actorPos > targetPos
+}
+
 // recordModerationAction is warning/timeout/kick/ban's one ledger write
 // (ModerationService's recordAction, plan item 2): a warning or timeout's
 // entire effect, or the ledger row riding alongside kick/ban's existing
@@ -136,19 +154,12 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 	if moderationActionPreRankCheckHook != nil {
 		moderationActionPreRankCheckHook()
 	}
-	actorPos, ok := rolePosition(ctx, tx, actorID)
-	if !ok {
-		return 0, fmt.Errorf("recordModerationAction: actor role: %w", ErrOutranked)
-	}
-	targetPos, ok := rolePosition(ctx, tx, targetID)
-	if !ok {
-		// A missing target (erased, or never existed) is treated as an
-		// unbeatable rank rather than a crash: the caller already looked the
-		// target up before deciding to act, so this is the same race the
-		// effect's own write is exposed to.
-		targetPos = math.MaxInt
-	}
-	if actorPos <= targetPos {
+	// A missing target (erased, or never existed) is treated as an unbeatable
+	// rank rather than a crash: the caller already looked the target up
+	// before deciding to act, so this is the same race the effect's own write
+	// is exposed to — strictlyOutranks folds that in with the actor's own
+	// position read.
+	if !strictlyOutranks(ctx, tx, actorID, targetID) {
 		return 0, ErrOutranked
 	}
 	if moderationActionPreInsertHook != nil {
@@ -336,17 +347,7 @@ func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedID
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	actorPos, ok := rolePosition(ctx, tx, actorID)
-	if !ok {
-		return nil, fmt.Errorf("LiftTimeout: %w", ErrOutranked)
-	}
-	targetPos, ok := rolePosition(ctx, tx, targetID)
-	if !ok {
-		// A missing target is treated as an unbeatable rank — see
-		// recordModerationAction's identical posture.
-		targetPos = math.MaxInt
-	}
-	if actorPos <= targetPos {
+	if !strictlyOutranks(ctx, tx, actorID, targetID) {
 		return nil, ErrOutranked
 	}
 

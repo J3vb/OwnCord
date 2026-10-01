@@ -2820,9 +2820,8 @@ higher-ranked user, even one the owner issued. Overturning a **ban**
 additionally requires `BAN_MEMBERS`, mirroring `UnbanUser`; a
 `MODERATE_MEMBERS`-only holder cannot clear a ban through the appeal queue.
 Overturning a **removal** is record-only (the content is already gone) and
-keeps the direct removal path's channel-scoped `MANAGE_MESSAGES` rule with
-no rank requirement. Upholding reverses nothing and needs no such
-authority.
+needs no authority beyond `MODERATE_MEMBERS`. Upholding reverses nothing and
+needs no such authority.
 
 **Two self-review rules apply, and they are different:** the moderator who
 took the appealed action may not decide its appeal **where another eligible

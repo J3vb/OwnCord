@@ -13,10 +13,15 @@ import (
 // ban that is BAN_MEMBERS, mirroring UnbanUser, since a ban reversal must not
 // be reachable by a MODERATE_MEMBERS-only holder. Warning and timeout need
 // only MODERATE_MEMBERS, already checked by requireModerate. "removal" is
-// excluded: overturning it is record-only (the content is already gone) and
-// the direct removal path is governed by channel MANAGE_MESSAGES with no rank
-// requirement, so a rank gate here would not mirror anything. Upholding
-// changes nothing and needs no such gate.
+// excluded: overturning it is record-only (the content is already gone), so
+// no authority beyond MODERATE_MEMBERS is needed and a rank or
+// MANAGE_MESSAGES gate here would mirror nothing. Upholding changes nothing
+// and needs no such gate.
+//
+// This is the CACHED pre-check half. The rank re-check is repeated live
+// inside DecideAppealTx's own transaction (see its outrank re-read), the
+// parity the direct LiftTimeout path already has (P2-8), so a decider
+// demoted between this call and the decision commits nothing.
 func (s *AppealService) requireOverturnAuthority(ctx context.Context, actorID int64, action *db.ModerationAction) error {
 	switch action.Kind {
 	case "ban":
