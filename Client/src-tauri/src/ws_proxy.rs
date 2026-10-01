@@ -131,6 +131,7 @@ pub(crate) fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json
 pub async fn ws_connect<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, WsState>,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     url: String,
 ) -> Result<(), String> {
     info!("[ws_proxy] connecting to {}", url);
@@ -253,6 +254,9 @@ pub async fn ws_connect<R: Runtime>(
 
     info!("[ws_proxy] connected to {}", host);
     emit_ws_state(&app, "open");
+    // Record the host this session is on, so the credential and identity
+    // commands can refuse any other host while it is live (finding 5).
+    session.set(&host);
 
     let app_read = app.clone();
     let app_state = app.clone();
@@ -418,7 +422,10 @@ pub async fn ws_send(state: tauri::State<'_, WsState>, message: String) -> Resul
 
 /// Disconnect the proxy WebSocket.
 #[tauri::command]
-pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), String> {
+pub async fn ws_disconnect(
+    state: tauri::State<'_, WsState>,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+) -> Result<(), String> {
     // begin_connection() both clears the sender slot (dropping it closes the
     // channel so the write task ends) AND bumps the generation counter, so a
     // handshake still pending from before this disconnect fails install_sender
@@ -426,6 +433,9 @@ pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), Strin
     // path a superseding connect() already has. The returned generation is
     // unused: nothing will ever install under it.
     state.begin_connection().await;
+    // Logout / server switch: no session is live, so the credential and
+    // identity commands fall back to their pre-session rule (finding 5).
+    session.clear();
     Ok(())
 }
 

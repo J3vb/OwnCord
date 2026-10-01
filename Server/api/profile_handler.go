@@ -15,7 +15,9 @@ import (
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
@@ -127,12 +129,19 @@ const revokeAllSessionsRateLimitPerMinute = 5
 // store may be nil, in which case the avatar-upload route is not registered —
 // a server with no storage backend has nowhere to put the bytes, and a route
 // that 500s on every call is worse than one that 404s.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
+//
+// cfg may be nil (tests that mount only the profile surface): the same-host
+// avatar guard then falls back to the request's Host header alone. In
+// production the router always passes the running config, so the guard compares
+// against the server's own configured hosts rather than anything the client
+// supplied.
+func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
+	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
-			Patch("/", handleUpdateProfile(svc, broadcaster))
+			Patch("/", handleUpdateProfile(svc, broadcaster, selfHosts))
 
 		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
@@ -181,10 +190,16 @@ func validateIdentityKey(key string) error {
 // viewer that renders the user would fetch an arbitrary path on this origin
 // with their credentials. The only legitimate same-host avatar is the
 // attachment route this server writes to users.avatar (service.AvatarFileURL),
-// so anything else on this host is refused. serverHost is the request's Host;
-// empty disables the same-host check. Different hosts are unaffected — they are
-// fetched anonymously through the client's external-content broker.
-func validateAvatarURL(avatar, serverHost string) error {
+// so anything else on this host is refused. Different hosts are unaffected —
+// they are fetched anonymously through the client's external-content broker.
+//
+// selfHosts are the hosts this server answers on, derived from configuration
+// (configuredSelfHosts), NOT from the request: the Host header is
+// client-supplied, so trusting it let an attacker name an arbitrary Host and
+// slip an arbitrary same-origin path past the comparison. When selfHosts is
+// empty (no configuration available), the request's own Host is the only
+// candidate left, so it is used as a fallback.
+func validateAvatarURL(avatar string, selfHosts []string, requestHost string) error {
 	if avatar == "" {
 		return nil
 	}
@@ -195,12 +210,56 @@ func validateAvatarURL(avatar, serverHost string) error {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return fmt.Errorf("avatar URL must use https://")
 	}
-	if serverHost != "" &&
-		strings.EqualFold(stripDefaultPort(parsed.Scheme, parsed.Host), stripDefaultPort(parsed.Scheme, serverHost)) &&
-		!isAvatarAttachmentPath(parsed.Path) {
+	if isSelfHost(parsed, selfHosts, requestHost) && !isAvatarAttachmentPath(parsed.Path) {
 		return fmt.Errorf("avatar URL on this server must be /api/v1/files/<id>")
 	}
 	return nil
+}
+
+// configuredSelfHosts derives the host[:port] names this server is reachable
+// on, for the same-host avatar guard: the operator-configured public host
+// (tls.domain, which names this server when TLS terminates here) plus every
+// bound listen address on this host. The request's Host header is deliberately
+// NOT an input: that is the spoofable value this binding replaces, so it is
+// used only as a last resort when nothing else names the server (isSelfHost).
+func configuredSelfHosts(cfg *config.Config) []string {
+	var hosts []string
+	if cfg != nil {
+		if d := strings.TrimSpace(cfg.TLS.Domain); d != "" {
+			hosts = append(hosts, d)
+		}
+	}
+	for _, a := range netclass.LocalAddrs() {
+		if a.Is6() {
+			// A URL's Host for an IPv6 literal is bracketed; match that form.
+			hosts = append(hosts, "["+a.String()+"]")
+		} else {
+			hosts = append(hosts, a.String())
+		}
+	}
+	return hosts
+}
+
+// isSelfHost reports whether parsed names this server. It matches parsed's
+// host:port against each self host, and — only when nothing names the server —
+// against the request's Host header as a last resort, so a server with no
+// configured host and no readable interface table still gets the guard's
+// protection on the honest path. Default ports are stripped from both sides.
+func isSelfHost(parsed *url.URL, selfHosts []string, requestHost string) bool {
+	parsedHost := stripDefaultPort(parsed.Scheme, parsed.Host)
+	candidates := selfHosts
+	if len(candidates) == 0 && requestHost != "" {
+		candidates = []string{requestHost}
+	}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if strings.EqualFold(parsedHost, stripDefaultPort(parsed.Scheme, candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 // isAvatarAttachmentPath reports whether path is this server's avatar file
@@ -251,7 +310,7 @@ var allowedAvatarMIME = map[string]bool{
 // and returns ok=false, and the caller must return without writing anything
 // further. Split out of handleUpdateProfile only to keep that handler under the
 // funlen limit; the field logic is unchanged.
-func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updateProfileRequest, bool) {
+func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
@@ -304,7 +363,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// the username path above.
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
-		if err := validateAvatarURL(trimmed, r.Host); err != nil {
+		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
@@ -352,14 +411,14 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	return req, true
 }
 
-func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
+func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, selfHosts []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
 
-		req, ok := parseUpdateProfileRequest(w, r)
+		req, ok := parseUpdateProfileRequest(w, r, selfHosts)
 		if !ok {
 			return
 		}

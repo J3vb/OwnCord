@@ -118,10 +118,14 @@ fn identity_pin_key(host: &str, user_id: &str) -> String {
 #[tauri::command]
 pub fn store_identity_pin(
     app: tauri::AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     user_id: String,
     pin: String,
 ) -> Result<(), String> {
+    // Never pre-session: peer pins are written during an authenticated voice
+    // session. Only its host's pins may be written (finding 5).
+    session.ensure(&host, false)?;
     if host.is_empty() || host.len() > 253 {
         return Err("host must be 1-253 characters".into());
     }

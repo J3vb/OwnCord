@@ -207,7 +207,14 @@ pub fn save_credential(
 ///
 /// Returns `None` when no credential exists for the given host.
 #[tauri::command(async)]
-pub fn load_credential(app: AppHandle, host: String) -> Result<Option<CredentialData>, String> {
+pub fn load_credential(
+    app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+    host: String,
+) -> Result<Option<CredentialData>, String> {
+    // Pre-session: the connect page prefills and auto-login reads before any
+    // ws_connect. Once a session exists, only its host may be read (finding 5).
+    session.ensure(&host, true)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
 
@@ -285,7 +292,15 @@ pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
 /// unavailable this returns an error rather than reporting a success that would
 /// leave peers rejecting the user's voice announce after a restart.
 #[tauri::command(async)]
-pub fn save_identity_key(app: AppHandle, host: String, key: String) -> Result<(), String> {
+pub fn save_identity_key(
+    app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+    host: String,
+    key: String,
+) -> Result<(), String> {
+    // Never pre-session: this runs from the ready/voice flow, by which point a
+    // session is established. Only its host may be written (finding 5).
+    session.ensure_identity_scope(&host, false)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
         require_non_empty(&key, "key")?;
@@ -300,7 +315,13 @@ pub fn save_identity_key(app: AppHandle, host: String, key: String) -> Result<()
 ///
 /// Returns `None` when no identity key exists for the given host.
 #[tauri::command(async)]
-pub fn load_identity_key(app: AppHandle, host: String) -> Result<Option<String>, String> {
+pub fn load_identity_key(
+    app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+    host: String,
+) -> Result<Option<String>, String> {
+    // Never pre-session, same as save_identity_key (finding 5).
+    session.ensure_identity_scope(&host, false)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
         secret_store::get(&app, &identity_account(&host))
@@ -312,7 +333,13 @@ pub fn load_identity_key(app: AppHandle, host: String) -> Result<Option<String>,
 ///
 /// Deleting a non-existent key is not treated as an error.
 #[tauri::command(async)]
-pub fn delete_identity_key(app: AppHandle, host: String) -> Result<(), String> {
+pub fn delete_identity_key(
+    app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+    host: String,
+) -> Result<(), String> {
+    // Never pre-session, same as save_identity_key (finding 5).
+    session.ensure_identity_scope(&host, false)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
         secret_store::delete(&app, &identity_account(&host))
@@ -443,9 +470,14 @@ pub struct SavedLoginResponse {
 pub async fn login_with_saved_password(
     app: AppHandle,
     state: tauri::State<'_, crate::http_proxy::HttpProxyState>,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     username: String,
 ) -> Result<SavedLoginResponse, String> {
+    // Pre-session by definition: this IS the login that establishes a session,
+    // and it runs before ws_connect. Once a session exists, only its host may
+    // be used (finding 5).
+    session.ensure(&host, true)?;
     require_non_empty(&host, "host")?;
     require_non_empty(&username, "username")?;
 

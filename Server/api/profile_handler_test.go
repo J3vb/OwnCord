@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,34 @@ func buildProfileRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, nil)
 	return r
+}
+
+// buildProfileRouterWithConfig mounts profile routes with a real configuration,
+// so the same-host avatar guard compares against server-known hosts rather than
+// the request's client-supplied Host.
+func buildProfileRouterWithConfig(database *db.DB, cfg *config.Config) http.Handler {
+	r := chi.NewRouter()
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, cfg)
+	return r
+}
+
+// patchJSONWithHost patches a profile with an explicit (possibly spoofed) Host
+// header.
+func patchJSONWithHost(t *testing.T, router http.Handler, path, token, host string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewReader(raw))
+	req.Host = host
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
 }
 
 // profileCreateToken creates a user and session, returning the raw token.
@@ -126,7 +153,9 @@ func TestUpdateProfile_Success(t *testing.T) {
 // URL that is not /api/v1/files/<uuid> must be refused.
 func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
 	database := newAuthTestDB(t)
-	router := buildProfileRouter(database)
+	cfg := &config.Config{}
+	cfg.TLS.Domain = "example.com"
+	router := buildProfileRouterWithConfig(database, cfg)
 	token := profileCreateToken(t, database, "samehostav", 4)
 
 	// httptest.NewRequest defaults req.Host to example.com, so this URL is
@@ -155,6 +184,39 @@ func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
 	})
 	if other.Code != http.StatusOK {
 		t.Fatalf("external-host avatar status = %d, want 200; body = %s", other.Code, other.Body.String())
+	}
+}
+
+// The Host header is client-supplied, so a guard that compared the avatar's
+// host against r.Host could be bypassed by sending an arbitrary Host while the
+// URL named the real server. With a configured server host, a spoofed Host
+// must not change the verdict: the avatar still names the real server and is
+// still refused.
+func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.TLS.Domain = "chat.example.com"
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "spoofhost", 4)
+
+	// The URL names the configured server host; the Host header claims to be
+	// some other origin. The guard must still see the two as the same server.
+	rr := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "spoofhost",
+		"avatar":   "https://chat.example.com/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("spoofed-Host same-host avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// And the attachment route on the configured host stays valid under the
+	// same spoofed Host.
+	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "spoofhost",
+		"avatar":   "https://chat.example.com/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("spoofed-Host same-host attachment status = %d, want 200; body = %s", ok.Code, ok.Body.String())
 	}
 }
 

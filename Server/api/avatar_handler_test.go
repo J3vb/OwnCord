@@ -31,7 +31,7 @@ func buildAvatarRouter(database *db.DB, store *storage.Storage) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountProfileRoutes(r, database, svc, store, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, svc, store, limiter, nil, nil, nil)
 	api.MountUploadRoutes(r, service.NewSessionService(database), store, limiter, nil, svc.Uploads)
 	return r
 }
@@ -218,7 +218,7 @@ func TestUploadAvatar_NotMountedWithoutStorage(t *testing.T) {
 	database := newUploadTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, nil, nil)
 	token := uploadCreateToken(t, database, "no_storage", 4)
 
 	if rr := doAvatarUpload(t, r, token, "me.png", makePNGBytes(t, 8, 8)); rr.Code == http.StatusCreated {
@@ -306,7 +306,7 @@ func TestUpdateProfile_BroadcastCarriesEveryProfileField(t *testing.T) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	spy := &userUpdateSpy{}
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, spy)
+	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, spy, nil)
 	token := profileCreateToken(t, database, "bc_user", 4)
 
 	rr := patchJSON(t, r, "/api/v1/users/me", token, map[string]any{

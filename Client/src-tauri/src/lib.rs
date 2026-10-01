@@ -1,3 +1,4 @@
+mod active_session;
 mod commands;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
@@ -148,6 +149,7 @@ pub fn run() {
     match builder
         .manage(json_store::JsonStores::default())
         .manage(diagnostics::FrontendReady::new())
+        .manage(active_session::ActiveSession::new())
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())

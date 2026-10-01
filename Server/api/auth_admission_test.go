@@ -64,7 +64,7 @@ func TestChangePassword_RefusedWhenAuthBudgetExhausted(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	limiter.SetAdmissionBudget(1)
 	router := chi.NewRouter()
-	api.MountProfileRoutes(router, database, service.New(database, limiter), nil, limiter, nil, nil)
+	api.MountProfileRoutes(router, database, service.New(database, limiter), nil, limiter, nil, nil, nil)
 	token := profileCreateToken(t, database, "budgeted", 4)
 	release, ok := limiter.Admission().TryAcquire()
 	if !ok {
