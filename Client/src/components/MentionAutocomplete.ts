@@ -6,6 +6,7 @@
 import { createElement, setText } from "@lib/dom";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { getChannelMessages } from "@stores/messages.store";
+import { getCurrentUser } from "@stores/auth.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { EVERYONE_TOKEN, HERE_TOKEN } from "@lib/mentions";
@@ -55,17 +56,19 @@ export type MentionAutocompleteComponent = InlineAutocompleteComponent;
 
 /**
  * Recency rank per user id for `channelId`: 0 is the most recent author of the
- * loaded history, higher is older. Users with no loaded message are absent.
+ * loaded history, higher is older. Users with no loaded message are absent, and
+ * so is the signed-in user, who keeps their alphabetical place.
  */
 function recentChatterRanks(channelId: number | undefined): ReadonlyMap<number, number> {
   const ranks = new Map<number, number>();
   if (channelId === undefined) return ranks;
   // getChannelMessages is oldest-first, so walk it backwards and keep each
   // author's first (most recent) sighting.
+  const selfId = getCurrentUser()?.id;
   const messages = getChannelMessages(channelId);
   for (let i = messages.length - 1; i >= 0; i--) {
     const userId = messages[i]!.user.id;
-    if (!ranks.has(userId)) ranks.set(userId, ranks.size);
+    if (userId !== selfId && !ranks.has(userId)) ranks.set(userId, ranks.size);
   }
   return ranks;
 }

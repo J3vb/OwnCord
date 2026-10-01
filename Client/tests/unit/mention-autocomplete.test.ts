@@ -126,6 +126,14 @@ describe("filterMentionSuggestions", () => {
     ]);
   });
 
+  it("does not rank the signed-in user as a recent chatter", () => {
+    seedMembers(["aaron", "alice"]);
+    authStore.setState((prev) => ({ ...prev, user: { ...prev.user!, id: 1, username: "aaron" } }));
+    // aaron (the signed-in user) spoke last; alice is the only other chatter.
+    setMessages(1, [historyRow(2, 1), historyRow(1, 2)], false);
+    expect(filterMentionSuggestions("a", 1).map((s) => s.token)).toEqual(["alice", "aaron"]);
+  });
+
   it("keeps prefix matches above a more recent substring chatter", () => {
     seedMembers(["bob", "abbot"]);
     setMessages(1, [historyRow(2, 2), historyRow(1, 1)], false);
