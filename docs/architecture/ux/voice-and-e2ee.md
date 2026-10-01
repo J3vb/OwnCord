@@ -288,7 +288,9 @@ trust action entirely (a blind accept is refused).
   behind the same call and turns the session's microphone off and on with
   the key, only while the user has it on.
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
-  plug/unplug and re-routes the active input/output without rejoining.
+  plug/unplug and re-routes the active input/output without rejoining. An
+  unplugged saved device falls back to the system default but stays the
+  saved pick, and the call switches back to it once it is listed again.
 - **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview
   of a **remote** participant's camera or screenshare in the voice channel
   sidebar (300 ms debounce, attached from `components/ChannelSidebar.ts`). There
