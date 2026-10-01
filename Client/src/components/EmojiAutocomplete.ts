@@ -80,11 +80,21 @@ function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
 }
 
 /**
+ * 0 when `q` is the primary keyword, 1 another whole keyword (underscores
+ * optional, so `thumbsup` is `thumbs_up`), 2 the start of one, 3 otherwise.
+ */
+function unicodeRank(words: readonly string[], q: string): number {
+  const exact = words.findIndex((w) => w === q || w.replaceAll("_", "") === q);
+  if (exact !== -1) return exact === 0 ? 0 : 1;
+  return words.some((w) => w.startsWith(q)) ? 2 : 3;
+}
+
+/**
  * Suggestions for `query`, in the order the popup lists them: custom emoji
  * first (prefix matches before substring), then unicode, alphabetical within
- * each group. Within unicode, an emoji with curated keywords (more than its
- * Unicode shortcode) ranks ahead of a shortcode-only one, so `:heart` still
- * offers ❤️ before the full set's `heart_suit` and friends.
+ * each group. Unicode emoji rank by how well a keyword matches: the query is
+ * the emoji's name, then another whole keyword (`:heart` finds ❤️ "red heart"
+ * before `heart_suit`), then the start of a keyword, then anywhere in one.
  *
  * A query shorter than MIN_EMOJI_QUERY yields nothing at all, so the composer
  * never opens a popup over a lone colon.
@@ -110,7 +120,6 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
     else customSubstring.push(entry);
   }
 
-  // Curated prefix, shortcode-only prefix, curated substring, shortcode-only substring.
   const unicode: EmojiSuggestion[][] = [[], [], [], []];
   const tone = skinTone();
   for (const group of emojiCatalog()?.groups ?? []) {
@@ -126,11 +135,7 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
         char,
         emoji: null,
       };
-      // "Prefix" means some whole keyword starts with the query, not just the
-      // primary one — typing ":fire" should rank 🔥 ("fire hot flame lit") above
-      // an emoji that merely contains "fire" mid-word.
-      const prefix = words.some((w) => w.startsWith(q) || w.replaceAll("_", "").startsWith(q));
-      unicode[(prefix ? 0 : 2) + (words.length > 1 ? 0 : 1)]?.push(entry);
+      unicode[unicodeRank(words, q)]?.push(entry);
     }
   }
 

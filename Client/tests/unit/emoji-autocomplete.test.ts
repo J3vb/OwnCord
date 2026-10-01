@@ -109,12 +109,20 @@ describe("filterEmojiSuggestions", () => {
     expect(filterEmojiSuggestions("astronaut").some((s) => s.insert === "🧑‍🚀")).toBe(true);
   });
 
-  it("ranks curated names ahead of shortcode-only matches", () => {
+  it("ranks a whole-keyword match ahead of a longer name that starts with it", () => {
     // The full set has more heart_* and love_* shortcodes than the popup shows.
-    expect(filterEmojiSuggestions("heart").some((s) => s.insert === "❤️")).toBe(true);
-    const love = filterEmojiSuggestions("love").map((s) => s.insert);
-    expect(love).toContain("❤️");
-    expect(love).not.toContain("🏩");
+    expect(filterEmojiSuggestions("heart").map((s) => s.insert)).toContain("❤️");
+    expect(filterEmojiSuggestions("love").map((s) => s.insert)).toContain("❤️");
+  });
+
+  it("puts the emoji named exactly by the query first", () => {
+    const first = (q: string): string | undefined =>
+      filterEmojiSuggestions(q).find((s) => s.kind === "unicode")?.insert;
+    expect(first("eyes")).toBe("👀");
+    expect(first("winking_face")).toBe("😉");
+    expect(first("fire")).toBe("🔥");
+    expect(first("mango")).toBe("🥭");
+    expect(first("thumbsup")).toBe("👍");
   });
 
   it("inserts the remembered skin tone", () => {
