@@ -60,7 +60,7 @@ export function createUserUpdateCredentialSaver(
  * `.status` / `.code` exactly as it can for a typed password.
  *
  * Throws `httpError`'s error for a non-2xx response: an `ApiClientError`, or a
- * `TransportError` for the tunnel's bare 502. Throws a plain `Error` for a
+ * `TransportError` for the tunnel's bare 502 (a refused certificate). Throws a plain `Error` for a
  * 2xx whose body does not parse: returning an empty object there would leave
  * both the token and the 2FA branch unentered and strand the caller with no
  * result and no error.
