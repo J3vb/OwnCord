@@ -951,6 +951,41 @@ describe("DeviceManager", () => {
       expect(onError).not.toHaveBeenCalled();
     });
 
+    it("records an unplug while the room is connecting and restores the device on replug once connected", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      mockRoom.state = "connecting";
+
+      inputs = [{ deviceId: "built-in-mic" }];
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+
+      mockRoom.state = "connected";
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset-mic")).toEqual([["audioinput", "headset-mic"]]);
+    });
+
+    it("falls back with the toast on an unplug while the signal reconnects, and restores on replug", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+      mockRoom.state = "signalReconnecting";
+
+      inputs = [{ deviceId: "built-in-mic" }];
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(onToast).toHaveBeenCalledWith("Audio device disconnected — switched to default");
+
+      mockRoom.state = "connected";
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset-mic")).toEqual([["audioinput", "headset-mic"]]);
+    });
+
     it("the room swapped mid-await: no switch is applied to the old room", async () => {
       prefs.set("audioInputDevice", "headset-mic");
       await fireDeviceChange();
