@@ -76,7 +76,7 @@ func handleCallDeclineV2(ctx context.Context, cmd Command, info ClientInfo, deps
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many call actions"}}
 	}
 
-	targets, err := d.DMSvc.RingTargets(ctx, info.UserID, declineCmd.ChannelID)
+	targets, err := d.DMSvc.DeclineTargets(ctx, info.UserID, declineCmd.ChannelID)
 	if err != nil {
 		return serviceErrorToResult(err)
 	}

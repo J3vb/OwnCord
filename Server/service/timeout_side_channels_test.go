@@ -7,11 +7,10 @@ import (
 	"time"
 )
 
-// A timeout refuses every write that publishes the actor's text or a
-// notification to other users, not only sends, reactions and voice: naming a
-// group DM, ringing a DM, pinning in one, and a custom status line all reach
-// other members too. Each is set up before the timeout lands so only the
-// timeout can be what refuses it.
+// Beyond sends, edits, reactions and voice joins, a timeout refuses creating
+// a new DM or group DM, renaming a group DM, ringing a DM call, pinning in a
+// DM, and setting a custom status. Each is set up before the timeout lands so
+// only the timeout can be what refuses it.
 func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
@@ -51,6 +50,9 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	}
 	if _, err := dms.RingTargets(ctx, fixtureMember, direct.Channel.ID); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("RingTargets while timed out = %v, want ErrTimedOut", err)
+	}
+	if targets, err := dms.DeclineTargets(ctx, fixtureMember, group.Channel.ID); err != nil || len(targets) != 2 {
+		t.Errorf("DeclineTargets while timed out = %v, %v; want the two other members", targets, err)
 	}
 	if err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("DM pin while timed out = %v, want ErrTimedOut", err)

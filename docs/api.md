@@ -2502,10 +2502,11 @@ and unsequenced.
 
 ### POST /api/v1/moderation/users/{id}/timeout
 
-Time-box a restriction: the target cannot send messages, add reactions,
-join voice, start a new DM, create or rename a group DM, ring a DM, pin in a
-DM, or set a custom status while it is active (`403 TIMED_OUT`). Reopening an
-existing DM still works. **Auth:** Required.
+Time-box a restriction: the target cannot send or edit messages, add
+reactions, join voice, start a new DM, create or rename a group DM, ring a DM
+call, pin in a DM, or set a custom status while it is active
+(`403 TIMED_OUT`). Reopening an existing DM and declining a call still work.
+**Auth:** Required.
 **Permission:** `MODERATE_MEMBERS`.
 
 #### Request

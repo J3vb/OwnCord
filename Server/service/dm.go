@@ -491,7 +491,8 @@ func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (i
 }
 
 // RingTargets returns the other participants of a DM the caller is in — the
-// people a call_ring or call_decline is addressed to.
+// people a call_ring is addressed to. A timed-out caller is refused, as for a
+// send.
 //
 // Ringing carries no state: a "call" in a DM *is* somebody being present in
 // that DM's voice channel, and the ring is a nudge to come look. That is why
@@ -499,6 +500,16 @@ func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (i
 // there is nothing to persist that presence does not already say, and a
 // persisted call would be one more thing that can be left dangling by a crash.
 func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
+	return s.callTargets(ctx, userID, channelID, true)
+}
+
+// DeclineTargets is RingTargets for a call_decline. A decline carries no text
+// and only stops the ringer's client ringing, so a timeout does not refuse it.
+func (s *DMService) DeclineTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
+	return s.callTargets(ctx, userID, channelID, false)
+}
+
+func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ring bool) ([]int64, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
@@ -516,10 +527,10 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
 		return nil, err
 	}
-	// Ringing (and declining) notifies the other participants, which a
-	// timeout refuses like a send.
-	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-		return nil, err
+	if ring {
+		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+			return nil, err
+		}
 	}
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)

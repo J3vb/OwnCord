@@ -1955,7 +1955,7 @@ dangling, in exchange for information the presence already carries.
 ```
 
 Only a participant of the DM may ring it (`FORBIDDEN` otherwise), and not
-while timed out (`TIMED_OUT`, which also refuses `call_decline`). Rate limited
+while timed out (`TIMED_OUT`; `call_decline` still works). Rate limited
 to one ring every 3 seconds per user — per _user_, not per channel, because the
 abuse it prevents is spamming somebody with call banners.
 

@@ -201,11 +201,12 @@ func denial(err error) error {
 	}
 }
 
-// requireNotTimedOut is CanSendMessage's timeout clause for a write that
-// publishes to other users outside a message send and has no channel
-// predicate of its own: naming a group DM, ringing a DM, pinning in one, a
-// custom status line. TimedOut is resolved exactly as for a send
-// (administrators exempt) and refused with the same ErrTimedOut.
+// requireNotTimedOut is CanSendMessage's timeout clause for the writes a
+// timeout refuses beyond sends, edits, reactions and voice joins, which have
+// no channel predicate of their own: creating a new DM or group DM, renaming
+// a group DM, ringing a DM call, pinning in a DM, and setting a custom status.
+// TimedOut is resolved exactly as for a send (administrators exempt) and
+// refused with the same ErrTimedOut.
 func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID int64) error {
 	sub, err := perms.Subject(ctx, userID, 0)
 	if err != nil {
