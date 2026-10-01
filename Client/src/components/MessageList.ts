@@ -735,8 +735,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * Fast path for a store update that changes a few rows (P4-01): diff the new
    * items against the rendered ones by key and touch only what changed — a
    * reaction, edit, delete or send confirmation re-renders its own row, plus a
-   * neighbour whose grouping changed and any loaded reply whose parent
-   * changed. Rows dropped from the head, rows appended at the tail (a
+   * neighbour whose grouping changed and any loaded reply whose quoted
+   * parent arrived, left or changed text, author or deletion. Rows dropped from the head, rows appended at the tail (a
    * revisit's refetched page, R1) and the NEW divider landing (R2) are
    * inserted or removed one by one. Every other row keeps its DOM node, so a
    * playing video, a revealed spoiler or focus survive. A row outside the
