@@ -175,18 +175,16 @@ type MessageService struct {
 	// tests swap it for an inline runner via RunBackgroundInlineForTest so they
 	// can read the counts deterministically right after a send.
 	bg func(fn func())
-	// online reports whether userID currently holds a live connection. It is
-	// wired by the ws layer (Hub.IsUserConnected) after both are constructed,
-	// so @here can apply the same "no live connection is offline, whatever the
-	// row stores" rule the read path uses (ws/serve_ready.go
-	// presentableMembers) instead of trusting users.status alone — that column
+	// liveStatus returns userID's live status, "" when they hold no live
+	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
+	// constructed, so @here reads the same status the member list overlays
+	// (ws/serve_ready.go presentableMembers) instead of users.status, which
 	// keeps a *chosen* idle/dnd/invisible across a disconnect by design
-	// (StampDisconnect only ever rewrites "online" -> "offline"), so a
-	// disconnected idle/dnd reader would otherwise still collect an @here
-	// badge. nil (the zero value, e.g. in tests and any caller with no hub)
-	// means "no live-connection information available" and applies no extra
-	// narrowing, preserving prior behavior.
-	online func(userID int64) bool
+	// (StampDisconnect only ever rewrites "online" -> "offline") and lags a
+	// connect by up to one batched stamp flush (StampFlushInterval). nil (the
+	// zero value, e.g. in tests and any caller with no hub) falls back to the
+	// row.
+	liveStatus func(userID int64) string
 	// messageRequests is B5-6's first-contact gate and delivery-audience
 	// filter (service/message_request.go), wired by service.New(). nil (the
 	// zero value — every test and any caller built via NewMessageService
@@ -224,12 +222,12 @@ func (s *MessageService) SetMessageRequests(mr *MessageRequestService) {
 	s.messageRequests = mr
 }
 
-// SetOnlineChecker wires the live-connection predicate @here's offline
-// narrowing consults in addition to users.status. Passing nil clears it. Safe
-// to call once at startup (the ws layer, after constructing both the Hub and
-// the Services) or from a test.
-func (s *MessageService) SetOnlineChecker(online func(userID int64) bool) {
-	s.online = online
+// SetLiveStatusLookup wires the live-status lookup @here's offline narrowing
+// reads in place of users.status. Passing nil clears it. Safe to call once at
+// startup (the ws layer, after constructing both the Hub and the Services) or
+// from a test.
+func (s *MessageService) SetLiveStatusLookup(liveStatus func(userID int64) string) {
+	s.liveStatus = liveStatus
 }
 
 // SetPushNotifier installs the Web Push dispatch hook. The composition root

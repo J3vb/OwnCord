@@ -177,15 +177,17 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgI
 			// thing "appear offline" is meant to stop. Collapsing first makes
 			// @here agree with what everyone else can see of that reader.
 			//
-			// That column check alone is not enough: users.status keeps a
-			// *chosen* idle/dnd across a disconnect by design
-			// (StampDisconnect only ever rewrites "online" -> "offline"),
-			// so a signed-out reader whose last status was idle/dnd would still
-			// read as non-offline here. s.online (nil-safe) applies the read
-			// path's "no live connection is offline, whatever the row says"
-			// rule (ws/serve_ready.go presentableMembers) to close that gap.
-			if set.HereOnly && (db.BroadcastStatus(r.Status) == db.StatusOffline ||
-				(s.online != nil && !s.online(r.UserID))) {
+			// The live status, when wired, stands in for the column: the row
+			// keeps a *chosen* idle/dnd across a disconnect by design
+			// (StampDisconnect only ever rewrites "online" -> "offline") and
+			// lags a connect by up to one batched stamp flush. A reader with
+			// no live connection ("") is offline whatever the row says, the
+			// read path's rule (ws/serve_ready.go presentableMembers).
+			status := r.Status
+			if s.liveStatus != nil {
+				status = s.liveStatus(r.UserID)
+			}
+			if set.HereOnly && (status == "" || db.BroadcastStatus(status) == db.StatusOffline) {
 				continue
 			}
 			recipients[r.UserID] = struct{}{}

@@ -245,7 +245,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// (users.status keeps their last *chosen* value across a disconnect)
 		// from one who is actually still connected — the same live-connection
 		// rule presentableMembers applies to the members array.
-		svc.Messages.SetOnlineChecker(h.IsUserConnected)
+		svc.Messages.SetLiveStatusLookup(h.LiveStatus)
 		// So every DM payload DMService builds (GET/POST /dms, POST
 		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
 		// applies the same live-connection rule instead of only the ready

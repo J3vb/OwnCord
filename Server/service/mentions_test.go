@@ -345,7 +345,12 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 		t.Fatalf("UpdateUserStatus(dnd): %v", err)
 	}
 	// bob has no live connection.
-	svc.SetOnlineChecker(func(userID int64) bool { return userID != 2 })
+	svc.SetLiveStatusLookup(func(userID int64) string {
+		if userID == 2 {
+			return ""
+		}
+		return db.StatusOnline
+	})
 
 	sendAs(t, svc, 4, "@here quick question")
 	if got := mentionCount(t, database, 2); got != 0 {
@@ -356,6 +361,24 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 	sendAs(t, svc, 4, "@everyone meeting now")
 	if got := mentionCount(t, database, 2); got != 1 {
 		t.Errorf("disconnected dnd bob @everyone mention_count = %d, want 1", got)
+	}
+}
+
+// TestSendMessage_HereReachesConnectedReaderBeforeStampFlush locks P5-S07's
+// batched connect stamp against @here: a reader whose connection is live but
+// whose stamp has not flushed (users.status still "offline", as after the
+// boot-time ResetAllUserStatuses) is present, so @here counts them.
+func TestSendMessage_HereReachesConnectedReaderBeforeStampFlush(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusOffline); err != nil {
+		t.Fatalf("UpdateUserStatus(offline): %v", err)
+	}
+	svc.SetLiveStatusLookup(func(int64) string { return db.StatusOnline })
+
+	sendAs(t, svc, 4, "@here quick question")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("connected bob with an unflushed stamp mention_count = %d, want 1", got)
 	}
 }
 

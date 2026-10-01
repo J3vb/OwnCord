@@ -530,8 +530,9 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 //
 // With a batch installed the write is queued and lands on the next flush, at
 // most StampFlushInterval later. The member list does not wait on it (the hub
-// overlays each connection's live status, ws presentableMembers); a reader of
-// the row itself, such as @here, may see the pre-connect value for that long.
+// overlays each connection's live status, ws presentableMembers, and @here
+// and DM payloads read the same live status); a reader of the row itself may
+// see the pre-connect value for that long.
 // The SQL re-derives the status from the column at write time, which keeps
 // a chosen idle/dnd/invisible committed meanwhile, but it would turn a legacy
 // "offline" choice into online, so a committed presence_update drops the
