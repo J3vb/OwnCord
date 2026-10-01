@@ -12,8 +12,9 @@ import (
 // flush, which still runs before database.Close, writes the stamps queued
 // before it runs. The hub's close step does not wait for the readPump defers
 // that queue each connection's disconnect stamp, so the step first stamps
-// every user the hub still holds disconnected (Hub.ConnectedUserIDs): a
-// graceful stop leaves them offline with last_seen at stop time.
+// every user the hub held when its stop began disconnected
+// (Hub.StoppedUserIDs): a graceful stop leaves them offline with last_seen at
+// stop time.
 func (a *App) installConnWrites(services *service.Services) {
 	if services == nil || services.Users == nil || services.Sessions == nil {
 		return
@@ -21,7 +22,7 @@ func (a *App) installConnWrites(services *service.Services) {
 	w := services.BatchConnWrites()
 	var connected func() []int64
 	if a.hub != nil {
-		connected = a.hub.ConnectedUserIDs
+		connected = a.hub.StoppedUserIDs
 	}
 	a.onClose("conn-writes", startConnWrites(a.bgCtx, w, services.Users, connected))
 }

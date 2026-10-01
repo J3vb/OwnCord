@@ -36,10 +36,13 @@ type Hub struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	gracefulOnce sync.Once
-	livekit      *LiveKitClient
-	lkProcess    *LiveKitProcess
-	registry     *HandlerRegistry
-	permChecker  *permissions.Checker
+	// stopUsers is every user held when GracefulStopContext began, plus any
+	// it closed. Guarded by mu. See StoppedUserIDs.
+	stopUsers   []int64
+	livekit     *LiveKitClient
+	lkProcess   *LiveKitProcess
+	registry    *HandlerRegistry
+	permChecker *permissions.Checker
 	// perms is the cached permission service (service.PermissionService). Nil in
 	// bare test hubs constructed without Services; every use falls back to the
 	// live permChecker path then. Revocation stays prompt because each mutation
@@ -365,6 +368,12 @@ func (h *Hub) GracefulStop() {
 // first call's ctx and reason are used).
 func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 	h.gracefulOnce.Do(func() {
+		h.mu.Lock()
+		for uid := range h.clients {
+			h.stopUsers = append(h.stopUsers, uid)
+		}
+		h.mu.Unlock()
+
 		// The notice window matters only when someone is connected to hear
 		// it — an idle server (and every early-return startup path) skips
 		// straight to teardown.
@@ -385,7 +394,8 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 
 		// Close all remaining client connections.
 		h.mu.Lock()
-		for _, c := range h.clients {
+		for uid, c := range h.clients {
+			h.stopUsers = append(h.stopUsers, uid)
 			c.closeSend()
 		}
 		h.mu.Unlock()

@@ -28,15 +28,12 @@ func (h *Hub) LiveStatus(userID int64) string {
 	return c.livePresence().status
 }
 
-// ConnectedUserIDs returns the users the hub still holds a connection for.
-// The conn-writes close step stamps each one disconnected, since a stopped
-// hub's readPump defers run too late for the final flush (P5-S07).
-func (h *Hub) ConnectedUserIDs() []int64 {
+// StoppedUserIDs returns every user the hub held when GracefulStopContext
+// began, plus any it closed; nil before. The conn-writes close step stamps
+// each one disconnected, since a stopped hub's readPump defers, which
+// unregister before they stamp, run too late for the final flush (P5-S07).
+func (h *Hub) StoppedUserIDs() []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	out := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		out = append(out, uid)
-	}
-	return out
+	return append([]int64(nil), h.stopUsers...)
 }
