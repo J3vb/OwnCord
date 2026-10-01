@@ -336,8 +336,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * sends and would anchor to the wrong message once reconciled.
    *
    * Also skips latching while the window is shorter than unreadOnOpen: the
-   * initial mount can render one live message (via the append path) before
-   * the async history fetch resolves, and firstUnreadIndex's
+   * initial mount can render one live message before the async history
+   * fetch resolves, and firstUnreadIndex's
    * `Math.max(0, ...)` clamp turns that 1-row window into index 0 just like a
    * real boundary would. Latching onto that message would glue the divider
    * to whatever happened to arrive first instead of the actual unread
