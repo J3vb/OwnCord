@@ -476,8 +476,8 @@ test("revisiting a long channel with unread messages trims, appends and marks NE
   await expect(alice.getByText(text(118), { exact: true })).toBeVisible();
   expect(await removals()).toBe(0);
 
-  // Scrolling up brings the older history back, checked against the server:
-  // the message deleted while away never shows.
+  // Scrolling up fetches the older history again: the message deleted while
+  // away never shows.
   const scroller = alice.locator(".messages-container");
   await expect(async () => {
     await scroller.evaluate((el) => (el.scrollTop = 0));

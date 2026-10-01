@@ -92,7 +92,6 @@ describe("INITIAL_STATE", () => {
     expect(Object.keys(INITIAL_STATE).toSorted()).toEqual([
       "detachedChannels",
       "hasMore",
-      "heldHistory",
       "historyLoadState",
       "loadWatermark",
       "loadedChannels",

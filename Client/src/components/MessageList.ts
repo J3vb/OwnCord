@@ -737,20 +737,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * reaction, edit, delete or send confirmation re-renders its own row, plus a
    * neighbour whose grouping changed and any loaded reply whose parent
    * changed. Rows dropped from the head, rows appended at the tail (a
-   * revisit's refetched page, R1), an older page prepended as the reader
-   * scrolls up (with the held rows it revalidated, R3) and the NEW divider
-   * landing (R2) are inserted or removed one by one. Every other row keeps its
-   * DOM node, so a playing video, a revealed spoiler or focus survive. A row
-   * outside the rendered window only moves its height entry.
+   * revisit's refetched page, R1) and the NEW divider landing (R2) are
+   * inserted or removed one by one. Every other row keeps its DOM node, so a
+   * playing video, a revealed spoiler or focus survive. A row outside the
+   * rendered window only moves its height entry.
    *
    * Returns false, for renderAll to rebuild, when there is nothing rendered to
-   * keep or rows were reordered.
+   * keep, rows were reordered, or a message was inserted above every row that
+   * stays (a history prepend, whose reading position renderAll keeps).
    *
    * The Fenwick tree is re-seeded from the height cache, as for any rebuild,
-   * and the topmost visible row that stays keeps its offset in the viewport.
-   * The window also covers the overscan above that row, so the scroll that
-   * follows does not rebuild it. The renderWindow oscillation guard is not
-   * consumed — this path never rebuilds.
+   * and the topmost visible message row that stays keeps its offset in the
+   * viewport. The renderWindow oscillation guard is not consumed — this path
+   * never rebuilds.
    */
   function patchRows(): boolean {
     if (root === null || contentContainer === null || tree === null) return false;
@@ -765,29 +764,24 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const nextIndex = new Map(nextKeys.map((k, i) => [k, i]));
     if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
 
-    // The rows that stay keep their order, and at least one message stays.
+    // The rows that stay keep their order, and no message lands above every
+    // message that stays (a history prepend, left to renderAll).
     let last = -1;
     let anchored = false;
-    for (const [j, key] of nextKeys.entries()) {
-      const i = prevIndex.get(key);
-      if (i === undefined) continue;
+    for (const [j, item] of nextItems.entries()) {
+      const i = prevIndex.get(nextKeys[j]!);
+      if (i === undefined) {
+        if (!anchored && item.kind === "message") return false;
+        continue;
+      }
       if (i < last) return false;
       last = i;
-      anchored ||= nextItems[j]!.kind === "message";
+      anchored ||= item.kind === "message";
     }
     if (!anchored) return false;
 
-    const atBottom = isNearBottom();
-    // Record the rendered rows' heights under their current keys before the
-    // items change, and the topmost visible row that stays as the anchor.
-    measureRendered();
-    let anchor = offsetToIndex(root.scrollTop);
-    while (anchor < prevItems.length && !nextIndex.has(prevKeys[anchor]!)) anchor++;
-    const anchorKey = prevKeys[anchor];
-    const anchorOffset = root.scrollTop - offsetBefore(anchor);
-
-    // The new window spans what stays of the old one and the overscan above
-    // the anchor, and grows with the tail when it was at the tail.
+    // The new window spans what stays of the old one, grows with the tail when
+    // it was at the tail, and keeps its top when it was at the top.
     let start = -1;
     let end = -1;
     for (let i = renderedStart; i < renderedEnd; i++) {
@@ -797,11 +791,24 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       end = j + 1;
     }
     if (start === -1) return false;
-    if (anchorKey !== undefined) {
-      start = Math.min(start, Math.max(0, nextIndex.get(anchorKey)! - OVERSCAN));
-    }
+    if (renderedStart === 0) start = 0;
     if (renderedEnd === prevItems.length) end = nextItems.length;
     if (end - start > MAX_INCREMENTAL_WINDOW) return false;
+
+    const atBottom = isNearBottom();
+    // Record the rendered rows' heights under their current keys before the
+    // items change, and the topmost visible message row that stays as the
+    // anchor: a divider is no anchor, since the NEW line can move.
+    measureRendered();
+    let anchor = offsetToIndex(root.scrollTop);
+    while (
+      anchor < prevItems.length &&
+      (prevItems[anchor]!.kind !== "message" || !nextIndex.has(prevKeys[anchor]!))
+    ) {
+      anchor++;
+    }
+    const anchorKey = prevKeys[anchor];
+    const anchorOffset = root.scrollTop - offsetBefore(anchor);
 
     // Messages whose object changed, left or arrived: a reply quoting one
     // re-renders its quote (renderReplyRef reads the parent from allMessages).

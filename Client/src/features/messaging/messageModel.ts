@@ -104,14 +104,6 @@ export interface MessagesState {
    * test fixtures need not restate it.
    */
   readonly loadWatermark?: ReadonlyMap<number, number>;
-  /**
-   * channelId -> loaded "sent" rows older than the window, oldest first, that
-   * a revisit's refetched page pushed out of it (P4-01 R3). They may carry an
-   * edit or delete missed while away, so they are never shown: the next older
-   * page fetched as the reader scrolls up revalidates them, keeping each row
-   * it left unchanged as the same object. Optional like loadWatermark.
-   */
-  readonly heldHistory?: ReadonlyMap<number, readonly Message[]>;
 }
 
 // -----------------------------------------------------------------------------
@@ -177,5 +169,4 @@ export const INITIAL_STATE: MessagesState = {
   historyLoadState: new Map(),
   detachedChannels: new Set(),
   loadWatermark: new Map(),
-  heldHistory: new Map(),
 };

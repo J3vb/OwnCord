@@ -284,39 +284,3 @@ describe("reducePrependMessages", () => {
     expect(ids(next).at(-1)).toBe(100 + MAX_MESSAGES_PER_CHANNEL - 2);
   });
 });
-
-// R3 (N1 option b): rows a refetched page pushes out of the window are held
-// back, never shown, until a page covering them is fetched again.
-const held = (s: MessagesState): number[] => (s.heldHistory?.get(1) ?? []).map((m) => m.id);
-const loaded = (): MessagesState =>
-  reduceSetChannelLoading(state(Array.from({ length: 100 }, (_, i) => row({ id: i + 1 }))), 1);
-
-describe("held history", () => {
-  it("holds the loaded rows older than an overlapping page", () => {
-    const next = reduceSetMessages(loaded(), 1, page(110, 61), true);
-    expect(ids(next)[0]).toBe(61);
-    expect(held(next)).toEqual(Array.from({ length: 60 }, (_, i) => i + 1));
-  });
-
-  it("holds nothing when the page is the whole channel or empty", () => {
-    expect(held(reduceSetMessages(loaded(), 1, page(110, 61), false))).toEqual([]);
-    expect(held(reduceSetMessages(loaded(), 1, [], false))).toEqual([]);
-  });
-
-  it("forgets held rows when a jump or a clear replaces the window", () => {
-    const holding = reduceSetMessages(loaded(), 1, page(110, 61), true);
-    expect(
-      held(reduceSetAroundMessages(holding, 1, page(30, 20).toReversed(), true, true)),
-    ).toEqual([]);
-    expect(held(reduceClearChannelContent(holding, 1))).toEqual([]);
-  });
-
-  it("reveals held rows only through a page that covers them, keeping unchanged objects", () => {
-    const holding = reduceSetMessages(loaded(), 1, page(110, 61), true);
-    const before = holding.heldHistory!.get(1)!;
-    const next = reducePrependMessages(holding, 1, page(60, 11), true);
-    expect(ids(next)[0]).toBe(11);
-    expect(next.messagesByChannel.get(1)![0]).toBe(before.find((m) => m.id === 11));
-    expect(held(next)).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
-  });
-});
