@@ -6,9 +6,7 @@
 
 import { clearChildren, createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { markdownToPlainText } from "@lib/markdown";
-import { resolveDisplayName } from "@lib/avatar";
+import { createModal } from "@lib/modalFactory";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -136,9 +134,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
   let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
-  // The open delete-confirm dialog, if any. Scoped to the mounted channel:
-  // the modal carries channelAbort.signal, so a switch or destroy closes it.
-  let deleteConfirm: ModalInstance | null = null;
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
@@ -268,7 +263,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   }
 
   function destroyChannel(): void {
-    deleteConfirm = null;
     // The reaction picker is a body-mounted overlay keyed to a message in
     // this channel — every other teardown path already routes through here,
     // so this is the one choke point to close it before the channel it was
@@ -763,7 +757,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      *  and the backdrop cancel, focus returns to the opener. Tied to the
      *  mounted channel's signal, so a switch or destroy closes it. */
     function openDeleteConfirm(msgId: number): void {
-      const msg = getChannelMessages(channelId).find((m) => m.id === msgId);
       const promptOwner = new Disposable();
       const titleId = `msg-delete-title-${msgId}`;
       const content = createElement("div");
@@ -773,25 +766,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       body.appendChild(
         createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
       );
-      if (msg !== undefined) {
-        const preview = createElement("div", {
-          class: "modal-danger-text delete-confirm-preview",
-        });
-        preview.appendChild(
-          createElement(
-            "strong",
-            {},
-            resolveDisplayName({
-              username: msg.user.username,
-              displayName: msg.user.display_name ?? null,
-            }),
-          ),
-        );
-        const text = createElement("div");
-        setText(text, markdownToPlainText(msg.content, messagingText("spoiler.revealed")));
-        preview.appendChild(text);
-        body.appendChild(preview);
-      }
       const footer = createElement("div", { class: "modal-footer" });
       const cancel = createElement(
         "button",
@@ -806,7 +780,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       footer.append(cancel, confirm);
       content.append(header, body, footer);
 
-      deleteConfirm = createModal({
+      const modal = createModal({
         content,
         ariaLabelledBy: titleId,
         overlayAttrs: { "data-testid": "msg-delete-modal" },
@@ -814,13 +788,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // The modal owns its own listeners; drop this prompt's with it.
         onClose: () => promptOwner.destroy(),
       });
-      cancel.addEventListener("click", () => deleteConfirm?.close(), {
-        signal: promptOwner.signal,
-      });
+      cancel.addEventListener("click", () => modal.close(), { signal: promptOwner.signal });
       confirm.addEventListener(
         "click",
         () => {
-          deleteConfirm?.close();
+          modal.close();
           sendDelete(msgId);
         },
         { signal: promptOwner.signal },
@@ -877,7 +849,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       onDeleteClick: (msgId: number, shiftKey: boolean) => {
         // Shift-click skips the prompt, as Discord's delete confirm does
-        // (P4-12). A plain click opens a confirm with the message preview.
+        // (P4-12). A plain click opens a confirm.
         if (!shiftKey) {
           openDeleteConfirm(msgId);
           return;

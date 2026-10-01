@@ -1321,19 +1321,3 @@ ul.md-list-nested {
 .typing-dots span:nth-child(3) {
   animation-delay: 0.4s;
 }
-
-/* P4-12: the message preview inside the delete-confirm dialog. A left rule
-   marks it as a quotation of the message being removed (Discord's shape). */
-.delete-confirm-preview {
-  border-left: 4px solid var(--border-strong);
-  padding-left: 8px;
-  margin-top: 8px;
-}
-.delete-confirm-preview strong {
-  color: var(--text-normal);
-}
-.delete-confirm-preview div {
-  color: var(--text-muted);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}

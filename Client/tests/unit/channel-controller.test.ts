@@ -686,9 +686,9 @@ describe("createChannelController", () => {
       return document.querySelector("[data-testid='msg-delete-cancel']") as HTMLButtonElement;
     }
 
-    it("opens a dialog with a preview and sends nothing on the first click", () => {
+    it("opens a dialog and sends nothing on the first click", () => {
       mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "hello **world**", user: { id: 2, username: "Bob" } },
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
       ]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
@@ -697,9 +697,6 @@ describe("createChannelController", () => {
       capturedMessageListOpts!.onDeleteClick(5, false);
 
       expect(deleteModal()).not.toBeNull();
-      const preview = deleteModal()!.querySelector(".delete-confirm-preview");
-      expect(preview?.textContent).toContain("hello world");
-      expect(deleteModal()!.textContent).toContain("Bob");
       expect(
         (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
           ([f]) => (f as { type: string }).type === "chat_delete",
