@@ -128,7 +128,7 @@ function buildMaskedLink(
   // origin, which is not something a message author gets to link to.
   if (!/^https?:\/\//i.test(node.url) || !isSafeUrl(node.url)) return null;
   const link = createElement("a", {
-    class: "msg-link",
+    class: "msg-link masked",
     href: node.url,
     title: node.url,
     target: "_blank",
@@ -377,9 +377,11 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
 
 /** Elements whose text is never mention-highlighted at render time, so the
  *  mention resync must leave them alone: code spans/blocks, existing pills and
- *  chips, and link anchors (whose text may be a bare URL containing "@"). */
+ *  chips, and autolinked URLs (whose text is the URL itself, which may contain
+ *  an `/@token` path). A masked `[text](url)` link does get mentions rendered
+ *  inside it, so `.masked` links stay transparent. */
 const MENTION_OPAQUE_SELECTOR =
-  "code, .msg-codeblock, .mention, .msg-link, .channel-mention, .message-link-chip";
+  "code, .msg-codeblock, .mention, .channel-mention, .message-link-chip, .msg-link:not(.masked)";
 
 /** Whether a rebuilt pill is identical to the one already in the DOM. */
 function sameMention(a: HTMLElement, b: HTMLElement): boolean {
@@ -439,8 +441,11 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
     }
 
     const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
     for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
-      const textNode = n as Text;
+      textNodes.push(n as Text);
+    }
+    for (const textNode of textNodes) {
       if (textNode.nodeValue?.includes("@") !== true) continue;
       const parent = textNode.parentElement;
       if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) continue;

@@ -1278,6 +1278,70 @@ describe("MessageList", () => {
       expect(row2!.querySelector(".msg-text")!.textContent).toBe("hey @alice");
     });
 
+    it("wraps every newly-resolving @token across sibling prose nodes on a member join (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [
+        makeMessage({
+          id: 1,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "check @alice and **@carol** and [@dave](https://example.com)",
+        }),
+      ]);
+      msgList.mount(container);
+      const row = container.querySelector("[data-testid='message-1']")!;
+      expect(row.querySelectorAll(".mention").length).toBe(0);
+
+      // alice, carol and dave all become resolvable at once via a join.
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(10, {
+          id: 10,
+          username: "alice",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        next.set(11, {
+          id: 11,
+          username: "carol",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        next.set(12, {
+          id: 12,
+          username: "dave",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      const text = row.querySelector(".msg-text")!;
+      const mentions = [...text.querySelectorAll(".mention")].map((m) => m.textContent);
+      expect(mentions).toContain("@alice");
+      expect(mentions).toContain("@carol");
+      expect(mentions).toContain("@dave");
+      expect(text.querySelector("a.msg-link .mention")?.textContent).toBe("@dave");
+      // The prose keeps its full text; only the tokens became pills.
+      expect(text.textContent).toBe("check @alice and @carol and @dave");
+    });
+
     it("repaints a reply's quoted author on a rename without rebuilding either row", () => {
       membersStore.setState(() => ({
         members: new Map([
