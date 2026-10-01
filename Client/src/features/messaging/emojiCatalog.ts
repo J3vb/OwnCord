@@ -69,6 +69,8 @@ function parseCatalog(groups: typeof EMOJI_GROUPS): EmojiCatalog {
         keywords: words ? `${words} ${names}` : names,
       };
       for (let t = 0; t < SKIN_TONES.length; t++) byChar.set(withSkinTone(e, t), e);
+      const bare = char.replaceAll("\u{FE0F}", "");
+      if (!byChar.has(bare)) byChar.set(bare, e);
       return e;
     }),
   }));

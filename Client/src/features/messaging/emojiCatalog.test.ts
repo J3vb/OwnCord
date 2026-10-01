@@ -75,6 +75,12 @@ describe("loadEmojiCatalog", () => {
     expect(catalog.byChar.get("🧑🏿‍🤝‍🧑🏿")).toBe(entry("🧑‍🤝‍🧑"));
   });
 
+  it("finds an emoji stored without its presentation selector by older pickers", () => {
+    expect(catalog.byChar.get("\u{1F590}")).toBe(entry("🖐️"));
+    expect(catalog.byChar.get("\u{1F441}‍\u{1F5E8}")).toBe(entry("👁️‍🗨️"));
+    expect(catalog.byChar.get("\u{1F5E8}")).toBe(entry("🗨️"));
+  });
+
   it("fits every emoji and skin-tone variant under the server's reaction cap", () => {
     for (const char of catalog.byChar.keys()) {
       expect([...char].length).toBeLessThanOrEqual(MAX_REACTION_RUNES);
