@@ -4,9 +4,10 @@
 //! when the taskbar button is recreated); this draws it:
 //!
 //! - Windows: a taskbar overlay icon, the count up to 9 and "9+" above;
-//! - Linux and macOS: the launcher/dock count (Linux through the Unity
-//!   `LauncherEntry` D-Bus API, so KDE and Ubuntu's dock show it, stock GNOME
-//!   does not);
+//! - Linux: the launcher count, as a Unity `LauncherEntry` D-Bus signal sent
+//!   straight to the session bus, which KDE Plasma and Ubuntu's dock read;
+//!   stock GNOME shows none;
+//! - macOS: the dock count;
 //! - every platform: the tray tooltip, text from `text.rs`.
 //!
 //! It never touches the tray's menu or its status items.
@@ -17,6 +18,7 @@ use crate::{text, tray};
 
 /// What the overlay shows for `count`: nothing at 0, the digit up to 9, "9+"
 /// above.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 fn badge_label(count: u32) -> Option<String> {
     match count {
         0 => None,
@@ -95,21 +97,75 @@ fn render_overlay(label: &str) -> Vec<u8> {
     px
 }
 
+/// The Unity `LauncherEntry.Update` signal that sets the launcher count of
+/// `<desktop_name>.desktop`; a count of 0 hides it.
+#[cfg(target_os = "linux")]
+fn launcher_entry_update(desktop_name: &str, count: u32) -> dbus::Message {
+    use dbus::arg::{PropMap, RefArg, Variant};
+
+    let mut props = PropMap::new();
+    props.insert(
+        "count".into(),
+        Variant(Box::new(i64::from(count)) as Box<dyn RefArg>),
+    );
+    props.insert(
+        "count-visible".into(),
+        Variant(Box::new(count > 0) as Box<dyn RefArg>),
+    );
+    dbus::Message::new_signal("/", "com.canonical.Unity.LauncherEntry", "Update")
+        .expect("static signal names are valid")
+        .append2(format!("application://{desktop_name}.desktop"), props)
+}
+
+/// Send the launcher count over the session bus. The connection is kept for
+/// the app's lifetime: the docks drop an entry once its sender leaves the bus.
+#[cfg(target_os = "linux")]
+fn send_launcher_count(desktop_name: &str, count: u32) {
+    use dbus::blocking::Connection;
+    use std::sync::Mutex;
+
+    static SESSION: Mutex<Option<Connection>> = Mutex::new(None);
+    let mut session = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    if session.is_none() {
+        match Connection::new_session() {
+            Ok(conn) => *session = Some(conn),
+            Err(e) => {
+                log::debug!("[badge] no session bus for the launcher count: {e}");
+                return;
+            }
+        }
+    }
+    let Some(conn) = session.as_ref() else { return };
+    if conn
+        .channel()
+        .send(launcher_entry_update(desktop_name, count))
+        .is_err()
+    {
+        log::debug!("[badge] cannot send the launcher count");
+        *session = None;
+        return;
+    }
+    conn.channel().flush();
+}
+
 /// Show `count` on the taskbar button and in the tray tooltip; 0 clears both.
 /// A platform that cannot draw one part is logged and the rest still applies.
 #[tauri::command]
 pub fn set_unread_badge<R: Runtime>(app: tauri::AppHandle<R>, count: u32) {
+    #[cfg(any(windows, target_os = "macos"))]
     if let Some(window) = app.get_webview_window("main") {
         #[cfg(windows)]
         let shown = window.set_overlay_icon(badge_label(count).map(|label| {
             tauri::image::Image::new_owned(render_overlay(&label), OVERLAY_SIZE, OVERLAY_SIZE)
         }));
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
         let shown = window.set_badge_count(badge_label(count).map(|_| i64::from(count)));
         if let Err(e) = shown {
             log::warn!("[badge] cannot set the taskbar badge: {e}");
         }
     }
+    #[cfg(target_os = "linux")]
+    send_launcher_count(&app.package_info().name, count);
     if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
         if let Err(e) = tray.set_tooltip(Some(text::tray_tooltip(count))) {
             log::warn!("[badge] cannot set the tray tooltip: {e}");
@@ -126,6 +182,26 @@ mod tests {
         assert_eq!(badge_label(0), None);
         assert_eq!(badge_label(5), Some("5".to_string()));
         assert_eq!(badge_label(12), Some("9+".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn launcher_entry_update_sets_the_count_and_hides_it_at_zero() {
+        use dbus::arg::{prop_cast, PropMap};
+
+        for (count, visible) in [(0, false), (5, true), (12, true)] {
+            let msg = launcher_entry_update("OwnCord", count);
+            assert_eq!(msg.path().as_deref(), Some("/"));
+            assert_eq!(
+                msg.interface().as_deref(),
+                Some("com.canonical.Unity.LauncherEntry")
+            );
+            assert_eq!(msg.member().as_deref(), Some("Update"));
+            let (uri, props): (String, PropMap) = msg.read2().unwrap();
+            assert_eq!(uri, "application://OwnCord.desktop");
+            assert_eq!(prop_cast::<i64>(&props, "count"), Some(&i64::from(count)));
+            assert_eq!(prop_cast::<bool>(&props, "count-visible"), Some(&visible));
+        }
     }
 
     #[test]
