@@ -156,6 +156,7 @@ and only when it changes something a contributor or fork holder must do
 ### Under the hood
 
 - **The read-only connection pool is bigger, so reads queue less under a rush of logins.** `database.max_readers` still defaults to automatic, but the automatic size is now `max(8, 2× CPU count)` instead of `max(4, CPU count)` — a two-core server goes from 4 reader connections to 8. On a large server the default stays well under the existing 1–64 clamp. The write pool is unchanged (still exactly one connection). No user-visible change; fewer read stalls during a restart herd.
+- **The hourly cleanup of old replay events no longer pauses writes on a busy server.** It deleted every expired row in one statement, holding the single write connection for as long as it took; it now deletes in 5,000-row chunks and releases the writer between them. No user-visible change; no write stall at the top of the hour on a large instance.
 
 ## v2.0.1-beta.1
 

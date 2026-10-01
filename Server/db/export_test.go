@@ -6,6 +6,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
+// SetEventPruneStatementHookForTest installs (or, with nil, clears) the hook
+// PruneEventsOlderThan calls once per DELETE statement it issues. Exported for
+// db_test's batching test, which counts statements to prove a large backlog is
+// deleted in chunks rather than one unbounded DELETE; production code never
+// calls this.
+func SetEventPruneStatementHookForTest(fn func()) {
+	eventPruneStatementHookForTest = fn
+}
+
 // SetModerationActionPreInsertHookForTest installs (or, with nil, clears)
 // the barrier moderationActionPreInsertHook runs inside recordModerationAction's
 // transaction, after the rank check and before the insert. Exported for
