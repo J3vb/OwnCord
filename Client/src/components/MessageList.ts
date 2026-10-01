@@ -30,7 +30,7 @@ import {
   renderMessage,
 } from "./message-list/renderers";
 import { getUnreadOnOpen } from "@stores/channels.store";
-import { UNREAD_COUNT_CAP } from "@lib/formatting";
+import { UNREAD_COUNT_CAP, atEachMidnight, formatMessageTimestamp } from "@lib/formatting";
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
@@ -1196,6 +1196,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         },
       ),
     );
+
+    // "Today at …" becomes "Yesterday at …" when the local day turns, so the
+    // rendered rows' relative times are relabelled in place once a day; rows
+    // outside the window get fresh text when renderWindow builds them. Owned
+    // by disposable.signal: destroy() releases the pending timer.
+    atEachMidnight(disposable.signal, relabelRenderedTimes);
+  }
+
+  function relabelRenderedTimes(): void {
+    if (contentContainer === null || renderedStart < 0) return;
+    const children = contentContainer.children;
+    for (let i = 0; i < children.length; i++) {
+      const item = virtualItems[renderedStart + i];
+      if (item?.kind !== "message") continue;
+      const text = formatMessageTimestamp(item.message.timestamp);
+      for (const el of children[i]!.querySelectorAll(".msg-time, .msg-hover-time, .sm-time")) {
+        el.textContent = text;
+      }
+    }
   }
 
   function destroy(): void {
