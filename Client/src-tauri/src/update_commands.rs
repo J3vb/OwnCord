@@ -224,6 +224,82 @@ fn cannot_self_update(bundle: Option<&BundleType>) -> bool {
     matches!(bundle, Some(BundleType::Deb | BundleType::Rpm))
 }
 
+/// Whether the artifact a release offers is built for the given machine target
+/// (`{os}-{arch}` in the updater plugin's spelling, e.g. `windows-x86_64`).
+///
+/// The signature only proves the bytes came from OwnCord; it says nothing about
+/// which machine can run them. A signed file for another OS or processor
+/// therefore downloads and installs cleanly and then will not start, so the
+/// offered file name is checked against the running machine before anything is
+/// written. Fail closed: a name that does not name both an operating system and
+/// an architecture is refused, because every signed OwnCord artifact names both.
+fn artifact_matches_target(download_url: &str, machine_target: &str) -> bool {
+    let Some((machine_os, machine_arch)) = machine_target.split_once('-') else {
+        return false;
+    };
+
+    let filename = download_url
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("");
+
+    let tokens: Vec<String> = filename
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+
+    let mut seen_arch: Option<&'static str> = None;
+    let mut seen_os: Option<&'static str> = None;
+    for (index, token) in tokens.iter().enumerate() {
+        if seen_arch.is_none() {
+            let is_x86_64 =
+                token == "x86" && tokens.get(index + 1).map(String::as_str) == Some("64");
+            seen_arch = plugin_arch(if is_x86_64 { "x86_64" } else { token });
+        }
+        if seen_os.is_none() {
+            seen_os = plugin_os(token);
+        }
+    }
+
+    match (seen_arch, seen_os) {
+        (Some(arch), Some(os)) => arch == machine_arch && os == machine_os,
+        _ => false,
+    }
+}
+
+/// Wrap `artifact_matches_target` for the running machine.
+fn artifact_matches_this_machine(download_url: &str) -> bool {
+    tauri_plugin_updater::target().is_none_or(|t| artifact_matches_target(download_url, &t))
+}
+
+/// Map a file-name token to the updater plugin's architecture spelling.
+fn plugin_arch(token: &str) -> Option<&'static str> {
+    match token {
+        "x86_64" | "x64" | "amd64" => Some("x86_64"),
+        "aarch64" | "arm64" => Some("aarch64"),
+        "i686" | "i386" | "ia32" | "x86" => Some("i686"),
+        "armv7" | "arm" => Some("armv7"),
+        "riscv64" => Some("riscv64"),
+        _ => None,
+    }
+}
+
+/// Map a file-name token to the updater plugin's OS spelling. Bare `app` is
+/// deliberately absent: it appears in product names and `appimage` is handled
+/// separately, so mapping it would misread unrelated names.
+fn plugin_os(token: &str) -> Option<&'static str> {
+    match token {
+        "windows" | "win" | "nsis" | "msi" | "exe" => Some("windows"),
+        "linux" | "appimage" | "deb" | "rpm" => Some("linux"),
+        "darwin" | "macos" | "dmg" => Some("darwin"),
+        _ => None,
+    }
+}
+
 /// Check for a client update using the given server URL to build the endpoint
 /// dynamically. This is required because OwnCord is self-hosted and the
 /// server address varies per user.
@@ -240,12 +316,29 @@ pub async fn check_client_update(
         .map_err(|e| format!("update check failed: {e}"))?;
 
     match update {
-        Some(u) => Ok(UpdateCheckResult {
-            available: true,
-            version: Some(u.version.clone()),
-            body: Some(u.body.clone().unwrap_or_default()),
-            manual_upgrade: false,
-        }),
+        Some(u) if artifact_matches_this_machine(u.download_url.as_str()) => {
+            Ok(UpdateCheckResult {
+                available: true,
+                version: Some(u.version.clone()),
+                body: Some(u.body.clone().unwrap_or_default()),
+                manual_upgrade: false,
+            })
+        }
+        // An offered file built for another OS or processor is not an update
+        // this machine can take, so it must not raise the banner. The install
+        // path refuses it too; this keeps the two commands from disagreeing.
+        Some(u) => {
+            log::warn!(
+                "[update] ignoring version {}: offered artifact is not for this machine",
+                u.version
+            );
+            Ok(UpdateCheckResult {
+                available: false,
+                version: None,
+                body: None,
+                manual_upgrade: false,
+            })
+        }
         None => Ok(UpdateCheckResult {
             available: false,
             version: None,
@@ -268,7 +361,7 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
         .map_err(|e| format!("update check failed: {e}"))?;
 
     match update {
-        Some(u) => {
+        Some(u) if artifact_matches_this_machine(u.download_url.as_str()) => {
             // Accumulate downloaded bytes and emit progress to the webview.
             // A failed emit must never abort the install, hence `let _ =`.
             let progress_app = app.clone();
@@ -310,6 +403,13 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
             install_guard.installed();
             Ok(())
         }
+        // Refuse a signed artifact built for another OS or processor: its
+        // signature is valid, but installing it replaces this install with a
+        // binary that cannot start.
+        Some(u) => Err(format!(
+            "update refused: version {} is not built for this machine",
+            u.version
+        )),
         None => Err("no update available".into()),
     }
 }
@@ -551,6 +651,92 @@ mod tests {
     #[tokio::test]
     async fn update_signed_for_the_offered_version_is_accepted() {
         assert_eq!(download_offer("99.0.0", SIG_V99_0_0).await, Ok(()));
+    }
+
+    #[test]
+    fn artifact_target_check_accepts_the_running_machines_own_artifacts() {
+        // The actual release file names (Client/scripts/stage-release-assets.sh,
+        // Server/updater/assets.go clientAssetSuffixByTarget).
+        for (target, url) in [
+            (
+                "windows-x86_64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_x64-setup.nsis.zip",
+            ),
+            (
+                "windows-aarch64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_arm64-setup.nsis.zip",
+            ),
+            (
+                "linux-x86_64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_amd64.AppImage.tar.gz",
+            ),
+            (
+                "linux-aarch64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_aarch64.AppImage.tar.gz",
+            ),
+        ] {
+            assert!(
+                artifact_matches_target(url, target),
+                "{url} must be accepted on {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn artifact_target_check_refuses_another_platform_or_architecture() {
+        let x64_nsis = "https://releases.example.com/v1/OwnCord_1.0.0_x64-setup.nsis.zip";
+        let arm64_nsis = "https://releases.example.com/v1/OwnCord_1.0.0_arm64-setup.nsis.zip";
+        let x64_appimage = "https://releases.example.com/v1/OwnCord_1.0.0_amd64.AppImage.tar.gz";
+        let arm64_appimage =
+            "https://releases.example.com/v1/OwnCord_1.0.0_aarch64.AppImage.tar.gz";
+
+        // Wrong architecture, same OS.
+        assert!(!artifact_matches_target(x64_nsis, "windows-aarch64"));
+        assert!(!artifact_matches_target(arm64_nsis, "windows-x86_64"));
+        assert!(!artifact_matches_target(x64_appimage, "linux-aarch64"));
+        assert!(!artifact_matches_target(arm64_appimage, "linux-x86_64"));
+
+        // Wrong OS, same architecture.
+        assert!(!artifact_matches_target(x64_nsis, "linux-x86_64"));
+        assert!(!artifact_matches_target(x64_appimage, "windows-x86_64"));
+    }
+
+    #[test]
+    fn artifact_target_check_is_case_insensitive_and_ignores_url_suffixes() {
+        assert!(artifact_matches_target(
+            "https://example.com/OwnCord_1.0.0_AMD64.AppImage.tar.gz",
+            "linux-x86_64",
+        ));
+        assert!(artifact_matches_target(
+            "https://example.com/OwnCord_1.0.0_x64-setup.nsis.zip?token=abc123",
+            "windows-x86_64",
+        ));
+    }
+
+    #[test]
+    fn artifact_target_check_reads_the_canonical_x86_64_spelling() {
+        // The updater plugin spells the 64-bit x86 architecture `x86_64`
+        // (tauri_plugin_updater::target()), so a file carrying that whole
+        // spelling must not be misread as the 32-bit `i686` its `x86` prefix
+        // would otherwise tokenise to.
+        assert!(artifact_matches_target(
+            "https://releases.example.com/v1/OwnCord_1.0.0_x86_64-setup.nsis.zip",
+            "windows-x86_64",
+        ));
+        assert!(!artifact_matches_target(
+            "https://releases.example.com/v1/OwnCord_1.0.0_x86_64-setup.nsis.zip",
+            "windows-i686",
+        ));
+    }
+
+    #[test]
+    fn artifact_target_check_fails_closed_on_an_unrecognised_name() {
+        // No architecture in the name: refuse rather than guess, because every
+        // signed OwnCord artifact names its own.
+        assert!(!artifact_matches_target(
+            "https://example.com/OwnCord_1.0.0.zip",
+            "linux-x86_64",
+        ));
     }
 
     #[test]

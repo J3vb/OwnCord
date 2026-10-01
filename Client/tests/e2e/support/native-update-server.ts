@@ -58,17 +58,22 @@ export async function startNativeUpdateServer(
         res.end();
         return;
       }
+      // Name the artifact after the target it was built for, the way release
+      // assets are (Server/updater/assets.go clientAssetSuffixByTarget). The
+      // client refuses an artifact whose name does not name the running
+      // machine's OS and architecture, so a generic name would never install.
+      const artifact = `/artifact/${target!}`;
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
           version,
           notes: "Signed desktop test release",
-          platforms: { [target!]: { signature, url: `${origin}/test-update.nsis.zip` } },
+          platforms: { [target!]: { signature, url: `${origin}${artifact}` } },
         }),
       );
       return;
     }
-    if (path === "/test-update.nsis.zip") {
+    if (path.startsWith("/artifact/")) {
       downloads++;
       if (fault === "corrupt") {
         res.end(Buffer.from("invalid signature payload"));
