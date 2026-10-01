@@ -129,9 +129,7 @@ func jpegHeader(r io.Reader) (orientation int, progressive bool) {
 			return orientation, progressive
 		}
 		marker, n := hdr[1], int(binary.BigEndian.Uint16(hdr[2:]))-2
-		// Start of scan, fill bytes, stuffed zeros and restart markers end
-		// the walk: the decoder reads them differently from a segment.
-		if marker == 0xDA || marker == 0xFF || marker == 0x00 || (marker >= 0xD0 && marker <= 0xD7) || n < 0 {
+		if endsSegmentWalk(marker) || n < 0 {
 			return orientation, progressive
 		}
 		switch {
@@ -152,6 +150,13 @@ func jpegHeader(r io.Reader) (orientation int, progressive bool) {
 		}
 	}
 	return orientation, progressive
+}
+
+// endsSegmentWalk reports whether marker ends jpegHeader's walk: start of
+// scan, fill bytes, stuffed zeros and restart markers are read differently
+// from a segment by the decoder.
+func endsSegmentWalk(marker byte) bool {
+	return marker == 0xDA || marker == 0xFF || marker == 0x00 || (marker >= 0xD0 && marker <= 0xD7)
 }
 
 // exifOrientation finds tag 0x0112 in IFD0 of a TIFF block.
