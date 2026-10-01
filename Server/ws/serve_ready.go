@@ -120,11 +120,13 @@ func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus
 		return db.StatusOffline
 	}
 	for i := range dmChannels {
-		if dmChannels[i].Recipient.ID != 0 {
-			dmChannels[i].Recipient.Status = status(dmChannels[i].Recipient.ID)
+		ch := &dmChannels[i]
+		if ch.Recipient.ID != 0 {
+			ch.Recipient.Status = status(ch.Recipient.ID)
 		}
-		for j := range dmChannels[i].Recipients {
-			dmChannels[i].Recipients[j].Status = status(dmChannels[i].Recipients[j].ID)
+		for j := range ch.Recipients {
+			r := &ch.Recipients[j]
+			r.Status = status(r.ID)
 		}
 	}
 	return dmChannels
