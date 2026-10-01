@@ -87,7 +87,8 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
  *
  * Should be called from the dispatcher when a chat_message arrives.
  * Skips notifications for the current user's own messages and when
- * the window is focused on the message's channel.
+ * the window is focused on the message's channel; while focused on another
+ * channel, only the chime may play.
  */
 export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const currentUser = authStore.getState().user;
