@@ -666,7 +666,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
           pttGated: s.pttGated === true,
-          pttOwnsMute: s.pttOwnsMute === true,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
         }),
@@ -681,7 +680,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&
           a.pttGated === b.pttGated &&
-          a.pttOwnsMute === b.pttOwnsMute &&
           a.voiceStatus === b.voiceStatus &&
           a.encryptionDegraded === b.encryptionDegraded,
       ),

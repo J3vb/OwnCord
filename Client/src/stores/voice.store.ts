@@ -89,19 +89,13 @@ export interface VoiceState {
    *  leave (a moderator move) and clears on any undeafen. */
   readonly moderatorDeafened?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
-   *  i.e. the mic should be gated (silenced) for PTT reasons. This is
-   *  deliberately a separate flag from localMuted: PTT must never write the
-   *  flag that represents the user's own explicit mute (see ptt.ts and
-   *  livekitSession.setMuted), so a hot-mic press can't undo a self-mute and
-   *  a PTT release can't corrupt the mute toggle's state. Always written by
-   *  the store; optional only for the same fixture reason as localServerMuted. */
+   *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
+   *  separate flag from localMuted: PTT never writes the flag that represents
+   *  the user's own explicit mute (livekitSession.setPttGated only closes and
+   *  opens the gate), so a press can't undo a self-mute and a release can't
+   *  corrupt the mute toggle's state. Always written by the store; optional
+   *  only for the same fixture reason as localServerMuted. */
   readonly pttGated?: boolean;
-  /** True while the mute in effect is the one push-to-talk's own release
-   *  applied, not one the user asked for: a press lifts only this mute (v006),
-   *  and only a user's own mute reads as muted on the mic controls. Written
-   *  by the PTT service and the mute toggle; optional for the same fixture
-   *  reason. */
-  readonly pttOwnsMute?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
   /** Epoch ms when the local user joined the current voice channel (for elapsed timer). */
@@ -141,7 +135,6 @@ const INITIAL_STATE: VoiceState = {
   localServerDeafened: false,
   moderatorDeafened: false,
   pttGated: false,
-  pttOwnsMute: false,
   localCamera: false,
   localScreenshare: false,
   joinedAt: null,
@@ -165,7 +158,6 @@ export function resetVoiceStore(): void {
     localServerDeafened: false,
     moderatorDeafened: false,
     pttGated: false,
-    pttOwnsMute: false,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -420,25 +412,19 @@ export function setLocalDeafened(deafened: boolean): void {
 }
 
 /** Record whether push-to-talk is currently gating (silencing) the mic —
- *  i.e. the bound key is not held. Written only from ptt.ts. Deliberately
- *  separate from localMuted so PTT can never write the flag that represents
- *  the user's own explicit mute (see the VoiceState.pttGated doc comment). */
+ *  i.e. the bound key is not held. Written through livekitSession.setPttGated,
+ *  which also closes or opens the mic processor's gate. Deliberately separate
+ *  from localMuted so PTT can never write the flag that represents the user's
+ *  own explicit mute (see the VoiceState.pttGated doc comment). */
 export function setPttGated(gated: boolean): void {
   voiceStore.setState((prev) => (prev.pttGated === gated ? prev : { ...prev, pttGated: gated }));
 }
 
-/** Record whether the mute in effect is push-to-talk's own (see
- *  VoiceState.pttOwnsMute). */
-export function setPttOwnsMute(owns: boolean): void {
-  voiceStore.setState((prev) =>
-    prev.pttOwnsMute === owns ? prev : { ...prev, pttOwnsMute: owns },
-  );
-}
-
-/** Whether the user's own mute is in effect: localMuted, unless the mute is
- *  the one a push-to-talk release applied. What the mic controls show. */
+/** Whether the user's own mute is in effect. Push-to-talk never writes
+ *  localMuted (its gate closes inside the mic processor), so this is the
+ *  mute the user asked for: what the mic controls show. */
 export function isSelfMuted(state: VoiceState): boolean {
-  return state.localMuted && state.pttOwnsMute !== true;
+  return state.localMuted;
 }
 
 /** Whether the Rust-side PTT key poller is actually able to report key state

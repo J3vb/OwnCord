@@ -82,6 +82,8 @@ export interface RoomEventDeps {
   teardownForReconnect: () => void;
   leaveVoice: (sendWs: boolean) => void;
   applyMicMuteState: (muted: boolean) => Promise<void>;
+  /** Attach the mic processor to a published microphone that has none. */
+  setupAudioPipeline: () => void;
   /** The room is the native backend's, whose decrypt reports are not
    *  rate-limited (see DECRYPT_QUIET_MS). */
   isNativeRoom: () => boolean;
@@ -170,6 +172,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     // SRE-M2: join-relative ms for the first local track publication.
     markLocalTrackPublished();
     if (publication.source === Track.Source.Microphone) {
+      // The processor is attached before the first publish and rides every
+      // republish; this only covers a microphone that somehow has none.
+      deps.setupAudioPipeline();
       const { localMuted, localDeafened } = voiceStore.getState();
       if (localMuted || localDeafened) {
         deps.applyMicMuteState(true).catch((e) => log.warn("applyMicMuteState failed", e));

@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@jitsi/rnnoise-wasm": "^0.2.1",
     "@playwright/test": "^1",
     "@stryker-mutator/api": "^10.0.0",
     "@stryker-mutator/core": "^10.0.0",
@@ -71,7 +72,6 @@
     "vitest": "^4.1.11"
   },
   "dependencies": {
-    "@jitsi/rnnoise-wasm": "^0.2.1",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-autostart": "^2.6.0",
     "@tauri-apps/plugin-deep-link": "^2.6.0",

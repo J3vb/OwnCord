@@ -38,6 +38,7 @@ export const shards = {
   ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",
+    "src/lib/micProcessor.ts",
     "src/lib/audioElements.ts",
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",

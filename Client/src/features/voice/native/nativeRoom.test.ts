@@ -312,6 +312,8 @@ describe("NativeRoom device switching", () => {
   });
 });
 
+const micCalls = () => host.calls.filter(([name]) => name === "setMicrophone");
+
 describe("NativeRoom room surface", () => {
   it("routes the microphone toggle to the native session", async () => {
     const room = createNativeRoom(audio);
@@ -321,6 +323,42 @@ describe("NativeRoom room surface", () => {
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, true]]);
     await room.localParticipant.setMicrophoneEnabled(false);
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, false]]);
+  });
+
+  describe("push-to-talk gate", () => {
+    it("enables the microphone closed while the key is up, and a press opens it", async () => {
+      const room = createNativeRoom(audio);
+      room.setPttGated(true);
+      await room.connect("u", "t");
+      host.calls.length = 0;
+
+      // The join, and any later re-enable (device-removed fallback, the
+      // listen-only retry), with the key up.
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(micCalls()).toEqual([["setMicrophone", [1, false]]]);
+
+      room.setPttGated(false);
+      room.setPttGated(true);
+      expect(micCalls().slice(1)).toEqual([
+        ["setMicrophone", [1, true]],
+        ["setMicrophone", [1, false]],
+      ]);
+    });
+
+    it("never opens a microphone the user turned off", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      room.setPttGated(true);
+      await room.localParticipant.setMicrophoneEnabled(false);
+      host.calls.length = 0;
+
+      room.setPttGated(false);
+      expect(micCalls()).toEqual([]);
+
+      // Unmuted while the key is held: live at once.
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(micCalls()).toEqual([["setMicrophone", [1, true]]]);
+    });
   });
 
   it("deafen unsubscribes remote audio publications through the session", async () => {

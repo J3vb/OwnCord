@@ -61,6 +61,7 @@ interface Harness {
   };
   spies: {
     applyMicMuteState: ReturnType<typeof vi.fn>;
+    setupAudioPipeline: ReturnType<typeof vi.fn>;
     attemptAutoReconnect: ReturnType<typeof vi.fn>;
     teardownForReconnect: ReturnType<typeof vi.fn>;
     leaveVoice: ReturnType<typeof vi.fn>;
@@ -84,6 +85,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
   };
   const spies = {
     applyMicMuteState: vi.fn().mockResolvedValue(undefined),
+    setupAudioPipeline: vi.fn(),
     attemptAutoReconnect: vi.fn().mockResolvedValue(undefined),
     teardownForReconnect: vi.fn(),
     leaveVoice: vi.fn(),
@@ -113,6 +115,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     teardownForReconnect: spies.teardownForReconnect,
     leaveVoice: spies.leaveVoice,
     applyMicMuteState: spies.applyMicMuteState,
+    setupAudioPipeline: spies.setupAudioPipeline,
     isNativeRoom: () => false,
     attemptAutoReconnect: spies.attemptAutoReconnect,
     ...over,
@@ -225,6 +228,31 @@ describe("handleLocalTrackPublished", () => {
       expect(applyMicMuteState).toHaveBeenCalled();
     });
     expectConsole("warn", /\[roomEventHandlers\] applyMicMuteState failed/);
+  });
+
+  // livekit-client republishes every local track after a full reconnect, and
+  // restarts the mic track itself when its device ends. Both put the raw
+  // capture track on the sender, past the input-volume and sensitivity chain.
+  it("rebuilds the audio pipeline when the microphone is (re)published", () => {
+    const h = build();
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.Microphone,
+    } as LocalTrackPublication);
+
+    expect(h.spies.setupAudioPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  // Deleted "rebuilds on TrackEvent.Restarted": the processor now survives SDK restarts, so the handler no longer subscribes.
+
+  it("leaves the pipeline alone for a published camera or screen share", () => {
+    const h = build();
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.ScreenShare,
+    } as LocalTrackPublication);
+
+    expect(h.spies.setupAudioPipeline).not.toHaveBeenCalled();
   });
 });
 

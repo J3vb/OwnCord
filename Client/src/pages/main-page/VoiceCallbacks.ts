@@ -5,14 +5,7 @@
 
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
-import {
-  voiceStore,
-  joinVoiceChannel,
-  leaveVoiceChannel,
-  isSelfMuted,
-  setPttOwnsMute,
-  isPttPollingLive,
-} from "@stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
@@ -67,16 +60,6 @@ export interface SidebarVoiceCallbacks {
 // Voice Widget Callbacks
 // ---------------------------------------------------------------------------
 
-/** Lift the user's own mute. With the push-to-talk key up the mic stays
- *  closed: the mute becomes push-to-talk's, which the next press lifts, so a
- *  toggle never opens a live mic while the key is up. Only where a press can
- *  arrive: with no live key polling the mute is lifted outright. */
-function releaseOwnMute(): void {
-  const state = voiceStore.getState();
-  if (state.pttGated === true && state.localMuted && isPttPollingLive()) setPttOwnsMute(true);
-  else voiceSessionSetMuted(false);
-}
-
 export function createVoiceWidgetCallbacks(
   ws: WsClient,
   limiters: VoiceLimiters,
@@ -97,7 +80,9 @@ export function createVoiceWidgetCallbacks(
       // just the disabled button).
       if (state.localServerMuted === true) return;
       if (isSelfMuted(state)) {
-        releaseOwnMute();
+        // With the push-to-talk key up the gate inside the mic processor
+        // stays closed, so lifting the mute never opens a live mic.
+        voiceSessionSetMuted(false);
         ws.send({ type: "voice_mute", payload: { muted: false } });
         // A moderator-imposed deafen is not ours to lift; the server refuses
         // the undeafen, so don't spend the round-trip (same guard as
@@ -107,10 +92,7 @@ export function createVoiceWidgetCallbacks(
           ws.send({ type: "voice_deafen", payload: { deafened: false } });
         }
       } else {
-        // A mute push-to-talk applied becomes the user's own; the mic is
-        // already closed.
-        if (state.localMuted) setPttOwnsMute(false);
-        else voiceSessionSetMuted(true);
+        voiceSessionSetMuted(true);
         ws.send({ type: "voice_mute", payload: { muted: true } });
       }
     },
@@ -125,7 +107,7 @@ export function createVoiceWidgetCallbacks(
         // the unmute, so don't spend the round-trip (same guard as
         // onMuteToggle above).
         if (state.localServerMuted !== true) {
-          releaseOwnMute();
+          voiceSessionSetMuted(false);
           ws.send({ type: "voice_mute", payload: { muted: false } });
         }
       } else {

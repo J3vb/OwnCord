@@ -164,15 +164,22 @@ control a permanent part of the listen-only badge.
 ## 4. Push-to-talk
 
 PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
-`setMuted(!pressed)` only while in a channel (the `ptt-state` listener inside `initPtt()`, `lib/ptt.ts`). **Target UX:**
+`setPttGated(!pressed)` only while in a channel (the `ptt-state` listener inside
+`initPtt()`, `platform/desktop/pushToTalkService.ts`): the key opens and closes
+a gate inside the microphone processor (§8), never the mute, so the capture
+stays open across presses and no press publishes a raw track. The Linux native
+room has no web microphone to gate: there the same `setPttGated` switches the
+Rust session's microphone (`NativeRoom.setPttGated` →
+`nativeVoice.setMicrophone`), and every enable while the key is up comes up
+off. **Target UX:**
 
-| State               | Presentation                                                                                                                                                                                        |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| PTT bound, released | Mic stays closed, but the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the mic |
-| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                             |
-| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                               |
-| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                           |
-| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)             |
+| State               | Presentation                                                                                                                                                                                                   |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate |
+| PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                        |
+| binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                          |
+| PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                      |
+| PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                        |
 
 ---
 
@@ -246,12 +253,40 @@ trust action entirely (a blind accept is refused).
 
 ## 8. Media processing & devices
 
-- **Noise suppression:** RNNoise WASM worklet (`lib/noise-suppression.ts`,
-  assets `public/rnnoise.wasm` + `public/rnnoise-worklet.js`), toggled in
-  Settings → Voice & Audio; falls back to a ScriptProcessorNode pipeline when
-  AudioWorklet is unavailable (`createScriptProcessorPipeline()` in `lib/noise-suppression.ts`).
-- **Input volume & VAD:** `lib/audioPipeline.ts` applies input gain and
-  voice-activity gating ahead of publish.
+- **The microphone processor:** the whole outbound chain — RNNoise when
+  Enhanced Noise Suppression is on, input gain, a 50 ms lookahead delay, the
+  voice-activity gate and the push-to-talk gate — is one livekit-client
+  `TrackProcessor` (`lib/micProcessor.ts`) in its own 48 kHz AudioContext,
+  attached to the microphone track when the room creates it, before the
+  first publish (`RoomLifecycle.attachMicProcessorOnCreate`). livekit-client
+  publishes, republishes and restarts a track through
+  `track.mediaStreamTrack`, which is the processor's output while one is
+  attached, so a device change, hot-plug, processing toggle, device-ended
+  restart or full-reconnect republish never puts the raw capture on the
+  sender. `lib/audioPipeline.ts` owns the processor, holds the settings and
+  runs the detector; a processor that cannot attach fails the publish.
+- **Noise suppression:** RNNoise WASM worklet node (`lib/noise-suppression.ts`,
+  assets `public/rnnoise.wasm` + `public/rnnoise-worklet.js`) inside the
+  processor, toggled live in Settings → Voice & Audio without restarting the
+  capture. The WASM is the current RNNoise model, the one
+  `@jitsi/rnnoise-wasm`'s sync build embeds
+  (`tests/unit/rnnoise-click-suppression.test.ts` pins it). If the worklet
+  cannot start, the processor runs without it.
+- **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
+  (`startVadDetector`, with a setTimeout fallback of the same timing). It
+  opens after about 32 ms of sustained level, so a mouse click does not open
+  it, and closes after about 200 ms; the lookahead delay means the start of a
+  word is not cut off. The settings meter runs the same processor over a
+  microphone opened with the call's capture settings and the same detector at
+  the same threshold: the bar is the loudest 128-sample block it saw, on the
+  threshold handle's axis, and it is green exactly while the gate is open.
+- **Push-to-talk:** the key only opens and closes the processor's second gate
+  (`livekitSession.setPttGated`; `pushToTalkService.ts`). The microphone
+  stays published and its capture stays open across presses, the store's
+  `pttGated` never writes `localMuted`, and a user's own mute or deafen still
+  stops the capture as before. On Linux the native room keeps its own gate
+  behind the same call and turns the session's microphone off and on with
+  the key, only while the user has it on.
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
   plug/unplug and re-routes the active input/output without rejoining.
 - **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview

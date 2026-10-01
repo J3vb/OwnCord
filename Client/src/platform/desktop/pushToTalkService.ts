@@ -3,23 +3,23 @@
  * PTT key is NOT consumed/hijacked. Other apps and chat input continue
  * to receive the key normally. Works even when OwnCord is unfocused.
  *
- * Lifted verbatim from `lib/ptt.ts` (B7-5): the `PushToTalk` suite binds
- * `init()` to the persisted key and `stop()`/`updateKey()` to the binding's
- * polling state, so the binding/generation bookkeeping and the mute-ownership
- * latch move with the native calls. `vkName` is a pure display helper and
- * stays in `lib/ptt.ts`. The native modules stay dynamic `import()`s.
+ * Lifted from `lib/ptt.ts` (B7-5): the `PushToTalk` suite binds `init()` to
+ * the persisted key and `stop()`/`updateKey()` to the binding's polling
+ * state, so the binding/generation bookkeeping moves with the native calls.
+ * `vkName` is a pure display helper and stays in `lib/ptt.ts`. The native
+ * modules stay dynamic `import()`s.
+ *
+ * A press or release only opens or closes the push-to-talk gate inside the
+ * microphone processor (livekitSession.setPttGated): the microphone stays
+ * published and the capture device stays open across presses, so no press
+ * ever puts a raw track on the sender, and a user's own mute is never PTT's
+ * to lift (v006) — a press while muted opens a gate on a stopped capture.
  *
  * Only `./pushToTalk.ts` imports this module, and lazily — see its header.
  */
 
 import { loadPref, savePref } from "@lib/preferences";
-import {
-  voiceStore,
-  setPttGated,
-  setPttOwnsMute,
-  setPttPollingLive,
-  isPttPollingLive,
-} from "@stores/voice.store";
+import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName } from "@lib/ptt";
 import type { PushToTalk } from "../contracts/pushToTalk";
@@ -38,7 +38,6 @@ let binding: PttBinding | null = null;
 let nativeStarted = false;
 let nativeStop: Promise<void> | null = null;
 let edge = 0;
-let pendingUngateMute: { channelId: number | null; joinedAt: number | null } | null = null;
 
 function isCurrent(attempt: PttBinding, version = attempt.generation): boolean {
   return binding === attempt && generation === version;
@@ -57,63 +56,25 @@ function retainListener(attempt: PttBinding, unlisten: () => void): boolean {
   return true;
 }
 
-/** True when the mute currently in effect is the one a PTT release applied,
- *  rather than one the user asked for. livekitSession.setMuted() writes
- *  localMuted for every caller, so that flag alone cannot tell "the user
- *  muted themselves" (which a press must never lift — v006) from "the last
- *  release muted the mic" (which it must). Reset on init/stop so a mute that
- *  outlived the previous PTT binding is treated as the user's.
- *
- *  This alone is not enough: the only writes are PTT's own (press/release),
- *  so a non-PTT unmute (the widget's mic button, retryMicPermission) never
- *  clears it. If the user then re-mutes, the stale `true` survives and the
- *  next PTT press wrongly treats their genuine self-mute as PTT's own to
- *  lift. The voiceStore subscription registered in initPtt closes that gap
- *  by clearing the latch on any observed unmute, not just PTT's. */
-const pttOwnsMute = (): boolean => voiceStore.getState().pttOwnsMute === true;
-
-/** Clear the PTT gate and, if the mute in effect is the one PTT's own last
- *  release applied (not one the user asked for) and nothing else
- *  independently wants the mic closed, re-open it. Used whenever the poller
- *  can no longer produce a future press/release edge to lift that mute —
- *  clearing the key binding (stopPtt) or the polling thread dying
- *  (ptt-error) — so a PTT-applied mute is never stranded gated with no
- *  recovery path.
- *
- *  `mutedByPtt` must be the caller's `pttOwnsMute` latch read BEFORE it
- *  resets the latch to false: both call sites zero it ahead of calling this
- *  (a mute must not outlive its PTT binding), so by the time this body runs
- *  the module-level flag itself is already false and can't be consulted
- *  here — the pre-reset value has to be threaded through instead. */
-function ungateMic(mutedByPtt: boolean): void {
+/** Open the gate when the poller can no longer produce a future press/release
+ *  edge — clearing the key binding (stopPtt) or the polling thread dying
+ *  (ptt-error) — so a closed gate is never stranded with no way to open it. */
+function ungateMic(): void {
   if (voiceStore.getState().pttGated !== true) return;
   const version = generation;
   const { currentChannelId, joinedAt } = voiceStore.getState();
-  setPttGated(false);
-  const { localMuted, localDeafened } = voiceStore.getState();
-  if (localDeafened) return;
-  // A mute the user asked for is never PTT's to lift (v006) — only lift it
-  // when it's the one PTT's own release applied.
-  if (localMuted && !mutedByPtt) return;
-  const pending = localMuted && mutedByPtt ? { channelId: currentChannelId, joinedAt } : null;
-  pendingUngateMute = pending;
   void import("@lib/livekitSession")
-    .then(({ setMuted }) => {
+    .then(({ setPttGated }) => {
       const state = voiceStore.getState();
       if (
         generation !== version ||
         state.currentChannelId !== currentChannelId ||
-        state.joinedAt !== joinedAt ||
-        state.localDeafened ||
-        (state.localMuted && !mutedByPtt)
+        state.joinedAt !== joinedAt
       )
         return;
-      setMuted(false);
+      setPttGated(false);
     })
-    .catch((e) => log.warn("Failed to re-open mic after clearing PTT gate", e))
-    .finally(() => {
-      if (pendingUngateMute === pending) pendingUngateMute = null;
-    });
+    .catch((e) => log.warn("Failed to open the mic gate after clearing PTT", e));
 }
 
 /** Start listening for PTT state changes from the Rust backend. */
@@ -134,20 +95,6 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
   };
   binding = attempt;
   setPttPollingLive(false);
-  // Preserve a release-owned mute across a live rebind, but never infer
-  // ownership from the user's mute flag alone.
-  if (
-    pendingUngateMute !== null &&
-    pendingUngateMute.channelId === initialState.currentChannelId &&
-    pendingUngateMute.joinedAt === initialState.joinedAt
-  ) {
-    // A rebind can supersede Clear/error's deferred unmute. Carry ownership
-    // into the new binding instead of mistaking that old PTT mute for the user.
-    setPttOwnsMute(initialState.localMuted);
-  } else if (!initialState.localMuted) {
-    setPttOwnsMute(false);
-  }
-  pendingUngateMute = null;
 
   try {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -172,21 +119,9 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       log.warn("PTT key polling unsupported on this platform — mic will not be gated at join");
     }
 
-    // See pttOwnsMute's doc comment: a non-PTT unmute must clear the latch
-    // too, or a later genuine self-mute is mistaken for one PTT itself
-    // applied and a subsequent press republishes the mic over it.
-    retainListener(
-      attempt,
-      voiceStore.subscribe((s) => {
-        // Write only on a real change: a no-op write from inside a
-        // notification still re-notifies, looping forever.
-        if (isCurrent(attempt) && !s.localMuted && pttOwnsMute()) setPttOwnsMute(false);
-      }),
-    );
-
     // Surface a backend polling-thread panic: no further ptt-state events can
-    // ever arrive afterward, so a mute the last release applied would
-    // otherwise be stranded with no way to lift it.
+    // ever arrive afterward, so a gate the last release closed would
+    // otherwise be stranded with no way to open it.
     const errorUnlisten = await listen<string>("ptt-error", (event) => {
       if (!isCurrent(attempt)) return;
       log.warn("PTT polling thread stopped unexpectedly", { error: event.payload });
@@ -195,10 +130,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       nativeStarted = false;
       releaseListeners(attempt);
       setPttPollingLive(false);
-      // Capture before resetting — see ungateMic's doc comment.
-      const mutedByPtt = pttOwnsMute();
-      setPttOwnsMute(false);
-      ungateMic(mutedByPtt);
+      ungateMic();
     });
     if (!retainListener(attempt, errorUnlisten)) return;
 
@@ -212,17 +144,12 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       const currentEdge = ++edge;
 
       const pressed = event.payload;
-      // Track the PTT gate in the store regardless of whether we end up
-      // calling setMuted below — this is the source of truth other code
-      // (e.g. the widget) can read without depending on localMuted.
-      setPttGated(!pressed);
-
       // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
       // loaded lazily so it stays out of the startup path. In a voice channel
       // the module is necessarily already loaded, so this import resolves
       // from the module cache in a microtask.
       void import("@lib/livekitSession")
-        .then(({ setMuted }) => {
+        .then(({ setPttGated }) => {
           const state = voiceStore.getState();
           if (
             !isCurrent(attempt, version) ||
@@ -231,29 +158,10 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
             state.joinedAt !== joinedAt
           )
             return;
-          const { localMuted, localDeafened } = state;
-          if (pressed) {
-            // Never let PTT lift a mute the user asked for — that would
-            // republish the mic to every peer while voice_states.muted (and
-            // every remote UI) still shows the user muted (v006). The mute a
-            // previous release applied is PTT's own, so lifting that is fine.
-            if (localDeafened || (localMuted && !pttOwnsMute())) {
-              log.debug("PTT pressed — staying muted (user is self-muted or deafened)");
-              return;
-            }
-            setMuted(false);
-            setPttOwnsMute(false);
-            log.debug("PTT pressed — unmuted");
-            return;
-          }
-          // Muting is always safe. setMuted() writes localMuted, so record
-          // whether this release is what muted the mic — only then may the
-          // next press lift it.
-          setMuted(true);
-          setPttOwnsMute(!localMuted);
-          log.debug("PTT released — muted");
+          setPttGated(!pressed);
+          log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
         })
-        .catch((e) => log.warn("Failed to apply PTT mute", e));
+        .catch((e) => log.warn("Failed to apply PTT gate", e));
     });
     if (!retainListener(attempt, unsub)) return;
 
@@ -295,10 +203,8 @@ async function stopBinding(clearKey: boolean): Promise<void> {
   binding = null;
   nativeStarted = false;
   releaseListeners(previous);
-  const mutedByPtt = pttOwnsMute();
-  setPttOwnsMute(false);
   setPttPollingLive(false);
-  ungateMic(mutedByPtt);
+  ungateMic();
   if (!clearKey && !shouldStopNative) return;
 
   const precedingStop = nativeStop;
@@ -335,8 +241,8 @@ async function updatePttKey(vk: number): Promise<void> {
     await startBinding(vk, true);
     return;
   }
-  // Rebinding an established poller preserves its mute ownership and event
-  // listeners, but supersedes pending key changes and delayed mic callbacks.
+  // Rebinding an established poller preserves its event listeners, but
+  // supersedes pending key changes and delayed mic callbacks.
   const version = ++generation;
   attempt.generation = version;
   try {
@@ -362,9 +268,8 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
     return;
   const version = attempt.generation;
   const currentEdge = edge;
-  setPttGated(true);
   try {
-    const { setMuted } = await import("@lib/livekitSession");
+    const { setPttGated } = await import("@lib/livekitSession");
     const state = voiceStore.getState();
     if (
       !isCurrent(attempt, version) ||
@@ -373,8 +278,7 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
       state.joinedAt !== joinedAt
     )
       return;
-    setMuted(true);
-    setPttOwnsMute(pttOwnsMute() || !state.localMuted);
+    setPttGated(true);
   } catch (e) {
     log.warn("Failed to gate mic after binding PTT key mid-call", e);
   }

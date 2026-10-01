@@ -96,7 +96,8 @@ describe("setMuted / setDeafened", () => {
     const room = fakeRoom();
     const { media, audioPipeline } = setup(room);
     await media.applyMicMuteState(true);
-    expect(audioPipeline.teardownAudioPipeline).toHaveBeenCalled();
+    // Mute leaves the processor on the track: no pipeline teardown.
+    expect(audioPipeline.teardownAudioPipeline).not.toHaveBeenCalled();
     expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
   });
 });
@@ -133,7 +134,8 @@ describe("applyMicMuteState(false)", () => {
     expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true, undefined, {
       audioPreset: { maxBitrate: 64000 },
     });
-    expect(audioPipeline.setupAudioPipeline).toHaveBeenCalled();
+    // Unmute keeps the processor the SDK restart carries over: no rebuild.
+    expect(audioPipeline.setupAudioPipeline).not.toHaveBeenCalled();
   });
 
   it("does not re-publish while the mic policy gate is closed", async () => {

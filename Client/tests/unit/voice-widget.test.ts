@@ -309,17 +309,11 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("does not paint the mic button as muted while a PTT gate owns the mute", () => {
-    // PTT release routes through setMuted, writing localMuted; pttGated records
-    // that the gate (not the user) silenced the mic. The button must read the
-    // user's own mute, not the gate, or a PTT user sees "muted" the whole time.
+  // Rewritten: PTT no longer writes localMuted (its gate closes inside the mic
+  // processor), so the idle gate is pttGated && !localMuted.
+  it("reads an idle PTT gate as not muted, with its own affordance", () => {
     setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({
-      ...prev,
-      localMuted: true,
-      pttGated: true,
-      pttOwnsMute: true,
-    }));
+    voiceStore.setState((prev) => ({ ...prev, localMuted: false, pttGated: true }));
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
@@ -333,32 +327,22 @@ describe("VoiceWidget", () => {
     const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
     expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
     expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
 
     // A genuine self-mute (no PTT gate) still paints muted.
-    voiceStore.setState((prev) => ({
-      ...prev,
-      localMuted: true,
-      pttGated: false,
-      pttOwnsMute: false,
-    }));
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: false }));
     voiceStore.flush();
     expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
     expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
 
     widget.destroy?.();
   });
 
   it("paints a PTT user's own mute as muted while the key is up", () => {
-    // Between presses the gate is closed either way; only whose mute is in
-    // effect tells them apart. A press never lifts the user's own mute, so
-    // reading it as live would leave them talking to nobody.
+    // The user's own mute wins over the idle gate: no ptt-gated affordance.
     setVoiceChannel(1, []);
-    voiceStore.setState((prev) => ({
-      ...prev,
-      localMuted: true,
-      pttGated: true,
-      pttOwnsMute: false,
-    }));
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: true }));
 
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
@@ -374,11 +358,10 @@ describe("VoiceWidget", () => {
     expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
     expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
 
-    // The mute a PTT release applied reads as the idle gate instead.
-    voiceStore.setState((prev) => ({ ...prev, pttOwnsMute: true }));
+    // Unmuting while the key is still up reads as the idle gate.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: false }));
     voiceStore.flush();
     expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
     expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
 
     widget.destroy?.();

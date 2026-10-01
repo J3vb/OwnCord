@@ -12,7 +12,16 @@ import {
   setInputVolume,
   setOutputVolume,
   reapplyAudioProcessing,
+  reapplyEnhancedNoiseSuppression,
 } from "@lib/livekitSession";
+import {
+  VAD_MAX_THRESHOLD,
+  micCaptureOptions,
+  startVadDetector,
+  vadThreshold,
+} from "@lib/audioPipeline";
+import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
+import { Track, type AudioProcessorOptions } from "livekit-client";
 import { nativeAudioDevices } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
@@ -21,7 +30,7 @@ import { setStatusIcon, statusIcon } from "../../features/settings/status";
 const log = createLogger("VoiceAudioTab");
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
-const MIC_NOISE_FLOOR = 0.02;
+const MIC_NOISE_FLOOR = 0.005;
 /** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
 const MIC_HEARD_HOLD_MS = 1000;
 
@@ -38,26 +47,18 @@ export interface VoiceAudioTabHandle {
 }
 
 export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
-  let micStream: MediaStream | null = null;
-  let micAudioCtx: AudioContext | null = null;
-  let micAnimFrame: number | null = null;
+  let stopMeter: (() => void) | null = null;
   let cameraPreviewStream: MediaStream | null = null;
   let invalidateCameraPreviewRequest: (() => void) | null = null;
 
+  function stopMic(): void {
+    stopMeter?.();
+    stopMeter = null;
+  }
+
   function cleanupMic(): void {
-    if (micAnimFrame !== null) {
-      cancelAnimationFrame(micAnimFrame);
-      micAnimFrame = null;
-    }
+    stopMic();
     invalidateCameraPreviewRequest?.();
-    if (micStream !== null) {
-      for (const track of micStream.getTracks()) track.stop();
-      micStream = null;
-    }
-    if (micAudioCtx !== null) {
-      void micAudioCtx.close();
-      micAudioCtx = null;
-    }
     // Also stop camera preview
     if (cameraPreviewStream !== null) {
       for (const track of cameraPreviewStream.getTracks()) track.stop();
@@ -70,11 +71,10 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
     cleanupMic();
     return buildVoiceAudioTabInner(
       buildSignal,
-      (stream, ctx, frame) => {
-        micStream = stream;
-        micAudioCtx = ctx;
-        micAnimFrame = frame;
+      (stop) => {
+        stopMeter = stop;
       },
+      stopMic,
       (stream) => {
         // Stop old camera tracks before registering new stream
         if (cameraPreviewStream !== null && cameraPreviewStream !== stream) {
@@ -98,13 +98,14 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   return { build, cleanup };
 }
 
-type MicRegistrar = (stream: MediaStream, ctx: AudioContext, frame: number) => void;
+type MicRegistrar = (stop: () => void) => void;
 type CameraRegistrar = (stream: MediaStream | null) => void;
 type CameraInvalidationRegistrar = (invalidate: () => void) => void;
 
 function buildVoiceAudioTabInner(
   signal: AbortSignal,
   registerMic: MicRegistrar,
+  stopMic: () => void,
   registerCamera: CameraRegistrar,
   registerCameraInvalidation: CameraInvalidationRegistrar,
 ): HTMLDivElement {
@@ -251,9 +252,15 @@ function buildVoiceAudioTabInner(
     return Math.round((1 - ratio) * 100);
   }
 
+  /** The meter's detector, so a dragged threshold applies to it at once. */
+  let meterThresholdSetter: ((threshold: number) => void) | null = null;
+  /** The meter's processor, so the Enhanced NS toggle re-routes it at once. */
+  let meterProcessor: MicProcessor | null = null;
+
   function previewSensitivity(val: number): void {
     currentSensitivity = val;
     updateThresholdIndicator(val);
+    meterThresholdSetter?.(vadThreshold(val));
   }
 
   function commitSensitivity(): void {
@@ -548,7 +555,7 @@ function buildVoiceAudioTabInner(
     "change",
     () => {
       savePref("audioInputDevice", inputSelect.value);
-      void switchInputDevice(inputSelect.value);
+      restartMeterAfter(switchInputDevice(inputSelect.value));
     },
     { signal },
   );
@@ -644,71 +651,108 @@ function buildVoiceAudioTabInner(
   // another "abort" handler here too would add one more listener every time
   // the tab is rebuilt, since this function runs again on every build.
 
-  // Start mic level monitoring for visual feedback
+  // Mic level meter. It runs the call's own microphone processor
+  // (lib/micProcessor.ts: RNNoise when Enhanced Noise Suppression is on) over
+  // a microphone opened with the call's capture settings, and the call's own
+  // detector (lib/audioPipeline.ts startVadDetector, same attack and hold)
+  // at the same threshold. The bar is the loudest 128-sample block the
+  // detector saw, on the threshold handle's axis; green is the gate open. So
+  // what the meter shows is what the gate does. Opening the microphone with
+  // other settings would also fight the call for the device: the browser can
+  // hand the call this stream's processing instead of its own.
   // The meter previews the webview's microphone; on the native engine the
   // saved device id is the engine's, and the meter is hidden anyway.
-  if (!nativeAudio)
+  function startMicMeter(): void {
+    if (nativeAudio || signal.aborted) return;
+    const thisRequest = ++micRequestId;
+    stopMic();
     void (async () => {
-      const thisRequest = ++micRequestId;
       try {
-        const savedDevice = loadPref<string>("audioInputDevice", "");
-        const constraints: MediaStreamConstraints = {
-          audio: savedDevice ? { deviceId: { exact: savedDevice } } : true,
-          video: false,
-        };
+        const constraints: MediaStreamConstraints = { audio: micCaptureOptions(), video: false };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        // Race guard: teardown (cleanup or abort) may have run while we awaited
-        // — opening the mic now would leave it hot with nobody left to stop it,
-        // and registerMic would re-arm state cleanupMic() already cleared.
-        if (signal.aborted || thisRequest !== micRequestId) {
+        const stopStream = (): void => {
           for (const track of stream.getTracks()) track.stop();
+        };
+        // Race guard: teardown (cleanup or abort) or a newer request may have
+        // run while we awaited — opening the mic now would leave it hot with
+        // nobody left to stop it, and registerMic would re-arm state
+        // cleanupMic() already cleared.
+        if (signal.aborted || thisRequest !== micRequestId) {
+          stopStream();
           return;
         }
-        const audioCtx = new AudioContext();
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 256;
-        analyser.smoothingTimeConstant = 0.5;
-        const source = audioCtx.createMediaStreamSource(stream);
-        source.connect(analyser);
+        const processor = createMicProcessor();
+        const options = { kind: Track.Kind.Audio, track: stream.getAudioTracks()[0]! };
+        await processor.init(options as AudioProcessorOptions);
+        meterProcessor = processor;
+        await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
+        if (signal.aborted || thisRequest !== micRequestId) {
+          if (meterProcessor === processor) meterProcessor = null;
+          void processor.destroy();
+          stopStream();
+          return;
+        }
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        let latestFrame = 0;
+        // The detector starts open, as the live gate does.
+        let gateOpen = true;
+        let level = 0;
         let lastHeardAt = Number.NEGATIVE_INFINITY;
-        function updateMeter(now: number): void {
-          if (signal.aborted) return;
-          analyser.getByteFrequencyData(dataArray);
-          // Compute RMS normalized to 0-1
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) {
-            const v = (dataArray[i] ?? 0) / 255;
-            sum += v * v;
-          }
-          const rms = Math.sqrt(sum / dataArray.length);
-          // Scale for visual: use sqrt for more visible quiet sounds
-          const visual = Math.min(Math.sqrt(rms) * 2, 1);
-          meterLevel.style.width = `${visual * 100}%`;
-
-          // Color: green if above threshold, yellow/red if below
-          const threshold = ((100 - currentSensitivity) / 100) * 0.15;
-          meterLevel.style.background = rms >= threshold ? "var(--green)" : "var(--yellow)";
+        const paint = (): void => {
+          // Same axis as the handle, whose position is threshold / max.
+          const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
+          meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
+          meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
           // The pill says whether the mic picks anything up, whatever the
           // sensitivity, and holds between syllables so it does not flicker.
-          if (rms >= MIC_NOISE_FLOOR) lastHeardAt = now;
+          const now = performance.now();
+          if (level >= MIC_NOISE_FLOOR) lastHeardAt = now;
           showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
-
-          latestFrame = requestAnimationFrame(updateMeter);
-          registerMic(stream, audioCtx, latestFrame);
-        }
-        latestFrame = requestAnimationFrame(updateMeter);
-        registerMic(stream, audioCtx, latestFrame);
+        };
+        const detector = startVadDetector(
+          processor.context,
+          processor.analyser!,
+          vadThreshold(currentSensitivity),
+          {
+            onGate: (gated) => {
+              gateOpen = !gated;
+              paint();
+            },
+            onRms: (rms) => {
+              level = rms;
+              paint();
+            },
+          },
+        );
+        meterThresholdSetter = detector.setThreshold;
+        registerMic(() => {
+          if (meterThresholdSetter === detector.setThreshold) meterThresholdSetter = null;
+          if (meterProcessor === processor) meterProcessor = null;
+          void detector.stop().then(() => processor.destroy());
+          stopStream();
+        });
       } catch (err) {
+        if (signal.aborted || thisRequest !== micRequestId) return;
         log.warn("Mic access denied or unavailable — meter stays empty", err);
         micStatus.hidden = false;
         setStatusIcon(micStatusIcon, "warn");
         setText(micStatusWord, t("voiceAudio.mic.noAccess"));
       }
     })();
+  }
+  startMicMeter();
+
+  /**
+   * Release the meter's microphone while the call re-opens its own, then
+   * meter again. The browser resolves a capture request against the streams
+   * already open on the device, so a meter still holding the old settings
+   * can hand them to the call's restart (and the reverse).
+   */
+  function restartMeterAfter(callRestart: Promise<void>): void {
+    // Invalidate a meter request still in flight, then release the meter.
+    micRequestId++;
+    stopMic();
+    void callRestart.then(startMicMeter, startMicMeter);
+  }
 
   // ── Audio processing toggles ──────────────────────────────────────
   const audioToggles: ReadonlyArray<{
@@ -758,8 +802,16 @@ function buildVoiceAudioTabInner(
       label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
-        // Reapply audio processing constraints to the live mic track
-        void reapplyAudioProcessing();
+        if (item.key === "enhancedNoiseSuppression") {
+          // RNNoise sits inside the processors: re-route the call's and the
+          // meter's, and leave both captures alone.
+          void reapplyEnhancedNoiseSuppression();
+          void meterProcessor?.setEnhanced(nowOn);
+          return;
+        }
+        // Reapply audio processing constraints to the live mic track, then to
+        // the meter's, so it keeps measuring what the call captures.
+        restartMeterAfter(reapplyAudioProcessing());
       },
     });
 
