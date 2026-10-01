@@ -140,3 +140,23 @@ func TestHandleReaction_DMParticipantFetchErrorFailsClosed(t *testing.T) {
 		t.Fatalf("reaction must not be committed when its fan-out cannot be resolved, got %d reaction rows", len(counts))
 	}
 }
+
+// TestValidateEmoji_LongestSkinToneSequence pins the longest sequence the
+// client's emoji set can react with (Client/scripts/gen-emoji-data.mjs prints
+// it): "kiss: woman, man, light skin tone", ten runes, well under
+// maxReactionRunes. The generator fails if a sequence ever exceeds the cap.
+func TestValidateEmoji_LongestSkinToneSequence(t *testing.T) {
+	const kiss = "\U0001F469\U0001F3FB\u200D\u2764\uFE0F\u200D\U0001F48B\u200D\U0001F468\U0001F3FB"
+	if n := len([]rune(kiss)); n != 10 {
+		t.Fatalf("fixture is %d runes, want 10", n)
+	}
+	for _, emoji := range []string{
+		kiss,
+		"\U0001F44D\U0001F3FD", // thumbs up: medium skin tone
+		"\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F", // flag: England
+	} {
+		if err := validateEmoji(emoji); err != nil {
+			t.Errorf("validateEmoji(%q) = %v, want nil", emoji, err)
+		}
+	}
+}

@@ -1,13 +1,34 @@
-/**
- * Emoji keyword index for search (B9-19). Maps emoji character → searchable
- * keywords. This is search-index data, not UI copy: the same table is why
- * `message-list/syntax-highlight.ts` is excluded from the UI-string scan.
- *
- * Shared because the composer's `:` autocomplete searches the same list the
- * picker does — two independently-maintained name tables would mean typing
- * `:fire` and searching "fire" disagreeing about what exists.
- */
-export const EMOJI_NAMES: Readonly<Record<string, string>> = {
+// Curated data for the emoji generator (scripts/gen-emoji-data.mjs). Keys may
+// omit the U+FE0F presentation selector.
+
+// Discord-style names an emoji answers to ahead of its Unicode shortcode. The
+// first is the name the composer's `:` popup shows, and typing a name exactly
+// ranks the emoji first.
+export const EMOJI_NAMES = {
+  "❤️": "heart love",
+  "💋": "kiss",
+  "💏": "couplekiss",
+  "👍": "thumbsup +1 thumbs",
+  "🐶": "dog",
+  "🐕": "dog2",
+  "🐱": "cat",
+  "🐈": "cat2",
+  "🐭": "mouse",
+  "🐁": "mouse2",
+  "🐰": "rabbit",
+  "🐇": "rabbit2",
+  "🐯": "tiger",
+  "🐅": "tiger2",
+  "🐮": "cow",
+  "🐄": "cow2",
+  "🐷": "pig",
+  "🐖": "pig2",
+};
+
+// Search keywords merged ahead of each emoji's names, so the words the
+// hand-picked set (B9-19) had before the full Unicode set (P4-14) still find
+// what they always did.
+export const EMOJI_ALIASES = {
   "😀": "grinning face happy smile",
   "😃": "smiley face happy smile",
   "😄": "smile happy grin",

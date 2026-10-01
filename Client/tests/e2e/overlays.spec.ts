@@ -158,8 +158,9 @@ test.describe("Emoji Picker", () => {
     const search = page.locator(".ep-search");
     await expect(search).toBeVisible({ timeout: 3_000 });
 
-    // Get count before filtering
+    // Get count before filtering, once the lazy emoji data has rendered
     const allEmojis = page.locator(".ep-emoji");
+    await expect(page.locator(".ep-loading")).toHaveCount(0, { timeout: 3_000 });
     const countBefore = await allEmojis.count();
     expect(countBefore).toBeGreaterThan(10);
 

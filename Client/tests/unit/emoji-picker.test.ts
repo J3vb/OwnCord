@@ -1,11 +1,26 @@
-import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, onTestFinished } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { expectConsole } from "../helpers/console";
+import { loadEmojiCatalog, skinTone } from "../../src/features/messaging/emojiCatalog";
+
+/** The cell for `char`. By dataset: jsdom's selector engine misses astral
+ *  characters in an attribute selector. */
+function emojiCell(root: HTMLElement, char: string): HTMLElement | undefined {
+  return Array.from(root.querySelectorAll<HTMLElement>(".ep-emoji")).find(
+    (c) => c.dataset.emoji === char,
+  );
+}
 
 describe("EmojiPicker", () => {
   let container: HTMLDivElement;
+
+  // The unicode set is a lazy chunk (tests/unit/emoji-lazy.test.ts covers the
+  // cold load); with it already loaded the picker renders synchronously.
+  beforeAll(async () => {
+    await loadEmojiCatalog();
+  });
 
   beforeEach(() => {
     container = document.createElement("div");
@@ -108,6 +123,76 @@ describe("EmojiPicker", () => {
     const emptyState = picker.element.querySelector("div[style*='text-align: center']");
     expect(emptyState).not.toBeNull();
     expect(emptyState!.textContent).toBe("No emoji found");
+    picker.destroy();
+  });
+
+  it("renders the full set, including the travel, activities and flags groups", () => {
+    const { picker } = makePicker();
+    const labelTexts = Array.from(picker.element.querySelectorAll(".ep-category-label")).map(
+      (l) => l.textContent,
+    );
+    expect(labelTexts).toEqual(expect.arrayContaining(["Travel", "Activities", "Flags"]));
+    expect(picker.element.querySelectorAll(".ep-emoji").length).toBeGreaterThan(1800);
+    expect(emojiCell(picker.element, "🇩🇪")).toBeDefined();
+    picker.destroy();
+  });
+
+  it("search matches multi-word names typed with spaces", () => {
+    const { picker } = makePicker();
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "thumbs up";
+    input.dispatchEvent(new Event("input"));
+    expect(emojiCell(picker.element, "👍")).toBeDefined();
+    picker.destroy();
+  });
+
+  it("search matches curated multi-word keywords typed with spaces", () => {
+    const { picker } = makePicker();
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "high five";
+    input.dispatchEvent(new Event("input"));
+    expect(emojiCell(picker.element, "✋")).toBeDefined();
+    picker.destroy();
+  });
+
+  it("the skin-tone selector re-renders the grid in that tone and remembers it", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const select = picker.element.querySelector(".ep-tone") as HTMLSelectElement;
+    expect(select.getAttribute("aria-label")).toBe("Skin tone");
+    expect(select.options).toHaveLength(6);
+    expect(select.value).toBe("0");
+
+    select.value = "3";
+    select.dispatchEvent(new Event("change"));
+
+    expect(skinTone()).toBe(3);
+    expect(emojiCell(picker.element, "👍")).toBeUndefined();
+    const toned = emojiCell(picker.element, "👍🏽")!;
+    expect(toned).toBeDefined();
+    // Emoji without skin tones are unaffected.
+    expect(emojiCell(picker.element, "😀")).toBeDefined();
+    toned.click();
+    expect(onSelect).toHaveBeenCalledWith("👍🏽");
+    picker.destroy();
+
+    const { picker: reopened } = makePicker();
+    expect((reopened.element.querySelector(".ep-tone") as HTMLSelectElement).value).toBe("3");
+    expect(emojiCell(reopened.element, "👍🏽")).toBeDefined();
+    reopened.destroy();
+  });
+
+  it("finds a toned Recent entry by its name", () => {
+    localStorage.setItem("owncord:recent-emoji", JSON.stringify(["👍🏿"]));
+    const { picker } = makePicker();
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "thumbsup";
+    input.dispatchEvent(new Event("input"));
+    const recentLabel = picker.element.querySelector(
+      '.ep-category-label[data-category="emoji.category.recent"]',
+    );
+    expect(recentLabel).not.toBeNull();
+    expect(emojiCell(picker.element, "👍🏿")).toBeDefined();
     picker.destroy();
   });
 

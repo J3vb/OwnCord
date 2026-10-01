@@ -5,9 +5,18 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
-import { EMOJI_NAMES } from "@components/emoji-keywords";
 import { messagingText } from "../i18n/messaging";
 import { resolveEmoji } from "@stores/emoji.store";
+import {
+  emojiCatalog,
+  emojiMatches,
+  loadEmojiCatalog,
+  setSkinTone,
+  skinTone,
+  withSkinTone,
+  SKIN_TONES,
+  type EmojiGroupKey,
+} from "../features/messaging/emojiCatalog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,270 +43,12 @@ export const SERVER_CATEGORY = "emoji.category.server" as const;
 
 /** A category heading; the key is resolved through the messaging catalog. */
 type EmojiCategoryKey =
-  | typeof SERVER_CATEGORY
-  | "emoji.category.recent"
-  | "emoji.category.smileys"
-  | "emoji.category.people"
-  | "emoji.category.nature"
-  | "emoji.category.food"
-  | "emoji.category.objects"
-  | "emoji.category.symbols";
-
-// ---------------------------------------------------------------------------
-// Built-in emoji data (common subset by category)
-// ---------------------------------------------------------------------------
+  typeof SERVER_CATEGORY | "emoji.category.recent" | `emoji.category.${EmojiGroupKey}`;
 
 interface EmojiCategory {
   readonly name: EmojiCategoryKey;
   readonly emoji: readonly string[];
 }
-
-const CATEGORIES: readonly EmojiCategory[] = [
-  {
-    name: "emoji.category.recent",
-    emoji: [], // populated at runtime from localStorage
-  },
-  {
-    name: "emoji.category.smileys",
-    emoji: [
-      "😀",
-      "😃",
-      "😄",
-      "😁",
-      "😆",
-      "😅",
-      "🤣",
-      "😂",
-      "🙂",
-      "😊",
-      "😇",
-      "🥰",
-      "😍",
-      "🤩",
-      "😘",
-      "😗",
-      "😋",
-      "😛",
-      "😜",
-      "🤪",
-      "😝",
-      "🤑",
-      "🤗",
-      "🤭",
-      "🤫",
-      "🤔",
-      "🤐",
-      "🤨",
-      "😐",
-      "😑",
-      "😶",
-      "😏",
-      "😒",
-      "🙄",
-      "😬",
-      "🤥",
-      "😌",
-      "😔",
-      "😪",
-      "🤤",
-      "😴",
-      "😷",
-      "🤒",
-      "🤕",
-      "🤢",
-      "🤮",
-      "🥵",
-      "🥶",
-      "🥴",
-      "😵",
-      "🤯",
-      "🤠",
-      "🥳",
-      "😎",
-      "🤓",
-      "🧐",
-      "😕",
-      "😟",
-      "🙁",
-      "😮",
-      "😲",
-      "😳",
-      "🥺",
-      "😢",
-      "😭",
-      "😤",
-      "😠",
-      "😡",
-      "🤬",
-      "💀",
-    ],
-  },
-  {
-    name: "emoji.category.people",
-    emoji: [
-      "👋",
-      "🤚",
-      "🖐",
-      "✋",
-      "🖖",
-      "👌",
-      "🤌",
-      "🤏",
-      "✌️",
-      "🤞",
-      "🤟",
-      "🤘",
-      "🤙",
-      "👈",
-      "👉",
-      "👆",
-      "👇",
-      "☝️",
-      "👍",
-      "👎",
-      "✊",
-      "👊",
-      "🤛",
-      "🤜",
-      "👏",
-      "🙌",
-      "👐",
-      "🤲",
-      "🤝",
-      "🙏",
-    ],
-  },
-  {
-    name: "emoji.category.nature",
-    emoji: [
-      "🐶",
-      "🐱",
-      "🐭",
-      "🐹",
-      "🐰",
-      "🦊",
-      "🐻",
-      "🐼",
-      "🐨",
-      "🐯",
-      "🦁",
-      "🐮",
-      "🐷",
-      "🐸",
-      "🐵",
-      "🐔",
-      "🐧",
-      "🐦",
-      "🐤",
-      "🦄",
-      "🌸",
-      "🌹",
-      "🌺",
-      "🌻",
-      "🌼",
-      "🌷",
-      "🌱",
-      "🌲",
-      "🌳",
-      "🍀",
-    ],
-  },
-  {
-    name: "emoji.category.food",
-    emoji: [
-      "🍎",
-      "🍊",
-      "🍋",
-      "🍌",
-      "🍉",
-      "🍇",
-      "🍓",
-      "🍒",
-      "🍑",
-      "🍍",
-      "🥝",
-      "🍔",
-      "🍟",
-      "🍕",
-      "🌭",
-      "🍿",
-      "🧀",
-      "🥚",
-      "🍳",
-      "🥓",
-      "☕",
-      "🍵",
-      "🍺",
-      "🍻",
-      "🥂",
-      "🍷",
-      "🍸",
-      "🍹",
-      "🍾",
-      "🧁",
-    ],
-  },
-  {
-    name: "emoji.category.objects",
-    emoji: [
-      "⚽",
-      "🏀",
-      "🏈",
-      "⚾",
-      "🎾",
-      "🎮",
-      "🎲",
-      "🎯",
-      "🎵",
-      "🎶",
-      "💡",
-      "🔥",
-      "⭐",
-      "🌟",
-      "💫",
-      "✨",
-      "💥",
-      "❤️",
-      "🧡",
-      "💛",
-      "💚",
-      "💙",
-      "💜",
-      "🖤",
-      "🤍",
-      "💯",
-      "💢",
-      "💬",
-      "👁‍🗨",
-      "🗨",
-    ],
-  },
-  {
-    name: "emoji.category.symbols",
-    emoji: [
-      "✅",
-      "❌",
-      "❓",
-      "❗",
-      "‼️",
-      "⁉️",
-      "💤",
-      "💮",
-      "♻️",
-      "🔰",
-      "⚠️",
-      "🚫",
-      "🔴",
-      "🟠",
-      "🟡",
-      "🟢",
-      "🔵",
-      "🟣",
-      "⚫",
-      "⚪",
-    ],
-  },
-];
 
 const MAX_RECENT = 20;
 const RECENT_KEY = "owncord:recent-emoji";
@@ -412,6 +163,18 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     placeholder: messagingText("emoji.searchPlaceholder"),
   });
   header.appendChild(searchInput);
+  // Skin tone for every emoji that has one, remembered across pickers and the
+  // composer's `:` popup. A native select keeps it one keyboard control.
+  const toneSelect = createElement("select", {
+    class: "ep-tone",
+    title: messagingText("emoji.skinTone"),
+    "aria-label": messagingText("emoji.skinTone"),
+  });
+  SKIN_TONES.forEach((mod, i) => {
+    toneSelect.appendChild(createElement("option", { value: String(i) }, `✋${mod}`));
+  });
+  toneSelect.value = String(skinTone());
+  header.appendChild(toneSelect);
   root.appendChild(header);
 
   // Category bar: one button per category jumps its heading into view, as a
@@ -486,7 +249,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     setRovingTabindex(categoryBar, ".ep-category-btn");
   }
 
-  // Build categories with recent + custom
+  // Build categories with recent + custom, then the Unicode set once loaded.
   function getAllCategories(): readonly EmojiCategory[] {
     const recent = getRecentEmoji();
     const cats: EmojiCategory[] = [{ name: "emoji.category.recent", emoji: recent }];
@@ -499,10 +262,12 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       });
     }
 
-    // Add built-in categories (skip the empty "Recent" placeholder)
-    for (const cat of CATEGORIES) {
-      if (cat.name === "emoji.category.recent") continue;
-      cats.push(cat);
+    const tone = skinTone();
+    for (const group of emojiCatalog()?.groups ?? []) {
+      cats.push({
+        name: `emoji.category.${group.key}`,
+        emoji: group.emoji.map((e) => withSkinTone(e, tone)),
+      });
     }
 
     return cats;
@@ -516,17 +281,23 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
     clearChildren(scrollArea);
 
+    // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
+    const raw = searchQuery.toLowerCase();
+    const q = raw.replace(/\s+/g, "_");
+    const byChar = emojiCatalog()?.byChar;
     for (const cat of categories) {
       if (cat.emoji.length === 0) continue;
 
-      const filtered = searchQuery
+      const filtered = q
         ? cat.emoji.filter((e) => {
-            const q = searchQuery.toLowerCase();
-            // Match against emoji name/keywords, or the character itself
-            const name = EMOJI_NAMES[e];
-            if (name !== undefined && name.includes(q)) return true;
-            // Also match custom emoji shortcodes like :wave:
-            return e.toLowerCase().includes(q);
+            // Match against emoji name/keywords (a toned Recent entry included)
+            const entry = byChar?.get(e);
+            if (entry !== undefined && (emojiMatches(entry, raw) || emojiMatches(entry, q))) {
+              return true;
+            }
+            // Also match the character itself and custom shortcodes like :wave:
+            const lower = e.toLowerCase();
+            return lower.includes(raw) || lower.includes(q);
           })
         : cat.emoji;
 
@@ -546,8 +317,12 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       scrollArea.appendChild(grid);
     }
 
-    // If nothing rendered at all, show empty state
-    if (scrollArea.children.length === 0) {
+    if (emojiCatalog() === null && !loadFailed) {
+      scrollArea.appendChild(
+        createElement("div", { class: "ep-loading" }, messagingText("emoji.loading")),
+      );
+    } else if (scrollArea.children.length === 0) {
+      // Nothing rendered at all: show the empty state
       const empty = createElement(
         "div",
         {
@@ -563,9 +338,35 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     setRovingTabindex(scrollArea, ".ep-emoji");
   }
 
-  // Initial render
-  renderCategoryBar(getAllCategories());
-  renderAllCategories(getAllCategories());
+  function renderAll(): void {
+    renderCategoryBar(getAllCategories());
+    renderAllCategories(getAllCategories());
+  }
+
+  // Initial render: Recent and Server straight away, the Unicode set when its
+  // lazy chunk lands (at once, if an earlier picker or popup loaded it).
+  let loadFailed = false;
+  renderAll();
+  if (emojiCatalog() === null) {
+    void loadEmojiCatalog().then(
+      () => {
+        if (!signal.aborted) renderAll();
+      },
+      () => {
+        loadFailed = true;
+        if (!signal.aborted) renderAll();
+      },
+    );
+  }
+
+  toneSelect.addEventListener(
+    "change",
+    () => {
+      setSkinTone(Number(toneSelect.value));
+      renderAllCategories(getAllCategories());
+    },
+    { signal },
+  );
 
   // Search handler
   searchInput.addEventListener(
