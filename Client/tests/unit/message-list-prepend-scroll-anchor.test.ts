@@ -21,6 +21,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { setChannels, setActiveChannel } from "@stores/channels.store";
 
 const CHANNEL_ID = 1;
 
@@ -161,6 +162,42 @@ describe("MessageList — history prepend keeps the reading position (OC-0248)",
 
     // The scroll position must have moved forward by roughly the height of
     // the prepended page, not stayed pinned at its pre-prepend value.
+    expect(root.scrollTop).toBeGreaterThan(1000);
+  });
+
+  // A capped unread count keeps the NEW line at the top of the loaded window,
+  // so it moves up with every prepended page: it is no anchor for the reader.
+  it("keeps the reading position when the NEW line sits at the top of the window", async () => {
+    const initial = Array.from({ length: 50 }, (_, i) => makeMessage(51 + i));
+    setMessages(initial);
+    setHasMore(true);
+    setChannels([
+      {
+        id: CHANNEL_ID,
+        name: "general",
+        type: "text",
+        category: null,
+        position: 0,
+        unread_count: 100,
+        mention_count: 0,
+      },
+    ]);
+    setActiveChannel(CHANNEL_ID);
+    mount();
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).not.toBeNull();
+
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    // Inside the NEW line, just above message 51.
+    root.scrollTop = 40;
+    root.dispatchEvent(new Event("scroll"));
+    await Promise.resolve();
+
+    const older = Array.from({ length: 50 }, (_, i) => makeMessage(1 + i));
+    setMessages([...older, ...initial]);
+    messagesStore.flush();
+
+    expect(container.querySelector('[data-testid="message-1"]')).toBeNull();
+    expect(container.querySelector('[data-testid="message-51"]')).not.toBeNull();
     expect(root.scrollTop).toBeGreaterThan(1000);
   });
 });

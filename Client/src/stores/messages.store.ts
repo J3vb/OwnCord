@@ -170,10 +170,10 @@ export function setChannelLoadError(channelId: number): void {
  *  reference as it was. A post-only page only appends when the channel's
  *  whole history fits in one page (hasMore false). Otherwise cached "sent"
  *  rows older than the page are dropped, so nothing deleted or edited while
- *  away stays on screen (scrolling up loads them again), the channel gets a
- *  new array and the list rebuilds once. A revisit that opens with unread
- *  messages always rebuilds the list once, when this lands, to place the NEW
- *  divider.
+ *  away stays on screen (scrolling up loads them again); retaining them
+ *  across a revisit (P4-01 R3) is deferred to a follow-up. The list patches
+ *  only the rows that changed: the dropped head, the new tail and, for a
+ *  revisit that opened with unread messages, the NEW divider.
  *
  *  `splice` is a full-ready resync's refetch (P2-T4): when the page reaches
  *  back to the newest row loaded at setChannelLoading, the loaded rows older

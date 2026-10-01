@@ -281,29 +281,30 @@ describe("MessageList", () => {
       return [...new Set(signals)];
     }
 
-    const windowSignals: AbortSignal[] = [];
+    const windowSignals: AbortSignal[][] = [];
     for (let i = 1; i <= 5; i++) {
       expect(msgList.scrollToMessage(i)).toBe(true);
-      const [signal, ...extra] = rowSignalsSinceLastRender();
-      // Every row in a rendered window shares that window's single signal.
-      expect(extra).toHaveLength(0);
-      if (signal === undefined) throw new Error(`jump ${i} rendered no row listeners`);
-      windowSignals.push(signal);
+      const signals = rowSignalsSinceLastRender();
+      // Each rendered row has its own owner (P4-01), so a row patch can
+      // release exactly the rows it replaces.
+      if (signals.length === 0) throw new Error(`jump ${i} rendered no row listeners`);
+      windowSignals.push(signals);
     }
 
-    // Each jump renders against a fresh signal, so nothing accumulates row
+    // Each jump renders against fresh signals, so nothing accumulates row
     // listeners on one long-lived signal.
-    expect(new Set(windowSignals).size).toBe(windowSignals.length);
+    const all = windowSignals.flat();
+    expect(new Set(all).size).toBe(all.length);
 
     // A superseded window is released by the render that replaced it, not
     // deferred to destroy(). Before OC-0286 rows registered directly against
     // the component-lifetime signal (`ac.signal`), so all five of these would
     // still be live here, each pinning a whole window of detached rows and
     // everything they reference — videos, images, embeds, tooltips.
-    const superseded = windowSignals.slice(0, -1);
-    const current = windowSignals[windowSignals.length - 1];
+    const superseded = windowSignals.slice(0, -1).flat();
+    const current = windowSignals[windowSignals.length - 1]!;
     expect(superseded.every((signal) => signal.aborted)).toBe(true);
-    expect(current?.aborted).toBe(false);
+    expect(current.some((signal) => signal.aborted)).toBe(false);
 
     addEventListenerSpy.mockRestore();
   });
@@ -893,6 +894,176 @@ describe("MessageList", () => {
     });
   });
 
+  // P4-01: an update that touches a few rows re-renders only those rows (and a
+  // neighbour whose grouping changed); every other row keeps its DOM node, so
+  // a playing video, a revealed spoiler, a selection or focus elsewhere survive.
+  describe("row-level patch", () => {
+    /** One minute apart and alternating authors, so no two rows group. */
+    function ungrouped(id: number): Message {
+      return makeMessage({
+        id,
+        user: { id: (id % 2) + 1, username: id % 2 === 0 ? "Alice" : "Bob", avatar: null },
+        timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString(),
+      });
+    }
+    const row = (id: number): Element | null =>
+      container.querySelector(`[data-testid='message-${id}']`);
+    const current = (): readonly Message[] => messagesStore.getState().messagesByChannel.get(1)!;
+    function replace(id: number, patch: Partial<Message>): void {
+      setMessages(
+        1,
+        current().map((m) => (m.id === id ? { ...m, ...patch } : m)),
+      );
+      messagesStore.flush();
+    }
+
+    it("re-renders only the row a reaction changed and leaves focus where it was", () => {
+      setMessages(
+        1,
+        Array.from({ length: 40 }, (_, i) => ungrouped(i + 1)),
+      );
+      msgList.mount(container);
+      // jsdom mounts at the tail; bring the oldest rows into the window.
+      expect(msgList.scrollToMessage(2)).toBe(true);
+      const row2 = row(2);
+      const row5 = row(5);
+      const row10 = row(10);
+      expect(row2).not.toBeNull();
+      expect(row5).not.toBeNull();
+      expect(row10).not.toBeNull();
+      const reply10 = container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-10']")!;
+      reply10.focus();
+
+      replace(5, { reactions: [{ emoji: "👍", count: 1, me: false }] });
+
+      expect(row(2)).toBe(row2);
+      expect(row(10)).toBe(row10);
+      expect(row(5)).not.toBe(row5);
+      expect(row(5)!.querySelector(".reaction-chip")).not.toBeNull();
+      expect(document.activeElement).toBe(reply10);
+    });
+
+    it("re-renders an edited row in place", () => {
+      setMessages(1, [1, 2, 3].map(ungrouped));
+      msgList.mount(container);
+      const [row1, row2, row3] = [row(1), row(2), row(3)];
+
+      replace(2, { content: "Edited", editedAt: "2024-01-15T12:10:00Z" });
+
+      expect(row(1)).toBe(row1);
+      expect(row(3)).toBe(row3);
+      expect(row(2)).not.toBe(row2);
+      expect(row(2)!.textContent).toContain("Edited");
+      const ids = [...container.querySelectorAll("[data-testid^='message-']")].map(
+        (el) => (el as HTMLElement).dataset.testid,
+      );
+      expect(ids).toEqual(["message-1", "message-2", "message-3"]);
+    });
+
+    it("re-renders the next row when a delete ends its grouping, and nothing further", () => {
+      // Same author a minute apart: every row after the first is grouped.
+      setMessages(
+        1,
+        [1, 2, 3, 4].map((id) =>
+          makeMessage({ id, timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString() }),
+        ),
+      );
+      msgList.mount(container);
+      const [row1, row3, row4] = [row(1), row(3), row(4)];
+      expect(row3!.classList.contains("grouped")).toBe(true);
+
+      replace(2, { deleted: true });
+
+      expect(row(1)).toBe(row1);
+      expect(row(4)).toBe(row4);
+      // A deleted row never groups, so the row under it now shows its author.
+      expect(row(3)).not.toBe(row3);
+      expect(row(3)!.classList.contains("grouped")).toBe(false);
+    });
+
+    it("swaps a confirmed send in for its optimistic row without touching the others", () => {
+      const optimistic = makeMessage({
+        id: 0,
+        correlationId: "c-1",
+        status: "pending",
+        content: "sending",
+        timestamp: "2024-01-15T12:30:00Z",
+      });
+      setMessages(1, [1, 2, 3].map(ungrouped).concat(optimistic));
+      msgList.mount(container);
+      const [row1, row2, row3] = [row(1), row(2), row(3)];
+      expect(row(0)).not.toBeNull();
+
+      setMessages(
+        1,
+        current().map((m) => (m === optimistic ? { ...m, id: 4, status: "sent" as const } : m)),
+      );
+      messagesStore.flush();
+
+      expect(row(1)).toBe(row1);
+      expect(row(2)).toBe(row2);
+      expect(row(3)).toBe(row3);
+      expect(row(0)).toBeNull();
+      expect(row(4)).not.toBeNull();
+    });
+
+    it("re-renders a loaded reply whose parent was edited", () => {
+      setMessages(1, [ungrouped(1), ungrouped(2), { ...ungrouped(3), replyTo: 1 }]);
+      msgList.mount(container);
+      const [row2, row3] = [row(2), row(3)];
+
+      replace(1, { content: "Parent edited" });
+
+      expect(row(2)).toBe(row2);
+      expect(row(3)).not.toBe(row3);
+      expect(row(3)!.querySelector(".msg-reply-ref")!.textContent).toContain("Parent edited");
+    });
+
+    it("keeps a loaded reply's row when its parent only gains a reaction", () => {
+      setMessages(1, [ungrouped(1), ungrouped(2), { ...ungrouped(3), replyTo: 1 }]);
+      msgList.mount(container);
+      const [row1, row3] = [row(1), row(3)];
+
+      replace(1, { reactions: [{ emoji: "👍", count: 1, me: false }] });
+
+      expect(row(1)).not.toBe(row1);
+      expect(row(3)).toBe(row3);
+    });
+
+    it("re-renders a loaded reply whose parent arrives", () => {
+      setMessages(1, [ungrouped(1), ungrouped(4), { ...ungrouped(5), replyTo: 2 }]);
+      msgList.mount(container);
+      const [row1, row5] = [row(1), row(5)];
+      expect(row5!.querySelector(".msg-reply-ref")!.textContent).not.toContain("Message 2");
+
+      // The parent lands above the reply's neighbour, so the reply's own
+      // grouping is unchanged: only its quote is stale.
+      const [first, ...rest] = current();
+      setMessages(1, [first!, ungrouped(2), ...rest]);
+      messagesStore.flush();
+
+      expect(row(1)).toBe(row1);
+      expect(row(5)).not.toBe(row5);
+      expect(row(5)!.querySelector(".msg-reply-ref")!.textContent).toContain("Message 2");
+    });
+
+    // R1: a revisit's page drops the oldest rows and adds the ones posted while away.
+    it("drops head rows and appends tail rows without rebuilding the rows that stay", () => {
+      const all = Array.from({ length: 63 }, (_, i) => ungrouped(i + 1));
+      setMessages(1, all.slice(0, 60));
+      msgList.mount(container);
+      const kept = [45, 50, 60].map((id) => [id, row(id)] as const);
+      for (const [, el] of kept) expect(el).not.toBeNull();
+
+      setMessages(1, all.slice(10, 63));
+      messagesStore.flush();
+
+      for (const [id, el] of kept) expect(row(id)).toBe(el);
+      expect(row(63)).not.toBeNull();
+      expect(row(5)).toBeNull();
+    });
+  });
+
   // DP-10: revisiting a channel shows its cached rows while the tail is
   // refetched; the fetch finishing must not rebuild them.
   describe("channel revisit", () => {
@@ -934,17 +1105,19 @@ describe("MessageList", () => {
     });
 
     it("renders the final state once the 2s burst window resets, instead of staying stuck at the pre-trip state", () => {
-      setMessages(1, [makeMessage({ id: 1, content: "v0" })]);
+      const others = Array.from({ length: 25 }, (_, i) => makeMessage({ id: i + 2 }));
+      setMessages(1, [makeMessage({ id: 1, content: "v0" }), ...others]);
       msgList.mount(container); // 1st renderAll call, starts the 2s window
 
-      // Fire 25 non-append updates (edits) back-to-back, well inside the 2s
-      // window. tryAppendMessages() returns false for every one of these
-      // (same-length array, content changed) so each forces a renderAll().
-      // Combined with the mount's call, this is 26 renderAll invocations —
-      // calls 21+ trip the >20-in-2s breaker and must return without
-      // rendering.
+      // Fire 25 updates back-to-back, well inside the 2s window, each editing
+      // message 1 and moving it one row further down. Every update is then a
+      // reorder against any earlier state, the last one rendered before the
+      // breaker trips included, and the row patch leaves a reorder to
+      // renderAll. Combined with the mount's call, this is 26 renderAll
+      // invocations — calls 21+ trip the >20-in-2s breaker and must return
+      // without rendering.
       for (let i = 1; i <= 25; i++) {
-        setMessages(1, [makeMessage({ id: 1, content: `v${i}` })]);
+        setMessages(1, others.toSpliced(i, 0, makeMessage({ id: 1, content: `v${i}` })));
         messagesStore.flush();
       }
       expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
