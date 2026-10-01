@@ -56,14 +56,14 @@ interface StatusDef {
  * instead of flashing back to online.
  */
 const STATUS_DEFS: readonly StatusDef[] = [
-  { value: "online", labelKey: "status.online", color: "#3ba55d" },
-  { value: "idle", labelKey: "status.idle", color: "#faa61a" },
-  { value: "dnd", labelKey: "status.dnd", color: "#ed4245" },
-  { value: "invisible", labelKey: "status.invisible", color: "#747f8d" },
+  { value: "online", labelKey: "status.online", color: "var(--green)" },
+  { value: "idle", labelKey: "status.idle", color: "var(--yellow)" },
+  { value: "dnd", labelKey: "status.dnd", color: "var(--red)" },
+  { value: "invisible", labelKey: "status.invisible", color: "var(--text-micro)" },
 ];
 
 function colorForStatus(status: UserStatus): string {
-  return STATUS_DEFS.find((d) => d.value === status)?.color ?? "#747f8d";
+  return STATUS_DEFS.find((d) => d.value === status)?.color ?? "var(--text-micro)";
 }
 
 // ---------------------------------------------------------------------------

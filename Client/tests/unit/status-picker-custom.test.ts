@@ -48,6 +48,21 @@ describe("StatusPicker", () => {
     expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("invisible");
   });
 
+  it("colors every option dot with design tokens, never a literal hex (P4-19)", () => {
+    picker = createStatusPicker({ currentStatus: "online", onStatusChange: vi.fn() });
+    picker.mount(container);
+
+    const byLabel = (label: string): HTMLElement =>
+      Array.from(container.querySelectorAll(".status-picker-option"))
+        .find((el) => el.querySelector(".status-picker-option-label")?.textContent === label)!
+        .querySelector<HTMLElement>(".status-picker-option-dot")!;
+
+    expect(byLabel("Online").style.background).toBe("var(--green)");
+    expect(byLabel("Idle").style.background).toBe("var(--yellow)");
+    expect(byLabel("Do Not Disturb").style.background).toBe("var(--red)");
+    expect(byLabel("Invisible").style.background).toBe("var(--text-micro)");
+  });
+
   it("renders no custom status input when no handler is supplied", () => {
     picker = createStatusPicker({ currentStatus: "online", onStatusChange: vi.fn() });
     picker.mount(container);

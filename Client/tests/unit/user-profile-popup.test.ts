@@ -94,6 +94,32 @@ describe("UserProfilePopup", () => {
     popup.destroy?.();
   });
 
+  it("colors the status dot with design tokens, never a literal hex (P4-19)", () => {
+    const cases: Array<[UserProfileData["status"], string]> = [
+      ["online", "var(--green)"],
+      ["idle", "var(--yellow)"],
+      ["dnd", "var(--red)"],
+      ["invisible", "var(--text-micro)"],
+      ["offline", "var(--text-micro)"],
+    ];
+    for (const [status, token] of cases) {
+      const popup = createUserProfilePopup({
+        user: makeUser({ status }),
+        anchorX: 100,
+        anchorY: 100,
+      });
+      popup.mount(container);
+
+      const dot = container.querySelector<HTMLElement>(".upp-status-dot");
+      expect(dot?.style.background, status).toBe(token);
+      const inline = container.querySelector<HTMLElement>(".upp-status-dot-inline");
+      expect(inline?.style.background, status).toBe(token);
+
+      popup.destroy?.();
+      container.replaceChildren();
+    }
+  });
+
   it("omits action buttons that have no handler", () => {
     const popup = createUserProfilePopup({
       user: makeUser(),
