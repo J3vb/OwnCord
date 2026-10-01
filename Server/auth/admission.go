@@ -53,9 +53,12 @@ const (
 	// AdmissionWait is how long an Acquire caller on the login, registration
 	// and recovery-code paths waits in the queue before it is refused.
 	AdmissionWait = 10 * time.Second
-	// queueSlotsPerSecond sizes the queue: four waiters per slot per second
-	// of AdmissionWait — a cost-12 compare holds a slot about a quarter
-	// second, so that is roughly what the budget can serve inside the wait.
+	// queueSlotsPerSecond caps the queue at four waiters per slot per second
+	// of AdmissionWait. It is only an upper bound: it matches what the budget
+	// serves inside the wait when a compare holds a slot a quarter second,
+	// but slots outnumber cores by default, so holds run longer. Acquire
+	// refuses earlier, from the measured hold time, whenever the wait it
+	// would face already exceeds its maxWait.
 	queueSlotsPerSecond = 4
 	// initialAvgHold seeds the retry hint before any slot has been released.
 	initialAvgHold = 250 * time.Millisecond
@@ -100,11 +103,11 @@ func (b *AdmissionBudget) TryAcquire() (release func(), ok bool) {
 }
 
 // Acquire takes one slot, waiting in arrival order for up to maxWait when
-// the budget is exhausted. ok is false when the queue is already full, when
-// maxWait passes, or when ctx ends first: nothing was taken, release is a
-// no-op, and retryAfter estimates when a slot is likely to be free. A
-// refusal is still the B4-4 refusal — no computation runs and it charges no
-// lockout attempt.
+// the budget is exhausted. ok is false when the queue is already full or its
+// estimated wait already exceeds maxWait, when maxWait passes, or when ctx
+// ends first: nothing was taken, release is a no-op, and retryAfter
+// estimates when a slot is likely to be free. A refusal is still the B4-4
+// refusal — no computation runs and it charges no lockout attempt.
 func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (release func(), retryAfter time.Duration, ok bool) {
 	b.mu.Lock()
 	if b.held < b.size && b.waiters.Len() == 0 {
@@ -112,7 +115,7 @@ func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (r
 		b.mu.Unlock()
 		return b.admitted(), 0, true
 	}
-	if b.waiters.Len() >= b.queueCap {
+	if b.waiters.Len() >= b.queueCap || b.estimatedWaitLocked() > maxWait {
 		retryAfter = b.retryAfterLocked()
 		b.mu.Unlock()
 		return func() {}, retryAfter, false
@@ -146,12 +149,16 @@ func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (r
 	return func() {}, retryAfter, false
 }
 
+// estimatedWaitLocked is how long a caller joining the queue now would wait
+// for a slot: the queue ahead of it divided by the budget's throughput.
+func (b *AdmissionBudget) estimatedWaitLocked() time.Duration {
+	return time.Duration(b.waiters.Len()+1) * b.avgHold / time.Duration(b.size)
+}
+
 // retryAfterLocked estimates how long a caller refused now should wait before
-// trying again: the queue ahead of it divided by the budget's throughput,
-// never under a second.
+// trying again: its estimated wait, never under a second.
 func (b *AdmissionBudget) retryAfterLocked() time.Duration {
-	wait := time.Duration(b.waiters.Len()+1) * b.avgHold / time.Duration(b.size)
-	return max(wait, time.Second)
+	return max(b.estimatedWaitLocked(), time.Second)
 }
 
 // admitted books a slot the caller now holds and returns its release.

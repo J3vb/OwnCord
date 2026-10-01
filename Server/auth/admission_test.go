@@ -262,7 +262,10 @@ func TestAdmissionBudget_WaiterPastItsDeadlineIsRefused(t *testing.T) {
 		t.Fatal("could not take the only slot")
 	}
 	defer release()
-	if _, retry, ok := b.Acquire(context.Background(), 20*time.Millisecond); ok || retry <= 0 {
+	// The deadline sits just past the estimated wait, so the caller queues
+	// and is refused only when it runs out.
+	b.SetAvgHoldForTest(10 * time.Millisecond)
+	if _, retry, ok := b.Acquire(context.Background(), 30*time.Millisecond); ok || retry <= 0 {
 		t.Fatalf("Acquire past its deadline = (ok %v, retry %v), want refused with a positive hint", ok, retry)
 	}
 	if b.QueuedForTest() != 0 || b.InFlight() != 1 {
@@ -282,13 +285,14 @@ func TestAdmissionBudget_FullQueueRefusesAtOnceWithARetryHint(t *testing.T) {
 	if qcap <= 0 {
 		t.Fatalf("queue cap = %d, want positive", qcap)
 	}
+	// Deadlines far past the estimated wait, so only the cap can refuse.
 	for range qcap {
-		wg.Go(func() { b.Acquire(ctx, 10*time.Second) })
+		wg.Go(func() { b.Acquire(ctx, time.Hour) })
 	}
 	waitQueued(t, b, qcap)
 
 	start := time.Now()
-	_, retry, ok := b.Acquire(context.Background(), 10*time.Second)
+	_, retry, ok := b.Acquire(context.Background(), time.Hour)
 	if ok {
 		t.Fatal("a full queue admitted one more")
 	}
@@ -306,6 +310,44 @@ func TestAdmissionBudget_FullQueueRefusesAtOnceWithARetryHint(t *testing.T) {
 	release()
 	if b.InFlight() != 0 {
 		t.Fatalf("in flight = %d, want 0", b.InFlight())
+	}
+}
+
+// A queue the budget cannot serve inside the caller's wait refuses at once,
+// from the measured hold time, instead of letting the caller wait out its
+// deadline for nothing.
+func TestAdmissionBudget_UnservableWaitRefusesAtOnce(t *testing.T) {
+	b := auth.NewAdmissionBudget(2)
+	for range 2 {
+		release, ok := b.TryAcquire()
+		if !ok {
+			t.Fatal("could not take a slot")
+		}
+		defer release()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	defer cancel()
+	// 6 s holds on 2 slots: the first waiter faces 3 s, inside a 5 s
+	// deadline; the next, with one waiter ahead, faces 6 s, past it.
+	b.SetAvgHoldForTest(6 * time.Second)
+	wg.Go(func() { b.Acquire(ctx, 5*time.Second) })
+	waitQueued(t, b, 1)
+
+	start := time.Now()
+	_, retry, ok := b.Acquire(context.Background(), 5*time.Second)
+	if ok {
+		t.Fatal("a caller the budget cannot serve inside its wait was admitted")
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Fatalf("an unservable wait made the caller wait %v, want an immediate refusal", waited)
+	}
+	if retry <= 0 {
+		t.Fatalf("retry hint = %v, want positive", retry)
+	}
+	if b.QueuedForTest() != 1 || b.InFlight() != 2 {
+		t.Fatalf("queued = %d, in flight = %d, want 1 and 2 (the refusal took nothing)", b.QueuedForTest(), b.InFlight())
 	}
 }
 
