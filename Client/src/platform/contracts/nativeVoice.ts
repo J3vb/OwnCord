@@ -164,6 +164,8 @@ export interface NativeVoice {
   /** Close `session` if it is still the live one; a stale id is a no-op. */
   disconnect(session: number): Promise<NativeVoiceResources>;
   setMicrophone(session: number, enabled: boolean): Promise<void>;
+  /** Push-to-talk's gate: closed, the open capture sends silence (DP-30). */
+  setPttGated(session: number, gated: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */

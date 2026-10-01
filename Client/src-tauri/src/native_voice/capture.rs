@@ -122,6 +122,8 @@ impl Reference {
 pub struct Processor {
     apm: Arc<Apm>,
     denoise: Option<Box<DenoiseState<'static>>>,
+    /// Push-to-talk's gate: while set, every frame goes out as silence.
+    gated: Arc<AtomicBool>,
     framer: Framer,
     input: Box<[f32; FRAME]>,
     output: Box<[f32; FRAME]>,
@@ -132,17 +134,27 @@ impl Processor {
         Self {
             apm,
             denoise: enhanced_noise_suppression.then(DenoiseState::new),
+            gated: Arc::default(),
             framer: Framer::default(),
             input: Box::new([0.0; FRAME]),
             output: Box::new([0.0; FRAME]),
         }
     }
 
+    /// Follow push-to-talk gate `gated` (the capture's shared one).
+    pub fn gated_by(mut self, gated: Arc<AtomicBool>) -> Self {
+        self.gated = gated;
+        self
+    }
+
     /// Feed mono samples (-1 to 1); each processed 10 ms frame goes to `out`.
+    /// While the push-to-talk gate is closed the frame is zeroed after the
+    /// APM and RNNoise ran, so their state stays warm for the next press.
     pub fn push(&mut self, samples: impl IntoIterator<Item = f32>, mut out: impl FnMut(&[i16])) {
         let Self {
             apm,
             denoise,
+            gated,
             framer,
             input,
             output,
@@ -160,6 +172,9 @@ impl Processor {
                     .iter_mut()
                     .zip(output.iter())
                     .for_each(|(s, o)| *s = o.clamp(-32768.0, 32767.0) as i16);
+            }
+            if gated.load(Ordering::Relaxed) {
+                frame.fill(0);
             }
             out(frame);
         });
@@ -229,6 +244,8 @@ type Processing = Arc<Mutex<Option<(Arc<Apm>, bool)>>>;
 struct Feed {
     processing: Processing,
     source: Arc<Mutex<Option<NativeAudioSource>>>,
+    /// Push-to-talk's gate, followed by every stream opened from this feed.
+    gated: Arc<AtomicBool>,
 }
 
 impl Feed {
@@ -241,13 +258,21 @@ impl Feed {
             .clone()
             .ok_or("audio processing is not set up")?;
         let source = lock(&self.source).clone().ok_or("no microphone track")?;
-        open_input(device, Processor::new(apm, denoise), source, dead)
+        let processor = Processor::new(apm, denoise).gated_by(self.gated.clone());
+        open_input(device, processor, source, dead)
     }
 }
 
 impl Capture {
     pub fn configure(&mut self, apm: Arc<Apm>, enhanced_noise_suppression: bool) {
         *lock(&self.feed.processing) = Some((apm, enhanced_noise_suppression));
+    }
+
+    /// Close or open push-to-talk's gate. The input stream stays as it is:
+    /// a closed gate sends silence from an open capture (D5), so a press
+    /// never waits on the device. Only a mute (`stop`) closes the capture.
+    pub fn set_ptt_gated(&self, gated: bool) {
+        self.feed.gated.store(gated, Ordering::Relaxed);
     }
 
     pub fn streams(&self) -> usize {
@@ -586,6 +611,41 @@ mod tests {
         assert!(watchers.ready(), "the watcher sees the source set after it");
         *lock(&capture.feed.source) = None;
         assert!(!watchers.ready());
+    }
+
+    /// DP-30: push-to-talk's gate keeps the capture and its processing
+    /// running but sends exact silence while closed, so a press needs no
+    /// device reopen and nothing of the room leaks while the key is up.
+    #[test]
+    fn a_closed_ptt_gate_sends_silence_and_an_open_one_the_processed_audio() {
+        let input = noise(FRAME * 20, 0.1, 3);
+        let capture = Capture::default();
+        let mut p = Processor::new(Apm::new(&opts(false, false)), true)
+            .gated_by(capture.feed.gated.clone());
+        capture.set_ptt_gated(true);
+        let gated = run(&mut p, &input);
+        assert_eq!(gated.len(), input.len(), "frames keep flowing");
+        assert!(
+            gated.iter().all(|&s| s == 0),
+            "a closed gate sends only zeros"
+        );
+        capture.set_ptt_gated(false);
+        assert!(
+            energy(&run(&mut p, &input)) > 1.0e5,
+            "an open gate passes audio"
+        );
+    }
+
+    /// A stream the watcher reopens (device loss, a default move) is built
+    /// from the shared feed, so it starts behind the same closed gate.
+    #[test]
+    fn the_ptt_gate_is_shared_with_the_watchers_feed() {
+        let capture = Capture::default();
+        let watchers = capture.feed.clone();
+        capture.set_ptt_gated(true);
+        assert!(watchers.gated.load(Ordering::Relaxed));
+        capture.set_ptt_gated(false);
+        assert!(!watchers.gated.load(Ordering::Relaxed));
     }
 
     #[test]

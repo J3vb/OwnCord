@@ -21,7 +21,7 @@
 import { loadPref, savePref } from "@lib/preferences";
 import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
-import { vkName } from "@lib/ptt";
+import { vkName, pttReleaseDelayMs } from "@lib/ptt";
 import type { PushToTalk } from "../contracts/pushToTalk";
 
 const log = createLogger("ptt");
@@ -38,6 +38,7 @@ let binding: PttBinding | null = null;
 let nativeStarted = false;
 let nativeStop: Promise<void> | null = null;
 let edge = 0;
+let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 
 function isCurrent(attempt: PttBinding, version = attempt.generation): boolean {
   return binding === attempt && generation === version;
@@ -144,22 +145,32 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       const currentEdge = ++edge;
 
       const pressed = event.payload;
+      // A newer edge supersedes a release still waiting out its delay; the
+      // edge guard below already drops it, this just frees the timer.
+      clearTimeout(releaseTimer);
       // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
       // loaded lazily so it stays out of the startup path. In a voice channel
       // the module is necessarily already loaded, so this import resolves
       // from the module cache in a microtask.
       void import("@lib/livekitSession")
         .then(({ setPttGated }) => {
-          const state = voiceStore.getState();
-          if (
-            !isCurrent(attempt, version) ||
-            currentEdge !== edge ||
-            state.currentChannelId !== channelId ||
-            state.joinedAt !== joinedAt
-          )
-            return;
-          setPttGated(!pressed);
-          log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
+          const apply = (): void => {
+            const state = voiceStore.getState();
+            if (
+              !isCurrent(attempt, version) ||
+              currentEdge !== edge ||
+              state.currentChannelId !== channelId ||
+              state.joinedAt !== joinedAt
+            )
+              return;
+            setPttGated(!pressed);
+            log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
+          };
+          // A release keeps transmitting for the saved delay (DP-30), so the
+          // tail of a word is not cut; a press opens at once.
+          const delay = pressed ? 0 : pttReleaseDelayMs();
+          if (delay > 0) releaseTimer = setTimeout(apply, delay);
+          else apply();
         })
         .catch((e) => log.warn("Failed to apply PTT gate", e));
     });

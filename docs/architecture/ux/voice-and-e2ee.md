@@ -167,16 +167,20 @@ PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
 `setPttGated(!pressed)` only while in a channel (the `ptt-state` listener inside
 `initPtt()`, `platform/desktop/pushToTalkService.ts`): the key opens and closes
 a gate inside the microphone processor (§8), never the mute, so the capture
-stays open across presses and no press publishes a raw track. The Linux native
-room has no web microphone to gate: there the same `setPttGated` switches the
-Rust session's microphone (`NativeRoom.setPttGated` →
-`nativeVoice.setMicrophone`), and every enable while the key is up comes up
-off. **Target UX:**
+stays open across presses and no press publishes a raw track. A release closes
+the gate only after the saved release delay (`pttReleaseDelayMs`, 0–2000 ms,
+20 ms by default); a press inside it cancels the close. The Linux native room
+has no web microphone to gate: there the same `setPttGated` flips the Rust
+session's own gate (`NativeRoom.setPttGated` → `nativeVoice.setPttGated`),
+which zeroes the open capture's processed frames, so the capture also stays
+open across presses; every enable sends the gate before the capture opens.
+Only a mute or deafen closes the capture, on both paths. **Target UX:**
 
 | State               | Presentation                                                                                                                                                                                                   |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate |
 | PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                        |
+| release delay       | Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                            |
 | binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                          |
 | PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                      |
 | PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                        |
@@ -285,8 +289,9 @@ trust action entirely (a blind accept is refused).
   stays published and its capture stays open across presses, the store's
   `pttGated` never writes `localMuted`, and a user's own mute or deafen still
   stops the capture as before. On Linux the native room keeps its own gate
-  behind the same call and turns the session's microphone off and on with
-  the key, only while the user has it on.
+  behind the same call: the key flips the Rust capture's gate, which zeroes
+  the open capture's processed frames, so there too the capture stays open
+  across presses (§4).
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
   plug/unplug and re-routes the active input/output without rejoining. An
   unplugged saved device falls back to the system default but stays the

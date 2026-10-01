@@ -110,6 +110,8 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.pressKey": "Press a supported key...",
   "keybinds.pttHint":
     "PTT works globally and does not hijack the key. Capture supports function keys, navigation keys, and Mouse 4/5.",
+  "keybinds.pttReleaseDelay": "Push to Talk release delay",
+  "keybinds.pttReleaseDelay.value": "{ms} ms",
   "keybinds.pttUnsupported":
     "Push to Talk needs global key observation, which this desktop does not support (macOS or a Wayland session). The key can be captured but never gates your microphone; use the mic button or Tray instead.",
   "keybinds.navigation": "Navigation",

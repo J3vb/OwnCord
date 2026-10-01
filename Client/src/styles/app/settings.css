@@ -285,6 +285,12 @@
   background: var(--accent);
   cursor: pointer;
 }
+.settings-slider:disabled {
+  opacity: 0.5;
+}
+.settings-slider:disabled::-webkit-slider-thumb {
+  cursor: not-allowed;
+}
 .slider-val {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
