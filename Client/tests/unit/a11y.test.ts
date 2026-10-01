@@ -336,6 +336,101 @@ describe("focusDialog", () => {
 });
 
 describe("enableRovingNavigation", () => {
+  it("moves by row width on ArrowUp/ArrowDown in grid orientation", () => {
+    const cells = Array.from({ length: 16 }, () => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal, "grid", 4);
+    cells[0]!.focus();
+
+    const down = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    cells[0]!.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(cells[4]);
+
+    const up = new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true });
+    cells[4]!.dispatchEvent(up);
+    expect(document.activeElement).toBe(cells[0]);
+
+    // Left/Right still step by one.
+    const right = new KeyboardEvent("keydown", {
+      key: "ArrowRight",
+      bubbles: true,
+      cancelable: true,
+    });
+    cells[0]!.dispatchEvent(right);
+    expect(document.activeElement).toBe(cells[1]);
+    ac.abort();
+  });
+
+  it("does not step past the edge of a grid row with ArrowDown", () => {
+    const cells = Array.from({ length: 3 }, () => {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      container.appendChild(cell);
+      return cell;
+    });
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal, "grid", 8);
+    cells[0]!.focus();
+
+    const down = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    cells[0]!.dispatchEvent(down);
+    // No cell a row below: stay put rather than jump to the end.
+    expect(document.activeElement).toBe(cells[0]);
+    ac.abort();
+  });
+
+  it("keeps grid ArrowUp/ArrowDown inside the focused cell's own grid", () => {
+    // Two category grids of 6 and 4 cells, 4 columns each: a flat-list step
+    // of 4 from A[2] would land on B[0], the wrong column.
+    const grids = [6, 4].map((n) => {
+      const grid = document.createElement("div");
+      container.appendChild(grid);
+      return Array.from({ length: n }, () => {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        grid.appendChild(cell);
+        return cell;
+      });
+    });
+    const a = grids[0]!;
+    const b = grids[1]!;
+    const ac = new AbortController();
+    enableRovingNavigation(container, ".cell", ac.signal, "grid", 4);
+
+    a[2]!.focus();
+    a[2]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(a[2]);
+
+    b[0]!.focus();
+    b[0]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(b[0]);
+
+    a[1]!.focus();
+    a[1]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(a[5]);
+    ac.abort();
+  });
+
   it("leaves a modified arrow (Alt+↓ steps channels) to the app", () => {
     const cells = [0, 1].map(() => {
       const cell = document.createElement("div");

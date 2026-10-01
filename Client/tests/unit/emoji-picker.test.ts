@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
@@ -250,6 +250,168 @@ describe("EmojiPicker", () => {
     const tabbable = cells.filter((c) => c.getAttribute("tabindex") === "0");
     expect(tabbable.length).toBe(1);
     expect(tabbable[0]).toBe(cells[0]);
+    picker.destroy();
+  });
+
+  // P4-13: the picker renders eight columns per category grid
+  // (.ep-grid { grid-template-columns: repeat(8, 1fr) }), so ArrowDown steps a
+  // whole row within the flat cell list.
+  it("ArrowDown moves focus one row down in the grid", () => {
+    const { picker } = makePicker();
+    const cells = picker.element.querySelectorAll(".ep-emoji") as NodeListOf<HTMLElement>;
+    expect(cells.length).toBeGreaterThan(8);
+
+    cells[0]!.focus();
+    cells[0]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
+    );
+
+    expect(document.activeElement).toBe(cells[8]);
+    expect(cells[0]!.getAttribute("tabindex")).toBe("-1");
+    expect(cells[8]!.getAttribute("tabindex")).toBe("0");
+    picker.destroy();
+  });
+
+  it("ArrowUp moves focus one row up in the grid", () => {
+    const { picker } = makePicker();
+    const cells = picker.element.querySelectorAll(".ep-emoji") as NodeListOf<HTMLElement>;
+
+    cells[8]!.focus();
+    cells[8]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }),
+    );
+
+    expect(document.activeElement).toBe(cells[0]);
+    picker.destroy();
+  });
+
+  it("Enter in the search input picks the first filtered emoji", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+
+    input.value = "smile";
+    input.dispatchEvent(new Event("input"));
+
+    const firstMatch = picker.element.querySelector(".ep-emoji") as HTMLElement;
+    expect(firstMatch).not.toBeNull();
+
+    input.focus();
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onSelect).toHaveBeenCalledWith(firstMatch.getAttribute("title"));
+    picker.destroy();
+  });
+
+  it("Enter that commits an IME composition in the search input does not pick", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+
+    input.value = "smile";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(onSelect).not.toHaveBeenCalled();
+    picker.destroy();
+  });
+
+  it("Enter in the search input does nothing when nothing matches", () => {
+    const onSelect = vi.fn();
+    const { picker } = makePicker({ onSelect });
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+
+    input.value = "zzzznotanemoji";
+    input.dispatchEvent(new Event("input"));
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+
+    expect(onSelect).not.toHaveBeenCalled();
+    picker.destroy();
+  });
+
+  it("clicking a category button scrolls its label into view", () => {
+    const original = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    const { picker } = makePicker();
+
+    const foodBtn = Array.from(
+      picker.element.querySelectorAll<HTMLButtonElement>(".ep-category-btn"),
+    ).find((b) => b.textContent === "Food");
+    expect(foodBtn).toBeDefined();
+
+    const foodLabel = Array.from(picker.element.querySelectorAll(".ep-category-label")).find(
+      (l) => l.textContent === "Food",
+    );
+    expect(foodLabel).toBeDefined();
+
+    scrollIntoView.mockClear();
+    foodBtn!.click();
+
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(foodLabel);
+    picker.destroy();
+  });
+
+  it("the category bar is a single Tab stop between the search and the grid", () => {
+    const { picker } = makePicker();
+    const tabOrder = Array.from(
+      picker.element.querySelectorAll<HTMLElement>("input, button, [tabindex]"),
+    ).filter((el) => el.tabIndex >= 0);
+    const search = picker.element.querySelector(".ep-search") as HTMLElement;
+    const at = tabOrder.indexOf(search);
+
+    expect(picker.element.querySelectorAll(".ep-category-btn").length).toBeGreaterThan(1);
+    expect(tabOrder[at + 1]!.classList.contains("ep-category-btn")).toBe(true);
+    expect(tabOrder[at + 2]!.classList.contains("ep-emoji")).toBe(true);
+    expect(tabOrder.filter((el) => el.classList.contains("ep-category-btn")).length).toBe(1);
+    picker.destroy();
+  });
+
+  it("ArrowRight steps the category bar and Enter jumps to that category", () => {
+    const original = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    const { picker } = makePicker();
+    const buttons = Array.from(
+      picker.element.querySelectorAll<HTMLButtonElement>(".ep-category-btn"),
+    );
+
+    buttons[0]!.focus();
+    buttons[0]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+    );
+    expect(document.activeElement).toBe(buttons[1]);
+    expect(buttons[0]!.getAttribute("tabindex")).toBe("-1");
+    expect(buttons[1]!.getAttribute("tabindex")).toBe("0");
+
+    scrollIntoView.mockClear();
+    buttons[1]!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    const label = picker.element.querySelector(
+      `.ep-category-label[data-category="${buttons[1]!.dataset.category}"]`,
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(label);
     picker.destroy();
   });
 
