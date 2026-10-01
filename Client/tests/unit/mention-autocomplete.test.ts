@@ -25,6 +25,8 @@ import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
+import { resetMessagesStore, setMessages } from "../../src/stores/messages.store";
+import type { MessageResponse } from "../../src/lib/types";
 import { Permission } from "../../src/lib/types";
 
 const NAMES = ["alice", "Alan", "Bob", "carol"];
@@ -61,9 +63,27 @@ function signInAs(role: string, permissions: number): void {
   channelsStore.flush();
 }
 
+/** A history row (newest-first page) authored by `userId`. */
+function historyRow(id: number, userId: number, channelId = 1): MessageResponse {
+  return {
+    id,
+    channel_id: channelId,
+    user: { id: userId, username: `u${userId}`, avatar: null },
+    content: `msg ${id}`,
+    reply_to: null,
+    attachments: [],
+    reactions: [],
+    pinned: false,
+    edited_at: null,
+    deleted: false,
+    timestamp: "2026-03-15T09:00:00Z",
+  };
+}
+
 beforeEach(() => {
   seedMembers();
   signInAs("member", Permission.SEND_MESSAGES);
+  resetMessagesStore();
 });
 
 describe("filterMentionSuggestions", () => {
@@ -83,6 +103,42 @@ describe("filterMentionSuggestions", () => {
   it("ranks prefix matches above substring matches", () => {
     seedMembers(["bob", "abbot"]);
     expect(filterMentionSuggestions("b").map((s) => s.token)).toEqual(["bob", "abbot"]);
+  });
+
+  it("ranks members who spoke recently in the channel first within a match group", () => {
+    seedMembers(["aaron", "alice", "abigail"]);
+    // Newest-first history page: alice (2) spoke most recently.
+    setMessages(1, [historyRow(3, 2), historyRow(2, 1), historyRow(1, 3)], false);
+    expect(filterMentionSuggestions("a", 1).map((s) => s.token)).toEqual([
+      "alice",
+      "aaron",
+      "abigail",
+    ]);
+  });
+
+  it("orders the recently active members by recency, then the rest alphabetically", () => {
+    seedMembers(["aaron", "alice", "abigail"]);
+    setMessages(1, [historyRow(3, 3), historyRow(2, 1), historyRow(1, 2)], false);
+    expect(filterMentionSuggestions("a", 1).map((s) => s.token)).toEqual([
+      "abigail",
+      "aaron",
+      "alice",
+    ]);
+  });
+
+  it("keeps prefix matches above a more recent substring chatter", () => {
+    seedMembers(["bob", "abbot"]);
+    setMessages(1, [historyRow(2, 2), historyRow(1, 1)], false);
+    expect(filterMentionSuggestions("b", 1).map((s) => s.token)).toEqual(["bob", "abbot"]);
+  });
+
+  it("stays alphabetical when the channel has no loaded messages", () => {
+    seedMembers(["aaron", "alice", "abigail"]);
+    expect(filterMentionSuggestions("a", 1).map((s) => s.token)).toEqual([
+      "aaron",
+      "abigail",
+      "alice",
+    ]);
   });
 
   it("returns nothing when no member matches", () => {
@@ -460,6 +516,10 @@ describe("composer integration", () => {
     return container.querySelector(".mention-autocomplete");
   }
 
+  function labels(): string[] {
+    return Array.from(container.querySelectorAll(".ma-name")).map((e) => e.textContent ?? "");
+  }
+
   function press(k: string): boolean {
     const ev = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
     textarea().dispatchEvent(ev);
@@ -469,6 +529,13 @@ describe("composer integration", () => {
   it("opens the popup on a bare @", () => {
     type("hello @");
     expect(popupEl()).not.toBeNull();
+  });
+
+  it("ranks recent chatters first in the mounted composer", () => {
+    seedMembers(["aaron", "alice"]);
+    setMessages(1, [historyRow(1, 2)], false);
+    type("@a");
+    expect(labels()).toEqual(["@alice", "@aaron"]);
   });
 
   it("does not open for an email-shaped @", () => {

@@ -5,6 +5,7 @@
 
 import { createElement, setText } from "@lib/dom";
 import { membersStore, memberDisplayName } from "@stores/members.store";
+import { getChannelMessages } from "@stores/messages.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { EVERYONE_TOKEN, HERE_TOKEN } from "@lib/mentions";
@@ -37,6 +38,12 @@ export interface MentionAutocompleteOptions {
   readonly onSelect: (token: string) => void;
   readonly onClose: () => void;
   /**
+   * Channel whose loaded history ranks the suggestions: members who spoke
+   * there recently are listed first. Omit to fall back to alphabetical order
+   * (no history is then consulted).
+   */
+  readonly channelId?: number;
+  /**
    * Composer textarea the popup completes for; carries combobox semantics and
    * aria-activedescendant while the popup is open (see inline-autocomplete).
    */
@@ -46,22 +53,38 @@ export interface MentionAutocompleteOptions {
 /** Same shape as the shared inline-autocomplete widget. */
 export type MentionAutocompleteComponent = InlineAutocompleteComponent;
 
-function byLabel(a: MentionSuggestion, b: MentionSuggestion): number {
-  return a.label.localeCompare(b.label);
+/**
+ * Recency rank per user id for `channelId`: 0 is the most recent author of the
+ * loaded history, higher is older. Users with no loaded message are absent.
+ */
+function recentChatterRanks(channelId: number | undefined): ReadonlyMap<number, number> {
+  const ranks = new Map<number, number>();
+  if (channelId === undefined) return ranks;
+  // getChannelMessages is oldest-first, so walk it backwards and keep each
+  // author's first (most recent) sighting.
+  const messages = getChannelMessages(channelId);
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const userId = messages[i]!.user.id;
+    if (!ranks.has(userId)) ranks.set(userId, ranks.size);
+  }
+  return ranks;
 }
 
 /**
  * Suggestions for `query`, in the order the popup lists them: prefix matches
- * before substring matches, alphabetical within each group.
+ * before substring matches. Within each group, members who spoke recently in
+ * `channelId` come first (most recent first), then the rest alphabetically.
+ * Without a channel id the order is purely alphabetical.
  *
  * @everyone / @here are offered only when the signed-in user's role holds
  * MENTION_EVERYONE — offering a token the server will refuse to honour would
  * be a lie. The server still enforces.
  */
-export function filterMentionSuggestions(query: string): MentionSuggestion[] {
+export function filterMentionSuggestions(query: string, channelId?: number): MentionSuggestion[] {
   const q = query.toLowerCase();
   const prefix: MentionSuggestion[] = [];
   const substring: MentionSuggestion[] = [];
+  const ranks = recentChatterRanks(channelId);
 
   for (const member of membersStore.getState().members.values()) {
     // Skip usernames the mention grammar cannot express (a space, an "@",
@@ -93,8 +116,20 @@ export function filterMentionSuggestions(query: string): MentionSuggestion[] {
     }
   }
 
-  prefix.sort(byLabel);
-  substring.sort(byLabel);
+  // Recent chatters first, then alphabetical within each group; a user with no
+  // rank (never seen in the loaded history) sorts after every ranked one.
+  const compare = (a: MentionSuggestion, b: MentionSuggestion): number => {
+    const ra = a.userId === null ? undefined : ranks.get(a.userId);
+    const rb = b.userId === null ? undefined : ranks.get(b.userId);
+    if (ra !== rb) {
+      if (ra === undefined) return 1;
+      if (rb === undefined) return -1;
+      return ra - rb;
+    }
+    return a.label.localeCompare(b.label);
+  };
+  prefix.sort(compare);
+  substring.sort(compare);
 
   const broadcasts: MentionSuggestion[] = [];
   if (currentUserHasPermission(Permission.MENTION_EVERYONE)) {
@@ -138,7 +173,7 @@ export function createMentionAutocomplete(
   return createInlineAutocomplete<MentionSuggestion>({
     rootClass: "mention-autocomplete",
     rootTestId: "mention-autocomplete",
-    filter: filterMentionSuggestions,
+    filter: (query) => filterMentionSuggestions(query, options.channelId),
     valueOf: (s) => s.token,
     rowTestId: (s) => `mention-option-${s.token}`,
     renderRow: renderMentionRow,

@@ -272,20 +272,24 @@ test.describe("Composer — mention autocomplete", () => {
     await expect(textarea(page)).toHaveValue("@oth");
   });
 
-  test("ArrowDown moves the active row and Enter inserts it", async ({ page }) => {
-    // Two rows match "er" (otheruser and testuser), so the arrow key decides
-    // which one Enter picks; the first row is otheruser alphabetically.
+  test("ranks a recent chatter ahead of an alphabetical match, and ArrowDown moves the active row", async ({
+    page,
+  }) => {
+    // Two rows match "er" (otheruser and testuser). testuser authored the mock
+    // channel's loaded message, so recent-chatter ranking puts it first even
+    // though "otheruser" sorts ahead alphabetically; the arrow key decides
+    // which row Enter picks.
     await textarea(page).fill("@er");
     await expect(mentionPopup(page)).toBeVisible();
-    const first = page.locator("[data-testid='mention-option-otheruser']");
-    const second = page.locator("[data-testid='mention-option-testuser']");
+    const first = page.locator("[data-testid='mention-option-testuser']");
+    const second = page.locator("[data-testid='mention-option-otheruser']");
     await expect(first).toHaveClass(/ma-item--active/);
 
     await textarea(page).press("ArrowDown");
     await expect(second).toHaveClass(/ma-item--active/);
 
     await textarea(page).press("Enter");
-    await expect(textarea(page)).toHaveValue("@testuser ");
+    await expect(textarea(page)).toHaveValue("@otheruser ");
   });
 });
 
