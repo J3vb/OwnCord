@@ -584,6 +584,33 @@ func (d *DB) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64,
 	return ids, nil
 }
 
+// DMDeliveryTarget is one participant of a DM channel as a send by a given
+// sender sees it (GetDMDeliveryTargets).
+type DMDeliveryTarget struct {
+	UserID int64
+	// Open is whether the participant's dm_open_state row already exists.
+	Open bool
+	// TrustsSender is whether the participant has a trusted_senders row for
+	// the sender (message requests; never populated for a group DM).
+	TrustsSender bool
+}
+
+// GetDMDeliveryTargets returns, in one read, a DM channel's group flag and
+// every participant with their open state and whether they trust senderID.
+// isGroup is false when the channel has no participants or is not a DM.
+func (d *DB) GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []DMDeliveryTarget, err error) {
+	rows, err := d.q.GetDMDeliveryTargets(ctx, dbgen.GetDMDeliveryTargetsParams{SenderID: senderID, ChannelID: channelID})
+	if err != nil {
+		return false, nil, fmt.Errorf("GetDMDeliveryTargets: %w", err)
+	}
+	targets = make([]DMDeliveryTarget, 0, len(rows))
+	for _, r := range rows {
+		isGroup = r.IsGroup != 0
+		targets = append(targets, DMDeliveryTarget{UserID: r.UserID, Open: r.IsOpen != 0, TrustsSender: r.TrustsSender != 0})
+	}
+	return isGroup, targets, nil
+}
+
 // GetDMRecipient returns the other participant in a DM channel.
 func (d *DB) GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*User, error) {
 	var recipientID int64

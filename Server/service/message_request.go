@@ -181,30 +181,34 @@ func (s *MessageRequestService) firstContact(ctx context.Context, senderID, reci
 // never in the returned set; their only frame from this channel is
 // dm_request.
 func (s *MessageRequestService) DMDeliveryAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
-	participantIDs, err := s.st.GetDMParticipantIDs(ctx, channelID)
+	isGroup, targets, err := s.st.GetDMDeliveryTargets(ctx, channelID, senderID)
 	if err != nil {
 		return nil, err
 	}
-	isGroup, err := s.st.IsGroupDM(ctx, channelID)
-	if err != nil {
-		return nil, err
-	}
+	return dmDeliveryAudience(isGroup, targets, senderID), nil
+}
+
+// dmDeliveryAudience is DMDeliveryAudience's rule over targets already read
+// by GetDMDeliveryTargets — shared with SendMessage, which reuses its own
+// read instead of re-reading.
+func dmDeliveryAudience(isGroup bool, targets []db.DMDeliveryTarget, senderID int64) []int64 {
 	if isGroup {
-		return participantIDs, nil
+		return dmTargetIDs(targets)
 	}
-	audience := make([]int64, 0, len(participantIDs))
-	for _, pid := range participantIDs {
-		if pid == senderID {
-			audience = append(audience, pid)
-			continue
-		}
-		trusted, tErr := s.st.IsTrustedSender(ctx, pid, senderID)
-		if tErr != nil {
-			return nil, tErr
-		}
-		if trusted {
-			audience = append(audience, pid)
+	audience := make([]int64, 0, len(targets))
+	for _, t := range targets {
+		if t.UserID == senderID || t.TrustsSender {
+			audience = append(audience, t.UserID)
 		}
 	}
-	return audience, nil
+	return audience
+}
+
+// dmTargetIDs is every participant's id, in read order.
+func dmTargetIDs(targets []db.DMDeliveryTarget) []int64 {
+	ids := make([]int64, 0, len(targets))
+	for _, t := range targets {
+		ids = append(ids, t.UserID)
+	}
+	return ids
 }

@@ -366,13 +366,19 @@ func TestDMService_ListDMs_CarriesMentionCount(t *testing.T) {
 	}
 }
 
-// erroringIsGroupDMStore forces RingTargets' IsGroupDM call to fail.
+// erroringIsGroupDMStore forces every group-flag lookup to fail: RingTargets'
+// IsGroupDM call, and SendMessage's GetDMDeliveryTargets read, which carries
+// the group flag for the send (DP-51).
 type erroringIsGroupDMStore struct {
 	*db.DB
 }
 
 func (s *erroringIsGroupDMStore) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
 	return false, errors.New("simulated IsGroupDM failure")
+}
+
+func (s *erroringIsGroupDMStore) GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (bool, []db.DMDeliveryTarget, error) {
+	return false, nil, errors.New("simulated GetDMDeliveryTargets failure")
 }
 
 // TestRingTargets_GroupLookupErrorFailsClosedToNoTargets is Codex review

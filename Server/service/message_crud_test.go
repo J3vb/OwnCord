@@ -9,7 +9,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -20,9 +23,10 @@ import (
 // disconnectAfterWriteStore models a client whose connection drops the instant
 // its write commits — the request ctx gets canceled right after the wrapped
 // write call returns, before the post-commit DM participant lookup runs.
-// GetDMParticipantIDs is overridden to fail whenever it is handed an
-// already-canceled context, so a test can tell whether the caller used the
-// (canceled) request ctx or a detached one for that lookup.
+// GetDMParticipantIDs and GetDMDeliveryTargets are overridden to fail
+// whenever handed an already-canceled context, so a test can tell whether
+// the caller used the (canceled) request ctx or a detached one for that
+// lookup.
 type disconnectAfterWriteStore struct {
 	Store
 	cancel context.CancelFunc
@@ -51,6 +55,13 @@ func (s disconnectAfterWriteStore) GetDMParticipantIDs(ctx context.Context, chan
 		return nil, ctx.Err()
 	}
 	return s.Store.GetDMParticipantIDs(ctx, channelID)
+}
+
+func (s disconnectAfterWriteStore) GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (bool, []db.DMDeliveryTarget, error) {
+	if ctx.Err() != nil {
+		return false, nil, ctx.Err()
+	}
+	return s.Store.GetDMDeliveryTargets(ctx, channelID, senderID)
 }
 
 // newDMFixture seeds a two-person DM channel (alice=1, bob=2) and returns the
@@ -501,5 +512,113 @@ func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testi
 	}
 	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE source = 'sent_first'`); n != 0 {
 		t.Errorf("trusted_senders 'sent_first' rows = %d, want 0", n)
+	}
+}
+
+// dmSendSpyStore counts the per-send DM lookups and writes DP-51 removed from
+// SendMessage's post-commit DM tail: the separate group-flag and
+// participant-ID reads, the per-recipient trust read, the DMAudience
+// re-reads, and an OpenDM write for a recipient whose DM row is already open.
+// Counting starts once the message row is written, so the pre-insert block
+// check (RequireDMNotBlocked's own IsGroupDM) is not counted.
+type dmSendSpyStore struct {
+	*db.DB
+	armed                                    atomic.Bool
+	participantIDs, isGroup, trusted, openDM atomic.Int32
+}
+
+func (s *dmSendSpyStore) count(n *atomic.Int32) {
+	if s.armed.Load() {
+		n.Add(1)
+	}
+}
+
+func (s *dmSendSpyStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error) {
+	msg, err := s.DB.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, mentionsEveryone)
+	s.armed.Store(true)
+	return msg, err
+}
+
+func (s *dmSendSpyStore) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
+	s.count(&s.participantIDs)
+	return s.DB.GetDMParticipantIDs(ctx, channelID)
+}
+
+func (s *dmSendSpyStore) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
+	s.count(&s.isGroup)
+	return s.DB.IsGroupDM(ctx, channelID)
+}
+
+func (s *dmSendSpyStore) IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	s.count(&s.trusted)
+	return s.DB.IsTrustedSender(ctx, recipientID, senderID)
+}
+
+func (s *dmSendSpyStore) OpenDM(ctx context.Context, userID, channelID int64) (bool, error) {
+	s.count(&s.openDM)
+	return s.DB.OpenDM(ctx, userID, channelID)
+}
+
+// DP-51: a group-DM send to five members who all have the DM open must not
+// write an OpenDM row per member through the single writer, nor re-read the
+// participants and group flag for the delivery audience. A member who closed
+// the DM still gets exactly one genuine re-open (OC-0106).
+func TestSendMessage_GroupDMSkipsOpenDMForOpenMembers(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET is_group = 1 WHERE id = 50`); err != nil {
+		t.Fatal(err)
+	}
+	for id := int64(3); id <= 5; id++ {
+		seedUser(t, database, &db.User{ID: id, Username: fmt.Sprintf("user%d", id)})
+		seedUserRole(t, database, id, permissions.MemberRoleID)
+		seedDMParticipant(t, database, 50, id)
+	}
+	for id := int64(1); id <= 5; id++ {
+		if _, err := database.OpenDM(ctx, id, 50); err != nil {
+			t.Fatalf("OpenDM(%d): %v", id, err)
+		}
+	}
+	spy := &dmSendSpyStore{DB: database}
+	svc := New(spy, nil)
+
+	result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi all",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if n := spy.openDM.Load(); n != 0 {
+		t.Errorf("OpenDM calls = %d, want 0 — every member already has the DM open", n)
+	}
+	if n := spy.participantIDs.Load() + spy.isGroup.Load(); n != 0 {
+		t.Errorf("separate GetDMParticipantIDs/IsGroupDM reads = %d, want 0 — the group flag rides on the one participant read", n)
+	}
+	if !result.DMIsGroup {
+		t.Error("DMIsGroup = false, want true")
+	}
+	if len(result.OpenedDMFor) != 0 {
+		t.Errorf("OpenedDMFor = %v, want []", result.OpenedDMFor)
+	}
+	slices.Sort(result.ParticipantIDs)
+	if want := []int64{1, 2, 3, 4, 5}; !slices.Equal(result.ParticipantIDs, want) {
+		t.Errorf("ParticipantIDs = %v, want %v", result.ParticipantIDs, want)
+	}
+
+	// Carol closes the DM: the next send re-opens it for her alone.
+	if err := database.CloseDM(ctx, 3, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	result, err = svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "carol?",
+	})
+	if err != nil {
+		t.Fatalf("second SendMessage: %v", err)
+	}
+	if n := spy.openDM.Load(); n != 1 {
+		t.Errorf("OpenDM calls after carol closed = %d, want 1", n)
+	}
+	if !slices.Equal(result.OpenedDMFor, []int64{3}) {
+		t.Errorf("OpenedDMFor = %v, want [3] — a closed member must still get dm_channel_open", result.OpenedDMFor)
 	}
 }
