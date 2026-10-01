@@ -263,12 +263,12 @@ export function createWsClient({
   let lastSeq = 0;
   // P5-S04: an announced restart's redial point (receipt + delay_seconds +
   // this client's random offset in reconnect_spread_ms), so the whole server
-  // does not redial into one instant. Consumed by the next redial.
+  // does not redial into one instant. Cleared by the next dial.
   let restartRedialAt: number | null = null;
   let restartOffsetMs = 0;
   // P5-S04: a SERVER_BUSY refusal's retry_after_ms, for the close that follows.
   let busyRetryAfterMs: number | undefined;
-  // P5-S04: the pending redial waits out that hint. Consumed by the next redial.
+  // P5-S04: the pending redial waits out that hint. Cleared by the next dial.
   let busyHold = false;
 
   // The transport's reports, for the lifetime of this client. Each one is a
@@ -512,8 +512,6 @@ export function createWsClient({
   // The backoff timer's callback, and a wake signal's early redial (DP-02).
   function redial(): void {
     reconnectTimer = null;
-    restartRedialAt = null;
-    busyHold = false;
     reconnectAttempt++;
     // U4: the process may have been suspended while this timer was pending
     // (a wake often outlives the backoff window), or a previous wake dial
@@ -790,6 +788,9 @@ export function createWsClient({
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
+    restartRedialAt = null;
+    busyRetryAfterMs = undefined;
+    busyHold = false;
     cancelReconnect();
     stopLiveness();
 

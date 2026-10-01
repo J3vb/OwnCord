@@ -307,6 +307,26 @@ describe("P5-S04 restart spread and server busy", () => {
     expect(peer.transport.connect).toHaveBeenCalledTimes(2);
   });
 
+  it("drops a pending restart hold when the user connects by hand", async () => {
+    const peer = transportHarness();
+    const clock = fakeClock();
+    const instance = client({ clock, random: () => 1 });
+    peer.authenticate();
+    peer.frame("server_restart", restart(5, 10_000));
+    await vi.advanceTimersByTimeAsync(5000);
+    peer.close();
+    // Retry while the spread wait is still pending.
+    instance.connect(config);
+    await vi.advanceTimersByTimeAsync(0);
+    peer.authenticate();
+    expect(peer.transport.connect).toHaveBeenCalledTimes(2);
+    // A later blip in the new session is an ordinary one.
+    peer.close();
+    expect(clock.setTimeout.mock.lastCall?.[1]).toBe(1000);
+    window.dispatchEvent(new Event("online"));
+    expect(peer.transport.connect).toHaveBeenCalledTimes(3);
+  });
+
   it("falls back to the ordinary backoff after a cancelled announcement or without a spread", async () => {
     const peer = transportHarness();
     const clock = fakeClock();
