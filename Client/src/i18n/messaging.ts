@@ -84,6 +84,13 @@ export const messagingText = defineCatalog("messaging", {
   "search.empty": "No results found",
   "search.failed": "Search failed",
   "search.authorHandle": "@{username}",
+  "search.scope.label": "Search scope",
+  "search.scope.server": "Whole server",
+  "search.scope.channel": "This channel",
+  "search.scope.inChannel": "in #{channel}",
+  "search.scope.inDm": "in @{name}",
+  "search.loadMore": "Load more",
+  "search.loadingMore": "Loading...",
 
   "pins.jump": "Jump to message",
   "pins.unpin": "Unpin message",

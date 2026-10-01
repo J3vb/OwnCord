@@ -444,10 +444,9 @@ export function createSearchOverlayController(opts: {
 
     instance = createSearchOverlay({
       currentChannelId: channelId ?? undefined,
-      onSearch: async (query, chId, signal) => {
+      onSearch: async (query, chId, signal, before) => {
         try {
-          const resp = await opts.api.search(query, { channelId: chId }, signal);
-          return resp.results;
+          return await opts.api.search(query, { channelId: chId, sort: "recent", before }, signal);
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           log.error("Search failed", { query, error: String(err) });

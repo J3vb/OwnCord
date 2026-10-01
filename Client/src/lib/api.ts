@@ -1194,12 +1194,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     search(
       query: string,
-      options?: { channelId?: number; limit?: number },
+      options?: {
+        channelId?: number;
+        limit?: number;
+        sort?: "relevance" | "recent";
+        before?: number;
+      },
       signal?: AbortSignal,
     ): Promise<SearchResponse> {
       const params = new URLSearchParams({ q: query });
       if (options?.channelId !== undefined) params.set("channel_id", String(options.channelId));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
+      if (options?.sort !== undefined) params.set("sort", options.sort);
+      // A `before` cursor only walks a newest-first list, so it implies the
+      // sort rather than letting the caller submit an invalid pairing.
+      if (options?.before !== undefined) {
+        params.set("sort", "recent");
+        params.set("before", String(options.before));
+      }
       const send = (): Promise<SearchResponse> =>
         request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
       // A server-wide search already omits channels the caller has not
