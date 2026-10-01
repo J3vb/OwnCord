@@ -285,6 +285,23 @@ func (a *App) startHub() error {
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
+	// Mention badges' single bounded worker (P5-O05). Its close step flushes
+	// every queued job and joins the loop, and the reverse walk runs it before
+	// the database closes because it registers here, after "database" but
+	// before the later stages — so a coalesced window is never lost at shutdown.
+	// The loop context is deliberately NOT bgCtx: the event-persistence close
+	// step cancels bgCtx, and the reverse walk reaches that step first, so a
+	// drain under bgCtx would be cancelled before it wrote. The close step's own
+	// bounded ctx is the live one the drain runs on.
+	if rt.Services != nil && rt.Services.Messages != nil {
+		loopCtx, cancel := context.WithCancel(context.WithoutCancel(a.bgCtx))
+		stop := rt.Services.Messages.StartMentionWorker(loopCtx)
+		a.onClose("mention-worker", func(ctx context.Context) error {
+			stop(ctx)
+			cancel()
+			return nil
+		})
+	}
 	return nil
 }
 

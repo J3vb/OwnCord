@@ -214,7 +214,7 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 	}
 
 	// A user who has blocked the author must never be pushed about the
-	// author's message -- the same exclusion applyMentionCounts applies to
+	// author's message -- the same exclusion the mention fan-out applies to
 	// mention badges (mentions.go). Fail closed: a lookup failure drops the
 	// whole round rather than risk pushing someone who blocked the sender.
 	blockers, err := d.st.ListBlockersOf(ctx, authorID)

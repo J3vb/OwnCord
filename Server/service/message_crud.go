@@ -88,23 +88,51 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// window before the increment lands, IncrementMentionCounts' own read-state
 	// guard (msgID vs. last_message_id) makes the increment a no-op instead of
 	// resurrecting it — the badge does not reappear.
+	//
+	// With a running mention worker (production), the job is queued and one
+	// window's jobs share a writer transaction (P5-O05); resolution runs at
+	// flush time so the block/visibility filters and the read-state guard see
+	// the state at write time. Without a worker (every test, and any caller
+	// built via NewMessageService directly) it resolves and writes inline via
+	// bg, so the counts are readable as soon as SendMessage returns.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
-	s.bg(func() {
-		bgCtx := context.WithoutCancel(ctx)
-		s.applyMentionCounts(bgCtx, channelID, msgID, authorID, mentions, isDM, participantIDs)
-		// Web Push dispatch (B5-11, behind HP-5): nil when dispatch is off.
-		// The candidate audience is the message's direct @mentions for a
-		// guild channel, or the DM's participants for a DM -- Notify applies
-		// every remaining filter (author, online, permission, coalescing)
-		// itself.
-		if s.pushNotifier != nil {
-			candidates := mentions.UserIDs
-			if isDM {
-				candidates = participantIDs
-			}
-			s.pushNotifier.Notify(bgCtx, channelID, authorID, candidates)
+	bgCtx := context.WithoutCancel(ctx)
+	// A message with no @user, @everyone or @here raises no badge, so it never
+	// takes a queue slot or a goroutine.
+	if len(mentions.UserIDs) > 0 || mentions.Everyone {
+		applyMentions := func(ctx context.Context) []db.MentionBatchEntry {
+			return s.mentionEntries(ctx, channelID, msgID, authorID, mentions, isDM, participantIDs)
 		}
-	})
+		if w := s.mentionWorkerForSend(); w != nil {
+			// Production: hand the job to the single bounded worker on the caller's
+			// goroutine. Enqueue never blocks, so no goroutine is spawned per send.
+			w.enqueue(mentionJob{enqueueAt: time.Now(), channelID: channelID, msgID: msgID, apply: applyMentions})
+		} else {
+			// No worker (tests, and any caller built via NewMessageService directly):
+			// resolve and write inline via bg so counts are readable right after the
+			// send. This is the pre-worker behaviour.
+			s.bg(func() {
+				if entries := applyMentions(bgCtx); len(entries) > 0 {
+					if err := s.st.IncrementMentionCountsBatch(bgCtx, channelID, entries); err != nil {
+						slog.Error("MessageService.mention fan-out IncrementMentionCounts", "err", err, "channel_id", channelID)
+					}
+				}
+			})
+		}
+	}
+	// Web Push dispatch (B5-11, behind HP-5): nil when dispatch is off. It is
+	// independent of the mention worker, so it keeps its own background hop
+	// (the Notify call can take seconds) rather than sharing the worker's
+	// queue.
+	if s.pushNotifier != nil {
+		candidates := mentions.UserIDs
+		if isDM {
+			candidates = participantIDs
+		}
+		s.bg(func() {
+			s.pushNotifier.Notify(bgCtx, channelID, authorID, candidates)
+		})
+	}
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil
@@ -222,7 +250,7 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMessageParams, result *SendMessageResult) bool {
 	// The message is already committed, so everything below must survive
 	// the sender's connection dropping the instant the write commits — the
-	// same reason the compensating deletes and applyMentionCounts below
+	// same reason the compensating deletes and the mention fan-out below
 	// detach from ctx. Without WithoutCancel, a canceled request ctx here
 	// silently drops every recipient from the fan-out (ParticipantIDs
 	// stays nil), skips re-opening the recipient's dm_open_state, and
@@ -603,6 +631,15 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if err != nil {
 		return nil, err
 	}
+
+	// Flush this message's queued mention-badge increment before the
+	// soft-delete commits and the reversal below runs, so increment and
+	// reversal stay symmetric (P5-O05; see FlushPendingMentionCounts). The
+	// liveness guard then sees the message still live and the reversal at the
+	// end of this method takes exactly the increment back — including when the
+	// recipient already held a genuine badge from an earlier message, which an
+	// unflushed reversal would wrongly consume.
+	s.FlushPendingMentionCounts(context.WithoutCancel(ctx), []int64{msgID})
 
 	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID, reason); err != nil {
 		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),

@@ -649,9 +649,9 @@ highlight from these fields rather than re-parsing the content. DMs never carry
 `mentions_everyone`.
 
 `@everyone` and `@here` both raise `mention_count` for every reader except
-`@here` skips a reader with no live connection at send time (the server's
-`applyMentionCounts` treats that reader as unreachable, the same way a push
-notification would). A client cannot tell the two tokens apart from
+`@here` skips a reader with no live connection when the badge is written (the
+server's mention worker treats that reader as unreachable, the same way a push
+notification would; the write lands a fraction of a second after the send). A client cannot tell the two tokens apart from
 `mentions_everyone` alone, which is why `mentions_here` exists: a reconnecting
 client that replays this frame from the gap it was disconnected for must not
 raise a mention badge for a here-only mention the server never counted — there

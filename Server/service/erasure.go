@@ -82,6 +82,11 @@ type ErasureService struct {
 	files   FileRemover
 	hub     ErasureHub
 	markers *db.MarkerStore
+	// flushMentions applies any still-queued mention-badge increments before
+	// the erasure transaction runs its own reversal and deletes the user's
+	// messages (P5-O05): the erasure cannot cheaply name the message ids, so it
+	// flushes everything. Wired by service.New; nil means no worker to flush.
+	flushMentions func(ctx context.Context)
 	// floorProbeCeiling bounds the sequence-floor probe; production runs at
 	// db.SequenceFloorProbeCeiling and the tests lower it to reach the
 	// refusal without hashing their way to it.
@@ -192,6 +197,13 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 // (db.eraseAccount, AuditWriter.Unlink), read under the writer connection
 // at insert time.
 func (s *ErasureService) eraseBehindBarrier(ctx context.Context, userID int64, token string, erase func(context.Context, int64, string) (*db.ErasureJob, error)) (*db.ErasureJob, error) {
+	// Flush queued mention-badge increments before the erasure transaction's
+	// reversal, so a message the subject sent inside the worker's coalesce
+	// window has its increment on disk and the reversal takes exactly it back
+	// (P5-O05; see MessageService.FlushAllPendingMentionCounts).
+	if s.flushMentions != nil {
+		s.flushMentions(ctx)
+	}
 	if err := s.st.FlushAudits(ctx); err != nil {
 		return nil, fmt.Errorf("erasure: audit barrier: %w", err)
 	}
