@@ -326,6 +326,46 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("closes on Escape after clicking a result moves focus off the input (DP-20)", async () => {
+    const result = makeResult({ message_id: 7 });
+    const onSearch = vi.fn().mockResolvedValue({ results: [result] });
+    const onSelectResult = vi.fn();
+    const opts = makeOptions({ onSearch, onSelectResult });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "click";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    (container.querySelector("[data-testid='search-result-0']") as HTMLElement).click();
+    // Picking a hit keeps the panel open and the row is a non-focusable div, so
+    // the browser parks focus on the body — the input's keydown never fires.
+    document.body.focus();
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(onSelectResult).toHaveBeenCalledOnce();
+    expect(opts.onClose).toHaveBeenCalledOnce();
+
+    overlay.destroy?.();
+  });
+
+  it("closes on Escape from the scope radiogroup, not just the input (DP-20)", () => {
+    const opts = makeOptions({ currentChannelId: 99 });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const channelChip = container.querySelector(
+      "[data-testid='search-scope-channel']",
+    ) as HTMLButtonElement;
+    channelChip.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(opts.onClose).toHaveBeenCalledOnce();
+
+    overlay.destroy?.();
+  });
+
   it("wires the input as a combobox over the results listbox (B9-22)", async () => {
     const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
     const onSearch = vi.fn().mockResolvedValue({ results });
@@ -584,6 +624,72 @@ describe("createSearchOverlay", () => {
 
     expect(onSearch).toHaveBeenLastCalledWith("scoped", 99, expect.any(AbortSignal), undefined);
     expect(channelChip.getAttribute("aria-checked")).toBe("true");
+
+    overlay.destroy?.();
+  });
+
+  it("clears the previous scope's results and cursor on every scope change (D4)", async () => {
+    const first = makeResult({ message_id: 30, channel_name: "general" });
+    const channelRow = makeResult({
+      message_id: 20,
+      channel_name: "general",
+      content: "in channel",
+    });
+    const onSearch = vi
+      .fn()
+      .mockResolvedValueOnce({ results: [first], next_before: 30 })
+      .mockResolvedValueOnce({ results: [channelRow], next_before: null });
+    const opts = makeOptions({ onSearch, currentChannelId: 99 });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const loadMore = container.querySelector(
+      "[data-testid='search-load-more']",
+    ) as HTMLButtonElement;
+    expect(container.querySelectorAll(".search-result-item")).toHaveLength(1);
+    expect(loadMore.style.display).not.toBe("none");
+
+    // Toggle scope inside the rate-limit window: the whole-server rows and
+    // cursor must not survive, or Load more would page the whole-server cursor
+    // with the channel-scoped request and mix scopes.
+    (container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement).click();
+    expect(container.querySelectorAll(".search-result-item")).toHaveLength(0);
+    expect(loadMore.style.display).toBe("none");
+
+    // The rescheduled channel-scoped search still runs.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(onSearch).toHaveBeenLastCalledWith("hello", 99, expect.any(AbortSignal), undefined);
+    expect(container.querySelectorAll(".search-result-item")).toHaveLength(1);
+
+    overlay.destroy?.();
+  });
+
+  it("aborts the in-flight search when the scope changes (D4)", async () => {
+    let abortedSignal: AbortSignal | undefined;
+    const onSearch = vi.fn().mockImplementation(
+      (_q: string, _ch: number | undefined, signal: AbortSignal) =>
+        new Promise<SearchResponse>(() => {
+          abortedSignal = signal;
+        }),
+    );
+    const opts = makeOptions({ onSearch, currentChannelId: 99 });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(onSearch).toHaveBeenCalledTimes(1);
+    const wholeServerSignal = abortedSignal;
+
+    (container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement).click();
+    expect(wholeServerSignal!.aborted).toBe(true);
 
     overlay.destroy?.();
   });

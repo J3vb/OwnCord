@@ -271,13 +271,20 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     if (scopeServer === server) return;
     scopeServer = server;
     paintScope();
+    // A scope change invalidates every previous result: the rows and the paging
+    // cursor belong to the old scope. Abort the in-flight request and clear them
+    // before doSearch(), so a rate-limited reschedule cannot leave the other
+    // scope's rows and cursor on screen for a later Load more to mix with.
+    if (searchAbort !== null) {
+      searchAbort.abort();
+      searchAbort = null;
+    }
+    results = [];
+    nextBefore = null;
+    loadingMore = false;
+    renderResults();
     if (input.value.trim().length >= MIN_QUERY_LEN) {
       doSearch();
-    } else {
-      results = [];
-      nextBefore = null;
-      loadingMore = false;
-      renderResults();
     }
   }
 
@@ -299,9 +306,16 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   function handleKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       e.preventDefault();
+      // Escape closes from anywhere: focus moves to the body after clicking a
+      // result row (and to the scope radiogroup or Load more after
+      // tabbing/roving), so an input-only handler left Escape dead there. Bound
+      // on document so the body-focus path is covered too; a single listener
+      // cannot double-fire.
       options.onClose();
       return;
     }
+    // Arrow/Enter combobox behaviour applies only while the input holds focus.
+    if (e.target !== input) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (results.length > 0) {
@@ -450,7 +464,10 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     container.appendChild(root);
 
     input.addEventListener("input", handleInput, { signal });
-    input.addEventListener("keydown", handleKeydown, { signal });
+    // Document-level keydown so Escape closes wherever focus is, including the
+    // body after a result click; the input still drives arrow/Enter combobox
+    // behaviour and the handler gates those on the event target.
+    document.addEventListener("keydown", handleKeydown, { signal });
     root.addEventListener("click", handleBackdropClick, { signal });
     resultsDiv.addEventListener("click", handleResultsClick, { signal });
 
