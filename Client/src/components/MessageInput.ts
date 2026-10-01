@@ -466,6 +466,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       mentionPopup = createMentionAutocomplete({
         onSelect: insertMention,
         onClose: closeMentionPopup,
+        channelId: options.channelId,
         // The popup manages combobox/aria-activedescendant state on the
         // textarea for as long as it is open.
         comboboxInput: textarea ?? undefined,
