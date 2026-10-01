@@ -58,8 +58,7 @@ func TestMentionWorker_OneTransactionPerChannelPerWindow(t *testing.T) {
 // count, the author none.
 func TestMentionWorker_FlushesCounts(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
 	defer stop(context.Background())
 
@@ -89,8 +88,7 @@ func TestMentionWorker_FlushesCounts(t *testing.T) {
 func TestMentionWorker_AppliesBlockFilter(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	seedBlock(t, database, 2, 1) // bob blocked alice
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
 	defer stop(context.Background())
 
@@ -110,8 +108,7 @@ func TestMentionWorker_AppliesBlockFilter(t *testing.T) {
 // worker running, SendMessage only enqueues, so the goroutine count stays flat.
 func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
 	defer stop(context.Background())
 
@@ -122,15 +119,13 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 100)
 	for range 100 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, err := svc.SendMessage(context.Background(), SendMessageParams{
 				ChannelID: 10, UserID: 4, Username: "mod", RoleName: "moderator",
 				Content: "@everyone storm",
 			})
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)
@@ -143,10 +138,7 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 	// The workers above are joined; only the worker plus its loop may remain.
 	// Poll briefly for the scheduler to reap the finished senders.
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if runtime.NumGoroutine()-baseline <= 2 {
-			break
-		}
+	for runtime.NumGoroutine()-baseline > 2 {
 		if time.Now().After(deadline) {
 			t.Fatalf("goroutines grew by %d over baseline after 100 sends, want <= 2",
 				runtime.NumGoroutine()-baseline)
@@ -169,8 +161,7 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 // raises a permanent phantom badge on a channel with nothing unread.
 func TestMentionWorker_DeleteBeforeFlushLeavesNoBadge(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
 	defer stop(context.Background())
 
@@ -194,8 +185,7 @@ func TestMentionWorker_DeleteBeforeFlushLeavesNoBadge(t *testing.T) {
 // prior badge (it cannot tell the two apart), leaving bob at 0.
 func TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
 	defer stop(context.Background())
 
@@ -234,8 +224,7 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	// mod (4) needs MANAGE_MESSAGES on channel 10 to purge.
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	stop := svc.StartMentionWorker(ctx)
 	defer stop(context.Background())
 
@@ -268,8 +257,7 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 func TestMentionWorker_FlushMessagesOnlyTargetsNamed(t *testing.T) {
 	spy := &batchSpyStore{}
 	w := newMentionWorker(spy)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	w.run(ctx)
 
 	w.enqueue(mentionJob{channelID: 10, msgID: 1, apply: func(context.Context) []db.MentionBatchEntry {
