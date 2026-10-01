@@ -122,7 +122,6 @@ mod tests {
     fn call_sites_do_not_repeat_the_table() {
         const CALL_SITES: &[(&str, &str)] = &[
             ("tray.rs", include_str!("tray.rs")),
-            ("unread_badge.rs", include_str!("unread_badge.rs")),
             ("lib.rs", include_str!("lib.rs")),
             ("tofu.rs", include_str!("tofu.rs")),
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
@@ -140,12 +139,10 @@ mod tests {
             TRAY_DEAFEN,
             TRAY_QUIT,
             TRAY_TOOLTIP,
-            TRAY_TOOLTIP_UNREAD_ONE,
             STARTUP_DIALOG_TITLE,
         ]
         .map(|literal| format!("\"{literal}\""));
         let prose = [
-            "unread mentions",
             "startup error and cannot continue",
             "is not yet trusted; confirm the fingerprint",
             "Certificate fingerprint changed for",

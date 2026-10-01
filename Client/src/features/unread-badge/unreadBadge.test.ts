@@ -62,13 +62,14 @@ describe("unread badge", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     setChannelList([]);
     setDms([]);
     localStorage.clear();
     invalidateMuteCache();
   });
 
-  it("the badge count is the sum of channel mentions plus DM unread, excludes muted channels, and is pushed once per change (deduplicated)", () => {
+  it("the badge count is channel mentions plus DM unread, muted channels add no plain unread but their mentions still count, and it is pushed once per change (deduplicated)", () => {
     const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
     const stop = startUnreadBadge({ setUnreadBadge });
 
@@ -96,6 +97,29 @@ describe("unread badge", () => {
     // One push per distinct count (empty, channels, DMs, mute); none for the chatter.
     expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 2, 6, 4]);
     stop();
+  });
+
+  it("re-pushes the unchanged count when the window is focused or shown, but not on a store change that leaves it unchanged", () => {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setDms([dm(20, 3)]);
+    const stop = startUnreadBadge({ setUnreadBadge });
+
+    setChannelList([channel(1, { unreadCount: 4 })]);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3]);
+
+    window.dispatchEvent(new Event("focus"));
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3, 3]);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3, 3, 3]);
+
+    setChannelList([channel(1, { unreadCount: 5 })]);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3, 3, 3]);
+
+    stop();
+    window.dispatchEvent(new Event("focus"));
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3, 3, 3, 0]);
   });
 
   it("a mention in a muted channel counts; plain unread in a muted channel does not", () => {
