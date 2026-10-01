@@ -51,9 +51,28 @@ export class DeviceManager {
     this.room = room;
     if (room !== null) {
       this.startDeviceChangeListener();
+      void this.dropReturnedFallbacks(room);
     } else {
       this.stopDeviceChangeListener();
     }
+  }
+
+  /** Forget a fallback whose device came back while no room was attached:
+   *  the join or reconnect already opened the saved device, so its next
+   *  unplug must fall back again. */
+  private async dropReturnedFallbacks(room: Room): Promise<void> {
+    const kinds = ["audioinput", "audiooutput"] as const;
+    await Promise.all(
+      kinds.map(async (kind) => {
+        const from = this.fallbackFrom[kind];
+        if (from === undefined) return;
+        const devices = (await nativeAudioDevices(kind)) ?? (await Room.getLocalDevices(kind));
+        if (this.room !== room || this.fallbackFrom[kind] !== from) return;
+        if (devices.some((d) => d.deviceId === from)) delete this.fallbackFrom[kind];
+      }),
+    ).catch((err: unknown) => {
+      log.warn("Failed to enumerate devices on room attach", err);
+    });
   }
 
   setAudioPipeline(pipeline: AudioPipeline | null): void {

@@ -837,6 +837,32 @@ describe("DeviceManager", () => {
       expect(prefs.get("audioOutputDevice")).toBe("headset");
     });
 
+    it("falls back again on the next unplug after the device returned while out of a call", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      prefs.set("audioOutputDevice", "headset");
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+      await fireDeviceChange();
+      expect(onToast).toHaveBeenCalledTimes(2);
+
+      dm.setRoom(null);
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      dm.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls.at(-1)[1];
+
+      inputs = [{ deviceId: "built-in-mic" }];
+      outputs = [{ deviceId: "speakers" }];
+      mockRoom.switchActiveDevice.mockClear();
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
+      expect(onToast).toHaveBeenCalledTimes(4);
+    });
+
     it("the room swapped mid-await: no switch is applied to the old room", async () => {
       prefs.set("audioInputDevice", "headset-mic");
       await fireDeviceChange();
