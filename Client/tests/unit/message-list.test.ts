@@ -1036,6 +1036,23 @@ describe("MessageList", () => {
         vi.useRealTimers();
       }
     });
+
+    it("releases the midnight timer on destroy", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
+        setMessages(1, [makeMessage({ id: 1, timestamp: new Date().toISOString() })]);
+        const pendingBeforeMount = vi.getTimerCount();
+        msgList.mount(container);
+        expect(vi.getTimerCount()).toBeGreaterThan(pendingBeforeMount);
+
+        msgList.destroy?.();
+
+        expect(vi.getTimerCount()).toBe(pendingBeforeMount);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("scrollToMessage vs renderWindow rebuild breaker", () => {
