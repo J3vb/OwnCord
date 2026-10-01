@@ -142,6 +142,7 @@ and only when it changes something a contributor or fork holder must do
 ### Installing & updating
 
 - **A Windows server started from a console window now restarts in that window.** After a self-update, backup restore or setup-wizard restart, the replacement opened in a new console window of its own, so the log you were watching went quiet. The replacement now runs in the same window, and the old process stays behind idle until it exits, which keeps a Windows Terminal tab open. The previous binary is now kept as a uniquely named `chatserver.exe.old-*` instead of `chatserver.exe.old`, because a binary still running cannot be replaced. Only a restart whose teardown hangs past the 90-second backstop still opens a new window.
+- **Desktop updates are now tied to the version they were signed for.** The client installs an update only when its signature names the version the server offered. Release builds sign that version into every updater artifact.
 
 ### Under the hood
 

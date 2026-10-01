@@ -179,7 +179,7 @@ fn build_updater(
         .map_err(|e| format!("failed to set endpoints: {e}"))?
         .configure_client(move |client| {
             // This callback applies to both metadata checks and downloads.
-            // UpdaterBuilder::timeout only bounds checks in updater 2.10.1;
+            // UpdaterBuilder::timeout only bounds checks through updater 2.13;
             // its returned Update has no timeout. Bound idle reads instead
             // of total download time so slow, progressing downloads finish.
             let client = client
@@ -454,6 +454,103 @@ mod tests {
                 "expected {url} to be rejected"
             );
         }
+    }
+
+    // One payload signed three times by an ephemeral test key with
+    // `tauri signer sign`: without `--app-version` (the shape of every release
+    // signed before the CLI recorded one), with `--app-version 2.0.0`, and with
+    // `--app-version 99.0.0`. The private key was discarded.
+    const FIXTURE_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2RDY3NzVFQkQyNjI4NTgKUldSWUtDYTlYbmZXcHQ2WHJqUXpkNXNMUWdVbFVDM1FiOXhLK2lNUlVwWUsvSm8yQTJzWGF6UHkK";
+    const FIXTURE_PAYLOAD: &[u8] = b"owncord update fixture\n";
+    const SIG_UNVERSIONED: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWUtDYTlYbmZXcHZ0RGc4VG1JZkxrOW1xWG85QUczUmg4dlhaMzhlMnRKNVZZMlJnWUxCSVdaNmRuYU9EYnJjWHpTQ0VGdGlyTndhblNxRnVBb0w0Zy9BUVNBT1YzendRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzk1ODMxCWZpbGU6YTEKMVJ5YWR0aTlsZDRGa256bGNsS2hjZDg5VTROcys1eDh3a2hVUTRTRXV2bmZmb3VjQk9DU1BOUHY3VVArTkhUK0N2ZU14UnJ1Yjd6eFlXQUg5R24rQWc9PQo=";
+    const SIG_V2_0_0: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWUtDYTlYbmZXcHZnWHdubHBXKzFxSjVWdFpkdkw1enArZDR3NzA4UWRONlhLZXU5dzB3VUFCRklycitzSW1HNVZWcUZqNXRFTU5ETFdsdFZGazBJcFRQZkRiMGs1NkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzk1ODMxCWZpbGU6YTIJdmVyc2lvbjoyLjAuMAo2cHFWbzZlUFVLTW94NEJ1UlU5SDFIL1RRYnFLb3FleVdlVG5lSG92UFFEd01qcmdVb1FVTVk5S3ZzbXkzczUrTzhUdGNuUUxyZHlROEEreGY5bXNEUT09Cg==";
+    const SIG_V99_0_0: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWUtDYTlYbmZXcG4weWU1Y3JZNWxUbXBoYjVsMnhYV0ZBM3NhT2t2SytacU43c010M3o4M1pSSTBQOHBLenNZNFd5emh5RzlmNE0vcWRoKytmRXpvcVdFeUxOMnNuSUEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzk1ODMxCWZpbGU6YTMJdmVyc2lvbjo5OS4wLjAKWEVreUJhdk9SaHFJblBUbkx3eUZSS2xnZ2o5dkpUMU4xYzJNekFQNlRMalUxSzRwWjczNnFRWG56NWE3bWcyUHpRTFY5eU1mT1Fsb2xXOUxCWFFwQ0E9PQo=";
+
+    /// A stub OwnCord server that answers every update check with `version`,
+    /// `signature` and a URL serving FIXTURE_PAYLOAD. Returns its base URL.
+    fn serve_update_offer(version: &str, signature: &str) -> String {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let base = format!("http://{}", listener.local_addr().expect("stub address"));
+        let offer = serde_json::json!({
+            "version": version,
+            "url": format!("{base}/artifact"),
+            "signature": signature,
+        })
+        .to_string();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut request = [0u8; 4096];
+                let n = stream.read(&mut request).unwrap_or(0);
+                let body = if request[..n].starts_with(b"GET /artifact") {
+                    FIXTURE_PAYLOAD.to_vec()
+                } else {
+                    offer.clone().into_bytes()
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+        });
+        base
+    }
+
+    /// Runs the shipped updater configuration (tauri.conf.json) against a stub
+    /// server's offer and downloads it. Only the trust anchor is swapped for
+    /// the fixture key, and plain http allowed for the loopback stub.
+    async fn download_offer(version: &str, signature: &str) -> Result<(), String> {
+        let base = serve_update_offer(version, signature);
+        let shipped: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let mut updater_config = shipped["plugins"]["updater"].clone();
+        updater_config["pubkey"] = FIXTURE_PUBKEY.into();
+        updater_config["dangerousInsecureTransportProtocol"] = true.into();
+
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), updater_config);
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .map_err(|e| e.to_string())?;
+
+        let update = app
+            .updater_builder()
+            .endpoints(vec![format!("{base}/update").parse().expect("endpoint")])
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?
+            .check()
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("no update offered")?;
+        update
+            .download(|_, _| {}, || {})
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    #[tokio::test]
+    async fn update_signed_for_an_older_version_is_refused() {
+        // A signature is valid for the bytes it covers whatever version the
+        // server announces next to it, so the offered version must itself be
+        // bound by the signature.
+        assert!(download_offer("99.0.0", SIG_V2_0_0).await.is_err());
+        // Releases signed before versions were recorded carry none at all.
+        assert!(download_offer("99.0.0", SIG_UNVERSIONED).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_signed_for_the_offered_version_is_accepted() {
+        assert_eq!(download_offer("99.0.0", SIG_V99_0_0).await, Ok(()));
     }
 
     #[test]

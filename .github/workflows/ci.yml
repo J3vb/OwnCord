@@ -1358,28 +1358,13 @@ jobs:
 
   # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier).
   #
-  # Skipped for Dependabot: its PRs run under the separate `dependabot` secrets
-  # scope, so TAURI_SIGNING_PRIVATE_KEY arrives empty and `npm run tauri build`
-  # always aborts with "failed to decode secret key" while signing the updater
-  # artifact — after a successful compile and bundle. That burned ~50 min of
-  # runner time per dependency PR to produce a red check that never carried any
-  # signal. Granting Dependabot the signing key would fix the symptom but hands
-  # a release key to workflows triggered by third-party dependency updates.
-  #
-  # What still covers Dependabot PRs: the required `rust-tests` job compiles the
-  # crate (cargo clippy --all-targets + cargo test --lib), so a dependency bump
-  # that breaks the Rust build is still caught.
-  # What this gives up on those PRs: bundling (NSIS/AppImage/deb), Windows and
-  # ARM-specific compilation, and the `cargo audit` step below — that last one
-  # overlaps with Dependabot's own cargo scanning, which is what opens these PRs
-  # in the first place.
+  # Built without updater artifacts, so no signing key is needed: this job runs
+  # PR-controlled npm and cargo build scripts, and the updater signing key is
+  # given to release.yml only (scripts/check-workflow-guards.mjs asserts it).
   tauri-build:
     name: Tauri Full Build (${{ matrix.os }})
     needs: client-check
-    if: >-
-      github.event_name == 'pull_request'
-      && github.base_ref == 'main'
-      && github.actor != 'dependabot[bot]'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     strategy:
       fail-fast: false
       matrix:
@@ -1457,10 +1442,7 @@ jobs:
           cargo audit
 
       - name: Build Tauri app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri build
+        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       # The release build host is Ubuntu 22.04 precisely so the shipped binary
       # starts on older distros. Linking the prebuilt libwebrtc could raise that
