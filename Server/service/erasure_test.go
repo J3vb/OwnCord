@@ -127,25 +127,44 @@ func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
 	}
 }
 
-// TestErasureService_FlushesQueuedMentionCounts locks P5-O05's erasure half:
-// the erasure must flush any queued mention-badge increment before its own
-// reversal, so a message the subject sent inside the worker's coalesce window
-// has its increment on disk and the reversal takes exactly it. The wired
-// flusher runs before the transaction; here a spy records that it did.
-func TestErasureService_FlushesQueuedMentionCounts(t *testing.T) {
-	database := newTestDB(t)
-	dir := t.TempDir()
-	uid, _ := seedErasureMember(t, database, dir)
-	svc := NewErasureService(database)
-	svc.SetFiles(newTestStorage(t, dir))
+// TestErasureService_PreservesPriorBadgeForQueuedMention locks P5-O05's
+// erasure half through the real wiring (service.New): bob holds a genuine badge
+// from m0; alice sends m mentioning him and is erased before the mention
+// worker's coalesce window flushes m. The erasure must flush m's increment
+// before its reversal, so the reversal takes exactly m back and bob keeps m0's
+// badge. Without the flush the reversal consumes m0's badge and the later
+// increment is skipped (m is gone), leaving bob at 0.
+func TestErasureService_PreservesPriorBadgeForQueuedMention(t *testing.T) {
+	_, _, database := newMentionFixture(t)
+	ctx := context.Background()
+	if _, err := database.CreateUser(ctx, "erasure-owner", "hash", 1); err != nil {
+		t.Fatalf("CreateUser(owner): %v", err)
+	}
+	svcs := New(database, nil)
+	svcs.Erasure.SetFiles(newTestStorage(t, t.TempDir()))
+	stop := svcs.Messages.StartMentionWorker(t.Context())
+	defer stop(context.Background())
 
-	flushed := false
-	svc.flushMentions = func(context.Context) { flushed = true }
-	if err := svc.Erase(context.Background(), uid); err != nil {
+	m0, err := database.CreateMessage(ctx, 10, 3, "hey @bob earlier", nil)
+	if err != nil {
+		t.Fatalf("seed m0: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, 10, m0, []int64{2}); err != nil {
+		t.Fatalf("seed increment: %v", err)
+	}
+
+	sendAs(t, svcs.Messages, 1, "@bob look")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d before the flush, want 1", got)
+	}
+
+	if err := svcs.Erasure.Erase(ctx, 1); err != nil {
 		t.Fatalf("Erase: %v", err)
 	}
-	if !flushed {
-		t.Error("the erasure did not flush queued mention counts before its reversal")
+	svcs.Messages.FlushAllPendingMentionCounts(ctx)
+
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob mention_count = %d after erasing the author of a queued mention, want 1 (his earlier genuine badge must survive)", got)
 	}
 }
 
