@@ -220,6 +220,61 @@ func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
 	}
 }
 
+// The default deployment listens on a non-443 port, and the client builds its
+// server host with that port, so the URL that would receive the bearer token is
+// https://<domain>:8443/... — the guard must match it.
+func TestUpdateProfile_RejectsSameHostAvatarOnNonDefaultPort(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.TLS.Domain = "chat.example.com"
+	cfg.Server.Port = 8443
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "portav", 4)
+
+	rr := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "portav",
+		"avatar":   "https://chat.example.com:8443/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("same-host :8443 non-attachment avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "portav",
+		"avatar":   "https://chat.example.com:8443/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("same-host :8443 attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
+	}
+}
+
+// A server with no tls.domain that is reached by DNS name (or behind a reverse
+// proxy) has no configured candidate naming that host; the request's Host is
+// the extra candidate that keeps the guard from being inert.
+func TestUpdateProfile_RejectsSameHostAvatarWithoutTLSDomain(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.Server.Port = 8443
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "nodomain", 4)
+
+	rr := patchJSONWithHost(t, router, "/api/v1/users/me", token, "chat.example.org:8443", map[string]string{
+		"username": "nodomain",
+		"avatar":   "https://chat.example.org:8443/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("DNS-name same-host avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "chat.example.org:8443", map[string]string{
+		"username": "nodomain",
+		"avatar":   "https://chat.example.org:8443/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("DNS-name same-host attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
+	}
+}
+
 func TestUpdateProfile_EmptyUsername(t *testing.T) {
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)

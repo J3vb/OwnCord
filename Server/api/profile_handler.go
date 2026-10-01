@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -195,10 +197,11 @@ func validateIdentityKey(key string) error {
 //
 // selfHosts are the hosts this server answers on, derived from configuration
 // (configuredSelfHosts), NOT from the request: the Host header is
-// client-supplied, so trusting it let an attacker name an arbitrary Host and
-// slip an arbitrary same-origin path past the comparison. When selfHosts is
-// empty (no configuration available), the request's own Host is the only
-// candidate left, so it is used as a fallback.
+// client-supplied, so trusting it alone let an attacker name an arbitrary Host
+// and slip an arbitrary same-origin path past the comparison. The request's own
+// Host is still one extra candidate: that only widens what is refused, so a
+// spoofed Host can never cause an acceptance, and it covers a server with no
+// tls.domain that is reached by DNS name or behind a reverse proxy.
 func validateAvatarURL(avatar string, selfHosts []string, requestHost string) error {
 	if avatar == "" {
 		return nil
@@ -219,39 +222,42 @@ func validateAvatarURL(avatar string, selfHosts []string, requestHost string) er
 // configuredSelfHosts derives the host[:port] names this server is reachable
 // on, for the same-host avatar guard: the operator-configured public host
 // (tls.domain, which names this server when TLS terminates here) plus every
-// bound listen address on this host. The request's Host header is deliberately
-// NOT an input: that is the spoofable value this binding replaces, so it is
-// used only as a last resort when nothing else names the server (isSelfHost).
+// bound listen address on this host, each with the configured listen port (an
+// explicit default port compares equal to none, see isSelfHost).
 func configuredSelfHosts(cfg *config.Config) []string {
-	var hosts []string
+	var names []string
+	port := ""
 	if cfg != nil {
 		if d := strings.TrimSpace(cfg.TLS.Domain); d != "" {
-			hosts = append(hosts, d)
+			names = append(names, d)
+		}
+		if cfg.Server.Port > 0 {
+			port = strconv.Itoa(cfg.Server.Port)
 		}
 	}
 	for _, a := range netclass.LocalAddrs() {
-		if a.Is6() {
-			// A URL's Host for an IPv6 literal is bracketed; match that form.
-			hosts = append(hosts, "["+a.String()+"]")
-		} else {
-			hosts = append(hosts, a.String())
+		names = append(names, a.String())
+	}
+	hosts := make([]string, 0, len(names))
+	for _, n := range names {
+		if port == "" {
+			if strings.Contains(n, ":") {
+				n = "[" + n + "]"
+			}
+			hosts = append(hosts, n)
+			continue
 		}
+		hosts = append(hosts, net.JoinHostPort(n, port))
 	}
 	return hosts
 }
 
-// isSelfHost reports whether parsed names this server. It matches parsed's
-// host:port against each self host, and — only when nothing names the server —
-// against the request's Host header as a last resort, so a server with no
-// configured host and no readable interface table still gets the guard's
-// protection on the honest path. Default ports are stripped from both sides.
+// isSelfHost reports whether parsed names this server: its host:port matches a
+// self host or the request's Host header. Default ports are stripped from both
+// sides.
 func isSelfHost(parsed *url.URL, selfHosts []string, requestHost string) bool {
 	parsedHost := stripDefaultPort(parsed.Scheme, parsed.Host)
-	candidates := selfHosts
-	if len(candidates) == 0 && requestHost != "" {
-		candidates = []string{requestHost}
-	}
-	for _, candidate := range candidates {
+	for _, candidate := range append(selfHosts[:len(selfHosts):len(selfHosts)], requestHost) {
 		if candidate == "" {
 			continue
 		}
