@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"image"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -17,13 +18,13 @@ const (
 	// thumbBox bounds both sides of a thumbnail. The client shows an inline
 	// image in at most 400×350 CSS px, so 800 stays sharp at 2× scaling.
 	thumbBox = 800
-	// thumbMaxPixels caps what is decoded: a header declaring more is passed
-	// through without a decode. A decoded image costs up to 8 bytes a pixel
-	// (16-bit PNG), so this keeps one generation under ~320 MiB.
-	thumbMaxPixels = 40_000_000
+	// thumbMaxDecodeBytes caps the memory a decode may take, estimated from
+	// the header (decodedBytesPerPixel): an image declaring more is passed
+	// through without a decode.
+	thumbMaxDecodeBytes = 160 << 20
 	// thumbConcurrency is how many thumbnails are generated at once; the rest
 	// wait. Each is generated once and then kept beside its original.
-	thumbConcurrency = 2
+	thumbConcurrency = 1
 	thumbJPEGQuality = 82
 )
 
@@ -40,30 +41,46 @@ func thumbFormat(mimeType string) string {
 	return ""
 }
 
-// makeThumbnail scales the image in r to fit thumbBox, in the same format,
-// upright by its EXIF orientation. ok is false when the original should be
-// passed through instead: it already fits, does not decode, or declares more
-// than thumbMaxPixels.
+// thumbOrientation decides from the header alone whether the image in r is
+// thumbnailed, and returns its EXIF orientation when it is. ok is false when
+// the original should be passed through instead: it already fits, its header
+// does not parse, or its decode would take more than thumbMaxDecodeBytes.
 //
-// The size is judged from the header alone, like imageDimensions
-// (emoji_handler.go): a decode error or a non-positive size is never trusted,
-// and nothing the declared size would allocate is decoded past the cap.
-func makeThumbnail(r io.ReadSeeker, format string) (thumb []byte, ok bool) {
+// Like imageDimensions (emoji_handler.go), a decode error or a non-positive
+// size is never trusted, and nothing the declared size would allocate is
+// decoded past the cap.
+func thumbOrientation(r io.ReadSeeker, format string) (orientation int, ok bool) {
 	cfg, got, err := image.DecodeConfig(r)
 	if err != nil || got != format || cfg.Width <= 0 || cfg.Height <= 0 ||
-		int64(cfg.Width)*int64(cfg.Height) > thumbMaxPixels {
-		return nil, false
+		int64(cfg.Width)*int64(cfg.Height) > thumbMaxDecodeBytes/decodedBytesPerPixel(cfg.ColorModel) {
+		return 0, false
 	}
 	if cfg.Width <= thumbBox && cfg.Height <= thumbBox {
-		return nil, false
+		return 0, false
 	}
-	orientation := 1
-	if format == "jpeg" {
-		if _, err := r.Seek(0, io.SeekStart); err != nil {
-			return nil, false
-		}
-		orientation = jpegOrientation(r)
+	if format != "jpeg" {
+		return 1, true
 	}
+	if _, err := r.Seek(0, io.SeekStart); err != nil {
+		return 0, false
+	}
+	return jpegOrientation(r), true
+}
+
+// decodedBytesPerPixel bounds what a decoded pixel of model m costs: 8 bytes
+// for any 16-bit model (the largest, RGBA64, takes 8), 4 for the rest.
+func decodedBytesPerPixel(m color.Model) int64 {
+	switch m {
+	case color.RGBA64Model, color.NRGBA64Model, color.Gray16Model:
+		return 8
+	}
+	return 4
+}
+
+// makeThumbnail decodes the image in r, which thumbOrientation accepted, and
+// scales it to fit thumbBox in the same format, upright by orientation. ok is
+// false when it does not decode.
+func makeThumbnail(r io.ReadSeeker, format string, orientation int) (thumb []byte, ok bool) {
 	if _, err := r.Seek(0, io.SeekStart); err != nil {
 		return nil, false
 	}

@@ -2069,8 +2069,10 @@ unlinked file, and any NSFW acknowledgement) and the same headers.
 
 A JPEG or PNG larger than 800×800 is scaled to fit an 800×800 box, in the same
 format, turned upright by its EXIF orientation. Any other image — one that
-already fits, a GIF (kept animated), another format, one over 40 megapixels or
-one that does not decode — is served as the original bytes. A file that is not
+already fits, a GIF (kept animated), another format, one too large to decode
+within the server's memory bound (judged from its header, so a 16-bit image
+reaches it at fewer pixels) or one that does not decode — is served as the
+original bytes. A file that is not
 an image is a `404`. A thumbnail is made on the first request, kept beside the
 original under `upload.storage_dir/thumbs/`, and removed with it. A server
 that has this route says so with `upload_policy.thumbnails` on `auth_ok`.

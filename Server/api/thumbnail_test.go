@@ -61,7 +61,15 @@ func FuzzMakeThumbnail(f *testing.F) {
 			t.Fatalf("jpegOrientation = %d", o)
 		}
 		for _, format := range []string{"jpeg", "png"} {
-			thumb, ok := makeThumbnail(bytes.NewReader(data), format)
+			r := bytes.NewReader(data)
+			orientation, ok := thumbOrientation(r, format)
+			if !ok {
+				continue
+			}
+			if orientation < 1 || orientation > 8 {
+				t.Fatalf("%s orientation = %d", format, orientation)
+			}
+			thumb, ok := makeThumbnail(r, format, orientation)
 			if !ok {
 				continue
 			}

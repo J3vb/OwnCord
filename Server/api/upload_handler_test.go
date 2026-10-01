@@ -1751,6 +1751,26 @@ func TestServeThumb_DecompressionBombIsNotDecoded(t *testing.T) {
 	}
 }
 
+// The decode cap counts a 16-bit image at 8 bytes a pixel, so it refuses one
+// at fewer pixels than an 8-bit image: this 25-megapixel 16-bit PNG, a few KB
+// on disk, is over the cap and is passed through without a decode.
+func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumb16", 4)
+	content := encodePNG(t, image.NewGray16(image.Rect(0, 0, 5000, 5000)))
+	id := uploadForThumb(t, router, token, "deep.png", content)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("16-bit PNG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the 16-bit PNG: %v", err)
+	}
+}
+
 func TestServeThumb_Unauthenticated(t *testing.T) {
 	database := newUploadTestDB(t)
 	router := buildUploadRouter(database, newUploadTestStorage(t), nil)

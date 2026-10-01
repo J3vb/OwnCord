@@ -314,9 +314,14 @@ function isExternalUrl(url: string): boolean {
 }
 
 /** The server's bounded preview of an image file (P4-08), or the file itself
- *  on a server that does not advertise thumbnails. */
-function thumbnailUrl(fileUrl: string): string {
-  if (authStore.getState().uploadPolicy?.thumbnails !== true || !isServerUrl(fileUrl)) {
+ *  on a server that does not advertise thumbnails or for a type the server
+ *  passes through unchanged (only JPEG and PNG are scaled). */
+function thumbnailUrl(fileUrl: string, mime: string): string {
+  if (
+    authStore.getState().uploadPolicy?.thumbnails !== true ||
+    (mime !== "image/jpeg" && mime !== "image/png") ||
+    !isServerUrl(fileUrl)
+  ) {
     return fileUrl;
   }
   const parsed = new URL(fileUrl);
@@ -955,7 +960,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   if (isImageMime(att.mime) && inlineable) {
     const wrap = createElement("div", { class: "msg-image" });
     // The row shows the server's preview; the lightbox loads the full file.
-    const inlineUrl = thumbnailUrl(resolvedUrl);
+    const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
 
     // Reserve space using server-provided dimensions to prevent layout shift.
     if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {

@@ -570,6 +570,13 @@ describe("renderAttachment — server thumbnails", () => {
     expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
   });
 
+  it("requests the original for a GIF row, which the server passes through", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment({ ...att, filename: "anim.gif", mime: "image/gif" });
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc"]);
+  });
+
   it("requests the original from a server without thumbnails", async () => {
     const el = renderAttachment(att);
     await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());

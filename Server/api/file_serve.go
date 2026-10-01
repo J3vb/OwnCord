@@ -38,8 +38,9 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 // handleServeThumb serves an image file's thumbnail (P4-08): made on the first
 // request, then kept beside the original and removed with it (storage.Delete).
 // An image the server does not shrink — one already inside thumbBox, a GIF,
-// a format it cannot encode, one over thumbMaxPixels or one that does not
-// decode — is served as the original. A file that is not an image is a 404.
+// a format it cannot encode, one too large to decode within
+// thumbMaxDecodeBytes or one that does not decode — is served as the original.
+// A file that is not an image is a 404.
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
 	slots := make(chan struct{}, thumbConcurrency)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -67,13 +68,23 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 		defer f.Close() //nolint:errcheck
 		var thumb []byte
 		if format != "" {
-			select {
-			case slots <- struct{}{}:
-			case <-r.Context().Done():
-				return
+			if orientation, ok := thumbOrientation(f, format); ok {
+				select {
+				case slots <- struct{}{}:
+				case <-r.Context().Done():
+					return
+				}
+				kept, err := store.OpenThumb(aa.StoredAs)
+				if err != nil {
+					thumb, _ = makeThumbnail(f, format, orientation)
+				}
+				<-slots
+				if err == nil {
+					defer kept.Close() //nolint:errcheck
+					serveFileContent(w, r, aa, aa.MimeType, fileModTime(kept), kept, allowedOrigins)
+					return
+				}
 			}
-			thumb, _ = makeThumbnail(f, format)
-			<-slots
 		}
 		if thumb == nil {
 			if _, err := f.Seek(0, io.SeekStart); err != nil {
