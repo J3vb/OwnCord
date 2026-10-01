@@ -98,8 +98,12 @@ import type { ContentNavigator } from "../features/navigation/contentView";
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
 const SESSION_NOTICE_TOAST_MS = 12_000;
-/** DP-24's call notification and missed-call notice: loaded on the first ring. */
-const callAlerts = () => import("../features/direct-messages/callAlerts");
+/**
+ * DP-24's call notification and missed-call notice. They are re-exported by the
+ * DM call panel, which the page already loads at mount, so the ring's OS alert
+ * costs no second dynamic chunk here.
+ */
+const callAlerts = () => import("@components/DmCallPanel");
 
 // ---------------------------------------------------------------------------
 // Options
@@ -1001,7 +1005,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Loaded on demand like the sidebar drawer: the panel is only drawn in a
     // DM with a call, so its code stays out of the eager MainPage chunk
     // (bundle budget). Until it lands, the banner answers every ring.
-    void import("@components/DmCallPanel").then(({ createDmCallPanel }) => {
+    void callAlerts().then(({ createDmCallPanel }) => {
       if (tornDown) return;
       const panel = createDmCallPanel({
         onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
