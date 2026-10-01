@@ -283,11 +283,11 @@ test.describe("Settings > Account — avatar upload", () => {
       .locator("[data-testid='avatar-file-input']")
       .setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: PNG_1X1 });
 
-    // The server's URL is fetched and drawn into the big avatar.
+    // The server's URL is fetched and drawn into the big avatar as an object URL.
     await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toBeAttached();
     await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toHaveAttribute(
       "src",
-      /^data:/,
+      /^blob:/,
     );
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Avatar updated" }),
