@@ -213,11 +213,12 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 }
 
 // sendMessageDMSideEffects fills in the DM-specific fields of result,
-// (re)opens the DM for every trusted (or group) participant, and — for a
-// one-to-one DM whose recipient does not yet trust the sender — stages a
-// message request instead (B5-6 decision 4). It reports false when the
-// participant lookup failed, which is the one case where the caller returns
-// the already-saved message without the remaining side effects.
+// (re)opens the DM for every trusted (or group) participant whose DM is not
+// already open, and — for a one-to-one DM whose recipient does not yet trust
+// the sender — stages a message request instead (B5-6 decision 4). It reports
+// false when the participant lookup failed, which is the one case where the
+// caller returns the already-saved message without the remaining side
+// effects.
 func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMessageParams, result *SendMessageResult) bool {
 	// The message is already committed, so everything below must survive
 	// the sender's connection dropping the instant the write commits — the
@@ -229,11 +230,23 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	// sender sees chat_send_ok and the other participant never gets the
 	// message live.
 	bgCtx := context.WithoutCancel(ctx)
-	participantIDs, pErr := s.st.GetDMParticipantIDs(bgCtx, p.ChannelID)
-	if pErr != nil {
-		slog.Error("MessageService.SendMessage GetDMParticipantIDs", "err", pErr, "channel_id", p.ChannelID)
+	// DP-51: one read carries the participants, the group flag, each
+	// participant's open state and whether they trust the sender, so the
+	// send needs no separate IsGroupDM, per-recipient trust read, OpenDM
+	// write for an already-open DM, or delivery-audience re-read.
+	//
+	// OC-0419: the group flag rides on this read, so a failure here can
+	// never leave isGroup at its false zero value and misclassify a group DM
+	// as one-to-one (staging per-member message requests instead of
+	// delivering), nor fail closed to isGroup=true and skip the first-contact
+	// gate for an untrusted 1:1 recipient. Message stays saved; the
+	// remaining DM side effects are skipped entirely.
+	isGroup, targets, tErr := s.st.GetDMDeliveryTargets(bgCtx, p.ChannelID, p.UserID)
+	if tErr != nil {
+		slog.Error("MessageService.SendMessage GetDMDeliveryTargets", "err", tErr, "channel_id", p.ChannelID)
 		return false
 	}
+	result.DMIsGroup = isGroup
 
 	sender, _ := s.st.GetUserByID(bgCtx, p.UserID)
 	result.SenderUser = sender
@@ -247,35 +260,21 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	} else {
 		slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 	}
-	// OC-0419: a failed lookup must not fall through with isGroup at its
-	// false zero value — that misclassifies a group DM as one-to-one, and
-	// the loop below then runs every other member through
-	// dmFirstContactGate (staging a message_requests row and a
-	// trusted_senders "sent_first" edge instead of delivering, since group
-	// DMs never populate trusted_senders) while skipping OpenDM for all of
-	// them. Nor may it fail closed to isGroup=true, the sibling lookups'
-	// posture (ws/voice_broadcast.go filterDMAudience, service/dm.go
-	// RingTargets, service/push_dispatch.go Notify): that would skip the
-	// first-contact gate and OpenDM/deliver to an untrusted 1:1 recipient,
-	// the opposite privacy regression. This is the one "cannot decide" case
-	// the caller already handles — bail out the same way the
-	// participant-lookup failure above does: message stays saved, the
-	// remaining DM side effects are skipped entirely.
-	isGroup, gErr := s.st.IsGroupDM(bgCtx, p.ChannelID)
-	if gErr != nil {
-		slog.Error("MessageService.SendMessage IsGroupDM", "err", gErr, "channel_id", p.ChannelID)
-		return false
-	}
-	result.DMIsGroup = isGroup
 
-	for _, pid := range participantIDs {
-		if pid == p.UserID {
+	for _, t := range targets {
+		if t.UserID == p.UserID {
 			continue
 		}
-		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, pid, result) {
+		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, t, result) {
 			// Staged as a request (or refused outright — banned recipient):
 			// never OpenDM an untrusted recipient. dmFirstContactGate has
 			// already done everything this send owes them.
+			continue
+		}
+		// Already open: nothing to write through the single writer. A close
+		// racing this send can land on either side of the read, exactly as
+		// it could already land on either side of the OpenDM write.
+		if t.Open {
 			continue
 		}
 		// OpenDM is INSERT OR IGNORE and idempotent: opened reports whether
@@ -284,41 +283,40 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		// that slice, and each one bumps the hub's global visibility
 		// watermark, forcing every other connected client's next reconnect
 		// onto a full resync. An already-open DM must not pay that cost on
-		// every single message.
-		opened, openErr := s.st.OpenDM(bgCtx, pid, p.ChannelID)
+		// every single message (OC-0106).
+		opened, openErr := s.st.OpenDM(bgCtx, t.UserID, p.ChannelID)
 		if openErr != nil {
-			slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", pid, "channel_id", p.ChannelID)
+			slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", t.UserID, "channel_id", p.ChannelID)
 			continue
 		}
 		if opened {
-			result.OpenedDMFor = append(result.OpenedDMFor, pid)
+			result.OpenedDMFor = append(result.OpenedDMFor, t.UserID)
 		}
 	}
 
 	// The live-delivery audience: the sender plus every other participant who
 	// trusts them (one-to-one) or every participant (group) — see
-	// DMAudience. Computed last, after the loop above has written any new
-	// trust/request rows, so a recipient this very send just staged a
-	// request for is correctly excluded.
-	if audience, aErr := s.DMAudience(bgCtx, p.ChannelID, p.UserID); aErr != nil {
-		slog.Error("MessageService.SendMessage DMAudience", "err", aErr, "channel_id", p.ChannelID)
-		// Fail closed toward every other participant, but still let the
-		// sender see their own message live — the same best-effort posture
-		// as the rest of this function's error handling.
-		result.ParticipantIDs = []int64{p.UserID}
+	// DMAudience — derived from the same read. The loop above writes no row
+	// that changes it: a staged request's trust edge points the other way
+	// (the recipient becomes trusted BY the sender), so a recipient this
+	// very send just staged a request for is correctly excluded.
+	if s.messageRequests == nil {
+		result.ParticipantIDs = dmTargetIDs(targets)
 	} else {
-		result.ParticipantIDs = audience
+		result.ParticipantIDs = dmDeliveryAudience(isGroup, targets, p.UserID)
 	}
 	return true
 }
 
 // dmFirstContactGate runs the B5-6 gate for one non-sender participant
-// (recipientID) of a one-to-one DM p.UserID just sent into. It reports true
-// when the send effect for this recipient is already fully handled (a
-// request was staged, or the recipient is banned and gets nothing) — the
-// caller's cue to skip OpenDM entirely for them. False means the recipient
-// already trusts the sender and today's OpenDM path applies.
-func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, recipientID int64, result *SendMessageResult) bool {
+// (recipient, read with its trust of the sender by GetDMDeliveryTargets) of
+// a one-to-one DM p.UserID just sent into. It reports true when the send
+// effect for this recipient is already fully handled (a request was staged,
+// or the recipient is banned and gets nothing) — the caller's cue to skip
+// OpenDM entirely for them. False means the recipient already trusts the
+// sender and today's OpenDM path applies.
+func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, target db.DMDeliveryTarget, result *SendMessageResult) bool {
+	recipientID := target.UserID
 	recipient, rErr := s.st.GetUserByID(ctx, recipientID)
 	if rErr != nil {
 		slog.Error("MessageService.SendMessage: recipient lookup for the first-contact gate failed",
@@ -332,13 +330,7 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 	if recipient == nil || auth.IsEffectivelyBanned(recipient) {
 		return true
 	}
-	trusted, tErr := s.st.IsTrustedSender(ctx, recipientID, p.UserID)
-	if tErr != nil {
-		slog.Error("MessageService.SendMessage: trust lookup failed",
-			"err", tErr, "recipient_id", recipientID, "sender_id", p.UserID)
-		return true
-	}
-	if trusted {
+	if target.TrustsSender {
 		return false // today's OpenDM path
 	}
 	if hook := s.afterFirstContactTrustCheck; hook != nil {

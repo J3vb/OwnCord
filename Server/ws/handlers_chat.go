@@ -177,7 +177,7 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 
 // dmEventOrFallback returns the participant-targeted DM event, falling back
 // to the channel-topic broadcast when the participant list is empty — the
-// degraded shape a failed post-commit GetDMParticipantIDs leaves behind. A
+// degraded shape a failed post-commit participant lookup leaves behind. A
 // sequenced frame addressed to nobody would consume a seq and reach no one;
 // the topic fallback still reaches whoever has the DM focused.
 func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {

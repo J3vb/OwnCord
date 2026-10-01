@@ -194,8 +194,9 @@ type MessageService struct {
 	// *MessageService directly green without themselves wiring it.
 	messageRequests *MessageRequestService
 	// afterFirstContactTrustCheck is a test seam (Codex review round 2,
-	// P2-8): called from dmFirstContactGate right after the trust read comes
-	// back false, before firstContact's insert — same package as its test,
+	// P2-8): called from dmFirstContactGate once the recipient's trust of the
+	// sender (read by GetDMDeliveryTargets) is false, before firstContact's
+	// insert — same package as its test,
 	// no exported setter, mirroring storage_quota.go's afterRecount. Nil in
 	// production.
 	afterFirstContactTrustCheck func()

@@ -265,6 +265,7 @@ type Store interface {
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
 	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
 	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
