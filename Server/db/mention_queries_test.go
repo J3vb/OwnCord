@@ -597,3 +597,52 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 		t.Error("mentions_everyone = true, want false")
 	}
 }
+
+// TestIncrementMentionCountsBatch_AppliesEveryEntry locks the coalesced-window
+// writer (P5-O05): several messages' fan-outs land in one transaction, each
+// with its own read-state guard. A reader behind every message gets one bump
+// per message; a reader whose read state already covers one message is skipped
+// for that message only.
+func TestIncrementMentionCountsBatch_AppliesEveryEntry(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	m1, err := database.CreateMessage(ctx, 1, 1, "first @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(m1): %v", err)
+	}
+	m2, err := database.CreateMessage(ctx, 1, 1, "second @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(m2): %v", err)
+	}
+
+	// Bob (2) has read up to m1; Carol (3) has read nothing.
+	if err := database.UpdateReadState(ctx, 2, 1, m1); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+		{MsgID: m1, UserIDs: []int64{2, 3}},
+		{MsgID: m2, UserIDs: []int64{2, 3}},
+	}); err != nil {
+		t.Fatalf("IncrementMentionCountsBatch: %v", err)
+	}
+
+	// Bob is past m1 but behind m2: only m2's bump lands.
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
+		t.Errorf("bob mention_count = %d, want 1 (m1 already read)", n)
+	}
+	// Carol is behind both, so both bumps land.
+	if n, _ := database.GetMentionCount(ctx, 3, 1); n != 2 {
+		t.Errorf("carol mention_count = %d, want 2", n)
+	}
+}
+
+func TestIncrementMentionCountsBatch_EmptyIsNoop(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	if err := database.IncrementMentionCountsBatch(context.Background(), 1, nil); err != nil {
+		t.Fatalf("IncrementMentionCountsBatch(nil): %v", err)
+	}
+}

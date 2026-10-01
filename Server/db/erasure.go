@@ -674,7 +674,7 @@ func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]strin
 // The subquery mirrors DecrementMentionCounts' guard: undeleted messages
 // past the recipient's last_message_id (a reader who has since marked the
 // channel read is left alone), excluding mentions to a user who has blocked
-// the departing author — applyMentionCounts (service/mentions.go) never
+// the departing author — mentionEntries (service/mentions.go) never
 // counted those (OC-0293), so reversing them would wipe a genuine, unrelated
 // badge on the same row. MAX(0, …) keeps the result monotonic.
 func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) error {

@@ -83,7 +83,7 @@ type chatMessagePayload struct {
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
 	// MentionsHere reports that MentionsEveryone came from @here rather than
-	// @everyone (never both). applyMentionCounts (service/mentions.go) skips
+	// @everyone (never both). mention fan-out (service/mentions.go, mentionEntries) skips
 	// the mention-count bump for an @here reader with no live connection at
 	// send time, so a client replaying this frame during a reconnect must not
 	// raise a badge the server never counted (OC-0271).

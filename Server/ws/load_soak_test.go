@@ -27,9 +27,11 @@ import (
 // under contention:
 //   - channelReadAudience, the per-broadcast permission-audience resolution
 //     used by voice_state/voice_leave and channel_create/update fan-out;
-//   - MessageService's background mention-count bookkeeping, which the
-//     production code fires with a bare `go fn()` per send (see
-//     RunBackgroundInlineForTest's doc comment on MessageService.bg).
+//   - MessageService's background mention-count bookkeeping. This test builds
+//     its service with service.New and never starts the mention worker, so the
+//     mention write takes the no-worker fallback — a bare `go fn()` per send
+//     (see RunBackgroundInlineForTest's doc comment on MessageService.bg),
+//     which is the path this test means to churn.
 //
 // Skipped under -short. Run explicitly with:
 //
