@@ -1015,6 +1015,27 @@ describe("MessageList", () => {
     );
   });
 
+  describe("midnight rollover", () => {
+    it("relabels 'Today at' to 'Yesterday at' at midnight without a channel switch", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
+        const msg = makeMessage({ id: 1, timestamp: new Date().toISOString() });
+        setMessages(1, [msg]);
+        msgList.mount(container);
+
+        expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Today at /);
+
+        // Cross local midnight (00:00 on the 16th) on the same channel.
+        vi.advanceTimersByTime(13 * 60 * 60 * 1000);
+
+        expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Yesterday at /);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("scrollToMessage vs renderWindow rebuild breaker", () => {
     beforeEach(() => {
       vi.useFakeTimers();
