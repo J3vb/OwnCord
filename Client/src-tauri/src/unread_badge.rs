@@ -14,7 +14,9 @@
 //!
 //! It never touches the tray's menu or its status items.
 
-use tauri::{Manager, Runtime};
+#[cfg(any(windows, target_os = "macos"))]
+use tauri::Manager;
+use tauri::Runtime;
 
 use crate::{text, tray};
 
