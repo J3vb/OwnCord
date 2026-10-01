@@ -96,6 +96,7 @@ vi.mock("@lib/profiles", async (importOriginal) => ({
 const mockLogin = vi.fn();
 const mockRecoverAccount = vi.fn();
 const mockVerifyTotp = vi.fn();
+const mockRegister = vi.fn();
 // UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
@@ -130,6 +131,7 @@ vi.mock("@lib/api", async (importOriginal) => {
         login: (...args: unknown[]) => mockLogin(...args),
         recoverAccount: (...args: unknown[]) => mockRecoverAccount(...args),
         verifyTotp: (...args: unknown[]) => mockVerifyTotp(...args),
+        register: (...args: unknown[]) => mockRegister(...args),
         getHealth: vi.fn(() =>
           mockHealthFails.value
             ? Promise.reject(new Error("offline"))
@@ -146,6 +148,12 @@ vi.mock("@lib/api", async (importOriginal) => {
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  onRegister?: (
+    host: string,
+    username: string,
+    password: string,
+    inviteCode: string,
+  ) => Promise<void>;
   onRecover?: (
     host: string,
     username: string,
@@ -167,6 +175,7 @@ vi.mock("@pages/ConnectPage", () => ({
       showConnecting: vi.fn(),
       showAutoConnecting: vi.fn(),
       showError: vi.fn(),
+      showNotice: vi.fn(),
       resetToIdle: vi.fn(),
       updateHealthStatus: vi.fn(),
       updateCompatibility: vi.fn(),
@@ -246,6 +255,7 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.useFakeTimers();
   mockInvoke.mockReset().mockResolvedValue(undefined);
+  mockRegister.mockReset();
   localStorage.clear();
   clearAuth();
 });
@@ -974,5 +984,25 @@ describe("main.ts session ownership", () => {
     await rejected;
     expect(api.getSession()).toBe(current);
     expect(current.isCurrent()).toBe(true);
+  });
+});
+
+describe("main.ts pending-approval notice (DP-54)", () => {
+  it("shows registration pending approval as an info notice, not a red error", async () => {
+    mockRegister.mockResolvedValueOnce({
+      user: { id: 3, username: "newbie" },
+      status: "pending_approval",
+    });
+    await capturedConnectCallbacks.onRegister!("approve.example:8443", "newbie", "hunter22", "");
+
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showNotice: ReturnType<typeof vi.fn>;
+      showError: ReturnType<typeof vi.fn>;
+    };
+    expect(page.showNotice).toHaveBeenCalledWith(
+      "Registration received. An admin has to approve your account before you can sign in.",
+    );
+    // The info path, not the red error banner.
+    expect(page.showError).not.toHaveBeenCalled();
   });
 });

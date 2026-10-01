@@ -145,6 +145,12 @@ export const connectText = defineCatalog("connect", {
   "session.expired": "Your session expired — sign in again.",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
+  // The request never reached the server. Reuses session.connectTimeout's
+  // wording; that key stays for the stored-token resume path.
+  "error.unreachable":
+    "Couldn't reach this server — it may be offline. Check your connection and try again.",
+  "error.tlsFailed":
+    "The server's certificate couldn't be verified. Check the server address, or ask the server owner.",
   "error.rateLimited": "Too many requests. Try again later.",
   "error.accountLocked":
     "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",

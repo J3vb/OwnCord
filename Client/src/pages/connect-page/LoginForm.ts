@@ -3,7 +3,7 @@
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { ApiClientError, errorText } from "@lib/api";
+import { ApiClientError, TransportError, errorText } from "@lib/api";
 import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -118,6 +118,9 @@ export interface LoginFormApi {
   /** Hide the waiting line without reporting a cancel. */
   hideServerWait(): void;
   showError(message: string): void;
+  /** A non-error, informational message (e.g. pending approval) shown as a
+   *  notice rather than the red error banner. */
+  showNotice(message: string): void;
   resetToIdle(): void;
   getRememberPassword(): boolean;
   /** Whether the auto-connect checkbox is ticked. */
@@ -206,6 +209,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let formState: FormState = "idle";
   let formMode: FormMode = "login";
   let errorMessage = "";
+  // A non-error notice (pending approval). Shown until the form next goes busy
+  // or an error replaces it.
+  let noticeMessage = "";
   /**
    * The field the current banner error belongs to (B9-23), so the error is
    * linked to its input with aria-describedby/aria-invalid and focus moves
@@ -232,6 +238,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let submitBtnText: HTMLSpanElement;
   let toggleModeBtn: HTMLButtonElement;
   let errorBanner: HTMLDivElement;
+  let infoNotice: HTMLDivElement;
   let totpInput: HTMLInputElement;
   let totpError: HTMLDivElement;
   let totpSubmitBtn: HTMLButtonElement;
@@ -339,6 +346,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       role: "alert",
       id: "connect-error-banner",
     });
+
+    // Informational notice (P4-18): a green/neutral status line for a fact the
+    // user needs (pending approval), never the red error banner.
+    infoNotice = createElement("div", { class: "info-notice", role: "status" });
 
     serverWait = buildServerWait();
     authBusyRetry = buildAuthBusyRetry();
@@ -500,7 +511,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
 
-    appendChildren(formContainer, formLogo, errorBanner, serverWait, authBusyRetry, form);
+    appendChildren(
+      formContainer,
+      formLogo,
+      errorBanner,
+      infoNotice,
+      serverWait,
+      authBusyRetry,
+      form,
+    );
     appendChildren(panel, settingsBtn, formContainer);
     return panel;
   }
@@ -739,6 +758,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // the instance so the input keeps aria-invalid/aria-describedby while the
     // banner is up, through unrelated store updates.
     errorField = state === "error" ? field : null;
+    // Any state change supersedes an informational notice: the user is trying
+    // again (busy), a real error replaced it, or the form reset.
+    noticeMessage = "";
+    updateInfoNotice();
 
     // Update UI based on state
     updateSubmitButton();
@@ -834,6 +857,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       errorBanner.style.animation = "";
     } else {
       errorBanner.classList.remove("visible");
+    }
+  }
+
+  function updateInfoNotice(): void {
+    if (noticeMessage) {
+      setText(infoNotice, noticeMessage);
+      infoNotice.classList.add("visible");
+    } else {
+      setText(infoNotice, "");
+      infoNotice.classList.remove("visible");
     }
   }
 
@@ -1126,9 +1159,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // The caller may also call showTotp() or showError() on this page.
     } catch (err: unknown) {
       let message: string;
-      if (err instanceof ApiClientError) {
-        // A server refusal: plain catalog copy for a known code, the
-        // capitalised server message otherwise.
+      if (err instanceof TransportError || err instanceof ApiClientError) {
+        // A transport failure or server refusal: plain catalog copy for a
+        // known kind or code, the capitalised server message otherwise.
         message = errorText(err, connectText("error.serverFallback"));
       } else if (err instanceof Error) {
         message = err.message;
@@ -1269,6 +1302,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     showError(message: string): void {
       transitionTo("error", message);
+    },
+
+    showNotice(message: string): void {
+      // A notice supersedes any error banner, and the form stays usable.
+      transitionTo("idle");
+      noticeMessage = message;
+      updateInfoNotice();
     },
 
     resetToIdle(): void {

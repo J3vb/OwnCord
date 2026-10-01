@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ApiClientError } from "../../src/lib/api";
+import { ApiClientError, TransportError } from "../../src/lib/api";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 import { uiStore, setTransientError } from "../../src/stores/ui.store";
@@ -1895,6 +1895,92 @@ describe("ConnectPage", () => {
       const errorBanner = container.querySelector(".error-banner")!;
       expect(errorBanner.textContent).toBe("42");
     });
+
+    page.destroy?.();
+  });
+
+  it("shows friendly copy for a transport failure instead of raw fetch text (DP-54)", async () => {
+    const onLogin = vi.fn().mockRejectedValue(new TransportError("offline", "Failed to fetch"));
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "testuser";
+    passwordInput.value = "password123";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      const errorBanner = container.querySelector(".error-banner")!;
+      expect(errorBanner.textContent).toBe(
+        "Couldn't reach this server — it may be offline. Check your connection and try again.",
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  it("shows certificate copy for a TLS transport failure (DP-54)", async () => {
+    const onLogin = vi
+      .fn()
+      .mockRejectedValue(new TransportError("tls", "invalid peer certificate: UnknownIssuer"));
+    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+    page.mount(container);
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+
+    hostInput.value = "localhost:8443";
+    usernameInput.value = "testuser";
+    passwordInput.value = "password123";
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await vi.waitFor(() => {
+      const errorBanner = container.querySelector(".error-banner")!;
+      expect(errorBanner.textContent).toBe(
+        "The server's certificate couldn't be verified. Check the server address, or ask the server owner.",
+      );
+    });
+
+    page.destroy?.();
+  });
+
+  // --- showNotice (P4-18): a non-error, informational message ---
+
+  it("shows a pending-approval notice via showNotice, not the red error banner", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    page.showNotice("Registration received. An admin has to approve your account.");
+
+    const notice = container.querySelector(".info-notice")!;
+    expect(notice.classList.contains("visible")).toBe(true);
+    expect(notice.textContent).toBe("Registration received. An admin has to approve your account.");
+    // It is an informational status, not an alert.
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(false);
+
+    page.destroy?.();
+  });
+
+  it("clears an info notice when the form next shows an error or goes idle", () => {
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    page.showNotice("Approval pending");
+    expect(container.querySelector(".info-notice")!.classList.contains("visible")).toBe(true);
+
+    page.showError("Connection refused");
+    expect(container.querySelector(".info-notice")!.classList.contains("visible")).toBe(false);
+    expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
 
     page.destroy?.();
   });
