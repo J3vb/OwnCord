@@ -87,7 +87,8 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
  *
  * Should be called from the dispatcher when a chat_message arrives.
  * Skips notifications for the current user's own messages and when
- * the window is focused on the message's channel.
+ * the window is focused on the message's channel; while focused on another
+ * channel, only the chime may play.
  */
 export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   const currentUser = authStore.getState().user;
@@ -103,14 +104,20 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // reading back-history and cannot see the new message at all — addMessage
   // silently refuses to append it. Without this check that combination
   // suppresses the one thing that would have told the user anything arrived.
+  const focused = isWindowFocused();
   const activeChannelId = channelsStore.getState().activeChannelId;
-  if (
-    isWindowFocused() &&
-    payload.channel_id === activeChannelId &&
-    !isWindowDetached(payload.channel_id)
-  ) {
+  if (focused && payload.channel_id === activeChannelId && !isWindowDetached(payload.channel_id)) {
     return;
   }
+
+  // DP-26 / D3(b): while the app is focused and the message is in some other
+  // channel, the popup and the taskbar flash are interruptions the user cannot
+  // act on without leaving what they are doing, so they are suppressed. The
+  // chime still plays (Discord desktop's behaviour) — but the window being
+  // focused on a *different* channel is the only case: a detached
+  // around-window in the active channel (OC-0204) must still popup and flash,
+  // because the new message is not on screen at all.
+  const focusedElsewhere = focused && payload.channel_id !== activeChannelId;
 
   const mentionInfo = {
     mentions: payload.mentions,
@@ -147,6 +154,10 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // notifications", so honour it for the popup and the chime. The taskbar
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
+  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+  if (!showPopup && !flash && !chime) return;
 
   // A burst of messages in one channel is one alert, not twenty (U1c); a DM is
   // a channel like any other. A mention is always announced — it is what the
@@ -174,8 +185,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // dynamic import of the markdown tokenizer: this module is in the startup
   // closure, so a static import would drag the tokenizer in with it
   // (bundle-budget's startup-closure gate).
-  if (!dnd && loadPref<boolean>("desktopNotifications", true)) {
-    fireDesktopNotification(title, payload.content, {
+  if (showPopup) {
+    fireDesktopNotification(title, payload.content, payload.attachments.length, {
       host: currentHost(),
       channelId: payload.channel_id,
       messageId: payload.id,
@@ -183,12 +194,12 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 
   // Flash taskbar
-  if (loadPref<boolean>("flashTaskbar", true)) {
+  if (flash) {
     flashTaskbar();
   }
 
   // Notification sound
-  if (!dnd && loadPref<boolean>("notificationSounds", true)) {
+  if (chime) {
     playNotificationSound();
   }
 }
@@ -204,11 +215,17 @@ function sanitizeNotif(s: string, maxLen: number): string {
  * The popup body for `rawContent`: its visible words, with a spoiler replaced
  * by its label rather than the hidden text, which would otherwise land verbatim
  * on a lock screen before anyone clicked to reveal it. A dynamic import of the
- * markdown tokenizer keeps it out of the startup closure.
+ * markdown tokenizer keeps it out of the startup closure. An attachment-only
+ * message has no visible words, so it falls back to a count ("sent 2
+ * attachments") rather than an empty body (DP-28).
  */
-async function plainBody(rawContent: string): Promise<string> {
+async function plainBody(rawContent: string, attachmentCount: number): Promise<string> {
   const { markdownToPlainText } = await import("./markdown");
-  return sanitizeNotif(markdownToPlainText(rawContent, connectText("notifications.spoiler")), 100);
+  const text = markdownToPlainText(rawContent, connectText("notifications.spoiler"));
+  if (text === "" && attachmentCount > 0) {
+    return connectText("notifications.attachment", { count: attachmentCount });
+  }
+  return sanitizeNotif(text, 100);
 }
 
 /** The server the client is signed into now, as a notification target names it. */
@@ -250,6 +267,7 @@ export function openNotificationTarget(target: NotificationTarget): void {
 function fireDesktopNotification(
   title: string,
   rawContent: string,
+  attachmentCount: number,
   target: NotificationTarget,
 ): void {
   void (async () => {
@@ -260,14 +278,18 @@ function fireDesktopNotification(
       }
 
       if (permitted) {
-        await desktop.notifier.showMessage(title, await plainBody(rawContent), target);
+        await desktop.notifier.showMessage(
+          title,
+          await plainBody(rawContent, attachmentCount),
+          target,
+        );
       }
     } catch (err) {
       log.debug("Tauri notification plugin unavailable, falling back to Web API", err);
       // Fallback to Web Notification API (dev mode / non-Tauri). Clicking it
       // focuses the window and opens the target as the native activation does.
       try {
-        const body = await plainBody(rawContent);
+        const body = await plainBody(rawContent, attachmentCount);
         const onClick = (): void => {
           window.focus();
           openNotificationTarget(target);
