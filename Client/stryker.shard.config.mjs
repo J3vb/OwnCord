@@ -138,6 +138,7 @@ export const shards = {
     "src/features/messaging/readingAnchor.ts",
     "src/features/messaging/messageEdits.ts",
     "src/features/messaging/reactionState.ts",
+    "src/features/messaging/emojiCatalog.ts",
   ], // 1918 mutants
   // D6 of the check-reliability pain-points report: the safety, moderation,
   // message-request, content-consent, navigation and reports feature modules

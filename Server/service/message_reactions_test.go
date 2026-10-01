@@ -146,7 +146,7 @@ func TestHandleReaction_DMParticipantFetchErrorFailsClosed(t *testing.T) {
 // it): "kiss: woman, man, light skin tone", ten runes, well under
 // maxReactionRunes. The generator fails if a sequence ever exceeds the cap.
 func TestValidateEmoji_LongestSkinToneSequence(t *testing.T) {
-	const kiss = "\U0001F469\U0001F3FB‍❤️‍\U0001F48B‍\U0001F468\U0001F3FB"
+	const kiss = "\U0001F469\U0001F3FB\u200D\u2764\uFE0F\u200D\U0001F48B\u200D\U0001F468\U0001F3FB"
 	if n := len([]rune(kiss)); n != 10 {
 		t.Fatalf("fixture is %d runes, want 10", n)
 	}
