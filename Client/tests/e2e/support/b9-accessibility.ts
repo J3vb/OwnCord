@@ -148,10 +148,27 @@ export async function tokenHex(page: Page, token: string): Promise<string> {
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** One node of `locator.ariaSnapshotJSON()`: the computed accessible name. */
+interface AriaSnapshotNode {
+  readonly name?: string;
+}
+
+/** Whether the snapshot gives the control a non-empty accessible name. */
+function snapshotHasName(nodes: unknown): boolean {
+  if (!Array.isArray(nodes)) return false;
+  return nodes.some((node) => {
+    const name = (node as AriaSnapshotNode | null)?.name;
+    return typeof name === "string" && name.trim() !== "";
+  });
+}
+
 /**
  * Focusable controls under `root` whose accessible name is empty, as their
  * ARIA-snapshot line (e.g. `- button`). Uses Playwright's accessible-name
- * computation, the same tree a screen reader is given.
+ * computation, the same tree a screen reader is given. Reads the name from
+ * `ariaSnapshotJSON` rather than the YAML text, which single-quotes a key whose
+ * name contains a `"` (e.g. `- 'radio "…"'`) and would otherwise read a named
+ * control as unnamed.
  */
 export async function findUnnamedControls(root: Locator): Promise<string[]> {
   const unnamed: string[] = [];
@@ -159,9 +176,8 @@ export async function findUnnamedControls(root: Locator): Promise<string[]> {
   for (let i = 0; i < (await controls.count()); i++) {
     const control = controls.nth(i);
     if (!(await control.isVisible())) continue;
-    const firstLine = (await control.ariaSnapshot()).split("\n")[0] ?? "";
-    // `- role "name" [state]`; an unnamed control has no quoted name.
-    if (!/^- [\w-]+ "[^"]*\S[^"]*"/.test(firstLine)) unnamed.push(firstLine);
+    if (snapshotHasName(await control.ariaSnapshotJSON())) continue;
+    unnamed.push((await control.ariaSnapshot()).split("\n")[0] ?? "");
   }
   return unnamed;
 }
