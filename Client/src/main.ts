@@ -819,10 +819,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           attempt.assertCurrent();
           pageOwner.assertCurrent();
           if (result.status === "pending_approval" || result.token === undefined) {
-            // Approval mode (B4-1): no session yet — an admin decides. The
-            // dedicated notice is B9's; until then the form's message line
-            // carries it.
-            connectPage.showError(connectText("registration.pendingApproval"));
+            // Approval mode (B4-1): no session yet — an admin decides. This is
+            // an expected state, not a failure, so it is an informational
+            // notice rather than a red error (DP-54).
+            connectPage.showNotice(connectText("registration.pendingApproval"));
             return;
           }
           const remember = connectPage.getRememberPassword();

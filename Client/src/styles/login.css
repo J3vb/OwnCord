@@ -560,6 +560,22 @@
   font-size: var(--font-size-sm);
   line-height: 1.4;
 }
+/* Informational notice (P4-18): a non-error fact such as pending approval,
+   shown green rather than as the red error banner. */
+.info-notice {
+  background: color-mix(in srgb, var(--green) 12%, var(--bg-primary));
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: none;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+.info-notice.visible {
+  display: block;
+}
+
 .incompatible-notice {
   background: color-mix(in srgb, var(--red) 12%, var(--bg-primary));
   border-radius: var(--radius-sm);

@@ -73,6 +73,8 @@ export function createConnectPage(
   showServerWait(serverName: string, host: string): void;
   hideServerWait(): void;
   showError(message: string): void;
+  /** A non-error informational message (pending approval), not the red banner. */
+  showNotice(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
   /** Advisory per-row epoch badge; never disables Connect. */
@@ -394,6 +396,7 @@ export function createConnectPage(
       loginForm.showServerWait(serverName, host),
     hideServerWait: () => loginForm.hideServerWait(),
     showError: (message: string) => loginForm.showError(message),
+    showNotice: (message: string) => loginForm.showNotice(message),
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>
       serverPanel.updateHealthStatus(host, status),

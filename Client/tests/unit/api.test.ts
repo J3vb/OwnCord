@@ -19,7 +19,13 @@ vi.mock("../../src/lib/httpProxy", () => ({
   stopHttpProxy: () => Promise.resolve(),
 }));
 
-import { createApiClient, ApiClientError, errorText, type OnUnauthorized } from "../../src/lib/api";
+import {
+  createApiClient,
+  ApiClientError,
+  TransportError,
+  errorText,
+  type OnUnauthorized,
+} from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -178,32 +184,57 @@ describe("API Client", () => {
       expect(onUnauthorized).not.toHaveBeenCalled();
     });
 
-    it("throws original Error when fetch rejects with an Error instance", async () => {
+    it("classifies an Error fetch rejection as a typed transport error", async () => {
       const networkErr = new TypeError("Failed to fetch");
       mockFetch.mockRejectedValue(networkErr);
-      await expect(api.getMe()).rejects.toBe(networkErr);
+      const err = await api.getMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      // The raw detail stays reachable for the log and for diagnostics.
+      expect((err as TransportError).cause).toBe(networkErr);
       expectConsole("error", /\[api\] API fetch failed/);
     });
 
-    it("wraps non-Error fetch rejection (string) in a new Error", async () => {
+    it("classifies a non-Error fetch rejection (string) as a typed transport error", async () => {
       mockFetch.mockRejectedValue("connection refused");
-      await expect(api.getMe()).rejects.toThrow("connection refused");
+      const err = await api.getMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      expect(err).toMatchObject({ message: "connection refused" });
       expectConsole("error", /\[api\] API fetch failed/);
     });
 
-    it("wraps non-Error non-string fetch rejection in a new Error via String()", async () => {
+    it("classifies a non-Error non-string fetch rejection as a typed transport error via String()", async () => {
       mockFetch.mockRejectedValue(42);
-      await expect(api.getMe()).rejects.toThrow("42");
+      const err = await api.getMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      expect(err).toMatchObject({ message: "42" });
       expectConsole("error", /\[api\] API fetch failed/);
     });
 
     it("parseError falls back to statusText when JSON body is not parseable", async () => {
-      mockFetch.mockResolvedValue(brokenJsonErrorResponse(502, "Bad Gateway"));
+      mockFetch.mockResolvedValue(brokenJsonErrorResponse(503, "Service Unavailable"));
       await expect(api.getMe()).rejects.toMatchObject({
-        status: 502,
+        status: 503,
         code: "UNKNOWN",
-        message: "Bad Gateway",
+        message: "Service Unavailable",
       });
+      expectConsole("warn", /\[api\] API error/);
+    });
+
+    it("treats the tunnel's bare 502 as a transport error, not a server refusal", async () => {
+      // The desktop proxy answers a refused (first-use or changed)
+      // certificate with an empty-body 502, so it carries no error code.
+      mockFetch.mockResolvedValue(brokenJsonErrorResponse(502, "Bad Gateway"));
+      const err = await api.getMe().catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      expect(errorText(err, "Fallback")).toBe(
+        "Couldn't reach this server — it may be offline. Check your connection and try again.",
+      );
+      expectConsole("warn", /\[api\] API error/);
+    });
+
+    it("keeps a 502 that carries a server error code as a server error", async () => {
+      mockFetch.mockResolvedValue(errorResponse(502, "BAD_GATEWAY", "upstream failed"));
+      await expect(api.getMe()).rejects.toMatchObject({ status: 502, code: "BAD_GATEWAY" });
       expectConsole("warn", /\[api\] API error/);
     });
 
@@ -698,22 +729,28 @@ describe("API Client", () => {
       expectConsole("warn", /\[api\] API error/);
     });
 
-    it("re-throws Error when fetch rejects with Error", async () => {
+    it("classifies an Error fetch rejection as a typed transport error", async () => {
       const networkErr = new TypeError("Network failure");
       mockFetch.mockRejectedValue(networkErr);
-      await expect(api.verifyTotp("123456", "pt")).rejects.toBe(networkErr);
+      const err = await api.verifyTotp("123456", "pt").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      expect((err as TransportError).cause).toBe(networkErr);
       expectConsole("error", /\[api\] API fetch failed/);
     });
 
-    it("wraps non-Error string rejection in new Error", async () => {
+    it("classifies a non-Error string rejection as a typed transport error", async () => {
       mockFetch.mockRejectedValue("dns lookup failed");
-      await expect(api.verifyTotp("123456", "pt")).rejects.toThrow("dns lookup failed");
+      const err = await api.verifyTotp("123456", "pt").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      expect(err).toMatchObject({ message: "dns lookup failed" });
       expectConsole("error", /\[api\] API fetch failed/);
     });
 
-    it("wraps non-Error non-string rejection via String()", async () => {
+    it("classifies a non-Error non-string rejection as a typed transport error via String()", async () => {
       mockFetch.mockRejectedValue(99);
-      await expect(api.verifyTotp("123456", "pt")).rejects.toThrow("99");
+      const err = await api.verifyTotp("123456", "pt").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(TransportError);
+      expect(err).toMatchObject({ message: "99" });
       expectConsole("error", /\[api\] API fetch failed/);
     });
 
@@ -1386,6 +1423,13 @@ describe("errorText (B9-20, Q7)", () => {
   it("keeps a non-server error's own message and falls back for a non-error", () => {
     expect(errorText(new Error("offline"), "Fallback")).toBe("offline");
     expect(errorText("nope", "Fallback")).toBe("Fallback");
+  });
+
+  it("maps a transport failure to friendly copy, not the raw fetch text", () => {
+    const offline = new TransportError("Failed to fetch");
+    expect(errorText(offline, "Fallback")).toBe(
+      "Couldn't reach this server — it may be offline. Check your connection and try again.",
+    );
   });
 
   it("maps auth, permission and capacity codes to plain capitalised copy", () => {
