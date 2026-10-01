@@ -293,6 +293,14 @@ in its header comments. The important choices it encodes:
 - `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
   `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
   user.
+- `LimitNOFILE=65536` — the open-file ceiling. Each WebSocket holds a
+  descriptor. The Go runtime already lifts the soft limit to just under the
+  hard one at init, and the server raises it the rest of the way, so this hard
+  limit is the real cap on how many people can be online (see
+  [Open-file limit](#open-file-limit-file-descriptors)). 65,536 is well above
+  what 2,000 online need (the boot budget for 2,000 is 4,256) and only needs
+  raising past roughly 30,000 connections; an old systemd default hard limit
+  of 1,024 would stop at a few hundred online.
 
 Pair it with the scheduled backups in the admin panel — or an external cron
 line (see Backup Strategy below) if you prefer driving backups outside the
@@ -1158,6 +1166,8 @@ than none:
 
 ## Capacity limits
 
+What one server carries on which hardware, and the size to buy for a
+community of 1,000–2,000 online, is in [Capacity](capacity.md#sizing-for-10002000-online).
 The qualified profile is **250 registered users, 100 simultaneous connections
 and 25 concurrent voice sessions on 2 vCPU / 4 GB RAM** — see
 [The profile](capacity.md#the-profile) and
@@ -1186,6 +1196,35 @@ which one is near:
 
 The reading of these and the other growth signals is covered once, under
 [Metrics Endpoint](#metrics-endpoint); that list is the one to alert on.
+
+### Open-file limit (file descriptors)
+
+Every WebSocket holds a file descriptor, so the number of people who can be
+online at once is bounded by the process's `RLIMIT_NOFILE`. The Go runtime
+already lifts the soft limit to just under the hard one at init, and the server
+**raises its soft limit to the hard limit at start-up** and logs the result
+under `open-file limit`; the number that matters is therefore the **hard**
+limit, which the supervisor or shell sets. The risk is a low hard limit — a
+plain `ulimit -n 1024`, or an old daemon or unit default of 1,024 — enough for
+a small community but not for 1,000–2,000, which need about 2,100 descriptors:
+
+- **systemd:** `LimitNOFILE=65536` in the unit (the shipped
+  [`deploy/owncord.service`](../deploy/owncord.service) sets it), or
+  `infinity`. `systemctl edit owncord` overrides it without touching the file.
+- **Docker Compose:** `ulimits.nofile` on the `owncord` service (the shipped
+  `Server/docker-compose.yml` sets 65,536). Without it the hard limit is
+  whatever the host daemon passes down, which an old or tuned-down daemon can
+  set to 1,024.
+- **Bare binary or another supervisor:** set the soft and hard limit with
+  `ulimit -n` (or `LimitNOFILE`-equivalent) before the server starts.
+
+The server also warns at boot when the resulting limit is below
+`2 × max_ws_connections + 256` — the descriptors that many connections need,
+doubled for headroom, plus a fixed allowance for the database, LiveKit, TLS
+and the rest of the process. With `server.max_ws_connections` unset
+(unlimited), the budget is the 2,000-online target: 4,256. A server started
+under `ulimit -n 1024` reports a raised limit or a warning naming this setting,
+never a silent fall-over at 1,000 connections.
 
 ## Monitoring
 
@@ -1785,7 +1824,7 @@ broadcast on their way out, and those frames have to reach a live hub and event
 persister or they vanish from the replay store across the restart. Shutdown
 does not wait on hijacked WebSocket connections, so connected clients do not
 delay the drain — they get the restart notice immediately afterwards. The order
-is the reverse of the start sequence in `Server/internal/app/lifecycle.go`, not
+is the reverse of the start sequence in `Server/internal/app/stages.go`, not
 a hand-written teardown.
 
 A managed livekit-server never outlives the server, even when the server dies
