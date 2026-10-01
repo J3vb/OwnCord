@@ -159,10 +159,10 @@ func TestFreshConnect_FailedFirstHandshakeStillAnnouncesOnNextConnect(t *testing
 		h.registerNow(c, nil)
 		h.applyConnectStatus(ctx, c)
 		h.announceFreshConnect(c)
-		settle(t, h)
 		return c
 	}
 	second := reconnect()
+	settle(t, h)
 	wantMemberJoinThenBatch(t, decodeFrames(t, drain(observer.send)), second)
 
 	// Announced once, the next connect is presence only.
@@ -170,6 +170,7 @@ func TestFreshConnect_FailedFirstHandshakeStillAnnouncesOnNextConnect(t *testing
 	settle(t, h)
 	drain(observer.send)
 	reconnect()
+	settle(t, h)
 	for _, f := range decodeFrames(t, drain(observer.send)) {
 		if f.Type != MsgTypePresenceBatch {
 			t.Fatalf("a connect after the member was announced sent %s", f.Type)
