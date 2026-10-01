@@ -246,18 +246,22 @@ fn artifact_matches_target(download_url: &str, machine_target: &str) -> bool {
         .next()
         .unwrap_or("");
 
+    let tokens: Vec<String> = filename
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+
     let mut seen_arch: Option<&'static str> = None;
     let mut seen_os: Option<&'static str> = None;
-    for token in filename.split(|c: char| !c.is_ascii_alphanumeric()) {
-        if token.is_empty() {
-            continue;
-        }
-        let token = token.to_ascii_lowercase();
+    for (index, token) in tokens.iter().enumerate() {
         if seen_arch.is_none() {
-            seen_arch = plugin_arch(&token);
+            let is_x86_64 =
+                token == "x86" && tokens.get(index + 1).map(String::as_str) == Some("64");
+            seen_arch = plugin_arch(if is_x86_64 { "x86_64" } else { token });
         }
         if seen_os.is_none() {
-            seen_os = plugin_os(&token);
+            seen_os = plugin_os(token);
         }
     }
 
@@ -706,6 +710,22 @@ mod tests {
         assert!(artifact_matches_target(
             "https://example.com/OwnCord_1.0.0_x64-setup.nsis.zip?token=abc123",
             "windows-x86_64",
+        ));
+    }
+
+    #[test]
+    fn artifact_target_check_reads_the_canonical_x86_64_spelling() {
+        // The updater plugin spells the 64-bit x86 architecture `x86_64`
+        // (tauri_plugin_updater::target()), so a file carrying that whole
+        // spelling must not be misread as the 32-bit `i686` its `x86` prefix
+        // would otherwise tokenise to.
+        assert!(artifact_matches_target(
+            "https://releases.example.com/v1/OwnCord_1.0.0_x86_64-setup.nsis.zip",
+            "windows-x86_64",
+        ));
+        assert!(!artifact_matches_target(
+            "https://releases.example.com/v1/OwnCord_1.0.0_x86_64-setup.nsis.zip",
+            "windows-i686",
         ));
     }
 
