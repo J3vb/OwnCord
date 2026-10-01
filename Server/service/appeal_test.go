@@ -1205,10 +1205,11 @@ func TestAppeal_OverturnRequiresOutrankAndKindPermission(t *testing.T) {
 		// A moderator above the target (position 90, so it outranks
 		// fixtureMember's 40) but holding only MODERATE_MEMBERS, never
 		// BAN_MEMBERS.
+		//nolint:contextcheck // seedRole/seedUser/seedUserRole always use context.Background() internally
 		seedRole(t, f.database, &db.Role{ID: 6, Name: "warnmod", Permissions: permissions.ModerateMembers, Position: 90})
 		const warnModID = int64(7)
-		seedUser(t, f.database, &db.User{ID: warnModID, Username: "warnmod"})
-		seedUserRole(t, f.database, warnModID, 6)
+		seedUser(t, f.database, &db.User{ID: warnModID, Username: "warnmod"}) //nolint:contextcheck // see above
+		seedUserRole(t, f.database, warnModID, 6)                             //nolint:contextcheck // see above
 
 		if err := f.mod.BanUser(ctx, fixtureMod, fixtureMember, "spam", nil); err != nil {
 			t.Fatalf("BanUser: %v", err)
