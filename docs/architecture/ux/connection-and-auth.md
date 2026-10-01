@@ -141,14 +141,15 @@ sequenceDiagram
 
 **Auth branches → reaction** (server `auth_handler.go`):
 
-| Server result                       | Target reaction                                                                                                                                          |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `200 {token, user}`                 | Proceed to WS connect                                                                                                                                    |
-| `200 {partial_token, requires_2fa}` | TOTP overlay; on cancel, clear the partial token (already cleared: the `onTotpSubmit` handler's `finally` in `main.ts` resets `pendingTotpPartialToken`) |
-| `403` banned/suspended              | Error banner with the server message; remain on the form                                                                                                 |
-| `403` require-2FA-but-none-set      | Error banner directing the user to set up 2FA on the web panel                                                                                           |
-| `400` invalid input                 | Inline field error                                                                                                                                       |
-| `429` rate-limited                  | "Too many attempts — wait a moment." Keep entered username; re-enable after cooldown                                                                     |
+| Server result                       | Target reaction                                                                                                                                            |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `200 {token, user}`                 | Proceed to WS connect                                                                                                                                      |
+| `200 {partial_token, requires_2fa}` | TOTP overlay; on cancel, clear the partial token (already cleared: the `onTotpSubmit` handler's `finally` in `main.ts` resets `pendingTotpPartialToken`)   |
+| `403` banned/suspended              | Error banner with the server message; remain on the form                                                                                                   |
+| `403` require-2FA-but-none-set      | Error banner directing the user to set up 2FA on the web panel                                                                                             |
+| `400` invalid input                 | Inline field error                                                                                                                                         |
+| `429` rate-limited                  | "Too many attempts — wait a moment." Keep entered username; re-enable after cooldown                                                                       |
+| `429 AUTH_BUSY` on login            | Stay `loading` with a "Server busy, retrying…" line and Cancel; retry after `Retry-After` (at least 15 s, plus jitter) for up to 70 s, then show the error |
 
 ### 2.4 Register-by-invite
 
