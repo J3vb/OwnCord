@@ -216,7 +216,7 @@ export const EMOJI_GROUPS: readonly (readonly [
 👇|0|backhand_index_pointing_down|pointing down
 ☝️|0|index_pointing_up|index pointing up
 🫵|0|index_pointing_at_the_viewer
-👍|0|thumbs_up|thumbs up like good yes
+👍|0|thumbsup +1 thumbs thumbs_up|thumbs up like good yes
 👎|0|thumbs_down|thumbs down dislike bad no
 ✊|0|raised_fist|raised fist power
 👊|0|oncoming_fist|fist bump punch
@@ -581,20 +581,20 @@ export const EMOJI_GROUPS: readonly (readonly [
 🐒||monkey
 🦍||gorilla
 🦧||orangutan
-🐶||dog_face|dog puppy pet
-🐕||dog
+🐶||dog dog_face|dog puppy pet
+🐕||dog2 dog
 🦮||guide_dog
 🐕‍🦺||service_dog
 🐩||poodle
 🐺||wolf
 🦊||fox|fox
 🦝||raccoon
-🐱||cat_face|cat kitten pet
-🐈||cat
+🐱||cat cat_face|cat kitten pet
+🐈||cat2 cat
 🐈‍⬛||black_cat
 🦁||lion|lion king
-🐯||tiger_face|tiger
-🐅||tiger
+🐯||tiger tiger_face|tiger
+🐅||tiger2 tiger
 🐆||leopard
 🐴||horse_face
 🫎||moose
@@ -604,12 +604,12 @@ export const EMOJI_GROUPS: readonly (readonly [
 🦓||zebra
 🦌||deer
 🦬||bison
-🐮||cow_face|cow moo
+🐮||cow cow_face|cow moo
 🐂||ox
 🐃||water_buffalo
-🐄||cow
-🐷||pig_face|pig oink
-🐖||pig
+🐄||cow2 cow
+🐷||pig pig_face|pig oink
+🐖||pig2 pig
 🐗||boar
 🐽||pig_nose
 🐏||ram
@@ -623,12 +623,12 @@ export const EMOJI_GROUPS: readonly (readonly [
 🦣||mammoth
 🦏||rhinoceros
 🦛||hippopotamus
-🐭||mouse_face|mouse rat
-🐁||mouse
+🐭||mouse mouse_face|mouse rat
+🐁||mouse2 mouse
 🐀||rat
 🐹||hamster|hamster
-🐰||rabbit_face|rabbit bunny
-🐇||rabbit
+🐰||rabbit rabbit_face|rabbit bunny
+🐇||rabbit2 rabbit
 🐿️||chipmunk
 🦫||beaver
 🦔||hedgehog

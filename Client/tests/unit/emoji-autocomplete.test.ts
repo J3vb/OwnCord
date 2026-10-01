@@ -124,6 +124,20 @@ describe("filterEmojiSuggestions", () => {
     expect(first("fire")).toBe("🔥");
     expect(first("mango")).toBe("🥭");
     expect(first("thumbsup")).toBe("👍");
+    expect(first("thumbs")).toBe("👍");
+    // Discord's names: the face is the animal, the full body is its "2".
+    for (const [name, face, body] of [
+      ["dog", "🐶", "🐕"],
+      ["cat", "🐱", "🐈"],
+      ["mouse", "🐭", "🐁"],
+      ["rabbit", "🐰", "🐇"],
+      ["tiger", "🐯", "🐅"],
+      ["cow", "🐮", "🐄"],
+      ["pig", "🐷", "🐖"],
+    ] as const) {
+      expect(first(name)).toBe(face);
+      expect(first(`${name}2`)).toBe(body);
+    }
   });
 
   it("inserts the remembered skin tone", () => {

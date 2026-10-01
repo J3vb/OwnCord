@@ -8,6 +8,21 @@ export const EMOJI_NAMES = {
   "❤️": "heart love",
   "💋": "kiss",
   "💏": "couplekiss",
+  "👍": "thumbsup +1 thumbs",
+  "🐶": "dog",
+  "🐕": "dog2",
+  "🐱": "cat",
+  "🐈": "cat2",
+  "🐭": "mouse",
+  "🐁": "mouse2",
+  "🐰": "rabbit",
+  "🐇": "rabbit2",
+  "🐯": "tiger",
+  "🐅": "tiger2",
+  "🐮": "cow",
+  "🐄": "cow2",
+  "🐷": "pig",
+  "🐖": "pig2",
 };
 
 // Search keywords merged ahead of each emoji's names, so the words the
