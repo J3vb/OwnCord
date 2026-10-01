@@ -40,21 +40,31 @@ export function vadThreshold(sensitivity: number): number {
  * reopens the system default; the settings meter uses the same request so it
  * measures what the call captures. The device is `exact`, as in
  * switchActiveDevice: Chromium resolves a merely preferred device id to the
- * default device.
+ * default device. `onDefault` swaps a saved device for the system default,
+ * for a retry while that device is unplugged (the pref keeps it, DP-31).
  */
-export function micCaptureOptions(): {
+export function micCaptureOptions(onDefault = false): {
   echoCancellation: boolean;
   noiseSuppression: boolean;
   autoGainControl: boolean;
-  deviceId?: { exact: string };
+  deviceId?: { exact: string } | string;
 } {
   const deviceId = loadPref<string>("audioInputDevice", "");
   return {
     echoCancellation: loadPref("echoCancellation", true),
     noiseSuppression: loadPref("noiseSuppression", true),
     autoGainControl: loadPref("autoGainControl", true),
-    ...(deviceId === "" ? {} : { deviceId: { exact: deviceId } }),
+    ...(deviceId === "" ? {} : { deviceId: onDefault ? "default" : { exact: deviceId } }),
   };
+}
+
+/** True when a capture request failed because its exact device is not
+ *  there (unplugged), so a retry with `micCaptureOptions(true)` can help. */
+export function isMissingDeviceError(err: unknown, options: { deviceId?: unknown }): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return (
+    options.deviceId !== undefined && (name === "OverconstrainedError" || name === "NotFoundError")
+  );
 }
 
 export interface VadDetector {
@@ -423,7 +433,10 @@ export class AudioPipeline {
     const captureOptions = micCaptureOptions();
     try {
       // restartTrack re-acquires the mic with new constraints without unpublishing
-      await track.restartTrack(captureOptions);
+      await track.restartTrack(captureOptions).catch((err: unknown) => {
+        if (!isMissingDeviceError(err, captureOptions)) throw err;
+        return track.restartTrack(micCaptureOptions(true));
+      });
       log.info("Audio processing reapplied via restartTrack", captureOptions);
     } catch (err) {
       log.error("Failed to reapply audio processing", err);
