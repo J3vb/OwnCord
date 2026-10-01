@@ -12,9 +12,11 @@ import (
 
 const (
 	// StampFlushInterval bounds how long a connect or disconnect status stamp
-	// waits for the writer. Short, because a few readers (@here, DM status)
-	// read users.status itself; a 2,000-client reconnect herd over 15 s still
-	// collapses into a handful of statements instead of 2,000.
+	// waits for the writer. Short, because direct readers of users.status
+	// (REST and admin user reads) see the row lag by that long; @here and DM
+	// statuses read the hub's live status instead. A 2,000-client reconnect
+	// herd over 15 s still collapses into a handful of statements instead of
+	// 2,000.
 	StampFlushInterval = 2 * time.Second
 	// TouchFlushInterval bounds how long a session touch waits. The idle
 	// expiry slides by 30 days, so a minute of lag on last_used and

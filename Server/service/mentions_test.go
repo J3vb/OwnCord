@@ -382,6 +382,28 @@ func TestSendMessage_HereReachesConnectedReaderBeforeStampFlush(t *testing.T) {
 	}
 }
 
+// TestSendMessage_EveryoneIgnoresLiveStatus locks that only @here narrows on
+// presence: a plain @everyone reaches every reader, offline ones included,
+// without a per-reader live-status lookup.
+func TestSendMessage_EveryoneIgnoresLiveStatus(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	lookups := 0
+	svc.SetLiveStatusLookup(func(int64) string {
+		lookups++
+		return ""
+	})
+
+	sendAs(t, svc, 4, "@everyone meeting now")
+	for _, uid := range []int64{1, 2, 3} {
+		if got := mentionCount(t, database, uid); got != 1 {
+			t.Errorf("user %d @everyone mention_count = %d, want 1", uid, got)
+		}
+	}
+	if lookups != 0 {
+		t.Errorf("@everyone made %d live-status lookups, want 0", lookups)
+	}
+}
+
 // TestSendMessage_EveryoneSkipsUsersWithoutRead locks that the @everyone
 // fan-out honors per-channel denies, not just the base role mask.
 func TestSendMessage_EveryoneSkipsUsersWithoutRead(t *testing.T) {

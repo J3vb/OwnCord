@@ -183,12 +183,14 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgI
 			// lags a connect by up to one batched stamp flush. A reader with
 			// no live connection ("") is offline whatever the row says, the
 			// read path's rule (ws/serve_ready.go presentableMembers).
-			status := r.Status
-			if s.liveStatus != nil {
-				status = s.liveStatus(r.UserID)
-			}
-			if set.HereOnly && (status == "" || db.BroadcastStatus(status) == db.StatusOffline) {
-				continue
+			if set.HereOnly {
+				status := r.Status
+				if s.liveStatus != nil {
+					status = s.liveStatus(r.UserID)
+				}
+				if status == "" || db.BroadcastStatus(status) == db.StatusOffline {
+					continue
+				}
 			}
 			recipients[r.UserID] = struct{}{}
 		}
