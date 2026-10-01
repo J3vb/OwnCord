@@ -81,6 +81,11 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   // (B9-7).
   let scopeServer = true;
   let nextBefore: number | null = null;
+  // The query that produced the currently displayed results. Paging must use it
+  // rather than the live input value: editing the box only schedules a debounce
+  // and leaves the old rows (and cursor) on screen until it fires, so a Load
+  // more inside that window would otherwise page a different query.
+  let lastQuery = "";
   let loadingMore = false;
   let debounceTimer: number | null = null;
   let searchAbort: AbortController | null = null;
@@ -190,6 +195,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       loadingMore = true;
       renderLoadMore();
     } else {
+      lastQuery = query;
       nextBefore = null;
       loadingMore = false;
       renderLoadMore();
@@ -234,6 +240,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
         searchAbort = null;
       }
       results = [];
+      lastQuery = "";
       nextBefore = null;
       loadingMore = false;
       renderResults();
@@ -260,9 +267,10 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
 
   function loadMore(): void {
     if (nextBefore === null || loadingMore) return;
-    const query = input.value.trim();
-    if (query.length < MIN_QUERY_LEN) return;
-    executeSearch(query, nextBefore, true);
+    // Page the query the cursor belongs to, never the live input: an edit
+    // inside the debounce window leaves this page's rows (and cursor) on screen.
+    if (lastQuery.length < MIN_QUERY_LEN) return;
+    executeSearch(lastQuery, nextBefore, true);
   }
 
   function chooseScope(server: boolean): void {
@@ -280,6 +288,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       searchAbort = null;
     }
     results = [];
+    lastQuery = "";
     nextBefore = null;
     loadingMore = false;
     renderResults();

@@ -782,6 +782,41 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("pages the query that produced the shown results, not an edited box (DP-20)", async () => {
+    const first = makeResult({ message_id: 30 });
+    const second = makeResult({ message_id: 20 });
+    const onSearch = vi
+      .fn()
+      .mockResolvedValueOnce({ results: [first], next_before: 30 })
+      .mockResolvedValueOnce({ results: [second], next_before: null });
+    const opts = makeOptions({ onSearch });
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const loadMore = container.querySelector(
+      "[data-testid='search-load-more']",
+    ) as HTMLButtonElement;
+    expect(loadMore.style.display).not.toBe("none");
+
+    // Edit the box but leave the 300 ms debounce pending: the "hello" rows and
+    // their cursor are still what is on screen, so Load more must page "hello".
+    input.value = "world";
+    input.dispatchEvent(new Event("input"));
+    loadMore.click();
+    // Flush the paged request without advancing past the pending debounce.
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onSearch).toHaveBeenLastCalledWith("hello", undefined, expect.any(AbortSignal), 30);
+    expect(container.querySelectorAll(".search-result-item")).toHaveLength(2);
+
+    overlay.destroy?.();
+  });
+
   it("does not show 'Load more' when the first page has no cursor", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [makeResult()] });
     const opts = makeOptions({ onSearch });
