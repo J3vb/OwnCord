@@ -28,9 +28,25 @@ import {
   renderDayDivider,
   renderNewDivider,
   renderMessage,
+  authorAvatarKey,
+  refreshConnectionControls,
 } from "./message-list/renderers";
+import { createAvatarElement } from "./message-list/avatar";
+import { refreshReactionLocks } from "./message-list/reactions";
+import { clearContentParseCache, resyncMentions } from "./message-list/content-parser";
+import { highlightsCurrentUser } from "@lib/mentions";
+import { canManageMessages } from "@lib/permissions";
+import { readableRoleColor } from "@lib/themes";
+import { resolveDisplayName } from "@lib/avatar";
 import { getUnreadOnOpen } from "@stores/channels.store";
-import { UNREAD_COUNT_CAP, atEachMidnight, formatMessageTimestamp } from "@lib/formatting";
+import {
+  UNREAD_COUNT_CAP,
+  atEachMidnight,
+  formatMessageTimestamp,
+  getUserRole,
+  resolveAuthor,
+  roleColorVar,
+} from "@lib/formatting";
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
@@ -289,6 +305,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let jumpToPresentPill: HTMLButtonElement | null = null;
   let renderedStart = 0;
   let renderedEnd = 0;
+  /** The signed-in user's MANAGE_MESSAGES state at the last roleRevision, so a
+   *  role change that flips it (which can add or remove a row's delete/pin
+   *  controls) still rebuilds, while a rename or a plain repaint does not. */
+  let lastCanManageMessages = false;
 
   // scrollToMessage's highlight-flash: at most one outstanding flash at a
   // time, so its cleanup timer never needs a per-call abort listener (which
@@ -1231,34 +1251,47 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
-    // Only re-render when member roles change, not on presence/typing updates.
-    // The store bumps roleRevision solely on membership/role mutations, so
-    // selecting the counter avoids rebuilding a role map per notification.
+    // A membership, role or profile (rename/avatar) change repaints only the
+    // author identity of the rendered rows that changed, not the whole list
+    // (P4-02, OC-0108). The store bumps roleRevision on every such mutation, so
+    // selecting the counter avoids touching a role map per presence update.
+    // The signed-in user's own role change can also change their per-row
+    // affordances (pin/delete), so that case — and only it — falls back to a
+    // rebuild.
+    lastCanManageMessages = canManageMessages();
     unsubscribers.push(
       membersStore.subscribeSelector(
         (s) => s.roleRevision ?? 0,
         () => {
-          renderAll();
+          const canManage = canManageMessages();
+          if (canManage !== lastCanManageMessages) {
+            lastCanManageMessages = canManage;
+            renderAll();
+          } else {
+            refreshAuthorRows();
+          }
         },
       ),
     );
 
-    // A timeout starting or ending re-renders the reaction controls (B9-15).
+    // A timeout starting or ending toggles the reaction controls' lock in place
+    // (B9-15); no row is rebuilt, so video, spoilers and focus survive.
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
         () => {
-          renderAll();
+          if (contentContainer !== null) refreshReactionLocks(contentContainer);
         },
       ),
     );
 
-    // The delete action is disabled while the socket is down (CLI-08).
+    // The delete action is disabled while the socket is down (CLI-08); flip the
+    // gate on the rendered buttons in place, without a rebuild.
     unsubscribers.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,
         () => {
-          renderAll();
+          if (contentContainer !== null) refreshConnectionControls(contentContainer);
         },
       ),
     );
@@ -1268,6 +1301,90 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // outside the window get fresh text when renderWindow builds them. Owned
     // by disposable.signal: destroy() releases the pending timer.
     atEachMidnight(disposable.signal, relabelRenderedTimes);
+  }
+
+  /**
+   * Repaint author identity on the rendered rows whose author changed after a
+   * members-store update, without rebuilding them (P4-02). A row stores the
+   * key it was drawn from in `data-author-key`; only a differing key patches
+   * that row's avatar, name and role colour, so a rename or a role change
+   * touches the affected rows and a presence update touches none.
+   */
+  function refreshAuthorRows(): void {
+    if (contentContainer === null || renderedStart < 0) return;
+    const children = contentContainer.children;
+    for (let i = 0; i < children.length; i++) {
+      const item = virtualItems[renderedStart + i];
+      if (item?.kind !== "message") continue;
+      const el = children[i] as HTMLElement;
+      // A reply's quoted author can change even when the row's own author did
+      // not, so this runs for every row, not only the ones whose own key moved.
+      repaintReplyRefAuthors(el);
+      const msg = item.message;
+      // @mention resolution depends on the live member store, so a rename or a
+      // membership change must re-resolve it on every rendered row — including
+      // rows that merely mention the renamed member, not just those it authored
+      // — without re-parsing or rebuilding them (P4-02, F3). A system row draws
+      // its mentions with no server info, so it resyncs the same way.
+      if (el.classList.contains("message")) {
+        const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+        resyncMentions(el, mentionInfo);
+        el.classList.toggle(
+          "mentioned",
+          !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo),
+        );
+      } else {
+        resyncMentions(el);
+      }
+      const roleColor = roleColorVar(getUserRole(msg.user.id));
+      const author = resolveAuthor(msg.user);
+      const key = authorAvatarKey(author, roleColor);
+      if (key === el.dataset["authorKey"]) continue;
+      el.dataset["authorKey"] = key;
+      const name = resolveDisplayName(author);
+      const authorEl = el.querySelector<HTMLElement>(".msg-author");
+      if (authorEl !== null) {
+        authorEl.textContent = name;
+        authorEl.title = author.username;
+        authorEl.dataset["roleColor"] = roleColor;
+        authorEl.style.color = readableRoleColor(roleColor);
+      }
+      const avatar = el.querySelector<HTMLElement>(".msg-avatar");
+      if (avatar !== null) {
+        avatar.replaceWith(
+          createAvatarElement(author, { className: "msg-avatar", background: roleColor }),
+        );
+      }
+    }
+  }
+
+  /**
+   * Repaint the quoted author on every reply bar under `row` whose parent's
+   * identity changed (a rename, avatar or role change), keyed by the same
+   * `data-author-key`. The reply body text is left alone: it belongs to the
+   * parent's message row, which the members-store update cannot change — only
+   * a parent content edit does, and patchRows re-renders that row.
+   */
+  function repaintReplyRefAuthors(row: HTMLElement): void {
+    for (const bar of row.querySelectorAll<HTMLElement>(".msg-reply-ref")) {
+      const replyTo = Number(bar.dataset["replyTo"] ?? "0");
+      const parent = allMessages.find((m) => m.id === replyTo);
+      if (parent === undefined) continue;
+      const roleColor = roleColorVar(getUserRole(parent.user.id));
+      const author = resolveAuthor(parent.user);
+      const key = authorAvatarKey(author, roleColor);
+      if (key === bar.dataset["authorKey"]) continue;
+      bar.dataset["authorKey"] = key;
+      const name = resolveDisplayName(author);
+      const authorEl = bar.querySelector<HTMLElement>(".rr-author");
+      if (authorEl !== null) authorEl.textContent = name;
+      const avatar = bar.querySelector<HTMLElement>(".rr-avatar");
+      if (avatar !== null) {
+        avatar.replaceWith(
+          createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+        );
+      }
+    }
   }
 
   function relabelRenderedTimes(): void {
@@ -1317,6 +1434,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     unsubscribers.length = 0;
     heightCache.clear();
+    clearContentParseCache();
     tree = null;
     releaseTrackedMedia();
     if (region !== null) {

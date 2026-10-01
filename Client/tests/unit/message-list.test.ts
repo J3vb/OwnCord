@@ -15,10 +15,23 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
+// An avatar change repaints through createAvatarElement, which fetches the
+// picture bytes through the authenticated attachment path. Stub just that fetch
+// so the swap can be observed; the URL resolution stays real.
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+}));
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
+});
+
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
 import type { Message } from "@stores/messages.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
@@ -1092,6 +1105,456 @@ describe("MessageList", () => {
       messagesStore.flush();
 
       expect(container.querySelector(".messages-loading")).toBeNull();
+    });
+  });
+
+  // P4-02: an append at the 500-row cap, a connection flip, a timeout change
+  // and a role change must not rebuild the rendered rows. The cap append goes
+  // through P4-01's row patch; the three flips are targeted updates.
+  describe("P4-02 targeted updates", () => {
+    const current = (): readonly Message[] => messagesStore.getState().messagesByChannel.get(1)!;
+
+    it("appends at the 500-row cap without rebuilding the rows that stay", () => {
+      const full = Array.from({ length: 500 }, (_, i) =>
+        makeMessage({
+          id: i + 1,
+          timestamp: new Date(Date.UTC(2024, 0, 15, 0, 0, i)).toISOString(),
+        }),
+      );
+      setMessages(1, full);
+      msgList.mount(container);
+
+      const row498 = container.querySelector("[data-testid='message-498']");
+      const row500 = container.querySelector("[data-testid='message-500']");
+      expect(row498).not.toBeNull();
+      expect(row500).not.toBeNull();
+
+      // The live reducer trims the head to stay at the cap; the array length is
+      // unchanged, which used to defeat the append path and force renderAll.
+      messagesStore.setState((prev) => {
+        const next = [...current(), makeMessage({ id: 501, timestamp: "2024-01-15T01:00:00Z" })];
+        const trimmed = next.slice(next.length - 500);
+        const m = new Map(prev.messagesByChannel);
+        m.set(1, trimmed);
+        return { ...prev, messagesByChannel: m };
+      });
+      messagesStore.flush();
+
+      expect(container.querySelector("[data-testid='message-498']")).toBe(row498);
+      expect(container.querySelector("[data-testid='message-500']")).toBe(row500);
+      expect(container.querySelector("[data-testid='message-501']")).not.toBeNull();
+    });
+
+    it("keeps row identity through a connection flip and still gates delete (CLI-08)", () => {
+      setConnectionStatus("connected");
+      uiStore.flush();
+      setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const deleteBtn = (): HTMLButtonElement =>
+        container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;
+      expect(deleteBtn().disabled).toBe(false);
+
+      setConnectionStatus("disconnected");
+      uiStore.flush();
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(deleteBtn().disabled).toBe(true);
+      expect(deleteBtn().getAttribute("aria-disabled")).toBe("true");
+
+      setConnectionStatus("connected");
+      uiStore.flush();
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      deleteBtn().click();
+      expect(options.onDeleteClick).toHaveBeenCalledWith(1, false);
+    });
+
+    it("disables reaction controls while timed out without rebuilding rows (B9-15)", () => {
+      setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const chip = (): HTMLElement =>
+        container.querySelector<HTMLElement>("[data-testid='message-1'] .reaction-chip")!;
+      expect(chip().getAttribute("aria-disabled")).not.toBe("true");
+
+      setActiveTimeout(new Date(Date.now() + 60_000).toISOString());
+      safetyStore.flush();
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(chip().getAttribute("aria-disabled")).toBe("true");
+      chip().click();
+      expect(options.onReactionClick).not.toHaveBeenCalled();
+
+      setActiveTimeout(null);
+      safetyStore.flush();
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(chip().hasAttribute("aria-disabled")).toBe(false);
+      chip().click();
+      expect(options.onReactionClick).toHaveBeenCalledWith(1, "🔥");
+      resetSafetyStore();
+    });
+
+    it("repaints author identity on a roleRevision bump without rebuilding rows", () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            1,
+            { id: 1, username: "Alice", avatar: null, role: "member", status: "online" as const },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const authorSpan = (): HTMLElement =>
+        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+      expect(authorSpan().dataset["roleColor"]).toBe("var(--role-member)");
+      expect(authorSpan().textContent).toBe("Alice");
+
+      // A role change bumps roleRevision; a rename bumps it too (OC-0108).
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(1, { ...next.get(1)!, role: "admin", username: "Alicia" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(authorSpan().dataset["roleColor"]).toBe("var(--role-admin)");
+      expect(authorSpan().textContent).toBe("Alicia");
+    });
+
+    it("re-resolves @mention highlighting on every rendered row on a rename (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            10,
+            {
+              id: 10,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online" as const,
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      // Row 1 is authored by alice; row 2 mentions alice but is authored by Bob,
+      // so the pill lives on a row that member did not author.
+      setMessages(1, [
+        makeMessage({ id: 1, user: { id: 10, username: "alice", avatar: null } }),
+        makeMessage({
+          id: 2,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "hey @alice",
+        }),
+      ]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const row2 = container.querySelector("[data-testid='message-2']");
+      expect(container.querySelector("[data-testid='message-2'] .mention")?.textContent).toBe(
+        "@alice",
+      );
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(10, { ...next.get(10)!, username: "alicia" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(container.querySelector("[data-testid='message-2']")).toBe(row2);
+      expect(container.querySelector("[data-testid='message-2'] .mention")).toBeNull();
+      expect(row2!.querySelector(".msg-text")!.textContent).toBe("hey @alice");
+    });
+
+    it("wraps every newly-resolving @token across sibling prose nodes on a member join (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [
+        makeMessage({
+          id: 1,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "check @alice and **@carol** and [@dave](https://example.com)",
+        }),
+      ]);
+      msgList.mount(container);
+      const row = container.querySelector("[data-testid='message-1']")!;
+      expect(row.querySelectorAll(".mention").length).toBe(0);
+
+      // alice, carol and dave all become resolvable at once via a join.
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(10, {
+          id: 10,
+          username: "alice",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        next.set(11, {
+          id: 11,
+          username: "carol",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        next.set(12, {
+          id: 12,
+          username: "dave",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      const text = row.querySelector(".msg-text")!;
+      const mentions = [...text.querySelectorAll(".mention")].map((m) => m.textContent);
+      expect(mentions).toContain("@alice");
+      expect(mentions).toContain("@carol");
+      expect(mentions).toContain("@dave");
+      expect(text.querySelector("a.msg-link .mention")?.textContent).toBe("@dave");
+      // The prose keeps its full text; only the tokens became pills.
+      expect(text.textContent).toBe("check @alice and @carol and @dave");
+    });
+
+    it("does not promote an @token inside a rejected masked link to a pill (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [
+        makeMessage({
+          id: 1,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "[@dave](/settings)",
+        }),
+      ]);
+      msgList.mount(container);
+      const row = container.querySelector("[data-testid='message-1']")!;
+      // The relative URL is rejected, so the source renders literally and no
+      // mention is highlighted at render time — nor must the resync add one.
+      expect(row.querySelector(".mention")).toBeNull();
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(12, {
+          id: 12,
+          username: "dave",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(row.querySelector(".mention")).toBeNull();
+      expect(row.querySelector(".msg-text")!.textContent).toBe("[@dave](/settings)");
+    });
+
+    it("does not promote an @token inside a rejected bare URL to a pill (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [
+        makeMessage({
+          id: 1,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "see https://[/@dave",
+        }),
+      ]);
+      msgList.mount(container);
+      const row = container.querySelector("[data-testid='message-1']")!;
+      // An unparseable URL is left as raw text and never linkified, so its
+      // @token is not highlighted at render time — nor must the resync add one.
+      expect(row.querySelector("a.msg-link")).toBeNull();
+      expect(row.querySelector(".mention")).toBeNull();
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(12, {
+          id: 12,
+          username: "dave",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(row.querySelector(".mention")).toBeNull();
+      expect(row.querySelector(".msg-text")!.textContent).toBe("see https://[/@dave");
+    });
+
+    it("updates the author's hover handle when only the username changes behind a display name (F3)", () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online" as const,
+              displayName: "Ali",
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [makeMessage({ id: 1 })]);
+      msgList.mount(container);
+      const authorEl = (): HTMLElement =>
+        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+      expect(authorEl().textContent).toBe("Ali");
+      expect(authorEl().title).toBe("alice");
+
+      // Only the username changes; the displayed name ("Ali") and avatar stay
+      // put, so the repaint key must still move for the title to track it.
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(1, { ...next.get(1)!, username: "alicia" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(authorEl().textContent).toBe("Ali");
+      expect(authorEl().title).toBe("alicia");
+    });
+
+    it("repaints a reply's quoted author on a rename without rebuilding either row", () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            1,
+            { id: 1, username: "Alice", avatar: null, role: "member", status: "online" as const },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      // Row 2 replies to row 1; row 2's own author (id 2) never changes.
+      setMessages(1, [
+        makeMessage({ id: 1 }),
+        makeMessage({
+          id: 2,
+          user: { id: 2, username: "Bob", avatar: null },
+          replyTo: 1,
+        }),
+      ]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const row2 = container.querySelector("[data-testid='message-2']");
+      const rrAuthor = (): HTMLElement =>
+        container.querySelector<HTMLElement>("[data-testid='message-2'] .rr-author")!;
+      expect(rrAuthor().textContent).toBe("Alice");
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(1, { ...next.get(1)!, username: "Alicia" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(container.querySelector("[data-testid='message-2']")).toBe(row2);
+      expect(rrAuthor().textContent).toBe("Alicia");
+    });
+
+    it("refetches an author's avatar on an avatar-only profile change (OC-0108)", async () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "Alice",
+              avatar: "/api/v1/files/old",
+              role: "member",
+              status: "online" as const,
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      fetchImageAsObjectUrlMock.mockClear();
+      setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      // The initial row's own avatar fetch, then the change below.
+      await vi.waitFor(() => {
+        expect(fetchImageAsObjectUrlMock).toHaveBeenCalledWith("/api/v1/files/old");
+      });
+      fetchImageAsObjectUrlMock.mockClear();
+
+      // Only the avatar changes; username and role stay put. The author key
+      // includes the avatar URL, so the row must rebuild and refetch, not just
+      // repaint the letter fallback.
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(1, { ...next.get(1)!, avatar: "/api/v1/files/new" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      const rowAvatar = row1!.querySelector<HTMLElement>(".msg-avatar")!;
+      await vi.waitFor(() => {
+        expect(rowAvatar.querySelector<HTMLImageElement>(".avatar-img")?.getAttribute("src")).toBe(
+          "data:image/png;base64,AAAA",
+        );
+      });
+      expect(fetchImageAsObjectUrlMock).toHaveBeenCalledWith("/api/v1/files/new");
     });
   });
 

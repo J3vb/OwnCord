@@ -189,13 +189,13 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
   },
   {
     file: "components/message-list/content-parser.ts",
-    fn: "renderCodeBlock",
+    fn: "renderParsedCodeBlock",
     reason:
       "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
   {
     file: "components/message-list/content-parser.ts",
-    fn: "renderCodeBlock",
+    fn: "renderParsedCodeBlock",
     reason:
       "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
