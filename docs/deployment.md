@@ -1824,7 +1824,7 @@ broadcast on their way out, and those frames have to reach a live hub and event
 persister or they vanish from the replay store across the restart. Shutdown
 does not wait on hijacked WebSocket connections, so connected clients do not
 delay the drain — they get the restart notice immediately afterwards. The order
-is the reverse of the start sequence in `Server/internal/app/lifecycle.go`, not
+is the reverse of the start sequence in `Server/internal/app/stages.go`, not
 a hand-written teardown.
 
 A managed livekit-server never outlives the server, even when the server dies
