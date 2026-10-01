@@ -677,7 +677,10 @@ CREATE TABLE read_states (
 );
 ```
 
-`mention_count` is incremented on message insert for every mentioned user who
+`mention_count` is incremented shortly after message insert (a bounded worker
+batches a ~250 ms window of messages into one write per channel; deleting,
+purging or erasing a message flushes its pending write first) for every
+mentioned user who
 can read the channel, except the author and except users who have blocked the
 author. `@everyone` counts every reader; `@here` counts only readers whose
 _broadcast_ status is not `offline` — the column stores the status the user
