@@ -33,7 +33,8 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { clearContentParseCache } from "./message-list/content-parser";
+import { clearContentParseCache, resyncMentions } from "./message-list/content-parser";
+import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
@@ -1320,6 +1321,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // not, so this runs for every row, not only the ones whose own key moved.
       repaintReplyRefAuthors(el);
       const msg = item.message;
+      // @mention resolution depends on the live member store, so a rename or a
+      // membership change must re-resolve it on every rendered row — including
+      // rows that merely mention the renamed member, not just those it authored
+      // — without re-parsing or rebuilding them (P4-02, F3). A system row draws
+      // its mentions with no server info, so it resyncs the same way.
+      if (el.classList.contains("message")) {
+        const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+        resyncMentions(el, mentionInfo);
+        el.classList.toggle(
+          "mentioned",
+          !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo),
+        );
+      } else {
+        resyncMentions(el);
+      }
       const roleColor = roleColorVar(getUserRole(msg.user.id));
       const author = resolveAuthor(msg.user);
       const key = authorAvatarKey(author, roleColor);

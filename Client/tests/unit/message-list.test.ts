@@ -31,6 +31,7 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
+import { authStore } from "@stores/auth.store";
 import type { Message } from "@stores/messages.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
@@ -1221,6 +1222,60 @@ describe("MessageList", () => {
       expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
       expect(authorSpan().dataset["roleColor"]).toBe("var(--role-admin)");
       expect(authorSpan().textContent).toBe("Alicia");
+    });
+
+    it("re-resolves @mention highlighting on every rendered row on a rename (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            10,
+            {
+              id: 10,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online" as const,
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      // Row 1 is authored by alice; row 2 mentions alice but is authored by Bob,
+      // so the pill lives on a row that member did not author.
+      setMessages(1, [
+        makeMessage({ id: 1, user: { id: 10, username: "alice", avatar: null } }),
+        makeMessage({
+          id: 2,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "hey @alice",
+        }),
+      ]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const row2 = container.querySelector("[data-testid='message-2']");
+      expect(container.querySelector("[data-testid='message-2'] .mention")?.textContent).toBe(
+        "@alice",
+      );
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(10, { ...next.get(10)!, username: "alicia" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(container.querySelector("[data-testid='message-2']")).toBe(row2);
+      expect(container.querySelector("[data-testid='message-2'] .mention")).toBeNull();
+      expect(row2!.querySelector(".msg-text")!.textContent).toBe("hey @alice");
     });
 
     it("repaints a reply's quoted author on a rename without rebuilding either row", () => {

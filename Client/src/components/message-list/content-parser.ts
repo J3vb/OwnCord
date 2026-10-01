@@ -375,6 +375,81 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
   return fragment;
 }
 
+/** Elements whose text is never mention-highlighted at render time, so the
+ *  mention resync must leave them alone: code spans/blocks, existing pills and
+ *  chips, and link anchors (whose text may be a bare URL containing "@"). */
+const MENTION_OPAQUE_SELECTOR =
+  "code, .msg-codeblock, .mention, .msg-link, .channel-mention, .message-link-chip";
+
+/** Whether a rebuilt pill is identical to the one already in the DOM. */
+function sameMention(a: HTMLElement, b: HTMLElement): boolean {
+  return a.className === b.className && (a.dataset["userId"] ?? "") === (b.dataset["userId"] ?? "");
+}
+
+/**
+ * Wrap the @tokens in one plain prose run that resolve against the live member
+ * store, leaving every other token (`#channel`, `:emoji:`, unresolved @) as the
+ * text it already is. Returns null when nothing in the run resolves.
+ */
+function wrapResolvedMentions(text: string, info?: MentionInfo): DocumentFragment | null {
+  const matches: TokenMatch[] = [];
+  for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
+    const idx = match.index;
+    const lead = match[1];
+    const token = match[2];
+    if (idx === undefined || lead === undefined || token === undefined) continue;
+    if (match[3] === "@") continue;
+    const start = idx + lead.length;
+    const node = buildMentionNode(`@${token}`, token, info);
+    if (node !== null) matches.push({ start, end: start + token.length + 1, node });
+  }
+  if (matches.length === 0) return null;
+  const fragment = document.createDocumentFragment();
+  let last = 0;
+  for (const m of matches) {
+    if (m.start < last) continue;
+    if (m.start > last) fragment.appendChild(document.createTextNode(text.slice(last, m.start)));
+    fragment.appendChild(m.node);
+    last = m.end;
+  }
+  if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+  return fragment;
+}
+
+/**
+ * Re-resolve the @mention spans already rendered under `root` against the live
+ * member store, and wrap plain @tokens inside it that now resolve. Called when
+ * a membership/role/profile change bumps roleRevision, so the pills track a
+ * rename without re-parsing or rebuilding the row (P4-02) — in both directions:
+ * a token that stopped resolving is unwrapped to plain text, one that started
+ * resolving becomes a pill. Scoped to the two regions mentions are rendered
+ * into (.msg-text and .sm-text), so an author's display name or a reply
+ * preview, where render never highlights a mention, is left alone.
+ */
+export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
+  for (const content of root.querySelectorAll(".msg-text, .sm-text")) {
+    // querySelectorAll returns a static list, so replacing a span as we go does
+    // not disturb the walk.
+    for (const span of content.querySelectorAll<HTMLElement>(".mention")) {
+      const raw = span.textContent ?? "";
+      const token = raw.startsWith("@") ? raw.slice(1) : raw;
+      const replacement = buildMentionNode(raw, token, info);
+      if (replacement !== null && sameMention(span, replacement)) continue;
+      span.replaceWith(replacement ?? document.createTextNode(raw));
+    }
+
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      const textNode = n as Text;
+      if (textNode.nodeValue?.includes("@") !== true) continue;
+      const parent = textNode.parentElement;
+      if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) continue;
+      const wrapped = wrapResolvedMentions(textNode.nodeValue ?? "", info);
+      if (wrapped !== null) textNode.replaceWith(wrapped);
+    }
+  }
+}
+
 // -- Parsed content (the parse cache's payload) -------------------------------
 //
 // Parsing (splitCodeFences + parseBlocks + parseInline + highlightCode) is the
