@@ -51,7 +51,7 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatTime, formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import { formatFullDate, formatMessageTimestamp } from "@lib/formatting";
 import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
 import { createAvatarElement } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
@@ -159,7 +159,7 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
   icon.appendChild(createIcon("arrow-right", 14));
   const text = createElement("span", { class: "sm-text" });
   text.appendChild(renderMentions(msg.content));
-  const time = createElement("span", { class: "sm-time" }, formatTime(msg.timestamp));
+  const time = createElement("span", { class: "sm-time" }, formatMessageTimestamp(msg.timestamp));
   appendChildren(el, icon, text, time);
   return el;
 }

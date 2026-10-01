@@ -966,6 +966,23 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("renders its time in the same clock format as the message header", () => {
+      const msg = makeMessage({
+        user: { id: 0, username: "System", avatar: null },
+        content: "@alice joined the server",
+        timestamp: new Date().toISOString(),
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      // The header format is "Today at 2:34 PM", not the bare 24h "14:34"
+      // formatTime used to render here (DP-48).
+      expect(el.querySelector(".sm-time")!.textContent).toMatch(/^Today at /);
+
+      ac.abort();
+    });
+
     it("renders mentions inside system message text", () => {
       const msg = makeMessage({
         user: { id: 0, username: "System", avatar: null },

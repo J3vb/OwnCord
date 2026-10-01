@@ -30,7 +30,7 @@ import {
   renderMessage,
 } from "./message-list/renderers";
 import { getUnreadOnOpen } from "@stores/channels.store";
-import { UNREAD_COUNT_CAP } from "@lib/formatting";
+import { UNREAD_COUNT_CAP, atEachMidnight } from "@lib/formatting";
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
@@ -1196,6 +1196,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         },
       ),
     );
+
+    // "Today at …" becomes "Yesterday at …" when the local day turns, so the
+    // loaded rows' relative times must be rebuilt once a day. Owned by
+    // disposable.signal: destroy() releases the pending timer.
+    atEachMidnight(disposable.signal, () => renderAll());
   }
 
   function destroy(): void {
