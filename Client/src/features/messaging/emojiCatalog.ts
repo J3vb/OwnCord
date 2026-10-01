@@ -16,7 +16,9 @@ export interface UnicodeEmoji {
   readonly char: string;
   /** Indices of the ZWJ segments that take a skin-tone modifier; "" for none. */
   readonly tone: string;
-  /** Search keywords, space-separated; the first one is the emoji's name. */
+  /** Its shortcodes; the first is the name the `:` popup shows. */
+  readonly names: readonly string[];
+  /** Search keywords, space-separated: the curated words, then the names. */
   readonly keywords: string;
 }
 
@@ -59,8 +61,13 @@ function parseCatalog(groups: typeof EMOJI_GROUPS): EmojiCatalog {
   const parsed = groups.map(([key, rows]) => ({
     key,
     emoji: rows.split("\n").map((row) => {
-      const [char = "", tone = "", keywords = ""] = row.split("|");
-      const e = { char, tone, keywords };
+      const [char = "", tone = "", names = "", words = ""] = row.split("|");
+      const e = {
+        char,
+        tone,
+        names: names.split(" "),
+        keywords: words ? `${words} ${names}` : names,
+      };
       for (let t = 0; t < SKIN_TONES.length; t++) byChar.set(withSkinTone(e, t), e);
       return e;
     }),

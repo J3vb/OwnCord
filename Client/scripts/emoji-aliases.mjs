@@ -1,8 +1,18 @@
-// Curated search keywords for the emoji generator (scripts/gen-emoji-data.mjs),
-// merged ahead of each emoji's Unicode name. The first keyword is the name the
-// composer's `:` popup shows, so these keep the names the hand-picked set had
-// before the full Unicode set (B9-19) — typing `:fire` or `:lol` still finds
-// what it always did. Keys may omit the U+FE0F presentation selector.
+// Curated data for the emoji generator (scripts/gen-emoji-data.mjs). Keys may
+// omit the U+FE0F presentation selector.
+
+// Discord-style names an emoji answers to ahead of its Unicode shortcode. The
+// first is the name the composer's `:` popup shows, and typing a name exactly
+// ranks the emoji first.
+export const EMOJI_NAMES = {
+  "❤️": "heart love",
+  "💋": "kiss",
+  "💏": "couplekiss",
+};
+
+// Search keywords merged ahead of each emoji's names, so the words the
+// hand-picked set had before the full Unicode set (B9-19) still find what they
+// always did.
 export const EMOJI_ALIASES = {
   "😀": "grinning face happy smile",
   "😃": "smiley face happy smile",

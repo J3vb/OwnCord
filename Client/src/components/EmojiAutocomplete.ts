@@ -28,6 +28,7 @@ import {
   emojiMatches,
   skinTone,
   withSkinTone,
+  type UnicodeEmoji,
 } from "../features/messaging/emojiCatalog";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the picker. */
@@ -80,21 +81,24 @@ function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
 }
 
 /**
- * 0 when `q` is the primary keyword, 1 another whole keyword (underscores
- * optional, so `thumbsup` is `thumbs_up`), 2 the start of one, 3 otherwise.
+ * 0 when `q` is the emoji's name, 1 another of its names, 2 another whole
+ * keyword (underscores optional, so `thumbsup` is `thumbs_up`), 3 the start of
+ * a keyword, 4 otherwise.
  */
-function unicodeRank(words: readonly string[], q: string): number {
-  const exact = words.findIndex((w) => w === q || w.replaceAll("_", "") === q);
-  if (exact !== -1) return exact === 0 ? 0 : 1;
-  return words.some((w) => w.startsWith(q)) ? 2 : 3;
+function unicodeRank(e: UnicodeEmoji, words: readonly string[], q: string): number {
+  const is = (w: string): boolean => w === q || w.replaceAll("_", "") === q;
+  const name = e.names.findIndex(is);
+  if (name !== -1) return name === 0 ? 0 : 1;
+  if (words.some(is)) return 2;
+  return words.some((w) => w.startsWith(q)) ? 3 : 4;
 }
 
 /**
  * Suggestions for `query`, in the order the popup lists them: custom emoji
  * first (prefix matches before substring), then unicode, alphabetical within
- * each group. Unicode emoji rank by how well a keyword matches: the query is
- * the emoji's name, then another whole keyword (`:heart` finds ❤️ "red heart"
- * before `heart_suit`), then the start of a keyword, then anywhere in one.
+ * each group. Unicode emoji rank by how well the query matches: the emoji's own
+ * name (`:heart` is ❤️, `:star` is ⭐), then a curated word (🤩 "star struck"),
+ * then the start of a keyword, then anywhere in one.
  *
  * A query shorter than MIN_EMOJI_QUERY yields nothing at all, so the composer
  * never opens a popup over a lone colon.
@@ -120,22 +124,23 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
     else customSubstring.push(entry);
   }
 
-  const unicode: EmojiSuggestion[][] = [[], [], [], []];
+  const unicode: EmojiSuggestion[][] = [[], [], [], [], []];
   const tone = skinTone();
   for (const group of emojiCatalog()?.groups ?? []) {
     for (const e of group.emoji) {
       if (!emojiMatches(e, q)) continue;
       const words = e.keywords.split(" ");
+      const label = e.names[0] ?? "";
       const char = withSkinTone(e, tone);
       const entry: EmojiSuggestion = {
-        label: words[0] ?? e.keywords,
+        label,
         insert: char,
-        detail: words.slice(1).join(" "),
+        detail: [...new Set(words)].filter((w) => w !== label).join(" "),
         kind: "unicode",
         char,
         emoji: null,
       };
-      unicode[unicodeRank(words, q)]?.push(entry);
+      unicode[unicodeRank(e, words, q)]?.push(entry);
     }
   }
 

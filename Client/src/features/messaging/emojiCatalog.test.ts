@@ -54,8 +54,14 @@ describe("loadEmojiCatalog", () => {
   });
 
   it("keeps the curated keywords, so the existing names still match", () => {
-    expect(entry("🔥").keywords.split(" ")[0]).toBe("fire");
+    expect(entry("🔥").names[0]).toBe("fire");
     expect(emojiMatches(entry("🔥"), "flame")).toBe(true);
+  });
+
+  it("names an emoji by its Discord name ahead of its Unicode shortcode", () => {
+    expect(entry("❤️").names).toEqual(["heart", "love", "red_heart"]);
+    expect(entry("⭐").names).toEqual(["star"]);
+    expect(emojiMatches(entry("❤️"), "red heart")).toBe(true);
   });
 
   it("matches a shortcode written without underscores", () => {

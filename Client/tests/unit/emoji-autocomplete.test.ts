@@ -109,15 +109,16 @@ describe("filterEmojiSuggestions", () => {
     expect(filterEmojiSuggestions("astronaut").some((s) => s.insert === "🧑‍🚀")).toBe(true);
   });
 
-  it("ranks a whole-keyword match ahead of a longer name that starts with it", () => {
-    // The full set has more heart_* and love_* shortcodes than the popup shows.
-    expect(filterEmojiSuggestions("heart").map((s) => s.insert)).toContain("❤️");
-    expect(filterEmojiSuggestions("love").map((s) => s.insert)).toContain("❤️");
-  });
-
   it("puts the emoji named exactly by the query first", () => {
     const first = (q: string): string | undefined =>
       filterEmojiSuggestions(q).find((s) => s.kind === "unicode")?.insert;
+    // Each also starts a curated phrase on another emoji: 😍 "heart eyes",
+    // 🤩 "star struck", 🥰 "love hearts", 🙄 "eye roll", 💏 the Unicode "kiss".
+    expect(first("heart")).toBe("❤️");
+    expect(first("star")).toBe("⭐");
+    expect(first("love")).toBe("❤️");
+    expect(first("eye")).toBe("👁️");
+    expect(first("kiss")).toBe("💋");
     expect(first("eyes")).toBe("👀");
     expect(first("winking_face")).toBe("😉");
     expect(first("fire")).toBe("🔥");
