@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -193,6 +194,62 @@ func TestReadyAdmission_RefusesPastDeadlineWithRetryHint(t *testing.T) {
 	}
 	if got := h.ClientCount(); got != 0 {
 		t.Fatalf("refused connect left %d registered clients, want 0", got)
+	}
+}
+
+func TestReadyAdmission_WaitingSocketCountsTowardConnectionCap(t *testing.T) {
+	database := newTeardownTestDB(t)
+	h := newTestHub(t, database, nil, nil)
+	h.readyGate = make(chan struct{}, 1)
+	h.readyGate <- struct{}{} // every permit held
+	go h.Run()
+	t.Cleanup(h.Stop)
+
+	tokens := seedSessions(t, database, 1)
+	srv := httptest.NewServer(ServeWS(h, []string{"*"}, 1))
+	t.Cleanup(srv.Close)
+	url := "ws" + strings.TrimPrefix(srv.URL, "http")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	waiting, resp, err := websocket.Dial(ctx, url, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = waiting.CloseNow() }()
+	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": map[string]any{"token": tokens[0]}})
+	if err := waiting.Write(ctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("auth write: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // past auth, parked in admission
+
+	second, resp, err := websocket.Dial(ctx, url, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if second != nil {
+		_ = second.CloseNow()
+	}
+	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("second dial with one socket awaiting a permit: err=%v resp=%v, want 503", err, resp)
+	}
+
+	<-h.readyGate // free the permit: the waiting socket is admitted
+	for {
+		_, msg, err := waiting.Read(ctx)
+		if err != nil {
+			t.Fatalf("waiting socket read: %v", err)
+		}
+		var f struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(msg, &f)
+		if f.Type == MsgTypeReady {
+			break
+		}
 	}
 }
 

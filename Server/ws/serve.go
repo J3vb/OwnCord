@@ -44,7 +44,8 @@ const (
 func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
 	// pending counts this handler's upgraded sockets that have not yet
-	// registered (still in their auth window).
+	// started their pumps (authenticating, waiting for a ready-build permit,
+	// or handshaking).
 	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
 		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
@@ -53,8 +54,9 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
 			return
 		}
-		// Pending only for the auth window: once auth succeeds the client is
-		// about to register and ClientCount carries it.
+		// Pending until the pumps start: the handshake can wait up to
+		// readyAdmissionWait for a permit before it registers, and the brief
+		// overlap with ClientCount after registerNow errs toward refusing.
 		pending.Add(1)
 		var ended bool
 		endPending := func() {
@@ -73,7 +75,6 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		conn.SetReadLimit(preAuthReadLimitBytes)
 
 		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
-		endPending()
 		if err != nil {
 			return
 		}
@@ -82,6 +83,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		ctx := r.Context()
 
 		startPumps := func() {
+			endPending()
 			writeCtx, writeCancel := context.WithCancel(ctx)
 			go writePump(writeCtx, conn, c)
 			go pingPump(writeCtx, conn, c, pingInterval)
