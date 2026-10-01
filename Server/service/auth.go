@@ -614,6 +614,16 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrLockedOut
 	}
 
+	// B4-4: take an admission slot before the attempt is reserved, so an
+	// over-budget request is refused without charging the failure budgets
+	// and without a bcrypt compare; the slot goes back right after the
+	// compare. A burst queues (P5-S02), so the account is read once
+	// admitted: a change made during the wait is what the compare sees.
+	release, err := s.acquireAdmission(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// Constant-time lookup: always attempt bcrypt compare even when user
 	// does not exist to prevent timing-based username enumeration.
 	user, err := s.st.GetUserByUsername(ctx, in.Username)
@@ -647,15 +657,6 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// is keyed per USER and is the only cross-IP brute-force defence, so
 	// scaling it with the shared-NAT multiplier would hand a distributed
 	// attacker more guesses (api/constants_test.go pins this call site).
-	// B4-4: take an admission slot before the attempt is reserved, so an
-	// over-budget request is refused without charging the failure budgets
-	// and without a bcrypt compare; the slot goes back right after the
-	// compare, the only expensive step. A burst queues (P5-S02) unreserved.
-	release, err := s.acquireAdmission(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
 	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) ||
 		!s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut

@@ -300,3 +300,45 @@ func TestExpensiveAuth_QueuedRefusalCarriesRetryHint(t *testing.T) {
 		t.Fatalf("hinted refusal message = %q, want ErrAuthBusy's %q", err.Error(), ErrAuthBusy.Error())
 	}
 }
+
+// A login reads the account only once admitted, so a password change or a
+// ban that lands while it waits in the queue is what decides it.
+func TestLogin_QueuedHonoursAccountChangesMadeDuringTheWait(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(ctx context.Context, f *admissionFixture) error
+		want   error
+	}{
+		{"password change", func(ctx context.Context, f *admissionFixture) error {
+			hash, err := auth.HashPassword("a brand new password")
+			if err != nil {
+				return err
+			}
+			return f.database.UpdateUserPassword(ctx, f.plain.User.ID, hash)
+		}, ErrInvalidCredentials},
+		{"ban", func(ctx context.Context, f *admissionFixture) error {
+			return f.database.BanUser(ctx, f.plain.User.ID, "spam", nil)
+		}, ErrBanned},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newAdmissionFixture(t, 1)
+			f.svc.admissionWait = auth.AdmissionWait
+			release := f.hold(t)
+			done := make(chan error, 1)
+			go func() {
+				_, err := f.svc.Login(ctx, LoginInput{Username: "budgeted", Password: admissionPassword, IP: "203.0.113.60"})
+				done <- err
+			}()
+			time.Sleep(100 * time.Millisecond)
+			if err := tc.change(ctx, f); err != nil {
+				t.Fatalf("change: %v", err)
+			}
+			release()
+			if err := <-done; !errors.Is(err, tc.want) {
+				t.Fatalf("login queued across the %s: error = %v, want %v", tc.name, err, tc.want)
+			}
+		})
+	}
+}
