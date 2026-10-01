@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -86,7 +87,7 @@ func configuredSelfHosts(cfg *config.Config) []string {
 // sides.
 func isSelfHost(parsed *url.URL, selfHosts []string, requestHost string) bool {
 	parsedHost := stripDefaultPort(parsed.Scheme, parsed.Host)
-	for _, candidate := range append(selfHosts[:len(selfHosts):len(selfHosts)], requestHost) {
+	for _, candidate := range append(slices.Clip(selfHosts), requestHost) {
 		if candidate == "" {
 			continue
 		}
