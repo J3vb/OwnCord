@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -146,13 +147,16 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 
 	// A new channel can notify the recipient (dm_channel_open), which a
 	// timeout refuses like a send; reopening an existing one notifies nobody.
-	_, exists, err := s.st.FindDMChannelIDBetween(ctx, userID, recipientID)
-	if err != nil {
-		return nil, fmt.Errorf("%w: failed to look up DM: %w", ErrInternal, err)
-	}
-	if !exists {
-		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-			return nil, err
+	if timeoutErr := requireNotTimedOut(ctx, s.perms, userID); timeoutErr != nil {
+		if !errors.Is(timeoutErr, ErrTimedOut) {
+			return nil, timeoutErr
+		}
+		_, exists, err := s.st.FindDMChannelIDBetween(ctx, userID, recipientID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to look up DM: %w", ErrInternal, err)
+		}
+		if !exists {
+			return nil, timeoutErr
 		}
 	}
 
