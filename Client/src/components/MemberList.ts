@@ -175,7 +175,7 @@ function statusColor(status: UserStatus): string {
     case "offline":
       return "var(--text-micro)";
     default:
-      return "#747f8d";
+      return "var(--text-micro)";
   }
 }
 

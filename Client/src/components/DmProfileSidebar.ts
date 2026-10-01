@@ -81,13 +81,13 @@ const SIDEBAR_WIDTH = 340;
 const NOTE_STORAGE_PREFIX = "owncord:dm-note:";
 
 const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
-  online: "#3ba55d",
-  idle: "#faa61a",
-  dnd: "#ed4245",
+  online: "var(--green)",
+  idle: "var(--yellow)",
+  dnd: "var(--red)",
   // A DM partner is never invisible from here — the server maps it to offline
   // for everyone but its owner — but the map has to be total over UserStatus.
-  invisible: "#747f8d",
-  offline: "#747f8d",
+  invisible: "var(--text-micro)",
+  offline: "var(--text-micro)",
 };
 
 const STATUS_LABELS: Readonly<

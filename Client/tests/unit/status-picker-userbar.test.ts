@@ -244,6 +244,24 @@ describe("StatusPicker wired to UserBar", () => {
     expect(loadUserStatus()).toBe("idle");
   });
 
+  it("tracks the stored status on the trigger dot with a design token, never a literal hex (P4-19)", () => {
+    setAuthState({ username: "alice" }, true);
+    saveUserStatus("idle");
+    const ws = createMockWs("connected");
+    comp = createUserBar(userBarOptsWithPresence(ws));
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    expect(dot.style.background).toBe("var(--yellow)");
+
+    dot.click();
+    const dnd = Array.from(container.querySelectorAll(".status-picker-option")).find(
+      (el) => el.querySelector(".status-picker-option-label")?.textContent === "Do Not Disturb",
+    ) as HTMLElement;
+    dnd.click();
+    expect(dot.style.background).toBe("var(--red)");
+  });
+
   it("follows a status change made elsewhere (settings Account tab)", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");

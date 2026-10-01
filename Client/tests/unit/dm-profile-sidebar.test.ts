@@ -211,6 +211,45 @@ describe("DmProfileSidebar", () => {
     sidebar.destroy?.();
   });
 
+  it("colors the status dots with design tokens, never a literal hex (P4-19)", () => {
+    const cases: Array<[DmProfileData["status"], string]> = [
+      ["online", "var(--green)"],
+      ["idle", "var(--yellow)"],
+      ["dnd", "var(--red)"],
+      ["invisible", "var(--text-micro)"],
+      ["offline", "var(--text-micro)"],
+    ];
+    for (const [status, token] of cases) {
+      const sidebar = createDmProfileSidebar(makeOptions({ user: makeUser({ status }) }));
+      sidebar.mount(container);
+
+      expect(
+        container.querySelector<HTMLElement>(".dps-status-dot")?.style.background,
+        status,
+      ).toBe(token);
+      expect(
+        container.querySelector<HTMLElement>(".dps-status-dot-inline")?.style.background,
+        status,
+      ).toBe(token);
+
+      sidebar.destroy?.();
+      container.replaceChildren();
+    }
+  });
+
+  it("repaints the token color on update() for a new status (P4-19)", () => {
+    const sidebar = createDmProfileSidebar(makeOptions({ user: makeUser({ status: "online" }) }));
+    sidebar.mount(container);
+
+    const dot = container.querySelector<HTMLElement>(".dps-status-dot")!;
+    expect(dot.style.background).toBe("var(--green)");
+
+    sidebar.update(makeUser({ status: "offline" }));
+    expect(dot.style.background).toBe("var(--text-micro)");
+
+    sidebar.destroy?.();
+  });
+
   it("hides about section when about is null", () => {
     const user = makeUser({ about: null });
     const sidebar = createDmProfileSidebar(makeOptions({ user }));

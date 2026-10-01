@@ -76,13 +76,13 @@ const VIEWPORT_MARGIN = 8;
 const ANCHOR_GAP = 8;
 
 const STATUS_COLORS: Record<UserStatus, string> = {
-  online: "#3ba55d",
-  idle: "#faa61a",
-  dnd: "#ed4245",
+  online: "var(--green)",
+  idle: "var(--yellow)",
+  dnd: "var(--red)",
   // Only ever reached for the signed-in user looking at their own profile —
   // the server maps invisible to offline for everyone else.
-  invisible: "#747f8d",
-  offline: "#747f8d",
+  invisible: "var(--text-micro)",
+  offline: "var(--text-micro)",
 };
 
 const STATUS_LABELS: Record<
