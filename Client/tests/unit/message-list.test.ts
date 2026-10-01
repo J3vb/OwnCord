@@ -1342,6 +1342,135 @@ describe("MessageList", () => {
       expect(text.textContent).toBe("check @alice and @carol and @dave");
     });
 
+    it("does not promote an @token inside a rejected masked link to a pill (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [
+        makeMessage({
+          id: 1,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "[@dave](/settings)",
+        }),
+      ]);
+      msgList.mount(container);
+      const row = container.querySelector("[data-testid='message-1']")!;
+      // The relative URL is rejected, so the source renders literally and no
+      // mention is highlighted at render time — nor must the resync add one.
+      expect(row.querySelector(".mention")).toBeNull();
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(12, {
+          id: 12,
+          username: "dave",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(row.querySelector(".mention")).toBeNull();
+      expect(row.querySelector(".msg-text")!.textContent).toBe("[@dave](/settings)");
+    });
+
+    it("does not promote an @token inside a rejected bare URL to a pill (F3)", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 99, username: "me", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+      membersStore.setState(() => ({
+        members: new Map([
+          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [
+        makeMessage({
+          id: 1,
+          user: { id: 2, username: "Bob", avatar: null },
+          content: "see https://[/@dave",
+        }),
+      ]);
+      msgList.mount(container);
+      const row = container.querySelector("[data-testid='message-1']")!;
+      // An unparseable URL is left as raw text and never linkified, so its
+      // @token is not highlighted at render time — nor must the resync add one.
+      expect(row.querySelector("a.msg-link")).toBeNull();
+      expect(row.querySelector(".mention")).toBeNull();
+
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(12, {
+          id: 12,
+          username: "dave",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+        });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(row.querySelector(".mention")).toBeNull();
+      expect(row.querySelector(".msg-text")!.textContent).toBe("see https://[/@dave");
+    });
+
+    it("updates the author's hover handle when only the username changes behind a display name (F3)", () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online" as const,
+              displayName: "Ali",
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [makeMessage({ id: 1 })]);
+      msgList.mount(container);
+      const authorEl = (): HTMLElement =>
+        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+      expect(authorEl().textContent).toBe("Ali");
+      expect(authorEl().title).toBe("alice");
+
+      // Only the username changes; the displayed name ("Ali") and avatar stay
+      // put, so the repaint key must still move for the title to track it.
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(1, { ...next.get(1)!, username: "alicia" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(authorEl().textContent).toBe("Ali");
+      expect(authorEl().title).toBe("alicia");
+    });
+
     it("repaints a reply's quoted author on a rename without rebuilding either row", () => {
       membersStore.setState(() => ({
         members: new Map([

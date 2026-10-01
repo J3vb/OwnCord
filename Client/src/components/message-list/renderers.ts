@@ -98,9 +98,10 @@ export function renderNewDivider(): HTMLDivElement {
 
 /**
  * A stable key for the identity a row's author is drawn from — the avatar URL,
- * the displayed name and the role colour. MessageList compares it against the
- * last render to repaint only the rows whose author actually changed (P4-02),
- * so a role change or a rename does not rebuild every other row.
+ * the displayed name, the username (the hover handle) and the role colour.
+ * MessageList compares it against the last render to repaint only the rows
+ * whose author actually changed (P4-02), so a role change or a rename does not
+ * rebuild every other row.
  */
 export function authorAvatarKey(
   author: {
@@ -110,7 +111,7 @@ export function authorAvatarKey(
   },
   roleColor: string,
 ): string {
-  return `${author.avatar ?? ""}\u0000${resolveDisplayName(author)}\u0000${roleColor}`;
+  return `${author.avatar ?? ""}\u0000${resolveDisplayName(author)}\u0000${author.username}\u0000${roleColor}`;
 }
 
 /** Apply the connection gate to one delete button in place (CLI-08). */

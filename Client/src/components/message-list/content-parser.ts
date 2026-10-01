@@ -155,7 +155,11 @@ function appendInline(parent: Node, nodes: readonly InlineNode[], info?: Mention
       case "link": {
         const link = buildMaskedLink(node, info);
         if (link !== null) parent.appendChild(link);
-        else parent.appendChild(document.createTextNode(node.raw));
+        else {
+          const raw = createElement("span", { class: "msg-link-raw" });
+          setText(raw, node.raw);
+          parent.appendChild(raw);
+        }
         break;
       }
       case "spoiler":
@@ -208,7 +212,9 @@ export function renderMentions(text: string, info?: MentionInfo): DocumentFragme
         fragment.appendChild(document.createTextNode(trailing));
       }
     } else {
-      fragment.appendChild(document.createTextNode(rawUrl));
+      const raw = createElement("span", { class: "msg-link-raw" });
+      setText(raw, rawUrl);
+      fragment.appendChild(raw);
     }
     lastIndex = idx + rawUrl.length;
   }
@@ -377,11 +383,12 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
 
 /** Elements whose text is never mention-highlighted at render time, so the
  *  mention resync must leave them alone: code spans/blocks, existing pills and
- *  chips, and autolinked URLs (whose text is the URL itself, which may contain
- *  an `/@token` path). A masked `[text](url)` link does get mentions rendered
- *  inside it, so `.masked` links stay transparent. */
+ *  chips, a rejected masked link left as raw text, and autolinked URLs (whose
+ *  text is the URL itself, which may contain an `/@token` path). A masked
+ *  `[text](url)` link does get mentions rendered inside it, so `.masked` links
+ *  stay transparent. */
 const MENTION_OPAQUE_SELECTOR =
-  "code, .msg-codeblock, .mention, .channel-mention, .message-link-chip, .msg-link:not(.masked)";
+  "code, .msg-codeblock, .mention, .channel-mention, .message-link-chip, .msg-link-raw, .msg-link:not(.masked)";
 
 /** Whether a rebuilt pill is identical to the one already in the DOM. */
 function sameMention(a: HTMLElement, b: HTMLElement): boolean {
