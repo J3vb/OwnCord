@@ -1024,12 +1024,14 @@ describe("MessageList", () => {
         setMessages(1, [msg]);
         msgList.mount(container);
 
+        const row = container.querySelector('[data-testid="message-1"]');
         expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Today at /);
 
         // Cross local midnight (00:00 on the 16th) on the same channel.
         vi.advanceTimersByTime(13 * 60 * 60 * 1000);
 
         expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Yesterday at /);
+        expect(container.querySelector('[data-testid="message-1"]')).toBe(row);
       } finally {
         vi.useRealTimers();
       }
