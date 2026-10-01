@@ -764,15 +764,14 @@ func Load(cfgPath string) (*Config, error) {
 			"addresses that should reach the admin panel")
 	}
 
-	// A customized admin allowlist with no trusted_proxies is a footgun
-	// behind any reverse proxy or container network: the check then compares
-	// the PROXY'S (or bridge's) address — by construction a private one —
-	// instead of the real client's, so the customization silently doesn't do
-	// what the operator believes. Warn, don't fail: direct-exposure setups
-	// are exactly this shape and are fine.
-	if len(cfg.Server.TrustedProxies) == 0 &&
-		!slices.Equal(cfg.Server.AdminAllowedCIDRs, defaults().Server.AdminAllowedCIDRs) {
-		slog.Warn("config: admin_allowed_cidrs is customized but trusted_proxies is empty — " +
+	// An admin allowlist with no trusted_proxies is a footgun behind any
+	// reverse proxy or container network: the check then compares the
+	// PROXY'S (or bridge's) address — by construction a private one, which
+	// the compiled default admits — instead of the real client's, so every
+	// client passes. Warn, don't fail: direct-exposure setups are exactly this
+	// shape and are fine.
+	if len(cfg.Server.TrustedProxies) == 0 && len(cfg.Server.AdminAllowedCIDRs) > 0 {
+		slog.Warn("config: admin_allowed_cidrs is set but trusted_proxies is empty — " +
 			"behind a reverse proxy or Docker network the allowlist checks the proxy's private " +
 			"address, not the real client; set server.trusted_proxies to the proxy hop(s)")
 	}

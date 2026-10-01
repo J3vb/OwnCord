@@ -204,7 +204,8 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 // origin check, rate limit, body decode, credential and wizard validation —
 // before any state is created. It writes the error response itself; ok=false
 // means the caller must return immediately. The returned host is the
-// rate-limit bucket key, reused as the session IP; proxyNets (parsed once by
+// resolved client address, reused as the session IP and (through
+// clientip.RateKey) as the rate-limit bucket; proxyNets (parsed once by
 // the caller from config.Server.TrustedProxies) makes both honour
 // trusted_proxies the same way every other session-creating path does
 // (OC-0274) instead of trusting the raw, possibly-a-proxy RemoteAddr.
@@ -226,7 +227,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// grouped under a single rate-limit bucket, and so distinct clients
 	// behind the same trusted proxy are NOT collapsed into one.
 	host := clientip.Resolve(r, proxyNets)
-	setupKey := "setup:" + host
+	setupKey := "setup:" + clientip.RateKey(host)
 	if !limiter.Allow(setupKey, 5, time.Minute) {
 		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
 		return req, "", false

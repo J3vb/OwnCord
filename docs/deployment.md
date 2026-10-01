@@ -555,7 +555,7 @@ cert management), three things matter:
    the proxy hops, never client networks. A proxy on the same host is
    `["127.0.0.1/32", "::1/128"]`: without it the allowlist sees the proxy's
    loopback address on every request, and the server warns about this shape
-   at start-up.
+   at start-up and again on the first forwarded request it admits.
 
 Working nginx snippet:
 

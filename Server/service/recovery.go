@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -181,9 +182,9 @@ type recoveryAttempt struct {
 func newRecoveryAttempt(in RecoverInput) recoveryAttempt {
 	unameKey := db.LowerASCII(in.Username)
 	return recoveryAttempt{
-		ipLock:   "recover_lock:" + in.IP,
+		ipLock:   "recover_lock:" + clientip.RateKey(in.IP),
 		userLock: "recover_user_lock:" + unameKey,
-		ipFail:   "recover_fail:" + in.IP,
+		ipFail:   "recover_fail:" + clientip.RateKey(in.IP),
 		userFail: "recover_user_fail:" + unameKey,
 	}
 }

@@ -116,3 +116,34 @@ func TestParseCIDRList_SkipsInvalid(t *testing.T) {
 		t.Errorf("ParseCIDRList = %d nets, want 1 (invalid skipped)", len(nets))
 	}
 }
+
+// TestResolve_MultipleXFFLinesWalkedAsOne pins that a proxy appending its own
+// X-Forwarded-For header line (rather than extending the client's) is read:
+// every line is joined before the right-to-left walk, so the client's own
+// leading line cannot pick the result.
+func TestResolve_MultipleXFFLinesWalkedAsOne(t *testing.T) {
+	nets := ParseCIDRList([]string{"10.0.0.0/8"})
+	r := req("10.0.0.9:4321", nil)
+	r.Header.Add("X-Forwarded-For", "192.0.2.66")
+	r.Header.Add("X-Forwarded-For", "203.0.113.7")
+	if got := Resolve(r, nets); got != "203.0.113.7" {
+		t.Errorf("Resolve = %q, want the proxy-appended 203.0.113.7 from the last line", got)
+	}
+}
+
+// TestRateKey pins per-IP bucket keys: IPv6 addresses aggregate to their /64
+// (one subscriber allocation), IPv4 and IPv4-mapped addresses stay whole.
+func TestRateKey(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"203.0.113.5", "203.0.113.5"},
+		{"::ffff:203.0.113.5", "203.0.113.5"},
+		{"2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"},
+		{"2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"},
+		{"not-an-ip", "not-an-ip"},
+	}
+	for _, tc := range cases {
+		if got := RateKey(tc.in); got != tc.want {
+			t.Errorf("RateKey(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

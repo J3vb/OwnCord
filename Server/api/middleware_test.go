@@ -1506,3 +1506,72 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     CHECK (blocker_id != blocked_id)
 );
 `)
+
+// TestRateLimitMiddleware_IPv6SharesSlash64Bucket pins that two addresses in
+// one IPv6 /64 draw from the same per-IP budget: a single host usually holds
+// the whole /64, so keying the full /128 would give it unlimited budget.
+func TestRateLimitMiddleware_IPv6SharesSlash64Bucket(t *testing.T) {
+	limiter := auth.NewRateLimiter()
+	h := api.RateLimitMiddleware(limiter, "test:", 1, time.Minute)(http.HandlerFunc(ok))
+
+	for i, remote := range []string{"[2001:db8:1:2::1]:1234", "[2001:db8:1:2::2]:1234"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = remote
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		want := http.StatusOK
+		if i == 1 {
+			want = http.StatusTooManyRequests
+		}
+		if rr.Code != want {
+			t.Errorf("request %d from %s: status = %d, want %d", i, remote, rr.Code, want)
+		}
+	}
+}
+
+// TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies pins the
+// runtime hint for a reverse proxy nobody declared: a loopback peer sending
+// X-Forwarded-For while trusted_proxies is empty means every client looks like
+// the proxy, so the allowlist admits them all. It warns once, not per request.
+func TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "127.0.0.1:9999"
+		req.Header.Set("X-Forwarded-For", "198.51.100.7")
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	if n := strings.Count(buf.String(), "trusted_proxies is empty"); n != 1 {
+		t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
+	}
+}
+
+// TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused: when the
+// allowlist refuses the local proxy's address, it does not admit every client,
+// so the warning claiming it does must stay silent.
+func TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"203.0.113.0/24"}, nil)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+	if strings.Contains(buf.String(), "trusted_proxies is empty") {
+		t.Errorf("warned although the allowlist refused the peer; log:\n%s", buf.String())
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -388,7 +389,7 @@ func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (
 		// Gated below.
 	}
 	// Without an invite to spend, the address is the only budget.
-	if !s.limiter.Allow("register_ip:"+in.IP, inviteFreeRegistrationsPerIPPerDay, 24*time.Hour) {
+	if !s.limiter.Allow("register_ip:"+clientip.RateKey(in.IP), inviteFreeRegistrationsPerIPPerDay, 24*time.Hour) {
 		return "", ErrRegistrationRateLimited
 	}
 	if mode == RegistrationApproval {
@@ -590,7 +591,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 // user or the refusal.
 func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User, error) {
 	// Check per-IP lockout first.
-	lockKey := "login_lock:" + in.IP
+	lockKey := "login_lock:" + clientip.RateKey(in.IP)
 	if s.limiter.IsLockedOut(lockKey) {
 		return nil, ErrLockedOut
 	}
@@ -623,7 +624,7 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrLoginUnavailable
 	}
 
-	failKey := "login_fail:" + in.IP
+	failKey := "login_fail:" + clientip.RateKey(in.IP)
 	userFailKey := "login_user_fail:" + unameKey
 	// F3: atomically reserve this attempt BEFORE the bcrypt compare. The
 	// read-only IsLockedOut gates above are check-then-act: N concurrent
