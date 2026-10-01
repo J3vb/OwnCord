@@ -267,11 +267,11 @@ type ServerConfig struct {
 	// traffic first. Unknown values fall back to "detect".
 	WAFCRSMode string `yaml:"waf_crs_mode"`
 	// MaxWSConnections caps concurrently connected WebSocket clients,
-	// counting sockets still authenticating; new upgrade requests beyond the
-	// cap are refused with 503 before the upgrade. 0 (the default) means
-	// unlimited — every connection costs goroutines and buffered send queues,
-	// so set a ceiling that matches the host's memory before pointing a large
-	// community at it.
+	// counting sockets still authenticating or waiting for a ready-build
+	// permit; new upgrade requests beyond the cap are refused with 503 before
+	// the upgrade. 0 (the default) means unlimited — every connection costs
+	// goroutines and buffered send queues, so set a ceiling that matches the
+	// host's memory before pointing a large community at it.
 	MaxWSConnections int `yaml:"max_ws_connections"`
 	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
 	// exporter separately from the human admin surface, so a central

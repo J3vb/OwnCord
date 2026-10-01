@@ -657,9 +657,11 @@ could be attributed.
 **The herd is N fresh connections carrying the token alone.** A restart resumes
 every client at tier `none`, which is a full `ready` (see "Graceful shutdown
 under load"). N fresh connects therefore reproduce the post-restart herd without
-the drain. The client redials after 0.5–1 s of jitter, and its backoff grows
-while the server is down (`Client/src/lib/ws.ts`), so a 10–30 s spread is
-realistic.
+the drain. After an announced restart the client spreads its first redial over
+the notice's `reconnect_spread_ms` (up to 30 s, scaled to the connected count;
+`server_restart` in [protocol.md](protocol.md)); after an unannounced drop it
+redials after 0.5–1 s of jitter and backs off while the server is down
+(`Client/src/lib/ws.ts`). Either way a 10–30 s spread is realistic.
 
 A VU that is kicked, or is still dialling when its slot passes, joins the herd
 with that dial. A dial that started before its slot but opened after it drops

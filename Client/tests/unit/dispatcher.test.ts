@@ -140,6 +140,7 @@ function createMockWs() {
     },
     startCertListener: vi.fn(async () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
+    onServerBusy: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),

@@ -505,6 +505,15 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
 	}
+	// P5-S04: bound concurrent ready builds. Taken before any handshake state
+	// change or registration, so a waiting connect neither touches the
+	// database nor queues broadcasts it cannot drain yet.
+	release, admitted := h.admitReady(ctx)
+	if !admitted {
+		refuseBusy(ctx, conn, c)
+		return fmt.Errorf("handleFreshConnect: ready builds saturated for user %d", c.userID)
+	}
+	defer release()
 	// The configured seam, never a caller-supplied handle: binding here is what
 	// lets a service-backed or instrumented Ready reader actually intercept the
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
@@ -605,29 +614,11 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// resync owed (P5-S03). Cleared before the build, so a drop after it
 	// marks the user again; restored if the ready never reaches the client.
 	owedResync := h.setPresenceResync(c.userID, false)
-	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
-		n, err := h.handshakeWriteReady(ctx, conn, ready)
-		if err != nil {
-			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
-			if owedResync {
-				h.setPresenceResync(c.userID, true)
-			}
-			h.unregisterFailedHandshake(ctx, c)
-			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-			return err
-		}
-		slog.Info("ws sent ready payload", "user_id", c.userID, "payload_bytes", n)
-	} else {
-		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
-		if owedResync {
-			h.setPresenceResync(c.userID, true)
-		}
-		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
-		h.unregisterFailedHandshake(ctx, c)
-		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
-		return readyErr
+	ready, readyErr := h.buildReady(ctx, database, c.userID, userRole)
+	release() // the write below is the peer's pace, not the database's
+	if err := h.sendFreshReady(ctx, conn, c, ready, readyErr, owedResync); err != nil {
+		return err
 	}
-
 	h.announceFreshConnect(c)
 
 	return nil

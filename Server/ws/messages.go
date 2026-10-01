@@ -326,6 +326,15 @@ type channelDeletePayload struct {
 type serverRestartPayload struct {
 	Reason       RestartReason `json:"reason"`
 	DelaySeconds int           `json:"delay_seconds"`
+	// ReconnectSpreadMS is the window after delay_seconds over which clients
+	// spread their redial (P5-S04), scaled to the connected count.
+	ReconnectSpreadMS int64 `json:"reconnect_spread_ms"`
+}
+
+// restartSpreadMS spreads a restart's redials over 10 ms per connected
+// client, capped at 30 s: 2,000 clients redial over 20 s, not at once.
+func restartSpreadMS(connected int) int64 {
+	return min(int64(connected)*10, 30_000)
 }
 
 // callSignalPayload carries an ephemeral DM call signal (call_incoming /
@@ -929,12 +938,13 @@ func buildCallSignal(msgType string, channelID, fromUserID int64, username strin
 }
 
 // buildServerRestartMsg constructs a server_restart broadcast.
-func buildServerRestartMsg(reason RestartReason, delaySeconds int) []byte {
+func buildServerRestartMsg(reason RestartReason, delaySeconds int, spreadMS int64) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeServerRestart,
 		Payload: serverRestartPayload{
-			Reason:       reason,
-			DelaySeconds: delaySeconds,
+			Reason:            reason,
+			DelaySeconds:      delaySeconds,
+			ReconnectSpreadMS: spreadMS,
 		},
 	})
 }

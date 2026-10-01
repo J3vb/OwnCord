@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildServerRestartMsg(t *testing.T) {
-	msg := buildServerRestartMsg("update", 5)
+	msg := buildServerRestartMsg("update", 5, 30)
 	var env struct {
 		Type    string `json:"type"`
 		Payload struct {

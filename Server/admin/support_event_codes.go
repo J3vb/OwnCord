@@ -460,6 +460,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"ws: frameReadableNow GetChannel failed, dropping frame":                                       "ws_framereadablenow_getchannel_failed",
 	"ws: frameReadableNow HasNSFWAcknowledgement failed, dropping frame":                           "ws_framereadablenow_hasnsfwacknowledgement_failed",
 	"ws: frameReadableNow found no such channel, dropping frame":                                   "ws_framereadablenow_found_no_such_channel",
+	"ws: fresh connect refused, ready builds saturated":                                            "ws_fresh_connect_refused_ready_saturated",
 	"ws: requirePerm GetRoleForUser failed":                                                        "ws_requireperm_getroleforuser_failed",
 	"ws: requirePerm called with nil dependency":                                                   "ws_requireperm_called_with_nil_dependency",
 	"ws: role lookup failed during handshake, closing connection":                                  "ws_role_lookup_failed_during_handshake",

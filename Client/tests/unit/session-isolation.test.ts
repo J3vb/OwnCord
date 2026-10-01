@@ -215,7 +215,7 @@ import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { leaveVoice } from "@lib/livekitSession";
 import { deleteCredential, loadCredential } from "@lib/credentials";
-import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
+import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
 
@@ -698,5 +698,63 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
     } finally {
       manager.getAutoConnectProfile.mockReturnValue(null);
     }
+  });
+});
+
+describe("a stored-token resume refused SERVER_BUSY keeps connecting (P5-S04)", () => {
+  /** The server holds the connect for its 10 s admission wait, then refuses it. */
+  async function busyRefusal(): Promise<void> {
+    emitTauriEvent("ws-state", "open");
+    await vi.advanceTimersByTimeAsync(10_000);
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "error",
+        payload: {
+          code: "SERVER_BUSY",
+          message: "server busy, retrying shortly",
+          retry_after_ms: 5_000,
+        },
+      }),
+    );
+    emitTauriEvent("ws-state", "closed");
+    // The redial waits out retry_after_ms.
+    await vi.advanceTimersByTimeAsync(5_000 + 100);
+  }
+
+  async function resumeA(): Promise<number> {
+    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
+      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
+    );
+    await loginWithPassword(A, 1);
+    await quickSwitchTo(A);
+    await vi.advanceTimersByTimeAsync(10);
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+    return Date.now();
+  }
+
+  it("signs in after two refusals without saying the server is offline", async () => {
+    const startedAt = await resumeA();
+
+    await busyRefusal();
+    await busyRefusal();
+    expect(Date.now() - startedAt).toBeGreaterThan(PREAUTH_CONNECT_TIMEOUT_MS);
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+    expect(latestConnectPage().showServerWait).not.toHaveBeenCalled();
+
+    await completeHandshake(1, A);
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(authStore.getState().token).toBe("stored-token-a");
+  });
+
+  it("still gives up on a server that stays saturated past the overall cap", async () => {
+    const startedAt = await resumeA();
+
+    while (Date.now() - startedAt < PREAUTH_BUSY_CAP_MS - 15_200) await busyRefusal();
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    await vi.advanceTimersByTimeAsync(PREAUTH_BUSY_CAP_MS - (Date.now() - startedAt) + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expect(uiStore.getState().transientError).toContain("offline");
   });
 });
