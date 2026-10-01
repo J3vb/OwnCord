@@ -41,7 +41,7 @@ func (s *revokeSpy) DisconnectIfSessionRevoked(userID int64) {
 func buildProfileRouterWithHub(database *db.DB, spy *revokeSpy) (http.Handler, *auth.RateLimiter) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
-	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, spy)
+	api.MountProfileRoutes(r, database, service.New(database, limiter), nil, limiter, nil, spy, nil)
 	return r, limiter
 }
 

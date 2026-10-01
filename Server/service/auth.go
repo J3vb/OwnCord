@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -613,7 +612,11 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// two rows, and must never share a bucket (OC-0324).
 	unameKey := db.LowerASCII(in.Username)
 	userLockKey := "login_user_lock:" + unameKey
-	if s.limiter.IsLockedOut(userLockKey) {
+	// An address that signed in to this account recently is exempt from the
+	// per-username lockout and budget (see loginVouchWindow).
+	successKey := loginVouchKey(unameKey, in.IP)
+	successVouched := s.loginVouched(successKey)
+	if s.limiter.IsLockedOut(userLockKey) && !successVouched {
 		return nil, ErrLockedOut
 	}
 
@@ -660,8 +663,12 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// is keyed per USER and is the only cross-IP brute-force defence, so
 	// scaling it with the shared-NAT multiplier would hand a distributed
 	// attacker more guesses (api/constants_test.go pins this call site).
-	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) ||
-		!s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
+		return nil, ErrLockedOut
+	}
+	// A vouched address skips the per-username reservation; the per-IP budget
+	// above still bounds it.
+	if !successVouched && !s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
 	}
 	// Always run the password check — with an empty hash when the user does
@@ -692,9 +699,10 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrInvalidCredentials
 	}
 
-	// Reset failure counters on success.
+	// Reset failure counters on success, and vouch for this address.
 	s.limiter.Reset(ctx, failKey)
 	s.limiter.Reset(ctx, userFailKey)
+	s.recordLoginVouch(ctx, successKey)
 	return user, nil
 }
 
@@ -1227,28 +1235,6 @@ func issueSession(ctx context.Context, st Store, userID int64, device, ip string
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
 	return getBooleanSetting(ctx, s.st, "require_2fa", false)
-}
-
-func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {
-	value, err := st.GetSetting(ctx, key)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return defaultValue, nil
-		}
-		return false, err
-	}
-	return parseBooleanSettingValue(value)
-}
-
-func parseBooleanSettingValue(value string) (bool, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true":
-		return true, nil
-	case "0", "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid boolean setting value %q", value)
-	}
 }
 
 // requirePasswordConfirmation checks the confirming password inside one

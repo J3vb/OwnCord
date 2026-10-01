@@ -407,7 +407,7 @@ The login shape: `token` and `user`, `requires_2fa` false.
 Authenticate with username and password.
 
 **Auth:** None (public)
-**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes. Lockouts are persisted to the database and survive server restarts.
+**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes, except for an address that signed in to that account in the last 24 hours. Lockouts are persisted to the database and survive server restarts; the 24-hour exemption is held in memory and does not.
 
 #### Request
 
@@ -789,13 +789,13 @@ event replaces the client's copy rather than patching it).
 }
 ```
 
-| Field                 | Rules                                                                                                                                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                               |
-| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
-| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
-| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
-| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).      |
+| Field                 | Rules                                                                                                                                                                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                                                                                       |
+| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`. |
+| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters.                                                         |
+| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                      |
+| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                              |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the

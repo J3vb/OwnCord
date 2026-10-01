@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -23,8 +24,34 @@ func buildProfileRouter(database *db.DB) http.Handler {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, nil)
 	return r
+}
+
+// buildProfileRouterWithConfig mounts profile routes with a real configuration,
+// so the same-host avatar guard compares against server-known hosts rather than
+// the request's client-supplied Host.
+func buildProfileRouterWithConfig(database *db.DB, cfg *config.Config) http.Handler {
+	r := chi.NewRouter()
+	limiter := auth.NewRateLimiter()
+	svc := service.New(database, limiter)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, cfg)
+	return r
+}
+
+// patchJSONWithHost patches a profile with an explicit (possibly spoofed) Host
+// header.
+func patchJSONWithHost(t *testing.T, router http.Handler, path, token, host string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewReader(raw))
+	req.Host = host
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
 }
 
 // profileCreateToken creates a user and session, returning the raw token.
@@ -105,7 +132,7 @@ func TestUpdateProfile_Success(t *testing.T) {
 
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "newname",
-		"avatar":   "https://example.com/av.png",
+		"avatar":   "https://avatars.example.net/av.png",
 	})
 
 	if rr.Code != http.StatusOK {
@@ -116,6 +143,135 @@ func TestUpdateProfile_Success(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["username"] != "newname" {
 		t.Errorf("username = %v, want 'newname'", resp["username"])
+	}
+}
+
+// A same-host avatar URL lets every client that renders the user fetch an
+// arbitrary path on the server's own origin with the session bearer token
+// attached (the client attaches it for a URL whose host equals the server).
+// Only the attachment route is a legitimate same-host avatar, so a same-host
+// URL that is not /api/v1/files/<uuid> must be refused.
+func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.TLS.Domain = "example.com"
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "samehostav", 4)
+
+	// httptest.NewRequest defaults req.Host to example.com, so this URL is
+	// on the server's own host — the amplification/CSRF-equivalent case.
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "samehostav",
+		"avatar":   "https://example.com/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("same-host non-attachment avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A same-host attachment URL stays valid.
+	ok := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "samehostav",
+		"avatar":   "https://example.com/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("same-host attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
+	}
+
+	// A different host is still accepted unchanged.
+	other := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "samehostav",
+		"avatar":   "https://avatars.example.net/av.png",
+	})
+	if other.Code != http.StatusOK {
+		t.Fatalf("external-host avatar status = %d, want 200; body = %s", other.Code, other.Body.String())
+	}
+}
+
+// The Host header is client-supplied, so a guard that compared the avatar's
+// host against r.Host could be bypassed by sending an arbitrary Host while the
+// URL named the real server. With a configured server host, a spoofed Host
+// must not change the verdict: the avatar still names the real server and is
+// still refused.
+func TestUpdateProfile_RejectsSameHostAvatarDespiteSpoofedHost(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.TLS.Domain = "chat.example.com"
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "spoofhost", 4)
+
+	// The URL names the configured server host; the Host header claims to be
+	// some other origin. The guard must still see the two as the same server.
+	rr := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "spoofhost",
+		"avatar":   "https://chat.example.com/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("spoofed-Host same-host avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// And the attachment route on the configured host stays valid under the
+	// same spoofed Host.
+	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "spoofhost",
+		"avatar":   "https://chat.example.com/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("spoofed-Host same-host attachment status = %d, want 200; body = %s", ok.Code, ok.Body.String())
+	}
+}
+
+// The default deployment listens on a non-443 port, and the client builds its
+// server host with that port, so the URL that would receive the bearer token is
+// https://<domain>:8443/... — the guard must match it.
+func TestUpdateProfile_RejectsSameHostAvatarOnNonDefaultPort(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.TLS.Domain = "chat.example.com"
+	cfg.Server.Port = 8443
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "portav", 4)
+
+	rr := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "portav",
+		"avatar":   "https://chat.example.com:8443/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("same-host :8443 non-attachment avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "bogus.example.org", map[string]string{
+		"username": "portav",
+		"avatar":   "https://chat.example.com:8443/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("same-host :8443 attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
+	}
+}
+
+// A server with no tls.domain that is reached by DNS name (or behind a reverse
+// proxy) has no configured candidate naming that host; the request's Host is
+// the extra candidate that keeps the guard from being inert.
+func TestUpdateProfile_RejectsSameHostAvatarWithoutTLSDomain(t *testing.T) {
+	database := newAuthTestDB(t)
+	cfg := &config.Config{}
+	cfg.Server.Port = 8443
+	router := buildProfileRouterWithConfig(database, cfg)
+	token := profileCreateToken(t, database, "nodomain", 4)
+
+	rr := patchJSONWithHost(t, router, "/api/v1/users/me", token, "chat.example.org:8443", map[string]string{
+		"username": "nodomain",
+		"avatar":   "https://chat.example.org:8443/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("DNS-name same-host avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	ok := patchJSONWithHost(t, router, "/api/v1/users/me", token, "chat.example.org:8443", map[string]string{
+		"username": "nodomain",
+		"avatar":   "https://chat.example.org:8443/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("DNS-name same-host attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
 	}
 }
 

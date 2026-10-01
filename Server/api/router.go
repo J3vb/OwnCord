@@ -221,7 +221,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr == nil {
 		profileStore = store
 	}
-	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
+	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
 
 	// DM (direct message) REST routes, and the message request inbox (B5-6)
 	// beside them — mounted after hub creation so real-time

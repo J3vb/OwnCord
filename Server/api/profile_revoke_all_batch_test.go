@@ -30,7 +30,7 @@ func TestSignOutEverywhere_BeatsAQueuedSessionTouch(t *testing.T) {
 	batch := svc.BatchConnWrites()
 	spy := &revokeSpy{}
 	r := chi.NewRouter()
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, spy)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, spy, nil)
 
 	token := profileCreateToken(t, database, "alice-batch", 4)
 	alice, _ := database.GetUserByUsername(ctx, "alice-batch")

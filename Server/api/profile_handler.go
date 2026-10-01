@@ -9,12 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -127,12 +127,19 @@ const revokeAllSessionsRateLimitPerMinute = 5
 // store may be nil, in which case the avatar-upload route is not registered —
 // a server with no storage backend has nowhere to put the bytes, and a route
 // that 500s on every call is worse than one that 404s.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
+//
+// cfg may be nil (tests that mount only the profile surface): the same-host
+// avatar guard then falls back to the request's Host header alone. In
+// production the router always passes the running config, so the guard compares
+// against the server's own configured hosts rather than anything the client
+// supplied.
+func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
+	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
-			Patch("/", handleUpdateProfile(svc, broadcaster))
+			Patch("/", handleUpdateProfile(svc, broadcaster, selfHosts))
 
 		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
@@ -172,22 +179,6 @@ func validateIdentityKey(key string) error {
 	return nil
 }
 
-// validateAvatarURL checks that avatar is either empty or a valid https:// URL
-// no longer than maxAvatarURLLen characters.
-func validateAvatarURL(avatar string) error {
-	if avatar == "" {
-		return nil
-	}
-	if len(avatar) > maxAvatarURLLen {
-		return fmt.Errorf("avatar URL too long (max %d characters)", maxAvatarURLLen)
-	}
-	parsed, err := url.Parse(avatar)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return fmt.Errorf("avatar URL must use https://")
-	}
-	return nil
-}
-
 // validateDisplayName rejects a nickname that would render as something other
 // than what it says. Length and emptiness are the service's job (empty clears
 // the field); this is the character-class check auth.ValidateUsername applies
@@ -223,7 +214,7 @@ var allowedAvatarMIME = map[string]bool{
 // and returns ok=false, and the caller must return without writing anything
 // further. Split out of handleUpdateProfile only to keep that handler under the
 // funlen limit; the field logic is unchanged.
-func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updateProfileRequest, bool) {
+func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
@@ -276,7 +267,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// the username path above.
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
-		if err := validateAvatarURL(trimmed); err != nil {
+		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
@@ -324,14 +315,14 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	return req, true
 }
 
-func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
+func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, selfHosts []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
 
-		req, ok := parseUpdateProfileRequest(w, r)
+		req, ok := parseUpdateProfileRequest(w, r, selfHosts)
 		if !ok {
 			return
 		}

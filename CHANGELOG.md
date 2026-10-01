@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Desktop app hardening
+
+- **The app can no longer read its own credential and pin files from the web page.** The embedded webview had recursive read access to the whole app data folder, which also holds the encrypted password fallback, the certificate pins and the identity pins. Its file access is now limited to the app log folder, and writes still go through the native save dialog; a page script that ever ran would no longer reach those files.
+- **Credential and identity-key commands only reach the server you are signed into.** The native commands that read a saved credential, the saved-password login, and the identity-key and identity-pin commands accepted any host. They now refuse a host other than the active session's, which guards against accidental cross-host use, except the connect-page flows that legitimately run before sign-in. The active host is set from the page, so this does not stop a compromised page.
+- **A locked-out username can still be signed into from an address that recently signed in.** A flood from many addresses can trip an account's lockout; an address that signed in to that account in the last day now still reaches the password check, so you are not locked out of your own account. That exemption is held in memory and is lost on a server restart.
+
 ### Login & connection
 
 - **The app opens about 0.8 s sooner after signing in.** The "Connected!" screen held for a fixed 800 ms before showing the server, even once all its data had arrived. It now hands off as soon as the server says it is ready.
@@ -79,6 +85,7 @@ and only when it changes something a contributor or fork holder must do
 - **"Sign out everywhere" and account recovery also revoke the account's API tokens.** Both now revoke the tokens along with the sessions, and the audit entry counts each.
 - **Changing your password, turning two-factor sign-in on or off, or removing a session disconnects the affected device at once.** Its connection now closes in the same request instead of within the next minute; the device you are using stays connected.
 - **IPv6 clients share per-address limits across their /64.** Login, registration, recovery, setup and API rate limits keyed each full IPv6 address separately, so one host could spread across its /64. The limits now count the whole /64 as one address.
+- **An avatar can no longer point at an arbitrary path on the server.** A profile could set an avatar to any address, and when it matched the server itself every client that viewed the profile sent its session token to that address. An avatar on the server's own host must now be an uploaded file, and the client only attaches a token to the server's file and emoji routes.
 
 ### Moderation
 
