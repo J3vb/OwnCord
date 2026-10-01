@@ -26,6 +26,10 @@ type broadcastMsg struct {
 	// send, and the two racing would let the async global broadcast overwrite
 	// it. Ignored outside the channelID == 0 branch of deliverBroadcast.
 	excludeUserID int64
+	// senderID, when non-zero, is the user whose request produced this
+	// channel frame; the topic limiter then counts it against that sender
+	// alone (allowTopicFrame). Zero for server-originated frames.
+	senderID int64
 	// barrier, when non-nil, makes this entry a dispatch barrier rather than
 	// a broadcast: deliverBroadcast closes it and sequences nothing. Because
 	// h.broadcast is FIFO on one dispatch goroutine, whoever waits on it

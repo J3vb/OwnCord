@@ -719,3 +719,24 @@ func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 		})
 	}
 }
+
+// The WebSocket upgrade route is rate limited per IP like the other
+// unauthenticated routes: a burst of upgrade requests from one address is
+// eventually refused with 429 before any socket is opened.
+func TestWSUpgradeRoute_RateLimitedPerIP(t *testing.T) {
+	router := setupRouter(t)
+	for i := range 500 {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
+		if rec.Code == http.StatusTooManyRequests {
+			if rec.Header().Get("Retry-After") == "" {
+				t.Fatal("429 response missing Retry-After header")
+			}
+			if i == 0 {
+				t.Fatal("first upgrade request was refused")
+			}
+			return
+		}
+	}
+	t.Fatal("500 upgrade requests from one IP were never refused with 429")
+}

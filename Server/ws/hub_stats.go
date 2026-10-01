@@ -2,6 +2,7 @@ package ws
 
 import (
 	"log/slog"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -111,8 +112,8 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 }
 
 // allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed
-// under the per-channel topic rate limit. The limit is a sliding 1s window via
-// the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
+// under the topic rate limit, counted per channel and sender. The limit is a
+// sliding 1s window via the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
 // with a full refill at each window boundary — sliding is stricter on
 // boundary-straddling bursts, the same sustained rate).
 //
@@ -129,7 +130,14 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.recipients != nil || bm.channelID == 0 {
 		return true
 	}
-	if h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
+	// Counted per sender, so a few members cannot use up a channel's budget
+	// and suppress live delivery for everyone else in it; server-originated
+	// frames (senderID 0) share the channel's own key.
+	key := "topic:" + string(ChannelTopic(bm.channelID))
+	if bm.senderID != 0 {
+		key += ":" + strconv.FormatInt(bm.senderID, 10)
+	}
+	if h.limiter.Allow(key, topicRateLimitPerSecond, time.Second) {
 		return true
 	}
 	h.latency.topicSheds.Add(1)
@@ -331,6 +339,6 @@ func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, o
 }
 
 // topicRateLimitPerSecond is the default maximum messages per second for any
-// single channel topic. Prevents a busy channel from saturating the broadcast
-// loop and starving other channels.
+// single channel topic, per sender. Prevents a busy channel from saturating
+// the broadcast loop and starving other channels.
 const topicRateLimitPerSecond = 100

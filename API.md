@@ -62,6 +62,7 @@ Rate limiting is per route, backed by one shared `auth.RateLimiter` instance (al
 | `POST /api/v1/auth/verify-totp`    | 10/min per IP, plus a 5-attempt budget per partial challenge                                                                       |
 | `POST /api/v1/auth/recover`        | 5/min per IP; 5 failures lock recovery for 15 min                                                                                  |
 | `/api/v1/diagnostics/connectivity` | 5/min, admin-only                                                                                                                  |
+| `GET /api/v1/ws` (upgrade)         | 60/min per IP, before auth; until auth succeeds a frame may be at most 8 KiB                                                       |
 | Client auto-update poll            | A dedicated bucket, so it cannot 429 a user's own 2FA or password-change calls                                                     |
 
 WebSocket-side limits are keyed by user id, on a sliding window over the shared limiter: `chat_send`/`chat_edit`/`chat_delete` 10/sec each (plus channel slow mode → `SLOW_MODE`), `reaction_add`/`remove` 5/sec combined, `typing_start` 1 per 3 s per channel, `presence_update` 1 per 10 s, `voice_join`/`voice_leave` 5/sec, `voice_mute`/`voice_deafen` 2/sec, `voice_camera`/`voice_screenshare` 2/sec, `voice_token_refresh` 1 per 60 s, voice moderation 5/sec, `call_ring`/`call_decline` 1 per 3 s, `chat_command` 5/sec, `voice_e2ee_announce` 5/sec, `voice_e2ee_offer` 64/sec. Exceeding one returns an `error` frame with code `RATE_LIMITED` (no `Retry-After`); only `typing_start`, `channel_focus`/`mark_read` (5/sec each) and `ping` (2/sec) are silently dropped (see the Rate Limits section of [docs/protocol.md](docs/protocol.md)).
@@ -174,7 +175,7 @@ Full per-type payloads, permission gates and rate limits are in [docs/protocol.m
 
 ### Backpressure
 
-Broadcasts fan out through per-topic pub/sub (global, `channel:N`, `voice:N`, `user:N`). Only channel-scoped broadcasts pass a 100 msg/s per-channel limiter, which sheds a frame before it gets a seq. Each client has three queues, drained high-first by `writePump`:
+Broadcasts fan out through per-topic pub/sub (global, `channel:N`, `voice:N`, `user:N`). Only channel-scoped broadcasts pass a 100 msg/s limiter, counted per channel and sender (server-originated frames share the channel's budget), which sheds a frame before it gets a seq. Each client has three queues, drained high-first by `writePump`:
 
 - `send` (256): every sequenced frame (chat including DMs, reactions, channel events, every broadcast `presence` and `presence_batch`) plus unsequenced direct replies, so the client's max(`seq`) ack never passes an undelivered frame.
 - `sendHigh` (64): unsequenced user-targeted frames only (DM-channel opens, DM requests, call signals); when full it spills into `send`.

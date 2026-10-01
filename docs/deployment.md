@@ -1191,7 +1191,7 @@ which one is near:
   `507 STORAGE_LOW_DISK` and `/health` reports `degraded`/`disk` → `disk_low`
   on metrics.
 - `security.auth_rate_limit_multiplier` (default `1.0`) → auth requests
-  refused with `429 RATE_LIMITED`; raise it for a community behind one shared
+  and WebSocket upgrades refused with `429 RATE_LIMITED`; raise it for a community behind one shared
   NAT (office, school) — the defaults assume roughly one person per IP.
 
 The reading of these and the other growth signals is covered once, under
@@ -1371,7 +1371,7 @@ descriptions):
 
 - `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
   and sequenced events were lost; alert on any growth. `topic_sheds_total`
-  growing → a single channel exceeded the per-channel topic limit and frames
+  growing → a sender exceeded its per-channel topic limit and frames
   were shed before sequencing; replay cannot recover them, so alert on any
   growth too. A content frame lost to either counter also forces the next
   reconnect of a client at or behind the loss onto the full-ready path, so
