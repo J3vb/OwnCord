@@ -1239,7 +1239,7 @@ emoji, which is also the answer for an emoji that does not exist). `avatar` is
 
 | Status | Error         | When                                                                                             |
 | ------ | ------------- | ------------------------------------------------------------------------------------------------ |
-| 400    | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-32-rune / control-character emoji              |
+| 400    | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-34-rune / control-character emoji              |
 | 403    | `FORBIDDEN`   | No `READ_MESSAGES` on the channel                                                                |
 | 404    | `NOT_FOUND`   | Channel or message not found, the message lives in another channel, or a DM the caller is not in |
 
