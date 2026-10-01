@@ -75,8 +75,8 @@ func TestChatSend_BroadcastCarriesMentions(t *testing.T) {
 
 // TestChatSend_BroadcastDistinguishesHereFromEveryone locks OC-0271: the wire
 // must carry mentions_here alongside mentions_everyone so a client replaying
-// this frame after a reconnect can tell a here-only fan-out (which
-// applyMentionCounts narrows to readers with a live connection at send time)
+// this frame after a reconnect can tell a here-only fan-out (which mention
+// fan-out narrows to readers with a live connection when the badge is written)
 // apart from a plain @everyone (which always reaches every reader) — without
 // it, a client cannot avoid raising a mention badge the server never counted.
 func TestChatSend_BroadcastDistinguishesHereFromEveryone(t *testing.T) {

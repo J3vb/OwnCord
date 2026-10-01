@@ -106,7 +106,7 @@ func TestTheLoadTest(t *testing.T) {
 
 	// ── anchors: registered once, stay up for the whole run, and are the
 	// steady audience broadcasts land on plus the @mention targets that
-	// exercise applyMentionCounts. ───────────────────────────────────────────
+	// exercise mention fan-out. ──────────────────────────────────────────────
 	type anchor struct {
 		user      *db.User
 		c         *ws.Client
