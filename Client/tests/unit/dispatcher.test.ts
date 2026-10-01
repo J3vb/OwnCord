@@ -1049,6 +1049,67 @@ describe("WS Dispatcher", () => {
     expect(membersStore.getState().members.get(1)?.customStatus).toBeNull();
   });
 
+  describe("presence_batch", () => {
+    const seed = (): void => {
+      membersStore.setState((prev) => {
+        const m = new Map(prev.members);
+        m.set(1, {
+          id: 1,
+          username: "alex",
+          avatar: null,
+          role: "admin",
+          status: "offline" as const,
+        });
+        m.set(2, {
+          id: 2,
+          username: "bea",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+          customStatus: "coding",
+        });
+        m.set(3, { id: 3, username: "cy", avatar: null, role: "member", status: "idle" as const });
+        return { ...prev, members: m };
+      });
+    };
+
+    it("applies every entry of a window batch, custom status included", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        updates: [
+          { user_id: 1, status: "online", custom_status: "back" },
+          { user_id: 2, status: "dnd", custom_status: null },
+          { user_id: 999, status: "online", custom_status: null },
+        ],
+      });
+      const members = membersStore.getState().members;
+      expect(members.get(1)?.status).toBe("online");
+      expect(members.get(1)?.customStatus).toBe("back");
+      expect(members.get(2)?.status).toBe("dnd");
+      expect(members.get(2)?.customStatus).toBeNull();
+      expect(members.get(3)?.status).toBe("idle");
+      // An entry for someone the list lacks, with no member data, is ignored.
+      expect(members.has(999)).toBe(false);
+    });
+
+    it("applies a full snapshot: anyone it leaves out is offline, listed text is replaced", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [
+          { user_id: 1, status: "online", custom_status: null },
+          { user_id: 2, status: "online", custom_status: "lunch" },
+        ],
+      });
+      const members = membersStore.getState().members;
+      expect(members.get(1)?.status).toBe("online");
+      expect(members.get(2)?.status).toBe("online");
+      expect(members.get(2)?.customStatus).toBe("lunch");
+      expect(members.get(3)?.status).toBe("offline");
+      expect(members.get(3)?.customStatus).toBeNull();
+    });
+  });
+
   it("wires user_update display_name into the member store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
@@ -1132,6 +1193,27 @@ describe("WS Dispatcher", () => {
       const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
       expect(dm?.recipient.status).toBe("dnd");
       expect(dm?.participants[0]?.status).toBe("dnd");
+    });
+
+    it("updates the DM partner's status from a presence_batch", () => {
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 10, status: "idle", custom_status: null }],
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("idle");
+      expect(dm?.participants[0]?.status).toBe("idle");
+    });
+
+    it("marks a DM partner a full snapshot leaves out as offline", () => {
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [{ user_id: 1, status: "online", custom_status: null }],
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("offline");
+      expect(dm?.participants[0]?.status).toBe("offline");
     });
 
     it("leaves an unrelated DM partner's status alone", () => {

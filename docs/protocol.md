@@ -93,28 +93,25 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                     |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                         |
-| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                  |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                      |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                   |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                             |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                      |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                               |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                                                               |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                |
 
-**`presence` is split, and only one half is sequenced.** Connect and disconnect
-presence is a normal sequenced global broadcast, so it replays on a warm resume.
-A `presence` caused by the user changing their own status (`presence_update`) is
-sent on the low-priority, droppable tier instead: it carries no `seq`, it can be
-shed under send-buffer pressure for a fully connected client, and it is not
-replayed — so a status change made while a client was away is not delivered when
-that client resumes.
-
-This is deliberate, not an oversight: presence is best-effort by design, and
-`member_join` carries `status` precisely so a client can re-derive presence
-without depending on the correction arriving. Clients must treat presence as
-eventually-consistent and must not assume they have seen every transition. See
+**Presence is sequenced, but droppable.** Connect and disconnect presence
+arrives as `presence_batch` (one frame per coalescing window), a status change
+(`presence_update`) as `presence`; both are sequenced global broadcasts that
+replay on a warm resume. Unlike every other sequenced frame, a presence frame
+that finds a client's send buffer full is **dropped instead of disconnecting
+the client**: the client then gets a full `presence_batch` snapshot within one
+window, and its next resume takes the full `ready`, because replay cannot bring
+back a seq below ones it has since seen. Clients must treat presence as
+eventually consistent and must not assume they have seen every transition. See
 Presence for the invisible-member split.
 
 ---
@@ -310,13 +307,18 @@ refuses anything else with `protocol_epoch_unsupported`.
 
 After `auth_ok`, the server sends a `ready` message containing all initial state.
 
-### Step 5: Member Join + Presence
+### Step 5: Presence
 
-The server broadcasts to all connected clients:
+The user's arrival rides the next `presence_batch` to all connected clients,
+preceded by a `member_join` only for a member they cannot have yet (see
+`member_join`):
 
 ```json
-{ "type": "member_join", "seq": 15, "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
-{ "type": "presence", "seq": 16, "payload": { "user_id": 1, "status": "online", "custom_status": null } }
+{
+  "type": "presence_batch",
+  "seq": 16,
+  "payload": { "updates": [{ "user_id": 1, "status": "online", "custom_status": null }] }
+}
 ```
 
 ### Periodic Session Revalidation
@@ -397,12 +399,12 @@ while the window is minimised. The JSON ping above is unchanged.
 
 When a connection drops, the client automatically reconnects with exponential backoff (1s to 30s max) and sends `last_seq` in the `auth` message. The server resolves the reconnect through a **3-tier replay pipeline** (cheapest first):
 
-| Tier | Condition                                                                        | Server Behavior                                                                                                                                  | `replay_source` |
-| ---- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| —    | `last_seq == 0`                                                                  | Full flow: `auth_ok` + `ready` + `member_join` + `presence`                                                                                      | `none`          |
-| 1    | seq within the in-memory ring buffer (1000 events)                               | Replay flow: `auth_ok` + missed events + `presence` (no `member_join`, no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
-| 2    | seq within the persistent `events` table (max 5000 events, subject to retention) | Same replay flow, served from the cold tier                                                                                                      | `db`            |
-| 3    | seq too far behind, or channel visibility changed while away                     | Full flow (fallback): same as `last_seq == 0`                                                                                                    | `none`          |
+| Tier | Condition                                                                                                | Server Behavior                                                                                                                      | `replay_source` |
+| ---- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
+| —    | `last_seq == 0`                                                                                          | Full flow: `auth_ok` + `ready`, then the user's presence in the next `presence_batch`                                                | `none`          |
+| 1    | seq within the in-memory ring buffer (1000 events)                                                       | Replay flow: `auth_ok` + missed events + `presence_batch` (no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
+| 2    | seq within the persistent `events` table (max 5000 events, subject to retention)                         | Same replay flow, served from the cold tier                                                                                          | `db`            |
+| 3    | seq too far behind, channel visibility changed while away, or a presence frame was dropped for this user | Full flow (fallback): same as `last_seq == 0`                                                                                        | `none`          |
 
 A visibility watermark forces the tier-3 full re-sync whenever channel
 visibility changed while the client was disconnected, so permission changes
@@ -878,6 +880,46 @@ true `"invisible"`. A client must therefore not assume it sees the same
 presence value for a user that everyone else does — and must not "correct" its
 own status back to online on the strength of a broadcast it did not receive.
 
+`presence` now carries only a user's own status changes (`presence_update`).
+Coming online and going offline arrive in `presence_batch`. A client older
+than this release ignores `presence_batch`, so it shows stale connect and
+disconnect presence until it updates.
+
+### presence_batch (Server -> Client, broadcast)
+
+Connect and disconnect presence is coalesced for 300 ms and sent as one frame
+listing every user whose presence changed in that window, so a reconnect herd
+of N users costs each client a handful of frames instead of N.
+
+```json
+{
+  "seq": 51,
+  "type": "presence_batch",
+  "payload": {
+    "updates": [
+      { "user_id": 1, "status": "online", "custom_status": "shipping phase 6" },
+      { "user_id": 4, "status": "offline", "custom_status": null }
+    ]
+  }
+}
+```
+
+Each entry means what a `presence` with the same fields means: `custom_status`
+is always present (`null` when unset), and an invisible user is `"offline"`
+with `custom_status: null` for everyone but themselves — the invisible user's
+own copy of the same frame (same `seq`) carries their true status. An entry
+for a user the client does not know is ignored: a member the recipient's list
+may not have yet arrives first as a `member_join` (see `member_join`).
+
+**Full snapshot.** A client whose send buffer was full when a presence frame
+arrived has that frame dropped (not the connection) and receives, within the
+next window, an unsequenced `presence_batch` with `"full": true`. It lists
+every connected user who is not offline to that client (its own true status
+and custom text included, even when invisible), each with their current
+`custom_status` (always present, `null` when unset); every member it leaves
+out is offline, so an invisible member is simply absent. Clear an offline
+member's custom text, which is what `ready` shows.
+
 ---
 
 ## Channel Focus and Read State
@@ -1038,9 +1080,16 @@ All member messages are broadcast to all connected clients.
 
 ### member_join (Server -> Client, broadcast)
 
-Sent when a user first connects (fresh connection, not reconnect replay), and
-when a ban is lifted (an admin unban or an overturned ban appeal) so clients
-re-add the row `member_ban` removed. On an unban, `status` is `"offline"`
+Sent when a ban is lifted (an admin unban or an overturned ban appeal) so
+clients re-add the row `member_ban` removed. Coming online is presence, not a
+join: every client's `ready` already lists every member, so a connect sends no
+`member_join`. It is still sent, just ahead of the `presence_batch` (or the
+`presence`) carrying their status, for a member other clients cannot have
+yet: a first-ever connect (repeated on the next connect if that first
+handshake failed before the announcement), or the return of a user whose
+temporary ban lapsed. Unlike presence, `member_join` is never dropped for a
+full send buffer. Clients that watched `member_join` to learn someone came
+online must read presence instead. On an unban, `status` is `"offline"`
 unless the user holds a live connection (a lapsed temporary ban lets them
 reconnect before the unban).
 
@@ -2121,6 +2170,7 @@ tables below add per-type behavioral notes.
 | `reaction_update`     | Yes      | Channel or DM participants                                              |
 | `typing`              | No       | Channel (excl. sender) or DM                                            |
 | `presence`            | Yes      | All clients                                                             |
+| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                 |
 | `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
 | `channel_update`      | Yes      | All clients                                                             |
 | `channel_delete`      | Yes      | All clients                                                             |

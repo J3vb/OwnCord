@@ -55,6 +55,7 @@ const (
 	MsgTypeReactionUpdate      = "reaction_update"
 	MsgTypeTyping              = "typing"
 	MsgTypePresence            = "presence"
+	MsgTypePresenceBatch       = "presence_batch" // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
 	MsgTypeChannelCreate       = "channel_create"
 	MsgTypeChannelUpdate       = "channel_update"
 	MsgTypeChannelDelete       = "channel_delete"

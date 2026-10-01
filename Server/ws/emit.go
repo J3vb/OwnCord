@@ -41,7 +41,7 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 				h.dropQueuedPresenceAndBroadcast(po.excludeUserID, func() {
 					// Normal priority, excluding the owner — NOT
 					// broadcastExcludeLow. Every other source of this same
-					// user's presence (connect/disconnect via BroadcastToAll,
+					// user's presence (the connect/disconnect presence_batch,
 					// and the visible presence_update path below) already
 					// shares the normal-priority queue; putting this one on
 					// the low-priority queue instead split one user's
@@ -53,7 +53,7 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 					// be delivered before an older frame still sitting on the
 					// other) — exactly the hazard OC-0214 fixed for the
 					// visible case below (OC-0003).
-					h.BroadcastToAllExcept(po.excludeUserID, e.Payload())
+					h.broadcastPresenceFrame(po.excludeUserID, e.Payload())
 				})
 			} else {
 				// Low priority: typing indicators are ephemeral.
@@ -64,10 +64,10 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// PresenceSelfEvent also satisfies — this case must stay ordered
 			// before it so the type switch picks this one). Every other
 			// source of this same user's own presence — the visible
-			// presence_update path (PresenceEvent -> BroadcastToAll) and the
-			// connect/disconnect coalescer's private half
-			// (BroadcastPresence -> h.SendToUser) — already shares the
-			// normal-priority queue. Routing this one through
+			// presence_update path (PresenceEvent) and the connect/disconnect
+			// batch's private copy — already shares the normal-priority
+			// queue, in the presence class (a full queue drops the frame and
+			// marks the client stale; see Client.sendPresenceMsg). Routing this one through
 			// h.SendToUserHigh instead split one user's own presence across
 			// two per-client FIFOs with different drain order: writePump
 			// always drains high strictly before normal, so a newer
@@ -75,7 +75,9 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			// older visible-status frame still sitting on normal, leaving
 			// the owner's own client on a stale status — the same hazard
 			// OC-0003/OC-0214 fixed for the "others" half of presence.
-			h.SendToUser(e.TargetUserID(), e.Payload())
+			if c := h.GetClient(e.TargetUserID()); c != nil {
+				c.sendPresenceMsg(e.Payload())
+			}
 		case TypingDMEvent:
 			// Low priority, NOT the UserTargetedEvent default below (which
 			// TypingDMEvent also satisfies — this case must stay ordered
@@ -116,15 +118,15 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 			h.broadcastVoiceEvent(ctx, e.VisibleChannelID(), e.UserID(), e.Payload())
 		case BroadcastAllEvent:
 			// Normal priority for everything, including presence: connect and
-			// disconnect presence for the same user already go out via
-			// hub.BroadcastToAll (serve.go, serve_pumps.go, hub_broadcast.go).
+			// disconnect presence for the same user already go out as a
+			// sequenced global presence_batch (hub_presence.go).
 			// Splitting handler-driven presence onto the low-priority queue
 			// put it in a different per-client FIFO than those, so writePump
 			// (which always drains normal strictly before low) could deliver
 			// a newer connect/disconnect frame before an older presence_update
 			// still sitting in the low queue — leaving the observer's final
 			// view of that user's status stale. Routing everything through
-			// BroadcastToAll keeps every source of one user's presence in a
+			// the dispatch FIFO keeps every source of one user's presence in a
 			// single ordered, seq-stamped, replayable stream (OC-0214).
 			if pe, isPresence := ev.(PresenceEvent); isPresence {
 				// A user-chosen presence also bypasses the connect/disconnect
@@ -135,7 +137,7 @@ func (h *Hub) EmitEvents(ctx context.Context, events []Event) {
 				// and the broadcast and overwrite this fresher status with
 				// the stale connect-time one.
 				h.dropQueuedPresenceAndBroadcast(pe.userID, func() {
-					h.BroadcastToAll(e.Payload())
+					h.broadcastPresenceFrame(0, e.Payload())
 				})
 			} else {
 				h.BroadcastToAll(e.Payload())

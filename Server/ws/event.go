@@ -30,11 +30,12 @@ type Result struct {
 	// SetChannelID, if non-nil, updates the client's focused channel.
 	// Used by channel_focus to mutate client state from a V2 handler.
 	SetChannelID *int64
-	// SetStatus, if non-nil, records the presence status the handler just
-	// committed as the client's live status (presentableMembers reads it).
-	// Applied before Events are emitted, so a ready built after the presence
-	// frame was queued cannot miss the change.
-	SetStatus *string
+	// SetPresence, if non-nil, records the presence the handler just
+	// committed as the client's live presence (presentableMembers and
+	// presence snapshots read it). Applied before Events are emitted, so a
+	// ready or snapshot built after the presence frame was queued cannot miss
+	// the change.
+	SetPresence *livePresence
 	// SetE2EEPubKey, if non-nil, stores the ECDH public key on the client.
 	// Used by voice_e2ee_announce to persist the key for later retrieval.
 	SetE2EEPubKey *string

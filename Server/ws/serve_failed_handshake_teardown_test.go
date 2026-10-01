@@ -153,8 +153,8 @@ func TestFailedHandshake_OfflineBroadcastDropsStaleCustomStatus(t *testing.T) {
 	h.flushPresenceQueue() // presence is coalesced; flush before inspecting
 	for len(h.broadcast) > 0 {
 		bm := <-h.broadcast
-		if bytes.Contains(bm.msg, []byte(`"type":"`+MsgTypePresence+`"`)) {
-			presence = bm.msg
+		if msg := queuedFrame(h, bm); bytes.Contains(msg, []byte(`"type":"`+MsgTypePresenceBatch+`"`)) {
+			presence = msg
 		}
 	}
 	if presence == nil {

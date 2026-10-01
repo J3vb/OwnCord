@@ -54,17 +54,25 @@ type broadcastMsg struct {
 	// not, because the enqueue happens on a request handler that can be
 	// arbitrarily far ahead of the dispatch loop (P2-4/P2-5).
 	nsfwChannelID int64
+	// presence, droppable and presenceSnapshot carry presence_batch and the
+	// presence drop policy; see hub_presence.go.
+	presence         map[int64]pendingPresence
+	droppable        bool
+	presenceSnapshot bool
 }
 
 // enqueue hands bm to the single hub dispatch loop, stamping it for the
 // enqueue→fanout latency metric. Non-blocking: if the broadcast channel is
-// full the message is dropped and counted, with kind naming the dropped frame.
-func (h *Hub) enqueue(bm broadcastMsg, kind string) {
+// full the message is dropped and counted, with kind naming the dropped frame,
+// and enqueue reports false.
+func (h *Hub) enqueue(bm broadcastMsg, kind string) bool {
 	bm.enqueuedAt = time.Now()
 	select {
 	case h.broadcast <- bm:
+		return true
 	default:
 		h.recordQueueDrop(bm, kind)
+		return false
 	}
 }
 
@@ -355,6 +363,10 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		close(bm.barrier)
 		return
 	}
+	if bm.presenceSnapshot {
+		h.deliverPresenceSnapshots()
+		return
+	}
 
 	// Dispatch lag: enqueue→dispatch start, how long this frame waited for the
 	// single dispatch goroutine (SRV-04).
@@ -382,6 +394,16 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// owns the shed handling (count + watermark, SRV-03).
 		if !h.allowTopicFrame(bm) {
 			return 0, 0, false
+		}
+
+		// A window's presence_batch names many users: an erased one loses
+		// only its own entry.
+		var private map[int64][]byte
+		if bm.presence != nil {
+			bm.msg, private = h.buildPresenceBatch(bm.presence)
+			if bm.msg == nil {
+				return 0, 0, false
+			}
 		}
 
 		// A frame naming an erased user, produced by a request that read
@@ -428,10 +450,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		case bm.channelID == 0:
 			// Global broadcast — deliver to every connected client, minus
 			// excludeUserID when the caller set one (see BroadcastToAllExcept).
-			// Publish(TopicGlobal, msg, 0) is exactly PublishGlobal(msg) when
-			// excludeUserID is the zero value, so ordinary BroadcastToAll
-			// callers are unaffected.
-			h.pubsub.Publish(TopicGlobal, msg, bm.excludeUserID)
+			h.publishGlobal(bm, msg, seq, private)
 		default:
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq

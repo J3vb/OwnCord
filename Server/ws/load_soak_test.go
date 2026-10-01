@@ -233,7 +233,7 @@ func TestTheLoadTest(t *testing.T) {
 				case 2:
 					anchorUser := anchors[idx%len(anchors)].user
 					status := []string{"online", "idle", "dnd", "invisible"}[i%4]
-					hub.BroadcastPresence(anchorUser.ID, status, nil)
+					hub.QueuePresence(anchorUser.ID, status, nil)
 				case 3:
 					// BroadcastChannelUpdate is called by the admin HubBroadcaster
 					// interface, which carries no context (see hub_broadcast.go);

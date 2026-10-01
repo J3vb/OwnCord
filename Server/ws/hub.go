@@ -207,9 +207,8 @@ type Hub struct {
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
 
-	// voiceKeyHolders maps channelID → userID of the current key holder.
-	// The key holder is the connected participant with the lowest userID in the channel.
-	// Protected by keyHolderMu.
+	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
+	// participant with the lowest userID in the channel. Protected by keyHolderMu.
 	keyHolderMu     syncutil.RWMutex
 	voiceKeyHolders map[int64]int64
 
@@ -217,7 +216,8 @@ type Hub struct {
 	presenceMu         syncutil.Mutex
 	presenceQueue      map[int64]pendingPresence
 	presenceFlushArmed bool
-	members            memberCache // the ready payloads' shared member list (serve_ready_members_cache.go)
+	presenceRepair     presenceRepairState // dropped presence and its repair (hub_presence.go)
+	members            memberCache         // the ready payloads' shared member list (serve_ready_members_cache.go)
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.

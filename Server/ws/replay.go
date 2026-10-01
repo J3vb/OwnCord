@@ -215,11 +215,11 @@ func (h *Hub) reconnectPrecheck(
 	// what lets a service-backed or instrumented reader actually intercept the
 	// two reads below — the same posture handleFreshConnect takes.
 	database := h.readers.Visibility
-	// Visibility changes are targeted and unsequenced, and a shed content
-	// frame (SRV-03) never got a seq, so replay cannot bring a client that
-	// missed one back into a coherent state — force the full-ready path.
-	if h.mustFullResync(lastSeq) {
-		slog.Info("ws replay skipped (resync watermark at or past last_seq), sending full ready",
+	// Replay cannot repair a missed visibility change (targeted and
+	// unsequenced), a shed content frame (SRV-03, never got a seq) or a
+	// presence frame this user's connection dropped (P5-S03): full ready.
+	if h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID) {
+		slog.Info("ws replay skipped (resync watermark at or past last_seq, or presence dropped), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))

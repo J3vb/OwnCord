@@ -153,11 +153,12 @@ type queueDropState struct {
 }
 
 // recordQueueDrop counts a frame enqueue dropped on a full broadcast queue. A
-// content-bearing one is also left for applyQueueContentDrops to settle into
-// the resync watermark under seqMu (SRV-03).
+// content-bearing one, or a presence_batch window, is also left for
+// applyQueueContentDrops to settle into the resync watermark under seqMu
+// (SRV-03).
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 	h.broadcastDrops.Add(1)
-	if bm.nsfwChannelID != 0 {
+	if bm.nsfwChannelID != 0 || bm.presence != nil {
 		h.queueDrops.dropped.Add(1)
 	}
 	slog.Warn("hub: broadcast channel full, dropping "+kind,
@@ -298,6 +299,11 @@ func (h *Hub) DispatchAlive() bool {
 func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
 	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
 }
+
+// PresenceDropCount is the process-lifetime count of presence frames dropped
+// on a full normal buffer, each repaired by a snapshot rather than a
+// disconnect (Client.sendPresenceMsg). Safe to call from any goroutine.
+func (h *Hub) PresenceDropCount() uint64 { return h.presenceRepair.drops.Load() }
 
 // DeliveryDropCount is the attention panel's delivery-pressure counter: hub
 // broadcast drops, topic-limiter sheds, and send-queue overflow disconnects.

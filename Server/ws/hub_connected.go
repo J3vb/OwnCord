@@ -14,14 +14,15 @@ func (h *Hub) connectedUserIDs() map[int64]bool {
 	return set
 }
 
-// liveStatuses snapshots each connected user's live status (Client.liveStatus),
-// "" for a connection that has not stamped one yet.
-func (h *Hub) liveStatuses() map[int64]string {
+// livePresences snapshots each connected user's live presence
+// (Client.livePresence), status "" for a connection that has not stamped one
+// yet.
+func (h *Hub) livePresences() map[int64]livePresence {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	out := make(map[int64]string, len(h.clients))
+	out := make(map[int64]livePresence, len(h.clients))
 	for uid, c := range h.clients {
-		out[uid] = c.liveStatus()
+		out[uid] = c.livePresence()
 	}
 	return out
 }

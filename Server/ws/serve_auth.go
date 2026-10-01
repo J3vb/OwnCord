@@ -179,8 +179,8 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	// Look up role name for protocol-compliant payloads and cache on client.
 	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):
 	// this value is authoritative on the wire — auth_ok reports it as the
-	// user's own role, member_join broadcasts it to every other client, and
-	// every chat_message carries it — so a lookup failure must not silently
+	// user's own role, a new member's presence_batch entry carries it to
+	// every other client, and every chat_message carries it — so a lookup failure must not silently
 	// substitute "member" and pin the whole session to a fabricated role
 	// (OC-0269).
 	role, roleErr := h.readers.Visibility.GetRoleByID(r.Context(), user.RoleID)

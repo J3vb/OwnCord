@@ -169,6 +169,9 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 // It runs BEFORE the ready payload is built so the member list the client is
 // handed already agrees with the presence broadcast that follows it.
 func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
+	if c.user.LastSeen == nil {
+		h.presenceRepair.mark(&h.presenceRepair.joins, c.userID, true)
+	}
 	status, err := h.presence.StampConnect(ctx, c.userID, c.user.Status)
 	if err != nil {
 		slog.Warn("ws StampConnect", "err", err)
@@ -178,12 +181,30 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 		// of users.status (via presentableMembers, which only ever downgrades
 		// a connected user to offline, never upgrades one) would then never
 		// self-correct for the rest of this session (OC-0298). The live
-		// status follows the row for the same reason.
-		c.setLiveStatus(c.user.Status)
+		// presence follows the row for the same reason.
+		c.setLivePresence(c.user.Status, c.user.CustomStatus)
 		return
 	}
 	c.user.Status = status
-	c.setLiveStatus(status)
+	c.setLivePresence(status, c.user.CustomStatus)
+}
+
+// announceFreshConnect tells every other client that c came online after a
+// full ready. Coming online is presence, not a join: every client's ready
+// already lists every member, so a member_join goes ahead of the presence
+// only for a member other clients cannot have yet — a user still owed one
+// since their first-ever connect (applyConnectStatus marks it before the
+// stamp erases last_seen NULL; announceMember clears it), or the return of a
+// user whose temporary ban lapsed (member_ban removed them everywhere, and
+// users.banned stays 1 until an unban).
+func (h *Hub) announceFreshConnect(c *Client) {
+	p := pendingPresence{status: c.user.Status, customStatus: c.user.CustomStatus}
+	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
+		m := memberPayloadFor(c.user, c.roleName)
+		p.member = &m
+	}
+	slog.Info("ws announcing connect presence", "user_id", c.userID, "username", c.user.Username, "new_member", p.member != nil)
+	h.queuePresence(c.userID, p)
 }
 
 // announceConnectPresence fans out the status applyConnectStatus settled on,

@@ -615,6 +615,21 @@ export interface VoiceE2EEOfferPayload {
   readonly iv: string;
 }
 
+/** One user's presence in a presence_batch. */
+export interface PresenceBatchEntry {
+  readonly user_id: number;
+  readonly status: UserStatus;
+  /** Always present (null = none). */
+  readonly custom_status: string | null;
+}
+
+/** Many users' presence in one frame: a coalescing window's changes, or with
+ *  `full` a snapshot of everyone online — anyone it leaves out is offline. */
+export interface PresenceBatchPayload {
+  readonly updates: readonly PresenceBatchEntry[];
+  readonly full?: boolean;
+}
+
 export interface MemberJoinPayload {
   readonly user: UserWithRole;
   /** Viewer-safe presence the connecting user comes online as (broadcast
@@ -909,6 +924,7 @@ export type ServerMessage =
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
   | (WsEnvelope<TypingPayload> & { readonly type: "typing" })
   | (WsEnvelope<PresencePayload> & { readonly type: "presence" })
+  | (WsEnvelope<PresenceBatchPayload> & { readonly type: "presence_batch" })
   | (WsEnvelope<ChannelCreatePayload> & { readonly type: "channel_create" })
   | (WsEnvelope<ChannelUpdatePayload> & { readonly type: "channel_update" })
   | (WsEnvelope<ChannelDeletePayload> & { readonly type: "channel_delete" })

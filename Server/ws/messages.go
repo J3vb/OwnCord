@@ -453,14 +453,7 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeMemberJoin,
 		Payload: memberJoinPayload{
-			User: memberUserPayload{
-				ID:                user.ID,
-				Username:          user.Username,
-				Avatar:            user.Avatar,
-				Role:              roleName,
-				DisplayName:       user.DisplayName,
-				IdentityPublicKey: user.IdentityPublicKey,
-			},
+			User:   memberPayloadFor(user, roleName),
 			Status: db.BroadcastStatus(user.Status),
 		},
 	})

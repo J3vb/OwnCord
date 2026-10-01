@@ -6,8 +6,8 @@ import (
 )
 
 // TestQueuePresence_CoalescesLatestWins locks the coalescer's contract: a
-// flap (multiple queued states for one user inside the window) flushes as ONE
-// broadcast carrying the latest state, and distinct users each get their own.
+// flap (multiple queued states for one user inside the window) flushes as its
+// latest state, and every user that changed rides ONE presence_batch.
 func TestQueuePresence_CoalescesLatestWins(t *testing.T) {
 	h := &Hub{broadcast: make(chan broadcastMsg, 16)}
 
@@ -22,24 +22,16 @@ func TestQueuePresence_CoalescesLatestWins(t *testing.T) {
 
 	h.flushPresenceQueue()
 
-	var frames [][]byte
-	for len(h.broadcast) > 0 {
-		frames = append(frames, (<-h.broadcast).msg)
+	if got := len(h.broadcast); got != 1 {
+		t.Fatalf("flushed %d broadcasts, want 1 (one batch)", got)
 	}
-	if len(frames) != 2 {
-		t.Fatalf("flushed %d broadcasts, want 2 (one per user)", len(frames))
+	batch := (<-h.broadcast).presence
+	if len(batch) != 2 || batch[1].status != "online" || batch[2].status != "offline" {
+		t.Fatalf("batch = %+v, want user 1 online (the flap's latest) and user 2 offline", batch)
 	}
-	sawUser1Online := false
-	for _, f := range frames {
-		if bytes.Contains(f, []byte(`"user_id":1`)) {
-			if bytes.Contains(f, []byte("offline")) {
-				t.Fatalf("user 1's flap flushed the stale state: %s", f)
-			}
-			sawUser1Online = bytes.Contains(f, []byte("online"))
-		}
-	}
-	if !sawUser1Online {
-		t.Fatal("user 1's latest (online) presence was not flushed")
+	msg, _ := h.buildPresenceBatch(batch)
+	if !bytes.Contains(msg, []byte(`"type":"presence_batch"`)) || bytes.Count(msg, []byte(`"user_id"`)) != 2 {
+		t.Fatalf("frame = %s, want one presence_batch with two entries", msg)
 	}
 
 	// The flush disarms the timer state — a later queue+flush works again.

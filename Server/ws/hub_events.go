@@ -263,6 +263,9 @@ func eventNamesUser(data []byte, userID int64) bool {
 			User       *struct {
 				ID int64 `json:"id"`
 			} `json:"user"`
+			Updates []struct {
+				UserID int64 `json:"user_id"`
+			} `json:"updates"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -272,7 +275,12 @@ func eventNamesUser(data []byte, userID int64) bool {
 	return (pl.UserID != nil && *pl.UserID == userID) ||
 		(pl.FromUserID != nil && *pl.FromUserID == userID) ||
 		(pl.User != nil && pl.User.ID == userID) ||
-		slices.Contains(pl.Mentions, userID)
+		slices.Contains(pl.Mentions, userID) ||
+		slices.ContainsFunc(pl.Updates, func(u struct {
+			UserID int64 `json:"user_id"`
+		}) bool {
+			return u.UserID == userID
+		})
 }
 
 // messageFamily lists the frame types that carry a message's content or

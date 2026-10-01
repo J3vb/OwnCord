@@ -28,6 +28,7 @@ export const ServerMessageType = {
   REACTION_UPDATE: "reaction_update",
   TYPING: "typing",
   PRESENCE: "presence",
+  PRESENCE_BATCH: "presence_batch", // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
   CHANNEL_CREATE: "channel_create",
   CHANNEL_UPDATE: "channel_update",
   CHANNEL_DELETE: "channel_delete",

@@ -79,10 +79,10 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 // those two into each member's cached encoding. members is shared with other
 // ready payloads: each element is copied, never changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
-	live := h.liveStatuses()
+	live := h.livePresences()
 	return func(yield func(int, db.MemberSummary) bool) {
 		for i, m := range members {
-			if status := live[m.ID]; status != "" {
+			if status := live[m.ID].status; status != "" {
 				m.Status = status
 			} else {
 				m.Status = db.StatusOffline
@@ -592,10 +592,17 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return err
 	}
+	// This ready carries every member's status, so it settles any presence
+	// resync owed (P5-S03). Cleared before the build, so a drop after it
+	// marks the user again; restored if the ready never reaches the client.
+	owedResync := h.setPresenceResync(c.userID, false)
 	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
 		n, err := h.handshakeWriteReady(ctx, conn, ready)
 		if err != nil {
 			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
+			if owedResync {
+				h.setPresenceResync(c.userID, true)
+			}
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 			return err
@@ -603,15 +610,16 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		slog.Info("ws sent ready payload", "user_id", c.userID, "payload_bytes", n)
 	} else {
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
+		if owedResync {
+			h.setPresenceResync(c.userID, true)
+		}
 		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
 		return readyErr
 	}
 
-	slog.Info("ws broadcasting member_join and presence", "user_id", c.userID, "username", c.user.Username)
-	h.BroadcastToAll(buildMemberJoin(c.user, c.roleName))
-	h.announceConnectPresence(c)
+	h.announceFreshConnect(c)
 
 	return nil
 }
