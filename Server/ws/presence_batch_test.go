@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 type batchFrame struct {
@@ -48,7 +50,8 @@ func decodeFrames(t *testing.T, frames [][]byte) []batchFrame {
 func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) *Client) {
 	t.Helper()
 	database := newTeardownTestDB(t)
-	h := newTestHub(t, database, nil, nil)
+	limiter := auth.NewRateLimiter()
+	h := newTestHub(t, database, limiter, service.New(database, limiter))
 	go h.Run()
 	t.Cleanup(h.Stop)
 	ctx := context.Background()
@@ -69,7 +72,7 @@ func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) 
 		c := herdClient(ctx, h, u)
 		h.registerNow(c, nil)
 		c.user.Status = db.StatusOnline
-		c.setLiveStatus(db.StatusOnline)
+		c.setLivePresence(db.StatusOnline, nil)
 		return c
 	}
 	return h, database, connect
@@ -228,7 +231,7 @@ func TestPresenceBatch_LostAtEnqueueRepairsBySnapshot(t *testing.T) {
 	}
 	watcher := herdClient(ctx, h, u)
 	h.registerNow(watcher, nil)
-	watcher.setLiveStatus(db.StatusOnline)
+	watcher.setLivePresence(db.StatusOnline, nil)
 
 	for len(h.broadcast) < cap(h.broadcast) {
 		h.broadcast <- broadcastMsg{}
@@ -345,7 +348,7 @@ func TestPresenceStale_NextWindowSendsFullSnapshot(t *testing.T) {
 	drain(slow.send)
 	fillQueue(slow)
 
-	ghost.setLiveStatus(db.StatusInvisible)
+	ghost.setLivePresence(db.StatusInvisible, nil)
 	h.QueuePresence(ghost.userID, db.StatusInvisible, nil)
 	settle(t, h)
 	drain(slow.send) // the reader catches up
@@ -465,7 +468,7 @@ func TestPresenceSnapshot_InvisibleIsIndistinguishableFromOffline(t *testing.T) 
 	ctx := context.Background()
 	observer := connect("observer", true)
 	ghost := connect("ghost", true)
-	ghost.setLiveStatus(db.StatusInvisible)
+	ghost.setLivePresence(db.StatusInvisible, nil)
 	away, err := database.CreateUser(ctx, "away", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -523,5 +526,74 @@ func TestPresenceBatch_LostAtEnqueueForcesFullReadyOnResume(t *testing.T) {
 	c.lastSeq = lastSeq
 	if _, _, ok := h.reconnectPrecheck(ctx, c, lastSeq); ok {
 		t.Fatal("a resume from before a lost presence_batch took replay, want the full ready")
+	}
+}
+
+// fullSnapshotTexts returns the custom_status of each entry in the last full
+// presence_batch on c.
+func fullSnapshotTexts(t *testing.T, c *Client) map[int64]*string {
+	t.Helper()
+	var got map[int64]*string
+	for _, f := range decodeFrames(t, drain(c.send)) {
+		if f.Type == MsgTypePresenceBatch && f.Payload.Full {
+			got = map[int64]*string{}
+			for _, e := range f.Payload.Updates {
+				got[e.UserID] = e.CustomStatus
+			}
+		}
+	}
+	if got == nil {
+		t.Fatalf("user %d got no full presence snapshot", c.userID)
+	}
+	return got
+}
+
+func TestPresenceSnapshot_RepairsADroppedCustomStatus(t *testing.T) {
+	h, _, connect := presenceBatchHub(t)
+	ctx := context.Background()
+	slow := connect("slow", true)
+	mover := connect("mover", true)
+	settle(t, h)
+	drain(slow.send)
+	fillQueue(slow)
+
+	h.handleMessage(mover, []byte(`{"type":"presence_update","payload":{"status":"online","custom_status":"lunch"}}`))
+	if err := h.awaitDispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !slow.presenceStale.Load() {
+		t.Fatal("the custom status change was not dropped as presence")
+	}
+	drain(slow.send) // the reader catches up
+	settle(t, h)
+
+	if got := fullSnapshotTexts(t, slow)[mover.userID]; got == nil || *got != "lunch" {
+		t.Fatalf("snapshot custom_status for the mover = %v, want \"lunch\"", got)
+	}
+}
+
+func TestPresenceSnapshot_InvisibleTextOnlyToSelf(t *testing.T) {
+	h, _, connect := presenceBatchHub(t)
+	ctx := context.Background()
+	observer := connect("observer", true)
+	ghost := connect("ghost", true)
+	text := "heads down"
+	ghost.setLivePresence(db.StatusInvisible, &text)
+	settle(t, h)
+	drain(observer.send)
+	drain(ghost.send)
+
+	observer.presenceStale.Store(true)
+	ghost.presenceStale.Store(true)
+	h.enqueue(broadcastMsg{presenceSnapshot: true}, "presence snapshot")
+	if err := h.awaitDispatch(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if seen := fullSnapshotTexts(t, observer); seen[ghost.userID] != nil {
+		t.Fatalf("observer's snapshot carries the invisible user's text %q", *seen[ghost.userID])
+	}
+	if own := fullSnapshotTexts(t, ghost)[ghost.userID]; own == nil || *own != text {
+		t.Fatalf("the ghost's own snapshot custom_status = %v, want %q", own, text)
 	}
 }

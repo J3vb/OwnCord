@@ -79,10 +79,10 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 // those two into each member's cached encoding. members is shared with other
 // ready payloads: each element is copied, never changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
-	live := h.liveStatuses()
+	live := h.livePresences()
 	return func(yield func(int, db.MemberSummary) bool) {
 		for i, m := range members {
-			if status := live[m.ID]; status != "" {
+			if status := live[m.ID].status; status != "" {
 				m.Status = status
 			} else {
 				m.Status = db.StatusOffline

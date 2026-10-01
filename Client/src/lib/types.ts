@@ -619,9 +619,8 @@ export interface VoiceE2EEOfferPayload {
 export interface PresenceBatchEntry {
   readonly user_id: number;
   readonly status: UserStatus;
-  /** Always present in a window batch (null = none). A full snapshot omits
-   *  it: the text is left alone, and cleared for anyone offline. */
-  readonly custom_status?: string | null;
+  /** Always present (null = none). */
+  readonly custom_status: string | null;
 }
 
 /** Many users' presence in one frame: a coalescing window's changes, or with

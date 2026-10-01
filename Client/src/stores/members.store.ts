@@ -178,9 +178,8 @@ export function updatePresence(
 
 /** Apply a presence_batch in one store update. An entry only updates a member
  *  the list already has (a new member arrives first as member_join). A `full`
- *  snapshot also marks everyone it leaves out offline.
- *  An absent custom_status leaves the text alone, except that offline clears
- *  it (what ready shows for an offline member). */
+ *  snapshot also marks everyone it leaves out offline, clearing their text
+ *  (what ready shows for an offline member). */
 export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full: boolean): void {
   membersStore.setState((prev) => {
     const next = new Map(prev.members);
@@ -193,9 +192,7 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
     for (const u of updates) {
       const existing = next.get(u.user_id);
       if (existing === undefined) continue;
-      const keptText = u.status === "offline" ? null : (existing.customStatus ?? null);
-      const customStatus = u.custom_status === undefined ? keptText : u.custom_status;
-      next.set(u.user_id, { ...existing, status: u.status, customStatus });
+      next.set(u.user_id, { ...existing, status: u.status, customStatus: u.custom_status });
     }
     return { ...prev, members: next };
   });

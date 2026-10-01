@@ -881,7 +881,9 @@ presence value for a user that everyone else does — and must not "correct" its
 own status back to online on the strength of a broadcast it did not receive.
 
 `presence` now carries only a user's own status changes (`presence_update`).
-Coming online and going offline arrive in `presence_batch`.
+Coming online and going offline arrive in `presence_batch`. A client older
+than this release ignores `presence_batch`, so it shows stale connect and
+disconnect presence until it updates.
 
 ### presence_batch (Server -> Client, broadcast)
 
@@ -913,10 +915,10 @@ may not have yet arrives first as a `member_join` (see `member_join`).
 arrived has that frame dropped (not the connection) and receives, within the
 next window, an unsequenced `presence_batch` with `"full": true`. It lists
 every connected user who is not offline to that client (its own true status
-included, even when invisible), without `custom_status`; every member it
-leaves out is offline, so an invisible member is simply absent.
-Keep a listed member's custom text and clear an offline one's, which is what
-`ready` shows.
+and custom text included, even when invisible), each with their current
+`custom_status` (always present, `null` when unset); every member it leaves
+out is offline, so an invisible member is simply absent. Clear an offline
+member's custom text, which is what `ready` shows.
 
 ---
 

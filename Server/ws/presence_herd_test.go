@@ -108,9 +108,12 @@ func TestPresenceHerd_500ConnectsInOneSecond_NoKicks(t *testing.T) {
 		c := herdClient(ctx, h, u)
 		h.registerNow(c, nil)
 		c.user.Status = db.StatusOnline
-		c.setLiveStatus(db.StatusOnline)
+		c.setLivePresence(db.StatusOnline, nil)
 		// The ready payload: every connected member as the hub sees them.
-		views[i] = h.liveStatuses()
+		views[i] = map[int64]string{}
+		for uid, p := range h.livePresences() {
+			views[i][uid] = p.status
+		}
 		h.announceFreshConnect(c)
 		clients[i] = c
 		time.Sleep(time.Until(start.Add(time.Duration(i+1) * time.Second / n)))

@@ -12,28 +12,20 @@ import (
 )
 
 // presenceBatchPayload is presence_batch: many users' presence in one frame.
-// A coalescing-window batch lists the users whose presence changed
-// ([]presenceBatchEntry); a Full snapshot lists every connected user
-// ([]presenceSnapshotEntry), and anyone it leaves out is offline.
+// A coalescing-window batch lists the users whose presence changed; a Full
+// snapshot lists every connected user, and anyone it leaves out is offline.
 type presenceBatchPayload struct {
-	Updates any  `json:"updates"`
-	Full    bool `json:"full,omitempty"`
+	Updates []presenceBatchEntry `json:"updates"`
+	Full    bool                 `json:"full,omitempty"`
 }
 
-// presenceBatchEntry is one user's presence in a window batch. CustomStatus
-// follows presencePayload's rule: always present, null when unset.
+// presenceBatchEntry is one user's presence in a batch or snapshot.
+// CustomStatus follows presencePayload's rule: always present, null when
+// unset.
 type presenceBatchEntry struct {
 	UserID       int64   `json:"user_id"`
 	Status       string  `json:"status"`
 	CustomStatus *string `json:"custom_status"`
-}
-
-// presenceSnapshotEntry is one user's presence in a Full snapshot. It has no
-// custom_status: the hub keeps no live copy of the text, so the client leaves
-// it alone (and clears it for anyone offline).
-type presenceSnapshotEntry struct {
-	UserID int64  `json:"user_id"`
-	Status string `json:"status"`
 }
 
 // memberPayloadFor is the member_join user object: what a client's member
@@ -327,7 +319,7 @@ func (h *Hub) broadcastPresenceFrame(excludeUserID int64, msg []byte) {
 	h.enqueue(broadcastMsg{msg: msg, excludeUserID: excludeUserID, droppable: true}, "presence")
 }
 
-func buildPresenceBatchMsg(updates any, full bool) []byte {
+func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {
 	return buildJSON(wsMsg{Type: MsgTypePresenceBatch, Payload: presenceBatchPayload{Updates: updates, Full: full}})
 }
 
@@ -357,9 +349,9 @@ func (h *Hub) setPresenceResync(userID int64, pending bool) bool {
 }
 
 // deliverPresenceSnapshots sends every presence-stale client a full
-// presence_batch: each connected user who is not offline to that client, its
-// own true status included; anyone absent is offline, so an invisible user
-// reads exactly like one with no connection. Unsequenced, like
+// presence_batch: each connected user who is not offline to that client, with
+// their live custom status, its own true presence included; anyone absent is
+// offline, so an invisible user reads exactly like one with no connection. Unsequenced, like
 // the other targeted repair frames, and droppable again (a still-full queue
 // just stays stale). Runs on the dispatch goroutine, so it lands after every
 // presence frame already sequenced and reads a registry no older than them.
@@ -375,21 +367,21 @@ func (h *Hub) deliverPresenceSnapshots() {
 	if len(stale) == 0 {
 		return
 	}
-	live := h.liveStatuses()
-	public := make([]presenceSnapshotEntry, 0, len(live))
-	for uid, s := range live {
-		if s := db.BroadcastStatus(s); s != "" && s != db.StatusOffline {
-			public = append(public, presenceSnapshotEntry{UserID: uid, Status: s})
+	live := h.livePresences()
+	public := make([]presenceBatchEntry, 0, len(live))
+	for uid, p := range live {
+		if s := db.BroadcastStatus(p.status); s != "" && s != db.StatusOffline {
+			public = append(public, presenceBatchEntry{UserID: uid, Status: s, CustomStatus: p.customStatus})
 		}
 	}
-	slices.SortFunc(public, func(a, b presenceSnapshotEntry) int { return cmp.Compare(a.UserID, b.UserID) })
+	slices.SortFunc(public, func(a, b presenceBatchEntry) int { return cmp.Compare(a.UserID, b.UserID) })
 	shared := buildPresenceBatchMsg(public, true)
 	for _, c := range stale {
 		c.presenceStale.Store(false)
 		msg := shared
-		i, listed := slices.BinarySearchFunc(public, c.userID, func(e presenceSnapshotEntry, uid int64) int { return cmp.Compare(e.UserID, uid) })
-		if s := live[c.userID]; !listed && s != "" && s != db.StatusOffline {
-			own := slices.Insert(slices.Clone(public), i, presenceSnapshotEntry{UserID: c.userID, Status: s})
+		i, listed := slices.BinarySearchFunc(public, c.userID, func(e presenceBatchEntry, uid int64) int { return cmp.Compare(e.UserID, uid) })
+		if p := live[c.userID]; !listed && p.status != "" && p.status != db.StatusOffline {
+			own := slices.Insert(slices.Clone(public), i, presenceBatchEntry{UserID: c.userID, Status: p.status, CustomStatus: p.customStatus})
 			msg = buildPresenceBatchMsg(own, true)
 		}
 		c.sendPresenceMsg(msg)

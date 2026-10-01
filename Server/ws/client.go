@@ -106,10 +106,11 @@ type Client struct {
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
 
-	// status is the presence status this connection last stamped
+	// presence is the status and custom status this connection last stamped
 	// (applyConnectStatus) or chose (presence_update); nil until the connect
-	// stamp. presentableMembers reads it from other goroutines, hence atomic.
-	status atomic.Pointer[string]
+	// stamp. presentableMembers and presence snapshots read it from other
+	// goroutines, hence atomic.
+	presence atomic.Pointer[livePresence]
 }
 
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.
@@ -158,18 +159,24 @@ func (c *Client) getChannelID() int64 {
 	return c.channelID
 }
 
-// liveStatus returns the connection's live presence status, "" before the
-// connect stamp.
-func (c *Client) liveStatus() string {
-	if s := c.status.Load(); s != nil {
-		return *s
-	}
-	return ""
+// livePresence is a connection's live presence: its status and custom status.
+type livePresence struct {
+	status       string
+	customStatus *string
 }
 
-// setLiveStatus records the status this connection just stamped or chose.
-func (c *Client) setLiveStatus(status string) {
-	c.status.Store(&status)
+// livePresence returns the connection's live presence, a zero value (status
+// "") before the connect stamp.
+func (c *Client) livePresence() livePresence {
+	if p := c.presence.Load(); p != nil {
+		return *p
+	}
+	return livePresence{}
+}
+
+// setLivePresence records the presence this connection just stamped or chose.
+func (c *Client) setLivePresence(status string, customStatus *string) {
+	c.presence.Store(&livePresence{status: status, customStatus: customStatus})
 }
 
 // getVoiceChID returns the voice channel ID under voiceMu.

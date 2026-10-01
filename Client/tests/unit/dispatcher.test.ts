@@ -1092,19 +1092,19 @@ describe("WS Dispatcher", () => {
       expect(members.has(999)).toBe(false);
     });
 
-    it("applies a full snapshot: anyone it leaves out is offline, listed text is kept", () => {
+    it("applies a full snapshot: anyone it leaves out is offline, listed text is replaced", () => {
       seed();
       mock.dispatch("presence_batch", {
         full: true,
         updates: [
-          { user_id: 1, status: "online" },
-          { user_id: 2, status: "online" },
+          { user_id: 1, status: "online", custom_status: null },
+          { user_id: 2, status: "online", custom_status: "lunch" },
         ],
       });
       const members = membersStore.getState().members;
       expect(members.get(1)?.status).toBe("online");
       expect(members.get(2)?.status).toBe("online");
-      expect(members.get(2)?.customStatus).toBe("coding");
+      expect(members.get(2)?.customStatus).toBe("lunch");
       expect(members.get(3)?.status).toBe("offline");
       expect(members.get(3)?.customStatus).toBeNull();
     });
@@ -1206,7 +1206,10 @@ describe("WS Dispatcher", () => {
     });
 
     it("marks a DM partner a full snapshot leaves out as offline", () => {
-      mock.dispatch("presence_batch", { full: true, updates: [{ user_id: 1, status: "online" }] });
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [{ user_id: 1, status: "online", custom_status: null }],
+      });
 
       const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
       expect(dm?.recipient.status).toBe("offline");

@@ -181,12 +181,12 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 		// of users.status (via presentableMembers, which only ever downgrades
 		// a connected user to offline, never upgrades one) would then never
 		// self-correct for the rest of this session (OC-0298). The live
-		// status follows the row for the same reason.
-		c.setLiveStatus(c.user.Status)
+		// presence follows the row for the same reason.
+		c.setLivePresence(c.user.Status, c.user.CustomStatus)
 		return
 	}
 	c.user.Status = status
-	c.setLiveStatus(status)
+	c.setLivePresence(status, c.user.CustomStatus)
 }
 
 // announceFreshConnect tells every other client that c came online after a
