@@ -123,7 +123,9 @@ The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold; each
 connection's protocol Ping every 25s refreshes activity and closes a peer that
 misses a Pong),
 revoked-session sweep (30s, plus
-per-connection revalidation every 10 messages), stale-voice-state sweep (60s),
+per-connection revalidation every 10 messages, plus an immediate per-account
+check, `DisconnectIfSessionRevoked`, after a password or 2FA change or a
+session revoke), stale-voice-state sweep (60s),
 LiveKit membership reconciler (60s, `voice_reconcile.go`; see
 [livekit-setup.md](../livekit-setup.md)),
 panic containment on the run loop (3 panics/60s, or one Windows memory fault

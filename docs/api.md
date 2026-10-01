@@ -353,8 +353,8 @@ in `kit_secret`, or with an owner-issued credential (B4-6, BPR-045; owner
 decision 3) in `credential` — the two are told apart by shape (32 and 24
 characters), so one compare per attempt runs against the right verifier and
 the paths never interfere. Using either means "I lost my devices": on success
-the password is replaced by `new_password`, every existing session is
-revoked, the kit is spent (or the credential consumed) and a
+the password is replaced by `new_password`, every existing session and API
+token is revoked, the kit is spent (or the credential consumed) and a
 `recovery_kit_used` / `recovery_assist_used` audit row is written — all in
 one transaction — and a fresh session is issued **without** the second
 factor, so an account with 2FA enrolled signs in from this response and can
@@ -649,7 +649,9 @@ disabling 2FA removes it.
 
 ### POST /api/v1/users/me/totp/confirm
 
-Confirm a pending TOTP enrollment.
+Confirm a pending TOTP enrollment. On success the account's other sessions are
+revoked, and its live WebSocket closes in the same request if it rode one of
+them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -669,7 +671,7 @@ Confirm a pending TOTP enrollment.
 
 ### DELETE /api/v1/users/me/totp
 
-Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret.
+Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret, and its other sessions are revoked; the account's live WebSocket closes in the same request if it rode one of them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -864,7 +866,8 @@ client is expected to downscale and square-crop before uploading.
 ### PUT /api/v1/users/me/password
 
 Change the authenticated user's password. Verifies the old password, enforces
-password strength, and revokes all _other_ sessions on success.
+password strength, and revokes all _other_ sessions on success. The account's
+live WebSocket closes in the same request if it rode one of them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
@@ -934,7 +937,8 @@ route.
 
 ### DELETE /api/v1/users/me/sessions/{id}
 
-Revoke one of the authenticated user's sessions by ID.
+Revoke one of the authenticated user's sessions by ID. The account's live
+WebSocket closes in the same request if it rode that session.
 
 **Auth:** Required
 
@@ -944,15 +948,14 @@ Revoke one of the authenticated user's sessions by ID.
 
 ### DELETE /api/v1/users/me/sessions
 
-Sign out everywhere: revoke every session of the authenticated account,
-the current one included, and drop the account's live WebSocket
-connections in the same request. The caller's token stops working with this
-response, so the client re-authenticates rather than treating the next 401
-as an error. Never touches another account's sessions. Writes a
-`session_revoke_all` audit row naming the account and the count when at
-least one session was revoked (an API-token principal, which holds no
-session, revokes nothing and writes nothing). Limited to 5 calls per
-account per minute (`429 RATE_LIMITED`).
+Sign out everywhere: revoke every session and every API token of the
+authenticated account, the current one included, and drop the account's live
+WebSocket connections in the same request. The caller's token stops working
+with this response, so the client re-authenticates rather than treating the
+next 401 as an error. Never touches another account's credentials. Writes a
+`session_revoke_all` audit row naming the account and both counts when
+anything was revoked. Limited to 5 calls per account per minute
+(`429 RATE_LIMITED`).
 
 **Auth:** Required
 
@@ -3561,9 +3564,10 @@ Owner-assisted recovery (B4-6, BPR-045; owner decision 3). The server owner,
 having verified the person out of band, receives a **15-minute, single-use**
 recovery credential for the account, shown once. The user redeems it at
 [`POST /api/v1/auth/recover`](#post-apiv1authrecover) in the `credential`
-field: the password is replaced, every session revoked and a session issued
-without the second factor. Only an argon2id verifier is stored; issuing again
-replaces the outstanding credential, and a recovery by kit withdraws it.
+field: the password is replaced, every session and API token revoked, and a
+session issued without the second factor. Only an argon2id verifier is
+stored; issuing again replaces the outstanding credential, and a recovery by
+kit withdraws it.
 Refused for the caller's own account, a banned or pending account and an
 anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
 Audited as `recovery_assist_issued` with the verification wording only.
@@ -3992,8 +3996,9 @@ Settings page shows until the owner saves its own.
 ## API Tokens
 
 Owner-only: minting a long-lived bearer credential over the network is the one
-admin action that, via a hijacked session, would outlive a password change and
-bulk logout (API tokens deliberately live outside the session table). These
+admin action that, via a hijacked session, would outlive a password change or an
+admin force-logout (API tokens deliberately live outside the session table;
+sign-out-everywhere and account recovery do revoke them). These
 routes are the HTTP equivalent of the `server token create|list|revoke` CLI.
 
 ### GET /admin/api/tokens

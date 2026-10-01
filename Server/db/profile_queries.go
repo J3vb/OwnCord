@@ -129,16 +129,33 @@ func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) err
 	return nil
 }
 
-// DeleteUserSessions removes every session of the user — the caller's own
-// included — and reports how many went. Sign-out-everywhere (B4-7).
-func (d *DB) DeleteUserSessions(ctx context.Context, userID int64) (int64, error) {
-	result, err := d.q.DeleteUserSessions(ctx, userID)
+// SignOutEverywhere revokes every session of the user — the caller's own
+// included — and every live API token in one transaction, so either both go
+// or neither does, and reports how many of each went (B4-7).
+func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("DeleteUserSessions: %w", err)
+		return 0, 0, fmt.Errorf("SignOutEverywhere begin: %w", err)
 	}
-	rows, err := result.RowsAffected()
+	defer tx.Rollback() //nolint:errcheck
+	q := d.q.WithTx(tx)
+
+	tokRes, err := q.RevokeUserAPITokens(ctx, userID)
 	if err != nil {
-		return 0, fmt.Errorf("DeleteUserSessions rows: %w", err)
+		return 0, 0, fmt.Errorf("SignOutEverywhere api tokens: %w", err)
 	}
-	return rows, nil
+	if tokens, err = tokRes.RowsAffected(); err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere api tokens rows: %w", err)
+	}
+	sessRes, err := q.DeleteUserSessions(ctx, userID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere sessions: %w", err)
+	}
+	if sessions, err = sessRes.RowsAffected(); err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere sessions rows: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere commit: %w", err)
+	}
+	return sessions, tokens, nil
 }

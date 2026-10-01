@@ -424,7 +424,7 @@ does not claim").
   too, stores only the verifier and returns the secret once on the finish
   step — so a fresh install starts with a way back in.
 - Redemption (`POST /api/v1/auth/recover`) replaces the password, revokes
-  every session, spends the kit and writes the audit row in one transaction
+  every session and API token, spends the kit and writes the audit row in one transaction
   (`DB.RedeemRecoveryKit`), then issues a session **without** the second
   factor — by owner decision, since the kit exists for lost devices. Two
   concurrent redemptions admit at most one; a spent kit never works again.
@@ -458,8 +458,8 @@ does not claim").
   (`Server/api/profile_handler.go:92-93`); revocation is scoped to the calling
   user (`Server/service/user.go:366`).
 - Sign-out-everywhere: `DELETE /api/v1/users/me/sessions` revokes every
-  session of the calling account, the current one included, and never
-  another account's (`UserService.RevokeAllSessions`, audit
+  session and API token of the calling account, the current one included,
+  and never another account's (`UserService.RevokeAllSessions`, audit
   `session_revoke_all`; test `TestRevokeAllSessions_OnlyTheCallersAccount`).
 - A password change revokes every other session (`Server/service/user.go:336`).
 - Admin force-logout revokes all of a user's sessions

@@ -425,26 +425,25 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 }
 
 // RevokeAllSessions is sign-out-everywhere (B4-7, BG-08): every session of
-// the user goes, the caller's own included, so a stolen token anywhere stops
-// working now and the caller re-authenticates. Returns how many were
-// revoked; zero is not an error (an API-token principal has none).
+// the user goes, the caller's own included, and so does every API token, so
+// a stolen credential anywhere stops working now and the caller
+// re-authenticates. Returns how many sessions were revoked.
 func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
-	n, err := s.st.DeleteUserSessions(ctx, userID)
+	n, tokens, err := s.st.SignOutEverywhere(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
 	}
-	if n == 0 {
-		// Nothing changed, so there is nothing to audit: an API-token
-		// principal keeps its (session-less) credential and could otherwise
-		// grow the audit log one row per call (Codex P2 on PR #1500).
-		slog.Debug("sign-out-everywhere found no session to revoke", "user_id", userID)
+	if n == 0 && tokens == 0 {
+		// Nothing changed, so there is nothing to audit (Codex P2 on PR
+		// #1500): a repeated call cannot grow the audit log.
+		slog.Debug("sign-out-everywhere found nothing to revoke", "user_id", userID)
 		return 0, nil
 	}
 	// Audit rows must survive a request canceled after the delete committed.
-	// The row names the account and the count, never a token or a device.
+	// The row names the account and the counts, never a token or a device.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,
-		fmt.Sprintf("signed out everywhere (%d sessions revoked)", n))
-	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n)
+		fmt.Sprintf("signed out everywhere (%d sessions, %d API tokens revoked)", n, tokens))
+	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n, "api_tokens_revoked", tokens)
 	return n, nil
 }
 

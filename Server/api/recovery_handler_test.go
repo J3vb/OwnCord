@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -21,6 +22,7 @@ func TestRecoveryKitRoutes_EnrolStatusRecover(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 	uid := seedUser(t, database, "kitholder", "KitHolderPass1!", 4)
 	token := issueSessionToken(t, database, uid)
+	apiToken := issueAPIToken(t, database, uid)
 
 	// Not enrolled yet.
 	rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", token)
@@ -82,6 +84,10 @@ func TestRecoveryKitRoutes_EnrolStatusRecover(t *testing.T) {
 	if rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", token); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("old session after recovery = %d, want 401", rr.Code)
 	}
+	// So is an API token minted before it.
+	if rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", apiToken); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("API token after recovery = %d, want 401", rr.Code)
+	}
 	if rr := postJSON(t, router, "/api/v1/auth/login", map[string]string{"username": "kitholder", "password": "Recovered-Pass2!"}); rr.Code != http.StatusOK {
 		t.Fatalf("login with the new password = %d; body = %s", rr.Code, rr.Body.String())
 	}
@@ -106,6 +112,21 @@ func issueSessionToken(t *testing.T, database interface {
 	return token
 }
 
+// issueAPIToken mints an API token for uid and returns its raw token.
+func issueAPIToken(t *testing.T, database interface {
+	CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error)
+}, uid int64) string {
+	t.Helper()
+	token, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	if _, err := database.CreateAPIToken(context.Background(), uid, auth.HashToken(token), "bot", nil); err != nil {
+		t.Fatalf("CreateAPIToken: %v", err)
+	}
+	return token
+}
+
 // An owner-issued credential (B4-6) is redeemed through the same public
 // route, in the credential field, and signs the holder in likewise.
 func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
@@ -115,6 +136,7 @@ func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 	router := buildAuthRouter(database, limiter)
 	uid := seedUser(t, database, "assisted", "AssistedPass1!", 4)
 	oldToken := issueSessionToken(t, database, uid)
+	apiToken := issueAPIToken(t, database, uid)
 	oid := seedUser(t, database, "owner", "OwnerPass1!", int(permissions.OwnerRoleID))
 	issue, err := service.NewAuthService(database, limiter, nil, nil).IssueRecoveryAssist(ctx, oid, uid, "voice_call")
 	if err != nil {
@@ -131,6 +153,9 @@ func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 	}
 	if rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", oldToken); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("the old session is still alive: %d", rr.Code)
+	}
+	if rr := getWithToken(t, router, "/api/v1/users/me/recovery-kit", apiToken); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("an API token minted before recovery is still alive: %d", rr.Code)
 	}
 	if rr := postJSON(t, router, "/api/v1/auth/recover", map[string]string{"username": "assisted", "credential": issue.Credential, "new_password": "N3w-Str0ng!Pass2"}); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("replayed credential = %d, want 401", rr.Code)

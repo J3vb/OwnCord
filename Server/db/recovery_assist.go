@@ -73,13 +73,14 @@ func (d *DB) DeleteRecoveryAssist(ctx context.Context, userID int64) error {
 }
 
 // RedeemRecoveryAssist is RedeemRecoveryKit for an owner-issued credential:
-// the live credential is deleted, the password replaced, every session of
-// the account revoked and the audit row written in one transaction, or none
-// of it. The consume is conditional on the credential being live and on it
-// being the very row the caller verified (its verifier), so two concurrent
-// redemptions admit at most one, an expired credential admits none, and a
-// credential replaced between the compare and the redeem cannot spend its
-// replacement; the loser gets ErrRecoveryAssistSpent.
+// the live credential is deleted, the password replaced, every session and
+// API token of the account revoked and the audit row written in one
+// transaction, or none of it. The consume is conditional on the credential
+// being live and on it being the very row the caller verified (its
+// verifier), so two concurrent redemptions admit at most one, an expired
+// credential admits none, and a credential replaced between the compare and
+// the redeem cannot spend its replacement; the loser gets
+// ErrRecoveryAssistSpent.
 func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -106,8 +107,14 @@ func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, n
 		return 0, fmt.Errorf("RedeemRecoveryAssist sessions: %w", err)
 	}
 	sessionsRevoked, _ = revoked.RowsAffected()
+	tokens, err := q.RevokeUserAPITokens(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("RedeemRecoveryAssist api tokens: %w", err)
+	}
+	tokensRevoked, _ := tokens.RowsAffected()
 	if err := q.LogAudit(ctx, dbgen.LogAuditParams{
-		ActorID: userID, Action: auditAction, TargetType: "user", TargetID: userID, Detail: auditDetail,
+		ActorID: userID, Action: auditAction, TargetType: "user", TargetID: userID,
+		Detail: fmt.Sprintf("%s (%d sessions, %d API tokens revoked)", auditDetail, sessionsRevoked, tokensRevoked),
 	}); err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryAssist audit: %w", err)
 	}

@@ -87,6 +87,23 @@ func settle(t *testing.T, h *Hub) {
 	}
 }
 
+// settleUntil is settle for an assertion that rides a presence timer: it
+// waits for cond, not for one window plus a margin, because a loaded runner
+// can fire the AfterFunc after settle's sleep is over.
+func settleUntil(t *testing.T, h *Hub, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal(what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := h.awaitDispatch(context.Background()); err != nil {
+		t.Fatalf("awaitDispatch: %v", err)
+	}
+}
+
 func TestFreshConnect_ExistingMemberSendsNoMemberJoin(t *testing.T) {
 	h, _, connect := presenceBatchHub(t)
 	observer := connect("observer", true)
@@ -248,14 +265,14 @@ func TestPresenceBatch_LostAtEnqueueRepairsBySnapshot(t *testing.T) {
 	}
 	go h.Run()
 	t.Cleanup(h.Stop)
-	settle(t, h)
-
-	for _, f := range decodeFrames(t, drain(watcher.send)) {
-		if f.Type == MsgTypePresenceBatch && f.Payload.Full {
-			return
+	settleUntil(t, h, func() bool {
+		for _, f := range decodeFrames(t, drain(watcher.send)) {
+			if f.Type == MsgTypePresenceBatch && f.Payload.Full {
+				return true
+			}
 		}
-	}
-	t.Fatal("the lost batch was never repaired by a full snapshot")
+		return false
+	}, "the lost batch was never repaired by a full snapshot")
 }
 
 func TestPresenceBatch_InvisibleEntryIsOfflineToOthersTrueToSelf(t *testing.T) {
@@ -385,7 +402,8 @@ func TestPresenceDrop_ForcesFullReadyOnResume(t *testing.T) {
 	fillQueue(slow)
 
 	h.QueuePresence(mover.userID, db.StatusIdle, nil)
-	settle(t, h)
+	settleUntil(t, h, func() bool { return h.presenceResyncPending(slow.userID) },
+		"the slow client never dropped the presence frame")
 
 	resume := func(u *db.User) bool {
 		c := herdClient(context.Background(), h, u)

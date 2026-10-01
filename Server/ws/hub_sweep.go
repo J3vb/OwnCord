@@ -151,19 +151,43 @@ func (h *Hub) sweepRevokedSessions() {
 	for _, c := range snapshot {
 		// A hash the authenticator did not answer for reads as the map's
 		// zero value, which is SessionRevoked by design: fail closed.
-		switch verdicts[c.tokenHash] {
-		case service.SessionRevoked:
-			slog.Info("session sweep: revoked/expired session, disconnecting",
-				"user_id", c.userID)
-			h.kickClientTerminal(c)
-		case service.SessionBanned:
-			slog.Info("session sweep: banned user, disconnecting",
-				"user_id", c.userID)
-			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClientTerminal(c)
-		case service.SessionLive:
-		}
+		h.applySessionVerdict(c, verdicts[c.tokenHash])
 	}
+}
+
+// applySessionVerdict drops c when its session is revoked, expired or
+// banned, and leaves it when the session is live.
+func (h *Hub) applySessionVerdict(c *Client, verdict service.SessionVerdict) {
+	switch verdict {
+	case service.SessionRevoked:
+		slog.Info("session sweep: revoked/expired session, disconnecting",
+			"user_id", c.userID)
+		h.kickClientTerminal(c)
+	case service.SessionBanned:
+		slog.Info("session sweep: banned user, disconnecting",
+			"user_id", c.userID)
+		c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+		h.kickClientTerminal(c)
+	case service.SessionLive:
+	}
+}
+
+// DisconnectIfSessionRevoked is the revoked-session sweep for one account,
+// run now: after a password change or a single-session revoke, which remove
+// some of the account's sessions but perhaps not the one its socket rides,
+// the socket goes at once if its own session was among them. A failed
+// lookup leaves it to the sweep's next tick, as the sweep itself does.
+func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
+	c := h.GetClient(userID)
+	if c == nil || c.tokenHash == "" {
+		return
+	}
+	verdicts, err := h.authn.SweepSessions(context.Background(), []string{c.tokenHash})
+	if err != nil {
+		slog.Warn("session sweep: batch session lookup failed", "user_id", userID, "err", err)
+		return
+	}
+	h.applySessionVerdict(c, verdicts[c.tokenHash])
 }
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it

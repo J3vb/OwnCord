@@ -82,7 +82,7 @@ server stores only an argon2id verifier of it. The setup wizard offers to
 generate the owner's kit at first run — shown once on the finish step, with
 only its verifier stored — and any account can enrol or rotate one from the
 desktop client while signed in. Redeeming the kit replaces the
-password, revokes every session, spends the kit and writes a content-free
+password, revokes every session and API token, spends the kit and writes a content-free
 audit row in one transaction, then signs the holder in without the second
 factor — it exists for the case where the devices are gone. A spent or lost
 kit cannot be recovered by the server; the holder issues a new one while
@@ -95,7 +95,7 @@ as one of four fixed wordings (`in_person`, `voice_call`, `video_call`,
 `trusted_contact`); no free text is accepted. The credential is single-use,
 expires in 15 minutes, is stored only as an argon2id verifier, and redeems
 through the same route with the same consequences (new password, every
-session revoked, no second factor). No administrator below the owner can
+session and API token revoked, no second factor). No administrator below the owner can
 reset anyone's credentials. Issuance and use are audited
 (`recovery_assist_issued`, `recovery_assist_used`).
 

@@ -189,7 +189,7 @@ type Store interface {
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
-	DeleteUserSessions(ctx context.Context, userID int64) (int64, error)
+	SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
 	TouchSessions(ctx context.Context, tokenHashes []string) error

@@ -28,11 +28,14 @@ type AuthBroadcaster interface {
 
 // SessionDisconnector is the hub's half of dropping a live socket once its
 // session is gone — the service layer's counterpart to api.SessionDisconnector,
-// satisfied by *ws.Hub. It is exported so the admin package can pin *ws.Hub to
-// it (service cannot import ws). A broadcaster that does not implement it
-// (tests, a nil hub) simply skips the disconnect.
+// satisfied by *ws.Hub. DisconnectRevokedUser drops the account's socket
+// outright; DisconnectIfSessionRevoked drops it only if the session it rode
+// is gone. It is exported so the admin package can pin *ws.Hub to it (service
+// cannot import ws). A broadcaster that does not implement it (tests, a nil
+// hub) simply skips the disconnect.
 type SessionDisconnector interface {
 	DisconnectRevokedUser(userID int64)
+	DisconnectIfSessionRevoked(userID int64)
 }
 
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
@@ -1196,40 +1199,6 @@ func (s *AuthService) confirmPassword(ctx context.Context, user *db.User, passwo
 	}
 	s.limiter.Reset(ctx, failKey)
 	return nil
-}
-
-// keepSessionID is the session a 2FA state change keeps alive. BUG-108: an
-// API-token principal has a nil session; keep=0 matches no row, so every
-// login session is revoked — same semantics as change-password.
-func keepSessionID(p Principal) int64 {
-	if p.Session != nil {
-		return p.Session.ID
-	}
-	return 0
-}
-
-// revokeOtherSessionsAfterAuthChange revokes every session for userID except
-// keepSessionID as the security tail of a committed 2FA state change. It
-// mirrors UserService.ChangePassword (service/user.go:262-274): a failure is
-// logged and retried once (bounded compensating retry for transient write
-// contention); if the retry also fails, revoked reports what did succeed and
-// failed is true so the caller can report a partial success instead of
-// silently claiming the other sessions were revoked when they were not.
-func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
-	revoked, err := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
-	if err != nil {
-		slog.Error("DeleteOtherSessions after "+action, "err", err, "user_id", userID)
-		revokedRetry, retryErr := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
-		if retryErr != nil {
-			slog.Error("DeleteOtherSessions retry after "+action, "err", retryErr, "user_id", userID)
-			return revoked, true
-		}
-		revoked += revokedRetry
-	}
-	if revoked > 0 {
-		slog.Info("revoked other sessions after "+action, "user_id", userID, "revoked", revoked)
-	}
-	return revoked, false
 }
 
 // ─── Helpers moved from api/auth_handler.go ──────────────────────────────────

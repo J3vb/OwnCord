@@ -405,8 +405,9 @@ Long-lived, revocable bearer tokens for headless clients (bots, CI, the introspe
 MCP tool). A token authenticates as `user_id`, inheriting that user's role/permissions,
 and is resolved by the same middleware as sessions (see `auth.ResolveTokenHash`). Only the
 SHA-256 hash is stored; the raw token is shown once at creation. `expires_at` NULL = never
-expires; `revoked_at` NULL = active. Mint/list/revoke via `server token …`. Separate from
-`sessions` so bulk logout and the per-user session cap never affect these.
+expires; `revoked_at` NULL = active. Mint/list/revoke via `server token …`. Kept in a
+separate table from `sessions` so the per-user session cap never affects these; the
+revocation paths are in [`docs/api.md`](api.md#api-tokens).
 
 ---
 
