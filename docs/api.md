@@ -2880,14 +2880,14 @@ live session was already ended when the ban landed.
 
 #### Errors
 
-| Status | Code              | Cause                                                                                                            |
-| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                     |
+| Status | Code              | Cause                                                                                                                                                                                                                  |
+| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                                                                                                                           |
 | 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, an overturn the caller may not apply (does not outrank the target, or lacks `BAN_MEMBERS` for a ban), or the decider's own authority no longer holds when re-checked at decision time |
-| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists             |
-| 404    | `NOT_FOUND`       | no such appeal                                                                                                   |
-| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                       |
-| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself  |
+| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists                                                                                                                   |
+| 404    | `NOT_FOUND`       | no such appeal                                                                                                                                                                                                         |
+| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                                                                                                                             |
+| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself                                                                                                        |
 
 ---
 
