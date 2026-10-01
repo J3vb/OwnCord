@@ -38,7 +38,7 @@ const {
   parseRelayedLogin,
   loginWithSavedPassword,
 } = await import("@lib/credentials");
-const { ApiClientError } = await import("@lib/api");
+const { ApiClientError, TransportError } = await import("@lib/api");
 
 // saveCredential (called from createUserUpdateCredentialSaver's listener) is
 // fire-and-forget: `void saveCredential(...)`. Its own body has no `await`
@@ -321,18 +321,36 @@ describe("loginWithSavedPassword", () => {
     });
   });
 
-  it("propagates a rejection as an Error carrying the original reason", async () => {
-    // Tauri commands reject with a plain string, not an Error — the caller's
-    // catch block reads err.message, so the string has to survive as one.
+  it("rejects a backend transport failure as a TransportError carrying the original reason", async () => {
+    // Tauri commands reject with a plain string, not an Error — the raw
+    // reason has to survive for the log while the form shows friendly copy.
     invoke.mockRejectedValue("saved-password login timed out");
 
-    await expect(loginWithSavedPassword("h.example", "alice")).rejects.toThrow(
-      "saved-password login timed out",
-    );
+    const err = await loginWithSavedPassword("h.example", "alice").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TransportError);
+    expect((err as Error).message).toBe("saved-password login timed out");
     expect(logMock.error).toHaveBeenCalledWith("Saved-password login failed", {
       host: "h.example",
       error: "saved-password login timed out",
     });
+  });
+
+  it("maps the backend's empty-response failure to a TransportError", async () => {
+    // A dropped loopback socket reads as EOF, which the backend reports as a
+    // malformed response.
+    invoke.mockRejectedValue("saved-password login: malformed response (no header terminator)");
+
+    await expect(loginWithSavedPassword("h.example", "alice")).rejects.toBeInstanceOf(
+      TransportError,
+    );
+  });
+
+  it("rejects a missing saved password unchanged, not as a TransportError", async () => {
+    invoke.mockRejectedValue("no saved password for this host");
+
+    const err = await loginWithSavedPassword("h.example", "alice").catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(TransportError);
+    expect((err as Error).message).toBe("no saved password for this host");
   });
 
   it("returns null for a resolved value of the wrong shape", async () => {
@@ -444,14 +462,18 @@ describe("parseRelayedLogin", () => {
 
   it("falls back to a usable message when the error body is not JSON", () => {
     try {
-      parseRelayedLogin({ status: 502, body: "<html>gateway</html>" });
+      parseRelayedLogin({ status: 503, body: "<html>unavailable</html>" });
       throw new Error("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(ApiClientError);
-      expect((err as InstanceType<typeof ApiClientError>).status).toBe(502);
+      expect((err as InstanceType<typeof ApiClientError>).status).toBe(503);
       expect((err as InstanceType<typeof ApiClientError>).code).toBe("UNKNOWN");
-      expect((err as Error).message).toContain("502");
+      expect((err as Error).message).toContain("503");
     }
+  });
+
+  it("treats the tunnel's empty-body 502 as a TransportError", () => {
+    expect(() => parseRelayedLogin({ status: 502, body: "" })).toThrow(TransportError);
   });
 
   it("throws rather than silently succeeding on an unreadable 2xx body", () => {

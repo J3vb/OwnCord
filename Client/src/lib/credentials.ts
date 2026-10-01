@@ -4,7 +4,7 @@
  * where their callers already import them.
  */
 
-import { ApiClientError } from "./api";
+import { TransportError, httpError } from "./api";
 import { desktop } from "../platform/desktop";
 import type { SavedCredential, SavedLoginResponse } from "../platform/contracts/credentials";
 import type { AuthResponse } from "./types";
@@ -56,10 +56,11 @@ export function createUserUpdateCredentialSaver(
  *
  * Rust returns status and raw body without interpreting either, so this is the
  * single place the login contract is read for the saved-password path — it
- * mirrors `api.ts`'s `parseError` + `ApiClientError` so a caller can narrow on
+ * mirrors `api.ts`'s `parseError` + `httpError` so a caller can narrow on
  * `.status` / `.code` exactly as it can for a typed password.
  *
- * Throws `ApiClientError` for a non-2xx response. Throws a plain `Error` for a
+ * Throws `httpError`'s error for a non-2xx response: an `ApiClientError`, or a
+ * `TransportError` for the tunnel's bare 502. Throws a plain `Error` for a
  * 2xx whose body does not parse: returning an empty object there would leave
  * both the token and the 2FA branch unentered and strand the caller with no
  * result and no error.
@@ -80,7 +81,7 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
       typeof body?.message === "string"
         ? body.message
         : connectText("session.loginFailedStatus", { status: relayed.status });
-    throw new ApiClientError(relayed.status, code, message);
+    throw httpError(relayed.status, code, message);
   }
 
   if (body === null) {
@@ -89,12 +90,24 @@ export function parseRelayedLogin(relayed: SavedLoginResponse): AuthResponse {
   return body as unknown as AuthResponse;
 }
 
-/** Log in to `host` using the password saved in the OS credential store. */
+/**
+ * Log in to `host` using the password saved in the OS credential store. The
+ * backend's own connect, read, write, timeout and malformed-response failures
+ * (all "saved-password login…") reject as a `TransportError`; any other reason
+ * (no saved password, a locked keychain) rejects unchanged.
+ */
 export async function loginWithSavedPassword(
   host: string,
   username: string,
 ): Promise<SavedLoginResponse | null> {
-  return desktop.credentials.loginWithSavedPassword(host, username);
+  try {
+    return await desktop.credentials.loginWithSavedPassword(host, username);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("saved-password login")) {
+      throw new TransportError(err.message, { cause: err });
+    }
+    throw err;
+  }
 }
 
 /** Load the credential stored for `host`, or null when there is none. */

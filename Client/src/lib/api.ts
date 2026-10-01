@@ -82,43 +82,33 @@ function parseRetryAfterMs(res: Response): number | undefined {
   return value !== undefined && /^\d+$/.test(value) ? Number(value) * 1000 : undefined;
 }
 
-/** Why a request never reached the server: it was unreachable, or its TLS
- *  certificate was rejected. A typed error so callers can show friendly copy
- *  instead of the transport's raw text, while `cause` keeps that text for the
- *  log and diagnostics. */
-export type TransportErrorKind = "offline" | "tls";
-
 /**
- * A request the desktop HTTP tunnel never completed: the host is offline or
- * unreachable (`offline`), or its certificate could not be verified (`tls`).
- * Never an HTTP status — a response that arrived is an `ApiClientError`.
+ * A request that never reached the server: the host is offline or
+ * unreachable, or the desktop HTTP tunnel could not open a verified connection
+ * to it. `cause` keeps the transport's raw text for the log; the display copy
+ * is `errorText`'s.
  */
 export class TransportError extends Error {
-  readonly kind: TransportErrorKind;
-
-  constructor(kind: TransportErrorKind, message: string, options?: { cause?: unknown }) {
+  constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = "TransportError";
-    this.kind = kind;
   }
 }
 
 /**
- * The certificate/TLS failures the Rust HTTP proxy can surface: a rejected
- * rustls handshake, a mismatched or untrusted pin, a closed TLS connection.
- * A transport error whose text matches one of these is a `tls` error; every
- * other transport failure is `offline`. Deliberately broad — a false positive
- * still tells the user their connection to the server failed.
+ * The error for a non-2xx response. The desktop HTTP tunnel answers a
+ * connection it could not make (the host is down, or its certificate was
+ * rejected) with a bare 502 that carries no error code, so that shape is a
+ * `TransportError` rather than a server refusal.
  */
-const TLS_TRANSPORT = /certificate|cert\b|tls|ssl|handshake|unknownissuer|self-signed|peer cert/i;
-
-/** Turn a rejected `fetch` into a typed `TransportError`, keeping the raw text.
- *  A cancellation is re-thrown unchanged: it is not a failure to display. */
-function classifyTransport(fetchErr: unknown): Error {
-  if (fetchErr instanceof Error && fetchErr.name === "AbortError") return fetchErr;
-  const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-  const kind: TransportErrorKind = TLS_TRANSPORT.test(message) ? "tls" : "offline";
-  return new TransportError(kind, message, { cause: fetchErr });
+export function httpError(
+  status: number,
+  code: string,
+  message: string,
+  retryAfterMs?: number,
+): Error {
+  if (status === 502 && code === "UNKNOWN") return new TransportError(message);
+  return new ApiClientError(status, code, message, retryAfterMs);
 }
 
 function isSessionExpired(message: string): boolean {
@@ -269,9 +259,7 @@ export function serverErrorText(code: string, message: string, fallback: string)
 /** A failed request's text: friendly copy for a `TransportError`, `serverErrorText`
  *  for an `ApiClientError`, else the error's own message. */
 export function errorText(err: unknown, fallback: string): string {
-  if (err instanceof TransportError) {
-    return connectText(err.kind === "tls" ? "error.tlsFailed" : "error.unreachable");
-  }
+  if (err instanceof TransportError) return connectText("session.connectTimeout");
   if (err instanceof ApiClientError) return serverErrorText(err.code, err.message, fallback);
   return err instanceof Error ? err.message : fallback;
 }
@@ -640,7 +628,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         // The raw detail stays in the log; the caller gets a typed error so
         // display copy can be friendly (DP-54).
         log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
-        throw classifyTransport(fetchErr);
+        throw new TransportError(fetchErr instanceof Error ? fetchErr.message : String(fetchErr), {
+          cause: fetchErr,
+        });
       }
       owner.assertCurrent();
       log.debug(`${label} ←`, { method, path, status: res.status });
@@ -660,7 +650,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           message: err.message,
           reqId: res.headers.get("x-request-id") ?? undefined,
         });
-        throw new ApiClientError(res.status, err.error, err.message, parseRetryAfterMs(res));
+        throw httpError(res.status, err.error, err.message, parseRetryAfterMs(res));
       }
       if (res.status === 204) {
         releaseTransport();

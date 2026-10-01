@@ -1160,8 +1160,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } catch (err: unknown) {
       let message: string;
       if (err instanceof TransportError || err instanceof ApiClientError) {
-        // A transport failure or server refusal: plain catalog copy for a
-        // known kind or code, the capitalised server message otherwise.
+        // A transport failure or server refusal: plain catalog copy for an
+        // unreachable server or a known code, the capitalised server message
+        // otherwise.
         message = errorText(err, connectText("error.serverFallback"));
       } else if (err instanceof Error) {
         message = err.message;
