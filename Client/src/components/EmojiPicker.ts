@@ -414,6 +414,20 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   header.appendChild(searchInput);
   root.appendChild(header);
 
+  // Category bar: one button per category jumps its heading into view. Built
+  // once from the unfiltered set and rebuilt only on mount, so the targets
+  // stay put while a search filters the grids underneath.
+  const categoryBar = createElement("div", {
+    class: "ep-categories",
+    role: "group",
+    "aria-label": messagingText("emoji.categoriesLabel"),
+  });
+  root.appendChild(categoryBar);
+
+  // The picker grid is `.ep-grid { grid-template-columns: repeat(8, 1fr) }`,
+  // so roving navigation is a grid with eight columns (ArrowDown = one row).
+  const GRID_COLUMNS = 8;
+
   // Scrollable content area (holds category labels + grids). Announced as a
   // single flat listbox — the category grids are visual grouping only, and
   // roving tabindex (DC-13) treats every .ep-emoji cell as one list.
@@ -423,7 +437,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     "aria-label": messagingText("emoji.listLabel"),
   });
   root.appendChild(scrollArea);
-  enableRovingNavigation(scrollArea, ".ep-emoji", signal);
+  enableRovingNavigation(scrollArea, ".ep-emoji", signal, "grid", GRID_COLUMNS);
 
   // Single delegated listener for the whole grid, registered once at mount
   // time. renderAllCategories() discards and rebuilds every cell on each
@@ -445,6 +459,28 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     },
     { signal },
   );
+
+  function renderCategoryBar(categories: readonly EmojiCategory[]): void {
+    clearChildren(categoryBar);
+    for (const cat of categories) {
+      if (cat.emoji.length === 0) continue;
+      const btn = createElement(
+        "button",
+        { class: "ep-category-btn", type: "button", "data-category": cat.name },
+        messagingText(cat.name),
+      );
+      btn.addEventListener(
+        "click",
+        () => {
+          scrollArea
+            .querySelector(`.ep-category-label[data-category="${cat.name}"]`)
+            ?.scrollIntoView({ block: "start" });
+        },
+        { signal },
+      );
+      categoryBar.appendChild(btn);
+    }
+  }
 
   // Build categories with recent + custom
   function getAllCategories(): readonly EmojiCategory[] {
@@ -492,7 +528,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
       if (filtered.length === 0) continue;
 
-      const label = createElement("div", { class: "ep-category-label" });
+      const label = createElement("div", {
+        class: "ep-category-label",
+        "data-category": cat.name,
+      });
       setText(label, messagingText(cat.name));
       scrollArea.appendChild(label);
 
@@ -521,6 +560,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   }
 
   // Initial render
+  renderCategoryBar(getAllCategories());
   renderAllCategories(getAllCategories());
 
   // Search handler
@@ -529,6 +569,21 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     () => {
       searchQuery = searchInput.value.trim();
       renderAllCategories(getAllCategories());
+    },
+    { signal },
+  );
+
+  // Enter in the search box picks the first visible match, so a typed search
+  // is one Enter away from insertion. Empty results are a no-op.
+  searchInput.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Enter") return;
+      const first = scrollArea.querySelector<HTMLElement>(".ep-emoji");
+      if (first === null) return;
+      e.preventDefault();
+      const emoji = first.dataset.emoji;
+      if (emoji !== undefined) handleEmojiClick(emoji);
     },
     { signal },
   );

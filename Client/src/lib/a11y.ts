@@ -126,14 +126,19 @@ export function setRovingTabindex(container: HTMLElement, cellSelector: string):
  *
  * `orientation` picks the stepping axis: the horizontal default (the picker
  * grids) keeps ArrowLeft/Right; `"vertical"` is for a stacked navigation list
- * (the B9-21 shell sidebars) and uses ArrowUp/ArrowDown instead. Home/End and
- * Enter/Space are the same either way.
+ * (the B9-21 shell sidebars) and uses ArrowUp/ArrowDown instead. `"grid"`
+ * treats the flat cell list as rows of `gridColumns` (the emoji picker's
+ * eight-column grid): Up/Down step a whole row and stay put at the top/bottom
+ * edge rather than jumping to the end of the list, while Left/Right still step
+ * by one and clamp at the ends. Home/End and Enter/Space are the same either
+ * way.
  */
 export function enableRovingNavigation(
   container: HTMLElement,
   cellSelector: string,
   signal: AbortSignal,
-  orientation: "horizontal" | "vertical" = "horizontal",
+  orientation: "horizontal" | "vertical" | "grid" = "horizontal",
+  gridColumns = 8,
 ): void {
   container.addEventListener(
     "keydown",
@@ -157,14 +162,30 @@ export function enableRovingNavigation(
       // move within this list.
       if (e.altKey || e.ctrlKey || e.metaKey) return;
 
-      const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
-      const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
       let to: number;
-      if (e.key === nextKey) to = Math.min(from + 1, cells.length - 1);
-      else if (e.key === prevKey) to = Math.max(from - 1, 0);
-      else if (e.key === "Home") to = 0;
-      else if (e.key === "End") to = cells.length - 1;
-      else return;
+      if (orientation === "grid") {
+        // A whole-row step. Past the edge of the list, stay put rather than
+        // jumping to the opposite end — a Down on the last row must not wrap.
+        if (e.key === "ArrowRight") to = Math.min(from + 1, cells.length - 1);
+        else if (e.key === "ArrowLeft") to = Math.max(from - 1, 0);
+        else if (e.key === "ArrowDown") {
+          to = from + gridColumns;
+          if (to >= cells.length) to = from;
+        } else if (e.key === "ArrowUp") {
+          to = from - gridColumns;
+          if (to < 0) to = from;
+        } else if (e.key === "Home") to = 0;
+        else if (e.key === "End") to = cells.length - 1;
+        else return;
+      } else {
+        const nextKey = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+        const prevKey = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
+        if (e.key === nextKey) to = Math.min(from + 1, cells.length - 1);
+        else if (e.key === prevKey) to = Math.max(from - 1, 0);
+        else if (e.key === "Home") to = 0;
+        else if (e.key === "End") to = cells.length - 1;
+        else return;
+      }
 
       e.preventDefault();
       // Move the single Tab stop along with focus so tabbing away and back

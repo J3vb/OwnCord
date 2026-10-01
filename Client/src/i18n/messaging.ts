@@ -56,6 +56,7 @@ export const messagingText = defineCatalog("messaging", {
 
   "emoji.searchPlaceholder": "Search emoji...",
   "emoji.listLabel": "Emoji",
+  "emoji.categoriesLabel": "Emoji categories",
   "emoji.empty": "No emoji found",
   "emoji.customDetail": "Server emoji",
   "emoji.category.recent": "Recent",
