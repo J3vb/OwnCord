@@ -21,7 +21,8 @@ screen-share audio volume commands, and phase 3 (branch
 commands. The registration-based correction was measured at `0beee8e` (`dev`,
 2026-09-23) and re-measured after the audio-parity and screen-share merges at
 `2ced3de` (`dev`, 2026-09-23). P3-09 (branch `fm/dp-p309`, 2026-09-30) added
-the `SystemIdle` contract and its `system_idle_ms` command. The
+the `SystemIdle` contract and its `system_idle_ms` command, and P3-04 (branch
+`fm/dp-p304`, 2026-10-01) added the `set_unread_badge` command. The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -192,7 +193,7 @@ native surface itself lives only in `platform/desktop/`.
 | Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                       | ⚠ see hard cases                                            |
 | Settings          | `lib/profiles.ts`                                                             | `api/core` (`save_settings`, `get_settings`)                                                                               | `localStorage` / IndexedDB                                  |
 | Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                               | `api/core`; 3 invokes                                                                                                      | not needed — the proxies exist to work around desktop TLS   |
-| Notifications     | `lib/notifications.ts`, `main.ts`                                             | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
+| Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge) | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
 | Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`     | `api/path`, `plugin-fs`                                                                                                    | in-memory ring buffer + download                            |
 | Window            | `lib/window-state.ts`, `lib/notifications.ts`                                 | `api/window`                                                                                                               | mostly unsupported; degrade                                 |
 | Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                   | `api/core`, `plugin-process`, `plugin-autostart`                                                                           | unsupported — the page reloads instead                      |
