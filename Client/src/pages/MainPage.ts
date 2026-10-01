@@ -635,8 +635,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Auto-idle. It only ever moves a status it is itself responsible for
     // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
-    // whole session.
-    autoIdle = startAutoIdle({ onStatusChange: (status) => applyPresence(status) });
+    // whole session. The OS idle source makes input in other apps count too.
+    autoIdle = startAutoIdle({
+      onStatusChange: (status) => applyPresence(status),
+      systemIdleMs: () => desktop.systemIdle.idleMs(),
+    });
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {

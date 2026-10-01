@@ -12,6 +12,7 @@ mod external_content;
 mod fallback_crypto;
 mod http_pool;
 mod http_proxy;
+mod idle;
 mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
@@ -190,6 +191,7 @@ pub fn run() {
             http_proxy::stop_http_proxy,
             external_content::external_preview,
             external_content::external_image,
+            idle::system_idle_ms,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]

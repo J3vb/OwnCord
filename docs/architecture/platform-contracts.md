@@ -20,7 +20,8 @@ screen-share audio volume commands, and phase 3 (branch
 `fm/linux-screenshare-p3`, 2026-09-23), which added the four screen-share
 commands. The registration-based correction was measured at `0beee8e` (`dev`,
 2026-09-23) and re-measured after the audio-parity and screen-share merges at
-`2ced3de` (`dev`, 2026-09-23). The
+`2ced3de` (`dev`, 2026-09-23). P3-09 (branch `fm/dp-p309`, 2026-09-30) added
+the `SystemIdle` contract and its `system_idle_ms` command. The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -70,18 +71,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 23    |
-| Distinct `invoke` command names called from `Client/src/`  | 54    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 57    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 24    |
+| Distinct `invoke` command names called from `Client/src/`  | 55    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 58    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 49    |
+| Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 56 distinct registrations
+The handler count covers the 57 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the eighteen `native_voice_*` commands behind
-`#[cfg(target_os = "linux")]`, so a default build registers 55 on Linux and 37
+`#[cfg(target_os = "linux")]`, so a default build registers 56 on Linux and 38
 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -152,6 +153,7 @@ start_livekit_proxy
 stop_http_proxy
 stop_livekit_proxy
 store_identity_pin
+system_idle_ms
 voice_shortcuts_set_keys
 voice_shortcuts_start
 voice_shortcuts_supported
@@ -173,8 +175,9 @@ to desktop/browser branching.
 
 ## Proposed contracts
 
-Eighteen capability clusters (the seventeenth, external content, added by
-B7-16; the eighteenth, global shortcuts, added with U6). Each becomes one file
+Nineteen capability clusters (the seventeenth, external content, added by
+B7-16; the eighteenth, global shortcuts, added with U6; the nineteenth,
+system idle, added with P3-09). Each becomes one file
 under `contracts/` (a few split across two or three), with matching implementations under `desktop/` and
 `browser/`. Since B7-5 the "Files today" column names the app-side callers; the
 native surface itself lives only in `platform/desktop/`.
@@ -199,6 +202,7 @@ native surface itself lives only in `platform/desktop/`.
 | Deep links        | `lib/deep-link.ts`                                                            | `plugin-deep-link`                                                                                     | URL routing                                                 |
 | App metadata      | `settings/LogsTab.ts`                                                         | `api/app`                                                                                              | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                                                                           | unsupported — the browser has its own devtools already      |
+| System idle       | `pages/MainPage.ts` (for `lib/autoIdle.ts`)                                   | `api/core` (`system_idle_ms`)                                                                          | unsupported — answers `null`; in-page activity decides      |
 
 **Media devices are not on this map, deliberately.** No `@tauri-apps` surface
 exists for them: every media-device call site (`lib/deviceManager.ts`,
