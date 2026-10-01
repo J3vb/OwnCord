@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
@@ -203,6 +204,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
 		broadcast:           make(chan broadcastMsg, 1024),
 		clientEvents:        make(chan clientEvent, 64),
+		readyGate:           make(chan struct{}, 2*runtime.GOMAXPROCS(0)),
 		stop:                make(chan struct{}),
 		runDone:             make(chan struct{}),
 		pubsub:              NewPubSub(),

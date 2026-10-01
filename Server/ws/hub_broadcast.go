@@ -134,9 +134,10 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
 // reason says why the server is restarting; delaySeconds tells clients how
-// long until the socket drops, and 0 cancels an earlier announcement.
+// long until the socket drops, and 0 cancels an earlier announcement. The
+// redial spread scales with who is connected now (P5-S04).
 func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
-	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
+	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds, restartSpreadMS(h.ClientCount())))
 }
 
 // BroadcastChannelCreate sends a channel_create message to the connected

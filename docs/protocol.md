@@ -2013,7 +2013,8 @@ and the ringer's own 30s window already covers it.
   "type": "server_restart",
   "payload": {
     "reason": "update",
-    "delay_seconds": 5
+    "delay_seconds": 5,
+    "reconnect_spread_ms": 20000
   }
 }
 ```
@@ -2043,6 +2044,38 @@ After the drop, the client re-joins the call with one ordinary `voice_join`
 once `ready` arrives, within a window that depends on the `reason`
 ([voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md), RT-12).
 A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
+
+`reconnect_spread_ms` spreads the reconnect herd: 10 ms per client connected
+when the notice is sent, capped at 30 000 (2,000 clients get 20 s). Each client
+picks a uniform offset in `[0, reconnect_spread_ms]` and makes its first
+redial at `delay_seconds` plus that offset after the notice, or that offset
+after the drop when the socket drops later than announced. A network-return or
+focus signal does not cut this wait short, unlike an ordinary reconnect's
+backoff. A server that predates the field omits it; treat that as 0.
+
+### Fresh-connect admission (`SERVER_BUSY`)
+
+A fresh connect (and a resume that falls back to a full `ready`) takes one of
+a bounded number of ready-build permits (2 × the server's CPU count) after
+`auth` is accepted and before any handshake work. It waits up to 10 s for one;
+past that the server sends, before `auth_ok`,
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "SERVER_BUSY",
+    "message": "server busy, retrying shortly",
+    "retry_after_ms": 3712
+  }
+}
+```
+
+and closes with status 1013 (try again later). `retry_after_ms` is drawn from
+2.5–5 s per refusal, so the refused connects do not return together; a client
+waits at least that long before redialling. The desktop client does this
+silently, without an error toast. A warm resume served by replay never waits
+for a permit.
 
 ---
 
@@ -2086,6 +2119,7 @@ A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 | `SERVER_MUTED`          | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`       | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`      | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
+| `SERVER_BUSY`           | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                                                     |
 | `ANOTHER_DEVICE_ACTIVE` | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.

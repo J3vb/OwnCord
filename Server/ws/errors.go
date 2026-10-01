@@ -42,4 +42,8 @@ const (
 	// displacing the live session; the client stops reconnecting and offers
 	// "Use here" so the user chooses whether to take over.
 	ErrCodeAnotherDeviceActive = "ANOTHER_DEVICE_ACTIVE"
+	// ErrCodeServerBusy refuses a fresh connect that waited readyAdmissionWait
+	// for a ready-build permit (P5-S04). It carries retry_after_ms, and the
+	// socket closes 1013 right after; the client redials no sooner.
+	ErrCodeServerBusy = "SERVER_BUSY"
 )

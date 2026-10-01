@@ -49,6 +49,7 @@ function transportHarness() {
       message(JSON.stringify({ type: "auth_ok", payload: { replay_source: "none" } }));
     },
     mismatch: () => mismatch({ host: "example.com", fingerprint: "new", status: "mismatch" }),
+    frame: (type: string, payload: unknown) => message(JSON.stringify({ type, payload })),
   };
 }
 
@@ -245,5 +246,101 @@ describe("RI-05 reconnect spreading", () => {
       await vi.advanceTimersByTimeAsync(750);
       peer.authenticate();
     }
+  });
+});
+
+describe("P5-S04 restart spread and server busy", () => {
+  const restart = (delay_seconds: number, reconnect_spread_ms?: number) => ({
+    reason: "update",
+    delay_seconds,
+    ...(reconnect_spread_ms !== undefined ? { reconnect_spread_ms } : {}),
+  });
+
+  it("lands each client's first redial in [delay, delay + spread] and spreads them", async () => {
+    const clock = fakeClock();
+    const random = seededRandom(7);
+    const firsts: number[] = [];
+    const peers = Array.from({ length: 64 }, () => {
+      const peer = transportHarness();
+      client({ clock, random });
+      peer.authenticate();
+      vi.mocked(peer.transport.connect).mockImplementation(async () => {
+        firsts.push(Date.now());
+        peer.authenticate();
+      });
+      return peer;
+    });
+    for (const peer of peers) peer.frame("server_restart", restart(5, 20_000));
+    await vi.advanceTimersByTimeAsync(5000);
+    for (const peer of peers) peer.close(); // the server drops everyone at once
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(firsts).toHaveLength(64);
+    expect(Math.min(...firsts)).toBeGreaterThanOrEqual(5000);
+    expect(Math.max(...firsts)).toBeLessThanOrEqual(25_000);
+    expect(Math.max(...firsts) - Math.min(...firsts)).toBeGreaterThan(15_000);
+  });
+
+  it("keeps the client's offset when the drop comes after the announced delay", async () => {
+    const peer = transportHarness();
+    const clock = fakeClock();
+    client({ clock, random: () => 0.5 });
+    peer.authenticate();
+    peer.frame("server_restart", restart(5, 10_000));
+    await vi.advanceTimersByTimeAsync(40_000);
+    peer.close();
+    expect(clock.setTimeout.mock.lastCall?.[1]).toBe(5000);
+  });
+
+  it("does not let a wake signal cut the restart wait short", async () => {
+    const peer = transportHarness();
+    const clock = fakeClock();
+    client({ clock, random: () => 1 });
+    peer.authenticate();
+    peer.frame("server_restart", restart(5, 10_000));
+    await vi.advanceTimersByTimeAsync(5000);
+    peer.close();
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(peer.transport.connect).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(peer.transport.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to the ordinary backoff after a cancelled announcement or without a spread", async () => {
+    const peer = transportHarness();
+    const clock = fakeClock();
+    client({ clock, random: () => 0 });
+    peer.authenticate();
+    peer.frame("server_restart", restart(5, 10_000));
+    peer.frame("server_restart", { reason: "update_aborted", delay_seconds: 0 });
+    peer.close();
+    expect(clock.setTimeout.mock.lastCall?.[1]).toBe(500);
+    await vi.advanceTimersByTimeAsync(500);
+    peer.authenticate();
+    // An older server sends no spread: redial at the announced delay.
+    peer.frame("server_restart", restart(5));
+    await vi.advanceTimersByTimeAsync(5000);
+    peer.close();
+    expect(clock.setTimeout.mock.lastCall?.[1]).toBe(0);
+  });
+
+  it("waits out SERVER_BUSY's retry_after_ms without surfacing the error", async () => {
+    const peer = transportHarness();
+    const clock = fakeClock();
+    const instance = client({ clock, random: () => 0 });
+    const errors = vi.fn();
+    instance.on("error", errors);
+    peer.authenticate();
+    peer.close();
+    await vi.advanceTimersByTimeAsync(500);
+    peer.frame("error", { code: "SERVER_BUSY", message: "busy", retry_after_ms: 3500 });
+    peer.close();
+    expect(errors).not.toHaveBeenCalled();
+    expect(clock.setTimeout.mock.lastCall?.[1]).toBe(3500);
+    // The hint applies to that one refusal only.
+    await vi.advanceTimersByTimeAsync(3500);
+    peer.close();
+    expect(clock.setTimeout.mock.lastCall?.[1]).toBe(2000);
   });
 });

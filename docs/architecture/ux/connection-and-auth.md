@@ -212,7 +212,9 @@ The WS client auto-reconnects with exponential backoff (base 1 s, cap 30 s, no
 jitter; the `DEFAULT_MAX_RECONNECT_DELAY` constant in `lib/ws.ts`), preserving `last_seq` for replay. While it waits
 out a backoff, the network coming back (`online`) or the window becoming visible cancels the wait and dials at once
 (at most once per 2 s, `WAKE_KICK_FLOOR_MS`). That dial takes the timer's own path, so the wake check below still
-applies, and it never fires after `disconnect()`, `auth_error` or a certificate-mismatch latch. The **first**
+applies, and it never fires after `disconnect()`, `auth_error` or a certificate-mismatch latch. After a `server_restart`, the first redial instead waits `delay_seconds` plus this client's random offset in
+`reconnect_spread_ms`, and no wake signal cuts that wait short; a `SERVER_BUSY` refusal is redialled no sooner than
+its `retry_after_ms` (P5-S04, [protocol.md](../../protocol.md#fresh-connect-admission-server_busy)). The **first**
 authentication is additionally bounded by a 20 s deadline (`PREAUTH_CONNECT_TIMEOUT_MS`): a login or stored-token
 auto-login that never reaches `auth_ok` returns to the form with "Couldn't reach this server — it may be offline"
 rather than retrying forever behind the connecting overlay. A stored-token resume (auto-login or a quick switch

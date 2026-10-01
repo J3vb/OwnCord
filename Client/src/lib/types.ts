@@ -73,6 +73,9 @@ export type WsErrorCode =
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
   | "SESSION_REPLACED"
+  // A fresh connect refused while the server's ready builds are saturated;
+  // carries retry_after_ms and is handled inside ws.ts (P5-S04).
+  | "SERVER_BUSY"
   // A wake reconnect (auth frame `wake: true`) refused because another device
   // currently holds the account's one live socket. The client stays signed in
   // and does not reconnect until the user chooses "Use here" (U4).
@@ -785,11 +788,15 @@ export interface DmRequestPayload extends DmRequestListItem {
 export interface ServerRestartPayload {
   readonly reason: ServerRestartReasonValue;
   readonly delay_seconds: number;
+  /** P5-S04: window after delay_seconds to spread the redial over (absent from older servers). */
+  readonly reconnect_spread_ms?: number;
 }
 
 export interface ErrorPayload {
   readonly code: WsErrorCode;
   readonly message: string;
+  /** SERVER_BUSY only: the least wait before redialling. */
+  readonly retry_after_ms?: number;
 }
 
 // -----------------------------------------------------------------------------

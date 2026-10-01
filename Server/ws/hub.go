@@ -107,9 +107,8 @@ type Hub struct {
 	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
 	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
 
-	// connRejects counts upgrade requests refused by the max_ws_connections
-	// capacity guardrail (ServeWS).
-	connRejects atomic.Uint64
+	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
+	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
 	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
 	// compiled-in default (maxColdReplay). HubOptions.ReplayColdLimit (B3-4).
