@@ -205,6 +205,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_microphone,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_ptt_gated,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_set_subscribed,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_video_view,

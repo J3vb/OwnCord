@@ -137,6 +137,10 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setMicrophone", args]);
         return Promise.resolve();
       },
+      setPttGated: (...args: unknown[]) => {
+        host.commands.push(["setPttGated", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.commands.push(["setSubscribed", args]);
         return Promise.resolve();
@@ -292,7 +296,8 @@ describe("LiveKitSession on the Linux native backend", () => {
 
   it("installs the room key natively before connecting, then publishes the mic", async () => {
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
-    expect(names()).toEqual(["setRoomKey", "connect", "setMicrophone"]);
+    // The push-to-talk gate is set before the capture opens behind it.
+    expect(names()).toEqual(["setRoomKey", "connect", "setPttGated", "setMicrophone"]);
     expect(host.commands[0]).toEqual(["setRoomKey", ["mock-room-key-base64"]]);
     expect(host.commands[1]).toEqual([
       "connect",
@@ -307,7 +312,8 @@ describe("LiveKitSession on the Linux native backend", () => {
         },
       ],
     ]);
-    expect(host.commands[2]).toEqual(["setMicrophone", [1, true]]);
+    expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
+    expect(host.commands[3]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
     expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
     expect(setListenOnly).toHaveBeenCalledWith(false);
@@ -470,9 +476,15 @@ describe("LiveKitSession on the Linux native backend", () => {
       for (let i = 0; i < 30 && !names().includes("setMicrophone"); i++) {
         await vi.advanceTimersByTimeAsync(1000);
       }
-      expect(names()).toEqual(["disconnect", "setRoomKey", "connect", "setMicrophone"]);
+      expect(names()).toEqual([
+        "disconnect",
+        "setRoomKey",
+        "connect",
+        "setPttGated",
+        "setMicrophone",
+      ]);
       expect(host.commands[0]).toEqual(["disconnect", [1]]);
-      expect(host.commands[3]).toEqual(["setMicrophone", [2, true]]);
+      expect(host.commands[4]).toEqual(["setMicrophone", [2, true]]);
       expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
       // The old session's subscription is gone; only the new room listens.
       expect(host.handlers.size).toBe(1);
@@ -491,10 +503,11 @@ describe("LiveKitSession on the Linux native backend", () => {
       "clearRoomKey",
       "setRoomKey",
       "connect",
+      "setPttGated",
       "setMicrophone",
     ]);
     expect(host.commands[0]).toEqual(["disconnect", [1]]);
-    expect(host.commands[4]).toEqual(["setMicrophone", [2, true]]);
+    expect(host.commands[5]).toEqual(["setMicrophone", [2, true]]);
   });
 
   it("screen share captures natively and stops when the desktop ends it", async () => {

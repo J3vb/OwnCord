@@ -278,6 +278,22 @@ pub async fn native_voice_set_microphone(
         .await
 }
 
+/// Close or open push-to-talk's gate on `session`'s microphone (DP-30).
+#[tauri::command]
+pub async fn native_voice_set_ptt_gated(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    gated: bool,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_ptt_gated(gated);
+    Ok(())
+}
+
 /// Publish (or replace) the camera; its frames then arrive on the session's
 /// frame socket. Returns the publication sid `native_voice_unpublish_camera`
 /// takes.

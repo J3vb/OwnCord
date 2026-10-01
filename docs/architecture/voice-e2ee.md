@@ -132,6 +132,7 @@ and `tests/unit/platform/nativeVoice.suite.ts` pins the host contract.
 **Commands and events.** `native_voice_set_key` (install/rotate),
 `native_voice_clear_key` (leave), `native_voice_connect` → `{session, identity}`,
 `native_voice_disconnect(session)`, `native_voice_set_microphone`,
+`native_voice_set_ptt_gated` (push-to-talk's gate: silence from an open capture),
 `native_voice_set_subscribed` (deafen), `native_voice_set_video_view` (a
 remote video's layer, or none while no tile shows it), `native_voice_set_volume` and
 `native_voice_set_screenshare_volume` (per-user and screen-share audio volume,

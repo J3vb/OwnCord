@@ -601,6 +601,12 @@ impl NativeSession {
         Ok(())
     }
 
+    /// Close or open push-to-talk's gate: the capture and the publication
+    /// stay as they are, and a closed gate sends silence (DP-30).
+    pub fn set_ptt_gated(&self, gated: bool) {
+        self.capture.set_ptt_gated(gated);
+    }
+
     /// Publish any audio source as the microphone track. The app passes its
     /// capture's source; the interop example passes a synthetic sine.
     pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {

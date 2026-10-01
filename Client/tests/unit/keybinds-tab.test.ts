@@ -5,7 +5,8 @@ const mockUpdatePttKey = vi.fn();
 const mockPttSupported = vi.fn(async () => true);
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
-vi.mock("@lib/ptt", () => ({
+vi.mock("@lib/ptt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/ptt")>()),
   vkName: (vk: number) => mockVkName(vk),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
@@ -49,6 +50,30 @@ describe("KeybindsTab", () => {
   function capture(element: EventTarget, code: string, init: KeyboardEventInit = {}): void {
     element.dispatchEvent(new KeyboardEvent("keydown", { code, bubbles: true, ...init }));
   }
+
+  it("saves the push-to-talk release delay from its slider, 20 ms by default", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const slider = el.querySelector("[data-testid='ptt-release-delay']") as HTMLInputElement;
+    const value = el.querySelector("[data-testid='ptt-release-delay-value']")!;
+    expect(slider.type).toBe("range");
+    expect([slider.min, slider.max, slider.value]).toEqual(["0", "2000", "20"]);
+    expect(slider.getAttribute("aria-label")).toBe("Push to Talk release delay");
+    expect(value.textContent).toBe("20 ms");
+
+    slider.value = "250";
+    slider.dispatchEvent(new Event("input"));
+
+    expect(localStorage.getItem("owncord:settings:pttReleaseDelayMs")).toBe("250");
+    expect(value.textContent).toBe("250 ms");
+    expect(slider.getAttribute("aria-valuetext")).toBe("250 ms");
+  });
+
+  it("disables the release delay where push-to-talk cannot gate the mic", async () => {
+    mockPttSupported.mockResolvedValueOnce(false);
+    const el = buildKeybindsTab(new AbortController().signal);
+    const slider = el.querySelector("[data-testid='ptt-release-delay']") as HTMLInputElement;
+    await vi.waitFor(() => expect(slider.disabled).toBe(true));
+  });
 
   it("shows the shipped defaults for the global shortcuts and lets each be rebound", async () => {
     const el = buildKeybindsTab(new AbortController().signal);

@@ -1060,6 +1060,8 @@ describe("PTT binding lifecycle races", () => {
         Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
       );
       testPrefs.set("pttVk", 0x20);
+      // The release must have closed the gate already (no release delay).
+      testPrefs.set("pttReleaseDelayMs", 0);
       await initPtt();
       const oldStateHandler = mockListen.mock.calls.find(([name]) => name === "ptt-state")![1];
       oldStateHandler({ payload: false });
@@ -1172,5 +1174,109 @@ describe("PTT binding lifecycle races", () => {
     await vi.dynamicImportSettled();
     expect(mockSetPttGated).not.toHaveBeenCalled();
     expect(mockSetMuted).not.toHaveBeenCalled();
+  });
+});
+
+// DP-30: a release keeps the gate open for the saved delay (D5: 20 ms by
+// default, 0–2000 ms), and a press inside it cancels the close, so a short
+// pause between words never cuts the next one.
+describe("ptt release delay", () => {
+  beforeEach(() => {
+    resetAll();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  async function bind(): Promise<(event: { payload: boolean }) => void> {
+    testPrefs.set("pttVk", 0x20);
+    let cb: ((event: { payload: boolean }) => void) | null = null;
+    mockListen.mockImplementation((_event: string, fn: (e: { payload: boolean }) => void) => {
+      cb = fn;
+      return Promise.resolve(() => {});
+    });
+    await initPtt();
+    mockSetPttGated.mockClear();
+    return cb!;
+  }
+
+  /** Deliver a key edge and let its lazy livekitSession import settle. */
+  async function edgeOf(cb: (event: { payload: boolean }) => void, pressed: boolean) {
+    cb({ payload: pressed });
+    await vi.dynamicImportSettled();
+  }
+
+  const gateCalls = () => mockSetPttGated.mock.calls.map((c) => c[0]);
+
+  it("a press after a release only toggles the gate and never touches mute", async () => {
+    mockCurrentChannelId = 7;
+    const key = await bind();
+
+    await edgeOf(key, true);
+    await edgeOf(key, false);
+    await vi.advanceTimersByTimeAsync(20);
+    await edgeOf(key, true);
+
+    expect(gateCalls()).toEqual([false, true, false]);
+    expect(mockSetMuted).not.toHaveBeenCalled();
+  });
+
+  it("release then press within the delay transmits continuously; release past the delay gates once", async () => {
+    mockCurrentChannelId = 7;
+    const key = await bind();
+
+    await edgeOf(key, true);
+    await edgeOf(key, false);
+    await vi.advanceTimersByTimeAsync(10);
+    await edgeOf(key, true);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(gateCalls()).not.toContain(true);
+
+    await edgeOf(key, false);
+    await vi.advanceTimersByTimeAsync(19);
+    expect(gateCalls()).not.toContain(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(gateCalls().filter((g) => g)).toEqual([true]);
+  });
+
+  it("follows the saved delay, and a delay of 0 closes on the release itself", async () => {
+    mockCurrentChannelId = 7;
+    testPrefs.set("pttReleaseDelayMs", 300);
+    const key = await bind();
+    await edgeOf(key, true);
+    await edgeOf(key, false);
+    await vi.advanceTimersByTimeAsync(299);
+    expect(gateCalls()).toEqual([false]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(gateCalls()).toEqual([false, true]);
+
+    testPrefs.set("pttReleaseDelayMs", 0);
+    await edgeOf(key, true);
+    await edgeOf(key, false);
+    expect(gateCalls()).toEqual([false, true, false, true]);
+  });
+
+  it("caps a saved delay at 2000 ms", async () => {
+    mockCurrentChannelId = 7;
+    testPrefs.set("pttReleaseDelayMs", 60_000);
+    const key = await bind();
+    await edgeOf(key, true);
+    await edgeOf(key, false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(gateCalls()).toEqual([false, true]);
+  });
+
+  it("a pending close is dropped when the call ends or the binding is cleared", async () => {
+    mockCurrentChannelId = 7;
+    const key = await bind();
+    await edgeOf(key, true);
+    await edgeOf(key, false);
+    mockCurrentChannelId = null;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(gateCalls()).toEqual([false]);
   });
 });
