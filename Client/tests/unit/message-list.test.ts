@@ -15,6 +15,18 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
+// An avatar change repaints through createAvatarElement, which fetches the
+// picture bytes through the authenticated attachment path. Stub just that fetch
+// so the swap can be observed; the URL resolution stays real.
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+}));
+vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
+});
+
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
@@ -1248,6 +1260,53 @@ describe("MessageList", () => {
       expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
       expect(container.querySelector("[data-testid='message-2']")).toBe(row2);
       expect(rrAuthor().textContent).toBe("Alicia");
+    });
+
+    it("refetches an author's avatar on an avatar-only profile change (OC-0108)", async () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "Alice",
+              avatar: "/api/v1/files/old",
+              role: "member",
+              status: "online" as const,
+            },
+          ],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      fetchImageAsObjectUrlMock.mockClear();
+      setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      // The initial row's own avatar fetch, then the change below.
+      await vi.waitFor(() => {
+        expect(fetchImageAsObjectUrlMock).toHaveBeenCalledWith("/api/v1/files/old");
+      });
+      fetchImageAsObjectUrlMock.mockClear();
+
+      // Only the avatar changes; username and role stay put. The author key
+      // includes the avatar URL, so the row must rebuild and refetch, not just
+      // repaint the letter fallback.
+      membersStore.setState((prev) => {
+        const next = new Map(prev.members);
+        next.set(1, { ...next.get(1)!, avatar: "/api/v1/files/new" });
+        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+      });
+      membersStore.flush();
+
+      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      const rowAvatar = row1!.querySelector<HTMLElement>(".msg-avatar")!;
+      await vi.waitFor(() => {
+        expect(rowAvatar.querySelector<HTMLImageElement>(".avatar-img")?.getAttribute("src")).toBe(
+          "data:image/png;base64,AAAA",
+        );
+      });
+      expect(fetchImageAsObjectUrlMock).toHaveBeenCalledWith("/api/v1/files/new");
     });
   });
 

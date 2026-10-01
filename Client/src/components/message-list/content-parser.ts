@@ -414,7 +414,6 @@ type ParsedSegment =
     };
 
 interface ParsedMessage {
-  readonly jumboClass: string;
   readonly segments: readonly ParsedSegment[];
 }
 
@@ -456,11 +455,6 @@ function parseBlocksInto(text: string, depth: number): readonly ParsedBlock[] {
 }
 
 function parseMessageContent(content: string): ParsedMessage {
-  // A message that is nothing but emoji renders them large, the way Discord
-  // does. Decided once over the whole content — the class is what sizes both
-  // the unicode glyphs and the custom-emoji images, so nothing downstream has
-  // to be told about it.
-  const jumboClass = isEmojiOnlyMessage(content) ? "msg-text msg-text-jumbo" : "msg-text";
   const segments: ParsedSegment[] = [];
   for (const segment of splitCodeFences(content)) {
     if (segment.kind === "code") {
@@ -479,7 +473,7 @@ function parseMessageContent(content: string): ParsedMessage {
     if (prose.trim().length === 0) continue;
     segments.push({ kind: "prose", blocks: parseBlocksInto(prose, 0) });
   }
-  return { jumboClass, segments };
+  return { segments };
 }
 
 // -- Block rendering ----------------------------------------------------------
@@ -643,13 +637,14 @@ export function renderMessageContent(
 ): DocumentFragment {
   const parsed = parsedFor(content, cacheKey);
   const fragment = document.createDocumentFragment();
+  const jumboClass = isEmojiOnlyMessage(content) ? "msg-text msg-text-jumbo" : "msg-text";
 
   for (const segment of parsed.segments) {
     if (segment.kind === "code") {
       fragment.appendChild(renderParsedCodeBlock(segment));
       continue;
     }
-    const text = createElement("div", { class: parsed.jumboClass });
+    const text = createElement("div", { class: jumboClass });
     renderParsedBlocks(text, segment.blocks, info);
     fragment.appendChild(text);
   }

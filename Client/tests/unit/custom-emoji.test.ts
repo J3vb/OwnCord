@@ -34,7 +34,10 @@ import {
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
 } from "../../src/components/message-list/custom-emoji";
-import { renderMessageContent } from "../../src/components/message-list/content-parser";
+import {
+  renderMessageContent,
+  clearContentParseCache,
+} from "../../src/components/message-list/content-parser";
 import { renderReactions } from "../../src/components/message-list/reactions";
 import {
   emojiStore,
@@ -281,6 +284,25 @@ describe("jumbo emoji", () => {
     expect(render("🔥🔥").querySelector(".msg-text-jumbo")).not.toBeNull();
     expect(render("hi :wave:").querySelector(".msg-text-jumbo")).toBeNull();
     expect(render("hi :wave:").querySelector(".msg-text")).not.toBeNull();
+  });
+
+  it("recomputes jumbo from the live emoji store under an unchanged cache key", () => {
+    clearContentParseCache();
+    const host = document.createElement("div");
+    // Drawn before the custom emoji set is known: the shortcode is unresolved,
+    // so this is not emoji-only.
+    clearCustomEmoji();
+    emojiStore.flush();
+    host.appendChild(renderMessageContent(":wave:", undefined, "1\u00000"));
+    expect(host.querySelector(".msg-text-jumbo")).toBeNull();
+
+    // The same message identity (id + editedAt), now that :wave: resolves, must
+    // render jumbo rather than serving the cached non-jumbo decision.
+    host.replaceChildren();
+    setCustomEmoji(EMOJI);
+    emojiStore.flush();
+    host.appendChild(renderMessageContent(":wave:", undefined, "1\u00000"));
+    expect(host.querySelector(".msg-text-jumbo")).not.toBeNull();
   });
 });
 

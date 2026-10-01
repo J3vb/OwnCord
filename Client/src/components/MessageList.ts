@@ -31,6 +31,7 @@ import {
   authorAvatarKey,
   refreshConnectionControls,
 } from "./message-list/renderers";
+import { createAvatarElement } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
 import { clearContentParseCache } from "./message-list/content-parser";
 import { canManageMessages } from "@lib/permissions";
@@ -1334,13 +1335,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
       const avatar = el.querySelector<HTMLElement>(".msg-avatar");
       if (avatar !== null) {
-        // A loaded picture already owns the wrapper's background; the letter
-        // fallback repaints to the new role colour and initial.
-        if (avatar.querySelector(".avatar-img") === null) {
-          avatar.style.background = roleColor;
-        }
-        const initial = avatar.querySelector<HTMLElement>(".avatar-initial");
-        if (initial !== null) initial.textContent = name.charAt(0).toUpperCase() || "?";
+        avatar.replaceWith(
+          createAvatarElement(author, { className: "msg-avatar", background: roleColor }),
+        );
       }
     }
   }
@@ -1367,9 +1364,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (authorEl !== null) authorEl.textContent = name;
       const avatar = bar.querySelector<HTMLElement>(".rr-avatar");
       if (avatar !== null) {
-        if (avatar.querySelector(".avatar-img") === null) avatar.style.background = roleColor;
-        const initial = avatar.querySelector<HTMLElement>(".avatar-initial");
-        if (initial !== null) initial.textContent = name.charAt(0).toUpperCase() || "?";
+        avatar.replaceWith(
+          createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+        );
       }
     }
   }
