@@ -255,7 +255,7 @@ pub async fn ws_connect<R: Runtime>(
     info!("[ws_proxy] connected to {}", host);
     emit_ws_state(&app, "open");
     // Record the host this session is on, so the credential and identity
-    // commands can refuse any other host while it is live (finding 5).
+    // commands can refuse any other host while it is live.
     session.set(&host);
 
     let app_read = app.clone();
@@ -434,7 +434,7 @@ pub async fn ws_disconnect(
     // unused: nothing will ever install under it.
     state.begin_connection().await;
     // Logout / server switch: no session is live, so the credential and
-    // identity commands fall back to their pre-session rule (finding 5).
+    // identity commands fall back to their pre-session rule.
     session.clear();
     Ok(())
 }

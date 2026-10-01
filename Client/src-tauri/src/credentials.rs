@@ -213,7 +213,7 @@ pub fn load_credential(
     host: String,
 ) -> Result<Option<CredentialData>, String> {
     // Pre-session: the connect page prefills and auto-login reads before any
-    // ws_connect. Once a session exists, only its host may be read (finding 5).
+    // ws_connect. Once a session exists, only its host may be read.
     session.ensure(&host, true)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
@@ -299,7 +299,7 @@ pub fn save_identity_key(
     key: String,
 ) -> Result<(), String> {
     // Never pre-session: this runs from the ready/voice flow, by which point a
-    // session is established. Only its host may be written (finding 5).
+    // session is established. Only its host may be written.
     session.ensure_identity_scope(&host, false)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
@@ -320,7 +320,7 @@ pub fn load_identity_key(
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
 ) -> Result<Option<String>, String> {
-    // Never pre-session, same as save_identity_key (finding 5).
+    // Never pre-session, same as save_identity_key.
     session.ensure_identity_scope(&host, false)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
@@ -338,7 +338,7 @@ pub fn delete_identity_key(
     session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
 ) -> Result<(), String> {
-    // Never pre-session, same as save_identity_key (finding 5).
+    // Never pre-session, same as save_identity_key.
     session.ensure_identity_scope(&host, false)?;
     with_credential_lock(|| {
         require_non_empty(&host, "host")?;
@@ -476,7 +476,7 @@ pub async fn login_with_saved_password(
 ) -> Result<SavedLoginResponse, String> {
     // Pre-session by definition: this IS the login that establishes a session,
     // and it runs before ws_connect. Once a session exists, only its host may
-    // be used (finding 5).
+    // be used.
     session.ensure(&host, true)?;
     require_non_empty(&host, "host")?;
     require_non_empty(&username, "username")?;

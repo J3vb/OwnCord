@@ -1,9 +1,8 @@
 //! The host of the session this process is currently connected to.
 //!
-//! Defence in depth for the finding-5 blast radius: a renderer compromise must
-//! not reach every saved server's credentials and pins, only the server the app
-//! is signed into now. `ws_connect` records the host it dialled, and
-//! `ws_disconnect` (logout, server switch) clears it.
+//! Scopes credential and identity commands to the server the app is signed
+//! into now. `ws_connect` records the host it dialled, and `ws_disconnect`
+//! (logout, server switch) clears it.
 //!
 //! Some commands legitimately run before any session exists — the connect
 //! page's credential prefill and the saved-password login. Those pass
@@ -171,8 +170,8 @@ mod tests {
 
     #[test]
     fn load_credential_for_a_non_active_host_is_refused() {
-        // The finding-5 acceptance case: with a live session on one host, a
-        // credential read for any other host is refused.
+        // With a live session on one host, a credential read for any other
+        // host is refused.
         let session = ActiveSession::new();
         session.set("chat.example.com");
         assert!(session.ensure("other.example.com", true).is_err());

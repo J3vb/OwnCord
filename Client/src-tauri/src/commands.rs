@@ -124,7 +124,7 @@ pub fn store_identity_pin(
     pin: String,
 ) -> Result<(), String> {
     // Never pre-session: peer pins are written during an authenticated voice
-    // session. Only its host's pins may be written (finding 5).
+    // session. Only its host's pins may be written.
     session.ensure(&host, false)?;
     if host.is_empty() || host.len() > 253 {
         return Err("host must be 1-253 characters".into());
