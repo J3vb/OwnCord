@@ -67,3 +67,21 @@ describe("NotificationsTab — notification level", () => {
     expect(all.getAttribute("aria-checked")).toBe("true");
   });
 });
+
+// D2(b): the ringtone has its own switch, on by default, so turning message
+// sounds off does not silence a ringing phone.
+describe("NotificationsTab — incoming call sound", () => {
+  it("is on by default and saves its own preference, apart from message sounds", () => {
+    const tab = build();
+    const toggle = tab.querySelector<HTMLElement>(
+      "[role='switch'][aria-label='Incoming Call Sound']",
+    )!;
+    expect(toggle).not.toBeNull();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+
+    toggle.click();
+
+    expect(localStorage.getItem("owncord:settings:callSounds")).toBe("false");
+    expect(localStorage.getItem("owncord:settings:notificationSounds")).toBeNull();
+  });
+});

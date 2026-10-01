@@ -98,6 +98,8 @@ import type { ContentNavigator } from "../features/navigation/contentView";
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
 const SESSION_NOTICE_TOAST_MS = 12_000;
+/** DP-24's call notification and missed-call notice: loaded on the first ring. */
+const callAlerts = () => import("../features/direct-messages/callAlerts");
 
 // ---------------------------------------------------------------------------
 // Options
@@ -983,6 +985,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDecline: (channelId) => {
         ws.send({ type: "call_decline", payload: { channel_id: channelId } });
       },
+      onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
+      onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
     });
     callBanner = createIncomingCallBanner({
       onAccept: () => acceptRing(false),

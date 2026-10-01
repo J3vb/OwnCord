@@ -22,6 +22,8 @@ export interface NativeControl {
   emitsActivation(target: NotificationTarget): Promise<void>;
   /** How many times the window asked for the user's attention. */
   attentionRequests(): number;
+  /** How many of those were the urgent kind (flash until focused). */
+  urgentAttentionRequests(): number;
 }
 
 export interface NotifierSubject {
@@ -69,6 +71,40 @@ export function describeNotifierSuite(
     check("asks for the user's attention once per flash", async () => {
       await ctx.subject.flashTaskbar();
       expect(ctx.native.attentionRequests()).toBe(1);
+    });
+
+    check(
+      "asks for urgent attention once per call request, not the informational kind",
+      async () => {
+        await ctx.subject.requestAttention();
+        expect(ctx.native.attentionRequests()).toBe(1);
+        expect(ctx.native.urgentAttentionRequests()).toBe(1);
+        await ctx.subject.flashTaskbar();
+        expect(ctx.native.urgentAttentionRequests()).toBe(1);
+      },
+    );
+
+    // A call notification opens its DM, not a message: the target carries no
+    // message id, which is what tells the host to build the channel form.
+    check("shows a call notification carrying its channel and no message", async () => {
+      await ctx.subject.showCall("Alice is calling you", "Voice call", {
+        host: "h",
+        channelId: 7,
+      });
+      expect(ctx.native.messageShown()).toEqual([
+        {
+          title: "Alice is calling you",
+          body: "Voice call",
+          target: { host: "h", channelId: 7 },
+        },
+      ]);
+    });
+
+    check("hands a call activation, with no message id, to its handler", async () => {
+      const handler = vi.fn();
+      ctx.subject.onMessageActivated(handler);
+      await ctx.native.emitsActivation({ host: "h", channelId: 7 });
+      expect(handler.mock.calls).toEqual([[{ host: "h", channelId: 7 }]]);
     });
 
     check("shows a message notification carrying its target", async () => {

@@ -18,7 +18,8 @@ import { getChannelMutesHost } from "./channel-mutes";
 
 const log = createLogger("message-nav");
 
-export type MessageJumpHandler = (channelId: number, messageId: number) => void;
+/** `messageId` is absent for a call notification's target: open the channel. */
+export type MessageJumpHandler = (channelId: number, messageId?: number) => void;
 
 let handler: MessageJumpHandler | null = null;
 
@@ -29,7 +30,7 @@ let handler: MessageJumpHandler | null = null;
  * is retained — the last click wins, as the user's latest intent — and it is
  * dropped at handoff if it named a different server than the one now signed in.
  */
-let pending: { channelId: number; messageId: number; host?: string } | null = null;
+let pending: { channelId: number; messageId?: number; host?: string } | null = null;
 
 /**
  * The cross-server guard: a source that named a `host` may only open when it
@@ -66,8 +67,11 @@ export function setMessageJumpHandler(fn: MessageJumpHandler): () => void {
   };
 }
 
-/** Jump to a message. Buffered until a page registers a handler. */
-export function jumpToMessage(channelId: number, messageId: number, host?: string): void {
+/**
+ * Jump to a message, or with no `messageId` open the channel (a call
+ * notification's DM). Buffered until a page registers a handler.
+ */
+export function jumpToMessage(channelId: number, messageId?: number, host?: string): void {
   if (handler === null) {
     pending = { channelId, messageId, host };
     log.debug("Jump requested with no handler registered — buffered", { channelId, messageId });

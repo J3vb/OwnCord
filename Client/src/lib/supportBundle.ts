@@ -143,6 +143,7 @@ const SETTINGS_ALLOWLIST = [
   "flashTaskbar",
   "suppressEveryone",
   "notificationSounds",
+  "callSounds",
   "echoCancellation",
   "noiseSuppression",
   "autoGainControl",

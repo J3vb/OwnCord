@@ -1961,6 +1961,23 @@ describe("notifyIncomingMessage", () => {
       }
     });
 
+    // DP-24: a call notification's target has no message id. It goes through
+    // the same guard: opened on its own server, dropped from another one.
+    it("opens a call target (no message) on its own server and drops one from another", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      try {
+        setChannelMutesHost("a.example");
+        openMessageTarget(7, undefined, "a.example");
+        setChannelMutesHost("b.example");
+        openMessageTarget(7, undefined, "a.example");
+        expect(jump.mock.calls).toEqual([[7, undefined]]);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
     it("buffers a cold-start target until a jumper is registered, then opens it once the page is live (F6)", async () => {
       // A Windows toast activated from Action Center launches the app before
       // any MainPage registers the jumper and sets the host.

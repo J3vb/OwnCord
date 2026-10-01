@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseInviteLink,
   parseMessageLink,
+  parseChannelLink,
   formatMessageLink,
   normaliseInviteCode,
 } from "@lib/deep-link";
@@ -73,6 +74,56 @@ describe("parseInviteLink", () => {
     // message route and try to register an account with the code "message".
     expect(parseInviteLink("owncord://message/5/42")).toBeNull();
     expect(parseInviteLink("owncord://message")).toBeNull();
+  });
+});
+
+// A call notification's Windows launch URI (src-tauri/src/message_notification.rs)
+// names the DM, not a message. It is an external input like a message link, so
+// it is validated the same way: positive safe-integer id, optional trimmed host.
+describe("parseChannelLink", () => {
+  it("parses a call notification's launch URI, host included", () => {
+    expect(parseChannelLink("owncord://channel/5?host=chat.example%3A8443")).toEqual({
+      channelId: 5,
+      host: "chat.example:8443",
+    });
+    expect(parseChannelLink("owncord://channel/5/")).toEqual({ channelId: 5 });
+  });
+
+  it("reads back a host that was percent-encoded to stop it forging a parameter", () => {
+    expect(parseChannelLink("owncord://channel/1?host=evil.example%26x%3D1%23y")).toEqual({
+      channelId: 1,
+      host: "evil.example&x=1#y",
+    });
+  });
+
+  it("treats an empty or blank host as absent", () => {
+    expect(parseChannelLink("owncord://channel/5?host=")).toEqual({ channelId: 5 });
+    expect(parseChannelLink("owncord://channel/5?host=%20")).toEqual({ channelId: 5 });
+  });
+
+  it("rejects missing, non-numeric, zero, negative and unsafe ids", () => {
+    for (const url of [
+      "owncord://channel",
+      "owncord://channel/abc",
+      "owncord://channel/5.5",
+      "owncord://channel/0",
+      "owncord://channel/-5",
+      "owncord://channel/99999999999999999999",
+    ]) {
+      expect(parseChannelLink(url), url).toBeNull();
+    }
+  });
+
+  it("rejects another scheme and the other routes", () => {
+    expect(parseChannelLink("https://example.com/channel/5")).toBeNull();
+    expect(parseChannelLink("owncord://message/5/42")).toBeNull();
+    expect(parseChannelLink("owncord://invite/5")).toBeNull();
+  });
+
+  it("is not an invite code, and not a message permalink", () => {
+    expect(parseInviteLink("owncord://channel/5")).toBeNull();
+    expect(parseInviteLink("owncord://channel")).toBeNull();
+    expect(parseMessageLink("owncord://channel/5")).toBeNull();
   });
 });
 

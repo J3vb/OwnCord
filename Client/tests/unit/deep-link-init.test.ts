@@ -142,6 +142,17 @@ describe("initDeepLinks", () => {
     expect(onMessage).toHaveBeenCalledWith(5, 42, "chat.example:8443");
   });
 
+  it("routes a call notification's channel link to onMessage with no message id", async () => {
+    getCurrent.mockResolvedValue(["owncord://channel/5?host=chat.example%3A8443"]);
+    const onInvite = vi.fn();
+    const onMessage = vi.fn();
+
+    await initDeepLinks(onInvite, onMessage);
+
+    expect(onMessage).toHaveBeenCalledWith(5, undefined, "chat.example:8443");
+    expect(onInvite).not.toHaveBeenCalled();
+  });
+
   it("dispatches a warm-launch message permalink", async () => {
     const onMessage = vi.fn();
     await initDeepLinks(vi.fn(), onMessage);

@@ -331,6 +331,20 @@ describe("main.ts notification-click opens the message (U1d)", () => {
     setChannelMutesHost(null);
   });
 
+  it("routes a clicked call notification (no message id) to the jumper, to open the DM", async () => {
+    const { jumpToMessage } = await import("@lib/message-navigation");
+    await Promise.resolve();
+    await Promise.resolve();
+    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    setChannelMutesHost("a.example");
+    vi.mocked(jumpToMessage).mockClear();
+
+    emitTauriEvent("notification-click", { host: "a.example", channelId: 7 });
+
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, undefined, "a.example");
+    setChannelMutesHost(null);
+  });
+
   it("forwards a cross-server click to the jumper, which applies the guard (F6)", async () => {
     const { jumpToMessage } = await import("@lib/message-navigation");
     await Promise.resolve();

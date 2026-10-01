@@ -71,6 +71,13 @@ vi.mock("@lib/notificationSound", () => ({
   cleanupNotificationAudio: vi.fn(),
 }));
 
+// DP-24: the OS-level call alerts are a lazy chunk the page loads on a ring;
+// their own behaviour is call-alerts.test.ts's.
+vi.mock("../../src/features/direct-messages/callAlerts", () => ({
+  alertIncomingCall: vi.fn(),
+  alertMissedCall: vi.fn(),
+}));
+
 const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
   mockSetAudioVolumeHost: vi.fn(),
 }));
@@ -263,7 +270,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
 }));
 
 import { createMainPage } from "../../src/pages/MainPage";
-import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
+import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { wireConnectionStatus } from "../../src/lib/dispatcher";
@@ -286,6 +293,7 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime } from "../../src/lib/notificationSound";
+import { alertIncomingCall, alertMissedCall } from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -1470,6 +1478,77 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(banner.style.display).toBe("none");
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
+  });
+
+  it("a ring raises one call alert, and a redial of the same ring none", async () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertIncomingCall).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject({
+      channelId: 50,
+      fromUserId: 10,
+    });
+  });
+
+  it("a ring that times out reports one missed call; one the ringer cancelled reports none", async () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertMissedCall).mockClear();
+    vi.mocked(alertIncomingCall).mockClear();
+
+    // The ringer hangs up first: not a missed call.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
+    ws.emit("call_declined", { channel_id: 50, from_user: 10 });
+    // Catch the ring's 30s timer and run it by hand: fake timers would also
+    // stall the dynamic import that loads the alert chunk.
+    const realSetTimeout = globalThis.setTimeout;
+    let ringTimeout: (() => void) | null = null;
+    const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      if (ms !== 30_000) return realSetTimeout(fn, ms);
+      ringTimeout = fn;
+      return 0;
+    }) as unknown as typeof setTimeout);
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    timers.mockRestore();
+    expect(ringTimeout).not.toBeNull();
+    // Let this ring's own alert land first: a mocked module imported again
+    // while that import is still in flight resolves to the real one here.
+    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(2));
+    ringTimeout!();
+
+    await vi.waitFor(() => expect(alertMissedCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertMissedCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).toBe("none");
+  });
+
+  // OC-0037 / OC-0204: DND silences the tone and the popup (call-alerts.test.ts),
+  // never the banner — it is the one way left to answer.
+  it("DND keeps the banner", () => {
+    saveUserStatus("dnd");
+    try {
+      const ws = fakeWs();
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+
+      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+      const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+      expect(banner.style.display).not.toBe("none");
+    } finally {
+      saveUserStatus("online");
+    }
   });
 
   it("does not ring for the channel this client is already in", () => {

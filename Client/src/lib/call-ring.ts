@@ -7,7 +7,7 @@
  *
  *      (none) --call_incoming--> ringing --accept---> (none)  [+ join voice]
  *                                       --decline--> (none)  [+ call_decline]
- *                                       --timeout--> (none)   after 30s
+ *                                       --timeout--> (none)   after 30s [+ missed]
  *                                       --ringer left-> (none)
  *
  * It is kept apart from the banner that draws it because the interesting part
@@ -38,6 +38,12 @@ export interface RingControllerOptions {
   /** Tell the ringer we are not picking up. Not sent on timeout: a timeout is
    *  "nobody was there", and the ringer's own 30s window covers it. */
   readonly onDecline: (channelId: number) => void;
+  /** A new ring began: not a redial of the ring already on screen. The OS
+   *  notification and the attention request hang off this, once per ring. */
+  readonly onRingStart?: (state: RingState) => void;
+  /** The ring ran out with nobody answering (DP-24). Only the timeout: an
+   *  accept, a decline, the ringer leaving or a newer call is not a miss. */
+  readonly onMissed?: (state: RingState) => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
@@ -87,14 +93,19 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     if (state !== null && state.channelId !== next.channelId) {
       stopRinging();
     }
+    const redial = state !== null;
     state = next;
     if (timer !== null) clearTimer(timer);
     timer = setTimer(() => {
-      // Timeout is silent by design — see onDecline's comment.
+      // No decline goes back to the ringer (see onDecline's comment), but the
+      // callee is told they missed it.
+      const missed = state;
       stopRinging();
+      if (missed !== null) opts.onMissed?.(missed);
     }, RING_TIMEOUT_MS);
     opts.onRingStateChange(next);
     opts.onChime(true);
+    if (!redial) opts.onRingStart?.(next);
   }
 
   function accept(): void {

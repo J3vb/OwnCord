@@ -105,6 +105,33 @@ async function chimeCount(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as { __chimeCount?: number }).__chimeCount ?? 0);
 }
 
+/** The call notifications the app asked the native host to show (no message id). */
+async function notifications(page: Page): Promise<Array<{ title: string; channelId: number }>> {
+  return page.evaluate(() =>
+    (
+      window as unknown as {
+        __invokeLog: Array<{
+          cmd: string;
+          args?: { title: string; channelId: number; messageId?: number };
+        }>;
+      }
+    ).__invokeLog
+      .filter((e) => e.cmd === "notify_message" && e.args?.messageId === undefined)
+      .map((e) => ({ title: e.args!.title, channelId: e.args!.channelId })),
+  );
+}
+
+/** The window attention requests the app made, by kind. */
+async function attentionRequests(page: Page): Promise<unknown[]> {
+  return page.evaluate(() =>
+    (
+      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { value?: unknown } }> }
+    ).__invokeLog
+      .filter((e) => e.cmd === "plugin:window|request_user_attention")
+      .map((e) => e.args?.value),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Outgoing-frame capture — the mock's own IPC log, no extra init script
 // ---------------------------------------------------------------------------
@@ -325,6 +352,40 @@ test.describe("DM calls — ring cancellation", () => {
     });
     await expect(banner(page)).toBeHidden();
     await expectChimeSilent(page);
+  });
+
+  // DP-24: an away callee (the app minimised or in the tray: no focus) gets
+  // an OS notification and an urgent attention request for the ring, and a
+  // "Missed call" notice when nobody answers within 30 s.
+  test("an unanswered ring raises a call notification, then a missed-call notice after the timeout", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    await page.addInitScript(() => {
+      document.hasFocus = () => false;
+    });
+    await boot(page);
+
+    await emitWsMessage(page, incoming());
+    await expect(banner(page)).toBeVisible();
+    await expect
+      .poll(() => notifications(page))
+      .toEqual([{ title: "Otto is calling you", channelId: DM_CHANNEL_ID }]);
+    // Critical, not Informational: the taskbar keeps flashing until focused.
+    await expect.poll(() => attentionRequests(page)).toEqual([{ type: "Critical" }]);
+
+    await page.clock.runFor(30_000);
+
+    await expect(banner(page)).toBeHidden();
+    await expect(page.locator(".toast-text", { hasText: "Missed call from Otto" })).toBeVisible();
+    await expect
+      .poll(() => notifications(page))
+      .toEqual([
+        { title: "Otto is calling you", channelId: DM_CHANNEL_ID },
+        { title: "Missed call from Otto", channelId: DM_CHANNEL_ID },
+      ]);
+    // A decline is a refusal; a timeout is nobody there, so none goes back.
+    expect((await sentFrames(page)).some((f) => f.type === "call_decline")).toBe(false);
   });
 
   test("a voice_leave for a different channel from the ringer leaves the ring up", async ({

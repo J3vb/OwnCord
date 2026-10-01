@@ -17,6 +17,7 @@ import type { SearchOverlayController } from "./OverlayManagers";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/message-navigation";
+import { navigateToChannel } from "@lib/channel-navigation";
 import { channelsStore } from "@stores/channels.store";
 import { canManageMessages } from "@lib/permissions";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
@@ -84,7 +85,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   const jumper = createMessageJumper({ api, getChannelCtrl });
   unsubscribers.push(
     setMessageJumpHandler((channelId, messageId) => {
-      void jumper.jumpTo(channelId, messageId);
+      // No message: a call notification, which opens the DM itself.
+      if (messageId === undefined) navigateToChannel(channelId);
+      else void jumper.jumpTo(channelId, messageId);
     }),
   );
 
