@@ -195,7 +195,8 @@ keeps it until one authenticates.
     "replay_source": "none",
     "upload_policy": {
       "max_upload_bytes": 104857600,
-      "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"]
+      "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
+      "thumbnails": true
     }
   }
 }
