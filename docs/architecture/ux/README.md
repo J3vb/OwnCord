@@ -166,8 +166,11 @@ reaction is per-call-site (`doFetch()` in `lib/api.ts` centralizes only 401);
 only the displayed text is shared: `serverErrorText()`/`errorText()` in
 `lib/api.ts` map a server error code (disambiguated by its message where the
 server overloads it — see `serverErrorCopy()`) to catalog text and show the
-server message, capitalised, only when there is no mapping. This matrix is the
-target contract.
+server message, capitalised, only when there is no mapping. A request that
+never reached the server (`TransportError`, including the desktop HTTP
+tunnel's bare `502`) shows the "Couldn't reach this server" copy instead of
+the transport's raw text, which goes to the log. This matrix is the target
+contract.
 
 | Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
