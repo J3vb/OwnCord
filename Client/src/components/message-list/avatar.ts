@@ -25,7 +25,7 @@
 import { createElement } from "@lib/dom";
 import { avatarInitial, resolveDisplayName, type AvatarSubject } from "@lib/avatar";
 import {
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   isSafeUrl,
   recoverEvictedImage,
   resolveServerUrl,
@@ -84,13 +84,13 @@ export function createAvatarElement(
   }
 
   const resolved = resolveServerUrl(subject.avatar);
-  void fetchImageAsDataUrl(resolved).then((dataUrl) => {
+  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
     // The row may have been torn down while the fetch was in flight; an
     // element with no parent is one nobody is looking at.
-    if (dataUrl === null || !wrapper.isConnected) return;
+    if (objectUrl === null || !wrapper.isConnected) return;
     const img = createElement("img", {
       class: "avatar-img",
-      src: dataUrl,
+      src: objectUrl,
       alt: resolveDisplayName(subject),
       loading: "lazy",
       decoding: "async",

@@ -23,7 +23,7 @@ import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "./message-list/avatar";
 import {
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "./message-list/attachments";
@@ -103,9 +103,9 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
   el.appendChild(letter);
   if (!isRenderableAvatar(avatar)) return;
   const resolved = resolveServerUrl(avatar);
-  void fetchImageAsDataUrl(resolved).then((dataUrl) => {
-    if (dataUrl === null || !el.isConnected) return;
-    const img = createElement("img", { src: dataUrl, alt: label });
+  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+    if (objectUrl === null || !el.isConnected) return;
+    const img = createElement("img", { src: objectUrl, alt: label });
     recoverEvictedImage(img, { url: resolved });
     img.style.width = "100%";
     img.style.height = "100%";

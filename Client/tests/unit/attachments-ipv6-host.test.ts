@@ -32,7 +32,7 @@ vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") 
 vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 
-// No-op IndexedDB so fetchImageAsDataUrl falls through to the network path.
+// No-op IndexedDB so fetchImageAsObjectUrl falls through to the network path.
 vi.stubGlobal("indexedDB", {
   open: () => {
     const req: Record<string, unknown> = { onsuccess: null, onerror: null, onupgradeneeded: null };
@@ -46,11 +46,15 @@ vi.stubGlobal("indexedDB", {
 
 import {
   clearAttachmentCaches,
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   isTrustedServerUrl,
   resolveServerUrl,
   setServerHost,
 } from "../../src/components/message-list/attachments";
+
+// jsdom implements no object URLs; server images are handed out as blob: URLs.
+URL.createObjectURL = vi.fn(() => "blob:test-image");
+URL.revokeObjectURL = vi.fn();
 
 function imageResponse() {
   return {
@@ -93,7 +97,7 @@ describe("attachment server-host handling for bare IPv6 literals", () => {
     fetchMock.mockResolvedValue(imageResponse());
 
     const resolved = resolveServerUrl("/api/v1/files/abc-123");
-    const result = await fetchImageAsDataUrl(resolved);
+    const result = await fetchImageAsObjectUrl(resolved);
 
     expect(result).not.toBeNull();
     expect(ensureHttpProxyMock).toHaveBeenCalledWith("[2001:db8::1]");

@@ -14,13 +14,13 @@ import fc from "fast-check";
 
 // The emoji image is behind the session token; stub the authenticated fetch
 // so buildCustomEmojiNode's async image swap does not hit the network.
-const { fetchImageAsDataUrlMock } = vi.hoisted(() => ({
-  fetchImageAsDataUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
 vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/components/message-list/attachments")>();
-  return { ...actual, fetchImageAsDataUrl: fetchImageAsDataUrlMock };
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
 import {

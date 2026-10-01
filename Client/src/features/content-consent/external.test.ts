@@ -21,7 +21,7 @@ vi.mock("@lib/logger", () => ({
 import { savePref } from "@lib/preferences";
 import {
   clearExternalImageCache,
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   previewExternal,
   setServerHost,
 } from "../../components/message-list/attachments";
@@ -121,7 +121,7 @@ describe("before consent", () => {
 
   it("refuses at the broker seam too, so a path that forgot to ask fetches nothing", async () => {
     expect(await previewExternal(LINK)).toEqual({ ok: false, failure: "unavailable" });
-    expect(await fetchImageAsDataUrl(IMAGE)).toBeNull();
+    expect(await fetchImageAsObjectUrl(IMAGE)).toBeNull();
     expect(brokerCalls()).toBe(0);
   });
 

@@ -21,7 +21,7 @@ import {
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
@@ -103,13 +103,13 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       avatarEl.style.background = "var(--accent)";
       return;
     }
-    void fetchImageAsDataUrl(url).then((dataUrl) => {
+    void fetchImageAsObjectUrl(url).then((objectUrl) => {
       // The URL may have changed again (or the bar been torn down) while the
       // bytes were in flight.
-      if (dataUrl === null || avatarEl === null || renderedAvatarUrl !== url) return;
+      if (objectUrl === null || avatarEl === null || renderedAvatarUrl !== url) return;
       const img = createElement("img", {
         class: "avatar-img",
-        src: dataUrl,
+        src: objectUrl,
         alt: subject.username,
       });
       recoverEvictedImage(img, { url });

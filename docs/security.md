@@ -362,7 +362,7 @@ The Tauri desktop client implements the following security measures:
 - The single `innerHTML` usage (SVG icons) operates on compile-time constants with a runtime guard
 - URLs are validated via `isSafeUrl` (rejects `javascript:`, `data:`, `vbscript:`)
 - YouTube embeds use `sandbox` attribute on iframes
-- `image/svg+xml` is excluded from safe MIME types for data URIs
+- `image/svg+xml` is excluded from the safe MIME types a fetched server image or clip may carry as its Blob type
 - GIF media URLs are validated against the trusted Klipy CDN origins
 - Linkified URLs strip trailing punctuation to prevent misleading destinations
 
