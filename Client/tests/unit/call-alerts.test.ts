@@ -74,7 +74,7 @@ afterEach(() => {
 });
 
 describe("an incoming call", () => {
-  it("the ring calls the notifier's call notification and the attention request", () => {
+  it("when not focused, the ring calls the notifier's call notification and the attention request", () => {
     alertIncomingCall(ring);
 
     expect(showCall.mock.calls).toEqual([

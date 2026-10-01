@@ -34,7 +34,12 @@ function popup(title: string, ring: RingState): void {
     .catch((err: unknown) => log.debug("Call notification not available", err));
 }
 
-/** A new ring: one OS notification and one attention request. */
+/**
+ * A new ring: one OS notification and one attention request. The acceptance
+ * "exactly one OS notification and one attention request per ring" applies
+ * when the window is not focused; a focused window gets only the banner and
+ * the ringtone (D3(b)).
+ */
 export function alertIncomingCall(ring: RingState): void {
   popup(dmCallText("notifyIncoming", { name: ring.fromUsername }), ring);
   // Flashes until the window is focused. A passive hint, so it stays under

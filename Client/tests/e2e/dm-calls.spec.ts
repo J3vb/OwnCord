@@ -357,7 +357,7 @@ test.describe("DM calls — ring cancellation", () => {
   // DP-24: an away callee (the app minimised or in the tray: no focus) gets
   // an OS notification and an urgent attention request for the ring, and a
   // "Missed call" notice when nobody answers within 30 s.
-  test("an unanswered ring raises a call notification, then a missed-call notice after the timeout", async ({
+  test("with the window not focused, an unanswered ring raises a call notification, then a missed-call notice after the timeout", async ({
     page,
   }) => {
     await page.clock.install();
