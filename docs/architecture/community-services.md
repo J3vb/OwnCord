@@ -768,8 +768,9 @@ or a property the architecture cannot have.
     stores fetched attachment bytes in IndexedDB (`owncord-image-cache`,
     `Client/src/components/message-list/attachments.ts`). Since B7-13 the
     store is scoped to `host#userId` and a switch to another account prunes
-    the previous one's entries, but nothing evicts the _current_ account's
-    copies: server-side erasure and retention remove the file from
+    the previous one's entries, but only a byte budget (least recently read
+    first) evicts the _current_ account's copies: server-side erasure and
+    retention remove the file from
     `upload.storage_dir`, and those copies stay until the viewer switches
     account or clears the cache by hand. A self-deletion from the desktop
     client prunes the deleted account's own entries (B7-15c); other viewers'

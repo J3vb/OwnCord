@@ -17,7 +17,7 @@ import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar } from "./message-list/avatar";
 import {
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "./message-list/attachments";
@@ -194,10 +194,10 @@ export function createDmProfileSidebar(
 
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
-      void fetchImageAsDataUrl(resolved).then((dataUrl) => {
-        if (dataUrl === null || !wrapper.isConnected) return;
+      void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+        if (objectUrl === null || !wrapper.isConnected) return;
         const img = createElement("img", {
-          src: dataUrl,
+          src: objectUrl,
           alt: resolveDisplayName(user),
           class: "dps-avatar-img",
         });

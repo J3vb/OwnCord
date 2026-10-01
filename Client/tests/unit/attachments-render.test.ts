@@ -114,10 +114,13 @@ import {
   isSafeUrl,
   isTrustedServerUrl,
   clearAttachmentCaches,
-  uint8ToBase64,
   renderAttachment,
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
 } from "../../src/components/message-list/attachments";
+
+// jsdom implements no object URLs; server images are handed out as blob: URLs.
+URL.createObjectURL = vi.fn(() => "blob:test-image");
+URL.revokeObjectURL = vi.fn();
 
 describe("resolveServerUrl", () => {
   beforeEach(() => {
@@ -233,17 +236,6 @@ describe("isTrustedServerUrl", () => {
 
   it("returns false for an invalid URL", () => {
     expect(isTrustedServerUrl("not-a-url")).toBe(false);
-  });
-});
-
-describe("uint8ToBase64", () => {
-  it("encodes small arrays", () => {
-    const bytes = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-    expect(uint8ToBase64(bytes)).toBe(btoa("Hello"));
-  });
-
-  it("handles empty arrays", () => {
-    expect(uint8ToBase64(new Uint8Array([]))).toBe("");
   });
 });
 
@@ -459,7 +451,7 @@ describe("renderAttachment — image with dimensions", () => {
   });
 });
 
-describe("fetchImageAsDataUrl — network fetch failure", () => {
+describe("fetchImageAsObjectUrl — network fetch failure", () => {
   beforeEach(() => {
     clearAttachmentCaches();
     fetchMock.mockReset();
@@ -468,15 +460,21 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
 
   it("returns null when fetch response is not ok", async () => {
     fetchMock.mockResolvedValue({ ok: false });
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(result).toBeNull();
   });
 
   it("returns null and logs error when fetch throws", async () => {
     fetchMock.mockRejectedValue(new Error("network failure"));
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(result).toBeNull();
   });
+
+  /** The type of the Blob behind the last blob: URL handed out. */
+  function lastBlobType(): string {
+    const calls = vi.mocked(URL.createObjectURL).mock.calls;
+    return (calls[calls.length - 1]![0] as Blob).type;
+  }
 
   it("sanitizes unsafe content-type to application/octet-stream", async () => {
     fetchMock.mockResolvedValue({
@@ -485,22 +483,22 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(result).not.toBeNull();
     // Should use application/octet-stream, not text/html
-    expect(result!.startsWith("data:application/octet-stream;")).toBe(true);
+    expect(lastBlobType()).toBe("application/octet-stream");
   });
 
-  it("preserves safe content-type in data URL", async () => {
+  it("preserves safe content-type on the Blob", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       headers: { get: () => "image/jpeg" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.jpg");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.jpg");
     expect(result).not.toBeNull();
-    expect(result!.startsWith("data:image/jpeg;")).toBe(true);
+    expect(lastBlobType()).toBe("image/jpeg");
   });
 
   it("routes server URLs through the cert-pinned proxy and external URLs to the broker", async () => {
@@ -513,7 +511,7 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
     // A server URL is rewritten to the loopback proxy origin (path + query
     // preserved) and carries no danger option — the proxy pins the cert. The
     // bearer token rides along when a session exists (none in this test).
-    await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png", { headers: {} });
 
     fetchMock.mockReset();
@@ -522,7 +520,7 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
 
     // A third-party URL never reaches a direct fetch: the external-content
     // broker owns it (B7-16), and a refusal there is simply no image.
-    await expect(fetchImageAsDataUrl("https://cdn.example.com/img.png")).resolves.toBeNull();
+    await expect(fetchImageAsObjectUrl("https://cdn.example.com/img.png")).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
       url: "https://cdn.example.com/img.png",

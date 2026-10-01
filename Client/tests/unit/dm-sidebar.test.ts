@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
+const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
 vi.mock("@components/message-list/attachments", () => ({
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
@@ -31,7 +31,7 @@ describe("DmSidebar", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    fetchImageAsDataUrl.mockReset();
+    fetchImageAsObjectUrl.mockReset();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -395,7 +395,7 @@ describe("DmSidebar", () => {
     // needs, so the picture is fetched through the same cert-pinned path
     // attachments use and swapped in once the bytes arrive -- never assigned
     // as a raw src.
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ avatar: "http://example.com/img.png" })],
       onSelectConversation: vi.fn(),
@@ -403,7 +403,7 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    expect(fetchImageAsDataUrl).toHaveBeenCalledWith("http://example.com/img.png");
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("http://example.com/img.png");
     await vi.waitFor(() => {
       const img = container.querySelector(".dm-avatar img") as HTMLImageElement;
       expect(img).not.toBeNull();
@@ -414,7 +414,7 @@ describe("DmSidebar", () => {
   });
 
   it("fetches a server-relative avatar through the authenticated path instead of leaving a raw <img src> that 404s", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,BBB");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,BBB");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ username: "Bob", avatar: "/api/v1/files/42" })],
       onSelectConversation: vi.fn(),
@@ -428,7 +428,7 @@ describe("DmSidebar", () => {
     expect(avatar.textContent).toBe("B");
 
     await vi.waitFor(() => {
-      expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
       const img = avatar.querySelector("img");
       expect(img).not.toBeNull();
       expect(img?.getAttribute("src")).toBe("data:image/png;base64,BBB");
@@ -438,7 +438,7 @@ describe("DmSidebar", () => {
   });
 
   it("keeps the presence dot when the fetched avatar image is swapped in", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,CCC");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,CCC");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ avatar: "/api/v1/files/42", status: "online" })],
       onSelectConversation: vi.fn(),
@@ -465,7 +465,7 @@ describe("DmSidebar", () => {
   });
 
   it("swaps fetched images into group faces, keeping the letter for members without one", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,DDD");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,DDD");
     const sidebar = createDmSidebar({
       conversations: [
         makeConvo({
@@ -494,7 +494,7 @@ describe("DmSidebar", () => {
     // Carol has no avatar: her letter stays and nothing was fetched for her.
     expect(faces[1]!.textContent).toBe("C");
     expect(faces[1]!.querySelector("img")).toBeNull();
-    expect(fetchImageAsDataUrl).toHaveBeenCalledTimes(1);
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
 
     sidebar.destroy?.();
   });

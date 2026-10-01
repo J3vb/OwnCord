@@ -140,12 +140,88 @@ export function isSafeUrl(url: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Image cache: memory + IndexedDB for persistence across restarts
+// Server content caches: blob: URLs in memory, Blobs in IndexedDB
 // ---------------------------------------------------------------------------
 
-/** In-memory cache for instant re-render (LRU eviction at CACHE_MAX). */
-const memoryCache = new Map<string, string>();
-const CACHE_MAX = 200;
+function createObjectUrl(blob: Blob): string | null {
+  // jsdom (and any non-browser host) may not implement the object-URL API.
+  if (typeof URL.createObjectURL !== "function") return null;
+  return URL.createObjectURL(blob);
+}
+
+function revokeObjectUrl(objectUrl: string): void {
+  if (typeof URL.revokeObjectURL !== "function") return;
+  URL.revokeObjectURL(objectUrl);
+}
+
+/** blob: URLs by source URL, least recently used first, bounded by the bytes
+ *  their Blobs pin (and optionally by count). An evicted URL is revoked; an
+ *  image still showing it recovers through `recoverEvictedImage`. One entry
+ *  larger than the budget stays until the next arrives. */
+class ObjectUrlCache {
+  private readonly entries = new Map<string, { objectUrl: string; bytes: number }>();
+  private bytes = 0;
+
+  constructor(
+    private readonly maxBytes: number,
+    private readonly maxEntries = Number.POSITIVE_INFINITY,
+  ) {}
+
+  get(key: string): string | undefined {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return undefined;
+    // Map order is the recency order: a read moves the entry to the end.
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return entry.objectUrl;
+  }
+
+  holds(objectUrl: string): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.objectUrl === objectUrl) return true;
+    }
+    return false;
+  }
+
+  set(key: string, objectUrl: string, bytes: number): void {
+    this.drop(key);
+    this.entries.set(key, { objectUrl, bytes });
+    this.bytes += bytes;
+    while (
+      this.entries.size > 1 &&
+      (this.bytes > this.maxBytes || this.entries.size > this.maxEntries)
+    ) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
+      this.drop(oldest);
+    }
+  }
+
+  clear(): void {
+    for (const key of this.entries.keys()) this.drop(key);
+  }
+
+  private drop(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return;
+    this.entries.delete(key);
+    this.bytes -= entry.bytes;
+    revokeObjectUrl(entry.objectUrl);
+  }
+}
+
+/** What server images may pin in memory as blob: URLs, for instant re-render. */
+export const IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+/** What the durable image store may hold, so it persists across restarts
+ *  without growing forever. */
+export const IMAGE_DB_MAX_BYTES = 256 * 1024 * 1024;
+const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES);
+/** Server images the server definitely refused (missing, gone, forbidden).
+ *  Asking again on every mount only repeated the answer — each one was
+ *  fetched twice in the audit's channel-switch run (DP-56). Retry and a cache
+ *  clear ask again. */
+const missingImages = new Set<string>();
+const DEFINITE_FAILURES = new Set([403, 404, 410]);
 let attachmentCacheGeneration = 0;
 
 /** `host#userId` of the account whose server content these caches hold
@@ -182,19 +258,17 @@ function idbKey(scope: string, url: string): string {
 
 export function clearAttachmentCaches(): void {
   attachmentCacheGeneration += 1;
-  memoryCache.clear();
+  imageCache.clear();
+  missingImages.clear();
   inFlight.clear();
-  for (const objectUrl of mediaObjectUrls.values()) {
-    revokeObjectUrl(objectUrl);
-  }
-  mediaObjectUrls.clear();
+  mediaCache.clear();
   mediaInFlight.clear();
 }
 
-/** Safe MIME types allowed in data: URIs — blocks script injection via crafted Content-Type. */
+/** Safe MIME types allowed as a server Blob's type — blocks script injection via crafted Content-Type. */
 // Note: image/svg+xml is intentionally excluded — SVGs can execute JS if
 // loaded in <object>, <embed>, or <iframe> contexts. Only raster formats
-// are considered safe for data: URI rendering via <img>.
+// are considered safe for blob: URL rendering via <img>.
 const SAFE_MIME_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -210,7 +284,7 @@ const SAFE_MIME_TYPES = new Set([
   "application/pdf",
 ]);
 
-/** Sanitize a Content-Type header value for use in a data: URI. */
+/** Sanitize a Content-Type header value for use as a Blob's type. */
 function sanitizeContentType(raw: string): string {
   const mime = raw.split(";")[0]?.trim() ?? "";
   return SAFE_MIME_TYPES.has(mime) ? raw : "application/octet-stream";
@@ -330,18 +404,45 @@ async function idbPrune(scope: string, keep: boolean): Promise<void> {
   }
 }
 
-/** Read a cached data URL from IndexedDB by its scoped key. */
-async function idbGet(key: string): Promise<string | null> {
+/** A durable entry: the image, its size, and when it was last read. */
+interface StoredImage {
+  blob: Blob;
+  bytes: number;
+  used: number;
+}
+
+/** False for an entry written before images were stored as Blobs (a data:
+ *  URI string): a read treats it as a miss and the next write drops it. */
+function isStoredImage(value: unknown): value is StoredImage {
+  const entry = value as Partial<StoredImage> | null;
+  return (
+    typeof entry === "object" &&
+    entry !== null &&
+    entry.blob instanceof Blob &&
+    typeof entry.bytes === "number"
+  );
+}
+
+/** Read a cached image from IndexedDB by its scoped key, marking it read. */
+async function idbGet(key: string): Promise<Blob | null> {
   const db = await openCacheDb();
   if (db === null) return null;
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(IDB_STORE, "readonly");
+      const tx = db.transaction(IDB_STORE, "readwrite");
       closeDbAfterTransaction(tx, db);
       const store = tx.objectStore(IDB_STORE);
       const req = store.get(key);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
-      req.onsuccess = () => resolve(typeof req.result === "string" ? req.result : null);
+      req.onsuccess = () => {
+        const entry: unknown = req.result;
+        if (!isStoredImage(entry)) {
+          resolve(null);
+          return;
+        }
+        store.put({ ...entry, used: Date.now() }, key);
+        resolve(entry.blob);
+      };
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
     } catch {
@@ -351,9 +452,11 @@ async function idbGet(key: string): Promise<string | null> {
   });
 }
 
-/** Write a data URL to IndexedDB under `scope`, unless the scope moved on
- *  while the database opened — a late write would outlive the prune. */
-async function idbPut(scope: string, url: string, dataUrl: string): Promise<void> {
+/** Write an image to IndexedDB under `scope`, unless the scope moved on
+ *  while the database opened — a late write would outlive the prune. The
+ *  same transaction then drops the least recently read entries until the
+ *  store fits IMAGE_DB_MAX_BYTES, and any pre-Blob entry outright. */
+async function idbPut(scope: string, url: string, blob: Blob): Promise<void> {
   const db = await openCacheDb();
   if (db === null) return;
   if (scope !== cacheScope) {
@@ -363,85 +466,64 @@ async function idbPut(scope: string, url: string, dataUrl: string): Promise<void
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
     closeDbAfterTransaction(tx, db);
-    tx.objectStore(IDB_STORE).put(dataUrl, idbKey(scope, url));
+    const store = tx.objectStore(IDB_STORE);
+    const entry: StoredImage = { blob, bytes: blob.size, used: Date.now() };
+    store.put(entry, idbKey(scope, url));
+    const keys = store.getAllKeys();
+    const values = store.getAll();
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+    values.onsuccess = () => {
+      const stored: { key: IDBValidKey; entry: StoredImage }[] = [];
+      let total = 0;
+      keys.result.forEach((key, i) => {
+        const value: unknown = values.result[i];
+        if (isStoredImage(value)) {
+          stored.push({ key, entry: value });
+          total += value.bytes;
+        } else {
+          store.delete(key);
+        }
+      });
+      for (const { key, entry: old } of stored.toSorted((a, b) => a.entry.used - b.entry.used)) {
+        if (total <= IMAGE_DB_MAX_BYTES) break;
+        store.delete(key);
+        total -= old.bytes;
+      }
+    };
   } catch {
     db.close();
     // IndexedDB full or unavailable — ignore
   }
 }
 
-/** Convert a Uint8Array to a base64 string. */
-export function uint8ToBase64(bytes: Uint8Array): string {
-  // Process in chunks to avoid call stack overflow on large files
-  const CHUNK = 8192;
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, Math.min(i + CHUNK, bytes.length));
-    binary += String.fromCharCode(...slice);
-  }
-  return btoa(binary);
-}
-
-/** Fetch an image and return a URL an `<img>` can show. Server images come
- *  back as a data: URI through memory → IndexedDB → the TOFU proxy; an
- *  external image comes back as a `blob:` URL from the broker and never
- *  enters those two caches, which hold server content only (B7-16). */
-export function fetchImageAsDataUrl(url: string): Promise<string | null> {
+/** Fetch an image and return a `blob:` URL an `<img>` can show. Server images
+ *  come through memory → IndexedDB → the TOFU proxy; an external image comes
+ *  from the broker and never enters those two caches, which hold server
+ *  content only (B7-16). */
+export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
   if (isExternalUrl(url)) return fetchExternalImage({ url });
   const generation = attachmentCacheGeneration;
   const scope = cacheScope;
 
-  // 1. Memory cache (instant)
-  const cached = memoryCache.get(url);
+  // 1. Memory cache (instant), and what the server already refused
+  const cached = imageCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
+  if (missingImages.has(url)) return Promise.resolve(null);
 
   // 2. Deduplicate concurrent requests for the same URL
   const existing = inFlight.get(url);
   if (existing !== undefined) return existing;
 
   const promise = (async (): Promise<string | null> => {
-    // 3. IndexedDB cache (persists across restarts)
-    const idbCached = scope === null ? null : await idbGet(idbKey(scope, url));
-    if (idbCached !== null) {
-      if (generation !== attachmentCacheGeneration) return null;
-      if (memoryCache.size >= CACHE_MAX) {
-        const firstKey = memoryCache.keys().next().value;
-        if (firstKey !== undefined) memoryCache.delete(firstKey);
-      }
-      memoryCache.set(url, idbCached);
-      return idbCached;
-    }
-
-    // 4. Network fetch through the Rust HTTP TOFU proxy (cert-pinned, same
-    // trust store as the WS proxy). Responses are only used as image data,
-    // never executed.
-    try {
-      const res = await fetchServerFile(url);
-      if (!res.ok) return null;
-
-      const rawCt = res.headers.get("content-type") ?? "";
-      const contentType = sanitizeContentType(rawCt);
-      const buffer = await res.arrayBuffer();
-      const base64 = uint8ToBase64(new Uint8Array(buffer));
-      const dataUrl = `data:${contentType};base64,${base64}`; // i18n-exempt: data-URI scheme, not copy
-
-      if (generation !== attachmentCacheGeneration) {
-        return null;
-      }
-
-      // Store in both caches (LRU eviction)
-      if (memoryCache.size >= CACHE_MAX) {
-        const firstKey = memoryCache.keys().next().value;
-        if (firstKey !== undefined) memoryCache.delete(firstKey);
-      }
-      memoryCache.set(url, dataUrl);
-      if (scope !== null) void idbPut(scope, url, dataUrl);
-
-      return dataUrl;
-    } catch (err) {
-      log.error("Failed to fetch attachment image", { url, error: String(err) });
-      return null;
-    }
+    // 3. IndexedDB cache (persists across restarts), then the network
+    const stored = scope === null ? null : await idbGet(idbKey(scope, url));
+    const blob = stored ?? (await fetchImageBlob(url, generation));
+    if (blob === null || generation !== attachmentCacheGeneration) return null;
+    const objectUrl = createObjectUrl(blob);
+    if (objectUrl === null) return null;
+    imageCache.set(url, objectUrl, blob.size);
+    if (stored === null && scope !== null) void idbPut(scope, url, blob);
+    return objectUrl;
   })();
 
   inFlight.set(url, promise);
@@ -454,46 +536,54 @@ export function fetchImageAsDataUrl(url: string): Promise<string | null> {
   return promise;
 }
 
+/** 4. Network fetch through the Rust HTTP TOFU proxy (cert-pinned, same trust
+ *  store as the WS proxy). The bytes are only ever shown as an image, never
+ *  executed, and their type goes through the allowlist. */
+async function fetchImageBlob(url: string, generation: number): Promise<Blob | null> {
+  try {
+    const res = await fetchServerFile(url);
+    if (!res.ok) {
+      if (DEFINITE_FAILURES.has(res.status) && generation === attachmentCacheGeneration) {
+        missingImages.add(url);
+      }
+      return null;
+    }
+    const type = sanitizeContentType(res.headers.get("content-type") ?? "");
+    return new Blob([await res.arrayBuffer()], { type });
+  } catch (err) {
+    log.error("Failed to fetch attachment image", { url, error: String(err) });
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Media (video/audio) sources
 // ---------------------------------------------------------------------------
 
+/** Each entry pins a whole video/audio Blob, so the cap is in bytes as well as
+ *  count: an unbounded map here quietly holds every clip played this session. */
+const MEDIA_CACHE_MAX = 20;
+const MEDIA_CACHE_MAX_BYTES = 256 * 1024 * 1024;
 /** Resolved blob: URLs keyed by attachment URL, so re-rendering a row (virtual
  *  scroll rebuilds the window constantly) reuses one download. */
-const mediaObjectUrls = new Map<string, string>();
+const mediaCache = new ObjectUrlCache(MEDIA_CACHE_MAX_BYTES, MEDIA_CACHE_MAX);
 /** In-flight media fetches, deduplicated the same way images are. */
 const mediaInFlight = new Map<string, Promise<string | null>>();
-/** FIFO cap mirroring memoryCache's CACHE_MAX, kept far lower: each entry
- *  pins a whole video/audio Blob (not a small base64 thumbnail string), so an
- *  unbounded map here quietly holds every clip ever viewed in the session. */
-const MEDIA_CACHE_MAX = 20;
-
-function createObjectUrl(blob: Blob): string | null {
-  // jsdom (and any non-browser host) may not implement the object-URL API.
-  if (typeof URL.createObjectURL !== "function") return null;
-  return URL.createObjectURL(blob);
-}
-
-function revokeObjectUrl(objectUrl: string): void {
-  if (typeof URL.revokeObjectURL !== "function") return;
-  URL.revokeObjectURL(objectUrl);
-}
 
 /**
  * Fetch a video/audio attachment through the same authenticated,
  * cert-pinned path images use (fetchServerFile attaches the session bearer
  * token, which /api/v1/files/{id} requires) and hand back a blob: URL.
  *
- * Deliberately not the image path: a data: URI means base64-inflating the whole
- * file into a string and parking it in the LRU + IndexedDB caches, which is
- * fine for a 200 KB thumbnail and ruinous for a 50 MB video. The Content-Type
+ * Deliberately not the image path: that one parks the bytes in IndexedDB too,
+ * which is fine for a screenshot and ruinous for a 50 MB video. The Content-Type
  * goes through the same allowlist so a crafted header cannot turn a
  * permission-checked download into an executable type.
  */
 export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
   const generation = attachmentCacheGeneration;
 
-  const cached = mediaObjectUrls.get(url);
+  const cached = mediaCache.get(url);
   if (cached !== undefined) return Promise.resolve(cached);
 
   const existing = mediaInFlight.get(url);
@@ -514,15 +604,7 @@ export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
         revokeObjectUrl(objectUrl);
         return null;
       }
-      if (mediaObjectUrls.size >= MEDIA_CACHE_MAX) {
-        const firstKey = mediaObjectUrls.keys().next().value;
-        if (firstKey !== undefined) {
-          const evicted = mediaObjectUrls.get(firstKey);
-          mediaObjectUrls.delete(firstKey);
-          if (evicted !== undefined) revokeObjectUrl(evicted);
-        }
-      }
-      mediaObjectUrls.set(url, objectUrl);
+      mediaCache.set(url, objectUrl, buffer.byteLength);
       return objectUrl;
     } catch (err) {
       log.error("Failed to fetch media attachment", { url, error: String(err) });
@@ -600,9 +682,23 @@ export function isExternalGif(objectUrl: string): boolean {
   return externalGifUrls.has(objectUrl);
 }
 
-/** Re-request `img`'s image through the broker when the blob: URL it shows
- *  was revoked — by the FIFO cap or a cache clear — and a GIF unfreeze or a
- *  lazy load after scrolling back reloads the stale URL. Register it before any other
+/** Whether a blob: URL is one an image cache still holds (not revoked). */
+function isLiveImageUrl(objectUrl: string): boolean {
+  return imageCache.holds(objectUrl) || [...externalObjectUrls.values()].includes(objectUrl);
+}
+
+/** Load `source` again the way it first came: a server image through its own
+ *  caches and the TOFU proxy, anything else through the broker. */
+function reloadImage(source: ExternalImageSource): Promise<ExternalContentResult<string>> {
+  if (!("url" in source) || !isServerUrl(source.url)) return loadExternalImage(source);
+  return fetchImageAsObjectUrl(source.url).then((value): ExternalContentResult<string> =>
+    value === null ? { ok: false, failure: "unavailable" } : { ok: true, value },
+  );
+}
+
+/** Re-request `img`'s image when the blob: URL it shows was revoked — by a
+ *  cache's eviction or a clear — and a GIF unfreeze or a lazy load after
+ *  scrolling back reloads the stale URL. Register it before any other
  *  error listener: a recovered load stops the error from reaching them. */
 export function recoverEvictedImage(
   img: HTMLImageElement,
@@ -610,11 +706,9 @@ export function recoverEvictedImage(
   onExpired?: () => void,
 ): void {
   const recover = (event: Event): void => {
-    if (!img.src.startsWith("blob:") || [...externalObjectUrls.values()].includes(img.src)) {
-      return;
-    }
+    if (!img.src.startsWith("blob:") || isLiveImageUrl(img.src)) return;
     event.stopImmediatePropagation();
-    void loadExternalImage(source).then((result) => {
+    void reloadImage(source).then((result) => {
       if (result.ok) {
         img.src = result.value;
         return;
@@ -739,29 +833,59 @@ function buildDownloadButton(att: Attachment, resolvedUrl: string): HTMLButtonEl
   return btn;
 }
 
+/** The play button that stands in for a player until the viewer asks for the
+ *  clip, so a row that only scrolls past downloads nothing (DP-16; the whole
+ *  file on the first play, D2 (a)). Native controls are inert without a
+ *  source, so they arrive with it. A failed download keeps the button:
+ *  pressing it again retries. */
+function buildPlayButton(
+  att: Attachment,
+  resolvedUrl: string,
+  wrap: HTMLElement,
+  player: HTMLMediaElement,
+): HTMLButtonElement {
+  const btn = createElement("button", {
+    class: "msg-media-play",
+    type: "button",
+    "aria-label": messageStatusText("file.playNamed", { filename: att.filename }),
+  });
+  btn.appendChild(createIcon("play", 20));
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    void fetchMediaAsObjectUrl(resolvedUrl).then((objectUrl) => {
+      if (objectUrl === null) {
+        // The download chip stays; the player is dimmed, never shown as loading.
+        wrap.classList.add("msg-media-failed");
+        btn.disabled = false;
+        return;
+      }
+      wrap.classList.remove("msg-media-failed");
+      btn.remove();
+      player.hidden = false;
+      player.controls = true;
+      player.src = objectUrl;
+      void player.play().catch((err: unknown) => {
+        // Playback refused (an autoplay policy): the controls are there to press.
+        log.debug("Media playback refused", { error: String(err) });
+      });
+    });
+  });
+  return btn;
+}
+
 /** Inline <video> player. Sized by the same .msg-image box as images so a
- *  video never blows the message column out; the source arrives asynchronously
+ *  video never blows the message column out; the source arrives on play
  *  because it needs the session token attached. */
 function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
   const video = createElement("video", { preload: "metadata" });
-  video.controls = true;
   video.setAttribute("aria-label", att.filename);
-  wrap.appendChild(video);
+  appendChildren(wrap, video, buildPlayButton(att, resolvedUrl, wrap, video));
 
   const overlay = createElement("div", { class: "msg-media-overlay" });
   overlay.appendChild(buildDownloadButton(att, resolvedUrl));
   wrap.appendChild(overlay);
-
-  void fetchMediaAsObjectUrl(resolvedUrl).then((objectUrl) => {
-    if (objectUrl !== null) {
-      video.src = objectUrl;
-    } else {
-      // The download chip stays; the player is dimmed, never shown as loading.
-      wrap.classList.add("msg-media-failed");
-    }
-  });
 
   return wrap;
 }
@@ -774,20 +898,12 @@ function renderAudioAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
 
   const info = buildFileMeta(att, resolvedUrl);
   const audio = createElement("audio", { preload: "metadata" });
-  audio.controls = true;
+  audio.hidden = true;
   audio.setAttribute("aria-label", att.filename);
-  info.appendChild(audio);
+  appendChildren(info, buildPlayButton(att, resolvedUrl, wrap, audio), audio);
 
   appendChildren(inner, info, buildDownloadButton(att, resolvedUrl));
   wrap.appendChild(inner);
-
-  void fetchMediaAsObjectUrl(resolvedUrl).then((objectUrl) => {
-    if (objectUrl !== null) {
-      audio.src = objectUrl;
-    } else {
-      wrap.classList.add("msg-media-failed");
-    }
-  });
 
   return wrap;
 }
@@ -839,23 +955,28 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       }
     };
 
-    // Check cache first for instant render
-    const cached = memoryCache.get(resolvedUrl);
-    if (cached !== undefined) {
+    const buildImage = (objectUrl: string): HTMLImageElement => {
       const img = createElement("img", {
-        src: cached,
+        src: objectUrl,
         alt: att.filename,
       });
+      recoverEvictedImage(img, { url: resolvedUrl });
       attachLightbox(img);
       img.addEventListener(
         "load",
         () => {
           clearReservation();
-          if (isGif) observeMedia(img, cached, wrap, !animateGifsPref);
+          if (isGif) observeMedia(img, objectUrl, wrap, !animateGifsPref);
         },
         { once: true },
       );
-      wrap.appendChild(img);
+      return img;
+    };
+
+    // Check cache first for instant render
+    const cached = imageCache.get(resolvedUrl);
+    if (cached !== undefined) {
+      wrap.appendChild(buildImage(cached));
     } else {
       // Show loading placeholder, then replace with image. On failure the
       // placeholder becomes a typed failure line with a bounded retry, like the
@@ -866,29 +987,20 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       let current: Element = placeholder;
 
       const attempt = (): void => {
-        void fetchImageAsDataUrl(resolvedUrl).then((dataUrl) => {
-          if (dataUrl !== null) {
-            const img = createElement("img", {
-              src: dataUrl,
-              alt: att.filename,
-            });
-            recoverEvictedImage(img, { url: resolvedUrl });
-            attachLightbox(img);
-            img.addEventListener(
-              "load",
-              () => {
-                clearReservation();
-                if (isGif) observeMedia(img, dataUrl, wrap, !animateGifsPref);
-              },
-              { once: true },
-            );
+        void fetchImageAsObjectUrl(resolvedUrl).then((objectUrl) => {
+          if (objectUrl !== null) {
+            const img = buildImage(objectUrl);
             current.replaceWith(img);
             current = img;
           } else {
             const failure = renderFailureStatus(
               messageStatusText("file.imageFailed"),
               messageStatusText("file.retry"),
-              attempt,
+              () => {
+                // Retry asks the server again, even after a definite refusal.
+                missingImages.delete(resolvedUrl);
+                attempt();
+              },
             );
             current.replaceWith(failure);
             current = failure;

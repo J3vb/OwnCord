@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock, putSpy, brokerImageMock, idbData } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
-  putSpy: vi.fn<(value: string, key: string) => void>(),
+  putSpy: vi.fn<(value: unknown, key: string) => void>(),
   brokerImageMock: vi.fn<any>(),
   /** The stub's durable store: what survives an app restart. */
-  idbData: new Map<string, string>(),
+  idbData: new Map<string, unknown>(),
 }));
 
 // B9-8: this suite exercises content the viewer has already consented to;
@@ -62,7 +62,8 @@ vi.stubGlobal("indexedDB", {
             return {
               get: (key: string) => request(idbData.get(key)),
               getAllKeys: () => request([...idbData.keys()]),
-              put: (value: string, key: string) => {
+              getAll: () => request([...idbData.values()]),
+              put: (value: unknown, key: string) => {
                 putSpy(value, key);
                 idbData.set(key, value);
               },
@@ -101,7 +102,9 @@ import {
   EXTERNAL_IMAGE_CACHE_MAX,
   clearExternalImageCache,
   fetchExternalImage,
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
+  IMAGE_CACHE_MAX_BYTES,
+  IMAGE_DB_MAX_BYTES,
   recoverEvictedImage,
   renderAttachment,
   setAttachmentCacheScope,
@@ -127,6 +130,9 @@ describe("attachment cache clearing", () => {
     setServerHost("example.com");
     setAttachmentCacheScope("example.com#1");
     document.body.innerHTML = "";
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
+    URL.revokeObjectURL = vi.fn();
   });
 
   it("never writes an external image into the memory or IndexedDB cache", async () => {
@@ -135,7 +141,7 @@ describe("attachment cache clearing", () => {
     URL.createObjectURL = vi.fn(() => "blob:external-1");
     URL.revokeObjectURL = vi.fn();
 
-    await expect(fetchImageAsDataUrl("https://cdn.elsewhere.example/a.png")).resolves.toBe(
+    await expect(fetchImageAsObjectUrl("https://cdn.elsewhere.example/a.png")).resolves.toBe(
       "blob:external-1",
     );
 
@@ -155,7 +161,7 @@ describe("attachment cache clearing", () => {
         }),
     );
 
-    const pending = fetchImageAsDataUrl("https://example.com/image.png");
+    const pending = fetchImageAsObjectUrl("https://example.com/image.png");
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
@@ -166,7 +172,7 @@ describe("attachment cache clearing", () => {
     expect(putSpy).not.toHaveBeenCalled();
 
     fetchMock.mockResolvedValueOnce(imageResponse());
-    await fetchImageAsDataUrl("https://example.com/image.png");
+    await fetchImageAsObjectUrl("https://example.com/image.png");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -187,14 +193,14 @@ describe("attachment cache clearing", () => {
           }),
       );
 
-    const first = fetchImageAsDataUrl("https://example.com/image.png");
+    const first = fetchImageAsObjectUrl("https://example.com/image.png");
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     clearAttachmentCaches();
 
-    const second = fetchImageAsDataUrl("https://example.com/image.png");
+    const second = fetchImageAsObjectUrl("https://example.com/image.png");
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
@@ -202,7 +208,7 @@ describe("attachment cache clearing", () => {
     resolveFirst?.(imageResponse());
     await expect(first).resolves.toBeNull();
 
-    const third = fetchImageAsDataUrl("https://example.com/image.png");
+    const third = fetchImageAsObjectUrl("https://example.com/image.png");
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     resolveSecond?.(imageResponse());
@@ -384,12 +390,21 @@ describe("attachment cache profile isolation (B7-13)", () => {
     fetchMock.mockReset();
     idbData.clear();
     setAttachmentCacheScope(null);
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:scoped-${++next}`);
+    URL.revokeObjectURL = vi.fn();
   });
+
+  /** The bytes of the one image the durable store holds. */
+  async function storedBytes(): Promise<number[]> {
+    const [record] = [...idbData.values()] as { blob: Blob }[];
+    return [...new Uint8Array(await record!.blob.arrayBuffer())];
+  }
 
   it("prunes the previous server's entries from the durable store on a switch", async () => {
     switchTo("a.example", "a.example#1");
     fetchMock.mockResolvedValueOnce(bytesResponse([1]));
-    await fetchImageAsDataUrl("https://a.example/api/v1/files/1");
+    await fetchImageAsObjectUrl("https://a.example/api/v1/files/1");
     await vi.waitFor(() => expect(idbData.size).toBe(1));
 
     switchTo("b.example", "b.example#1");
@@ -401,17 +416,17 @@ describe("attachment cache profile isolation (B7-13)", () => {
     const url = "https://example.com/api/v1/files/7";
     switchTo("example.com", "example.com#1");
     fetchMock.mockResolvedValueOnce(bytesResponse([1]));
-    const first = await fetchImageAsDataUrl(url);
+    const first = await fetchImageAsObjectUrl(url);
     await vi.waitFor(() => expect(idbData.size).toBe(1));
 
     switchTo("example.com", "example.com#2");
     fetchMock.mockResolvedValueOnce(bytesResponse([2]));
-    const second = await fetchImageAsDataUrl(url);
+    const second = await fetchImageAsObjectUrl(url);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(second).not.toBe(first);
     await vi.waitFor(() => expect(idbData.size).toBe(1));
-    expect([...idbData.values()]).toEqual([second]);
+    expect(await storedBytes()).toEqual([2]);
   });
 
   // B7-15c: a self-deleted account's images leave the disk; other accounts'
@@ -435,12 +450,223 @@ describe("attachment cache profile isolation (B7-13)", () => {
     const url = "https://example.com/api/v1/files/9";
     switchTo("example.com", "example.com#1");
     fetchMock.mockResolvedValueOnce(bytesResponse([9]));
-    const first = await fetchImageAsDataUrl(url);
+    const first = await fetchImageAsObjectUrl(url);
     await vi.waitFor(() => expect(idbData.size).toBe(1));
 
     switchTo("example.com", "example.com#1");
 
-    await expect(fetchImageAsDataUrl(url)).resolves.toBe(first);
+    // The sign-out revoked `first`; the disk copy comes back as a new URL.
+    await expect(fetchImageAsObjectUrl(url)).resolves.toMatch(/^blob:/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(first);
+  });
+});
+
+// DP-56: the audit's channel-switch run fetched every seeded attachment twice.
+// The seeded files do not exist on disk, so each fetch was a 404 — and a
+// failure was never remembered, so the next mount asked again.
+describe("one download per attachment (DP-56)", () => {
+  const image = {
+    id: "att-9",
+    url: "https://example.com/api/v1/files/9",
+    filename: "shot.png",
+    size: 3,
+    mime: "image/png",
+  };
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    idbData.clear();
+    clearAttachmentCaches();
+    setServerHost("example.com");
+    setAttachmentCacheScope("example.com#1");
+    document.body.innerHTML = "";
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  /** Two rows show the attachment, then a channel switch away and back
+   *  remounts it. */
+  async function mountTwoRowsThenRemount(): Promise<HTMLElement> {
+    const rows = [renderAttachment(image), renderAttachment(image)];
+    document.body.append(...rows);
+    await vi.waitFor(() => {
+      expect(document.querySelector(".loading")).toBeNull();
+    });
+    document.body.innerHTML = "";
+    const again = renderAttachment(image);
+    document.body.append(again);
+    await vi.waitFor(() => {
+      expect(again.querySelector(".loading")).toBeNull();
+    });
+    return again;
+  }
+
+  it("fetches a shown image once", async () => {
+    fetchMock.mockResolvedValue(imageResponse());
+    await mountTwoRowsThenRemount();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask again for an image the server reported missing", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
+    const row = await mountTwoRowsThenRemount();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(row.querySelector(".msg-media-fallback")).not.toBeNull();
+  });
+
+  it("still asks again when the viewer presses Retry", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
+    const row = await mountTwoRowsThenRemount();
+
+    fetchMock.mockResolvedValue(imageResponse());
+    (row.querySelector(".msg-media-retry") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(row.querySelector("img")).not.toBeNull();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+// DP-16: server images are blob: URLs over byte-bounded caches, not base64
+// data: URIs in a count-capped map and an unbounded IndexedDB store.
+describe("server image caches (DP-16)", () => {
+  const url = (i: number): string => `https://example.com/api/v1/files/${i}`;
+  const key = (i: number): string => `example.com#1|${url(i)}`;
+
+  function sizedResponse(bytes: number) {
+    return {
+      ok: true,
+      headers: { get: () => "image/png" },
+      arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(bytes)),
+    };
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    putSpy.mockReset();
+    idbData.clear();
+    clearAttachmentCaches();
+    setServerHost("example.com");
+    setAttachmentCacheScope("example.com#1");
+    document.body.innerHTML = "";
+    let next = 0;
+    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
+    URL.revokeObjectURL = vi.fn();
+  });
+
+  it("shows a server image from a blob: URL, never a data: URI", async () => {
+    fetchMock.mockResolvedValue(imageResponse());
+    const element = renderAttachment({
+      id: "att-1",
+      url: url(1),
+      filename: "shot.png",
+      size: 3,
+      mime: "image/png",
+    });
+
+    await vi.waitFor(() => {
+      expect(element.querySelector("img")?.getAttribute("src")).toBe("blob:server-1");
+    });
+    const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob;
+    expect(blob.type).toBe("image/png");
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([1, 2, 3]);
+  });
+
+  it("evicts by bytes, revoking the evicted URL", async () => {
+    fetchMock.mockResolvedValue(sizedResponse(Math.floor(IMAGE_CACHE_MAX_BYTES * 0.4)));
+
+    const first = await fetchImageAsObjectUrl(url(1));
+    await fetchImageAsObjectUrl(url(2));
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+    await fetchImageAsObjectUrl(url(3));
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(first);
+  });
+
+  it("evicts the least recently shown image, not the oldest fetched", async () => {
+    fetchMock.mockResolvedValue(sizedResponse(Math.floor(IMAGE_CACHE_MAX_BYTES * 0.4)));
+
+    const first = await fetchImageAsObjectUrl(url(1));
+    const second = await fetchImageAsObjectUrl(url(2));
+    await expect(fetchImageAsObjectUrl(url(1))).resolves.toBe(first);
+
+    await fetchImageAsObjectUrl(url(3));
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(second);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(first);
+  });
+
+  it("revokes every cached image URL when the caches are cleared", async () => {
+    fetchMock.mockResolvedValue(imageResponse());
+    const shown = await fetchImageAsObjectUrl(url(1));
+
+    clearAttachmentCaches();
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(shown);
+  });
+
+  it("stores the Blob in IndexedDB, not a base64 string", async () => {
+    fetchMock.mockResolvedValue(imageResponse());
+    await fetchImageAsObjectUrl(url(1));
+
+    await vi.waitFor(() => expect(idbData.has(key(1))).toBe(true));
+    const record = idbData.get(key(1)) as { blob: unknown; bytes: number };
+    expect(record.blob).toBeInstanceOf(Blob);
+    expect(record.bytes).toBe(3);
+  });
+
+  it("keeps IndexedDB under its byte budget, dropping the least recently read", async () => {
+    const half = IMAGE_DB_MAX_BYTES / 2;
+    idbData.set(key(1), { blob: new Blob(["a"]), bytes: half, used: 1 });
+    idbData.set(key(2), { blob: new Blob(["b"]), bytes: half, used: 2 });
+
+    // A read from disk (memory is empty) refreshes entry 1's place…
+    await expect(fetchImageAsObjectUrl(url(1))).resolves.toMatch(/^blob:/);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // …so the write that crosses the budget drops entry 2.
+    fetchMock.mockResolvedValue(imageResponse());
+    await fetchImageAsObjectUrl(url(3));
+
+    await vi.waitFor(() => expect([...idbData.keys()].toSorted()).toEqual([key(1), key(3)]));
+  });
+
+  it("treats a pre-blob data: URI entry as a miss and drops it", async () => {
+    idbData.set(key(1), "data:image/png;base64,AAAA");
+    idbData.set(key(2), "data:image/png;base64,BBBB");
+    fetchMock.mockResolvedValue(imageResponse());
+
+    await expect(fetchImageAsObjectUrl(url(1))).resolves.toMatch(/^blob:/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect([...idbData.keys()]).toEqual([key(1)]));
+    expect(idbData.get(key(1))).toMatchObject({ bytes: 3 });
+  });
+
+  it("re-requests an on-screen server image whose blob: URL was evicted", async () => {
+    fetchMock.mockResolvedValue(imageResponse());
+    const element = renderAttachment({
+      id: "att-1",
+      url: url(1),
+      filename: "shot.png",
+      size: 3,
+      mime: "image/png",
+    });
+    await vi.waitFor(() => expect(element.querySelector("img")).not.toBeNull());
+    const img = element.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe("blob:server-1");
+    const otherError = vi.fn();
+    img.addEventListener("error", otherError);
+
+    clearAttachmentCaches();
+    img.dispatchEvent(new Event("error"));
+
+    // The server path brings it back (from disk here) — never the broker.
+    await vi.waitFor(() => expect(img.getAttribute("src")).toBe("blob:server-2"));
+    expect(brokerImageMock).not.toHaveBeenCalledWith(expect.anything(), { url: url(1) });
+    expect(otherError).not.toHaveBeenCalled();
   });
 });

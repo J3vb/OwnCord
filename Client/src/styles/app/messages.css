@@ -1091,6 +1091,44 @@ ul.md-list-nested {
   margin-top: 6px;
   height: 32px;
 }
+.msg-audio audio[hidden] {
+  display: none;
+}
+
+/* Stands in for a video/audio player until the clip is wanted: nothing is
+   downloaded before it is pressed. */
+.msg-media-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--scrim);
+  color: var(--on-fill);
+  cursor: pointer;
+}
+.msg-media-play:hover {
+  background: var(--scrim-strong);
+}
+.msg-media-play:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.msg-video .msg-media-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+.msg-audio .msg-media-play {
+  width: 32px;
+  height: 32px;
+  margin-top: 6px;
+}
 
 /* A media attachment whose authenticated fetch failed keeps its download
    affordance; the player is just dimmed so it does not read as loading. */

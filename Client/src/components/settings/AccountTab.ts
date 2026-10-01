@@ -18,7 +18,7 @@ import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
@@ -158,9 +158,9 @@ function paintAvatar(
     showInitial();
     return;
   }
-  void fetchImageAsDataUrl(url).then((dataUrl) => {
-    if (dataUrl === null || !target.isConnected) return;
-    const img = createElement("img", { class: "avatar-img", src: dataUrl, alt });
+  void fetchImageAsObjectUrl(url).then((objectUrl) => {
+    if (objectUrl === null || !target.isConnected) return;
+    const img = createElement("img", { class: "avatar-img", src: objectUrl, alt });
     recoverEvictedImage(img, { url });
     target.replaceChildren(img);
     target.style.background = "transparent";

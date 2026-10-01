@@ -19,13 +19,13 @@ vi.mock("@lib/livekitSession", () => ({
 // The emoji image is behind the session token, so buildCustomEmojiImage goes
 // through the same authenticated fetch attachments use. Stub just that call —
 // everything else in the module (isSafeUrl, resolveServerUrl) is real.
-const { fetchImageAsDataUrlMock } = vi.hoisted(() => ({
-  fetchImageAsDataUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
 vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/components/message-list/attachments")>();
-  return { ...actual, fetchImageAsDataUrl: fetchImageAsDataUrlMock };
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
 import {
@@ -56,7 +56,7 @@ beforeEach(() => {
   emojiStore.flush();
   setCustomEmoji(EMOJI);
   emojiStore.flush();
-  fetchImageAsDataUrlMock.mockClear();
+  fetchImageAsObjectUrlMock.mockClear();
 });
 
 // ---------------------------------------------------------------------------
@@ -171,9 +171,9 @@ describe("emoji tokens", () => {
 
   it("fetches the image through the authenticated path, not img.src", () => {
     buildCustomEmojiNode("wave");
-    expect(fetchImageAsDataUrlMock).toHaveBeenCalledTimes(1);
+    expect(fetchImageAsObjectUrlMock).toHaveBeenCalledTimes(1);
     // resolveServerUrl leaves the path relative when no host has been set.
-    const [url] = fetchImageAsDataUrlMock.mock.calls[0] as unknown as [string];
+    const [url] = fetchImageAsObjectUrlMock.mock.calls[0] as unknown as [string];
     expect(url).toContain("/api/v1/emoji/1/image");
   });
 });
