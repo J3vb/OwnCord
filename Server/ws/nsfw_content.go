@@ -9,8 +9,9 @@ import (
 // broadcastChannelEvent is EmitEvents' ChannelEvent route (B5-7): a metadata
 // kind (contentBearingKinds is false) takes BroadcastToChannel's route,
 // unchanged — the ordinary topic-subscriber Publish path, at exactly its
-// pre-B5-7 cost. Both carry senderID for the per-sender topic limit. A content-bearing kind stays on that SAME path (still
-// channel-scoped, bm.recipients nil) but is marked with nsfwChannelID, so
+// pre-B5-7 cost. Both carry senderID for the per-sender topic limit. A
+// content-bearing kind stays on that SAME path (still channel-scoped,
+// bm.recipients nil) but is marked with nsfwChannelID, so
 // deliverBroadcast resolves the channel's label and the recipient's
 // acknowledgement at DISPATCH time and narrows the topic's subscribers by
 // CanReadContent's ack check there. Withheld from the plugin sink entirely

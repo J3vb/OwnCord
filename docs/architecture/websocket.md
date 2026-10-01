@@ -70,7 +70,7 @@ flowchart LR
     EV["deliverBroadcast<br/>assign seq"] --> RB["EventRingBuffer<br/>(event_persistence.replay_ring_size, default 1000, Tier 1)"]
     EV --> EP["EventPersister<br/>async batched → events table<br/>(Tier 2; drops if queue full)"]
     EV --> PLG["plugin EventSink"]
-    EV --> PS["PubSub topics<br/>global / channel:N / voice:N / user:N<br/>(per-topic 100 msg/s limit)"]
+    EV --> PS["PubSub topics<br/>global / channel:N / voice:N / user:N<br/>(channel:N 100 msg/s limit per sender)"]
     PS --> CH{"per-client queues"}
     CH --> HI["sendHigh (64)<br/>DMs, mentions"]
     CH --> NO["send (256)<br/>chat, reactions, presence"]

@@ -175,7 +175,7 @@ Full per-type payloads, permission gates and rate limits are in [docs/protocol.m
 
 ### Backpressure
 
-Broadcasts fan out through per-topic pub/sub (global, `channel:N`, `voice:N`, `user:N`). Only channel-scoped broadcasts pass a 100 msg/s per-channel limiter, which sheds a frame before it gets a seq. Each client has three queues, drained high-first by `writePump`:
+Broadcasts fan out through per-topic pub/sub (global, `channel:N`, `voice:N`, `user:N`). Only channel-scoped broadcasts pass a 100 msg/s limiter, counted per channel and sender (server-originated frames share the channel's budget), which sheds a frame before it gets a seq. Each client has three queues, drained high-first by `writePump`:
 
 - `send` (256): every sequenced frame (chat including DMs, reactions, channel events, every broadcast `presence` and `presence_batch`) plus unsequenced direct replies, so the client's max(`seq`) ack never passes an undelivered frame.
 - `sendHigh` (64): unsequenced user-targeted frames only (DM-channel opens, DM requests, call signals); when full it spills into `send`.

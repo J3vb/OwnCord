@@ -268,9 +268,10 @@ type ServerConfig struct {
 	WAFCRSMode string `yaml:"waf_crs_mode"`
 	// MaxWSConnections caps concurrently connected WebSocket clients,
 	// counting sockets still authenticating; new upgrade requests beyond the
-	// cap are refused with 503 before the upgrade. 0 (the default) means unlimited — every connection costs
-	// goroutines and buffered send queues, so set a ceiling that matches the
-	// host's memory before pointing a large community at it.
+	// cap are refused with 503 before the upgrade. 0 (the default) means
+	// unlimited — every connection costs goroutines and buffered send queues,
+	// so set a ceiling that matches the host's memory before pointing a large
+	// community at it.
 	MaxWSConnections int `yaml:"max_ws_connections"`
 	// MetricsAllowedCIDRs gates /api/v1/metrics and the Prometheus /metrics
 	// exporter separately from the human admin surface, so a central
@@ -412,10 +413,9 @@ type BackupConfig struct {
 type SecurityConfig struct {
 	// AuthRateLimitMultiplier scales the per-IP auth rate limits and failure
 	// thresholds (registration, login, TOTP, sensitive endpoints, WebSocket
-	// upgrades). The
-	// defaults assume roughly one person per IP address; a community behind a
-	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
-	// clamped to [0.1, 100].
+	// upgrades). The defaults assume roughly one person per IP address; a
+	// community behind a shared NAT (office, school) hits them collectively.
+	// 0 or unset = 1.0; clamped to [0.1, 100].
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
 	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
 	// checks and hashes on every auth route, recovery-code matching at the
