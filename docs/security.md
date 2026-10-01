@@ -69,7 +69,7 @@ OwnCord supports TOTP-based 2FA:
   recognise, and erase again, an account the backup resurrects.
 - Admins can enforce server-wide 2FA via the `require_2fa` setting in the admin panel
 - `require_2fa` requires all users to have 2FA enabled and `registration_mode` to be `closed`; while it is on, the mode cannot be reopened
-- A session expires 30 days after its last use: an authenticated REST request, the WebSocket handshake and the WebSocket heartbeat each slide `expires_at`, at most once a minute per session. It never outlives 365 days from sign-in, and a touch never revives a session that has already expired or been revoked
+- A session expires 30 days after its last use: an authenticated REST request, the WebSocket handshake and the WebSocket heartbeat each slide `expires_at`, at most once a minute per session; the slide is written in a batch up to a minute later ([schema.md](schema.md#sessions) owns the bound and its edge). It never outlives 365 days from sign-in, and a touch never revives a session that has already expired or been revoked
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
 - Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); login, registration and recovery-code checks over it wait in a bounded FIFO queue (up to 10 s), and an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no bcrypt and counts as no failed attempt
