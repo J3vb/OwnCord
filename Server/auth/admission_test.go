@@ -159,6 +159,22 @@ func waitQueued(t *testing.T, b *auth.AdmissionBudget, n int) {
 	}
 }
 
+// With a free slot and nobody queued, Acquire admits at once, like TryAcquire.
+func TestAdmissionBudget_AcquireWithAFreeSlotAdmitsAtOnce(t *testing.T) {
+	b := auth.NewAdmissionBudget(1)
+	release, retry, ok := b.Acquire(context.Background(), time.Second)
+	if !ok || retry != 0 {
+		t.Fatalf("Acquire on a free budget = ok %v, retry %v; want admitted with no retry hint", ok, retry)
+	}
+	if b.InFlight() != 1 {
+		t.Fatalf("in flight = %d, want 1", b.InFlight())
+	}
+	release()
+	if b.InFlight() != 0 {
+		t.Fatalf("in flight = %d after release, want 0", b.InFlight())
+	}
+}
+
 func TestAdmissionBudget_AcquireAdmitsEveryWaiterInFIFOOrder(t *testing.T) {
 	const size, callers = 4, 40
 	b := auth.NewAdmissionBudget(size)
@@ -323,7 +339,7 @@ func TestAdmissionBudget_UnservableWaitRefusesAtOnce(t *testing.T) {
 		if !ok {
 			t.Fatal("could not take a slot")
 		}
-		defer release()
+		t.Cleanup(release)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
