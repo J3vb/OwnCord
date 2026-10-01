@@ -857,6 +857,24 @@ describe("DeviceManager", () => {
       expect(prefs.get("audioOutputDevice")).toBe("headset");
     });
 
+    it("switches the output back when it is replugged within the debounce after LiveKit moved it to the default", async () => {
+      prefs.set("audioOutputDevice", "headset");
+      outputs = [{ deviceId: "default" }, { deviceId: "headset" }];
+      const active = new Map([["audiooutput", "headset"]]);
+      mockRoom.getActiveDevice = (kind: string) => active.get(kind);
+      mockRoom.switchActiveDevice.mockImplementation(async (kind: string, id: string) => {
+        active.set(kind, id);
+      });
+      // The unplug and replug both land inside one debounce window; LiveKit's
+      // own (undebounced) devicechange handler already moved output to default.
+      active.set("audiooutput", "default");
+
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset")).toEqual([["audiooutput", "headset"]]);
+      expect(active.get("audiooutput")).toBe("headset");
+    });
+
     it("falls back again on the next unplug after the device returned while out of a call", async () => {
       prefs.set("audioInputDevice", "headset-mic");
       prefs.set("audioOutputDevice", "headset");

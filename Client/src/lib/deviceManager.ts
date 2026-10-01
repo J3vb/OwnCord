@@ -197,6 +197,14 @@ export class DeviceManager {
       if (this.room !== room) return;
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       const outputListed = outputDevices.some((d) => d.deviceId === savedOutput);
+      // LiveKit's own undebounced devicechange handler moves output to the
+      // default the moment the saved device disappears, so a replug inside
+      // our debounce finds it listed with no fallback recorded. The native
+      // room has no getActiveDevice; its re-apply loop below covers it.
+      const activeOutput = room.getActiveDevice?.("audiooutput");
+      if (outputListed && activeOutput !== undefined && activeOutput !== savedOutput) {
+        this.fallbackFrom.audiooutput = savedOutput;
+      }
       if (savedOutput !== "" && !outputListed && this.fallbackFrom.audiooutput !== savedOutput) {
         log.warn("Saved audio output device removed — falling back to default", { savedOutput });
         try {
