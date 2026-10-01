@@ -1084,9 +1084,9 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 }
 
 /** Download a file via Tauri HTTP plugin and save to disk with native dialog.
- *  The bare `fs:allow-write-file` identifier grants the command; the save
- *  dialog then grants the one path the user chose, so no static write scope is
- *  needed (and none covers app data). The dialog itself is the boundary. */
+ *  `fs:allow-write-file` is statically scoped to `$APPLOG` (nothing covers app
+ *  data); the save dialog grants the one path the user chose at runtime, so the
+ *  dialog itself is the boundary for the download. */
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename
