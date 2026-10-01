@@ -138,8 +138,9 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   administrator short-circuits. The `authz-chokepoint` invariant fails any
   other raw call, and that list only shrinks.
 - Voice permission is enforced twice: once at `voice_join` (channel
-  permission) and again inside the LiveKit JWT itself (`CanPublishSources`
-  scoped by role permission). The client is never the sole gate.
+  `CONNECT_VOICE`, plus `READ_MESSAGES` outside a DM) and again inside the
+  LiveKit JWT itself (`CanPublishSources` scoped by role permission). The
+  client is never the sole gate.
 - Admin panel access is IP/CIDR-gated (`admin_allowed_cidrs`), separately from
   bearer admin auth on its API.
 - The rule contributors must follow: never trust a client-supplied permission

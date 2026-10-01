@@ -174,7 +174,7 @@ How a client joins voice:
 Client                     OwnCord Server              LiveKit Server
   |                             |                           |
   |-- voice_join (channel_id)-->|                           |
-  |                             |-- check CONNECT_VOICE     |
+  |                             |-- check READ+CONNECT_VOICE|
   |                             |-- persist to voice_states |
   |                             |-- GenerateToken()         |
   |<-- voice_token ------------|                           |

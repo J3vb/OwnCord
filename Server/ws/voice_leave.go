@@ -34,7 +34,7 @@ const (
 	// voiceLeaveReasonTokenRefresh is a refused voice_token_refresh whose
 	// permission was revoked, which evicts rather than merely denying a token.
 	voiceLeaveReasonTokenRefresh = "token_refresh"
-	// voiceLeaveReasonRevoked is the CONNECT_VOICE revocation sweep
+	// voiceLeaveReasonRevoked is the voice permission revocation sweep
 	// (sweepStaleVoiceEvictRevoked, hub_sweep.go).
 	voiceLeaveReasonRevoked = "revoked"
 	// voiceLeaveReasonReconciled is RT-3's polling reconciler removing a

@@ -106,6 +106,11 @@ func TestCanJoinVoice(t *testing.T) {
 		{"role deny CONNECT refused", Subject{RolePerms: memberBits, Override: deny(ConnectVoice), Channel: voice(false)}, ErrPermissionDenied},
 		{"user deny CONNECT refused", Subject{RolePerms: memberBits, Override: userDeny(ConnectVoice), Channel: voice(false)}, ErrPermissionDenied},
 		{"admin bypasses deny", Subject{RolePerms: Administrator, Override: deny(ConnectVoice), Channel: voice(false)}, nil},
+		// A voice channel hidden by denying only READ_MESSAGES stays closed:
+		// joining would put the member in a room they cannot see.
+		{"role deny READ refused", Subject{RolePerms: memberBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
+		{"user deny READ refused", Subject{RolePerms: memberBits, Override: userDeny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
+		{"CONNECT without READ refused", Subject{RolePerms: ConnectVoice, Channel: voice(false)}, ErrPermissionDenied},
 		{"text channel is not voice", Subject{RolePerms: memberBits, Channel: text(false)}, ErrNotVoiceChannel},
 		{"archived voice refused", Subject{RolePerms: memberBits, Channel: voice(true)}, ErrArchived},
 		{"unauthorized never learns archived", Subject{RolePerms: ReadMessages, Channel: voice(true)}, ErrPermissionDenied},

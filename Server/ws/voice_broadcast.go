@@ -45,8 +45,9 @@ func qualityBitrate(quality string) int {
 // filterDMAudience when channelID is a one-to-one DM.
 //
 // A room's own participants must always receive its voice_state /
-// voice_leave: voice membership is gated on CONNECT_VOICE alone, so the
-// READ filter can exclude a live participant — whose client then keeps a
+// voice_leave: voice membership can outlive READ_MESSAGES (a mid-call
+// revocation, or a DM call after the DM was closed), so the READ filter can
+// exclude a live participant — whose client then keeps a
 // stale E2EE key holder, stalling rotation and locking new joiners out
 // until e2ee_timeout. Union the READ audience with the room's current
 // participants; what outsiders may observe is unchanged.
@@ -149,9 +150,9 @@ func (h *Hub) sendVoiceEventSync(ctx context.Context, channelID, subjectID int64
 // their client-side voice state — which means broadcastVoiceEvent's own
 // still-in-the-room participant union can no longer see them. Every path
 // that tears down a voice participant whose client state is cleared before
-// the voice_leave goes out needs this: voice membership is gated on
-// CONNECT_VOICE alone, so a leaver without READ_MESSAGES on the channel
-// would otherwise never learn the server already ended their call. Mirrors
+// the voice_leave goes out needs this: voice membership can outlive
+// READ_MESSAGES (a mid-call revocation, or a closed DM), so a leaver without
+// READ_MESSAGES on the channel would otherwise never learn the server already ended their call. Mirrors
 // CleanupVoiceForChannel's per-batch leaver union, for the single-leaver case.
 // leaverID also doubles as the DM-audience subject (B5-6): the leaver always
 // sees their own leave.

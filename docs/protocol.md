@@ -1340,6 +1340,9 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 { "type": "voice_join", "payload": { "channel_id": 10 } }
 ```
 
+The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
+`READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
+
 On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL
@@ -1555,13 +1558,14 @@ the moderator did and restates it with `voice_deafen`.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
-The destination is checked against the TARGET's `CONNECT_VOICE` (a move must not
-place someone where they could not go themselves) and against the destination's
-`voice_max_users`. The server then runs its voice-leave routine for the target —
-`voice_leave` is broadcast, the LiveKit participant is removed, the row deleted
-— and sends the target `voice_moved`. The target's client answers with an
-ordinary `voice_join` for the destination, so capacity, token minting and
-key-holder election keep their single implementation.
+The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
+DM, `READ_MESSAGES` (a move must not place someone where they could not go
+themselves) and against the destination's `voice_max_users`. The server then
+runs its voice-leave routine for the target — `voice_leave` is broadcast, the
+LiveKit participant is removed, the row deleted — and sends the target
+`voice_moved`. The target's client answers with an ordinary `voice_join` for
+the destination, so capacity, token minting and key-holder election keep their
+single implementation.
 
 A target whose socket has dropped while the server holds its call open for a
 reconnect (up to 15 seconds) has no socket to receive `voice_moved`. The server

@@ -363,6 +363,37 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	}
 }
 
+// TestVoice_Join_ReadDeniedByOverride_Refused: a voice channel hidden from a
+// role by a READ_MESSAGES-only override is not joinable, even though the role
+// still carries CONNECT_VOICE — joining would put the member in a room they
+// cannot see.
+func TestVoice_Join_ReadDeniedByOverride_Refused(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceUserWithRole(t, database, "hidden-vc", 4)
+	chanID := seedVoiceChan(t, database, "vc-hidden")
+	if err := database.UpsertChannelOverride(context.Background(), chanID, 4, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != ws.ErrCodeForbidden {
+		t.Fatalf("error code = %q, want %q", code, ws.ErrCodeForbidden)
+	}
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil {
+		t.Error("voice_states row persisted for a voice_join into a channel the member cannot see")
+	}
+}
+
 // ─── voice_leave ──────────────────────────────────────────────────────────────
 
 func TestVoice_Leave_ClearsStateInDB(t *testing.T) {

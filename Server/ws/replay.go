@@ -41,8 +41,8 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// Voice membership needs only CONNECT_VOICE, not READ_MESSAGES
-	// (voice_join.go), so a live participant resuming can have their own room
+	// Voice membership can outlive READ_MESSAGES (voice_join.go checks it
+	// only at join), so a live participant resuming can have their own room
 	// excluded from allowedChannelIDs entirely — most commonly a DM voice call
 	// after the DM was closed (computeAllowedChannels sources DM IDs from
 	// dm_open_state). Capture it before registerNow performs the same
@@ -579,7 +579,8 @@ func liveVoiceEventsSinceCore(ringRead, coldRead func() [][]byte, keep func([]by
 
 // liveVoiceEventsSince returns voice_state/voice_leave events for chID at or
 // after afterSeq, bypassing the READ-gated channel filter entirely. Voice
-// membership needs only CONNECT_VOICE (voice_join.go), so a resuming
+// membership can outlive READ_MESSAGES (voice_join.go checks it only at
+// join), so a resuming
 // participant's own room is not always in their READ-visible set — a stock
 // example is a DM voice call after the DM was closed. Tries the ring buffer
 // first (fresh, so it observes anything pushed concurrently with the caller),

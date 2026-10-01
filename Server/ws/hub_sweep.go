@@ -167,8 +167,9 @@ func (h *Hub) sweepRevokedSessions() {
 }
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-checks CONNECT_VOICE for every client currently in voice, evicts the
-// ones who no longer hold it, and reconciles active media source permissions.
+// re-runs the voice join gate (permissions.CanJoinVoice) for every client
+// currently in voice, evicts the ones it now refuses, and reconciles active
+// media source permissions.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// The whole SFU reconciliation pass shares a budget. An unavailable
 	// companion cannot hold the hub loop for one network timeout per user.
@@ -223,9 +224,9 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
 			continue
 		}
-		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",
+		slog.Warn("sweepStaleVoiceStates: evicted participant who may no longer join the channel",
 			"user_id", c.userID, "channel_id", chID)
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to join this voice channel"))
 	}
 }
 
@@ -435,7 +436,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// The evicted participants themselves must always be in it (their client
 	// state is already cleared, so broadcastVoiceEvent's participant union
 	// cannot see them): the voice_leave is what drives their own E2EE
-	// teardown, and voice membership never required READ_MESSAGES.
+	// teardown, and voice membership can outlive READ_MESSAGES.
 	//
 	// Both callers of CleanupVoiceForChannel commit archived=1 to this
 	// channel before evicting (OC-0022) — deliberately, so a concurrent

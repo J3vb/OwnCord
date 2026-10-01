@@ -45,7 +45,7 @@ var voiceJoinPostTokenRaceHook func(*Client)
 
 // handleVoiceJoin processes a voice_join message.
 // 1. Parses channel_id.
-// 2. Checks CONNECT_VOICE permission.
+// 2. Checks the voice join gate (permissions.CanJoinVoice).
 // 3. If already in a different voice channel, leaves it first.
 // 4. Checks channel capacity (voice_max_users).
 // 5. Persists join in DB.
@@ -115,9 +115,10 @@ func (h *Hub) restorePendingModFlags(c *Client, wasServerMuted, wasServerDeafene
 
 // voiceJoinPrecheck runs every gate that must pass before handleVoiceJoin
 // mutates any state: rate limit, payload parse, a moderator's rejoin block
-// (voice_rejoin_block.go), CONNECT_VOICE, channel existence, channel type, DM
-// block, archive, switch capacity, authenticated user and LiveKit
-// availability. It reports the target channel id and row when the join may
+// (voice_rejoin_block.go), channel existence, the join gate
+// (permissions.CanJoinVoice: CONNECT_VOICE, READ_MESSAGES outside a DM,
+// channel type, DM block, archive), switch capacity, authenticated user and
+// LiveKit availability. It reports the target channel id and row when the join may
 // proceed; on refusal it has already sent the error frame and returns false.
 func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.RawMessage) (int64, *db.Channel, bool) {
 	// Rate limit: voice_join broadcasts a voice_state update to every connected
@@ -152,7 +153,8 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// permissions.CanJoinVoice over the channel-TYPE-aware subject: the
 	// CONNECT_VOICE bit (a role-only check passes for any DM id — DMs have no
 	// overrides — and the token minted below carries RoomJoin+CanSubscribe
-	// for that room), a channel that has a room (a text channel would
+	// for that room), READ_MESSAGES outside a DM (a channel hidden from the
+	// caller is not joinable), a channel that has a room (a text channel would
 	// otherwise persist a voice_states row and mint a LiveKit room the UI can
 	// never render or moderate; DM and group calls join through this same
 	// handler), no archive (a caller still holding the id of a channel nobody
@@ -373,7 +375,7 @@ func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID
 func (h *Hub) voiceJoinPublishPerms(ctx context.Context, userID, channelID int64) (canPublish, canVideo, canScreenShare bool) {
 	if h.perms != nil {
 		// PermissionService answers all three bits from one cached
-		// role+overrides snapshot (populated by the CONNECT_VOICE gate
+		// role+overrides snapshot (populated by the join gate
 		// above, so these are cache hits). Same fail-closed posture: an
 		// unresolved role or override map yields no publish grants.
 		canPublish = h.perms.HasChannelPerm(ctx, userID, channelID, permissions.SpeakVoice)
@@ -427,7 +429,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, c *Client, channelID int6
 		}
 
 		// OC-0008: a concurrent eviction (voice_mod_kick/move via
-		// DisconnectFromVoiceInChannel, the CONNECT_VOICE revocation sweep, or
+		// DisconnectFromVoiceInChannel, the voice permission revocation sweep, or
 		// CleanupVoiceForChannel) can land anywhere between c.setVoiceState
 		// (BUG-088, above) and here — all of them delete the voice_states row
 		// and clear the client's in-memory state, then call RemoveParticipant,
@@ -610,7 +612,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// Re-run the join gate (permissions.CanJoinVoice, exactly as voice_join
 	// applies it) where the credential is minted. The channel comes from the
 	// client's own session state, and voice_join used to be the only place
-	// the bit was checked — so a user whose CONNECT_VOICE was revoked
+	// the gate was checked — so a user whose CONNECT_VOICE was revoked
 	// mid-session kept minting fresh SFU room-join grants, and a block imposed
 	// mid-session (OC-0018) kept re-issuing one for the blocker's DM. Refusing
 	// alone would leave the live session in place, so the refusal also evicts:
@@ -620,7 +622,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	ch, chErr := d.Reader.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return Result{
-			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing permission to join this voice channel"},
 			LeaveVoice:       true,
 			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}
@@ -628,7 +630,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	sub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, userID, ch, true)
 	if subErr != nil {
 		return Result{
-			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"},
+			Error:            ClientError{Code: ErrCodeForbidden, Message: "missing permission to join this voice channel"},
 			LeaveVoice:       true,
 			LeaveVoiceReason: voiceLeaveReasonTokenRefresh,
 		}
