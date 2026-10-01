@@ -27,7 +27,10 @@ export interface EmojiCatalog {
     readonly key: EmojiGroupKey;
     readonly emoji: readonly UnicodeEmoji[];
   }[];
-  /** Every emoji by character, each skin-tone variant mapped to its base. */
+  /**
+   * Every emoji by character: each skin-tone variant mapped to its base, plus
+   * the U+FE0F-stripped form older pickers stored in Recent (unqualified).
+   */
   readonly byChar: ReadonlyMap<string, UnicodeEmoji>;
 }
 
