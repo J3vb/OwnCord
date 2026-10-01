@@ -126,6 +126,17 @@ describe("Tauri default capability — HTTP scope", () => {
     }
   });
 
+  it("every fs permission is a scoped object with an explicit allow list", () => {
+    const fsEntries = permissions.filter((p) =>
+      (typeof p === "string" ? p : p.identifier).startsWith("fs:"),
+    );
+    expect(fsEntries.length).toBeGreaterThan(0);
+    for (const entry of fsEntries) {
+      expect(typeof entry, `${JSON.stringify(entry)} is an unscoped fs grant`).not.toBe("string");
+      expect((entry as ScopedPermission).allow?.length ?? 0).toBeGreaterThan(0);
+    }
+  });
+
   it("does not grant fs:default (its recursive read includes $APPDATA)", () => {
     expect(permissions).not.toContain("fs:default");
   });
