@@ -105,8 +105,8 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 // Recipients (the group-aware field) are rewritten, since a 1:1 DM's
 // Recipient is a copy of Recipients[0], not a shared reference.
 func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
-	live := h.liveStatuses()
-	return presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id] })
+	live := h.livePresences()
+	return presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id].status })
 }
 
 // presentDMStatuses is presentableDMChannels over any live-status lookup

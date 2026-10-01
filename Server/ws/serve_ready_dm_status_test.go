@@ -62,7 +62,7 @@ func dmChannelStatusFor(t *testing.T, raw []byte, otherID int64) (recipientStatu
 // dm_channels, exactly as presentableMembers already forces for the members
 // array. absent chooses "dnd", then StampDisconnect-equivalent state is
 // simulated by simply never registering a client for absent (buildReady's
-// liveStatuses() only reflects live hub registrations, so an
+// livePresences() only reflects live hub registrations, so an
 // unregistered user is indistinguishable from "signed out").
 func TestBuildReady_DMChannelsHidesDisconnectedRecipientStatus(t *testing.T) {
 	hub, database := newServeHub(t)

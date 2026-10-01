@@ -1,7 +1,7 @@
 package ws
 
 // hub_connected.go — live-connection status snapshots, split out of
-// serve_ready.go (at its line ceiling). See liveStatuses.
+// serve_ready.go (at its line ceiling). See livePresences.
 
 // livePresences snapshots each connected user's live presence
 // (Client.livePresence), status "" for a connection that has not stamped one
@@ -25,7 +25,7 @@ func (h *Hub) LiveStatus(userID int64) string {
 	if c == nil {
 		return ""
 	}
-	return c.liveStatus()
+	return c.livePresence().status
 }
 
 // ConnectedUserIDs returns the users the hub still holds a connection for.
