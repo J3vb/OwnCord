@@ -45,7 +45,7 @@ func FuzzValidateAvatarURL(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, avatar string) {
-		err := validateAvatarURL(avatar)
+		err := validateAvatarURL(avatar, "")
 		if err != nil {
 			return
 		}

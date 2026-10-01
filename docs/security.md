@@ -317,7 +317,7 @@ The Tauri desktop client implements the following security measures:
 
 ### Tauri Capabilities (Least Privilege)
 
-- Filesystem write access is scoped to `$APPDATA/**` and `$APPLOG/**` only
+- Filesystem access is scoped to `$APPLOG` only. The renderer reads and writes its own logs there; every other frontend save goes through the native save dialog, whose chosen path the dialog plugin grants dynamically. `$APPDATA` is deliberately out of scope: it holds `credential_fallback.json`/`.key`, `certs.json` and `identity_pins.json`, so a renderer compromise would otherwise read the fallback credential store or the TLS/identity pins. `fs:default` (whose recursive read covers `$APPDATA`) and the old `$APPDATA/**` write scope were removed for this reason.
 - DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
 - HTTP fetch is restricted to `http://127.0.0.1:*` (the Rust TOFU proxies' loopback tunnels) — no `https://` destination at all. It still **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` as defence in depth should a wildcard ever return
 - `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
@@ -332,7 +332,7 @@ The Tauri desktop client implements the following security measures:
 - The HTTP proxy (`http_proxy`) carrying REST traffic pins against the same store
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
 - All three native tunnels share one TOFU verifier — see [trust-model.md](trust-model.md)
-- Certificate mismatch triggers a modal requiring user acknowledgment
+- Certificate mismatch triggers a modal requiring user acknowledgment. Pinning a certificate is additionally gated by a native OS confirmation dialog in `accept_cert_fingerprint` — the only writer of a pin — so a renderer compromise cannot silently re-pin a host and must get a human to answer the dialog that names the host and fingerprint
 - **First-contact defence is comparison out of band.** The fingerprint is what
   the trust decision rests on, so read it from the server's start-up banner
   (also on the admin Dashboard and the setup wizard's finish step) and compare

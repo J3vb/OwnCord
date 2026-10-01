@@ -336,10 +336,25 @@ export function isTrustedServerUrl(url: string): boolean {
 }
 
 /**
+ * Server content routes that legitimately require the session bearer token:
+ * attachments (channel ACLs) and custom emoji (authenticated so an emoji is
+ * not a tracking pixel). A server-host URL outside these is fetched without
+ * credentials — otherwise a same-host URL someone put in a field the client
+ * renders, such as an avatar, makes every viewer issue an authenticated
+ * request to an arbitrary path on the server's own origin.
+ */
+const TOKEN_BEARING_ROUTES = ["/api/v1/files/", "/api/v1/emoji/"];
+
+function isTokenBearingServerPath(pathname: string): boolean {
+  return TOKEN_BEARING_ROUTES.some((route) => pathname.startsWith(route));
+}
+
+/**
  * Fetch a file from the OwnCord server through the Rust HTTP TOFU proxy's
  * loopback origin (cert-pinned) with the session bearer token attached —
  * /api/v1/files/{id} enforces channel ACLs, so an unauthenticated request
- * would 401. The token is only ever sent to the configured server host.
+ * would 401. The token is only ever sent to the configured server host, and
+ * only for the server's own content routes.
  *
  * Server URLs only. An external URL is never fetched directly (B7-16): images
  * go through the external-content broker (`fetchExternalImage`), and anything
@@ -352,7 +367,7 @@ async function fetchServerFile(url: string): Promise<Response> {
   const origin = await ensureHttpProxy(parsed.host);
   const headers: Record<string, string> = {};
   const token = getToken();
-  if (token !== null) {
+  if (token !== null && isTokenBearingServerPath(parsed.pathname)) {
     // i18n-exempt: HTTP wire header value, never rendered
     headers["Authorization"] = `Bearer ${token}`;
   }
@@ -1069,9 +1084,9 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
 }
 
 /** Download a file via Tauri HTTP plugin and save to disk with native dialog.
- *  NOTE: This requires fs:allow-write-file with path "**" in capabilities because
- *  the user chooses the save location via the native OS dialog — the destination is
- *  not under our control. The dialog itself is the security boundary. */
+ *  The bare `fs:allow-write-file` identifier grants the command; the save
+ *  dialog then grants the one path the user chose, so no static write scope is
+ *  needed (and none covers app data). The dialog itself is the boundary. */
 async function downloadFile(url: string, filename: string): Promise<void> {
   try {
     // Show native save dialog with suggested filename

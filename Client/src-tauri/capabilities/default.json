@@ -49,18 +49,7 @@
     "autostart:allow-is-enabled",
     "deep-link:default",
     "deep-link:allow-register",
-    "fs:default",
-    {
-      "identifier": "fs:allow-write-file",
-      "allow": [
-        {
-          "path": "$APPDATA/**"
-        },
-        {
-          "path": "$APPLOG/**"
-        }
-      ]
-    },
+    "fs:allow-write-file",
     {
       "identifier": "fs:allow-write-text-file",
       "allow": [
@@ -88,6 +77,9 @@
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
+        {
+          "path": "$APPLOG"
+        },
         {
           "path": "$APPLOG/**"
         }

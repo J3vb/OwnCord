@@ -173,8 +173,18 @@ func validateIdentityKey(key string) error {
 }
 
 // validateAvatarURL checks that avatar is either empty or a valid https:// URL
-// no longer than maxAvatarURLLen characters.
-func validateAvatarURL(avatar string) error {
+// no longer than maxAvatarURLLen characters, and that a URL on the server's own
+// host is an attachment route.
+//
+// A same-host URL is otherwise an amplification primitive: the client attaches
+// the session bearer token to a request whose host equals the server, so every
+// viewer that renders the user would fetch an arbitrary path on this origin
+// with their credentials. The only legitimate same-host avatar is the
+// attachment route this server writes to users.avatar (service.AvatarFileURL),
+// so anything else on this host is refused. serverHost is the request's Host;
+// empty disables the same-host check. Different hosts are unaffected — they are
+// fetched anonymously through the client's external-content broker.
+func validateAvatarURL(avatar, serverHost string) error {
 	if avatar == "" {
 		return nil
 	}
@@ -185,7 +195,25 @@ func validateAvatarURL(avatar string) error {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return fmt.Errorf("avatar URL must use https://")
 	}
+	if serverHost != "" &&
+		strings.EqualFold(stripDefaultPort(parsed.Scheme, parsed.Host), stripDefaultPort(parsed.Scheme, serverHost)) &&
+		!isAvatarAttachmentPath(parsed.Path) {
+		return fmt.Errorf("avatar URL on this server must be /api/v1/files/<id>")
+	}
 	return nil
+}
+
+// isAvatarAttachmentPath reports whether path is this server's avatar file
+// route: /api/v1/files/<uuid>. The uuid check mirrors what the upload handler
+// actually stores, so a path that merely looks similar cannot be used to reach
+// another handler.
+func isAvatarAttachmentPath(path string) bool {
+	id, ok := strings.CutPrefix(path, "/api/v1/files/")
+	if !ok {
+		return false
+	}
+	_, err := uuid.Parse(id)
+	return err == nil
 }
 
 // validateDisplayName rejects a nickname that would render as something other
@@ -276,7 +304,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// the username path above.
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
-		if err := validateAvatarURL(trimmed); err != nil {
+		if err := validateAvatarURL(trimmed, r.Host); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}

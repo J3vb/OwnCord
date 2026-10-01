@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri_plugin_dialog::DialogExt;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
@@ -448,7 +449,12 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
 /// Accept a certificate fingerprint for a host — the only path that writes a pin
 /// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
-#[tauri::command]
+///
+/// The pin is written only after a native dialog the user answers: the renderer
+/// already showed its own prompt, but a compromised renderer must not be able
+/// to pin an arbitrary host/fingerprint silently. The dialog is the trust
+/// boundary, so it names the host and the fingerprint being pinned.
+#[tauri::command(async)]
 pub fn accept_cert_fingerprint<R: Runtime>(
     app: AppHandle<R>,
     host: String,
@@ -460,6 +466,19 @@ pub fn accept_cert_fingerprint<R: Runtime>(
 
     if !is_valid_cert_fingerprint(&fingerprint) {
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
+    }
+
+    // async command: the body runs off Tauri's main thread, so blocking_show
+    // (which itself dispatches onto the main thread) cannot deadlock.
+    let confirmed = app
+        .dialog()
+        .message(crate::text::cert_accept_prompt(&host, &fingerprint))
+        .title(crate::text::CERT_ACCEPT_TITLE)
+        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+        .buttons(tauri_plugin_dialog::MessageDialogButtons::YesNo)
+        .blocking_show();
+    if !confirmed {
+        return Err("certificate not accepted".into());
     }
 
     let store = crate::json_store::open(&app, CERTS_STORE).map_err(|e| {

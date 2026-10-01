@@ -105,7 +105,7 @@ func TestUpdateProfile_Success(t *testing.T) {
 
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
 		"username": "newname",
-		"avatar":   "https://example.com/av.png",
+		"avatar":   "https://avatars.example.net/av.png",
 	})
 
 	if rr.Code != http.StatusOK {
@@ -116,6 +116,45 @@ func TestUpdateProfile_Success(t *testing.T) {
 	_ = json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["username"] != "newname" {
 		t.Errorf("username = %v, want 'newname'", resp["username"])
+	}
+}
+
+// A same-host avatar URL lets every client that renders the user fetch an
+// arbitrary path on the server's own origin with the session bearer token
+// attached (the client attaches it for a URL whose host equals the server).
+// Only the attachment route is a legitimate same-host avatar, so a same-host
+// URL that is not /api/v1/files/<uuid> must be refused.
+func TestUpdateProfile_RejectsSameHostNonAttachmentAvatar(t *testing.T) {
+	database := newAuthTestDB(t)
+	router := buildProfileRouter(database)
+	token := profileCreateToken(t, database, "samehostav", 4)
+
+	// httptest.NewRequest defaults req.Host to example.com, so this URL is
+	// on the server's own host — the amplification/CSRF-equivalent case.
+	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "samehostav",
+		"avatar":   "https://example.com/admin/api/stats",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("same-host non-attachment avatar status = %d, want 400; body = %s", rr.Code, rr.Body.String())
+	}
+
+	// A same-host attachment URL stays valid.
+	ok := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "samehostav",
+		"avatar":   "https://example.com/api/v1/files/0b3e2f5a-1111-2222-3333-444455556666",
+	})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("same-host attachment avatar status = %d, want 200; body = %s", ok.Code, ok.Body.String())
+	}
+
+	// A different host is still accepted unchanged.
+	other := patchJSON(t, router, "/api/v1/users/me", token, map[string]string{
+		"username": "samehostav",
+		"avatar":   "https://avatars.example.net/av.png",
+	})
+	if other.Code != http.StatusOK {
+		t.Fatalf("external-host avatar status = %d, want 200; body = %s", other.Code, other.Body.String())
 	}
 }
 

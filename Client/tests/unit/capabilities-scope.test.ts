@@ -106,15 +106,40 @@ describe("Tauri default capability — HTTP scope", () => {
     );
   });
 
-  it("filesystem grants stay under $APPDATA/$APPLOG", () => {
+  it("filesystem grants stay under $APPLOG only", () => {
+    // $APPDATA holds credential_fallback.json/.key, certs.json and
+    // identity_pins.json. fs:default grants recursive read of the app data
+    // directory, so the renderer could read the fallback store and every
+    // saved server's pins; nothing in the frontend needs $APPDATA at all
+    // (saves go through dialog-granted paths and $APPLOG). Any grant that
+    // reaches $APPDATA is the blast radius this locks out.
     const fsPaths = permissions.flatMap((p) =>
       typeof p !== "string" && p.identifier.startsWith("fs:")
-        ? (p.allow ?? []).map((e) => e.path ?? "")
+        ? [...(p.allow ?? []), ...(p.deny ?? [])].map((e) => e.path ?? "")
         : [],
     );
     expect(fsPaths.length).toBeGreaterThan(0);
     for (const path of fsPaths) {
-      expect(path).toMatch(/^\$APP(DATA|LOG)\//);
+      // $APPLOG itself (for a read-dir on the log directory) or a path under it.
+      expect(path).toMatch(/^\$APPLOG(\/|$)/);
+      expect(path).not.toMatch(/^\$APPDATA(\/|$)/);
+    }
+  });
+
+  it("does not grant fs:default (its recursive read includes $APPDATA)", () => {
+    expect(permissions).not.toContain("fs:default");
+  });
+
+  it("grants no write scope over $APPDATA", () => {
+    const writes = permissions.flatMap((p) =>
+      typeof p !== "string" &&
+      p.identifier.startsWith("fs:") &&
+      /write|mkdir|remove|rename|copy|create/.test(p.identifier)
+        ? (p.allow ?? []).map((e) => e.path ?? "")
+        : [],
+    );
+    for (const path of writes) {
+      expect(path).not.toMatch(/^\$APPDATA(\/|$)/);
     }
   });
 });
