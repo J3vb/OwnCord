@@ -611,8 +611,11 @@ on, through RNNoise (`nnnoiseless`, a pure-Rust port of RNNoise's 2018 model;
 the web path ships the newer one), into
 an unbuffered `NativeAudioSource` that backs the published microphone track.
 Mute closes the input stream (the OS in-use indicator goes out) and keeps the
-publication; unmute reopens it on the device it last resolved, so a
-push-to-talk press does not enumerate devices. The capture shares the
+publication; unmute reopens it on the device it last resolved, without
+enumerating devices. Push-to-talk never closes it: with the key up
+(`native_voice_set_ptt_gated`) each processed frame is zeroed after the APM
+and RNNoise ran, so the stream and their state stay up and the indicator
+stays lit while PTT is armed. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

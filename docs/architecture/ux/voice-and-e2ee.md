@@ -289,8 +289,9 @@ trust action entirely (a blind accept is refused).
   stays published and its capture stays open across presses, the store's
   `pttGated` never writes `localMuted`, and a user's own mute or deafen still
   stops the capture as before. On Linux the native room keeps its own gate
-  behind the same call and turns the session's microphone off and on with
-  the key, only while the user has it on.
+  behind the same call: the key flips the Rust capture's gate, which zeroes
+  the open capture's processed frames, so there too the capture stays open
+  across presses (§4).
 - **Device hot-swap:** `lib/deviceManager.ts` follows OS device
   plug/unplug and re-routes the active input/output without rejoining. An
   unplugged saved device falls back to the system default but stays the
