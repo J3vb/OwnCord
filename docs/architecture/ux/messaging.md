@@ -171,10 +171,10 @@ so surrounding context and reply references stay intact.
 
 ## 5. Reactions
 
-| Action              | Target UX                                                                                                                  |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Add/remove reaction | Optimistic pill toggle + count adjustment, reflecting `me`; `reaction_update` echo reconciles; failure rolls the pill back |
-| Emoji picker        | `EmojiPicker` with recent-emoji memory (`owncord:recent-emoji`)                                                            |
+| Action              | Target UX                                                                                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add/remove reaction | Optimistic pill toggle + count adjustment, reflecting `me`; `reaction_update` echo reconciles; failure rolls the pill back                                                       |
+| Emoji picker        | `EmojiPicker`: the full Unicode set (`features/messaging/emojiCatalog.ts`, data lazy-loaded on first open), a remembered skin tone, recent-emoji memory (`owncord:recent-emoji`) |
 
 > **✓ Implemented (2026-08).** The pill toggles on the click:
 > `ReactionController.sendReaction` applies the toggle locally
