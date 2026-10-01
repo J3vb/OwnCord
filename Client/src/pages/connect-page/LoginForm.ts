@@ -149,6 +149,23 @@ export interface LoginFormApi {
 // Factory
 // ---------------------------------------------------------------------------
 
+/** How long a login keeps retrying a busy server before it gives up (P5-S02). */
+const AUTH_BUSY_RETRY_BUDGET_MS = 70_000;
+/** The shortest wait before a retry, whatever Retry-After says (the
+ *  saved-password relay sends none). The login route allows 5 attempts per IP
+ *  per minute and refused ones count, so attempts at least 15 s apart keep
+ *  one client to 4 in any minute. */
+const AUTH_BUSY_MIN_RETRY_MS = 15_000;
+/** Up to this much is added to each wait, so a burst of refused clients
+ *  does not come back in lockstep. */
+const AUTH_BUSY_JITTER_MS = 1_000;
+
+/** The server's password-check queue was full: a refusal worth retrying. A
+ *  per-IP RATE_LIMITED is not — retrying only spends the window again. */
+function isAuthBusy(err: unknown): err is ApiClientError {
+  return err instanceof ApiClientError && err.code === "AUTH_BUSY";
+}
+
 function isBusy(state: FormState): boolean {
   return state === "loading" || state === "connecting" || state === "auto-connecting";
 }
@@ -224,6 +241,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let serverWait: HTMLDivElement;
   let serverWaitText: HTMLSpanElement;
   let serverWaitHost = "";
+  let authBusyRetry: HTMLDivElement;
+  /** The busy line's Cancel: ends the wait and stops the AUTH_BUSY retries. */
+  let cancelAuthBusyRetry: (() => void) | null = null;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -321,6 +341,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     });
 
     serverWait = buildServerWait();
+    authBusyRetry = buildAuthBusyRetry();
 
     // Form
     const form = createElement("form", { class: "connect-form" });
@@ -479,7 +500,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
 
-    appendChildren(formContainer, formLogo, errorBanner, serverWait, form);
+    appendChildren(formContainer, formLogo, errorBanner, serverWait, authBusyRetry, form);
     appendChildren(panel, settingsBtn, formContainer);
     return panel;
   }
@@ -661,6 +682,25 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     cancelBtn.addEventListener("click", cancelServerWait, { signal });
     appendChildren(wait, serverWaitText, cancelBtn);
     return wait;
+  }
+
+  function buildAuthBusyRetry(): HTMLDivElement {
+    // The server-wait line's look: a live status while a busy login retries.
+    const line = createElement("div", { class: "server-wait auth-busy-retry", role: "status" });
+    line.hidden = true;
+    const text = createElement(
+      "span",
+      { class: "server-wait-text" },
+      connectText("login.serverBusyRetrying"),
+    );
+    const cancelBtn = createElement(
+      "button",
+      { class: "btn-ghost server-wait-cancel", type: "button" },
+      connectText("common.cancel"),
+    );
+    cancelBtn.addEventListener("click", () => cancelAuthBusyRetry?.(), { signal });
+    appendChildren(line, text, cancelBtn);
+    return line;
   }
 
   function cancelServerWait(): void {
@@ -910,7 +950,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // Event handlers
   // ---------------------------------------------------------------------------
 
+  /** Every write of the host goes through here: a new host ends a busy retry for the old one. */
+  function writeHost(host: string): void {
+    if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
+    hostInput.value = host;
+  }
+
   function handleToggleMode(): void {
+    cancelAuthBusyRetry?.();
     formMode = formMode === "login" ? "register" : "login";
 
     // A remembered password belongs to an EXISTING account. Carrying the
@@ -990,6 +1037,60 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     return null;
   }
 
+  /**
+   * Run a login, retrying an AUTH_BUSY refusal after the larger of its
+   * Retry-After and AUTH_BUSY_MIN_RETRY_MS (plus jitter) until it succeeds,
+   * fails any other way, or that wait (before jitter) would overrun the retry budget —
+   * that refusal is the one shown. The busy line shows while it retries; its
+   * Cancel, or picking another host, sends no further attempt, reports
+   * `onAutoLoginCancel` (which ends the attempt in flight) and returns the
+   * form to idle.
+   */
+  async function loginRetryingWhileBusy(login: () => Promise<void>): Promise<void> {
+    const deadline = Date.now() + AUTH_BUSY_RETRY_BUDGET_MS;
+    let cancelled = false;
+    let wake: (() => void) | null = null;
+    cancelAuthBusyRetry = () => {
+      cancelled = true;
+      authBusyRetry.hidden = true;
+      wake?.();
+      onAutoLoginCancel?.();
+    };
+    try {
+      for (;;) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- a retry is sequential by definition
+          await login();
+          return;
+        } catch (err) {
+          if (cancelled) {
+            transitionTo("idle");
+            return;
+          }
+          if (!isAuthBusy(err)) throw err;
+          const minWait = Math.max(err.retryAfterMs ?? 0, AUTH_BUSY_MIN_RETRY_MS);
+          const left = deadline - Date.now();
+          if (minWait > left) throw err;
+          // Jitter never costs the last retry: it is clipped to the budget.
+          const wait = Math.min(minWait + Math.random() * AUTH_BUSY_JITTER_MS, left);
+          authBusyRetry.hidden = false;
+          // oxlint-disable-next-line no-await-in-loop -- the wait between retries
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            setOwnedTimeout(signal, resolve, wait);
+          });
+          if (cancelled) {
+            transitionTo("idle");
+            return;
+          }
+        }
+      }
+    } finally {
+      cancelAuthBusyRetry = null;
+      authBusyRetry.hidden = true;
+    }
+  }
+
   async function handleFormSubmit(e: Event): Promise<void> {
     e.preventDefault();
 
@@ -1011,11 +1112,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     try {
       if (formMode === "login") {
-        if (usingSavedPassword) {
-          await onLoginWithSavedPassword(host, username);
-        } else {
-          await onLogin(host, username, password);
-        }
+        const savedPassword = usingSavedPassword;
+        await loginRetryingWhileBusy(() =>
+          savedPassword
+            ? onLoginWithSavedPassword(host, username)
+            : onLogin(host, username, password),
+        );
       } else {
         const inviteCode = normaliseInviteCode(inviteInput.value);
         await onRegister(host, username, password, inviteCode);
@@ -1197,7 +1299,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setHost(host: string): void {
-      hostInput.value = host;
+      writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
     },
@@ -1239,7 +1341,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
      * which case the user still needs to enter the server address.
      */
     applyInviteLink(code: string, host?: string): void {
-      if (host) hostInput.value = host;
+      if (host) writeHost(host);
       if (formMode !== "register") handleToggleMode();
       inviteInput.value = code;
       updateRegistrationUi();

@@ -419,10 +419,12 @@ type SecurityConfig struct {
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
 	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
 	// checks and hashes on every auth route, recovery-code matching at the
-	// second-factor step — run at once: the B4-4 admission budget. An
-	// over-budget attempt is refused with 429 RATE_LIMITED, runs no bcrypt
-	// and consumes no lockout attempt. 0 or unset = twice the CPU count
-	// (never below 4); clamped to [1, 4096].
+	// second-factor step — run at once: the B4-4 admission budget. Login,
+	// registration and recovery-code checks over the budget queue for up to
+	// 10 s; an attempt refused (queue full, wait over, or a password
+	// confirmation over budget) gets 429 AUTH_BUSY, runs no bcrypt and
+	// consumes no lockout attempt. 0 or unset = twice the CPU count (never
+	// below 4); clamped to [1, 4096].
 	ExpensiveAuthConcurrency int `yaml:"expensive_auth_concurrency"`
 }
 

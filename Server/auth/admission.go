@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"container/list"
+	"context"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // AdmissionBudget bounds how much deliberately expensive authentication work
@@ -12,19 +15,31 @@ import (
 // issue, and the recovery-code match at verify (B4-4, SEC-01). One process
 // holds one budget (inside the shared RateLimiter), so every route that pays
 // for bcrypt takes the same server-owned admission decision: a slot is taken
-// atomically before the computation starts and given back after it, and an
-// over-budget attempt is refused up front — no compare runs, and the refusal
-// charges no lockout attempt.
+// atomically before the computation starts and given back after it. An
+// over-budget attempt either waits its turn in a bounded FIFO queue (Acquire:
+// the login, registration and recovery-code routes, so a login burst is slow
+// rather than refused — P5-S02) or is refused up front (TryAcquire: the
+// sensitive confirmations). A refusal runs no compare and charges no lockout
+// attempt.
 //
 // The size counts concurrent computations, not requests per second: bcrypt
 // at cost 12 is a quarter second of one core, so the budget is what keeps a
 // burst of password attempts from growing the CPU-bound backlog without
 // bound. The default is twice the core count — enough that legitimate
-// traffic never sees a refusal, small enough that the worst-case queue
-// behind it stays under a second.
+// traffic rarely queues, small enough that each queued caller moves up
+// quickly.
 type AdmissionBudget struct {
-	slots    chan struct{}
 	size     int
+	queueCap int
+	mu       sync.Mutex
+	// held counts slots taken; waiters are Acquire callers queued for one,
+	// oldest first. A released slot passes straight to the oldest waiter,
+	// so held never drops while anyone waits and nobody can jump the queue.
+	held    int
+	waiters list.List // of chan struct{}, closed when handed a slot
+	// avgHold is a moving average of how long a slot is held, the service
+	// time behind the retry hint.
+	avgHold  time.Duration
 	inFlight atomic.Int64
 	peak     atomic.Int64
 }
@@ -35,6 +50,18 @@ const (
 	minDefaultAdmissionBudget = 4
 	// maxAdmissionBudget is where a budget stops bounding anything.
 	maxAdmissionBudget = 4096
+	// AdmissionWait is how long an Acquire caller on the login, registration
+	// and recovery-code paths waits in the queue before it is refused.
+	AdmissionWait = 10 * time.Second
+	// queueSlotsPerSecond caps the queue at four waiters per slot per second
+	// of AdmissionWait. It is only an upper bound: it matches what the budget
+	// serves inside the wait when a compare holds a slot a quarter second,
+	// but slots outnumber cores by default, so holds run longer. Acquire
+	// refuses earlier, from the measured hold time, whenever the wait it
+	// would face already exceeds its maxWait.
+	queueSlotsPerSecond = 4
+	// initialAvgHold seeds the retry hint before any slot has been released.
+	initialAvgHold = 250 * time.Millisecond
 )
 
 // DefaultAdmissionBudget is the size a zero or negative configuration value
@@ -50,19 +77,92 @@ func NewAdmissionBudget(size int) *AdmissionBudget {
 		size = DefaultAdmissionBudget()
 	}
 	size = min(size, maxAdmissionBudget)
-	return &AdmissionBudget{slots: make(chan struct{}, size), size: size}
+	return &AdmissionBudget{
+		size:     size,
+		queueCap: queueSlotsPerSecond * size * int(AdmissionWait/time.Second),
+		avgHold:  initialAvgHold,
+	}
 }
 
 // TryAcquire takes one slot without waiting. ok is false when the budget is
-// exhausted: nothing was taken and release is a no-op. release is
-// idempotent, so a caller can give the slot back as soon as the expensive
-// step is done and still defer it as a safety net.
+// exhausted or callers are already queued for it: nothing was taken and
+// release is a no-op. release is idempotent, so a caller can give the slot
+// back as soon as the expensive step is done and still defer it as a safety
+// net.
 func (b *AdmissionBudget) TryAcquire() (release func(), ok bool) {
-	select {
-	case b.slots <- struct{}{}:
-	default:
+	b.mu.Lock()
+	ok = b.held < b.size && b.waiters.Len() == 0
+	if ok {
+		b.held++
+	}
+	b.mu.Unlock()
+	if !ok {
 		return func() {}, false
 	}
+	return b.admitted(), true
+}
+
+// Acquire takes one slot, waiting in arrival order for up to maxWait when
+// the budget is exhausted. ok is false when the queue is already full or its
+// estimated wait already exceeds maxWait, when maxWait passes, or when ctx
+// ends first: nothing was taken, release is a no-op, and retryAfter
+// estimates when a slot is likely to be free. A refusal is still the B4-4
+// refusal — no computation runs and it charges no lockout attempt.
+func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (release func(), retryAfter time.Duration, ok bool) {
+	b.mu.Lock()
+	if b.held < b.size && b.waiters.Len() == 0 {
+		b.held++
+		b.mu.Unlock()
+		return b.admitted(), 0, true
+	}
+	if b.waiters.Len() >= b.queueCap || b.estimatedWaitLocked() > maxWait {
+		retryAfter = b.retryAfterLocked()
+		b.mu.Unlock()
+		return func() {}, retryAfter, false
+	}
+	ready := make(chan struct{})
+	elem := b.waiters.PushBack(ready)
+	b.mu.Unlock()
+
+	timer := time.NewTimer(maxWait)
+	defer timer.Stop()
+	select {
+	case <-ready:
+		return b.admitted(), 0, true
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+
+	b.mu.Lock()
+	select {
+	case <-ready:
+		// Handed a slot while giving up: pass it on rather than hold it for
+		// a caller that no longer wants it.
+		b.mu.Unlock()
+		b.admitted()()
+		b.mu.Lock()
+	default:
+		b.waiters.Remove(elem)
+	}
+	retryAfter = b.retryAfterLocked()
+	b.mu.Unlock()
+	return func() {}, retryAfter, false
+}
+
+// estimatedWaitLocked is how long a caller joining the queue now would wait
+// for a slot: the queue ahead of it divided by the budget's throughput.
+func (b *AdmissionBudget) estimatedWaitLocked() time.Duration {
+	return time.Duration(b.waiters.Len()+1) * b.avgHold / time.Duration(b.size)
+}
+
+// retryAfterLocked estimates how long a caller refused now should wait before
+// trying again: its estimated wait, never under a second.
+func (b *AdmissionBudget) retryAfterLocked() time.Duration {
+	return max(b.estimatedWaitLocked(), time.Second)
+}
+
+// admitted books a slot the caller now holds and returns its release.
+func (b *AdmissionBudget) admitted() func() {
 	n := b.inFlight.Add(1)
 	for {
 		p := b.peak.Load()
@@ -70,13 +170,22 @@ func (b *AdmissionBudget) TryAcquire() (release func(), ok bool) {
 			break
 		}
 	}
+	start := time.Now()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			b.inFlight.Add(-1)
-			<-b.slots
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			b.avgHold += (time.Since(start) - b.avgHold) / 8
+			if front := b.waiters.Front(); front != nil {
+				b.waiters.Remove(front)
+				close(front.Value.(chan struct{}))
+				return
+			}
+			b.held--
 		})
-	}, true
+	}
 }
 
 // Size is the number of concurrent computations the budget admits.

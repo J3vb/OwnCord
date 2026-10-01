@@ -149,6 +149,21 @@ describe("API Client", () => {
       expectConsole("warn", /\[api\] API error/);
     });
 
+    it("surfaces a Retry-After in seconds on the error, and none when absent", async () => {
+      const busy = errorResponse(429, "AUTH_BUSY", "busy");
+      (busy.headers as Headers).set("Retry-After", "7");
+      mockFetch.mockResolvedValueOnce(busy);
+      await expect(api.login("u", "p")).rejects.toMatchObject({
+        status: 429,
+        code: "AUTH_BUSY",
+        retryAfterMs: 7000,
+      });
+      expectConsole("warn", /\[api\] API error/);
+      mockFetch.mockResolvedValueOnce(errorResponse(429, "AUTH_BUSY", "busy"));
+      await expect(api.login("u", "p")).rejects.toMatchObject({ retryAfterMs: undefined });
+      expectConsole("warn", /\[api\] API error/);
+    });
+
     it("calls onUnauthorized on 401", async () => {
       mockFetch.mockResolvedValue(errorResponse(401, "UNAUTHORIZED", "Invalid session"));
       await expect(api.getMe()).rejects.toThrow();
@@ -1468,6 +1483,11 @@ describe("errorText (B9-20, Q7)", () => {
     ],
     [
       "RATE_LIMITED",
+      "too many authentication attempts in progress, try again later",
+      "The server is busy right now. Try again in a moment.",
+    ],
+    [
+      "AUTH_BUSY",
       "too many authentication attempts in progress, try again later",
       "The server is busy right now. Try again in a moment.",
     ],

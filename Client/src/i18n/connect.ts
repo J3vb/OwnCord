@@ -92,6 +92,7 @@ export const connectText = defineCatalog("connect", {
   "login.connecting": "Connecting…",
   "login.loggingIn": "Logging in…",
   "login.registering": "Registering…",
+  "login.serverBusyRetrying": "Server busy, retrying…",
   "login.registrationClosed": "Registration closed",
   "login.autoConnecting": "Auto-connecting...",
   "login.waitingForServer": "Waiting for {server}…",

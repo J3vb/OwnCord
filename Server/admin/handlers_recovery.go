@@ -55,8 +55,13 @@ func handleIssueRecoveryCredential(authSvc *service.AuthService) http.HandlerFun
 }
 
 func writeRecoveryErr(w http.ResponseWriter, err error) {
-	// ErrRateLimited has no equivalent in writeSvcErr's four cases, so it is
-	// checked first and everything else falls through to the shared mapper.
+	// ErrAuthBusy and ErrRateLimited have no equivalent in writeSvcErr's four
+	// cases, so they are checked first — the admission refusal before the
+	// issuance budget it also matches — and everything else falls through.
+	if errors.Is(err, service.ErrAuthBusy) {
+		writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", err.Error())
+		return
+	}
 	if errors.Is(err, service.ErrRateLimited) {
 		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 		return

@@ -244,8 +244,8 @@ var (
 	// ErrAuthBusy is the B4-4 admission refusal: the process-wide budget for
 	// expensive authentication work is exhausted, so this attempt ran no
 	// bcrypt and consumed no lockout attempt. Same category as the lockouts
-	// (429 RATE_LIMITED); a message of its own so an operator can tell load
-	// from abuse.
+	// (429), but its own code, AUTH_BUSY, tells load from abuse; the queued
+	// sites wrap it with a retry hint (authBusyError, P5-S02).
 	ErrAuthBusy                   = &authError{ErrRateLimited, "too many authentication attempts in progress, try again later"}
 	ErrPasswordRequired           = &authError{ErrInvalidInput, "password is required"}
 	ErrIncorrectPassword          = &authError{ErrInvalidInput, "incorrect password"}
@@ -301,6 +301,8 @@ type AuthService struct {
 	// private one over st; the composition root swaps in the shared
 	// Services.Erasure (UseErasure) so the file storage is installed once.
 	erasure *ErasureService
+	// admissionWait bounds acquireAdmission's queue wait (P5-S02).
+	admissionWait time.Duration
 }
 
 // NewAuthService wires the auth slice. limiter is the shared auth rate
@@ -313,14 +315,15 @@ type AuthService struct {
 // enrolment and the replay window, and a store fault fails closed.
 func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
 	return &AuthService{
-		st:          st,
-		limiter:     limiter,
-		partial:     auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
-		pending:     auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
-		usedCodes:   auth.NewUsedTOTPCodeStore().WithPersister(st),
-		totpKey:     totpKey,
-		broadcaster: broadcaster,
-		erasure:     NewErasureService(st),
+		st:            st,
+		limiter:       limiter,
+		partial:       auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
+		pending:       auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
+		usedCodes:     auth.NewUsedTOTPCodeStore().WithPersister(st),
+		totpKey:       totpKey,
+		broadcaster:   broadcaster,
+		erasure:       NewErasureService(st),
+		admissionWait: auth.AdmissionWait,
 	}
 }
 
@@ -448,11 +451,13 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	// does not burn a valid invite code.
 	// The hash is bcrypt at full cost, so it takes an admission slot like a
 	// compare does (B4-4): a burst of registrations cannot grow the CPU
-	// backlog past the budget, and a refusal burns nothing.
-	hash, admitted, err := s.limiter.Admission().HashPassword(in.Password)
-	if !admitted {
-		return nil, ErrAuthBusy
+	// backlog past the budget, and a refusal burns nothing (queued, P5-S02).
+	release, err := s.acquireAdmission(ctx)
+	if err != nil {
+		return nil, err
 	}
+	hash, err := auth.HashPassword(in.Password)
+	release()
 	if err != nil {
 		return nil, ErrPasswordHash
 	}
@@ -609,6 +614,16 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrLockedOut
 	}
 
+	// B4-4: take an admission slot before the attempt is reserved, so an
+	// over-budget request is refused without charging the failure budgets
+	// and without a bcrypt compare; the slot goes back right after the
+	// compare. A burst queues (P5-S02), so the account is read once
+	// admitted: a change made during the wait is what the compare sees.
+	release, err := s.acquireAdmission(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// Constant-time lookup: always attempt bcrypt compare even when user
 	// does not exist to prevent timing-based username enumeration.
 	user, err := s.st.GetUserByUsername(ctx, in.Username)
@@ -642,15 +657,6 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// is keyed per USER and is the only cross-IP brute-force defence, so
 	// scaling it with the shared-NAT multiplier would hand a distributed
 	// attacker more guesses (api/constants_test.go pins this call site).
-	// B4-4: take an admission slot before the attempt is reserved, so an
-	// over-budget request is refused without charging the failure budgets
-	// and without a bcrypt compare; the slot goes back right after the
-	// compare, the only expensive step.
-	release, admitted := s.limiter.Admission().TryAcquire()
-	if !admitted {
-		return nil, ErrAuthBusy
-	}
-	defer release()
 	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) ||
 		!s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
@@ -730,13 +736,13 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// the code compare, the check-then-act the up-front record closes.
 	// An emergency recovery code is matched against up to ten bcrypt hashes,
 	// so it takes an admission slot before the attempt is reserved (B4-4): a
-	// refusal charges nothing. A TOTP code is an HMAC and needs no slot.
+	// refusal charges nothing, and it queues for the slot like login does
+	// (P5-S02). A TOTP code is an HMAC and needs no slot.
 	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
 	release := func() {}
 	if isRecovery {
-		var admitted bool
-		if release, admitted = s.limiter.Admission().TryAcquire(); !admitted {
-			return nil, ErrAuthBusy
+		if release, err = s.acquireAdmission(ctx); err != nil {
+			return nil, err
 		}
 		defer release()
 	}

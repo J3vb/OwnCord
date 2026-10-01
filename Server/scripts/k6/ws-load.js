@@ -240,12 +240,14 @@ const downloads = IS_OPERATIONAL ? new Counter("downloads") : null;
 // the server made on purpose is never counted as a WebSocket error.
 //
 // They are different gates and only one is about the server. The per-IP sliding
-// window (api/middleware.go:251) sets Retry-After and fires because every
+// window (api/middleware.go:251) answers RATE_LIMITED and fires because every
 // generator shares one address — an artifact of this topology, which is what
 // OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER is for. The process-wide bcrypt
-// admission budget (auth/admission.go:60) sets no Retry-After and is sized
-// max(2*NumCPU, 4), i.e. 4 concurrent compares on the constrained leg — a real
-// operational signal, and the one that binds a simultaneous login burst.
+// admission budget (auth/admission.go) answers AUTH_BUSY once its bounded
+// queue is full or a login has waited 10 s in it. It is sized max(2*NumCPU, 4),
+// i.e. 4 concurrent compares on the constrained leg — a real operational
+// signal, and the one that binds a simultaneous login burst. Both set
+// Retry-After, so the error code is what tells them apart.
 //
 // Neither is a defect: both refuse before any bcrypt runs and charge no lockout
 // attempt. Both cost the VU its token, so both have to be visible.
@@ -1322,21 +1324,21 @@ function authenticate(username, extraHeaders) {
     }
 
     // A 429 is the server shedding load on purpose, and it is retryable — the
-    // admission budget frees its slots every ~250 ms. It is NOT a ws_error:
+    // admission queue drains a slot every ~250 ms. It is NOT a ws_error:
     // that counter backs the published "0 WebSocket errors" claim, and a run
     // that counted refusals there published a defect that did not exist while
     // hiding the one that did (VUs that never connected).
     if (res.status === 429) {
-      // k6 exposes headers under their canonical names, so Retry-After is the
-      // one to look for; the lowercase spelling is here only so a k6 that
-      // stops canonicalising cannot silently reclassify every per-IP refusal
-      // as an admission refusal — which is the distinction this split exists
-      // to draw.
-      if (res.headers["Retry-After"] ?? res.headers["retry-after"]) {
-        authRateLimited.add(1, scaleTags());
-      } else {
-        authAdmissionRefused.add(1, scaleTags());
+      // The body's code draws the distinction this split exists for; a body
+      // that is not the JSON error shape counts as the per-IP refusal.
+      let code = null;
+      try {
+        code = res.json("error");
+      } catch {
+        code = null;
       }
+      if (code === "AUTH_BUSY") authAdmissionRefused.add(1, scaleTags());
+      else authRateLimited.add(1, scaleTags());
       // Backoff, so the retries of many stuck VUs de-synchronise instead of
       // arriving in lockstep and re-colliding on the same slots.
       if (attempt < LOGIN_ATTEMPTS - 1) sleep(1 + attempt * 0.5);

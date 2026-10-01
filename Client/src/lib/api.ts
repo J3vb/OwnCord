@@ -64,13 +64,22 @@ interface RequestOptions {
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The response's Retry-After, in milliseconds, when it sent one. */
+  readonly retryAfterMs: number | undefined;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, retryAfterMs?: number) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.code = code;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/** A Retry-After header in delta-seconds form, as milliseconds; undefined otherwise. */
+function parseRetryAfterMs(res: Response): number | undefined {
+  const value = res.headers.get("retry-after")?.trim();
+  return value !== undefined && /^\d+$/.test(value) ? Number(value) * 1000 : undefined;
 }
 
 function isSessionExpired(message: string): boolean {
@@ -152,7 +161,8 @@ const PERMISSION_REFUSAL =
  * suspended account, or an account-state refusal ("account is awaiting
  * approval"). Only a refused sign-in, session, suspension or permission has
  * fixed copy — the rest keep the server's own sentence, which says what went
- * wrong. RATE_LIMITED and INTERNAL_ERROR carry the auth slice's lockout,
+ * wrong. AUTH_BUSY is the server's authentication queue being full. RATE_LIMITED
+ * and INTERNAL_ERROR carry the auth slice's lockout,
  * budget and failure sentences, each of which gets copy of its own; any other
  * rate limit reads as the generic line and any other internal failure as the
  * caller's fallback.
@@ -161,6 +171,8 @@ export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
       return authSliceCopy(message) ?? connectText("error.rateLimited");
+    case "AUTH_BUSY":
+      return connectText("error.authBusy");
     case "INTERNAL":
     case "INTERNAL_ERROR":
       return authSliceCopy(message);
@@ -604,7 +616,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           message: err.message,
           reqId: res.headers.get("x-request-id") ?? undefined,
         });
-        throw new ApiClientError(res.status, err.error, err.message);
+        throw new ApiClientError(res.status, err.error, err.message, parseRetryAfterMs(res));
       }
       if (res.status === 204) {
         releaseTransport();

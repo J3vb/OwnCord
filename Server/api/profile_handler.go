@@ -437,7 +437,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		failKey := auth.Key("pw_confirm_fail", user.ID)
 		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
 		if !admitted {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", service.ErrAuthBusy.Error())
+			writeAuthBusy(w, service.ErrAuthBusy)
 			return
 		}
 		if !matched {
@@ -464,7 +464,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		// Hash new password — bcrypt at full cost, so through the budget too.
 		hash, admitted, err := limiter.Admission().HashPassword(req.NewPassword)
 		if !admitted {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", service.ErrAuthBusy.Error())
+			writeAuthBusy(w, service.ErrAuthBusy)
 			return
 		}
 		if err != nil {

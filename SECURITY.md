@@ -84,8 +84,10 @@ disagreement is a doc bug.
   comparison (`subtle.ConstantTimeCompare`).
 - Every bcrypt computation on an authentication route (password checks and
   hashes, recovery-code matching) is admitted through one process-wide
-  concurrency budget; an over-budget attempt is refused with `429
-RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
+  concurrency budget. Login, registration and recovery-code checks over it
+  wait in a bounded FIFO queue (up to 10 s); an attempt refused (queue full,
+  wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`,
+  runs no bcrypt, and counts as no failed attempt.
 - TOTP-based 2FA is supported (enrolment via QR code plus backup codes), and
   admins can require it server-wide. Second-factor state (the login
   challenge, a pending enrolment and the 90-second replay window) survives a
