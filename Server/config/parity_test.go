@@ -186,8 +186,8 @@ func TestParityEveryLeafRoundTrips(t *testing.T) {
 		want[key] = p
 	})
 	// A walk that silently loses a key would make the rest of this test vacuous.
-	if len(want) != 75 {
-		t.Fatalf("walked %d config leaves, want the full 75-key surface", len(want))
+	if len(want) != 77 {
+		t.Fatalf("walked %d config leaves, want the full 77-key surface", len(want))
 	}
 
 	body, err := goyaml.Marshal(tree)
