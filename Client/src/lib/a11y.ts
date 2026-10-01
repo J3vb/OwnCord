@@ -128,8 +128,8 @@ export function setRovingTabindex(container: HTMLElement, cellSelector: string):
  * treats each cell's parent element as rows of `gridColumns` (the emoji
  * picker's eight-column category grids): Up/Down step a whole row within that
  * parent and stay put at its top/bottom edge, while Left/Right still step by
- * one across the whole list and clamp at the ends. Home/End and Enter/Space are the same either
- * way.
+ * one across the whole list and clamp at the ends. Home/End and Enter/Space are
+ * the same in every mode.
  */
 export function enableRovingNavigation(
   container: HTMLElement,
