@@ -239,7 +239,7 @@ func TestDMService_CreateGroupDM_SurvivesCancelledPostCommitRead(t *testing.T) {
 // ─── OC-0304: disconnected recipients must read as offline ────────────────
 //
 // users.status keeps a *chosen* idle/dnd/invisible across a disconnect
-// (MarkUserDisconnected only ever rewrites "online" -> "offline") so a
+// (StampDisconnect only ever rewrites "online" -> "offline") so a
 // reconnect can honour it. ws/serve_ready.go's presentableMembers documents
 // the resulting obligation on every read path: "a member with no live
 // connection is offline, whatever the row says." DMSummaryFor, ListDMs and

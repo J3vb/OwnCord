@@ -16,7 +16,7 @@ import (
 // OC-0304: POST /dms must apply the same "no live connection is offline,
 // whatever users.status stores" rule ws/serve_ready.go's
 // presentableMembers/presentableDMChannels apply to the ready payload and
-// members list. MarkUserDisconnected deliberately keeps a chosen idle/dnd
+// members list. StampDisconnect deliberately keeps a chosen idle/dnd
 // status across a disconnect (so a reconnect can honour it), so a
 // signed-out recipient's saved "dnd" must not leak into the DM sidebar as a
 // live presence dot — contradicting the member list right next to it, which
@@ -36,7 +36,7 @@ func TestCreateDM_RecipientStatus_OfflineWhenDisconnected(t *testing.T) {
 		t.Fatalf("lookup bob: %v", err)
 	}
 
-	// Bob chose "Do Not Disturb" and then signed out: MarkUserDisconnected
+	// Bob chose "Do Not Disturb" and then signed out: StampDisconnect
 	// only ever rewrites the "online" status, so the saved row keeps "dnd".
 	if _, err := database.ExecContext(context.Background(),
 		`UPDATE users SET status = 'dnd' WHERE id = ?`, bob.ID,

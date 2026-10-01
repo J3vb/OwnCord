@@ -60,7 +60,7 @@ func dmChannelStatusFor(t *testing.T, raw []byte, otherID int64) (recipientStatu
 // TestBuildReady_DMChannelsHidesDisconnectedRecipientStatus pins OC-0008: a DM
 // recipient with no live WebSocket connection must render offline in
 // dm_channels, exactly as presentableMembers already forces for the members
-// array. absent chooses "dnd", then MarkUserDisconnected-equivalent state is
+// array. absent chooses "dnd", then StampDisconnect-equivalent state is
 // simulated by simply never registering a client for absent (buildReady's
 // liveStatuses() only reflects live hub registrations, so an
 // unregistered user is indistinguishable from "signed out").
@@ -76,7 +76,7 @@ func TestBuildReady_DMChannelsHidesDisconnectedRecipientStatus(t *testing.T) {
 	}
 
 	// absent chose "dnd" before signing out; the column keeps it (this is
-	// exactly what MarkUserDisconnected leaves behind for a non-online status).
+	// exactly what StampDisconnect leaves behind for a non-online status).
 	if err := database.UpdateUserStatus(ctx, absent.ID, db.StatusDND); err != nil {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}

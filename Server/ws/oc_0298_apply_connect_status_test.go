@@ -36,21 +36,21 @@ func TestApplyConnectStatus_DoesNotStampStatusWhenDBWriteFails(t *testing.T) {
 	}
 	// Establish a known persisted status distinct from what ConnectStatus
 	// would compute from it, so a wrongly-stamped c.user.Status is
-	// unambiguous. MarkUserDisconnected is what actually leaves a session at
+	// unambiguous. StampConnections is what actually leaves a session at
 	// "offline" going into a reconnect, so use that instead of a raw status
 	// write to keep the precondition realistic.
 	if err := database.UpdateUserStatus(ctx, userID, db.StatusOnline); err != nil {
 		t.Fatalf("UpdateUserStatus(online): %v", err)
 	}
 	if err := database.StampConnections(ctx, nil, []int64{userID}); err != nil {
-		t.Fatalf("MarkUserDisconnected: %v", err)
+		t.Fatalf("StampConnections: %v", err)
 	}
 	pre, err := database.GetUserByID(ctx, userID)
 	if err != nil || pre == nil {
 		t.Fatalf("GetUserByID (precondition): %v", err)
 	}
 	if pre.Status != db.StatusOffline {
-		t.Fatalf("precondition: expected status=offline after MarkUserDisconnected, got %q", pre.Status)
+		t.Fatalf("precondition: expected status=offline after StampConnections, got %q", pre.Status)
 	}
 
 	c := newClient(nil, nil, pre, "tokenhash", 0, ctx)

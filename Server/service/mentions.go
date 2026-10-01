@@ -179,7 +179,7 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgI
 			//
 			// That column check alone is not enough: users.status keeps a
 			// *chosen* idle/dnd across a disconnect by design
-			// (MarkUserDisconnected only ever rewrites "online" -> "offline"),
+			// (StampDisconnect only ever rewrites "online" -> "offline"),
 			// so a signed-out reader whose last status was idle/dnd would still
 			// read as non-offline here. s.online (nil-safe) applies the read
 			// path's "no live connection is offline, whatever the row says"

@@ -181,7 +181,7 @@ type MessageService struct {
 	// row stores" rule the read path uses (ws/serve_ready.go
 	// presentableMembers) instead of trusting users.status alone — that column
 	// keeps a *chosen* idle/dnd/invisible across a disconnect by design
-	// (MarkUserDisconnected only ever rewrites "online" -> "offline"), so a
+	// (StampDisconnect only ever rewrites "online" -> "offline"), so a
 	// disconnected idle/dnd reader would otherwise still collect an @here
 	// badge. nil (the zero value, e.g. in tests and any caller with no hub)
 	// means "no live-connection information available" and applies no extra

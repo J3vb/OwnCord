@@ -332,7 +332,7 @@ func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
 // treat a reader with no live connection as offline even when their stored
 // status is idle/dnd, matching the read path's "no live connection is
 // offline, whatever the row says" rule (ws/serve_ready.go presentableMembers).
-// MarkUserDisconnected only ever rewrites "online" -> "offline" — an idle/dnd
+// StampDisconnect only ever rewrites "online" -> "offline" — an idle/dnd
 // choice survives the disconnect by design, so a bare
 // db.BroadcastStatus(r.Status) == db.StatusOffline test can never catch a
 // disconnected idle/dnd reader without also consulting live connection state.
@@ -340,7 +340,7 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 
 	// bob's last chosen status was "dnd" before disconnecting (mirrors what
-	// MarkUserDisconnected leaves behind for a non-"online" status).
+	// StampDisconnect leaves behind for a non-"online" status).
 	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusDND); err != nil {
 		t.Fatalf("UpdateUserStatus(dnd): %v", err)
 	}

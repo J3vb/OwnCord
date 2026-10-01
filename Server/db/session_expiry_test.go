@@ -178,7 +178,7 @@ func TestTouchSession_SlidesIdleExpiry(t *testing.T) {
 	seedAgedSession(t, database, "active", 29*24*time.Hour, time.Now().Add(24*time.Hour))
 
 	if err := database.TouchSessions(context.Background(), []string{"active"}); err != nil {
-		t.Fatalf("TouchSession: %v", err)
+		t.Fatalf("TouchSessions: %v", err)
 	}
 
 	got := parseExpiry(t, sessionExpiresAt(t, database, "active"))
@@ -197,7 +197,7 @@ func TestTouchSession_NeverRevivesExpired(t *testing.T) {
 	before := sessionExpiresAt(t, database, "lapsed")
 
 	if err := database.TouchSessions(context.Background(), []string{"lapsed"}); err != nil {
-		t.Fatalf("TouchSession: %v", err)
+		t.Fatalf("TouchSessions: %v", err)
 	}
 
 	after := sessionExpiresAt(t, database, "lapsed")
@@ -224,7 +224,7 @@ func TestTouchSession_AbsoluteCap(t *testing.T) {
 	ctx := context.Background()
 	for _, tok := range []string{"near_cap", "past_cap"} {
 		if err := database.TouchSessions(ctx, []string{tok}); err != nil {
-			t.Fatalf("TouchSession(%s): %v", tok, err)
+			t.Fatalf("TouchSessions(%s): %v", tok, err)
 		}
 	}
 

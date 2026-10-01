@@ -8,7 +8,7 @@ package ws
 // resumed auth_ok always carried the disconnect-time status rather than the
 // status the session is about to come online as.
 //
-// Concretely: MarkUserDisconnected rewrites a plain "online" user to
+// Concretely: StampConnections rewrites a plain "online" user to
 // "offline" on socket loss. On a fast reconnect (still covered by the ring
 // buffer, so the buffer-tier replay path is taken) the resumed auth_ok's
 // payload.user.status must reflect db.ConnectStatus("offline") == "online" —
@@ -43,21 +43,21 @@ func TestReconnect_AuthOKReflectsSettledStatus_NotDisconnectTimeStatus(t *testin
 	}
 
 	// Establish the user as a plain "online" session, then simulate the
-	// socket loss that precedes every reconnect: MarkUserDisconnected only
+	// socket loss that precedes every reconnect: StampConnections only
 	// rewrites a plain "online" row to "offline" (idle/dnd/invisible survive
 	// untouched), so this is the ordinary case, not a contrived one.
 	if err := database.UpdateUserStatus(ctx, userID, db.StatusOnline); err != nil {
 		t.Fatalf("UpdateUserStatus(online): %v", err)
 	}
 	if err := database.StampConnections(ctx, nil, []int64{userID}); err != nil {
-		t.Fatalf("MarkUserDisconnected: %v", err)
+		t.Fatalf("StampConnections: %v", err)
 	}
 	pre, err := database.GetUserByID(ctx, userID)
 	if err != nil || pre == nil {
 		t.Fatalf("GetUserByID (precondition): %v", err)
 	}
 	if pre.Status != db.StatusOffline {
-		t.Fatalf("precondition: expected status=offline after MarkUserDisconnected, got %q", pre.Status)
+		t.Fatalf("precondition: expected status=offline after StampConnections, got %q", pre.Status)
 	}
 
 	token, err := auth.GenerateToken()

@@ -84,7 +84,7 @@ func TestMemberSummary_ForViewer(t *testing.T) {
 	}
 }
 
-func TestMarkUserDisconnected_PreservesChosenStatus(t *testing.T) {
+func TestStampConnections_DisconnectPreservesChosenStatus(t *testing.T) {
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 
