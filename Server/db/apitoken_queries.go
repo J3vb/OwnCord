@@ -14,8 +14,9 @@ import (
 //
 // API tokens are long-lived, revocable bearer credentials for headless clients
 // (the MCP introspection tool, bots, CI). They live in their own table so the
-// per-user session cap, bulk logout, and password/TOTP session wipes never
-// touch them. Like sessions, only the SHA-256 hash is stored.
+// per-user session cap and password/TOTP session wipes never touch them;
+// sign-out-everywhere and account recovery revoke them with the sessions.
+// Like sessions, only the SHA-256 hash is stored.
 
 // CreateAPIToken inserts a new API token and returns its ID. tokenHash must
 // already be hashed (never store the raw token). Pass expiresAt = nil for a
@@ -90,6 +91,16 @@ func (d *DB) RevokeAPITokenByLabel(ctx context.Context, label string) (int64, er
 	res, err := d.q.RevokeAPITokenByLabel(ctx, label)
 	if err != nil {
 		return 0, fmt.Errorf("RevokeAPITokenByLabel: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// RevokeUserAPITokens marks every live token of the user revoked and returns
+// how many it revoked.
+func (d *DB) RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error) {
+	res, err := d.q.RevokeUserAPITokens(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("RevokeUserAPITokens: %w", err)
 	}
 	return res.RowsAffected()
 }

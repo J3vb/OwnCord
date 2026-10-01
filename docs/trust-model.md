@@ -458,8 +458,8 @@ does not claim").
   (`Server/api/profile_handler.go:92-93`); revocation is scoped to the calling
   user (`Server/service/user.go:366`).
 - Sign-out-everywhere: `DELETE /api/v1/users/me/sessions` revokes every
-  session of the calling account, the current one included, and never
-  another account's (`UserService.RevokeAllSessions`, audit
+  session and API token of the calling account, the current one included,
+  and never another account's (`UserService.RevokeAllSessions`, audit
   `session_revoke_all`; test `TestRevokeAllSessions_OnlyTheCallersAccount`).
 - A password change revokes every other session (`Server/service/user.go:336`).
 - Admin force-logout revokes all of a user's sessions

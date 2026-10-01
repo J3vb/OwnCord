@@ -864,7 +864,8 @@ client is expected to downscale and square-crop before uploading.
 ### PUT /api/v1/users/me/password
 
 Change the authenticated user's password. Verifies the old password, enforces
-password strength, and revokes all _other_ sessions on success.
+password strength, and revokes all _other_ sessions on success. The account's
+live WebSocket closes in the same request if it rode one of them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
@@ -934,7 +935,8 @@ route.
 
 ### DELETE /api/v1/users/me/sessions/{id}
 
-Revoke one of the authenticated user's sessions by ID.
+Revoke one of the authenticated user's sessions by ID. The account's live
+WebSocket closes in the same request if it rode that session.
 
 **Auth:** Required
 
@@ -944,15 +946,14 @@ Revoke one of the authenticated user's sessions by ID.
 
 ### DELETE /api/v1/users/me/sessions
 
-Sign out everywhere: revoke every session of the authenticated account,
-the current one included, and drop the account's live WebSocket
-connections in the same request. The caller's token stops working with this
-response, so the client re-authenticates rather than treating the next 401
-as an error. Never touches another account's sessions. Writes a
-`session_revoke_all` audit row naming the account and the count when at
-least one session was revoked (an API-token principal, which holds no
-session, revokes nothing and writes nothing). Limited to 5 calls per
-account per minute (`429 RATE_LIMITED`).
+Sign out everywhere: revoke every session and every API token of the
+authenticated account, the current one included, and drop the account's live
+WebSocket connections in the same request. The caller's token stops working
+with this response, so the client re-authenticates rather than treating the
+next 401 as an error. Never touches another account's credentials. Writes a
+`session_revoke_all` audit row naming the account and both counts when
+anything was revoked. Limited to 5 calls per account per minute
+(`429 RATE_LIMITED`).
 
 **Auth:** Required
 
@@ -3992,8 +3993,9 @@ Settings page shows until the owner saves its own.
 ## API Tokens
 
 Owner-only: minting a long-lived bearer credential over the network is the one
-admin action that, via a hijacked session, would outlive a password change and
-bulk logout (API tokens deliberately live outside the session table). These
+admin action that, via a hijacked session, would outlive a password change or an
+admin force-logout (API tokens deliberately live outside the session table;
+sign-out-everywhere and account recovery do revoke them). These
 routes are the HTTP equivalent of the `server token create|list|revoke` CLI.
 
 ### GET /admin/api/tokens

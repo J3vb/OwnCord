@@ -328,10 +328,10 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 		// Consume exactly the credential the compare verified: one issued
 		// meanwhile is a different row and stays.
 		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, target.assist.Verifier, newHash, "recovery_assist_used",
-			"account recovered with an owner-issued credential; every session revoked")
+			"account recovered with an owner-issued credential")
 	} else {
 		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
-			"account recovered with the recovery kit; every session revoked")
+			"account recovered with the recovery kit")
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrRecoveryKitSpent) || errors.Is(err, db.ErrRecoveryAssistSpent) {

@@ -58,10 +58,10 @@ func (d *DB) DeleteRecoveryKit(ctx context.Context, userID int64) error {
 
 // RedeemRecoveryKit is the whole state change of a successful recovery in
 // one transaction (data-lifecycle O8, axis A1): the kit is spent, the
-// password replaced, every session of the account revoked and the audit
-// row written, or none of it. The consume is conditional on the kit being
-// unspent, so two concurrent redemptions admit at most one; the loser gets
-// ErrRecoveryKitSpent.
+// password replaced, every session and API token of the account revoked and
+// the audit row written with both counts, or none of it. The consume is
+// conditional on the kit being unspent, so two concurrent redemptions admit
+// at most one; the loser gets ErrRecoveryKitSpent.
 func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -88,6 +88,11 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHas
 		return 0, fmt.Errorf("RedeemRecoveryKit sessions: %w", err)
 	}
 	sessionsRevoked, _ = revoked.RowsAffected()
+	tokens, err := q.RevokeUserAPITokens(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("RedeemRecoveryKit api tokens: %w", err)
+	}
+	tokensRevoked, _ := tokens.RowsAffected()
 	// A recovery by kit withdraws any owner-issued credential still
 	// outstanding for the account (B4-6): the situation it was issued for
 	// is over.
@@ -95,7 +100,8 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHas
 		return 0, fmt.Errorf("RedeemRecoveryKit withdraw credential: %w", err)
 	}
 	if err := q.LogAudit(ctx, dbgen.LogAuditParams{
-		ActorID: userID, Action: auditAction, TargetType: "user", TargetID: userID, Detail: auditDetail,
+		ActorID: userID, Action: auditAction, TargetType: "user", TargetID: userID,
+		Detail: fmt.Sprintf("%s (%d sessions, %d API tokens revoked)", auditDetail, sessionsRevoked, tokensRevoked),
 	}); err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit audit: %w", err)
 	}

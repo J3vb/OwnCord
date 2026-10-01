@@ -181,6 +181,17 @@ func (q *Queries) RevokeAPITokenByLabel(ctx context.Context, label string) (sql.
 	return q.db.ExecContext(ctx, revokeAPITokenByLabel, label)
 }
 
+const revokeUserAPITokens = `-- name: RevokeUserAPITokens :execresult
+UPDATE api_tokens SET revoked_at = datetime('now')
+WHERE user_id = ? AND revoked_at IS NULL
+`
+
+// Sign-out-everywhere and account recovery revoke every live token of the
+// account along with its sessions.
+func (q *Queries) RevokeUserAPITokens(ctx context.Context, userID int64) (sql.Result, error) {
+	return q.db.ExecContext(ctx, revokeUserAPITokens, userID)
+}
+
 const touchAPIToken = `-- name: TouchAPIToken :exec
 UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_hash = ?
 `

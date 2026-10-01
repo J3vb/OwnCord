@@ -3,7 +3,9 @@ package db_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -125,5 +127,63 @@ func TestEraseAccount_PurgesTheRecoveryKit(t *testing.T) {
 	}
 	if kit, _ := database.GetRecoveryKit(ctx, uid); kit != nil {
 		t.Fatal("the recovery kit survived account deletion")
+	}
+}
+
+// A recovery revokes the account's API tokens with its sessions, and the
+// audit row carries both counts; another account's token stays live.
+func TestRedeemRecovery_RevokesTheAccountsAPITokens(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		redeem func(database *db.DB, uid int64) error
+	}{
+		{"kit", func(database *db.DB, uid int64) error {
+			if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
+				return err
+			}
+			_, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_used", "recovered")
+			return err
+		}},
+		{"owner credential", func(database *db.DB, uid int64) error {
+			if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$v", uid, "voice_call", time.Now().Add(time.Hour)); err != nil {
+				return err
+			}
+			_, err := database.RedeemRecoveryAssist(ctx, uid, "$argon2id$v", "newhash", "recovery_used", "recovered")
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database := openMigratedMemory(t)
+			uid, _ := database.CreateUser(ctx, "recovering", "oldhash", 4)
+			other, _ := database.CreateUser(ctx, "bystander", "hash", 4)
+			for _, h := range []string{"api-a", "api-b"} {
+				if _, err := database.CreateAPIToken(ctx, uid, h, h, nil); err != nil {
+					t.Fatalf("CreateAPIToken: %v", err)
+				}
+			}
+			if _, err := database.CreateAPIToken(ctx, other, "api-other", "other", nil); err != nil {
+				t.Fatalf("CreateAPIToken: %v", err)
+			}
+
+			if err := tc.redeem(database, uid); err != nil {
+				t.Fatalf("redeem: %v", err)
+			}
+			for _, h := range []string{"api-a", "api-b"} {
+				if tok, err := database.GetActiveAPIToken(ctx, h); err != nil || tok != nil {
+					t.Errorf("token %s after recovery = %+v, %v; want revoked", h, tok, err)
+				}
+			}
+			if tok, _ := database.GetActiveAPIToken(ctx, "api-other"); tok == nil {
+				t.Error("another account's token was revoked")
+			}
+			var detail string
+			if err := database.QueryRowContext(ctx, `SELECT detail FROM audit_log WHERE action = 'recovery_used'`).Scan(&detail); err != nil {
+				t.Fatalf("audit row: %v", err)
+			}
+			if !strings.Contains(detail, "2 API tokens revoked") {
+				t.Errorf("audit detail = %q, want the API token count", detail)
+			}
+		})
 	}
 }

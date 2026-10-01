@@ -107,12 +107,12 @@ disagreement is a doc bug.
   token lives as long as its creator chose, and one created without a lifetime
   never expires.
 - Sessions: a user may hold up to 25 sessions, with the oldest evicted beyond
-  that. Users can list and revoke their own sessions and sign out everywhere,
-  and a password change revokes every other session. Admin force-logout
-  revokes all of a user's sessions.
+  that. Users can list and revoke their own sessions and sign out everywhere
+  (which also revokes their API tokens), and a password change revokes every
+  other session. Admin force-logout revokes all of a user's sessions.
 - Account recovery (a self-held recovery kit, or owner-assisted recovery after
   out-of-band identity verification) replaces the password and revokes every
-  session in one transaction. Both paths then sign the holder in without the
+  session and API token in one transaction. Both paths then sign the holder in without the
   second factor (an owner decision: recovery exists for lost devices). The kit
   is stored only as an argon2id verifier, and a spent or lost kit cannot be
   recovered by the server; the owner-issued credential is single-use and

@@ -115,25 +115,10 @@ type ProfileBroadcaster interface {
 	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
-// SessionDisconnector is the hub's half of sign-out-everywhere: once the
-// sessions are gone, the live sockets they authenticated must go too, or a
-// device keeps its connection until the revoked-session sweep notices
-// (Codex P1 on PR #1500). *ws.Hub implements it; a ProfileBroadcaster that
-// does not (tests, a nil hub) simply skips the disconnect.
-type SessionDisconnector interface {
-	DisconnectRevokedUser(userID int64)
-}
-
-// The production hub must keep satisfying it: the assertion at the call site
-// silently skips the disconnect when it stops matching, so a renamed method
-// would leave revoked devices connected until the sweep — the bug PR #1500
-// fixed — with nothing failing to say so.
-var _ SessionDisconnector = (*ws.Hub)(nil)
-
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account. A session principal revokes itself with the first call; an
-// API-token principal keeps its credential, so the cap is what keeps repeated
-// no-op calls from costing anything (Codex P2 on PR #1500).
+// per account (Codex P2 on PR #1500). Every call revokes the caller's own
+// session or API token, so the cap bounds how fast a fresh sign-in can
+// repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
 
 // MountProfileRoutes registers user profile management endpoints.
@@ -150,7 +135,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 			Patch("/", handleUpdateProfile(svc, broadcaster))
 
 		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
-			Put("/password", handleChangePassword(svc, limiter))
+			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
@@ -162,7 +147,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).
 			Get("/moderation", handleOwnModeration(svc))
 		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
-		r.Delete("/sessions/{id}", handleRevokeSession(svc))
+		r.Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
 	})
 }
 
@@ -406,7 +391,7 @@ func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 }
 
 // handleChangePassword processes PUT /api/v1/users/me/password.
-func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -485,6 +470,11 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 			writeServiceError(r.Context(), w, err)
 			return
 		}
+		// The other sessions are gone; drop the account's socket now if it
+		// rode one of them, rather than at the sweep's next tick.
+		if res.SessionsRevoked > 0 {
+			disconnectIfSessionRevoked(broadcaster, user.ID)
+		}
 		if res.RevokeFailed {
 			// Partial success: the password IS changed; only revoking the
 			// other sessions failed. A 5xx here would tell the user to retry
@@ -552,7 +542,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 }
 
 // handleRevokeSession processes DELETE /api/v1/users/me/sessions/{id}.
-func handleRevokeSession(svc *service.Services) http.HandlerFunc {
+func handleRevokeSession(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -568,6 +558,7 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
+		disconnectIfSessionRevoked(broadcaster, user.ID)
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -584,7 +575,7 @@ type revokeAllSessionsResponse struct {
 
 // handleRevokeAllSessions processes DELETE /api/v1/users/me/sessions —
 // sign-out-everywhere. The current session is revoked with the rest, and so
-// is every live WebSocket the account holds.
+// are every API token and every live WebSocket the account holds.
 func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -593,8 +584,7 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 		}
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
-		// Per account, not per IP: the principal is authenticated, and the
-		// no-op case (an API token with nothing to revoke) is the one to cap.
+		// Per account, not per IP: the principal is authenticated.
 		if !limiter.Allow(auth.Key("revoke_all", user.ID), revokeAllSessionsRateLimitPerMinute, time.Minute) {
 			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many sign-out-everywhere requests, try again later")
 			return

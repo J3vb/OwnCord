@@ -110,6 +110,7 @@ type Store interface {
 	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
 	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
 	RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error)
+	RevokeUserAPITokens(ctx context.Context, userID int64) (int64, error)
 	CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
