@@ -583,7 +583,7 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, false); err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	results, err := database.SearchMessages(ctx, "deployment", nil, 10)
+	results, err := database.SearchMessages(ctx, "deployment", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}

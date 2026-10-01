@@ -163,6 +163,71 @@ func TestSearch_FiltersResultsByPermission(t *testing.T) {
 	}
 }
 
+// DP-20: paging newest first walks the same readable set as a plain search —
+// the caller's DMs stay in (OC-0087), a channel they cannot read and a
+// labelled one they have not acknowledged stay out (B9-7), on every page.
+func TestSearch_RecentPagingKeepsReadableScope(t *testing.T) {
+	ctx := context.Background()
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+
+	_ = chTestCreateToken(t, database, "authz-owner-pg", 1)
+	owner, _ := database.GetUserByUsername(ctx, "authz-owner-pg")
+	memberToken := chTestCreateToken(t, database, "authz-member-pg", 4)
+	member, _ := database.GetUserByUsername(ctx, "authz-member-pg")
+
+	chVisible, _ := database.CreateChannel(ctx, "pub", "text", "", "", 0)
+	chHidden, _ := database.CreateChannel(ctx, "priv", "text", "", "", 1)
+	chLabelled, _ := database.CreateChannel(ctx, "labelled", "text", "", "", 2)
+	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, chLabelled); err != nil {
+		t.Fatalf("label channel: %v", err)
+	}
+	denyReadMessages(t, database, chHidden, permissions.MemberRoleID)
+	dm, _, err := database.GetOrCreateDMChannel(ctx, member.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+
+	var want []int64
+	for _, ch := range []int64{chVisible, chHidden, dm.ID, chLabelled, chVisible} {
+		id, err := database.CreateMessage(ctx, ch, owner.ID, "scopedword hit", nil)
+		if err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if ch == chVisible || ch == dm.ID {
+			want = append([]int64{id}, want...)
+		}
+	}
+
+	var got []int64
+	path := "/api/v1/search?q=scopedword&sort=recent&limit=1"
+	for range 10 {
+		rr := chGet(t, router, path, memberToken)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Results []struct {
+				MessageID int64 `json:"message_id"`
+			} `json:"results"`
+			NextBefore *int64 `json:"next_before"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		for _, r := range resp.Results {
+			got = append(got, r.MessageID)
+		}
+		if resp.NextBefore == nil {
+			break
+		}
+		path = fmt.Sprintf("/api/v1/search?q=scopedword&sort=recent&limit=1&before=%d", *resp.NextBefore)
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("paged hits = %v, want %v (visible and DM only, newest first)", got, want)
+	}
+}
+
 func TestSearch_AdminSeesAllResults(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)

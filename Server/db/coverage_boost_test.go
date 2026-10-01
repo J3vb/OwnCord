@@ -249,7 +249,7 @@ func TestSearchMessagesInChannels_FindsInAllowedChannels(t *testing.T) {
 	_, _ = database.CreateMessage(context.Background(), ch3, userID, "gamma keyword here", nil)
 
 	// Search only in ch1 and ch2.
-	results, err := database.SearchMessagesInChannels(context.Background(), "keyword", []int64{ch1, ch2}, 10)
+	results, err := database.SearchMessagesInChannels(context.Background(), "keyword", []int64{ch1, ch2}, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestSearchMessagesInChannels_FindsInAllowedChannels(t *testing.T) {
 func TestSearchMessagesInChannels_EmptyQuery(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessagesInChannels(context.Background(), "", []int64{1}, 10)
+	results, err := database.SearchMessagesInChannels(context.Background(), "", []int64{1}, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestSearchMessagesInChannels_EmptyQuery(t *testing.T) {
 func TestSearchMessagesInChannels_EmptyChannelIDs(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessagesInChannels(context.Background(), "test", nil, 10)
+	results, err := database.SearchMessagesInChannels(context.Background(), "test", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestSearchMessagesInChannels_LimitRespected(t *testing.T) {
 		_, _ = database.CreateMessage(context.Background(), ch1, userID, "findme content here", nil)
 	}
 
-	results, err := database.SearchMessagesInChannels(context.Background(), "findme", []int64{ch1}, 2)
+	results, err := database.SearchMessagesInChannels(context.Background(), "findme", []int64{ch1}, db.SearchPage{Limit: 2})
 	if err != nil {
 		t.Fatalf("SearchMessagesInChannels: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestSearchMessagesInChannels_LimitRespected(t *testing.T) {
 func TestSearchMessagesInChannels_ZeroLimit(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessagesInChannels(context.Background(), "test", []int64{1}, 0)
+	results, err := database.SearchMessagesInChannels(context.Background(), "test", []int64{1}, db.SearchPage{Limit: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -862,7 +862,7 @@ func TestUseInviteAtomic_NonExistent(t *testing.T) {
 func TestSearchMessages_EmptyQuery(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessages(context.Background(), "", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -874,7 +874,7 @@ func TestSearchMessages_EmptyQuery(t *testing.T) {
 func TestSearchMessages_ZeroLimit(t *testing.T) {
 	database := openMigratedMemory(t)
 
-	results, err := database.SearchMessages(context.Background(), "test", nil, 0)
+	results, err := database.SearchMessages(context.Background(), "test", nil, db.SearchPage{Limit: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -891,7 +891,7 @@ func TestSearchMessages_SpecialCharsStripped(t *testing.T) {
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world content", nil)
 
 	// FTS special chars should be stripped, leaving a valid query.
-	results, err := database.SearchMessages(context.Background(), "hello* \"world\"", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "hello* \"world\"", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessages with special chars: %v", err)
 	}

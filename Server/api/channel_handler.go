@@ -277,8 +277,31 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		if !ok {
 			return
 		}
+		page := db.SearchPage{Limit: limit}
 
-		results, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, limit)
+		switch r.URL.Query().Get("sort") {
+		case "", "relevance":
+		case "recent":
+			page.Recent = true
+		default:
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "sort must be 'relevance' or 'recent'")
+			return
+		}
+		if raw := r.URL.Query().Get("before"); raw != "" {
+			v, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || v <= 0 {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before must be a positive integer")
+				return
+			}
+			// A message-id cursor only walks a newest-first list.
+			if !page.Recent {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before requires sort=recent")
+				return
+			}
+			page.Before = v
+		}
+
+		results, nextBefore, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, page)
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
 				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid search query")
@@ -293,8 +316,15 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 
 		type response struct {
 			Results []db.MessageSearchResult `json:"results"`
+			// NextBefore is the before= cursor for the next sort=recent page;
+			// null when there is none.
+			NextBefore *int64 `json:"next_before"`
 		}
-		writeJSON(w, http.StatusOK, response{Results: results})
+		resp := response{Results: results}
+		if nextBefore > 0 {
+			resp.NextBefore = &nextBefore
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

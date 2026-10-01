@@ -86,48 +86,54 @@ func (s *MessageService) requireSearchChannelAccess(ctx context.Context, userID,
 	return nil
 }
 
-// SearchMessages performs full-text search across accessible channels.
-func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error) {
+// SearchMessages performs full-text search across accessible channels and
+// returns one page of hits. nextBefore is the cursor for the following page
+// of a page.Recent search (0 when there is none).
+func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query string, channelID *int64, page db.SearchPage) (results []db.MessageSearchResult, nextBefore int64, err error) {
 	if query == "" {
-		return nil, fmt.Errorf("%w: query cannot be empty", ErrBadRequest)
+		return nil, 0, fmt.Errorf("%w: query cannot be empty", ErrBadRequest)
 	}
-	if limit <= 0 {
-		limit = 50
+	if page.Limit <= 0 {
+		page.Limit = 50
 	}
-	if limit > 100 {
-		limit = 100
+	if page.Limit > 100 {
+		page.Limit = 100
+	}
+	limit := page.Limit
+	if page.Recent {
+		// Fetch one extra to learn whether another page follows.
+		page.Limit++
 	}
 
 	// Single-channel search.
 	if channelID != nil && *channelID > 0 {
 		if err := s.requireSearchChannelAccess(ctx, userID, *channelID); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		results, err := s.st.SearchMessages(ctx, query, channelID, limit)
-		if err != nil {
-			return nil, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
+		results, err = s.st.SearchMessages(ctx, query, channelID, page)
+	} else {
+		// Global search: build the READABLE channel list (B5-7) — the visible
+		// set minus any labelled channel the caller has not acknowledged, so a
+		// hit inside one is silently absent from the results rather than
+		// returned. This is the leak path the plan calls "would ship silently":
+		// a gate on the single-channel branch alone leaves this one wide open.
+		accessibleIDs, idsErr := s.ReadableChannelIDs(ctx, userID)
+		if idsErr != nil {
+			return nil, 0, idsErr
 		}
-		return results, nil
+		if len(accessibleIDs) == 0 {
+			return nil, 0, nil
+		}
+		results, err = s.st.SearchMessagesInChannels(ctx, query, accessibleIDs, page)
 	}
-
-	// Global search: build the READABLE channel list (B5-7) — the visible
-	// set minus any labelled channel the caller has not acknowledged, so a
-	// hit inside one is silently absent from the results rather than
-	// returned. This is the leak path the plan calls "would ship silently":
-	// a gate on the single-channel branch alone leaves this one wide open.
-	accessibleIDs, err := s.ReadableChannelIDs(ctx, userID)
 	if err != nil {
-		return nil, err
+		return nil, 0, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
 	}
-	if len(accessibleIDs) == 0 {
-		return nil, nil
+	if len(results) > limit {
+		results = results[:limit]
+		nextBefore = results[limit-1].MessageID
 	}
-
-	results, err := s.st.SearchMessagesInChannels(ctx, query, accessibleIDs, limit)
-	if err != nil {
-		return nil, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
-	}
-	return results, nil
+	return results, nextBefore, nil
 }
 
 // MessageWindow is a slice of channel history centred on one message, as

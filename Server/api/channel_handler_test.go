@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -623,6 +624,84 @@ func TestSearch_LimitCappedAt100(t *testing.T) {
 	rr := chGet(t, router, "/api/v1/search?q=test&limit=200", token)
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rr.Code)
+	}
+}
+
+// searchPage decodes a /api/v1/search response into its hit ids and cursor.
+func searchPage(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, nextBefore *int64) {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Results []struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"results"`
+		NextBefore *int64 `json:"next_before"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, r := range resp.Results {
+		ids = append(ids, r.MessageID)
+	}
+	return ids, resp.NextBefore
+}
+
+// DP-20: sort=recent pages newest first through next_before; every page
+// holds only ids strictly below the cursor it was asked with.
+func TestSearch_SortRecentPagesWithBefore(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "recentpager", 1)
+	user, _ := database.GetUserByUsername(context.Background(), "recentpager")
+	chID, _ := database.CreateChannel(context.Background(), "pager", "text", "", "", 0)
+	ids := make([]int64, 5)
+	for i := range ids {
+		ids[i], _ = database.CreateMessage(context.Background(), chID, user.ID, "pagerword hit", nil)
+	}
+
+	got, next := searchPage(t, chGet(t, router, "/api/v1/search?q=pagerword&sort=recent&limit=2", token))
+	if !slices.Equal(got, []int64{ids[4], ids[3]}) || next == nil || *next != ids[3] {
+		t.Fatalf("page 1 = %v next_before %v, want [%d %d] next_before %d", got, next, ids[4], ids[3], ids[3])
+	}
+	got, next = searchPage(t, chGet(t, router, fmt.Sprintf("/api/v1/search?q=pagerword&sort=recent&limit=2&before=%d", *next), token))
+	if !slices.Equal(got, []int64{ids[2], ids[1]}) || next == nil || *next != ids[1] {
+		t.Fatalf("page 2 = %v next_before %v, want [%d %d] next_before %d", got, next, ids[2], ids[1], ids[1])
+	}
+	got, next = searchPage(t, chGet(t, router, fmt.Sprintf("/api/v1/search?q=pagerword&sort=recent&limit=2&before=%d", *next), token))
+	if !slices.Equal(got, []int64{ids[0]}) || next != nil {
+		t.Fatalf("page 3 = %v next_before %v, want [%d] and no cursor", got, next, ids[0])
+	}
+
+	// The default stays rank order with no cursor, however many hits remain.
+	got, next = searchPage(t, chGet(t, router, "/api/v1/search?q=pagerword&limit=2", token))
+	if len(got) != 2 || next != nil {
+		t.Errorf("default page = %v next_before %v, want 2 hits and no cursor", got, next)
+	}
+	got, _ = searchPage(t, chGet(t, router, "/api/v1/search?q=pagerword&sort=relevance", token))
+	if len(got) != 5 {
+		t.Errorf("sort=relevance = %d hits, want 5", len(got))
+	}
+}
+
+func TestSearch_InvalidSortOrCursor(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "badcursor", 1)
+
+	for _, q := range []string{
+		"sort=newest",
+		"sort=recent&before=abc",
+		"sort=recent&before=0",
+		"sort=recent&before=-5",
+		"before=10",                // a cursor only means something newest first
+		"sort=relevance&before=10", // likewise
+	} {
+		rr := chGet(t, router, "/api/v1/search?q=test&"+q, token)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", q, rr.Code)
+		}
 	}
 }
 

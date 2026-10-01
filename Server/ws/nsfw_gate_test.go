@@ -159,27 +159,30 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if _, err := f.svc.Messages.GetReactionUsers(ctx, f.bobID, f.labelledID, f.msgID, "👍"); !isNSFWForbidden(err) {
 		t.Errorf("GetReactionUsers(bob) = %v, want ErrForbidden+ErrNSFWUnacknowledged", err)
 	}
-	if _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", &f.labelledID, 10); !isNSFWForbidden(err) {
+	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", &f.labelledID, db.SearchPage{Limit: 10}); !isNSFWForbidden(err) {
 		t.Errorf("SearchMessages(bob, single-channel) = %v, want ErrForbidden+ErrNSFWUnacknowledged", err)
 	}
-	globalHits, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", nil, 10)
-	if err != nil {
-		t.Fatalf("SearchMessages(bob, global): %v", err)
-	}
-	var sawControl, sawLabelled bool
-	for _, hit := range globalHits {
-		if hit.ChannelID == f.controlID {
-			sawControl = true
+	// Both orders, so newest-first paging (DP-20) cannot reopen the leak.
+	for _, page := range []db.SearchPage{{Limit: 10}, {Limit: 10, Recent: true}} {
+		globalHits, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", nil, page)
+		if err != nil {
+			t.Fatalf("SearchMessages(bob, global, %+v): %v", page, err)
 		}
-		if hit.ChannelID == f.labelledID {
-			sawLabelled = true
+		var sawControl, sawLabelled bool
+		for _, hit := range globalHits {
+			if hit.ChannelID == f.controlID {
+				sawControl = true
+			}
+			if hit.ChannelID == f.labelledID {
+				sawLabelled = true
+			}
 		}
-	}
-	if !sawControl {
-		t.Error("global search dropped the control hit from the unlabelled channel")
-	}
-	if sawLabelled {
-		t.Error("global search leaked a hit from the labelled channel to an unacknowledged member")
+		if !sawControl {
+			t.Errorf("global search %+v dropped the control hit from the unlabelled channel", page)
+		}
+		if sawLabelled {
+			t.Errorf("global search %+v leaked a hit from the labelled channel to an unacknowledged member", page)
+		}
 	}
 
 	bobUser, err := f.db.GetUserByID(ctx, f.bobID)
@@ -320,7 +323,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if _, err := f.svc.Messages.GetReactionUsers(ctx, f.aliceID, f.labelledID, f.msgID, "👍"); err != nil {
 		t.Errorf("GetReactionUsers(alice) = %v, want nil", err)
 	}
-	if _, err := f.svc.Messages.SearchMessages(ctx, f.aliceID, "needleword", &f.labelledID, 10); err != nil {
+	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.aliceID, "needleword", &f.labelledID, db.SearchPage{Limit: 10}); err != nil {
 		t.Errorf("SearchMessages(alice, single-channel) = %v, want nil", err)
 	}
 	aliceRole, err := f.db.GetRoleForUser(ctx, f.aliceID)

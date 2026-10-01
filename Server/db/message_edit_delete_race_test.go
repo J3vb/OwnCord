@@ -84,7 +84,7 @@ func TestSearchMessages_PunctuationFoldsToASeparator(t *testing.T) {
 		{"slashes and a dot", "docs/architecture/README.md", "docs/architecture"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := database.SearchMessages(ctx, tc.query, nil, 10)
+			got, err := database.SearchMessages(ctx, tc.query, nil, db.SearchPage{Limit: 10})
 			if err != nil {
 				t.Fatalf("SearchMessages(%q): %v", tc.query, err)
 			}
@@ -124,7 +124,7 @@ func TestSearchMessages_OperatorSyntaxStaysInert(t *testing.T) {
 		`-`,
 		`""`,
 	} {
-		if _, err := database.SearchMessages(ctx, q, nil, 10); err != nil {
+		if _, err := database.SearchMessages(ctx, q, nil, db.SearchPage{Limit: 10}); err != nil {
 			t.Errorf("SearchMessages(%q) errored: %v — operator syntax must be neutralized, not passed through", q, err)
 		}
 	}
