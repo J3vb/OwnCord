@@ -37,6 +37,12 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 		t.Fatalf("Timeout: %v", err)
 	}
 
+	if _, err := dms.CreateDM(ctx, fixtureMember, fixtureMod); !errors.Is(err, ErrTimedOut) {
+		t.Errorf("new 1:1 DM while timed out = %v, want ErrTimedOut", err)
+	}
+	if reopened, err := dms.CreateDM(ctx, fixtureMember, fixtureMember2); err != nil || reopened.Created || reopened.Channel.ID != direct.Channel.ID {
+		t.Errorf("reopening the existing 1:1 DM while timed out = %+v, %v; want the existing channel", reopened, err)
+	}
 	if _, err := dms.CreateGroupDM(ctx, fixtureMember, []int64{fixtureMember2, fixtureMod}, "new"); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("CreateGroupDM while timed out = %v, want ErrTimedOut", err)
 	}

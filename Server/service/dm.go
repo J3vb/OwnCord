@@ -144,6 +144,18 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
 	}
 
+	// A new channel can notify the recipient (dm_channel_open), which a
+	// timeout refuses like a send; reopening an existing one notifies nobody.
+	_, exists, err := s.st.FindDMChannelIDBetween(ctx, userID, recipientID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to look up DM: %w", ErrInternal, err)
+	}
+	if !exists {
+		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+			return nil, err
+		}
+	}
+
 	// B5-6 (Codex review round 2, P1): the recipient's visibility is decided
 	// INSIDE GetOrCreateDMChannelGated's own transaction (does the recipient
 	// already trust the caller?) and written once, atomically, with the
