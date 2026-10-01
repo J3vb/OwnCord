@@ -455,38 +455,10 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
         })
 }
 
-/// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
-/// `host`. Called from an async command: the body runs off Tauri's main thread,
-/// so `blocking_show` (which itself dispatches onto the main thread) cannot
-/// deadlock.
-#[cfg(not(feature = "e2e-auto-confirm"))]
-fn confirm_pin_natively<R: Runtime>(app: &AppHandle<R>, host: &str, fingerprint: &str) -> bool {
-    use tauri_plugin_dialog::DialogExt;
-    app.dialog()
-        .message(crate::text::cert_accept_prompt(host, fingerprint))
-        .title(crate::text::CERT_ACCEPT_TITLE)
-        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
-        .buttons(tauri_plugin_dialog::MessageDialogButtons::YesNo)
-        .blocking_show()
-}
-
-/// The E2E lane drives the renderer through Playwright, which cannot see a
-/// native dialog, so its test-only build (identity `com.owncord.e2e`, never a
-/// release artifact) answers yes. Shipped builds never enable this feature.
-#[cfg(feature = "e2e-auto-confirm")]
-fn confirm_pin_natively<R: Runtime>(_: &AppHandle<R>, _: &str, _: &str) -> bool {
-    true
-}
-
 /// Accept a certificate fingerprint for a host — the only path that writes a pin
 /// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
-///
-/// The pin is written only after a native dialog the user answers: the renderer
-/// already showed its own prompt, but a compromised renderer must not be able
-/// to pin an arbitrary host/fingerprint silently. The dialog is the trust
-/// boundary, so it names the host and the fingerprint being pinned.
-#[tauri::command(async)]
+#[tauri::command]
 pub fn accept_cert_fingerprint<R: Runtime>(
     app: AppHandle<R>,
     host: String,
@@ -498,10 +470,6 @@ pub fn accept_cert_fingerprint<R: Runtime>(
 
     if !is_valid_cert_fingerprint(&fingerprint) {
         return Err("fingerprint must be SHA-256 colon-hex format (e.g. aa:bb:cc:...)".into());
-    }
-
-    if !confirm_pin_natively(&app, &host, &fingerprint) {
-        return Err("certificate not accepted".into());
     }
 
     let store = crate::json_store::open(&app, CERTS_STORE).map_err(|e| {

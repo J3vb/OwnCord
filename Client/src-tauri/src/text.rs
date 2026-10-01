@@ -64,22 +64,6 @@ pub fn cert_not_trusted(host: &str) -> String {
     CERT_NOT_TRUSTED.replace("{host}", host)
 }
 
-/// Title of the native dialog that confirms pinning a certificate. The dialog
-/// is the trust boundary: `accept_cert_fingerprint` pins nothing until the user
-/// answers it, so a compromised renderer cannot silently re-pin a host.
-pub const CERT_ACCEPT_TITLE: &str = "Confirm server certificate";
-
-/// Body of the native cert-confirmation dialog: the host and the fingerprint it
-/// is being pinned to. Shown once per accept regardless of the renderer's own
-/// prompt.
-pub fn cert_accept_prompt(host: &str, fingerprint: &str) -> String {
-    format!(
-        "Trust this certificate for {host}?\n\n\
-         Fingerprint:\n{fingerprint}\n\n\
-         Only continue if this matches the fingerprint your server shows."
-    )
-}
-
 /// The human-readable mismatch message. The frontend parses `Stored:` out of
 /// it, so keep this exact shape stable (`/Stored:\s+(\S+)/` in `src/lib/ws.ts`).
 pub fn cert_mismatch(host: &str, stored: &str, current: &str) -> String {
@@ -121,13 +105,6 @@ mod tests {
             "certificate for example.com:8443 is not yet trusted; confirm the fingerprint to continue"
         );
         // The proxies build the mismatch message through tofu, so check it there.
-        assert_eq!(CERT_ACCEPT_TITLE, "Confirm server certificate");
-        assert_eq!(
-            cert_accept_prompt("example.com:8443", "aa:bb:cc"),
-            "Trust this certificate for example.com:8443?\n\n\
-             Fingerprint:\naa:bb:cc\n\n\
-             Only continue if this matches the fingerprint your server shows."
-        );
         assert_eq!(
             crate::tofu::mismatch_message("example.com:8443", "aa:bb", "cc:dd"),
             "Certificate fingerprint changed for example.com:8443.\n\

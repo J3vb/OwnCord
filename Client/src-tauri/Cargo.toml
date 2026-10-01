@@ -29,9 +29,6 @@ tauri-build = { version = "2", features = [] }
 [features]
 default = []
 devtools = ["tauri/devtools"]
-# Test-only: the native E2E builds skip the native cert-pin confirmation dialog,
-# which Playwright cannot answer. Never enabled for a shipped build.
-e2e-auto-confirm = []
 
 [dependencies]
 tauri = { version = "2.12", features = ["tray-icon"] }

@@ -60,7 +60,7 @@ for (const [label, version] of [
   try {
     const result = await exec(
       process.execPath,
-      [cli, "build", "--bundles", "nsis", "--features", "e2e-auto-confirm", "--config", config],
+      [cli, "build", "--bundles", "nsis", "--config", config],
       {
         env: {
           ...process.env,
