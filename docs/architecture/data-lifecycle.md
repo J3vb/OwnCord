@@ -282,8 +282,10 @@ erasure target (B4-9) purges the subject's events in the erasure transaction
 `DeleteExpiredSessions` (maintenance tick), the 25-session cap eviction in
 `CreateSession` (H-6), `DeleteOtherSessions` on password and 2FA changes (one
 bounded retry, then a partial-success `warning` the client must surface —
-OC-0314) and the per-session and future all-sessions revocations (B4-7). All
-are single statements; every axis is trivial except A5: a restore revives
+OC-0314) and the per-session and all-sessions revocations (B4-7). All
+are single statements except sign-out-everywhere, which revokes the
+account's API tokens and deletes its sessions in one transaction
+(`DB.SignOutEverywhere`); every axis is trivial except A5: a restore revives
 revoked sessions **only** if their rows were in the backup and have not
 expired — session rows are hashed tokens that expire 30 days after last
 use, so a revived row is usable again by a client that still holds the

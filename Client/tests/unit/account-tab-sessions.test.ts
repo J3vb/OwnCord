@@ -145,7 +145,7 @@ describe("Account tab — devices", () => {
 
     await vi.waitFor(() => {
       expect(mockShowToast).toHaveBeenCalledWith(
-        "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds.",
+        "Device signed out. Its requests are refused and its current connection is closed.",
         "success",
       );
     });

@@ -87,7 +87,7 @@ export const accountText = defineCatalog("account", {
   "devices.unknownIp": "Unknown IP",
   "devices.signOut": "Sign out",
   "devices.signedOutReplaced":
-    "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds.",
+    "Device signed out. Its requests are refused and its current connection is closed.",
   "devices.signedOut": "Device signed out. It can no longer connect.",
   "devices.signOutFailed": "Failed to sign out the device.",
   "devices.sectionTitle": "Signed-in devices",
