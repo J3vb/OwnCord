@@ -429,6 +429,70 @@ func TestDecideAppealTx_BanLandedBeforeTxRefuses(t *testing.T) {
 	}
 }
 
+// TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn is P2-8's
+// overturn parity with LiftTimeout: an OVERTURN re-checks the decider
+// strictly outranks the TARGET live, inside the decision transaction, never
+// trusted from the service's earlier permission-cache-backed check. A
+// demotion landing in the exact pre-BeginTx gap must refuse the overturn and
+// leave the appealed timeout active. The demotion keeps MODERATE_MEMBERS
+// (so the own-authority check still passes) and only drops rank to the
+// target's own position — isolating the rank re-check from the authority
+// check, exactly the shape TestAssignAppealForced_BitRevokedBeforeTxRefuses
+// uses in the other direction.
+func TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn(t *testing.T) {
+	database, ownerID, modID, memberID, _ := newAppealQueriesTestDB(t)
+	ctx := context.Background()
+
+	// A role equal to the target's Member position (40) but still holding
+	// MODERATE_MEMBERS: rank alone must be what refuses the overturn.
+	equalRankMod, err := database.CreateRole(ctx, "equal-rank-mod", nil, permissions.ModerateMembers, 40)
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+
+	actionID, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "cool off", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	appealID, err := database.InsertAppeal(ctx, "pub-overturn-demoted", actionID, memberID, "please")
+	if err != nil {
+		t.Fatalf("InsertAppeal: %v", err)
+	}
+
+	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
+		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: equalRankMod.ID, ID: modID})
+	})
+	defer db.SetAppealDecideInTxHookForTest(nil)
+
+	action, err := database.GetModerationAction(ctx, actionID)
+	if err != nil {
+		t.Fatalf("GetModerationAction: %v", err)
+	}
+	reversal := db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}
+	result, _, _, err := database.DecideAppealTx(ctx, appealID, "open", 0, "overturned", modID, "fine",
+		false, memberID, permissions.ModerateMembers, permissions.Administrator, reversal, simpleAuthorityCheck)
+	if err != nil {
+		t.Fatalf("DecideAppealTx: %v", err)
+	}
+	if result != db.AppealWriteForbidden {
+		t.Fatalf("DecideAppealTx after the decider was demoted to the target's rank pre-tx: result = %v, want AppealWriteForbidden", result)
+	}
+	active, err := database.HasActiveTimeout(ctx, memberID)
+	if err != nil {
+		t.Fatalf("HasActiveTimeout: %v", err)
+	}
+	if !active {
+		t.Fatal("timeout was lifted despite the demoted decider's overturn being refused")
+	}
+	got, err := database.GetAppeal(ctx, appealID)
+	if err != nil {
+		t.Fatalf("GetAppeal: %v", err)
+	}
+	if got.State != "open" {
+		t.Fatalf("appeal state = %q, want open (the refused overturn must not commit)", got.State)
+	}
+}
+
 // TestAssignAppealForced_BitRevokedBeforeTxRefuses is item 2's forced
 // re-assign twin, via forceReassignPreBeginTxHook: proves the transaction
 // placement of the checkAuthority re-check (not just that it exists), by

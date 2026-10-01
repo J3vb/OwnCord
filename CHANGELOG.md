@@ -76,6 +76,10 @@ and only when it changes something a contributor or fork holder must do
 - **Proxies that add their own `X-Forwarded-For` line are read correctly.** Only the first header line was used, so a proxy that appends a separate line (HAProxy's `option forwardfor`) had the client's own line picked. Every line is now read before choosing the client address.
 - **IPv6 clients share per-address limits across their /64.** Login, registration, recovery, setup and API rate limits keyed each full IPv6 address separately, so one host could spread across its /64. The limits now count the whole /64 as one address.
 
+### Moderation
+
+- **Overturning an appeal now needs the authority the reversal itself needs.** A moderator could previously overturn any warning, timeout or ban with Moderate Members alone, even one a higher-ranked moderator or the owner had issued, and could clear a ban without Ban Members. Overturning now requires the decider to outrank the sanctioned user, and Ban Members for a ban — the same rule the direct lift and unban actions already apply.
+
 ### Messages
 
 - **Live delivery in a busy channel is no longer shared by everyone in it.** A channel's live-message limit was one budget for all its members, so a few very active members could stop others' messages arriving live (they still saved). The limit now applies to each sender separately.
