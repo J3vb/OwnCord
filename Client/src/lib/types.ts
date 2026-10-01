@@ -318,6 +318,8 @@ export interface UploadPolicy {
   readonly blocked_extensions?: readonly string[];
   /** Non-empty: allow-only mode, the final extension must be listed. */
   readonly allowed_extensions?: readonly string[];
+  /** The server serves an image's bounded preview at /api/v1/files/{id}/thumb. */
+  readonly thumbnails?: boolean;
 }
 
 export interface AuthErrorPayload {

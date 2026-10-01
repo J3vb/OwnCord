@@ -22,6 +22,10 @@ func (failingStore) Save(string, io.Reader) (int64, error) {
 }
 func (failingStore) Delete(string) error               { return nil }
 func (failingStore) Open(string) (storage.File, error) { return nil, errors.New("no file") }
+func (failingStore) OpenThumb(string) (storage.File, error) {
+	return nil, errors.New("no file")
+}
+func (failingStore) SaveThumb(string, []byte) error { return errors.New("simulated write failure") }
 
 // TestSaveReserved_ReleasesTheChargeOnAFailedWrite pins saveReserved's own
 // guarantee, independent of the handlers' deferred Settle: a caller that

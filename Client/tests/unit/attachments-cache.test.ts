@@ -24,7 +24,10 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 vi.mock("@lib/httpProxy", () => ({
   ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
 }));
-vi.mock("@stores/auth.store", () => ({ getToken: () => null }));
+vi.mock("@stores/auth.store", () => ({
+  getToken: () => null,
+  authStore: { getState: () => ({ uploadPolicy: null }) },
+}));
 vi.mock("../../src/platform/desktop/externalContent", () => ({
   externalContent: { preview: vi.fn(), image: brokerImageMock },
 }));

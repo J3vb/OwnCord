@@ -143,6 +143,7 @@ func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
 			UploadPolicy struct {
 				BlockedExtensions []string `json:"blocked_extensions"`
 				AllowedExtensions []string `json:"allowed_extensions"`
+				Thumbnails        bool     `json:"thumbnails"`
 			} `json:"upload_policy"`
 		} `json:"payload"`
 	}
@@ -155,5 +156,9 @@ func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
 	}
 	if got := authOK.Payload.UploadPolicy; !slices.Equal(got.BlockedExtensions, []string{"bat", "ps1"}) || !slices.Equal(got.AllowedExtensions, []string{"txt"}) {
 		t.Fatalf("auth_ok upload_policy = %+v, want config.yaml's lists; raw=%s", got, msg)
+	}
+	// P4-08: the client asks for /thumb only when the server says it serves it.
+	if !authOK.Payload.UploadPolicy.Thumbnails {
+		t.Errorf("auth_ok upload_policy.thumbnails = false, want true; raw=%s", msg)
 	}
 }

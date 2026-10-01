@@ -531,3 +531,103 @@ func TestDelete_NotFound(t *testing.T) {
 		t.Error("Delete should return error for nonexistent file")
 	}
 }
+
+// ─── thumbnails ──────────────────────────────────────────────────────────────
+
+// TestThumb_RoundTripAndOutOfList: a saved thumbnail opens by its original's
+// name, and List — the reconciliation pass's view — never reports it, so the
+// pass cannot mistake a thumbnail for a stranded upload.
+func TestThumb_RoundTripAndOutOfList(t *testing.T) {
+	s := newTestStorage(t)
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.SaveThumb("orig", []byte("thumb")); err != nil {
+		t.Fatalf("SaveThumb: %v", err)
+	}
+	f, err := s.OpenThumb("orig")
+	if err != nil {
+		t.Fatalf("OpenThumb: %v", err)
+	}
+	got, _ := io.ReadAll(f)
+	_ = f.Close()
+	if string(got) != "thumb" {
+		t.Errorf("OpenThumb = %q, want %q", got, "thumb")
+	}
+	entries, err := s.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "orig" {
+		t.Errorf("List = %+v, want only the original", entries)
+	}
+}
+
+// TestDelete_RemovesThumbnail: erasure, retention and the orphan sweep all
+// remove files through Delete, so Delete is where a thumbnail goes with its
+// original.
+func TestDelete_RemovesThumbnail(t *testing.T) {
+	s := newTestStorage(t)
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.SaveThumb("orig", []byte("thumb")); err != nil {
+		t.Fatalf("SaveThumb: %v", err)
+	}
+	if err := s.Delete("orig"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := s.OpenThumb("orig"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("OpenThumb after Delete = %v, want ErrNotExist", err)
+	}
+}
+
+// TestDelete_RetryRemovesThumbnailOfMissingOriginal: a retried removal (the
+// erasure journal's) whose original is already gone still removes the
+// thumbnail, and still reports the original as not existing.
+func TestDelete_RetryRemovesThumbnailOfMissingOriginal(t *testing.T) {
+	dir := t.TempDir()
+	s, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := s.Save("orig", strings.NewReader("original")); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := s.SaveThumb("orig", []byte("thumb")); err != nil {
+		t.Fatalf("SaveThumb: %v", err)
+	}
+	if err := os.Remove(filepath.Join(dir, "orig")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("orig"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Delete = %v, want ErrNotExist for the original", err)
+	}
+	if _, err := s.OpenThumb("orig"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("thumbnail survived: %v", err)
+	}
+}
+
+// TestSaveThumb_OriginalGoneLeavesNothing: a thumbnail generated while its
+// original was being deleted must not outlive it.
+func TestSaveThumb_OriginalGoneLeavesNothing(t *testing.T) {
+	s := newTestStorage(t)
+	if err := s.SaveThumb("never-saved", []byte("thumb")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("SaveThumb without an original = %v, want ErrNotExist", err)
+	}
+	if _, err := s.OpenThumb("never-saved"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail outlived its original: %v", err)
+	}
+}
+
+func TestThumb_PathTraversalRejected(t *testing.T) {
+	s := newTestStorage(t)
+	for _, name := range []string{"", ".", "..", "../x", ".hidden", "a/b", `a\b`} {
+		if err := s.SaveThumb(name, []byte("x")); err == nil {
+			t.Errorf("SaveThumb(%q) accepted", name)
+		}
+		if _, err := s.OpenThumb(name); err == nil {
+			t.Errorf("OpenThumb(%q) accepted", name)
+		}
+	}
+}

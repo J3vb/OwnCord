@@ -97,6 +97,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/dm_handler.go":               {Disposition: "adapter", Note: "DM response types + pure status helpers"},
 	"api/dm_request_handler.go":       {Disposition: "adapter", Note: "message-request response types; the service owns the calls"},
 	"api/emoji_handler.go":            {Disposition: "adapter", Note: "Emoji/User types only"},
+	"api/file_serve.go":               {Disposition: "adapter", Note: "AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions"},
 	"api/invite_handler.go":           {Disposition: "adapter", Note: "Invite/User types only"},
 	"api/middleware.go":               {Disposition: "adapter", Note: "User/Session/Role types on the context keys; SessionService owns the resolution, the touches and the expired-session discard"},
 	"api/moderation_handler.go":       {Disposition: "adapter", Note: "db.ModerationAction response type only; ModerationService owns every call"},
@@ -107,7 +108,6 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/push_handler.go":             {Disposition: "adapter", Note: "db.User type on the context key only; PushService owns every call"},
 	"api/report_handler.go":           {Disposition: "adapter", Note: "db.User from the auth context only; ReportService owns every call"},
 	"api/router.go":                   {Disposition: "boundary", Note: "health probe (PingRead, SQLDb, SQLReaderDB); hub construction left in B3-3", Calls: calls{"PingRead": 1, "SQLDb": 1, "SQLReaderDB": 1}, Hands: calls{"admin.NewHandler": 1, "service.NewAuthService": 1}},
-	"api/upload_handler.go":           {Disposition: "adapter", Note: "AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions"},
 	// ── auth ──────────────────────────────────────────────────────────────
 	"auth/helpers.go": {Disposition: "adapter", Note: "db.User type in a helper signature"},
 	"auth/resolve.go": {Disposition: "adapter", Note: "Session/APIToken/Role/User types; resolution is injected"},

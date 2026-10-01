@@ -32,7 +32,10 @@ vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
-vi.mock("@stores/auth.store", () => ({ getToken: () => "session-token" }));
+vi.mock("@stores/auth.store", () => ({
+  getToken: () => "session-token",
+  authStore: { getState: () => ({ uploadPolicy: null }) },
+}));
 
 import {
   clearAttachmentCaches,

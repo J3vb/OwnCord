@@ -233,6 +233,11 @@ those. Either is omitted when empty or unknown, and clients then refuse
 nothing by name. The values are read with the server-name cache, so a change
 reaches a new connection within 30 seconds.
 
+`thumbnails` is `true` when the server serves
+`GET /api/v1/files/{id}/thumb`, an image's bounded preview. A client then shows
+an inline image from that route and loads the full file only when it is
+opened. It is omitted by older servers, and clients then show the full file.
+
 ### Step 3: Failure -- auth_error
 
 ```json

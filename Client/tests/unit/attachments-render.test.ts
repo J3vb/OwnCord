@@ -5,7 +5,7 @@
  * The sibling attachments-cache.test.ts covers cache invalidation flows.
  * This file covers the rendering paths and helper functions.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock, saveMock, writeFileMock, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
@@ -116,7 +116,9 @@ import {
   clearAttachmentCaches,
   renderAttachment,
   fetchImageAsObjectUrl,
+  closeActiveLightbox,
 } from "../../src/components/message-list/attachments";
+import { authStore } from "@stores/auth.store";
 
 // jsdom implements no object URLs; server images are handed out as blob: URLs.
 URL.createObjectURL = vi.fn(() => "blob:test-image");
@@ -525,5 +527,63 @@ describe("fetchImageAsObjectUrl — network fetch failure", () => {
     expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
       url: "https://cdn.example.com/img.png",
     });
+  });
+});
+
+// P4-08: a server that advertises upload_policy.thumbnails serves a bounded
+// preview at /api/v1/files/{id}/thumb; the inline image uses it, and the full
+// file loads only when the image is opened.
+describe("renderAttachment — server thumbnails", () => {
+  const att = {
+    id: "abc",
+    url: "/api/v1/files/abc",
+    filename: "photo.jpg",
+    size: 4_000_000,
+    mime: "image/jpeg",
+    width: 4000,
+    height: 3000,
+  };
+  const okImage = {
+    ok: true,
+    headers: { get: () => "image/jpeg" },
+    arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+  };
+  const fetchedPaths = (): string[] =>
+    fetchMock.mock.calls.map((call) => new URL(String(call[0])).pathname);
+
+  beforeEach(() => {
+    clearAttachmentCaches();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(okImage);
+    setServerHost("myserver.local:8443");
+  });
+
+  afterEach(() => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: null }));
+    closeActiveLightbox();
+  });
+
+  it("requests /thumb for an image row when the server has thumbnails", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
+  });
+
+  it("requests the original from a server without thumbnails", async () => {
+    const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc"]);
+  });
+
+  it("opening a thumbnail loads the original into the lightbox", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    (el.querySelector("img") as HTMLImageElement).click();
+    await vi.waitFor(() =>
+      expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb", "/api/v1/files/abc"]),
+    );
+    expect(document.querySelector(".image-lightbox img")).not.toBeNull();
   });
 });

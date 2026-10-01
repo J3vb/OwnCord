@@ -103,6 +103,30 @@ func TestErasureService_EraseRemovesRowsAndFiles(t *testing.T) {
 	}
 }
 
+// P4-08: a thumbnail of an erased user's image goes with the original.
+func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, files := seedErasureMember(t, database, dir)
+	st := newTestStorage(t, dir)
+	for _, f := range files {
+		if err := st.SaveThumb(f, []byte("thumb")); err != nil {
+			t.Fatalf("SaveThumb(%s): %v", f, err)
+		}
+	}
+	svc := NewErasureService(database)
+	svc.SetFiles(st)
+
+	if err := svc.Erase(context.Background(), uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	for _, f := range files {
+		if _, err := st.OpenThumb(f); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("thumbnail of %s survived the erasure: %v", f, err)
+		}
+	}
+}
+
 // Interruption between the commit and the file removal: the process dies
 // with the files on disk and the job at db_done. A restart — a fresh handle
 // on the same file, as the maintenance loop's startup resume sees it —

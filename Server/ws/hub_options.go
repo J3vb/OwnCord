@@ -119,6 +119,9 @@ type UploadPolicy struct {
 	// and a non-empty allowed list is allow-only mode.
 	BlockedExtensions []string `json:"blocked_extensions,omitempty"`
 	AllowedExtensions []string `json:"allowed_extensions,omitempty"`
+	// Thumbnails reports that GET /api/v1/files/{id}/thumb exists, so a
+	// client asks for an inline image's thumbnail instead of the original.
+	Thumbnails bool `json:"thumbnails,omitempty"`
 }
 
 // UploadFileTypes reads the upload file-type policy in force;
