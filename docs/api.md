@@ -407,7 +407,7 @@ The login shape: `token` and `user`, `requires_2fa` false.
 Authenticate with username and password.
 
 **Auth:** None (public)
-**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes. Lockouts are persisted to the database and survive server restarts.
+**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes, except for an address that signed in to that account in the last 24 hours. Lockouts are persisted to the database and survive server restarts; the 24-hour exemption is held in memory and does not.
 
 #### Request
 
