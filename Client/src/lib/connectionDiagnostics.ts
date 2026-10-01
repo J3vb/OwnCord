@@ -3,6 +3,7 @@ import type { Room } from "livekit-client";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/preferences";
+import { isMissingDeviceError } from "@lib/audioPipeline";
 import { settingsText as t } from "../i18n/settings";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
@@ -209,10 +210,13 @@ export async function runConnectionDiagnostics(
         const selected = loadPref<string>("audioInputDevice", "");
         // getUserMedia cannot cancel a permission prompt. Always stop the tracks
         // in its fulfillment handler, even after timeout, close or server switch.
-        const stream = await services.getUserMedia({
-          audio: selected ? { deviceId: { exact: selected } } : true,
-          video: false,
-        });
+        const audio = selected ? { deviceId: { exact: selected } } : {};
+        const stream = await services
+          .getUserMedia({ audio, video: false })
+          .catch((err: unknown) => {
+            if (!isMissingDeviceError(err, audio)) throw err;
+            return services.getUserMedia({ audio: { deviceId: "default" }, video: false });
+          });
         try {
           if (!stream.getAudioTracks().some((track) => track.readyState === "live")) {
             // i18n-exempt: internal guard mapped to the microphone failure catalog line

@@ -926,5 +926,26 @@ describe("DeviceManager", () => {
 
       expect(switchesTo("Headset Mic")).toEqual([["audioinput", "Headset Mic"]]);
     });
+
+    it("keeps following a hot-plugged system default on the native backend while fallen back", async () => {
+      prefs.set("audioInputDevice", "Headset Mic");
+      prefs.set("audioOutputDevice", "Headset Out");
+      mockNativeAudioDevices.mockImplementation(async (kind: string) =>
+        kind === "audioinput" ? inputs : outputs,
+      );
+      await fireDeviceChange();
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "BT Mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "BT Out" }];
+      mockRoom.switchActiveDevice.mockClear();
+      await fireDeviceChange();
+
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", ""],
+        ["audiooutput", ""],
+      ]);
+      expect(prefs.get("audioInputDevice")).toBe("Headset Mic");
+      expect(prefs.get("audioOutputDevice")).toBe("Headset Out");
+    });
   });
 });

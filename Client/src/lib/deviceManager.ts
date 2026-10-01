@@ -208,7 +208,8 @@ export class DeviceManager {
         ["audiooutput", "audioOutputDevice", outputDevices],
       ] as const;
       for (const [kind, key, listed] of saved) {
-        const deviceId = loadPref<string>(key, "");
+        const pref = loadPref<string>(key, "");
+        const deviceId = this.fallbackFrom[kind] === pref ? "" : pref;
         const reapply = deviceId === "" || listed.some((d) => d.deviceId === deviceId);
         if (!reapply || restored.has(kind)) continue;
         try {
