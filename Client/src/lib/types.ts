@@ -65,7 +65,8 @@ export type WsErrorCode =
   | "INVALID_JSON"
   | "UNKNOWN_TYPE"
   | "SLOW_MODE"
-  // A send, reaction or voice join refused by an active moderator timeout.
+  // A write refused by an active moderator timeout: a send or edit, a
+  // reaction, a voice join, a call ring, or a custom status.
   | "TIMED_OUT"
   | "CONFLICT"
   | "BAD_PAYLOAD"

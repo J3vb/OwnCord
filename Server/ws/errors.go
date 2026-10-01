@@ -26,8 +26,9 @@ const (
 	// Returned when a user tries to lift a moderator-imposed voice state.
 	ErrCodeServerMuted    = "SERVER_MUTED"
 	ErrCodeServerDeafened = "SERVER_DEAFENED"
-	// ErrCodeTimedOut is returned for a send, reaction, voice join, call ring
-	// or custom status refused by an active moderator timeout (B5-9).
+	// ErrCodeTimedOut is returned for a send, edit, reaction, voice join,
+	// call ring or custom status refused by an active moderator timeout
+	// (B5-9).
 	ErrCodeTimedOut = "TIMED_OUT"
 	// ErrCodeSessionReplaced is sent to a connection the hub displaces
 	// because the same user connected from another device. The client stops

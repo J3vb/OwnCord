@@ -240,6 +240,7 @@ endpoints return plain-text errors — see their section):
 | `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                            |
 | `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                |
 | `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                |
+| `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                          |
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                |
 | `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                          |
 | `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                           |
@@ -1539,7 +1540,7 @@ DM channels use participant-based authorization rather than role-based permissio
 
 ### POST /api/v1/dms
 
-Create or retrieve a 1-on-1 DM channel with another user. If a DM channel already exists, it is returned and re-opened.
+Create or retrieve a 1-on-1 DM channel with another user. If a DM channel already exists, it is returned and re-opened. A timed-out caller may still reopen an existing channel, but creating a new one is refused with `403 TIMED_OUT`.
 
 **Auth:** Required
 
