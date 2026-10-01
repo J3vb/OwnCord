@@ -2000,7 +2000,10 @@ describe("messages store", () => {
       expect(getHistoryLoadState(1)).toBeNull();
     });
 
-    it("returns a new array without the rows older than the page once the window grew past it", () => {
+    // R3 (N1 option b): the rows a revisit's page pushes out of the window are
+    // held back, not shown, until scrolling up fetches their page again; that
+    // fetch keeps every row it left unchanged as the same object.
+    it("holds the rows older than the page back once the window grew past it", () => {
       setMessages(1, page(1, 50), true);
       addMessage(makeChatPayload({ id: 51, content: "m51", timestamp: "2026-03-15T09:00:00Z" }));
       const cached = getChannelMessages(1);
@@ -2012,9 +2015,13 @@ describe("messages store", () => {
       expect(msgs).not.toBe(cached);
       expect(msgs.map((m) => m.id)).toEqual(cached.slice(1).map((m) => m.id));
       msgs.forEach((m, i) => expect(m).toBe(cached[i + 1]));
+
+      // Scrolling up refetches the held row's page: it comes back as it was.
+      prependMessages(1, page(1, 1), false);
+      expect(getChannelMessages(1)[0]).toBe(cached[0]);
     });
 
-    it("drops older cached rows beyond the page and keeps unchanged row objects inside it", () => {
+    it("holds older cached rows beyond the page back and keeps unchanged row objects inside it", () => {
       setMessages(1, page(51, 100), true);
       prependMessages(1, page(1, 50), true);
       const cached = getChannelMessages(1);
@@ -2039,18 +2046,61 @@ describe("messages store", () => {
       expect(msgs[0]).toBe(cached.find((m) => m.id === 52));
       expect(msgs.find((m) => m.id === 70)).toBe(cached.find((m) => m.id === 70));
       expect(hasMoreMessages(1)).toBe(true);
+
+      // The older page the reader scrolls to revalidates the held rows 2-51.
+      prependMessages(1, page(2, 51), true);
+      const older = getChannelMessages(1);
+      expect(older[0]!.id).toBe(2);
+      expect(older.find((m) => m.id === 20)).toBe(cached.find((m) => m.id === 20));
     });
 
-    it("does not show a message deleted while away that is older than the refetched page", () => {
+    it("never shows a message deleted or edited while away that is older than the refetched page", () => {
       setMessages(1, page(51, 100), true);
       prependMessages(1, page(1, 50), true);
       expect(getChannelMessages(1).map((m) => m.id)).toContain(20);
 
       revisit();
-      // While away: 20 was deleted and 101-110 were posted.
+      // While away: 20 was deleted, 30 edited and 101-110 were posted.
       setMessages(1, page(61, 110), true);
-
       expect(getChannelMessages(1).map((m) => m.id)).not.toContain(20);
+
+      // Scrolling up: the page covering the held rows 11-60 no longer has 20.
+      prependMessages(
+        1,
+        page(11, 60)
+          .filter((m) => m.id !== 20)
+          .map((m) => (m.id === 30 ? { ...m, content: "edited" } : m)),
+        true,
+      );
+      let ids = getChannelMessages(1).map((m) => m.id);
+      expect(ids[0]).toBe(11);
+      expect(ids).not.toContain(20);
+      expect(getChannelMessages(1).find((m) => m.id === 30)!.content).toBe("edited");
+
+      // The last page reaches the start of the channel.
+      prependMessages(1, page(1, 10), false);
+      ids = getChannelMessages(1).map((m) => m.id);
+      expect(ids[0]).toBe(1);
+      expect(ids).not.toContain(20);
+    });
+
+    it("drops the held rows a later page shows were deleted, and every one past the start", () => {
+      setMessages(1, page(51, 100), true);
+      prependMessages(1, page(1, 50), true);
+
+      revisit();
+      setMessages(1, page(61, 110), true);
+      // While away rows 1-10 and 12 were deleted: the server has nothing older than 11.
+      prependMessages(
+        1,
+        page(11, 60).filter((m) => m.id !== 12),
+        false,
+      );
+
+      const ids = getChannelMessages(1).map((m) => m.id);
+      expect(ids[0]).toBe(11);
+      expect(ids).not.toContain(12);
+      expect(messagesStore.getState().heldHistory?.get(1) ?? []).toEqual([]);
     });
 
     it("keeps a row that arrived live when the page carries its REST twin in the server's wire shapes", () => {

@@ -33,6 +33,20 @@ function sameValue(a: unknown, b: unknown): boolean {
   return keys.length === present(y).length && keys.every((k) => sameValue(x[k], y[k]));
 }
 
+/** `prev.heldHistory` with one channel's held rows replaced (none = removed). */
+function withHeld(
+  prev: MessagesState,
+  channelId: number,
+  rows: readonly Message[],
+): ReadonlyMap<number, readonly Message[]> {
+  const current = prev.heldHistory ?? new Map<number, readonly Message[]>();
+  if (rows.length === 0 && !current.has(channelId)) return current;
+  const updated = new Map(current);
+  if (rows.length > 0) updated.set(channelId, rows);
+  else updated.delete(channelId);
+  return updated;
+}
+
 /** setChannelLoading's reducer. */
 export function reduceSetChannelLoading(prev: MessagesState, channelId: number): MessagesState {
   const updated = new Map(prev.historyLoadState);
@@ -131,6 +145,20 @@ export function reduceSetMessages(
   if (merged.length === previous.length && merged.every((m, i) => m === previous[i])) {
     merged = previous;
   }
+  // Loaded rows older than the page, and rows already held, are held back
+  // (R3): never shown until the page that covers them is fetched again. A page
+  // that is the whole channel, or empty, leaves nothing older to hold.
+  const shownIds = new Set(merged.map((m) => m.id));
+  const heldById = new Map(
+    hasMore && trimmed.length > 0
+      ? [...(prev.heldHistory?.get(channelId) ?? []), ...previous]
+          .filter((m) => m.status === "sent" && m.id < minSnapshotId && !shownIds.has(m.id))
+          .map((m) => [m.id, m])
+      : [],
+  );
+  const held = [...heldById.values()]
+    .toSorted((a, b) => a.id - b.id)
+    .slice(-MAX_MESSAGES_PER_CHANNEL);
 
   const updatedMessages = new Map(prev.messagesByChannel);
   updatedMessages.set(channelId, merged);
@@ -170,6 +198,7 @@ export function reduceSetMessages(
     historyLoadState: updatedLoadState,
     detachedChannels: updatedDetached,
     loadWatermark: updatedWatermark,
+    heldHistory: withHeld(prev, channelId, held),
   };
 }
 
@@ -247,6 +276,7 @@ export function reduceSetAroundMessages(
     hasMore: updatedHasMore,
     historyLoadState: updatedLoadState,
     detachedChannels: updatedDetached,
+    heldHistory: withHeld(prev, channelId, []),
   };
 }
 
@@ -284,7 +314,14 @@ export function reduceClearChannelContent(prev: MessagesState, channelId: number
   hasMore.delete(channelId);
   const detachedChannels = new Set(prev.detachedChannels);
   detachedChannels.delete(channelId);
-  return { ...prev, messagesByChannel, loadedChannels, hasMore, detachedChannels };
+  return {
+    ...prev,
+    messagesByChannel,
+    loadedChannels,
+    hasMore,
+    detachedChannels,
+    heldHistory: withHeld(prev, channelId, []),
+  };
 }
 
 /** reattachToPresent's reducer. */
@@ -302,7 +339,20 @@ export function reducePrependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): MessagesState {
-  const converted = messages.map(messageResponseToMessage).toReversed();
+  // The page revalidates the held rows it covers (R3): an unchanged one comes
+  // back as the same object, and one missing from the page was deleted. Held
+  // rows older than the page stay held; none survive the start of the channel.
+  const held = prev.heldHistory?.get(channelId) ?? [];
+  const heldById = new Map(held.map((m) => [m.id, m]));
+  const converted = messages
+    .map(messageResponseToMessage)
+    .toReversed()
+    .map((m) => {
+      const kept = heldById.get(m.id);
+      return kept !== undefined && sameValue(kept, m) ? kept : m;
+    });
+  const pageMin = converted[0]?.id ?? 0;
+  const stillHeld = hasMore && converted.length > 0 ? held.filter((m) => m.id < pageMin) : [];
   const existing = prev.messagesByChannel.get(channelId) ?? [];
   let combined = [...converted, ...existing];
   // Keep the OLDEST rows (start of array) when the cap is exceeded: the
@@ -337,5 +387,7 @@ export function reducePrependMessages(
     messagesByChannel: updatedMessages,
     hasMore: updatedHasMore,
     detachedChannels: updatedDetached,
+    heldHistory:
+      stillHeld.length === held.length ? prev.heldHistory : withHeld(prev, channelId, stillHeld),
   };
 }

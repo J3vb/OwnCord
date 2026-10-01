@@ -263,7 +263,8 @@ channel clears the badge, which destroys the only record of where the reader had
 got to, so `setActiveChannel` snapshots the count first
 (`channels.store.getUnreadOnOpen`); MessageList reads it once at mount and places
 the line above the last _N_ loaded messages. On a revisit the cached rows predate
-what arrived while away, so the line waits for the refetched tail to land.
+what arrived while away, so the line waits for the refetched tail to land and
+is then inserted on its own, without redrawing the rows already shown.
 Consequences of that derivation: the line is suppressed while the message window
 is detached (a slice around some old message is not the tail), and it clears on
 the next visit, when the snapshot is 0.

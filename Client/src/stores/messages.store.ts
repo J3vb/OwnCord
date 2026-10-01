@@ -167,13 +167,14 @@ export function setChannelLoadError(channelId: number): void {
  *  A revisit's refetch (DP-10) reconciles into the cached window: a row the
  *  page left unchanged keeps its object. While the window is still exactly
  *  the latest page, a page that changes nothing leaves the channel's array
- *  reference as it was. A post-only page only appends when the channel's
- *  whole history fits in one page (hasMore false). Otherwise cached "sent"
- *  rows older than the page are dropped, so nothing deleted or edited while
- *  away stays on screen (scrolling up loads them again), the channel gets a
- *  new array and the list rebuilds once. A revisit that opens with unread
- *  messages always rebuilds the list once, when this lands, to place the NEW
- *  divider.
+ *  reference as it was. Cached "sent" rows older than the page leave the
+ *  window but are held back (heldHistory, P4-01 R3) rather than dropped: they
+ *  may carry an edit or delete made while away, so they are not shown until
+ *  scrolling up fetches their page again (prependMessages), which keeps each
+ *  one it left unchanged. A page that is the whole channel (hasMore false)
+ *  holds nothing. The list patches only the rows that changed: the dropped
+ *  head, the new tail and, for a revisit that opened with unread messages,
+ *  the NEW divider.
  *
  *  `splice` is a full-ready resync's refetch (P2-T4): when the page reaches
  *  back to the newest row loaded at setChannelLoading, the loaded rows older
@@ -254,8 +255,9 @@ export function invalidateLoadedMessageWindows(): void {
  * "already loaded": that refetch is the only way to learn about edits,
  * deletes and reactions made while away. The rows themselves are kept (the
  * next visit renders them at once) and setMessages reconciles the refetched
- * page into them, keeping the rows it left unchanged, dropping older rows
- * beyond it and carrying pending/failed rows across. Like reattachToPresent,
+ * page into them, keeping the rows it left unchanged, holding older rows
+ * beyond it back until their page is fetched again, and carrying
+ * pending/failed rows across. Like reattachToPresent,
  * this leaves detachedChannels alone: setMessages clears it once the tail has
  * actually landed, and until then a detached window must keep refusing live
  * broadcasts.
@@ -291,7 +293,9 @@ export function reattachToPresent(channelId: number): void {
 }
 
 /** Prepend older messages for infinite scroll.
- *  The server returns messages newest-first; we reverse to chronological order. */
+ *  The server returns messages newest-first; we reverse to chronological order.
+ *  The page revalidates the held rows it covers (setMessages): an unchanged one
+ *  comes back as the same object, one the page no longer has stays gone. */
 export function prependMessages(
   channelId: number,
   messages: readonly MessageResponse[],

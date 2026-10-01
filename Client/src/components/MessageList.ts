@@ -263,22 +263,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   const disposable = new Disposable();
   const unsubscribers: Array<() => void> = [];
   /**
-   * Scopes the *current* rendered window's row listeners (react/reply/pin/
-   * edit/delete/copy-link, reply-ref, reaction chips, ...). `renderWindow`
-   * aborts and replaces this before every full rebuild, so a discarded row's
-   * listeners are dropped immediately instead of accumulating on `disposable` for
-   * the whole component lifetime — every row used to register against
-   * `disposable.signal` directly, and nothing aborted a stale render's registrations
-   * short of `destroy()`, retaining a full window of detached rows (and
-   * everything they reference: videos, images, embeds, tooltips) per rebuild
-   * (OC-0286). Mirrors ChannelSidebar's `renderOwner` (OC-0229) and
-   * SettingsOverlay's `renderOwner`.
+   * One owner per rendered message row, scoping that row's listeners (react/
+   * reply/pin/edit/delete/copy-link, reply-ref, reaction chips, ...). A row
+   * discarded by a rebuild or replaced by a row patch has its owner destroyed
+   * at once, so its listeners never outlive it — every row used to register
+   * against `disposable.signal` directly, retaining a full window of detached
+   * rows (and everything they reference: videos, images, embeds, tooltips)
+   * per rebuild (OC-0286). destroy() releases the rest.
    */
-  let rowOwner: Disposable | null = null;
-  /** Signal handed to row renderers — combines `disposable.signal` (component
-   *  lifetime) with `rowOwner.signal` (current window) so either one aborts a
-   *  row's listeners. Starts as plain `disposable.signal` before the first render. */
-  let rowSignal: AbortSignal = disposable.signal;
+  const rowOwners = new Map<HTMLElement, Disposable>();
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -378,11 +371,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function renderVirtualItem(item: VirtualItem): HTMLElement {
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
-    return renderMessage(item.message, item.isGrouped, allMessages, options, rowSignal);
+    const owner = new Disposable();
+    const el = renderMessage(item.message, item.isGrouped, allMessages, options, owner.signal);
+    rowOwners.set(el, owner);
+    return el;
+  }
+
+  /** Discard one rendered row: stop tracking its media and abort its listeners. */
+  function releaseRow(el: HTMLElement): void {
+    for (const img of el.querySelectorAll("img")) unobserveMedia(img);
+    rowOwners.get(el)?.destroy();
+    rowOwners.delete(el);
+    el.remove();
   }
 
   function itemKey(index: number): string {
-    const item = virtualItems[index];
+    return keyOf(virtualItems[index], index);
+  }
+
+  function keyOf(item: VirtualItem | undefined, index: number): string {
     if (item === undefined) return `idx-${index}`;
     if (item.kind === "divider") return `div-${item.timestamp}`;
     if (item.kind === "new-divider") return "new-divider";
@@ -391,7 +398,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // message.id would collide two or more pending rows onto the same
     // "msg-0" cache entry — measureRendered would overwrite one row's
     // measured height with another's, and the next Fenwick rebuild
-    // (rebuildItems / tryAppendMessages) would seed both rows' tree slots
+    // (rebuildItems / patchRows) would seed both rows' tree slots
     // from that single, wrong value. correlationId is unique per pending
     // send and stable across the row's lifetime, so key on that instead
     // while id is still the 0 sentinel; fall back to the row's own index
@@ -583,17 +590,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
   }
 
-  /** Abort the previous window's row-scoped listeners and start a fresh
-   *  signal for the rows about to replace them. Must run before every
-   *  `clearChildren(contentContainer)` that discards rendered rows, so a
-   *  stale row can never outlive the render that replaced it (OC-0286) — the
-   *  incremental append fast path (tryAppendMessages) deliberately does NOT
-   *  call this, since it appends to rows that stay live until the next
-   *  rebuild and must keep using the current window's signal. */
+  /** Abort every rendered row's listeners before a rebuild discards the rows,
+   *  so a stale row can never outlive the render that replaced it (OC-0286).
+   *  The row patch (patchRows) releases only the rows it replaces. */
   function beginRowRender(): void {
-    rowOwner?.destroy();
-    rowOwner = new Disposable();
-    rowSignal = AbortSignal.any([disposable.signal, rowOwner.signal]);
+    for (const owner of rowOwners.values()) owner.destroy();
+    rowOwners.clear();
   }
 
   let renderWindowCount = 0;
@@ -715,98 +717,154 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     allMessages = getChannelMessages(options.channelId);
     virtualItems = buildVirtualItems(allMessages, null, null, resolveNewDividerIndex(allMessages));
 
-    // Build Fenwick tree initialized with smart estimates / cached heights
+    seedTree();
+  }
+
+  /** Build the Fenwick tree from measured heights, estimating the rest. */
+  function seedTree(): void {
     tree = new FenwickTree(virtualItems.length);
-    for (let i = 0; i < virtualItems.length; i++) {
-      const cached = heightCache.get(itemKey(i));
-      const h = cached !== undefined ? cached : estimateItemHeight(virtualItems[i]!);
-      tree.set(i, h);
-    }
+    for (let i = 0; i < virtualItems.length; i++) tree.set(i, getItemHeight(i));
   }
 
   // ---------------------------------------------------------------------------
-  // Incremental tail append (fast path)
+  // Row-level patch (fast path)
   // ---------------------------------------------------------------------------
 
-  /** Cap on rendered rows for the append fast path. Once the window grows past
+  /** Cap on rendered rows for the patch path. Once the window grows past
    *  this, fall back to renderAll so it is re-trimmed to the visible range. */
   const MAX_INCREMENTAL_WINDOW = 200;
 
   /**
-   * Fast path for the common "new message arrived at the tail" update: when
-   * the store's array is a pure suffix extension of `allMessages`, append the
-   * new rows and re-seed the Fenwick tree instead of tearing down the whole
-   * rendered window (renderAll → renderWindow REBUILD). Anything else (edits,
-   * deletes, history prepends, confirmations replacing optimistic rows)
-   * returns false so the caller does a full rebuild.
+   * Fast path for a store update that changes a few rows (P4-01): diff the new
+   * items against the rendered ones by key and touch only what changed — a
+   * reaction, edit, delete or send confirmation re-renders its own row, plus a
+   * neighbour whose grouping changed and any loaded reply whose parent
+   * changed. Rows dropped from the head, rows appended at the tail (a
+   * revisit's refetched page, R1) and the NEW divider landing (R2) are
+   * inserted or removed one by one. Every other row keeps its DOM node, so a
+   * playing video, a revealed spoiler or focus survive. A row outside the
+   * rendered window only moves its height entry.
    *
-   * Scroll-anchor/spacer safety: no existing row is touched, so the anchor
-   * item's offset only changes via the bottom spacer/appended rows below it;
-   * the ResizeObserver's RAF pass re-measures and restores the anchor exactly
-   * as it does for image loads. The renderWindow oscillation guard is not
-   * consumed — this path never rebuilds.
+   * Returns false, for renderAll to rebuild, when there is nothing rendered to
+   * keep, rows were reordered, or a message was inserted above every row that
+   * stays (a history prepend, whose reading position renderAll keeps).
+   *
+   * The Fenwick tree is re-seeded from the height cache, as for any rebuild,
+   * and the topmost visible row that stays keeps its offset in the viewport.
+   * The renderWindow oscillation guard is not consumed — this path never
+   * rebuilds.
    */
-  function tryAppendMessages(): boolean {
+  function patchRows(): boolean {
     if (root === null || contentContainer === null || tree === null) return false;
-    if (renderAllRunning || renderedStart < 0) return false;
-
-    // The append path never places the NEW divider; when a revisit's tail
-    // lands with it still deferred, rebuild so it can be.
-    if (newDividerDeferred) return false;
-
-    const prev = allMessages;
+    if (renderAllRunning || renderedStart < 0 || allMessages.length === 0) return false;
     const next = getChannelMessages(options.channelId);
-    if (prev.length === 0 || next.length <= prev.length) return false;
-    for (let i = 0; i < prev.length; i++) {
-      if (next[i] !== prev[i]) return false;
-    }
+    if (next.length === 0) return false;
+    const prevItems = virtualItems;
+    const nextItems = buildVirtualItems(next, null, null, resolveNewDividerIndex(next));
+    const prevKeys = prevItems.map(keyOf);
+    const nextKeys = nextItems.map(keyOf);
+    const prevIndex = new Map(prevKeys.map((k, i) => [k, i]));
+    const nextIndex = new Map(nextKeys.map((k, i) => [k, i]));
+    if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
 
-    const prevLast = prev[prev.length - 1]!;
-    const appendedItems = buildVirtualItems(next.slice(prev.length), prevLast, prevLast.timestamp);
-    const oldItemCount = virtualItems.length;
-    const windowAtTail = renderedEnd === oldItemCount;
-    if (
-      windowAtTail &&
-      renderedEnd - renderedStart + appendedItems.length > MAX_INCREMENTAL_WINDOW
-    ) {
-      return false; // window has grown too large — let renderAll re-trim it
+    // The rows that stay keep their order, and no message lands above every
+    // message that stays (a history prepend, left to renderAll).
+    let last = -1;
+    let anchored = false;
+    for (const [j, item] of nextItems.entries()) {
+      const i = prevIndex.get(nextKeys[j]!);
+      if (i === undefined) {
+        if (!anchored && item.kind === "message") return false;
+        continue;
+      }
+      if (i < last) return false;
+      last = i;
+      anchored ||= item.kind === "message";
     }
+    if (!anchored) return false;
+
+    // The new window spans what stays of the old one, grows with the tail when
+    // it was at the tail, and keeps its top when it was at the top.
+    let start = -1;
+    let end = -1;
+    for (let i = renderedStart; i < renderedEnd; i++) {
+      const j = nextIndex.get(prevKeys[i]!);
+      if (j === undefined) continue;
+      if (start === -1) start = j;
+      end = j + 1;
+    }
+    if (start === -1) return false;
+    if (renderedStart === 0) start = 0;
+    if (renderedEnd === prevItems.length) end = nextItems.length;
+    if (end - start > MAX_INCREMENTAL_WINDOW) return false;
 
     const atBottom = isNearBottom();
-
-    // Capture measured heights of the currently rendered rows before swapping
-    // trees so the rebuilt tree starts from real measurements.
+    // Record the rendered rows' heights under their current keys before the
+    // items change, and the topmost visible row that stays as the anchor.
     measureRendered();
+    let anchor = offsetToIndex(root.scrollTop);
+    while (anchor < prevItems.length && !nextIndex.has(prevKeys[anchor]!)) anchor++;
+    const anchorKey = prevKeys[anchor];
+    const anchorOffset = root.scrollTop - offsetBefore(anchor);
 
+    // Messages whose object changed or left: a reply quoting one re-renders
+    // its quote (renderReplyRef reads the parent from allMessages).
+    const nextById = new Map(next.map((m) => [m.id, m]));
+    const changedIds = new Set(
+      allMessages.filter((m) => nextById.get(m.id) !== m).map((m) => m.id),
+    );
+
+    const focused = captureRowFocus();
+    const shown = [...contentContainer.children] as HTMLElement[];
+    const shownByKey = new Map(shown.map((el, i) => [prevKeys[renderedStart + i]!, el]));
     allMessages = next;
-    virtualItems = [...virtualItems, ...appendedItems];
+    virtualItems = nextItems;
 
-    // Extend the height index. FenwickTree is fixed-size, so re-seed a fresh
-    // one from the height cache — cheap relative to the DOM teardown this
-    // path avoids.
-    tree = new FenwickTree(virtualItems.length);
-    for (let i = 0; i < virtualItems.length; i++) {
-      const cached = heightCache.get(itemKey(i));
-      tree.set(i, cached !== undefined ? cached : estimateItemHeight(virtualItems[i]!));
-    }
-
-    if (windowAtTail) {
-      // The rendered window includes the old tail — append the new rows.
-      const fragment = document.createDocumentFragment();
-      for (const item of appendedItems) {
-        fragment.appendChild(renderVirtualItem(item));
+    const rows: HTMLElement[] = [];
+    const reused = new Set<HTMLElement>();
+    for (let j = start; j < end; j++) {
+      const now = nextItems[j]!;
+      const el = shownByKey.get(nextKeys[j]!);
+      const was = el && prevItems[prevIndex.get(nextKeys[j]!)!];
+      // A row stays when nothing it draws changed: its message, its grouping
+      // and the parent a reply quotes. A divider with the same key is the same.
+      const same =
+        now.kind !== "message" ||
+        (was?.kind === "message" &&
+          was.message === now.message &&
+          was.isGrouped === now.isGrouped &&
+          !changedIds.has(now.message.replyTo ?? -1));
+      if (el !== undefined && same) {
+        rows.push(el);
+        reused.add(el);
+      } else {
+        rows.push(renderVirtualItem(now));
       }
-      contentContainer.appendChild(fragment);
-      renderedEnd = virtualItems.length;
-      measureRendered();
     }
-    // Otherwise the user has scrolled up past the tail: the new items only
-    // grow the bottom spacer; renderWindow picks them up on the next rebuild.
+    for (const el of shown) {
+      if (!reused.has(el)) releaseRow(el);
+    }
+    // The reused rows are already in order; slot the new ones in around them.
+    let cursor = contentContainer.firstElementChild;
+    for (const el of rows) {
+      if (el === cursor) cursor = cursor.nextElementSibling;
+      else contentContainer.insertBefore(el, cursor);
+    }
+    renderedStart = start;
+    renderedEnd = end;
 
+    seedTree();
+    measureRendered();
     updateSpacers();
+    if (focused !== null && !contentContainer.contains(document.activeElement)) {
+      restoreRowFocus(focused);
+    }
+
     if (atBottom) {
       scrollToBottom();
       updateScrollToBottomBtn();
+    } else if (anchorKey !== undefined) {
+      root.scrollTop = Math.max(0, offsetBefore(nextIndex.get(anchorKey)!) + anchorOffset);
     }
     return true;
   }
@@ -1133,7 +1191,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         // array references are unchanged) never trigger a re-render here.
         (s) => s.messagesByChannel.get(options.channelId),
         () => {
-          if (!tryAppendMessages()) {
+          if (!patchRows()) {
             renderAll();
           }
         },
@@ -1143,13 +1201,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Re-render the (empty) region when the first-page fetch transitions
     // between loading / error / idle. Shown rows are left alone: a revisit's
     // refetch finishing must not rebuild them (DP-10), and any change the
-    // fetch made reaches the messagesByChannel subscriber above. The one
-    // exception is a NEW divider still waiting for that fetch.
+    // fetch made reaches the messagesByChannel subscriber above. A NEW divider
+    // still waiting for that fetch is patched in on its own (R2).
     unsubscribers.push(
       messagesStore.subscribeSelector(
         (s) => s.historyLoadState.get(options.channelId),
         () => {
-          if (virtualItems.length === 0 || newDividerDeferred) renderAll();
+          if (virtualItems.length === 0 || (newDividerDeferred && !patchRows())) renderAll();
         },
       ),
     );
@@ -1223,12 +1281,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver = null;
     }
     disposable.destroy();
-    // rowSignal (AbortSignal.any([disposable.signal, rowOwner.signal])) already aborts
-    // as soon as disposable does, but abort + drop the reference too so a stray
-    // beginRowRender() after destroy (there shouldn't be one) can't resurrect
-    // a live-looking controller.
-    rowOwner?.destroy();
-    rowOwner = null;
+    beginRowRender();
     if (scrollRafId !== 0) {
       cancelAnimationFrame(scrollRafId);
       scrollRafId = 0;

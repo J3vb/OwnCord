@@ -122,6 +122,11 @@ describe("MessageList — new-messages divider", () => {
     msgList.mount(container);
   }
 
+  /** The rendered row node for each message id, to check node identity. */
+  function rowNodes(ids: readonly number[]): (Element | null)[] {
+    return ids.map((id) => container.querySelector(`[data-testid="message-${id}"]`));
+  }
+
   function dividerIndex(): number {
     const rows = [...container.querySelectorAll(".virtual-content > *")];
     return rows.findIndex((el) => el.classList.contains("msg-new-divider"));
@@ -351,6 +356,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(1);
     mount();
     expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    const cachedRows = rowNodes([1, 2, 3, 4, 5]);
 
     // The refetch lands: the cached rows unchanged plus the one posted while away.
     messagesStore.setState((prev) => {
@@ -364,6 +370,8 @@ describe("MessageList — new-messages divider", () => {
     expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
       "message-6",
     );
+    // R2: the divider is inserted on its own; the rows already shown stay.
+    cachedRows.forEach((el, i) => expect(rowNodes([i + 1])[0]).toBe(el));
   });
 
   // A DM's messages reach the cached window live while it is not open, so the
@@ -377,6 +385,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(1);
     mount();
     expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    const cachedRows = rowNodes([1, 2, 3, 4, 5]);
 
     messagesStore.setState((prev) => ({ ...prev, historyLoadState: new Map() }));
     messagesStore.flush();
@@ -385,6 +394,7 @@ describe("MessageList — new-messages divider", () => {
     expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
       "message-5",
     );
+    cachedRows.forEach((el, i) => expect(rowNodes([i + 1])[0]).toBe(el));
   });
 
   // The line marks a boundary; the message under it must not be rendered as a
