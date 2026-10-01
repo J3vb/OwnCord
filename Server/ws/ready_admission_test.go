@@ -60,9 +60,18 @@ func seedSessions(t *testing.T, database *db.DB, n int) []string {
 }
 
 // dialFresh authenticates a fresh connect and returns the type of the first
-// frame after auth_ok (ready on success), plus that frame.
-func dialFresh(ctx context.Context, url, token string) (string, []byte, *websocket.Conn, error) {
+// frame after auth_ok (ready on success), plus that frame. dialSlots, when
+// non-nil, bounds the WebSocket dials in flight (not the sessions): 1,000
+// simultaneous dials overflow the listen backlog on Windows, which then
+// refuses connections.
+func dialFresh(ctx context.Context, url, token string, dialSlots chan struct{}) (string, []byte, *websocket.Conn, error) {
+	if dialSlots != nil {
+		dialSlots <- struct{}{}
+	}
 	conn, resp, err := websocket.Dial(ctx, url, nil)
+	if dialSlots != nil {
+		<-dialSlots
+	}
 	if resp != nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
@@ -113,9 +122,10 @@ func TestReadyAdmission_1000FreshConnects_BoundedBuilds(t *testing.T) {
 	defer cancel()
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
+	dialSlots := make(chan struct{}, 50)
 	for _, tok := range tokens {
 		wg.Go(func() {
-			typ, _, conn, err := dialFresh(ctx, url, tok)
+			typ, _, conn, err := dialFresh(ctx, url, tok, dialSlots)
 			if conn != nil {
 				defer func() { _ = conn.CloseNow() }()
 			}
@@ -155,7 +165,7 @@ func TestReadyAdmission_RefusesPastDeadlineWithRetryHint(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	typ, frame, conn, err := dialFresh(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), tokens[0])
+	typ, frame, conn, err := dialFresh(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), tokens[0], nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
