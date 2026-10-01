@@ -51,24 +51,30 @@ export class DeviceManager {
     this.room = room;
     if (room !== null) {
       this.startDeviceChangeListener();
-      void this.dropReturnedFallbacks(room);
+      void this.reconcileFallbacks(room);
     } else {
       this.stopDeviceChangeListener();
     }
   }
 
-  /** Forget a fallback whose device came back while no room was attached:
-   *  the join or reconnect already opened the saved device, so its next
-   *  unplug must fall back again. */
-  private async dropReturnedFallbacks(room: Room): Promise<void> {
-    const kinds = ["audioinput", "audiooutput"] as const;
+  /** Match the fallback record to the devices listed when a room attaches.
+   *  Join and reconnect open the saved device when it is listed and degrade
+   *  to the default when it is not, so a missing saved device counts as
+   *  fallen back (restored when it is listed again) and a listed one does
+   *  not (its next unplug falls back again). */
+  private async reconcileFallbacks(room: Room): Promise<void> {
+    const saved = [
+      ["audioinput", "audioInputDevice"],
+      ["audiooutput", "audioOutputDevice"],
+    ] as const;
     await Promise.all(
-      kinds.map(async (kind) => {
-        const from = this.fallbackFrom[kind];
-        if (from === undefined) return;
+      saved.map(async ([kind, key]) => {
+        const deviceId = loadPref<string>(key, "");
+        if (deviceId === "") return;
         const devices = (await nativeAudioDevices(kind)) ?? (await Room.getLocalDevices(kind));
-        if (this.room !== room || this.fallbackFrom[kind] !== from) return;
-        if (devices.some((d) => d.deviceId === from)) delete this.fallbackFrom[kind];
+        if (this.room !== room || loadPref<string>(key, "") !== deviceId) return;
+        if (devices.some((d) => d.deviceId === deviceId)) delete this.fallbackFrom[kind];
+        else this.fallbackFrom[kind] = deviceId;
       }),
     ).catch((err: unknown) => {
       log.warn("Failed to enumerate devices on room attach", err);

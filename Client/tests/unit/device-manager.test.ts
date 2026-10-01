@@ -93,6 +93,7 @@ describe("DeviceManager", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockNativeAudioDevices.mockImplementation(async () => null);
+    mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
     mockVoiceState.localServerMuted = false;
@@ -354,6 +355,23 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("handleDeviceChange", () => {
+    /** Attach with the saved devices listed, as at join, so the next device
+     *  change sees them removed. */
+    const attachWhileListed = async (): Promise<void> => {
+      const later = mockGetLocalDevices.getMockImplementation();
+      mockGetLocalDevices.mockImplementation(async (kind: string) => [
+        {
+          deviceId: mockLoadPref(
+            kind === "audioinput" ? "audioInputDevice" : "audioOutputDevice",
+            "",
+          ),
+        },
+      ]);
+      dm.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      mockGetLocalDevices.mockImplementation(later!);
+    };
+
     it("re-applies both saved devices on the native backend so shifted indexes refresh", async () => {
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
         if (key === "audioInputDevice") return "Headset Mic";
@@ -440,7 +458,7 @@ describe("DeviceManager", () => {
       });
 
       const onToast = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
 
       // Trigger device change
@@ -472,7 +490,7 @@ describe("DeviceManager", () => {
       });
       mockVoiceState.localMuted = true;
 
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
       handler();
       await vi.advanceTimersByTimeAsync(600);
@@ -526,7 +544,7 @@ describe("DeviceManager", () => {
       });
 
       const onToast = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
 
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -548,7 +566,7 @@ describe("DeviceManager", () => {
       mockRoom.switchActiveDevice.mockRejectedValue(new Error("sink unavailable"));
       const onToast = vi.fn();
       const onError = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
       dm.setOnError(onError);
 
@@ -573,7 +591,7 @@ describe("DeviceManager", () => {
         }),
       );
       const onToast = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
 
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -604,7 +622,7 @@ describe("DeviceManager", () => {
         );
         const onToast = vi.fn();
         const onError = vi.fn();
-        dm.setRoom(mockRoom);
+        await attachWhileListed();
         dm.setOnToast(onToast);
         dm.setOnError(onError);
 
@@ -636,7 +654,7 @@ describe("DeviceManager", () => {
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValue(new Error("no device"));
 
       const onError = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnError(onError);
 
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -685,7 +703,7 @@ describe("DeviceManager", () => {
       } as any;
       const onToast = vi.fn();
 
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setAudioPipeline(pipeline);
       dm.setOnToast(onToast);
 
@@ -861,6 +879,56 @@ describe("DeviceManager", () => {
       expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
       expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
       expect(onToast).toHaveBeenCalledTimes(4);
+    });
+
+    it("restores a device unplugged while no room was attached once it is plugged back in", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      prefs.set("audioOutputDevice", "headset");
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+
+      dm.setRoom(null);
+      inputs = [{ deviceId: "built-in-mic" }];
+      outputs = [{ deviceId: "speakers" }];
+      dm.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+      expect(onToast).not.toHaveBeenCalled();
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", "headset-mic"],
+        ["audiooutput", "headset"],
+      ]);
+    });
+
+    it("switches to a saved device that was absent at join when it appears mid-call", async () => {
+      dm.setRoom(null);
+      prefs.set("audioInputDevice", "bt-mic");
+      prefs.set("audioOutputDevice", "bt-out");
+      const joined = new DeviceManager();
+      joined.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls.at(-1)[1];
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "bt-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "bt-out" }];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+      joined.setRoom(null);
+
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", "bt-mic"],
+        ["audiooutput", "bt-out"],
+      ]);
     });
 
     it("the room swapped mid-await: no switch is applied to the old room", async () => {
