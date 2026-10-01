@@ -555,6 +555,233 @@ back-to-back 30 s CPU profiles, then block, mutex and heap profiles once at the
 end, with the sampler pinned to the generator CPUs (`taskset -c 2,3`) so it
 does not compete with the server it measures.
 
+## Scale profile
+
+What 1,000–2,000 people online at once actually do, on the same reference
+cgroup and the same pinned generators as everything above. It is the instrument
+the scaling phase measures itself against, and like the rest of this document
+**its method is published here before its first qualifying run**.
+
+```
+gh workflow run load-baseline.yml -f profile=scale --ref dev
+# the defaults, spelled out:
+#   -f scale_connections=2000 -f scale_active=0.1 -f scale_burst_send_ms=2000 -f scale_herd_spread_s=15
+```
+
+Constrained leg only, no voice leg. `K6_PROFILE=scale` in
+`Server/scripts/k6/ws-load.js`; `capacity`, `operational`, `restart` and
+`ceiling-search` are unchanged by it.
+
+### Traffic model
+
+The other profiles are stress shapes. Every connection sends every 2 s, types
+every 4 s and flips presence every 15 s, which at 2,000 connections would be
+1,000 messages/s. No community of 2,000 behaves like that, and no single SQLite
+writer carries it. This profile uses the idle-heavy model the owner chose
+(decision D2, 2026-09-30):
+
+- **N connected** (`scale_connections`, default 2,000), spread over **20 text
+  channels**: about 100 members per channel at 2,000.
+- **A small active fraction.** `K6_SCALE_ACTIVE` defaults to 0.1, spread evenly
+  within every channel. An active user sends a keyed `chat_send` every
+  `K6_SCALE_SEND_MS` (default 8,000 ms), about **25 messages/s** server-wide.
+  - The send carries a `client_message_id`, as the desktop client's does, so
+    every message also writes its delivery receipt.
+  - It is preceded by `typing_start` at most once per 3 s. That is the
+    client's own throttle (`Client/src/components/MessageInput.ts`), and no
+    one else types.
+- **Presence only on a status flip.** Each user flips once per 10 minutes,
+  as `Client/src/lib/presence.ts` sends `presence_update` only on a change.
+  Each user has its own slot in that period, so 2,000 users flip at about
+  3.3/s.
+- **Timers keep their phase across reconnects (OC-0445).** A herd redial
+  changes when a user is connected, not when they type.
+
+### Windows
+
+One run, six windows on the scenario clock. Each window is `[start, end)`
+seconds, and a sample belongs to the window it was **received** in. The
+defaults are:
+
+| Window      | Default           | What runs                                                                                                                                                   | What it publishes                                                                                   |
+| ----------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `ramp`      | [0, 180) s        | N fresh connections, paced; the last is scheduled 10 s before `steady` opens                                                                                | `auth_ok`, dial → `ready`                                                                           |
+| `steady`    | [180, 360) s      | The traffic model above                                                                                                                                     | acknowledgement, delivery, the held population                                                      |
+| `burst`     | [360, 420) s      | Active users send every `K6_SCALE_BURST_SEND_MS` (default 2,000 ms: about **100 messages/s**)                                                               | acknowledgement, delivery                                                                           |
+| `login`     | [420, 510) s      | `K6_SCALE_LOGINS` (default **500**) fresh password logins over `K6_SCALE_LOGIN_SPREAD_S` (default **10 s**), each from its own address, over steady traffic | time to a token including retries, give-ups, per-attempt login time, refusals                       |
+| `herd`      | [510, 600) s      | Every socket drops on its own slot of a `scale_herd_spread_s` spread (default **15 s**) and redials a full `ready`                                          | time until all N are `ready`, dial → `ready` p50/p95/p99, `auth_ok`, backpressure queue disconnects |
+| `ramp-down` | [600, end) and on | Draining                                                                                                                                                    | Excluded                                                                                            |
+
+`K6_SCALE_RAMP_S`, `_STEADY_S`, `_BURST_S`, `_LOGIN_S` and `_HERD_S` move the
+boundaries. Init refuses empty windows, a herd spread no shorter than its window,
+and a login spread no shorter than its window.
+
+**The herd comes last because it may not settle.** Nothing measured after it
+could be attributed.
+
+**The herd is N fresh connections carrying the token alone.** A restart resumes
+every client at tier `none`, which is a full `ready` (see "Graceful shutdown
+under load"). N fresh connects therefore reproduce the post-restart herd without
+the drain. The client redials after 0.5–1 s of jitter, and its backoff grows
+while the server is down (`Client/src/lib/ws.ts`), so a 10–30 s spread is
+realistic.
+
+A VU that is kicked, or is still dialling when its slot passes, joins the herd
+with that dial. A dial that started before its slot but opened after it drops
+on the next tick and redials. `herd_ready_at_ms` is measured from the herd's
+start to each VU's first `ready` after its drop.
+
+The observer polls `/api/v1/metrics` every 5 s and tags each delta with its
+window:
+
+- writer and reader waits;
+- backpressure queue disconnects;
+- topic sheds;
+- `connected_users` (`obs_population`).
+
+`load_measurement` in `k6-summary.json` carries:
+
+- per window: acknowledgement, delivery, `auth_ok`, `ready` and login
+  p50/p95/p99 with sample counts, sends, queue disconnects, the lowest
+  population and the writer wait;
+- the herd and login-burst figures;
+- the planned message rates;
+- `run_start_epoch_ms`, the wall-clock anchor that the CPU samples are sliced
+  against.
+
+An empty window reports `sample_count: 0` and null percentiles, never a
+zero-latency success.
+
+### Population and seeding
+
+- **Every seeded user and every VU has its own address.** The server boots with
+  `server.trusted_proxies: ["127.0.0.1/32"]`, and user n and VU n both send
+  `X-Forwarded-For: 10.x.y.z`, derived from n, from registration to the last
+  frame.
+  - **This is a measurement setting, never a deployment recommendation.**
+    `trusted_proxies` lists your real reverse-proxy hops and nothing else
+    (`docs/server-configuration.md`). The setting exists here so that the
+    per-IP limits see 2,000 people rather than one host.
+  - On one address, the restart drill's login ramp gave up on 877 of 1,000
+    VUs (run 36739426993).
+- **Sessions are minted at seeding.** Registration returns a session token, and
+  sessions persist in SQLite. `tokens.txt` keeps one token per user, and a VU
+  starts from its token as a returning desktop client does (`Client/src/main.ts`,
+  `resumeStoredSession`). The measured windows therefore contain no bcrypt
+  except the login burst's. The file stays on the runner and is never uploaded.
+- **Registration runs 2 × NumCPU in flight**, which is the server's bcrypt
+  admission budget. A refusal from that budget is retried, and anything else
+  fails the seeding.
+- **N + 501 users are seeded:** the cohort, the observer and the login-burst
+  VUs. k6 hands VU ids out test-wide, and VU n logs in as `loadtest<n>`.
+- **The channel spread is checked at init.** At the faster of the two send
+  intervals, no channel may be scheduled more than half the 100 messages/s topic
+  limit (OC-0447), counted over every id in the pool. An interval below 100 ms
+  (10 sends/s per user, `Server/service/message_crud.go`) is also refused.
+
+The non-defaults this profile adds to the configuration table above:
+
+| Key                         | Value              | Why                                                                                      |
+| --------------------------- | ------------------ | ---------------------------------------------------------------------------------------- |
+| `server.trusted_proxies`    | `["127.0.0.1/32"]` | Per-IP limits model distinct people; a measurement setting, not a deployment setting     |
+| `server.max_ws_connections` | 2 × N              | As for the ceiling search: a configuration cap can never be the number the run publishes |
+
+### Budgets and gates
+
+**The existing budgets, applied to the window they describe:**
+
+| Window            | Measure                                                                   | Budget         |
+| ----------------- | ------------------------------------------------------------------------- | -------------- |
+| `steady`          | Message send → sender acknowledgement, p95 / p99                          | 150 / 300 ms   |
+| `steady`          | Message send → recipient delivery, p95 / p99                              | 200 / 400 ms   |
+| `steady`, `burst` | Sends acknowledged (`ws_message_success`), not answered with an error     | > 95%          |
+| `ramp`            | WebSocket open → `auth_ok` received, p95 / p99 (the connects happen here) | 200 / 500 ms   |
+| `ramp`, `herd`    | WebSocket connect (`ws_connect_time`), p95                                | < 2 s          |
+| `burst`           | Acknowledgement p95; delivery p95                                         | 150 ms; 200 ms |
+| `login`           | REST login (`auth_time`, the successful attempt), p95 / p99               | 600 / 1,000 ms |
+
+**New budgets for the herd and the login burst (owner decision D3,
+2026-09-30).** They apply to this profile, and no existing row changes:
+
+| Scenario    | Measure                                                          | Budget                                                   |
+| ----------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
+| herd        | Every VU `ready` again, from the herd's start                    | ≤ 30 s (`herd_ready_at_ms` max, with `herd_readies` ≥ N) |
+| herd        | Dial → `ready`, p95 (`ws_ready_time{phase:herd}`)                | ≤ 5 s                                                    |
+| herd        | Backpressure queue disconnects in the window                     | 0                                                        |
+| login burst | Give-ups                                                         | 0                                                        |
+| login burst | First attempt → token, retries included (`login_burst_time` max) | ≤ 70 s, for all K (`login_burst_ok` ≥ K)                 |
+
+A login-burst VU retries a refusal at most 12 times, which spans about 45 s,
+and then counts one give-up and stops. It never retries in an unbounded loop
+(the B6-10 defect).
+
+**Validity gates.** A run that fails one of these did not measure what it
+claims:
+
+- `login_giveups == 0`: every cohort VU obtained a session.
+- `obs_population{phase:steady}` min ≥ N: the whole population was connected
+  at every poll of the steady window.
+- `ws_messages_sent` and `ws_deliveries` in `steady` and in `burst` each reach
+  30% of the window's planned count (planned sends × the smallest channel's
+  other members, for deliveries): a window that never carried its load cannot
+  pass its percentiles over a handful of samples.
+- `obs_ws_conn_rejects == 0`.
+- `topic_sheds_total == 0`, read from the server's own snapshot. This workflow
+  gate is shared with the ceiling search.
+
+**No run-wide latency gate.** The herd is expected to break a run-wide
+percentile, so each window is gated on its own, and a herd miss can neither fail
+nor hide the steady result.
+
+A missed budget is published as measured and recorded in the findings ledger.
+It is never re-run on a bigger box. The first run is expected to pass `steady`
+and fail the herd, and it is published that way.
+
+Like every profile here, it does not gate the pipeline (decision D6). It runs
+by dispatch.
+
+### The generator
+
+- **The generator is sampled.** k6 is pinned to two CPUs, and every 5 s the
+  sampler records k6's own CPU time (`k6_ticks` in `cpu.stat.log`) beside the
+  container's `cpu.stat`. After the run, `windows-cpu.txt` gives the server's
+  and the generator's average and peak cores per window.
+- **A window whose k6 averaged 90% or more of its two CPUs is marked
+  `GENERATOR-LIMITED`.** It says what the generator could offer, not what the
+  server can carry, and it is published as such, never as a server result.
+- **Memory is not the question.** Measured locally with k6 1.3.0, 2,501 VUs of
+  this script hold about 2.0 GB resident on a 16 GB runner. The open question
+  is whether two generator cores can drive 2,000 connections at this mix, and
+  the first run answers it.
+- **If `steady` is generator-limited, the fix is the runner, not the
+  harness.** The options are a larger GitHub runner or a lighter driver (P2-T8
+  used a Node driver). Choosing between them is the owner's call (decision D6).
+
+### Reproducing it by hand
+
+```bash
+# the boot above, plus the profile's two settings
+docker run -d --name owncord-sut ... \
+  -e OWNCORD_SERVER_TRUSTED_PROXIES=127.0.0.1/32 \
+  -e OWNCORD_SERVER_MAX_WS_CONNECTIONS=4000 \
+  debian:bookworm-slim /app/chatserver
+
+# the population: 20 text channels, then N + 501 users registered with their
+# own X-Forwarded-For and their tokens kept in user order — the workflow's
+# "Seed owner, channels, invite and users" step, scale branch
+
+cd Server/scripts/k6 && mkdir -p reports
+K6_PROFILE=scale K6_WS_URL=wss://127.0.0.1:8443/api/v1/ws K6_HTTP_URL=https://127.0.0.1:8443 \
+K6_PEAK_VUS=2000 K6_SCALE_CHANNELS="$CHANNEL_IDS" K6_SCALE_TOKENS="$WORK/tokens.txt" \
+  taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
+```
+
+### Measured
+
+**No qualifying run yet.** The first run will be dispatched on `dev` after this
+section lands there. Its per-window table, its generator column and its run link
+will be published here.
+
 ## Measured
 
 Every number below comes from the **constrained** leg and from nothing else.

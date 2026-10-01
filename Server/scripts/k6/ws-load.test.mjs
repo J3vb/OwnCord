@@ -14,14 +14,18 @@ const script = new vm.Script(source);
 const epoch = 1800000000000;
 const channels = (n) => Array.from({ length: n }, (_, i) => i + 10).join(",");
 
-function harness(env = {}, vu = 1) {
+function harness(env = {}, vu = 1, files = {}) {
   let now = epoch;
   const metrics = {};
   const frames = [];
   const handlers = {};
   const intervals = new Map();
   const timeouts = [];
+  const connects = [];
+  const logins = [];
+  let closes = 0;
   let body = {};
+  let dialMs = 0;
   class Metric {
     constructor(name) {
       this.name = name;
@@ -35,27 +39,45 @@ function harness(env = {}, vu = 1) {
     __ENV: env,
     __VU: vu,
     Date: { now: () => now },
-    exec: { scenario: { startTime: epoch } },
+    exec: { scenario: { startTime: epoch, iterationInTest: 0 } },
     Counter: Metric,
     Gauge: Metric,
     Rate: Metric,
     Trend: Metric,
+    // k6/data and the init-context open(): the array is built once, as k6's is.
+    SharedArray: function (_name, build) {
+      return build();
+    },
+    open: (path) => files[path],
     check: () => true,
     sleep: () => {},
+    crypto: globalThis.crypto,
     http: {
-      post: () => ({ status: 200, body: '{"token":"test-token"}' }),
+      post: (url, payload, params) => {
+        logins.push({ url, payload: JSON.parse(payload), params });
+        return { status: 200, body: '{"token":"test-token"}', headers: {} };
+      },
       get: () => ({ status: 200, json: () => body }),
     },
     ws: {
-      connect: (_url, _params, callback) => {
+      connect: (url, params, callback) => {
+        connects.push({ url, params, at: now });
+        now += dialMs;
         callback({
           send: (frame) => frames.push(JSON.parse(frame)),
           on: (event, handler) => {
             handlers[event] = handler;
           },
           setInterval: (callback, ms) => intervals.set(ms, callback),
-          setTimeout: (callback, ms) => timeouts.push({ ms, callback }),
-          close: () => {},
+          // k6/ws refuses a timer that is not in the future.
+          setTimeout: (callback, ms) => {
+            if (!(ms > 0))
+              throw new Error(`setTimeout requires a >0 timeout parameter, received ${ms}`);
+            timeouts.push({ ms, callback });
+          },
+          close: () => {
+            closes++;
+          },
         });
         return { status: 101 };
       },
@@ -68,7 +90,14 @@ function harness(env = {}, vu = 1) {
     frames,
     intervals,
     timeouts,
+    connects,
+    logins,
+    closes: () => closes,
     evaluate,
+    // How long the next ws.connect takes to open, on the harness clock.
+    dialTakes: (ms) => {
+      dialMs = ms;
+    },
     at: (seconds) => {
       now = epoch + seconds * 1000;
     },
@@ -524,4 +553,374 @@ test("load workflow seeds enough channels for the harness at each supported maxi
       }),
     );
   }
+});
+
+// --- scale (P5-S01) ---------------------------------------------------------
+
+const scaleEnv = (extra = {}) => ({
+  K6_PROFILE: "scale",
+  K6_SCALE_CHANNELS: channels(20),
+  ...extra,
+});
+
+test("scale rejects too few channels for its topic headroom and sends above 10/s per user", () => {
+  // The default single channel cannot hold 10% of 2,501 ids under half the
+  // 100/s topic limit, and neither can 20 channels once a user bursts at 10/s.
+  assert.throws(() => harness({ K6_PROFILE: "scale" }), /K6_SCALE_CHANNELS/);
+  assert.throws(() => harness(scaleEnv({ K6_SCALE_CHANNELS: channels(1) })), /K6_SCALE_CHANNELS/);
+  assert.throws(
+    () => harness(scaleEnv({ K6_SCALE_BURST_SEND_MS: "100" })),
+    /K6_SCALE_CHANNELS needs at least \d+/,
+  );
+  for (const list of ["1,1", "1,2oops", "0"]) {
+    assert.throws(() => harness(scaleEnv({ K6_SCALE_CHANNELS: list })), /K6_SCALE_CHANNELS/);
+  }
+  // service/message_crud.go admits at most 10 sends/second per user.
+  for (const knob of ["K6_SCALE_SEND_MS", "K6_SCALE_BURST_SEND_MS"]) {
+    for (const ms of ["99", "50", "0", "x"]) {
+      assert.throws(() => harness(scaleEnv({ [knob]: ms })), /10 sends\/second/);
+    }
+  }
+  for (const active of ["0", "1.5", "-0.1", "x"]) {
+    assert.throws(() => harness(scaleEnv({ K6_SCALE_ACTIVE: active })), /K6_SCALE_ACTIVE/);
+  }
+  // At the limit and with enough channels it runs.
+  assert.doesNotThrow(() =>
+    harness(scaleEnv({ K6_SCALE_BURST_SEND_MS: "100", K6_SCALE_CHANNELS: channels(60) })),
+  );
+  assert.doesNotThrow(() => harness(scaleEnv()));
+});
+
+test("scale phase windows are computed from the knobs, and the summary publishes them", () => {
+  const h = harness(scaleEnv());
+  const cases = [
+    [0, "ramp"],
+    [179.999, "ramp"],
+    [180, "steady"],
+    [359.999, "steady"],
+    [360, "burst"],
+    [419.999, "burst"],
+    [420, "login"],
+    [509.999, "login"],
+    [510, "herd"],
+    [599.999, "herd"],
+    [600, "ramp-down"],
+  ];
+  for (const [t, phase] of cases) assert.equal(h.evaluate(`scalePhaseAt(${t})`), phase, `t=${t}`);
+  const windows = h.summary().load_measurement.windows;
+  assert.deepEqual(
+    windows.map((w) => [w.phase, w.start_s, w.end_s]),
+    [
+      ["ramp", 0, 180],
+      ["steady", 180, 360],
+      ["burst", 360, 420],
+      ["login", 420, 510],
+      ["herd", 510, 600],
+      ["ramp-down", 600, null],
+    ],
+  );
+  const stages = h.evaluate("options.scenarios.websocket_load.stages");
+  assert.deepEqual(JSON.parse(JSON.stringify(stages)), [
+    // The last connection is scheduled 10 s before steady opens, so the
+    // steady window starts with the population in place.
+    { duration: "170s", target: 2000 },
+    { duration: "430s", target: 2000 },
+    { duration: "20s", target: 0 },
+  ]);
+  const login = h.evaluate("options.scenarios.login_burst");
+  assert.equal(login.executor, "per-vu-iterations");
+  assert.equal(login.vus, 500);
+  assert.equal(login.iterations, 1);
+  assert.equal(login.startTime, "420s");
+  assert.equal(h.evaluate("options.scenarios.observer.duration"), "620s");
+  assert.equal(h.evaluate("SCALE_VUS_MAX"), 2501);
+
+  const custom = harness(
+    scaleEnv({
+      K6_PEAK_VUS: "300",
+      K6_SCALE_RAMP_S: "30",
+      K6_SCALE_STEADY_S: "60",
+      K6_SCALE_BURST_S: "20",
+      K6_SCALE_LOGIN_S: "40",
+      K6_SCALE_HERD_S: "45",
+      K6_SCALE_HERD_SPREAD_S: "10",
+      K6_SCALE_LOGINS: "50",
+    }),
+  );
+  assert.deepEqual(
+    custom.summary().load_measurement.windows.map((w) => [w.start_s, w.end_s]),
+    [
+      [0, 30],
+      [30, 90],
+      [90, 110],
+      [110, 150],
+      [150, 195],
+      [195, null],
+    ],
+  );
+  assert.equal(custom.evaluate("options.scenarios.login_burst.startTime"), "110s");
+  assert.equal(custom.evaluate("SCALE_VUS_MAX"), 351);
+  // Every window must exist, and the herd must outlast its own spread.
+  for (const env of [
+    { K6_SCALE_STEADY_S: "0" },
+    { K6_SCALE_BURST_S: "0" },
+    { K6_SCALE_LOGIN_S: "x" },
+    { K6_SCALE_HERD_S: "15" },
+    { K6_SCALE_HERD_SPREAD_S: "0" },
+    { K6_SCALE_LOGINS: "0" },
+    { K6_SCALE_LOGIN_SPREAD_S: "90" },
+  ]) {
+    assert.throws(() => harness(scaleEnv(env)), /scale requires/, JSON.stringify(env));
+  }
+});
+
+test("scale gives every VU its own X-Forwarded-For address and starts from a minted token", () => {
+  const h = harness(scaleEnv());
+  const max = h.evaluate("SCALE_VUS_MAX");
+  const seen = new Set();
+  for (let vu = 1; vu <= max; vu++) {
+    const address = h.evaluate(`scaleAddress(${vu})`);
+    assert.match(address, /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/);
+    assert.ok(address.split(".").every((o) => Number(o) <= 255));
+    seen.add(address);
+  }
+  assert.equal(seen.size, max);
+  // The workflow seeds user i from the address VU i later uses.
+  const workflow = readFileSync(
+    new URL("../../../.github/workflows/load-baseline.yml", import.meta.url),
+    "utf8",
+  );
+  const helper = workflow.split("\n").find((line) => line.trim().startsWith("scale_address() {"));
+  assert.ok(helper, "the workflow defines scale_address");
+  for (const vu of [1, 255, 256, 2501, 70000]) {
+    const out = execFileSync("bash", ["-c", `${helper}\nscale_address ${vu}`], {
+      encoding: "utf8",
+    });
+    assert.equal(out.trim(), h.evaluate(`scaleAddress(${vu})`));
+  }
+
+  // A returning client: auth with the token minted at seeding, no login.
+  const tokens = Array.from({ length: max }, (_, i) => `tok${i + 1}`).join("\n");
+  const vu = 7;
+  const minted = harness(scaleEnv({ K6_SCALE_TOKENS: "/t" }), vu, { "/t": `${tokens}\n` });
+  minted.start();
+  assert.equal(minted.logins.length, 0);
+  assert.equal(minted.frames[0].type, "auth");
+  assert.equal(minted.frames[0].payload.token, "tok7");
+  assert.equal(minted.frames[0].payload.last_seq, undefined);
+  assert.equal(
+    minted.connects[0].params.headers["X-Forwarded-For"],
+    minted.evaluate(`scaleAddress(${vu})`),
+  );
+
+  // No token file: the VU logs in, from its own address.
+  const login = harness(scaleEnv(), 9);
+  login.start();
+  assert.equal(login.logins.length, 1);
+  assert.equal(login.logins[0].payload.username, "loadtest9");
+  assert.equal(
+    login.logins[0].params.headers["X-Forwarded-For"],
+    login.evaluate("scaleAddress(9)"),
+  );
+
+  // The login burst: a fresh password login from the VU's own address,
+  // staggered over the spread, counted apart from the steady give-up gate.
+  const burst = harness(scaleEnv(), 2400);
+  burst.evaluate("loginBurstScenario()");
+  assert.equal(burst.logins[0].payload.username, "loadtest2400");
+  assert.equal(
+    burst.logins[0].params.headers["X-Forwarded-For"],
+    burst.evaluate("scaleAddress(2400)"),
+  );
+  assert.equal(burst.metrics.login_burst_ok.length, 1);
+  assert.equal(burst.metrics.login_burst_time.length, 1);
+  assert.equal(burst.metrics.login_giveups.length, 0);
+});
+
+test("scale traffic: active users type then send keyed messages, burst raises the rate, presence flips", () => {
+  const env = scaleEnv();
+  // Channel = vu % 20 and activity is spread within each channel, so VU 5 is
+  // idle and VU 185 (the 10th id on channel 5) is active.
+  const idle = harness(env, 5);
+  idle.at(200);
+  idle.start();
+  assert.equal(idle.intervals.has(8000), false);
+  assert.equal(idle.intervals.has(2000), false);
+
+  const h = harness(env, 185);
+  h.at(200);
+  h.start();
+  const channel = h.evaluate("VU_CHANNEL_ID");
+  assert.equal(channel, 15); // channels(20) starts at 10; 185 % 20 = 5.
+  const types = () => h.frames.map((f) => f.type);
+  const count = (type) => types().filter((t) => t === type).length;
+
+  h.intervals.get(8000)();
+  const send = h.frames.at(-1);
+  assert.equal(send.type, "chat_send");
+  assert.equal(h.frames.at(-2).type, "typing_start");
+  assert.equal(send.payload.channel_id, channel);
+  assert.match(
+    send.payload.client_message_id,
+    /^\d{13}:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  assert.equal(h.metrics.ws_messages_sent.at(-1).tags.phase, "steady");
+  // The burst timer is silent outside the burst window.
+  h.intervals.get(2000)();
+  assert.equal(count("chat_send"), 1);
+
+  h.at(370);
+  h.intervals.get(8000)();
+  assert.equal(count("chat_send"), 1, "the steady timer yields to the burst");
+  h.intervals.get(2000)();
+  assert.equal(count("chat_send"), 2);
+  assert.equal(count("typing_start"), 2);
+  h.at(372);
+  h.intervals.get(2000)();
+  assert.equal(count("chat_send"), 3);
+  assert.equal(count("typing_start"), 2, "typing is throttled to one per 3 s, like the client");
+  assert.equal(h.metrics.ws_messages_sent.at(-1).tags.phase, "burst");
+
+  // Presence: one flip per 10 min, on a per-VU phase inside that period, so
+  // the population flips at N / 600 s rather than never inside the run.
+  const phase = h.evaluate("presencePhaseMs(185)");
+  assert.equal(phase, 184 * 300);
+  const delay = (((phase - (epoch + 200000)) % 600000) + 600000) % 600000;
+  const flip = h.timeouts.find((t) => t.ms === delay);
+  assert.ok(flip, "the first flip waits for the VU's own slot");
+  flip.callback();
+  h.intervals.get(600000)();
+  const statuses = h.frames
+    .filter((f) => f.type === "presence_update")
+    .map((f) => f.payload.status);
+  assert.deepEqual(statuses, ["idle", "online"]);
+});
+
+test("scale herd: every socket drops on its spread slot and redials a full ready (OC-0445 phases kept)", () => {
+  const env = scaleEnv();
+  // Offsets spread (vu - 1) % N over the 15 s spread.
+  const late = harness(env, 1001);
+  assert.equal(late.evaluate("herdOffsetMs(1001)"), 7500);
+
+  const h = harness(env, 185);
+  h.at(200.25);
+  h.start();
+  const firstSend = h.intervals.get(8000);
+  assert.equal(h.evaluate("herdOffsetMs(185)"), 1380);
+  const drop = h.timeouts.find((t) => t.ms === 510000 + 1380 - 200250);
+  assert.ok(drop, "the drop is scheduled at the VU's herd slot");
+  h.at(511.38);
+  drop.callback();
+  assert.equal(h.closes(), 1);
+  assert.equal(h.metrics.herd_drops.length, 1);
+
+  // The redial is a fresh connection (no last_seq): a full ready.
+  h.at(512);
+  h.evaluate("websocketScenario()");
+  const auth = h.frames.at(-1);
+  assert.equal(auth.type, "auth");
+  assert.equal(auth.payload.last_seq, undefined);
+  // The send timer re-anchors on the first connection's phase (250 ms of 8 s),
+  // not the redial instant.
+  assert.equal(h.evaluate("vuTimerPhase.send"), 250);
+  assert.ok(h.timeouts.some((t) => t.ms === 250));
+  assert.equal(h.intervals.get(8000), firstSend, "no new interval at the redial instant");
+  h.at(512.5);
+  h.receive({ type: "auth_ok" });
+  h.at(513);
+  h.receive({ type: "ready" });
+  assert.equal(h.metrics.herd_readies.length, 1);
+  assert.equal(h.metrics.herd_ready_at_ms.at(-1).value, 3000);
+  assert.equal(h.metrics.ws_ready_time.at(-1).tags.phase, "herd");
+  assert.equal(h.metrics.ws_auth_ok_time.at(-1).tags.phase, "herd");
+  // A later reconnect of the same VU is not a second herd ready.
+  h.evaluate("websocketScenario()");
+  h.receive({ type: "ready" });
+  assert.equal(h.metrics.herd_readies.length, 1);
+});
+
+test("scale herd: a dial that opens after the VU's slot drops on the next tick, not a 0 ms timer", () => {
+  // Under load a connect takes seconds: a VU that starts dialling just before
+  // its slot opens after it, and k6 refuses socket.setTimeout(fn, 0).
+  const h = harness(scaleEnv(), 185);
+  h.at(511.37); // the slot is 511.38
+  h.dialTakes(2000);
+  h.evaluate("websocketScenario()");
+  const drop = h.timeouts.find((t) => t.ms === 1);
+  assert.ok(drop, "the late dial still drops at once");
+  drop.callback();
+  assert.equal(h.closes(), 1);
+  assert.equal(h.metrics.herd_drops.length, 1);
+});
+
+test("scale thresholds: existing budgets per phase, D3 herd and login-burst gates, no run-wide latency gate", () => {
+  const h = harness(scaleEnv());
+  const t = (key) => h.evaluate(`options.thresholds[${JSON.stringify(key)}]`);
+  const has = (key, ...gates) => {
+    for (const g of gates) assert.ok(t(key).includes(g), `${key} ${g}`);
+  };
+  has("ws_broadcast_latency_ms{phase:steady}", "p(95)<150", "p(99)<300");
+  has("ws_delivery_latency_ms{phase:steady}", "p(95)<200", "p(99)<400");
+  has("ws_auth_ok_time{phase:ramp}", "p(95)<200", "p(99)<500");
+  assert.ok(t("ws_broadcast_latency_ms{phase:burst}").includes("p(95)<150"));
+  assert.ok(t("ws_delivery_latency_ms{phase:burst}").includes("p(95)<200"));
+  assert.deepEqual([...t("obs_population{phase:steady}")], ["min>=2000"]);
+  assert.deepEqual([...t("herd_ready_at_ms")], ["max<=30000"]);
+  assert.ok(t("ws_ready_time{phase:herd}").includes("p(95)<=5000"));
+  assert.deepEqual([...t("herd_readies")], ["count>=2000"]);
+  assert.deepEqual([...t("obs_backpressure{phase:herd,kind:queue_disconnects}")], ["count==0"]);
+  assert.deepEqual([...t("login_burst_giveups")], ["count==0"]);
+  assert.deepEqual([...t("login_burst_time")], ["max<=70000"]);
+  assert.deepEqual([...t("login_burst_ok")], ["count>=500"]);
+  assert.deepEqual([...t("login_giveups")], ["count==0"]);
+  assert.deepEqual([...t("obs_ws_conn_rejects")], ["count==0"]);
+  // The remaining existing budgets, each on the window it describes.
+  assert.deepEqual([...t("ws_message_success{phase:steady}")], ["rate>0.95"]);
+  assert.deepEqual([...t("ws_message_success{phase:burst}")], ["rate>0.95"]);
+  assert.ok(t("ws_connect_time{phase:ramp}").includes("p(95)<2000"));
+  assert.ok(t("ws_connect_time{phase:herd}").includes("p(95)<2000"));
+  has("auth_time{phase:login}", "p(95)<600", "p(99)<1000");
+  // Validity floors: 30% of 200 active users' planned sends (25/s steady for
+  // 180 s, 100/s burst for 60 s), each delivered to 99 other members.
+  assert.deepEqual([...t("ws_messages_sent{phase:steady}")], ["count>=1350"]);
+  assert.deepEqual([...t("ws_deliveries{phase:steady}")], ["count>=133650"]);
+  assert.deepEqual([...t("ws_messages_sent{phase:burst}")], ["count>=1800"]);
+  assert.deepEqual([...t("ws_deliveries{phase:burst}")], ["count>=178200"]);
+  assert.equal(t("ws_message_success"), undefined);
+  assert.equal(t("ws_connect_time"), undefined);
+  assert.equal(t("auth_time"), undefined);
+  // A send answered with an error frame counts against its own window.
+  const sender = harness(scaleEnv(), 185);
+  sender.at(370);
+  sender.start();
+  sender.receive({ type: "error", payload: { code: "INTERNAL" } });
+  sender.receive({ type: "chat_send_ok", id: "x" });
+  assert.deepEqual(
+    sender.metrics.ws_message_success.map((m) => [m.value, m.tags.phase]),
+    [
+      [false, "burst"],
+      [true, "burst"],
+    ],
+  );
+  // The herd is expected to break a run-wide percentile; each phase is gated
+  // on its own instead, so a herd miss cannot hide or fail the steady result.
+  assert.equal(t("ws_broadcast_latency_ms"), undefined);
+  assert.equal(t("ws_delivery_latency_ms"), undefined);
+  assert.equal(t("ws_errors"), undefined);
+
+  const summary = h.summary({
+    metrics: {
+      "ws_broadcast_latency_ms{phase:steady}": {
+        values: { med: 4, "p(95)": 9, "p(99)": 12, max: 30, count: 900 },
+      },
+    },
+    state: { testRunDurationMs: 620000 },
+  }).load_measurement;
+  assert.equal(summary.profile, "scale");
+  assert.equal(summary.planned_steady_messages_per_second, 25);
+  assert.equal(summary.planned_burst_messages_per_second, 100);
+  const steady = summary.windows.find((w) => w.phase === "steady");
+  assert.deepEqual(steady.acknowledgement, { p50_ms: 4, p95_ms: 9, p99_ms: 12, sample_count: 900 });
+  assert.deepEqual(steady.delivery, { p50_ms: null, p95_ms: null, p99_ms: null, sample_count: 0 });
+  assert.ok(Number.isFinite(summary.run_start_epoch_ms));
 });
