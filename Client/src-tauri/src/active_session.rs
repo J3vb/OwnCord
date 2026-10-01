@@ -10,6 +10,12 @@
 //! `allow_pre_session` and are admitted while the slot is empty; the
 //! identity-key and identity-pin commands never run pre-session and require an
 //! exact host match.
+//!
+//! This scoping guards against accidental cross-host credential and identity
+//! use. The host is set by `ws_connect` and cleared by `ws_disconnect`, both
+//! callable from the renderer, so it is not a barrier against a compromised
+//! renderer. Sourcing the active host from a native-side authenticated event is
+//! a follow-up, not a property this module claims.
 
 use std::sync::Mutex;
 
