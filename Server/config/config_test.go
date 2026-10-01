@@ -885,10 +885,9 @@ func (h *recordingHandler) warned(substr string) bool {
 
 // adminPerimeterWarning is a distinctive phrase from the empty-allowlist
 // warning. Asserting on the message rather than on the key name is what keeps
-// the test off warnOnServerConfig's neighbouring warning, which also fires for
-// this config (an emptied list is "customized") and names the same key — in an
-// attribute, so a key-name assertion would match either one and pass for the
-// wrong reason.
+// the test off config.Load's neighbouring trusted_proxies warning, which fires
+// for the default config and names the same key, so a key-name assertion would
+// fail the defaults half for the wrong reason.
 const adminPerimeterWarning = "the /admin IP perimeter is disabled"
 
 // TestLoadWarnsOnEmptyAdminCIDRs pins the warning that fires when
