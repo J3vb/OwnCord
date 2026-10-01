@@ -76,7 +76,7 @@ and only when it changes something a contributor or fork holder must do
 - **The server now warns whenever `trusted_proxies` is empty and the admin allowlist is on.** The startup warning used to appear only for a customised `admin_allowed_cidrs`, so the default config behind a same-host reverse proxy stayed silent. It now shows for the default too, and the first request the allowlist admits from a local peer carrying `X-Forwarded-For` while `trusted_proxies` is empty logs a one-time warning naming the setting.
 - **Proxies that add their own `X-Forwarded-For` line are read correctly.** Only the first header line was used, so a proxy that appends a separate line (HAProxy's `option forwardfor`) had the client's own line picked. Every line is now read before choosing the client address.
 - **"Sign out everywhere" and account recovery also revoke the account's API tokens.** Both now revoke the tokens along with the sessions, and the audit entry counts each.
-- **Changing your password or removing a session disconnects the affected device at once.** Its connection now closes in the same request instead of within the next minute; the device you are using stays connected.
+- **Changing your password, turning two-factor sign-in on or off, or removing a session disconnects the affected device at once.** Its connection now closes in the same request instead of within the next minute; the device you are using stays connected.
 - **IPv6 clients share per-address limits across their /64.** Login, registration, recovery, setup and API rate limits keyed each full IPv6 address separately, so one host could spread across its /64. The limits now count the whole /64 as one address.
 
 ### Moderation

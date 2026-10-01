@@ -424,7 +424,7 @@ does not claim").
   too, stores only the verifier and returns the secret once on the finish
   step — so a fresh install starts with a way back in.
 - Redemption (`POST /api/v1/auth/recover`) replaces the password, revokes
-  every session, spends the kit and writes the audit row in one transaction
+  every session and API token, spends the kit and writes the audit row in one transaction
   (`DB.RedeemRecoveryKit`), then issues a session **without** the second
   factor — by owner decision, since the kit exists for lost devices. Two
   concurrent redemptions admit at most one; a spent kit never works again.

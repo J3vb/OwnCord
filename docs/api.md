@@ -353,8 +353,8 @@ in `kit_secret`, or with an owner-issued credential (B4-6, BPR-045; owner
 decision 3) in `credential` — the two are told apart by shape (32 and 24
 characters), so one compare per attempt runs against the right verifier and
 the paths never interfere. Using either means "I lost my devices": on success
-the password is replaced by `new_password`, every existing session is
-revoked, the kit is spent (or the credential consumed) and a
+the password is replaced by `new_password`, every existing session and API
+token is revoked, the kit is spent (or the credential consumed) and a
 `recovery_kit_used` / `recovery_assist_used` audit row is written — all in
 one transaction — and a fresh session is issued **without** the second
 factor, so an account with 2FA enrolled signs in from this response and can

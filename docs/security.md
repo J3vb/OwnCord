@@ -95,7 +95,7 @@ as one of four fixed wordings (`in_person`, `voice_call`, `video_call`,
 `trusted_contact`); no free text is accepted. The credential is single-use,
 expires in 15 minutes, is stored only as an argon2id verifier, and redeems
 through the same route with the same consequences (new password, every
-session revoked, no second factor). No administrator below the owner can
+session and API token revoked, no second factor). No administrator below the owner can
 reset anyone's credentials. Issuance and use are audited
 (`recovery_assist_issued`, `recovery_assist_used`).
 
