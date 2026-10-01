@@ -2074,8 +2074,10 @@ past that the server sends, before `auth_ok`,
 and closes with status 1013 (try again later). `retry_after_ms` is drawn from
 2.5–5 s per refusal, so the refused connects do not return together; a client
 waits at least that long before redialling. The desktop client does this
-silently, without an error toast. A warm resume served by replay never waits
-for a permit.
+silently, without an error toast. On a first sign-in it keeps its connecting
+screen: each refusal restarts the 20 s first-authentication deadline, up to
+70 s after the first attempt, after which the sign-in fails with an error. A
+warm resume served by replay never waits for a permit.
 
 ---
 

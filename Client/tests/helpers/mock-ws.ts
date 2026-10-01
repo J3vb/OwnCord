@@ -90,6 +90,10 @@ export function createMockWsClient() {
       return () => {};
     },
 
+    onServerBusy(): () => void {
+      return () => {};
+    },
+
     onCertMismatch(_listener: CertMismatchListener): () => void {
       return () => {};
     },

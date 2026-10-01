@@ -23,6 +23,7 @@ import {
   bracketBareIPv6Host,
   createWsClient,
   normalizeHostForCertCompare,
+  PREAUTH_BUSY_CAP_MS,
   PREAUTH_CONNECT_TIMEOUT_MS,
 } from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
@@ -514,8 +515,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // to the form and says why, while a live session's later outages keep the
     // in-app reconnect banner and its retry loop. Cleared on the first "connected"
     // (auth_ok), a terminal disconnect, a first-use certificate prompt for this
-    // host, or when the session tears down.
-    const preauthTimer = setTimeout(() => {
+    // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
+    // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
+    const preauthStartedAt = Date.now();
+    const onPreauthDeadline = (): void => {
       if (!owner.isCurrent()) return;
       log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
       // Stop the retry loop and tear the dead attempt down exactly as a
@@ -530,16 +533,34 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       lastConnectToken = "";
       setTransientError(connectText("session.connectTimeout"));
       onPreauthTimeout?.();
-    }, PREAUTH_CONNECT_TIMEOUT_MS);
+    };
+    let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(
+      onPreauthDeadline,
+      PREAUTH_CONNECT_TIMEOUT_MS,
+    );
+    const clearPreauthDeadline = (): void => {
+      if (preauthTimer !== null) clearTimeout(preauthTimer);
+      preauthTimer = null;
+    };
 
     // Session-scoped WS listeners — collected so they're all removed together
     // on logout/disconnect (or the next wirePostAuth).
-    const sessionUnsubs: Array<() => void> = [() => clearTimeout(preauthTimer)];
+    const sessionUnsubs: Array<() => void> = [clearPreauthDeadline];
     // A first-use certificate prompt means the server answered: the user is
     // deciding, not waiting on an offline host, and Accept resumes this login.
     sessionUnsubs.push(
       ws.onCertFirstUse((evt) => {
-        if (evt.host === normalizeHostForCertCompare(host)) clearTimeout(preauthTimer);
+        if (evt.host === normalizeHostForCertCompare(host)) clearPreauthDeadline();
+      }),
+    );
+    sessionUnsubs.push(
+      ws.onServerBusy(() => {
+        if (preauthTimer === null) return;
+        clearTimeout(preauthTimer);
+        preauthTimer = setTimeout(
+          onPreauthDeadline,
+          Math.min(PREAUTH_CONNECT_TIMEOUT_MS, preauthStartedAt + PREAUTH_BUSY_CAP_MS - Date.now()),
+        );
       }),
     );
 
@@ -600,7 +621,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       if (wsState === "connected") {
         // Authenticated: the pre-auth deadline has nothing left to bound, and
         // keeping it would bounce a live session out on its first later outage.
-        clearTimeout(preauthTimer);
+        clearPreauthDeadline();
         // Stop listening once connected so a later transition can't fire this
         // handler again.
         unsubState();
@@ -615,7 +636,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // deadline goes with it: it bounds only the endless retry loop, and
         // with this handler gone nothing would clear it on a later auth_ok
         // (a certificate re-dial after a mismatch).
-        clearTimeout(preauthTimer);
+        clearPreauthDeadline();
         unsubState();
       }
     });

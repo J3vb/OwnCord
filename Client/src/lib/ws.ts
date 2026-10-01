@@ -125,6 +125,10 @@ const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
 // bounded: once the session is live, an outage keeps the in-app reconnect
 // banner and its retry loop instead of bouncing the user out.
 export const PREAUTH_CONNECT_TIMEOUT_MS = 20_000;
+// P5-S04: a SERVER_BUSY refusal is the server answering, so each one restarts
+// the pre-auth deadline, but never past this long after the first attempt: a
+// server that stays saturated still ends in an error.
+export const PREAUTH_BUSY_CAP_MS = 70_000;
 // DP-02: the least time between two wake-signal redials, so a flapping network
 // or a burst of focus changes cannot spin the reconnect loop.
 const WAKE_KICK_FLOOR_MS = 2_000;
@@ -291,6 +295,9 @@ export function createWsClient({
 
   // TOFU first-use confirmation listeners (F4/F8)
   const certFirstUseListeners = new Set<CertFirstUseListener>();
+
+  // P5-S04: SERVER_BUSY refusals, which never reach the error listeners.
+  const serverBusyListeners = new Set<() => void>();
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -599,6 +606,9 @@ export function createWsClient({
     if (msg.type === "error" && msg.payload.code === "SERVER_BUSY") {
       busyRetryAfterMs = msg.payload.retry_after_ms;
       log.info("Server busy, redialling later", { retryAfterMs: busyRetryAfterMs });
+      for (const listener of serverBusyListeners) {
+        listener();
+      }
       return;
     }
 
@@ -992,6 +1002,12 @@ export function createWsClient({
     onCertFirstUse(listener: CertFirstUseListener): () => void {
       certFirstUseListeners.add(listener);
       return () => certFirstUseListeners.delete(listener);
+    },
+
+    /** Register a listener for SERVER_BUSY refusals (P5-S04). */
+    onServerBusy(listener: () => void): () => void {
+      serverBusyListeners.add(listener);
+      return () => serverBusyListeners.delete(listener);
     },
 
     /** Register a listener for TOFU certificate mismatch events. */
