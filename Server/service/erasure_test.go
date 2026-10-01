@@ -127,6 +127,28 @@ func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
 	}
 }
 
+// TestErasureService_FlushesQueuedMentionCounts locks P5-O05's erasure half:
+// the erasure must flush any queued mention-badge increment before its own
+// reversal, so a message the subject sent inside the worker's coalesce window
+// has its increment on disk and the reversal takes exactly it. The wired
+// flusher runs before the transaction; here a spy records that it did.
+func TestErasureService_FlushesQueuedMentionCounts(t *testing.T) {
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, _ := seedErasureMember(t, database, dir)
+	svc := NewErasureService(database)
+	svc.SetFiles(newTestStorage(t, dir))
+
+	flushed := false
+	svc.flushMentions = func(context.Context) { flushed = true }
+	if err := svc.Erase(context.Background(), uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	if !flushed {
+		t.Error("the erasure did not flush queued mention counts before its reversal")
+	}
+}
+
 // Interruption between the commit and the file removal: the process dies
 // with the files on disk and the job at db_done. A restart — a fresh handle
 // on the same file, as the maintenance loop's startup resume sees it —

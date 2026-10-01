@@ -289,6 +289,50 @@ func (s *MessageService) mentionWorkerForSend() *mentionWorker {
 	return s.mentionWorker.Load()
 }
 
+// FlushPendingMentionCounts applies any still-queued mention-badge job for
+// msgIDs before the caller reverses those messages' increments. A removal path
+// (DeleteMessage, PurgeMessages, erasure) must call this first so the
+// increment and its reversal stay symmetric: a message removed inside the
+// worker's coalesce window would otherwise be reversed before its increment
+// landed, and the later flush would either raise a phantom badge or (with the
+// liveness guard) be skipped and take a pre-existing genuine badge with it.
+//
+// A no-op when no worker is running: the inline fallback writes the increment
+// on the send path, so it is already on disk before any removal runs. ctx only
+// bounds the wait; the worker applies the jobs against its own loop context, so
+// a cancelled caller context cannot drop the flush.
+func (s *MessageService) FlushPendingMentionCounts(ctx context.Context, msgIDs []int64) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushMessages(ctx, msgIDs)
+}
+
+// flushChannelMentionCounts is FlushPendingMentionCounts for every queued job
+// on one channel — PurgeMessages' pre-purge flush, which cannot name the ids
+// until after the purge has run.
+func (s *MessageService) flushChannelMentionCounts(ctx context.Context, channelID int64) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushChannel(ctx, channelID)
+}
+
+// FlushAllPendingMentionCounts applies every queued mention-badge job,
+// ignoring the coalesce window. The erasure path calls it before its own
+// reversal and message deletion, since the erasure deletes all of a user's
+// messages and cannot cheaply name them first (P5-O05; see
+// FlushPendingMentionCounts). A no-op without a worker.
+func (s *MessageService) FlushAllPendingMentionCounts(ctx context.Context) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushNow(ctx)
+}
+
 // sanitizePass is one unescape-sanitize-unescape cycle. Both unescapes are
 // load-bearing; do not drop either.
 //   - Inner: bluemonday's StrictPolicy treats "&lt;img ...&gt;" as inert

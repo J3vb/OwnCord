@@ -103,7 +103,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	if w := s.mentionWorkerForSend(); w != nil {
 		// Production: hand the job to the single bounded worker on the caller's
 		// goroutine. Enqueue never blocks, so no goroutine is spawned per send.
-		w.enqueue(mentionJob{enqueueAt: time.Now(), channelID: channelID, apply: applyMentions})
+		w.enqueue(mentionJob{enqueueAt: time.Now(), channelID: channelID, msgID: msgID, apply: applyMentions})
 	} else {
 		// No worker (tests, and any caller built via NewMessageService directly):
 		// resolve and write inline via bg so counts are readable right after the
@@ -627,6 +627,15 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if err != nil {
 		return nil, err
 	}
+
+	// Flush this message's queued mention-badge increment before the
+	// soft-delete commits and the reversal below runs, so increment and
+	// reversal stay symmetric (P5-O05; see FlushPendingMentionCounts). The
+	// liveness guard then sees the message still live and the reversal at the
+	// end of this method takes exactly the increment back — including when the
+	// recipient already held a genuine badge from an earlier message, which an
+	// unflushed reversal would wrongly consume.
+	s.FlushPendingMentionCounts(context.WithoutCancel(ctx), []int64{msgID})
 
 	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID, reason); err != nil {
 		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),

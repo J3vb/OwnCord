@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // batchSpyStore counts the writer transactions the mention worker opens. Only
@@ -182,6 +183,112 @@ func TestMentionWorker_DeleteBeforeFlushLeavesNoBadge(t *testing.T) {
 	if got := mentionCount(t, database, 2); got != 0 {
 		t.Errorf("bob mention_count = %d after deleting a message whose increment was still queued, want 0", got)
 	}
+}
+
+// TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge is the F1-followup
+// case: bob already holds a genuine badge from an earlier message, and a new
+// message mentioning him is deleted while its increment is still queued.
+// DeleteMessage must flush that queued increment BEFORE the reversal, so the
+// increment lands and the reversal takes exactly it back — bob keeps his
+// genuine badge. Without the pre-delete flush the reversal consumes the
+// prior badge (it cannot tell the two apart), leaving bob at 0.
+func TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	// m0 gives bob a real, unread badge. It is a real row so the liveness guard
+	// admits its increment.
+	m0, err := database.CreateMessage(context.Background(), 10, 3, "hey @bob earlier", nil)
+	if err != nil {
+		t.Fatalf("seed m0: %v", err)
+	}
+	if err := svc.st.IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
+		t.Fatalf("seed increment: %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d, want 1", got)
+	}
+
+	// m mentions bob; its job is queued, increment not yet landed.
+	res := sendAs(t, svc, 1, "@bob look")
+	if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+
+	// Any later flush must not change the result: the pre-delete flush already
+	// wrote m's increment and the reversal took exactly it.
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob mention_count = %d after deleting the queued mention, want 1 (his earlier genuine badge must survive)", got)
+	}
+}
+
+// TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge is the purge sibling
+// of the delete case: PurgeMessages must flush the channel's queued mention
+// increments before its reversal, so a purged in-window message does not
+// consume a genuine badge another, still-live message raised.
+func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	// mod (4) needs MANAGE_MESSAGES on channel 10 to purge.
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	// m0 gives bob a real badge.
+	m0, err := database.CreateMessage(context.Background(), 10, 3, "hey @bob earlier", nil)
+	if err != nil {
+		t.Fatalf("seed m0: %v", err)
+	}
+	if err := svc.st.IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
+		t.Fatalf("seed increment: %v", err)
+	}
+
+	// m mentions bob; queued, then purged before its increment lands. Purge
+	// only the newest message so m0 survives and its genuine badge is the one
+	// at stake.
+	sendAs(t, svc, 4, "@bob purge me")
+	if _, err := svc.PurgeMessages(context.Background(), 4, 10, 1, 0); err != nil {
+		t.Fatalf("PurgeMessages: %v", err)
+	}
+
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob mention_count = %d after purging the queued mention, want 1 (his earlier genuine badge must survive)", got)
+	}
+}
+
+// TestMentionWorker_FlushMessagesOnlyTargetsNamed locks the targeted flush:
+// flushing one message's job leaves another pending job untouched until its own
+// window elapses.
+func TestMentionWorker_FlushMessagesOnlyTargetsNamed(t *testing.T) {
+	spy := &batchSpyStore{}
+	w := newMentionWorker(spy)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w.run(ctx)
+
+	w.enqueue(mentionJob{channelID: 10, msgID: 1, apply: func(context.Context) []db.MentionBatchEntry {
+		return []db.MentionBatchEntry{{MsgID: 1, UserIDs: []int64{2}}}
+	}})
+	w.enqueue(mentionJob{channelID: 10, msgID: 2, apply: func(context.Context) []db.MentionBatchEntry {
+		return []db.MentionBatchEntry{{MsgID: 2, UserIDs: []int64{3}}}
+	}})
+
+	w.flushMessages(context.Background(), []int64{1})
+	if spy.entries != 1 {
+		t.Fatalf("after targeted flush, batched entries = %d, want 1 (only msg 1)", spy.entries)
+	}
+
+	w.flushNow(context.Background())
+	if spy.entries != 2 {
+		t.Fatalf("after full flush, batched entries = %d, want 2", spy.entries)
+	}
+	w.stopAndDrain(context.Background())
 }
 
 // TestMentionWorker_DropsWhenStopped locks the non-blocking contract: a send
