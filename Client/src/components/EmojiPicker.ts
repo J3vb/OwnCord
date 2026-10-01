@@ -281,8 +281,9 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
     clearChildren(scrollArea);
 
-    // Names are shortcodes, so "thumbs up" searches as thumbs_up.
-    const q = searchQuery.toLowerCase().replace(/\s+/g, "_");
+    // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
+    const raw = searchQuery.toLowerCase();
+    const q = raw.replace(/\s+/g, "_");
     const byChar = emojiCatalog()?.byChar;
     for (const cat of categories) {
       if (cat.emoji.length === 0) continue;
@@ -291,9 +292,12 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
         ? cat.emoji.filter((e) => {
             // Match against emoji name/keywords (a toned Recent entry included)
             const entry = byChar?.get(e);
-            if (entry !== undefined && emojiMatches(entry, q)) return true;
+            if (entry !== undefined && (emojiMatches(entry, raw) || emojiMatches(entry, q))) {
+              return true;
+            }
             // Also match the character itself and custom shortcodes like :wave:
-            return e.toLowerCase().includes(q);
+            const lower = e.toLowerCase();
+            return lower.includes(raw) || lower.includes(q);
           })
         : cat.emoji;
 

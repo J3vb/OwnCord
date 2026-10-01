@@ -109,6 +109,14 @@ describe("filterEmojiSuggestions", () => {
     expect(filterEmojiSuggestions("astronaut").some((s) => s.insert === "🧑‍🚀")).toBe(true);
   });
 
+  it("ranks curated names ahead of shortcode-only matches", () => {
+    // The full set has more heart_* and love_* shortcodes than the popup shows.
+    expect(filterEmojiSuggestions("heart").some((s) => s.insert === "❤️")).toBe(true);
+    const love = filterEmojiSuggestions("love").map((s) => s.insert);
+    expect(love).toContain("❤️");
+    expect(love).not.toContain("🏩");
+  });
+
   it("inserts the remembered skin tone", () => {
     setSkinTone(3);
     const thumbs = filterEmojiSuggestions("thumbsup").find((s) => s.kind === "unicode");

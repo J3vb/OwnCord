@@ -146,6 +146,15 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
+  it("search matches curated multi-word keywords typed with spaces", () => {
+    const { picker } = makePicker();
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = "high five";
+    input.dispatchEvent(new Event("input"));
+    expect(emojiCell(picker.element, "✋")).toBeDefined();
+    picker.destroy();
+  });
+
   it("the skin-tone selector re-renders the grid in that tone and remembers it", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });

@@ -82,7 +82,9 @@ function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
 /**
  * Suggestions for `query`, in the order the popup lists them: custom emoji
  * first (prefix matches before substring), then unicode, alphabetical within
- * each group.
+ * each group. Within unicode, an emoji with curated keywords (more than its
+ * Unicode shortcode) ranks ahead of a shortcode-only one, so `:heart` still
+ * offers ❤️ before the full set's `heart_suit` and friends.
  *
  * A query shorter than MIN_EMOJI_QUERY yields nothing at all, so the composer
  * never opens a popup over a lone colon.
@@ -108,8 +110,8 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
     else customSubstring.push(entry);
   }
 
-  const unicodePrefix: EmojiSuggestion[] = [];
-  const unicodeSubstring: EmojiSuggestion[] = [];
+  // Curated prefix, shortcode-only prefix, curated substring, shortcode-only substring.
+  const unicode: EmojiSuggestion[][] = [[], [], [], []];
   const tone = skinTone();
   for (const group of emojiCatalog()?.groups ?? []) {
     for (const e of group.emoji) {
@@ -127,23 +129,16 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
       // "Prefix" means some whole keyword starts with the query, not just the
       // primary one — typing ":fire" should rank 🔥 ("fire hot flame lit") above
       // an emoji that merely contains "fire" mid-word.
-      if (words.some((w) => w.startsWith(q) || w.replaceAll("_", "").startsWith(q))) {
-        unicodePrefix.push(entry);
-      } else {
-        unicodeSubstring.push(entry);
-      }
+      const prefix = words.some((w) => w.startsWith(q) || w.replaceAll("_", "").startsWith(q));
+      unicode[(prefix ? 0 : 2) + (words.length > 1 ? 0 : 1)]?.push(entry);
     }
   }
 
   customPrefix.sort(byLabel);
   customSubstring.sort(byLabel);
-  unicodePrefix.sort(byLabel);
-  unicodeSubstring.sort(byLabel);
+  for (const tier of unicode) tier.sort(byLabel);
 
-  return [...customPrefix, ...customSubstring, ...unicodePrefix, ...unicodeSubstring].slice(
-    0,
-    MAX_EMOJI_SUGGESTIONS,
-  );
+  return [...customPrefix, ...customSubstring, ...unicode.flat()].slice(0, MAX_EMOJI_SUGGESTIONS);
 }
 
 /** One emoji row: preview cell, `:label:`/name, and a keyword detail line. */
