@@ -1570,6 +1570,27 @@ describe("notifyIncomingMessage", () => {
       });
       now.mockRestore();
     });
+
+    it("a message that raised no alert does not start the window", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      testPrefs.set("notificationSounds", false);
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+
+      notifyIncomingMessage(makePayload({ id: 1, channel_id: 1 }));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sendNotification).not.toHaveBeenCalled();
+
+      vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      now.mockReturnValue(1_003_000);
+      notifyIncomingMessage(makePayload({ id: 2, channel_id: 1 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
+      });
+      now.mockRestore();
+    });
   });
 
   describe("playNotificationSound: oscillator params", () => {

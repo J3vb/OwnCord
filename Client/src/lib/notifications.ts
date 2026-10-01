@@ -153,6 +153,10 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // notifications", so honour it for the popup and the chime. The taskbar
   // flash stays: it's a passive hint, not a notification.
   const dnd = loadUserStatus() === "dnd";
+  const showPopup = !dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true);
+  const flash = !focusedElsewhere && loadPref<boolean>("flashTaskbar", true);
+  const chime = !dnd && loadPref<boolean>("notificationSounds", true);
+  if (!showPopup && !flash && !chime) return;
 
   // A burst of messages in one channel is one alert, not twenty (U1c); a DM is
   // a channel like any other. A mention is always announced — it is what the
@@ -180,7 +184,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // dynamic import of the markdown tokenizer: this module is in the startup
   // closure, so a static import would drag the tokenizer in with it
   // (bundle-budget's startup-closure gate).
-  if (!dnd && !focusedElsewhere && loadPref<boolean>("desktopNotifications", true)) {
+  if (showPopup) {
     fireDesktopNotification(title, payload.content, payload.attachments.length, {
       host: currentHost(),
       channelId: payload.channel_id,
@@ -189,12 +193,12 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   }
 
   // Flash taskbar
-  if (!focusedElsewhere && loadPref<boolean>("flashTaskbar", true)) {
+  if (flash) {
     flashTaskbar();
   }
 
   // Notification sound
-  if (!dnd && loadPref<boolean>("notificationSounds", true)) {
+  if (chime) {
     playNotificationSound();
   }
 }
