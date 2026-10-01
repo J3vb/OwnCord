@@ -249,8 +249,10 @@ the overlay when the taskbar button is recreated); a message that leaves the
 count unchanged costs no IPC call. Windows draws a red overlay icon with the count, capped
 at "9+"; Linux sends the Unity `LauncherEntry` D-Bus signal on the session
 bus, which KDE Plasma and Ubuntu's dock read but **stock GNOME does not** (it
-needs an extension such as Dash to Dock); macOS badges the dock icon. The
-tooltip reads "OwnCord — N unread mentions", and both clear at 0 and on logout.
+needs an extension such as Dash to Dock); macOS badges the dock icon. On
+Windows and macOS the tray tooltip reads "OwnCord — N unread mentions"; Linux
+tray icons (libappindicator) have no tooltip, so there the launcher count is
+the only indicator. Both clear at 0 and on logout.
 
 ---
 

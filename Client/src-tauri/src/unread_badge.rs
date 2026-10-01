@@ -8,7 +8,9 @@
 //!   straight to the session bus, which KDE Plasma and Ubuntu's dock read;
 //!   stock GNOME shows none;
 //! - macOS: the dock count;
-//! - every platform: the tray tooltip, text from `text.rs`.
+//! - Windows and macOS: the tray tooltip, text from `text.rs`. Linux tray
+//!   icons (libappindicator) have no tooltip, so there the launcher count is
+//!   the only indicator.
 //!
 //! It never touches the tray's menu or its status items.
 
