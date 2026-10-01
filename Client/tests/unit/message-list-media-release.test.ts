@@ -114,19 +114,17 @@ describe("MessageList media release (GIF observer leak fix)", () => {
   });
 
   it("unobserves rendered <img> elements before a full re-render discards them", () => {
-    setMessages(1, [makeMessage({ id: 2, content: "look https://example.com/anim.gif" })]);
+    const later = makeMessage({ id: 3, content: "later", timestamp: "2024-01-15T12:01:00Z" });
+    setMessages(1, [makeMessage({ id: 2, content: "look https://example.com/anim.gif" }), later]);
     msgList.mount(container);
 
     const img = container.querySelector(".virtual-content img");
     expect(img).not.toBeNull();
     unobserveMediaMock.mockClear();
 
-    // Prepend an older message — NOT a suffix extension, so the list takes
-    // the full-rebuild path that tears the rendered rows down.
-    setMessages(1, [
-      makeMessage({ id: 1, content: "older", timestamp: "2024-01-15T11:00:00Z" }),
-      makeMessage({ id: 2, content: "look https://example.com/anim.gif" }),
-    ]);
+    // Reorder the rows — the row patch leaves a reorder to the full-rebuild
+    // path that tears the rendered rows down.
+    setMessages(1, [later, makeMessage({ id: 2, content: "look https://example.com/anim.gif" })]);
     messagesStore.flush();
 
     expect(unobserveMediaMock).toHaveBeenCalledWith(img);

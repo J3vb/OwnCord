@@ -1019,6 +1019,23 @@ describe("MessageList", () => {
       expect(row(3)!.querySelector(".msg-reply-ref")!.textContent).toContain("Parent edited");
     });
 
+    it("re-renders a loaded reply whose parent arrives", () => {
+      setMessages(1, [ungrouped(1), ungrouped(4), { ...ungrouped(5), replyTo: 2 }]);
+      msgList.mount(container);
+      const [row1, row5] = [row(1), row(5)];
+      expect(row5!.querySelector(".msg-reply-ref")!.textContent).not.toContain("Message 2");
+
+      // The parent lands above the reply's neighbour, so the reply's own
+      // grouping is unchanged: only its quote is stale.
+      const [first, ...rest] = current();
+      setMessages(1, [first!, ungrouped(2), ...rest]);
+      messagesStore.flush();
+
+      expect(row(1)).toBe(row1);
+      expect(row(5)).not.toBe(row5);
+      expect(row(5)!.querySelector(".msg-reply-ref")!.textContent).toContain("Message 2");
+    });
+
     // R1: a revisit's page drops the oldest rows and adds the ones posted while away.
     it("drops head rows and appends tail rows without rebuilding the rows that stay", () => {
       const all = Array.from({ length: 63 }, (_, i) => ungrouped(i + 1));
@@ -1077,20 +1094,19 @@ describe("MessageList", () => {
     });
 
     it("renders the final state once the 2s burst window resets, instead of staying stuck at the pre-trip state", () => {
-      setMessages(1, [makeMessage({ id: 1, content: "v0" })]);
+      const others = Array.from({ length: 25 }, (_, i) => makeMessage({ id: i + 2 }));
+      setMessages(1, [makeMessage({ id: 1, content: "v0" }), ...others]);
       msgList.mount(container); // 1st renderAll call, starts the 2s window
 
-      // Fire 25 history prepends back-to-back, well inside the 2s window, each
-      // also editing message 1. The row patch leaves a prepend to renderAll
-      // (it keeps the reading position), so each forces a renderAll().
-      // Combined with the mount's call, this is 26 renderAll invocations —
-      // calls 21+ trip the >20-in-2s breaker and must return without
-      // rendering.
+      // Fire 25 updates back-to-back, well inside the 2s window, each editing
+      // message 1 and moving it one row further down. Every update is then a
+      // reorder against any earlier state, the last one rendered before the
+      // breaker trips included, and the row patch leaves a reorder to
+      // renderAll. Combined with the mount's call, this is 26 renderAll
+      // invocations — calls 21+ trip the >20-in-2s breaker and must return
+      // without rendering.
       for (let i = 1; i <= 25; i++) {
-        setMessages(1, [
-          makeMessage({ id: 1000 - i, content: "older" }),
-          makeMessage({ id: 1, content: `v${i}` }),
-        ]);
+        setMessages(1, others.toSpliced(i, 0, makeMessage({ id: 1, content: `v${i}` })));
         messagesStore.flush();
       }
       expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);

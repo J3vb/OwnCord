@@ -101,7 +101,8 @@ describe("MessageList row listener lifecycle (OC-0286)", () => {
   });
 
   it("aborts a discarded row's listeners on a full rebuild instead of retaining them for the component's lifetime", () => {
-    setMessages(1, [makeMessage({ id: 2, content: "hello" })]);
+    const later = makeMessage({ id: 3, content: "later", timestamp: "2024-01-15T12:01:00Z" });
+    setMessages(1, [makeMessage({ id: 2, content: "hello" }), later]);
     msgList.mount(container);
 
     const reactBtn = container.querySelector(
@@ -114,13 +115,10 @@ describe("MessageList row listener lifecycle (OC-0286)", () => {
     expect(options.onReactionClick).toHaveBeenCalledTimes(1);
     (options.onReactionClick as ReturnType<typeof vi.fn>).mockClear();
 
-    // Prepend an older message — NOT a suffix extension, so the list takes
-    // the full-rebuild path (renderWindow REBUILD) that discards the
-    // currently rendered rows and replaces them with freshly rendered ones.
-    setMessages(1, [
-      makeMessage({ id: 1, content: "older", timestamp: "2024-01-15T11:00:00Z" }),
-      makeMessage({ id: 2, content: "hello" }),
-    ]);
+    // Reorder the rows — the row patch leaves a reorder to the full-rebuild
+    // path (renderWindow REBUILD) that discards the currently rendered rows
+    // and replaces them with freshly rendered ones.
+    setMessages(1, [later, makeMessage({ id: 2, content: "hello" })]);
     messagesStore.flush();
 
     // The button element is now detached from the document, but nothing

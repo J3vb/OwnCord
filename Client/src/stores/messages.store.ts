@@ -171,10 +171,10 @@ export function setChannelLoadError(channelId: number): void {
  *  window but are held back (heldHistory, P4-01 R3) rather than dropped: they
  *  may carry an edit or delete made while away, so they are not shown until
  *  scrolling up fetches their page again (prependMessages), which keeps each
- *  one it left unchanged. A page that is the whole channel (hasMore false)
- *  holds nothing. The list patches only the rows that changed: the dropped
- *  head, the new tail and, for a revisit that opened with unread messages,
- *  the NEW divider.
+ *  one it left unchanged and reuses its measured height. A page that is the
+ *  whole channel (hasMore false) holds nothing. The list patches only the rows
+ *  that changed: the dropped head, the new tail and, for a revisit that opened
+ *  with unread messages, the NEW divider.
  *
  *  `splice` is a full-ready resync's refetch (P2-T4): when the page reaches
  *  back to the newest row loaded at setChannelLoading, the loaded rows older
@@ -295,7 +295,9 @@ export function reattachToPresent(channelId: number): void {
 /** Prepend older messages for infinite scroll.
  *  The server returns messages newest-first; we reverse to chronological order.
  *  The page revalidates the held rows it covers (setMessages): an unchanged one
- *  comes back as the same object, one the page no longer has stays gone. */
+ *  comes back as the same object, one the page no longer has stays gone. The
+ *  list inserts the page above the rows it shows without redrawing them, and
+ *  keeps the reading position. */
 export function prependMessages(
   channelId: number,
   messages: readonly MessageResponse[],
