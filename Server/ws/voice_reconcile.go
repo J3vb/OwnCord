@@ -11,9 +11,9 @@ package ws
 // key holder stalls every new joiner's key exchange.
 //
 // This closes the gap by polling: once a tick, ListParticipants for every
-// room that has a row, and reconcile the SFU's participant set against the
-// DB. It runs on the startSweep pattern, never on the dispatch goroutine,
-// because ListParticipants is a network round trip.
+// room that has a row or that the SFU has open, and reconcile the SFU's
+// participant set against the DB. It runs on the startSweep pattern, never
+// on the dispatch goroutine, because ListParticipants is a network round trip.
 //
 // The reap is deliberate about false positives: a participant that is absent
 // on one tick is only a candidate (the media path can blip, and an in-flight
@@ -104,6 +104,19 @@ func (h *Hub) reconcileVoiceMembership() {
 		live[id] = struct{}{}
 	}
 	h.voiceReconcile.prune(live)
+	// Also visit rooms no row names: a sole member removed from voice leaves
+	// a room with no rows, and a participant there (a replayed, still-valid
+	// token) is an orphan too. A failure only narrows this tick to rooms with
+	// rows.
+	roomIDs, err := h.livekit.ListRoomChannelIDs(ctx)
+	if err != nil {
+		slog.Warn("voice reconcile: ListRooms failed, checking rooms with rows only", "err", err)
+	}
+	for _, channelID := range roomIDs {
+		if _, ok := byRoom[channelID]; !ok {
+			byRoom[channelID] = nil
+		}
+	}
 
 	for channelID, roomRows := range byRoom {
 		identities, listErr := h.livekit.ListParticipants(ctx, channelID)
@@ -135,40 +148,44 @@ func (h *Hub) reconcileVoiceMembership() {
 			}
 		}
 
-		// Remove SFU participants that no voice_states row names — an
-		// identity for a user with no row at all, or one from a superseded
-		// join instance whose row now carries a newer token. The snapshot
-		// predates this room's list, so each candidate's row is re-read
-		// first: a join committed since then is live, not an orphan.
-		for _, id := range identities {
-			if _, ok := expected[id]; ok {
-				continue
-			}
-			userID, token, parseErr := parseParticipantIdentity(id)
-			if parseErr != nil {
-				// Not an OwnCord identity (a room agent, or a future
-				// participant kind): never remove what we cannot attribute.
-				slog.Warn("voice reconcile: leaving unparseable SFU identity",
-					"identity", id, "channel_id", channelID)
-				continue
-			}
-			row, stateErr := h.voice.State(ctx, userID)
-			if stateErr != nil {
-				slog.Warn("voice reconcile: re-reading orphan's voice state failed, skipping",
-					"err", stateErr, "user_id", userID, "channel_id", channelID)
-				continue
-			}
-			if row != nil && row.ChannelID == channelID && row.JoinedAt == token {
-				continue
-			}
-			if err := h.livekit.RemoveParticipant(ctx, channelID, userID, token); err != nil {
-				slog.Warn("voice reconcile: removing orphan participant failed",
-					"err", err, "user_id", userID, "channel_id", channelID)
-				continue
-			}
-			slog.Info("voice reconcile: removed orphan SFU participant",
-				"user_id", userID, "channel_id", channelID)
+		h.reconcileRemoveOrphans(ctx, channelID, identities, expected)
+	}
+}
+
+// reconcileRemoveOrphans removes SFU participants that no voice_states row
+// names — an identity for a user with no row at all, or one from a superseded
+// join instance whose row now carries a newer token. The snapshot predates
+// this room's list, so each candidate's row is re-read first: a join committed
+// since then is live, not an orphan.
+func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, identities []string, expected map[string]struct{}) {
+	for _, id := range identities {
+		if _, ok := expected[id]; ok {
+			continue
 		}
+		userID, token, parseErr := parseParticipantIdentity(id)
+		if parseErr != nil {
+			// Not an OwnCord identity (a room agent, or a future
+			// participant kind): never remove what we cannot attribute.
+			slog.Warn("voice reconcile: leaving unparseable SFU identity",
+				"identity", id, "channel_id", channelID)
+			continue
+		}
+		row, stateErr := h.voice.State(ctx, userID)
+		if stateErr != nil {
+			slog.Warn("voice reconcile: re-reading orphan's voice state failed, skipping",
+				"err", stateErr, "user_id", userID, "channel_id", channelID)
+			continue
+		}
+		if row != nil && row.ChannelID == channelID && row.JoinedAt == token {
+			continue
+		}
+		if err := h.livekit.RemoveParticipant(ctx, channelID, userID, token); err != nil {
+			slog.Warn("voice reconcile: removing orphan participant failed",
+				"err", err, "user_id", userID, "channel_id", channelID)
+			continue
+		}
+		slog.Info("voice reconcile: removed orphan SFU participant",
+			"user_id", userID, "channel_id", channelID)
 	}
 }
 

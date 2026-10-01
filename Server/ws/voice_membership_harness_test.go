@@ -186,7 +186,15 @@ func (f *fakeSFU) handle(w http.ResponseWriter, r *http.Request) {
 		_ = proto.Unmarshal(body, &req)
 		marshal(&lkproto.ParticipantInfo{Identity: req.GetIdentity()})
 	case "ListRooms":
-		marshal(&lkproto.ListRoomsResponse{})
+		f.mu.Lock()
+		rooms := make([]*lkproto.Room, 0, len(f.participants))
+		for name, ids := range f.participants {
+			if len(ids) > 0 {
+				rooms = append(rooms, &lkproto.Room{Name: name})
+			}
+		}
+		f.mu.Unlock()
+		marshal(&lkproto.ListRoomsResponse{Rooms: rooms})
 	default:
 		f.mu.Lock()
 		f.unhandled = append(f.unhandled, method)
