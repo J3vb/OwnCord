@@ -386,17 +386,25 @@ test("a playing video keeps playing while bob reacts to another message 20 times
     has: bob.locator(".msg-text", { hasText: `react-${id}` }),
   });
   const mine = target.locator(".reaction-chip.me");
-  // Ten adds and ten removals; each waits for its own echo before the next.
+  const aliceChips = alice
+    .locator(".message", { hasText: `react-${id}` })
+    .locator(".reaction-chip:not(.add-reaction)");
+  // Ten adds and ten removals; each waits for its echo on alice's page before
+  // the next. The pause keeps bob under the client's 5-per-second reaction
+  // limit: the toggle flips optimistically, so a fast loop outruns it and the
+  // over-limit click is dropped with a "slow down" toast.
   for (let round = 0; round < 10; round++) {
     await target.hover();
     await target.locator("[data-testid^='msg-react-']").click();
+    await bob.waitForTimeout(250);
     await bob.locator(".reaction-picker-wrap .emoji-picker.open .ep-emoji").first().click();
     await expect(mine).toHaveCount(1);
+    await expect(aliceChips).toHaveCount(1);
+    await bob.waitForTimeout(250);
     await mine.click();
     await expect(mine).toHaveCount(0);
+    await expect(aliceChips).toHaveCount(0);
   }
-  const aliceTarget = alice.locator(".message", { hasText: `react-${id}` });
-  await expect(aliceTarget.locator(".reaction-chip")).toHaveCount(0);
 
   // Every reaction re-rendered only bob's row: alice's player is the same
   // element, still in the page and still playing.
