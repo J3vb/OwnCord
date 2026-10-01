@@ -40,6 +40,9 @@ type PingDeps struct {
 type ChatDeps struct {
 	Limiter    *auth.RateLimiter
 	MessageSvc *service.MessageService
+	// LiveStatus is Hub.LiveStatus: the dm_channel_open a send fans out
+	// presents each participant's live status, not the users.status row.
+	LiveStatus func(userID int64) string
 }
 
 // PresenceDeps holds dependencies for presence, typing, and channel focus handlers.

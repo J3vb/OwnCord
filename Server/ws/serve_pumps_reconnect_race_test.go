@@ -6,7 +6,7 @@ package ws
 // hub.handleVoiceLeave, which can block (DB delete with retry, audience scan;
 // the LiveKit RemoveParticipant call runs in the background since OC-0453). The stale
 // `replaced` boolean is then reused, unchecked, to decide whether to run
-// MarkUserDisconnected and broadcast an offline presence. A reconnect that
+// StampDisconnect and broadcast an offline presence. A reconnect that
 // registers during that window is invisible to the stale flag: the dead
 // socket's teardown marks the *live* session's user offline.
 

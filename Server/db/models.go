@@ -356,7 +356,7 @@ type Emoji struct {
 }
 
 // sessionTTL is the idle window: a session expires this long after it was
-// created or last touched (TouchSession slides it). TouchSession also caps
+// created or last touched (TouchSessions slides it). TouchSessions also caps
 // expires_at at created_at + 365 days, the absolute lifetime from sign-in,
 // in its query (sessions.sql).
 const sessionTTL = 30 * 24 * time.Hour

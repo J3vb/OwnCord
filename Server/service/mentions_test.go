@@ -332,7 +332,7 @@ func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
 // treat a reader with no live connection as offline even when their stored
 // status is idle/dnd, matching the read path's "no live connection is
 // offline, whatever the row says" rule (ws/serve_ready.go presentableMembers).
-// MarkUserDisconnected only ever rewrites "online" -> "offline" — an idle/dnd
+// StampDisconnect only ever rewrites "online" -> "offline" — an idle/dnd
 // choice survives the disconnect by design, so a bare
 // db.BroadcastStatus(r.Status) == db.StatusOffline test can never catch a
 // disconnected idle/dnd reader without also consulting live connection state.
@@ -340,12 +340,17 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 
 	// bob's last chosen status was "dnd" before disconnecting (mirrors what
-	// MarkUserDisconnected leaves behind for a non-"online" status).
+	// StampDisconnect leaves behind for a non-"online" status).
 	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusDND); err != nil {
 		t.Fatalf("UpdateUserStatus(dnd): %v", err)
 	}
 	// bob has no live connection.
-	svc.SetOnlineChecker(func(userID int64) bool { return userID != 2 })
+	svc.SetLiveStatusLookup(func(userID int64) string {
+		if userID == 2 {
+			return ""
+		}
+		return db.StatusOnline
+	})
 
 	sendAs(t, svc, 4, "@here quick question")
 	if got := mentionCount(t, database, 2); got != 0 {
@@ -356,6 +361,46 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 	sendAs(t, svc, 4, "@everyone meeting now")
 	if got := mentionCount(t, database, 2); got != 1 {
 		t.Errorf("disconnected dnd bob @everyone mention_count = %d, want 1", got)
+	}
+}
+
+// TestSendMessage_HereReachesConnectedReaderBeforeStampFlush locks P5-S07's
+// batched connect stamp against @here: a reader whose connection is live but
+// whose stamp has not flushed (users.status still "offline", as after the
+// boot-time ResetAllUserStatuses) is present, so @here counts them.
+func TestSendMessage_HereReachesConnectedReaderBeforeStampFlush(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+
+	if err := database.UpdateUserStatus(context.Background(), 2, db.StatusOffline); err != nil {
+		t.Fatalf("UpdateUserStatus(offline): %v", err)
+	}
+	svc.SetLiveStatusLookup(func(int64) string { return db.StatusOnline })
+
+	sendAs(t, svc, 4, "@here quick question")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("connected bob with an unflushed stamp mention_count = %d, want 1", got)
+	}
+}
+
+// TestSendMessage_EveryoneIgnoresLiveStatus locks that only @here narrows on
+// presence: a plain @everyone reaches every reader, offline ones included,
+// without a per-reader live-status lookup.
+func TestSendMessage_EveryoneIgnoresLiveStatus(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	lookups := 0
+	svc.SetLiveStatusLookup(func(int64) string {
+		lookups++
+		return ""
+	})
+
+	sendAs(t, svc, 4, "@everyone meeting now")
+	for _, uid := range []int64{1, 2, 3} {
+		if got := mentionCount(t, database, uid); got != 1 {
+			t.Errorf("user %d @everyone mention_count = %d, want 1", uid, got)
+		}
+	}
+	if lookups != 0 {
+		t.Errorf("@everyone made %d live-status lookups, want 0", lookups)
 	}
 }
 

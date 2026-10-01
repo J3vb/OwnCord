@@ -1,18 +1,8 @@
 package ws
 
-// hub_connected.go — the live-connection id snapshot, split out of
-// serve_ready.go (at its line ceiling). See connectedUserIDs.
-
-// connectedUserIDs snapshots the ids with a live WebSocket connection.
-func (h *Hub) connectedUserIDs() map[int64]bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	set := make(map[int64]bool, len(h.clients))
-	for uid := range h.clients {
-		set[uid] = true
-	}
-	return set
-}
+// hub_connected.go — live-connection status snapshots, split out of
+// serve_ready.go (at its line ceiling), and the graceful-stop user snapshot
+// kept out of hub.go (at its line ceiling). See livePresences, StoppedUserIDs.
 
 // livePresences snapshots each connected user's live presence
 // (Client.livePresence), status "" for a connection that has not stamped one
@@ -25,4 +15,48 @@ func (h *Hub) livePresences() map[int64]livePresence {
 		out[uid] = c.livePresence()
 	}
 	return out
+}
+
+// LiveStatus returns userID's live status, "" when the user has no
+// connection or it has not stamped one yet. Safe to call from any goroutine.
+func (h *Hub) LiveStatus(userID int64) string {
+	h.mu.RLock()
+	c := h.clients[userID]
+	h.mu.RUnlock()
+	if c == nil {
+		return ""
+	}
+	return c.livePresence().status
+}
+
+// StoppedUserIDs returns every user the hub held when GracefulStopContext
+// began, plus any it closed; nil before. The conn-writes close step stamps
+// each one disconnected, since a stopped hub's readPump defers, which
+// unregister before they stamp, run too late for the final flush (P5-S07).
+func (h *Hub) StoppedUserIDs() []int64 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return append([]int64(nil), h.stopUsers...)
+}
+
+// recordStopUsers adds every user the hub holds to stopUsers; the first step
+// of GracefulStopContext.
+func (h *Hub) recordStopUsers() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for uid := range h.clients {
+		h.stopUsers = append(h.stopUsers, uid)
+	}
+}
+
+// closeClientsForStop closes every remaining client's send channel, adding
+// each user to stopUsers first so one who connected during the notice window
+// is stamped too.
+func (h *Hub) closeClientsForStop() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for uid, c := range h.clients {
+		h.stopUsers = append(h.stopUsers, uid)
+		c.closeSend()
+	}
 }

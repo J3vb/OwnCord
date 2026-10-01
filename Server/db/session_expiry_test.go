@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -176,8 +177,8 @@ func TestTouchSession_SlidesIdleExpiry(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedAgedSession(t, database, "active", 29*24*time.Hour, time.Now().Add(24*time.Hour))
 
-	if err := database.TouchSession(context.Background(), "active"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
+	if err := database.TouchSessions(context.Background(), []string{"active"}); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
 	}
 
 	got := parseExpiry(t, sessionExpiresAt(t, database, "active"))
@@ -195,8 +196,8 @@ func TestTouchSession_NeverRevivesExpired(t *testing.T) {
 	seedAgedSession(t, database, "lapsed", 31*24*time.Hour, time.Now().Add(-time.Hour))
 	before := sessionExpiresAt(t, database, "lapsed")
 
-	if err := database.TouchSession(context.Background(), "lapsed"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
+	if err := database.TouchSessions(context.Background(), []string{"lapsed"}); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
 	}
 
 	after := sessionExpiresAt(t, database, "lapsed")
@@ -222,8 +223,8 @@ func TestTouchSession_AbsoluteCap(t *testing.T) {
 
 	ctx := context.Background()
 	for _, tok := range []string{"near_cap", "past_cap"} {
-		if err := database.TouchSession(ctx, tok); err != nil {
-			t.Fatalf("TouchSession(%s): %v", tok, err)
+		if err := database.TouchSessions(ctx, []string{tok}); err != nil {
+			t.Fatalf("TouchSessions(%s): %v", tok, err)
 		}
 	}
 
@@ -234,5 +235,36 @@ func TestTouchSession_AbsoluteCap(t *testing.T) {
 	}
 	if past := parseExpiry(t, sessionExpiresAt(t, database, "past_cap")); past.After(pastBefore) {
 		t.Errorf("past_cap expires_at extended from %v to %v; a session older than the cap must not be", pastBefore, past)
+	}
+}
+
+// TestTouchSessions_OneBatchSlidesEveryLiveSession pins P5-S07's batched
+// touch: one call slides every live session it names, more than one
+// statement's worth of them included, and still never revives a lapsed one.
+func TestTouchSessions_OneBatchSlidesEveryLiveSession(t *testing.T) {
+	database := openMigratedMemory(t)
+	tokens := make([]string, 0, 1201)
+	for i := range 1200 {
+		tok := fmt.Sprintf("live-%d", i)
+		seedAgedSession(t, database, tok, 2*24*time.Hour, time.Now().Add(24*time.Hour))
+		tokens = append(tokens, tok)
+	}
+	seedAgedSession(t, database, "lapsed", 31*24*time.Hour, time.Now().Add(-time.Hour))
+	before := sessionExpiresAt(t, database, "lapsed")
+	tokens = append(tokens, "lapsed", "no-such-token")
+
+	if err := database.TouchSessions(context.Background(), tokens); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
+	}
+
+	want := time.Now().UTC().Add(30 * 24 * time.Hour)
+	for _, tok := range []string{"live-0", "live-999", "live-1000", "live-1199"} {
+		got := parseExpiry(t, sessionExpiresAt(t, database, tok))
+		if d := want.Sub(got); d < -time.Minute || d > time.Minute {
+			t.Errorf("%s expires_at = %v, want about %v", tok, got, want)
+		}
+	}
+	if after := sessionExpiresAt(t, database, "lapsed"); after != before {
+		t.Fatalf("lapsed expires_at moved from %q to %q; a batch must never revive a session", before, after)
 	}
 }

@@ -72,7 +72,7 @@ func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
 // Every kick path (the sweeps, the handlers.go expiry/ban kicks, DisconnectUser)
 // deletes the hub entry via kickClient, so the readPump defer's unregisterNow
 // finds nothing. "Absent" is a real disconnect, not a replacement: reporting it
-// as replaced makes readPump skip MarkUserDisconnected, the offline presence
+// as replaced makes readPump skip StampDisconnect, the offline presence
 // broadcast, and handleVoiceLeave, so peers keep rendering the kicked user
 // online.
 func TestUnregisterNow_KickedClientIsNotReportedAsReplaced(t *testing.T) {

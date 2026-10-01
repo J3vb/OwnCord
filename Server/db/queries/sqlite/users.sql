@@ -57,7 +57,21 @@ UPDATE users SET totp_secret = ? WHERE id = ?;
 -- name: UpdateUserIdentityKey :exec
 UPDATE users SET identity_public_key = ? WHERE id = ?;
 
--- name: MarkUserDisconnected :exec
+-- name: StampUsersConnected :exec
+-- Connect bookkeeping, db.ConnectStatus in SQL: a chosen idle, dnd or
+-- invisible survives, anything else comes online, and last_seen is refreshed.
+-- It reads the column at write time rather than taking a status from the
+-- caller, so a batched stamp (P5-S07) keeps an idle, dnd or invisible that a
+-- presence_update committed while it waited. A legacy 'offline' choice would
+-- become 'online', so a committed presence_update drops the pending stamp
+-- (ChannelService.HandlePresenceUpdate); only a flush already in flight can
+-- still land once over that 'offline'.
+UPDATE users
+SET status = CASE WHEN status IN ('idle', 'dnd', 'invisible') THEN status ELSE 'online' END,
+    last_seen = datetime('now')
+WHERE id IN (sqlc.slice('ids'));
+
+-- name: StampUsersDisconnected :exec
 -- Disconnect bookkeeping. It clears only 'online', which is the one status
 -- that means "has a live session"; idle, dnd and invisible are choices the
 -- user made and are what the next connect reads instead of stamping online
@@ -66,7 +80,7 @@ UPDATE users SET identity_public_key = ? WHERE id = ?;
 UPDATE users
 SET status = CASE WHEN status = 'online' THEN 'offline' ELSE status END,
     last_seen = datetime('now')
-WHERE id = ?;
+WHERE id IN (sqlc.slice('ids'));
 
 -- name: ResetAllUserStatuses :exec
 -- Startup reset: nothing is connected yet, so every 'online' is a leftover

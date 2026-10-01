@@ -43,7 +43,7 @@ func TestMemberGeneration_MovesOnMemberWritesOnly(t *testing.T) {
 	}{
 		{"join", func() { _, err := database.CreateUser(ctx, "bob", "hash", 4); must(err) }, true},
 		{"connect stamp", func() { must(database.UpdateUserStatus(ctx, uid, db.StatusOnline)) }, false},
-		{"disconnect stamp", func() { must(database.MarkUserDisconnected(ctx, uid)) }, false},
+		{"disconnect stamp", func() { must(database.StampConnections(ctx, nil, []int64{uid})) }, false},
 		{"ban", func() { must(database.BanUser(ctx, uid, "r", &expires)) }, true},
 		{"unban", func() { must(database.UnbanUser(ctx, uid)) }, true},
 		{"role change", func() { must(database.UpdateUserRole(ctx, uid, 3)) }, true},

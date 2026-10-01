@@ -31,7 +31,7 @@ const (
 //     unregisterFailedHandshake teardown and closed conn themselves, so no
 //     pump may start — readPump's defer would find the client already gone
 //     (unregisterNow reporting replaced=false) and run that same teardown a
-//     second time (OC-0051): a duplicate MarkUserDisconnected, a duplicate
+//     second time (OC-0051): a duplicate StampDisconnect, a duplicate
 //     offline presence broadcast, and a duplicate hub seq for it.
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
@@ -185,7 +185,7 @@ func (h *Hub) handleReconnect(
 	// handleFreshConnect's ordering: reconnectWriteReplay reads c.user.Status
 	// to build auth_ok, so if this ran after that write the resumed client
 	// would be told its disconnect-time status (routinely "offline", since
-	// MarkUserDisconnected just rewrote it) instead of the status it is about
+	// StampDisconnect just rewrote it) instead of the status it is about
 	// to come online as and broadcast (OC-0222). Skips member_join — the user
 	// was already known.
 	h.applyConnectStatus(ctx, c)

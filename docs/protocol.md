@@ -1094,8 +1094,9 @@ join: every client's `ready` already lists every member, so a connect sends no
 `member_join`. It is still sent, just ahead of the `presence_batch` (or the
 `presence`) carrying their status, for a member other clients cannot have
 yet: a first-ever connect (repeated on the next connect if that first
-handshake failed before the announcement), or the return of a user whose
-temporary ban lapsed. Unlike presence, `member_join` is never dropped for a
+handshake failed before the announcement, or if it comes within about 2
+seconds, before the first connect's status write), or the return of a user
+whose temporary ban lapsed. Unlike presence, `member_join` is never dropped for a
 full send buffer. Clients that watched `member_join` to learn someone came
 online must read presence instead. On an unban, `status` is `"offline"`
 unless the user holds a live connection (a lapsed temporary ban lets them

@@ -91,9 +91,9 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			var openPayload []byte
 			if len(result.DMParticipants) > 0 {
 				openPayload = buildDMChannelOpen(
-					db.NewDMChannelInfo(sendCmd.ChannelID, chName, result.DMIsGroup, result.DMParticipants, pid))
+					db.NewDMChannelInfo(sendCmd.ChannelID, chName, result.DMIsGroup, result.DMParticipants, pid), pid, d.LiveStatus)
 			} else {
-				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID, result.SenderUser, pid)
+				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID, result.SenderUser, pid, d.LiveStatus)
 			}
 			if openPayload == nil {
 				continue

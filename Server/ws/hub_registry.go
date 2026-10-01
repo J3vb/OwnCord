@@ -325,7 +325,7 @@ func (h *Hub) unregisterNow(c *Client) bool {
 }
 
 // shouldMarkOffline reports whether a disconnect teardown should run
-// MarkUserDisconnected and broadcast an offline presence for c's user.
+// StampDisconnect and broadcast an offline presence for c's user.
 //
 // `replaced` (unregisterNow's return, sampled once at the start of teardown)
 // is necessary but not sufficient: both readPump's defer and

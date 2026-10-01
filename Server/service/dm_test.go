@@ -239,12 +239,12 @@ func TestDMService_CreateGroupDM_SurvivesCancelledPostCommitRead(t *testing.T) {
 // ─── OC-0304: disconnected recipients must read as offline ────────────────
 //
 // users.status keeps a *chosen* idle/dnd/invisible across a disconnect
-// (MarkUserDisconnected only ever rewrites "online" -> "offline") so a
+// (StampDisconnect only ever rewrites "online" -> "offline") so a
 // reconnect can honour it. ws/serve_ready.go's presentableMembers documents
 // the resulting obligation on every read path: "a member with no live
 // connection is offline, whatever the row says." DMSummaryFor, ListDMs and
 // CreateGroupDM are the service-layer choke points every DM payload in this
-// package is built from, so each must apply that rule once SetOnlineChecker
+// package is built from, so each must apply that rule once SetLiveStatusLookup
 // is wired — otherwise a signed-out user's last chosen status leaks into the
 // DM sidebar as a live presence dot, contradicting the member list right
 // next to it.
@@ -261,7 +261,7 @@ func TestDMService_DMSummaryFor_RecipientOfflineWhenDisconnected(t *testing.T) {
 	}
 
 	// Bob chose "dnd" and then signed out — nobody holds a live connection.
-	svc.SetOnlineChecker(func(userID int64) bool { return false })
+	svc.SetLiveStatusLookup(func(int64) string { return "" })
 
 	summary, err := svc.DMSummaryFor(context.Background(), 1, created.Channel.ID)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestDMService_ListDMs_RecipientOfflineWhenDisconnected(t *testing.T) {
 		t.Fatalf("setup CreateDM: %v", err)
 	}
 
-	svc.SetOnlineChecker(func(userID int64) bool { return false })
+	svc.SetLiveStatusLookup(func(int64) string { return "" })
 
 	dms, err := svc.ListDMs(context.Background(), 1)
 	if err != nil {
@@ -308,7 +308,12 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
-	svc.SetOnlineChecker(func(userID int64) bool { return userID != 2 })
+	svc.SetLiveStatusLookup(func(userID int64) string {
+		if userID == 2 {
+			return ""
+		}
+		return db.StatusOnline
+	})
 
 	result, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
 	if err != nil {

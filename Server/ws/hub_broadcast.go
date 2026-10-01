@@ -252,11 +252,14 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 		roleName = role.Name
 	}
 	// A lapsed temporary ban lets the user reconnect while users.banned is
-	// still 1, so they can be online at unban time. With no live connection,
-	// report offline regardless of the stale status the row carries
-	// (serve_ready's "no live connection is offline, whatever the row says"
-	// rule); with one, the row holds the status their connect stamped.
-	if h.GetClient(userID) == nil {
+	// still 1, so they can be online at unban time. Report the live status
+	// their connection stamped or chose, never the row: with no stamped
+	// connection it is offline whatever the row says, and with one the row
+	// can still lag the batched connect stamp (serve_ready's
+	// presentableMembers rules). buildMemberJoin hides invisible.
+	if live := h.LiveStatus(userID); live != "" {
+		user.Status = live
+	} else {
 		user.Status = db.StatusOffline
 	}
 	h.BroadcastToAll(buildMemberJoin(user, roleName))
