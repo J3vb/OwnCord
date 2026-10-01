@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 176 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 177 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -146,6 +146,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
+| GET     | `/api/v1/files/{id}/thumb`                                           |
 | GET     | `/api/v1/gif/search`                                                 |
 | GET     | `/api/v1/gif/trending`                                               |
 | GET     | `/api/v1/health`                                                     |
@@ -2057,6 +2058,28 @@ Serve a previously uploaded file by its UUID.
 Supports HTTP range requests and conditional requests. MIME types that could
 execute under the app origin (HTML, SVG, XML, PDF) are served with
 `Content-Disposition: attachment` to force download.
+
+---
+
+### GET /api/v1/files/{id}/thumb
+
+Serve a preview of an image file, for showing it inline. The full file stays
+at `GET /api/v1/files/{id}`.
+
+**Auth:** Required (Bearer token), with exactly the access rule of
+`GET /api/v1/files/{id}` (channel read, DM participation, the uploader for an
+unlinked file, and any NSFW acknowledgement) and the same headers.
+
+A JPEG or PNG larger than 800×800 is scaled to fit an 800×800 box, in the same
+format, turned upright by its EXIF orientation. Any other image — one that
+already fits, a GIF (kept animated), another format, one too large to decode
+within the server's memory bound (judged from its header, so a 16-bit image
+or a progressive JPEG reaches it at fewer pixels) or one that does not decode —
+is served as the original bytes. A file that is not an image is a `404`. A
+thumbnail is made on the first request, kept beside the original under
+`upload.storage_dir/thumbs/`, and removed with it; an image that fails to
+decode is remembered there too and not tried again. A server that has this
+route says so with `upload_policy.thumbnails` on `auth_ok`.
 
 ---
 

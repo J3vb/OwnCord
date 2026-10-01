@@ -12,7 +12,7 @@ import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { formatByteSize } from "@lib/connectionStats";
 import { ensureHttpProxy } from "@lib/httpProxy";
-import { getToken } from "@stores/auth.store";
+import { authStore, getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { desktop } from "../../platform/desktop";
 import type {
@@ -311,6 +311,23 @@ function isExternalUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** The server's bounded preview of an image file (P4-08), or the file itself
+ *  on a server that does not advertise thumbnails or for a type the server
+ *  passes through unchanged (only JPEG and PNG are scaled). */
+function thumbnailUrl(fileUrl: string, mime: string): string {
+  if (
+    authStore.getState().uploadPolicy?.thumbnails !== true ||
+    (mime !== "image/jpeg" && mime !== "image/png") ||
+    !isServerUrl(fileUrl)
+  ) {
+    return fileUrl;
+  }
+  const parsed = new URL(fileUrl);
+  if (!/^\/api\/v1\/files\/[^/]+$/.test(parsed.pathname)) return fileUrl;
+  parsed.pathname += "/thumb";
+  return parsed.toString();
 }
 
 /** Report whether a URL targets the configured OwnCord server host. */
@@ -942,6 +959,8 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
   }
   if (isImageMime(att.mime) && inlineable) {
     const wrap = createElement("div", { class: "msg-image" });
+    // The row shows the server's preview; the lightbox loads the full file.
+    const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
 
     // Reserve space using server-provided dimensions to prevent layout shift.
     if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {
@@ -983,7 +1002,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
         src: objectUrl,
         alt: att.filename,
       });
-      recoverEvictedImage(img, { url: resolvedUrl });
+      recoverEvictedImage(img, { url: inlineUrl });
       attachLightbox(img);
       img.addEventListener(
         "load",
@@ -997,7 +1016,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
     };
 
     // Check cache first for instant render
-    const cached = imageCache.get(resolvedUrl);
+    const cached = imageCache.get(inlineUrl);
     if (cached !== undefined) {
       wrap.appendChild(buildImage(cached));
     } else {
@@ -1010,7 +1029,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       let current: Element = placeholder;
 
       const attempt = (): void => {
-        void fetchImageAsObjectUrl(resolvedUrl).then((objectUrl) => {
+        void fetchImageAsObjectUrl(inlineUrl).then((objectUrl) => {
           if (objectUrl !== null) {
             const img = buildImage(objectUrl);
             current.replaceWith(img);
@@ -1021,7 +1040,7 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
               messageStatusText("file.retry"),
               () => {
                 // Retry asks the server again, even after a definite refusal.
-                missingImages.delete(resolvedUrl);
+                missingImages.delete(inlineUrl);
                 attempt();
               },
             );
@@ -1111,6 +1130,13 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
   if (external !== undefined) recoverEvictedImage(img, external);
+  // `src` can be the server's thumbnail (P4-08): show it at once, then the
+  // full file. A server image shown in full is a memory-cache hit here.
+  if (external !== undefined && "url" in external && isServerUrl(external.url)) {
+    void fetchImageAsObjectUrl(external.url).then((full) => {
+      if (full !== null && img.isConnected && img.src !== full) img.src = full;
+    });
+  }
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 

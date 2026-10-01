@@ -189,7 +189,16 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	return written, nil
 }
 
-// Delete removes the file named uuid from the storage dir.
+// thumbDir is the subdirectory holding thumbnails, each named after its
+// original. List reports regular files only, so the reconciliation pass never
+// sees a thumbnail as a stranded upload.
+const thumbDir = "thumbs"
+
+// Delete removes the file named uuid from the storage dir, and its thumbnail.
+// Erasure, retention and the orphan sweep all remove files here, so a
+// thumbnail always goes with its original. A missing original still removes
+// the thumbnail (a retried removal) and is reported as fs.ErrNotExist; a
+// thumbnail that could not be removed is an error, so the caller retries.
 func (s *Storage) Delete(uuid string) error {
 	if err := sanitizeFilename(uuid); err != nil {
 		return err
@@ -198,7 +207,71 @@ func (s *Storage) Delete(uuid string) error {
 	if err != nil {
 		return err
 	}
-	return os.Remove(dst)
+	// The original goes first: SaveThumb checks it after writing, so a
+	// thumbnail generated during this call is removed by one side or the other.
+	err = os.Remove(dst)
+	thumb := filepath.Join(filepath.Dir(dst), thumbDir, uuid)
+	if thumbErr := os.Remove(thumb); thumbErr != nil && !errors.Is(thumbErr, fs.ErrNotExist) {
+		return fmt.Errorf("removing thumbnail: %w: %w", ErrIO, thumbErr)
+	}
+	return err
+}
+
+// thumbPath is the thumbnail path for the original named uuid.
+func (s *Storage) thumbPath(uuid string) (string, error) {
+	if err := sanitizeFilename(uuid); err != nil {
+		return "", err
+	}
+	dst, err := s.resolvedPath(uuid)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(dst), thumbDir, uuid), nil
+}
+
+// OpenThumb opens the thumbnail of the original named uuid.
+func (s *Storage) OpenThumb(uuid string) (File, error) {
+	p, err := s.thumbPath(uuid)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(p)
+}
+
+// SaveThumb stores data as the thumbnail of the original named uuid; empty
+// data records that the original has no thumbnail. The
+// write is atomic (a temporary file renamed into place), so a reader never
+// sees a partial thumbnail. If the original is gone once the thumbnail is in
+// place — deleted while it was being generated — the thumbnail is removed
+// again and fs.ErrNotExist returned, so it never outlives its original.
+func (s *Storage) SaveThumb(uuid string, data []byte) error {
+	p, err := s.thumbPath(uuid)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("creating thumbnail dir: %w: %w", ErrIO, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("creating thumbnail: %w: %w", ErrIO, err)
+	}
+	_, writeErr := tmp.Write(data)
+	closeErr := tmp.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("writing thumbnail: %w: %w", ErrIO, err)
+	}
+	if err := os.Rename(tmp.Name(), p); err != nil {
+		_ = os.Remove(tmp.Name())
+		return fmt.Errorf("storing thumbnail: %w: %w", ErrIO, err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), uuid)); errors.Is(err, fs.ErrNotExist) {
+		_ = os.Remove(p)
+		return fmt.Errorf("thumbnail of a removed original: %w", fs.ErrNotExist)
+	}
+	return nil
 }
 
 // Entry is one regular file in the storage directory, as List reports it.

@@ -490,6 +490,7 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"upload failed: server storage error":                                                          "upload_storage_error",
 	"upload rejected":                                                                              "upload_rejected",
 	"upload refused: reading the file-type policy failed":                                          "upload_file_type_policy_unreadable",
+	"could not keep a thumbnail":                                                                   "thumbnail_store_failed",
 	"auth_ok: reading the upload file-type policy failed":                                          "auth_ok_upload_file_type_policy_unreadable",
 	"auto-generated key saved to disk":                                                             "key_auto_generated",
 	"livekit companion output":                                                                     "livekit_companion_log",

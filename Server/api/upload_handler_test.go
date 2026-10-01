@@ -3,16 +3,23 @@ package api_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
+	"image/draw"
+	"image/gif"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -1523,5 +1530,389 @@ func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
 	rr2 := doServeFile(t, router, fileID, adminToken, nil)
 	if rr2.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 for admin who is not a DM participant", rr2.Code)
+	}
+}
+
+// ─── GET /api/v1/files/{id}/thumb (P4-08) ───────────────────────────────────
+
+func doServeThumb(t *testing.T, router http.Handler, fileID, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/"+fileID+"/thumb", nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	return rr
+}
+
+// uploadForThumb uploads content as the given user and returns the file id.
+func uploadForThumb(t *testing.T, router http.Handler, token, filename string, content []byte) string {
+	t.Helper()
+	rr := doUpload(t, router, token, "file", filename, content)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("upload %s: %d; body: %s", filename, rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil || resp.ID == "" {
+		t.Fatalf("upload response: %v", err)
+	}
+	return resp.ID
+}
+
+// solidImage is a w×h image in one colour, filled without a per-pixel loop
+// (a 4000×3000 Set loop is most of a second).
+func solidImage(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 200, G: 40, B: 40, A: 255}}, image.Point{}, draw.Src)
+	return img
+}
+
+func encodePNG(t *testing.T, img image.Image) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func encodeJPEG(t *testing.T, img image.Image) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatalf("jpeg.Encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// withEXIFOrientation inserts an APP1 Exif segment carrying only the
+// Orientation tag right after a JPEG's SOI marker, as a phone camera writes it.
+func withEXIFOrientation(jpg []byte, orientation uint16) []byte {
+	tiff := []byte{
+		'M', 'M', 0, 42, 0, 0, 0, 8, // big-endian TIFF header, IFD0 at 8
+		0, 1, // one entry
+		0x01, 0x12, 0, 3, 0, 0, 0, 1, byte(orientation >> 8), byte(orientation), 0, 0, // Orientation SHORT
+		0, 0, 0, 0, // no next IFD
+	}
+	payload := append([]byte("Exif\x00\x00"), tiff...)
+	seg := []byte{0xFF, 0xE1, byte((len(payload) + 2) >> 8), byte(len(payload) + 2)}
+	out := append([]byte{}, jpg[:2]...)
+	out = append(out, seg...)
+	out = append(out, payload...)
+	return append(out, jpg[2:]...)
+}
+
+// pngBomb is a valid PNG header declaring width×height pixels over a
+// one-pixel body: DecodeConfig accepts it, and a full decode would try to
+// allocate the declared size.
+func pngBomb(t *testing.T, width, height uint32) []byte {
+	t.Helper()
+	raw := encodePNG(t, solidImage(1, 1))
+	// IHDR data starts after the 8-byte signature, 4-byte length, 4-byte type.
+	binary.BigEndian.PutUint32(raw[16:20], width)
+	binary.BigEndian.PutUint32(raw[20:24], height)
+	binary.BigEndian.PutUint32(raw[29:33], crc32.ChecksumIEEE(raw[12:29]))
+	return raw
+}
+
+func TestServeThumb_PNGFitsTheBox(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbpng", 4)
+	id := uploadForThumb(t, router, token, "big.png", encodePNG(t, solidImage(4000, 3000)))
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("thumb: %d; body: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Content-Type = %q, want image/png", ct)
+	}
+	if rr.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("thumbnail served without nosniff")
+	}
+	if cc := rr.Header().Get("Cache-Control"); cc != "private, no-cache" {
+		t.Errorf("Cache-Control = %q, want the original's private, no-cache", cc)
+	}
+	cfg, format, err := image.DecodeConfig(rr.Body)
+	if err != nil || format != "png" {
+		t.Fatalf("thumbnail does not decode as PNG: %v (%s)", err, format)
+	}
+	if cfg.Width != 800 || cfg.Height != 600 {
+		t.Errorf("thumbnail = %dx%d, want 800x600 (the 4000x3000 original in an 800 box)", cfg.Width, cfg.Height)
+	}
+	if f, err := store.OpenThumb(id); err != nil {
+		t.Errorf("thumbnail not kept for the next request: %v", err)
+	} else {
+		_ = f.Close()
+	}
+}
+
+func TestServeThumb_JPEGFitsTheBox(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbjpg", 4)
+	id := uploadForThumb(t, router, token, "photo.jpg", encodeJPEG(t, solidImage(1200, 2400)))
+
+	for range 2 { // generated, then served from the kept thumbnail
+		rr := doServeThumb(t, router, id, token)
+		if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" {
+			t.Fatalf("thumb: %d %q", rr.Code, rr.Header().Get("Content-Type"))
+		}
+		cfg, format, err := image.DecodeConfig(rr.Body)
+		if err != nil || format != "jpeg" || cfg.Width != 400 || cfg.Height != 800 {
+			t.Fatalf("thumbnail = %dx%d %s (%v), want a 400x800 JPEG", cfg.Width, cfg.Height, format, err)
+		}
+	}
+}
+
+// A phone photo stores its pixels sideways with an EXIF Orientation tag the
+// webview honours for the original; the thumbnail must come out upright too.
+func TestServeThumb_JPEGHonoursEXIFOrientation(t *testing.T) {
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "thumbexif", 4)
+	// Stored sideways: the left half (blue) is the photo's top.
+	src := solidImage(1600, 1000)
+	draw.Draw(src, image.Rect(0, 0, 800, 1000), &image.Uniform{C: color.RGBA{B: 255, A: 255}}, image.Point{}, draw.Src)
+	id := uploadForThumb(t, router, token, "phone.jpg", withEXIFOrientation(encodeJPEG(t, src), 6))
+
+	rr := doServeThumb(t, router, id, token)
+	thumb, _, err := image.Decode(rr.Body)
+	if rr.Code != http.StatusOK || err != nil {
+		t.Fatalf("thumb: %d, %v", rr.Code, err)
+	}
+	if b := thumb.Bounds(); b.Dx() != 500 || b.Dy() != 800 {
+		t.Fatalf("thumbnail = %dx%d, want 500x800 (rotated upright)", b.Dx(), b.Dy())
+	}
+	if _, _, blue, _ := thumb.At(250, 100).RGBA(); blue < 0x8000 {
+		t.Error("the photo's top (blue) is not at the thumbnail's top")
+	}
+}
+
+// Anything the server does not thumbnail — an image already inside the box,
+// an animated GIF — is passed through as the original bytes.
+func TestServeThumb_PassesThroughSmallImagesAndGIFs(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbpass", 4)
+	var gifBuf bytes.Buffer
+	if err := gif.Encode(&gifBuf, image.NewPaletted(image.Rect(0, 0, 1000, 1000), color.Palette{color.Black, color.White}), nil); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string][]byte{
+		"small.png": encodePNG(t, solidImage(300, 200)),
+		"anim.gif":  gifBuf.Bytes(),
+	} {
+		id := uploadForThumb(t, router, token, name, content)
+		rr := doServeThumb(t, router, id, token)
+		if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+			t.Errorf("%s: %d, %d bytes; want the original's %d bytes", name, rr.Code, rr.Body.Len(), len(content))
+		}
+		if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s: a pass-through stored a thumbnail: %v", name, err)
+		}
+	}
+}
+
+func TestServeThumb_NonImageIsNotFound(t *testing.T) {
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "thumbtxt", 4)
+	id := uploadForThumb(t, router, token, "notes.txt", []byte("plain text, not an image"))
+	if rr := doServeThumb(t, router, id, token); rr.Code != http.StatusNotFound {
+		t.Errorf("thumb of a text file: %d, want 404", rr.Code)
+	}
+}
+
+// A decompression bomb — a header declaring far more pixels than the cap — is
+// refused before a full decode, which would try to allocate the declared
+// 10 gigapixels; the original is passed through untouched instead.
+func TestServeThumb_DecompressionBombIsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbomb", 4)
+	bomb := pngBomb(t, 100_000, 100_000)
+	id := uploadForThumb(t, router, token, "bomb.png", bomb)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), bomb) {
+		t.Errorf("bomb: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the bomb: %v", err)
+	}
+}
+
+// The decode cap counts a 16-bit image at 8 bytes a pixel, so it refuses one
+// at fewer pixels than an 8-bit image: this 25-megapixel 16-bit PNG, a few KB
+// on disk, is over the cap and is passed through without a decode.
+func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumb16", 4)
+	content := encodePNG(t, image.NewGray16(image.Rect(0, 0, 5000, 5000)))
+	id := uploadForThumb(t, router, token, "deep.png", content)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("16-bit PNG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the 16-bit PNG: %v", err)
+	}
+}
+
+// A baseline JPEG is counted at its decoded image alone, so a 24-megapixel
+// camera photo gets a real thumbnail.
+func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbaseline", 4)
+	id := uploadForThumb(t, router, token, "camera.jpg", encodeJPEG(t, solidImage(6000, 4000)))
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("thumb: %d %q", rr.Code, rr.Header().Get("Content-Type"))
+	}
+	cfg, format, err := image.DecodeConfig(rr.Body)
+	if err != nil || format != "jpeg" || cfg.Width != 800 || cfg.Height != 533 {
+		t.Fatalf("thumbnail = %dx%d %s (%v), want an 800x533 JPEG", cfg.Width, cfg.Height, format, err)
+	}
+}
+
+// A progressive JPEG's decode is counted at three times its decoded image,
+// for the coefficient blocks it holds: this 20-megapixel greyscale JPEG, small
+// on disk, is under the cap counted as a baseline JPEG but over it counted as
+// a progressive one, and is passed through without a decode. Go encodes only
+// baseline, so its SOF0 marker is patched to SOF2; the body is never decoded.
+func TestServeThumb_LargeProgressiveJPEGIsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbigjpg", 4)
+	content := encodeJPEG(t, image.NewGray(image.Rect(0, 0, 5000, 4000)))
+	sof := bytes.Index(content, []byte{0xFF, 0xC0})
+	if sof < 0 {
+		t.Fatal("no SOF0 marker in the encoded JPEG")
+	}
+	content[sof+1] = 0xC2
+	id := uploadForThumb(t, router, token, "wide.jpg", content)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("large progressive JPEG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the large progressive JPEG: %v", err)
+	}
+}
+
+// A JPEG whose header is valid but whose body does not decode is decoded
+// once; the failure is kept, and later requests pass the original through
+// without decoding it again. The original is swapped for a decodable one
+// after the first request to show the second never decodes.
+func TestServeThumb_UndecodableJPEGIsDecodedOnce(t *testing.T) {
+	database := newUploadTestDB(t)
+	dir := t.TempDir()
+	store, err := storage.New(dir, 10)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumbbroken", 4)
+	full := encodeJPEG(t, solidImage(1200, 900))
+	broken := full[:len(full)/2]
+	id := uploadForThumb(t, router, token, "broken.jpg", broken)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), broken) {
+		t.Fatalf("broken JPEG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	assertNoThumbKept := func() {
+		t.Helper()
+		f, err := store.OpenThumb(id)
+		if err != nil {
+			t.Fatalf("the failed decode was not kept: %v", err)
+		}
+		defer f.Close() //nolint:errcheck
+		if info, err := f.Stat(); err != nil || info.Size() != 0 {
+			t.Fatalf("kept thumbnail of a broken JPEG: %v, %v", info, err)
+		}
+	}
+	assertNoThumbKept()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originals []string
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			originals = append(originals, e.Name())
+		}
+	}
+	if len(originals) != 1 {
+		t.Fatalf("storage holds %v, want one original", originals)
+	}
+	decodable := encodeJPEG(t, solidImage(1200, 2400))
+	if err := os.WriteFile(filepath.Join(dir, originals[0]), decodable, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rr = doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), decodable) {
+		t.Errorf("second request: %d, %d bytes; want the original passed through undecoded", rr.Code, rr.Body.Len())
+	}
+	assertNoThumbKept()
+}
+
+func TestServeThumb_Unauthenticated(t *testing.T) {
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "thumbanon", 4)
+	id := uploadForThumb(t, router, token, "a.png", encodePNG(t, solidImage(1000, 1000)))
+	if rr := doServeThumb(t, router, id, ""); rr.Code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated thumb: %d, want 401", rr.Code)
+	}
+}
+
+// The thumbnail is the same content as the file, so it answers to the same
+// access rule: a member without READ_MESSAGES on the channel gets 403.
+func TestServeThumb_MemberWithoutReadForbidden(t *testing.T) {
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	uploaderToken := uploadCreateToken(t, database, "thumbowner", 1)
+	memberToken := uploadCreateToken(t, database, "thumbnoperm", 4)
+	id := uploadForThumb(t, router, uploaderToken, "secret.png", encodePNG(t, solidImage(1000, 1000)))
+
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `INSERT INTO channels (id, name, type) VALUES (1, 'secret', 'text')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO messages (id, channel_id, user_id, content) SELECT 1, 1, id, 'x' FROM users WHERE username = 'thumbowner'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE attachments SET message_id = 1 WHERE id = ?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, 0, 2)`); err != nil {
+		t.Fatal(err)
+	}
+	if rr := doServeThumb(t, router, id, memberToken); rr.Code != http.StatusForbidden {
+		t.Errorf("thumb without READ_MESSAGES: %d, want 403", rr.Code)
+	}
+	if rr := doServeThumb(t, router, id, uploaderToken); rr.Code != http.StatusOK {
+		t.Errorf("thumb for a reader: %d, want 200", rr.Code)
 	}
 }

@@ -258,6 +258,28 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 // The tick is bounded and restart-safe: a budget stops it mid-channel with
 // no marker written for that channel, the next tick continues; a run whose
 // files were never removed is resumed on the next tick.
+// P4-08: a retention purge removes the purged attachment's thumbnail too.
+func TestRetention_PurgeRemovesThumbnails(t *testing.T) {
+	ctx := context.Background()
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, _ := database.CreateUser(ctx, "ret-owner", "hash", 1)
+	_, files := seedRetentionChannel(t, database, "thumbs", uid, dir, 1)
+	st := newTestStorage(t, dir)
+	if err := st.SaveThumb(files[0], []byte("thumb")); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := newRetention(t, database, dir).Tick(ctx); err != nil || rep.FilesRemoved != 1 {
+		t.Fatalf("Tick = %+v, %v; want the old attachment removed", rep, err)
+	}
+	if _, err := st.OpenThumb(files[0]); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("thumbnail survived the purge: %v", err)
+	}
+}
+
 func TestRetention_BudgetAndResume(t *testing.T) {
 	ctx := context.Background()
 	database := newTestDB(t)

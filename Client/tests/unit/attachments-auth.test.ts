@@ -28,6 +28,7 @@ vi.mock("@lib/httpProxy", () => ({
 
 vi.mock("@stores/auth.store", () => ({
   getToken: getTokenMock,
+  authStore: { getState: () => ({ uploadPolicy: null }) },
 }));
 
 vi.mock("@lib/logger", () => ({
