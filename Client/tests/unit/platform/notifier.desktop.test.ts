@@ -83,6 +83,10 @@ describeNotifierSuite(async () => {
       // Tauri's UserAttentionType: 1 is Critical, 2 Informational.
       urgentAttentionRequests: () =>
         requestUserAttention.mock.calls.filter((call) => call[0] === 1).length,
+      badgeCounts: () =>
+        invoke.mock.calls
+          .filter((call) => call[0] === "set_unread_badge")
+          .map((call) => (call[1] as { count: number }).count),
     },
   };
 });

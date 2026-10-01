@@ -1,0 +1,224 @@
+//! The taskbar and tray unread badge (DP-27). The renderer computes the count
+//! (`src/features/unread-badge/unreadBadge.ts`) and pushes it when it changes,
+//! and again when the window is shown or focused (Windows drops the overlay
+//! when the taskbar button is recreated); this draws it:
+//!
+//! - Windows: a taskbar overlay icon, the count up to 9 and "9+" above;
+//! - Linux: the launcher count, as a Unity `LauncherEntry` D-Bus signal sent
+//!   straight to the session bus, which KDE Plasma and Ubuntu's dock read;
+//!   stock GNOME shows none;
+//! - macOS: the dock count;
+//! - Windows and macOS: the tray tooltip, text from `text.rs`. Linux tray
+//!   icons (libappindicator) have no tooltip, so there the launcher count is
+//!   the only indicator.
+//!
+//! It never touches the tray's menu or its status items.
+
+#[cfg(any(windows, target_os = "macos"))]
+use tauri::Manager;
+use tauri::Runtime;
+
+use crate::{text, tray};
+
+/// What the overlay shows for `count`: nothing at 0, the digit up to 9, "9+"
+/// above.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn badge_label(count: u32) -> Option<String> {
+    match count {
+        0 => None,
+        1..=9 => Some(count.to_string()),
+        _ => Some("9+".to_string()),
+    }
+}
+
+/// Overlay icon edge, px. Windows scales it to the small-icon size.
+#[cfg_attr(not(windows), allow(dead_code))]
+const OVERLAY_SIZE: u32 = 32;
+
+/// `--danger-fill` (`src/styles/tokens.css`), the app's mention badge red.
+#[cfg_attr(not(windows), allow(dead_code))]
+const OVERLAY_RED: [u8; 3] = [0xd0, 0x30, 0x2f];
+
+/// A 3x5 pixel glyph, one row per entry, bit 2 the leftmost column.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn glyph(c: char) -> [u8; 5] {
+    match c {
+        '0' => [7, 5, 5, 5, 7],
+        '1' => [2, 6, 2, 2, 7],
+        '2' => [7, 1, 7, 4, 7],
+        '3' => [7, 1, 7, 1, 7],
+        '4' => [5, 5, 7, 1, 1],
+        '5' => [7, 4, 7, 1, 7],
+        '6' => [7, 4, 7, 5, 7],
+        '7' => [7, 1, 1, 1, 1],
+        '8' => [7, 5, 7, 5, 7],
+        '9' => [7, 5, 7, 1, 7],
+        '+' => [0, 2, 7, 2, 0],
+        _ => [0; 5],
+    }
+}
+
+/// RGBA pixels for the overlay: a red disc with `label` in white. Drawn here
+/// rather than shipped as ten PNGs, which would also need tauri's image
+/// decoder feature.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn render_overlay(label: &str) -> Vec<u8> {
+    let size = OVERLAY_SIZE;
+    let mut px = vec![0u8; (size * size * 4) as usize];
+    let centre = size as f32 / 2.0;
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 + 0.5 - centre;
+            let dy = y as f32 + 0.5 - centre;
+            // One pixel of edge coverage keeps the disc from looking jagged.
+            let alpha = (centre - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
+            let i = ((y * size + x) * 4) as usize;
+            let [r, g, b] = OVERLAY_RED;
+            px[i..i + 4].copy_from_slice(&[r, g, b, (alpha * 255.0) as u8]);
+        }
+    }
+    let chars = label.chars().count() as u32;
+    let scale = if chars > 1 { 3 } else { 4 };
+    let width = (chars * 4 - 1) * scale;
+    let (left, top) = ((size - width) / 2, (size - 5 * scale) / 2);
+    for (k, c) in label.chars().enumerate() {
+        for (row, bits) in glyph(c).into_iter().enumerate() {
+            for col in 0..3u32 {
+                if (bits >> (2 - col)) & 1 == 0 {
+                    continue;
+                }
+                let x0 = left + (k as u32 * 4 + col) * scale;
+                let y0 = top + row as u32 * scale;
+                for y in y0..y0 + scale {
+                    for x in x0..x0 + scale {
+                        let i = ((y * size + x) * 4) as usize;
+                        px[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+                    }
+                }
+            }
+        }
+    }
+    px
+}
+
+/// The Unity `LauncherEntry.Update` signal that sets the launcher count of
+/// `<desktop_name>.desktop`; a count of 0 hides it.
+#[cfg(target_os = "linux")]
+fn launcher_entry_update(desktop_name: &str, count: u32) -> dbus::Message {
+    use dbus::arg::{PropMap, RefArg, Variant};
+
+    let mut props = PropMap::new();
+    props.insert(
+        "count".into(),
+        Variant(Box::new(i64::from(count)) as Box<dyn RefArg>),
+    );
+    props.insert(
+        "count-visible".into(),
+        Variant(Box::new(count > 0) as Box<dyn RefArg>),
+    );
+    dbus::Message::new_signal("/", "com.canonical.Unity.LauncherEntry", "Update")
+        .expect("static signal names are valid")
+        .append2(format!("application://{desktop_name}.desktop"), props)
+}
+
+/// Send the launcher count over the session bus. The connection is kept for
+/// the app's lifetime: the docks drop an entry once its sender leaves the bus.
+#[cfg(target_os = "linux")]
+fn send_launcher_count(desktop_name: &str, count: u32) {
+    use dbus::blocking::Connection;
+    use std::sync::Mutex;
+
+    static SESSION: Mutex<Option<Connection>> = Mutex::new(None);
+    let mut session = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    if session.is_none() {
+        match Connection::new_session() {
+            Ok(conn) => *session = Some(conn),
+            Err(e) => {
+                log::debug!("[badge] no session bus for the launcher count: {e}");
+                return;
+            }
+        }
+    }
+    let Some(conn) = session.as_ref() else { return };
+    if conn
+        .channel()
+        .send(launcher_entry_update(desktop_name, count))
+        .is_err()
+    {
+        log::debug!("[badge] cannot send the launcher count");
+        *session = None;
+        return;
+    }
+    conn.channel().flush();
+}
+
+/// Show `count` on the taskbar button and in the tray tooltip; 0 clears both.
+/// A platform that cannot draw one part is logged and the rest still applies.
+#[tauri::command]
+pub fn set_unread_badge<R: Runtime>(app: tauri::AppHandle<R>, count: u32) {
+    #[cfg(any(windows, target_os = "macos"))]
+    if let Some(window) = app.get_webview_window("main") {
+        #[cfg(windows)]
+        let shown = window.set_overlay_icon(badge_label(count).map(|label| {
+            tauri::image::Image::new_owned(render_overlay(&label), OVERLAY_SIZE, OVERLAY_SIZE)
+        }));
+        #[cfg(target_os = "macos")]
+        let shown = window.set_badge_count(badge_label(count).map(|_| i64::from(count)));
+        if let Err(e) = shown {
+            log::warn!("[badge] cannot set the taskbar badge: {e}");
+        }
+    }
+    #[cfg(target_os = "linux")]
+    send_launcher_count(&app.package_info().name, count);
+    if let Some(tray) = app.tray_by_id(tray::TRAY_ID) {
+        if let Err(e) = tray.set_tooltip(Some(text::tray_tooltip(count))) {
+            log::warn!("[badge] cannot set the tray tooltip: {e}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn badge_label_is_cleared_at_zero_and_capped_at_nine_plus() {
+        assert_eq!(badge_label(0), None);
+        assert_eq!(badge_label(5), Some("5".to_string()));
+        assert_eq!(badge_label(12), Some("9+".to_string()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn launcher_entry_update_sets_the_count_and_hides_it_at_zero() {
+        use dbus::arg::{prop_cast, PropMap};
+
+        for (count, visible) in [(0, false), (5, true), (12, true)] {
+            let msg = launcher_entry_update("OwnCord", count);
+            assert_eq!(msg.path().as_deref(), Some("/"));
+            assert_eq!(
+                msg.interface().as_deref(),
+                Some("com.canonical.Unity.LauncherEntry")
+            );
+            assert_eq!(msg.member().as_deref(), Some("Update"));
+            let (uri, props): (String, PropMap) = msg.read2().unwrap();
+            assert_eq!(uri, "application://OwnCord.desktop");
+            assert_eq!(prop_cast::<i64>(&props, "count"), Some(&i64::from(count)));
+            assert_eq!(prop_cast::<bool>(&props, "count-visible"), Some(&visible));
+        }
+    }
+
+    #[test]
+    fn overlay_is_a_red_disc_with_a_white_label() {
+        let px = render_overlay("9+");
+        let at = |x: u32, y: u32| {
+            let i = ((y * OVERLAY_SIZE + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2], px[i + 3]]
+        };
+        assert_eq!(px.len(), (OVERLAY_SIZE * OVERLAY_SIZE * 4) as usize);
+        assert_eq!(at(0, 0)[3], 0, "the corner is outside the disc");
+        assert_eq!(at(16, 2), [0xd0, 0x30, 0x2f, 255], "the disc is badge red");
+        // "9+" at scale 3 starts at x=5, y=8: the 9's top-left pixel is set.
+        assert_eq!(at(5, 8), [255, 255, 255, 255]);
+    }
+}

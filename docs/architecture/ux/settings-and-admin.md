@@ -239,6 +239,21 @@ toggling the same controls as the in-app shortcuts (a no-op outside a voice
 channel), **Open Log Folder** opens the client log directory, and **Quit** exits
 the app.
 
+**Unread badge (DP-27).** The taskbar button and the tray tooltip carry the
+unread count: mentions in server channels plus unread direct messages (a muted
+conversation adds only its mentions; the `nothing` notification level shows
+none). `src/features/unread-badge/unreadBadge.ts` counts from the stores and
+calls the `set_unread_badge` command (`src-tauri/src/unread_badge.rs`) when
+the count changes, and again when the window is shown or focused (Windows drops
+the overlay when the taskbar button is recreated); a message that leaves the
+count unchanged costs no IPC call. Windows draws a red overlay icon with the count, capped
+at "9+"; Linux sends the Unity `LauncherEntry` D-Bus signal on the session
+bus, which KDE Plasma and Ubuntu's dock read but **stock GNOME does not** (it
+needs an extension such as Dash to Dock); macOS badges the dock icon. On
+Windows and macOS the tray tooltip reads "OwnCord — N unread mentions"; Linux
+tray icons (libappindicator) have no tooltip, so there the launcher count is
+the only indicator. Both clear at 0 and on logout.
+
 ---
 
 ## Source of truth

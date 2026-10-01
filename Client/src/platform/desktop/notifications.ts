@@ -72,4 +72,10 @@ export const notifier: Notifier = {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().requestUserAttention(1); // Critical: until focused
   },
+  // One host command draws the overlay (Windows) or launcher count (Linux,
+  // macOS) and sets the tray tooltip (src-tauri/src/unread_badge.rs).
+  async setUnreadBadge(count: number): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_unread_badge", { count });
+  },
 };

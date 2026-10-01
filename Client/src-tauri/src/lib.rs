@@ -32,6 +32,7 @@ mod shortcuts;
 mod text;
 mod tofu;
 mod tray;
+mod unread_badge;
 mod update_commands;
 mod ws_proxy;
 
@@ -159,6 +160,7 @@ pub fn run() {
             commands::get_cert_fingerprint,
             #[cfg(desktop)]
             message_notification::notify_message,
+            unread_badge::set_unread_badge,
             commands::store_identity_pin,
             commands::get_identity_pin,
             ws_proxy::ws_connect,
