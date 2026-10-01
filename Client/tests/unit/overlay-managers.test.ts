@@ -1506,7 +1506,7 @@ describe("createSearchOverlayController", () => {
     expect(opts.currentChannelId).toBeUndefined();
   });
 
-  it("onSearch calls api.search and returns results", async () => {
+  it("onSearch calls api.search newest-first and passes the page cursor through", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1522,12 +1522,17 @@ describe("createSearchOverlayController", () => {
         query: string,
         chId: number | undefined,
         signal?: AbortSignal,
-      ) => Promise<unknown[]>;
+        before?: number,
+      ) => Promise<{ results: unknown[] }>;
     };
 
-    const results = await opts.onSearch("hello", 5);
-    expect(api.search).toHaveBeenCalledWith("hello", { channelId: 5 }, undefined);
-    expect(results).toEqual([{ channel_id: 1, message_id: 10, content: "hello" }]);
+    const resp = await opts.onSearch("hello", 5, undefined, 42);
+    expect(api.search).toHaveBeenCalledWith(
+      "hello",
+      { channelId: 5, sort: "recent", before: 42 },
+      undefined,
+    );
+    expect(resp.results).toEqual([{ channel_id: 1, message_id: 10, content: "hello" }]);
   });
 
   it("onSearch re-throws AbortError", async () => {

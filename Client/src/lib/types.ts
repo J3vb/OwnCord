@@ -1213,6 +1213,11 @@ export interface SearchResultItem {
 /** GET /api/search response. */
 export interface SearchResponse {
   readonly results: readonly SearchResultItem[];
+  /**
+   * Cursor for the next page of a newest-first (`sort=recent`) search, or null
+   * or absent when there is none. Only `recent` paging sets it.
+   */
+  readonly next_before?: number | null;
 }
 
 /** REST API error response body. */

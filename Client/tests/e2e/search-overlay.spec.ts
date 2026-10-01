@@ -3,11 +3,12 @@
  *
  * Covers the whole user-visible path the audit found untested:
  *   - Ctrl+F (and the chat-header search trigger) opens the overlay
- *   - input is debounced: a burst of typing issues one scoped request
+ *   - input is debounced: a burst of typing issues one request
  *   - a < MIN_QUERY_LEN query shows the hint instead of searching
+ *   - whole-server by default, with a scope toggle to the current channel
  *   - results render channel/author/content; empty results say so
  *   - ArrowDown/ArrowUp move the active row with wrap-around
- *   - Enter / click jump to the message (highlight) and close the overlay,
+ *   - Enter / click jump to the message (highlight) and keep the panel open,
  *     switching channels when the hit lives elsewhere
  *   - Escape / backdrop click close
  *
@@ -96,7 +97,9 @@ async function mockSessionWithSearch(page: Page, searchResults: unknown): Promis
 }
 
 /** Params of every `/search` request the client has issued, in order. */
-async function searchRequests(page: Page): Promise<Array<{ q: string; channelId: string }>> {
+async function searchRequests(
+  page: Page,
+): Promise<Array<{ q: string; channelId: string; sort: string; before: string }>> {
   return page.evaluate(() =>
     (
       window as unknown as {
@@ -108,7 +111,12 @@ async function searchRequests(page: Page): Promise<Array<{ q: string; channelId:
       .filter((url) => url.includes("/search"))
       .map((url) => {
         const params = new URL(url).searchParams;
-        return { q: params.get("q") ?? "", channelId: params.get("channel_id") ?? "" };
+        return {
+          q: params.get("q") ?? "",
+          channelId: params.get("channel_id") ?? "",
+          sort: params.get("sort") ?? "",
+          before: params.get("before") ?? "",
+        };
       }),
   );
 }
@@ -155,7 +163,7 @@ test.describe("Search overlay", () => {
     await expect(page.locator(INPUT)).toBeFocused();
   });
 
-  test("input is debounced, then sends the final query once, scoped to the channel", async ({
+  test("input is debounced, then sends the final query once, whole-server by default (D4)", async ({
     page,
   }) => {
     // Freeze time so the burst below lands inside one debounce window no
@@ -171,10 +179,32 @@ test.describe("Search overlay", () => {
     await page.clock.runFor(299);
     expect(await searchRequests(page)).toEqual([]);
 
-    // Then exactly one request, carrying the final query, scoped to the active
-    // channel (#general = 1) rather than a global search.
+    // Then exactly one request, carrying the final query, whole-server (no
+    // channel_id) and newest-first so the results can page.
     await page.clock.runFor(1);
-    await expect.poll(() => searchRequests(page)).toEqual([{ q: "hello", channelId: "1" }]);
+    await expect
+      .poll(() => searchRequests(page))
+      .toEqual([{ q: "hello", channelId: "", sort: "recent", before: "" }]);
+  });
+
+  test("the scope toggle narrows the search to the current channel (D4)", async ({ page }) => {
+    await openOverlay(page);
+
+    // Whole server is the default, so the first search carries no channel_id.
+    await page.locator(INPUT).fill("hello");
+    await expect(page.locator("[data-testid='search-scope-server']")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect.poll(async () => (await searchRequests(page))[0]?.channelId).toBe("");
+
+    // Narrowing to #general re-runs the search scoped to channel 1.
+    await page.locator("[data-testid='search-scope-channel']").click();
+    await expect.poll(async () => (await searchRequests(page)).at(-1)?.channelId).toBe("1");
+    await expect(page.locator("[data-testid='search-scope-channel']")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 
   test("a below-minimum query shows the hint and clears prior results", async ({ page }) => {
@@ -234,19 +264,28 @@ test.describe("Search overlay", () => {
     await expect(second).toHaveClass(/search-result-item--active/);
   });
 
-  test("Enter jumps to the active hit, highlights it and closes the overlay", async ({ page }) => {
+  test("Enter jumps to the active hit, highlights it and keeps the panel open (DP-20)", async ({
+    page,
+  }) => {
     await openOverlay(page);
     await page.locator(INPUT).fill("hello");
     await expect(page.locator("[data-testid='search-result-0']")).toBeVisible();
 
     await page.keyboard.press("Enter");
 
-    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    // The panel stays up so the reader can walk through several hits.
+    await expect(page.locator(OVERLAY)).toBeVisible();
     // scrollToMessage flashes the target row for a moment.
     await expect(page.locator("[data-testid='message-101']")).toHaveClass(/highlight-flash/);
+
+    // Escape is the close.
+    await page.keyboard.press("Escape");
+    await expect(page.locator(OVERLAY)).toHaveCount(0);
   });
 
-  test("clicking a result jumps to that message", async ({ page }) => {
+  test("clicking a result jumps to that message without closing the panel (DP-20)", async ({
+    page,
+  }) => {
     await openOverlay(page);
     await page.locator(INPUT).fill("hello");
 
@@ -254,7 +293,7 @@ test.describe("Search overlay", () => {
     await expect(first).toBeVisible();
     await first.click();
 
-    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    await expect(page.locator(OVERLAY)).toBeVisible();
     await expect(page.locator("[data-testid='message-101']")).toHaveClass(/highlight-flash/);
   });
 
@@ -269,7 +308,8 @@ test.describe("Search overlay", () => {
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
 
-    await expect(page.locator(OVERLAY)).toHaveCount(0);
+    // The panel stays open while the channel switches underneath it.
+    await expect(page.locator(OVERLAY)).toBeVisible();
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("random");
     await expect(page.locator("[data-testid='channel-2']")).toHaveClass(/active/);
     // The hit is flashed by the jumper (scrollToMessage), not merely shown by

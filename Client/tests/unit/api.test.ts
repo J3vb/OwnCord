@@ -834,6 +834,23 @@ describe("API Client", () => {
       expect(url).not.toContain("channel_id");
       expect(url).not.toContain("limit");
     });
+
+    it("passes sort and before for newest-first paging", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ results: [], next_before: null }));
+      const resp = await api.search("hello", { channelId: 3, sort: "recent", before: 42 });
+      const url = fetchCallUrl();
+      expect(url).toContain("sort=recent");
+      expect(url).toContain("before=42");
+      expect(resp.next_before).toBeNull();
+    });
+
+    it("a before cursor implies sort=recent rather than an invalid pairing", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ results: [] }));
+      await api.search("hello", { before: 7 });
+      const url = fetchCallUrl();
+      expect(url).toContain("sort=recent");
+      expect(url).toContain("before=7");
+    });
   });
 
   describe("file upload", () => {
