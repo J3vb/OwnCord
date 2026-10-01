@@ -373,6 +373,8 @@ test("a playing video keeps playing while bob reacts to another message 20 times
   await bobInput.fill(`react-${id}`);
   await bobInput.press("Enter");
 
+  // The clip downloads only once its play button is pressed.
+  await alice.getByRole("button", { name: `Play clip-${id}.webm` }).click();
   const video = alice.locator(".message", { hasText: `clip-${id}` }).locator("video");
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThan(1);
   await video.evaluate(async (v: HTMLVideoElement) => {
