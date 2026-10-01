@@ -343,4 +343,25 @@ describe("P5-S04 restart spread and server busy", () => {
     peer.close();
     expect(clock.setTimeout.mock.lastCall?.[1]).toBe(2000);
   });
+
+  it("does not let a wake signal cut SERVER_BUSY's wait short, but still kicks a later backoff", async () => {
+    const peer = transportHarness();
+    const clock = fakeClock();
+    client({ clock, random: () => 0 });
+    peer.authenticate();
+    peer.close();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(peer.transport.connect).toHaveBeenCalledTimes(2);
+    peer.frame("error", { code: "SERVER_BUSY", message: "busy", retry_after_ms: 3500 });
+    peer.close();
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(3499);
+    expect(peer.transport.connect).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(peer.transport.connect).toHaveBeenCalledTimes(3);
+    // An ordinary backoff after the refusal keeps the at-once wake redial.
+    peer.close();
+    window.dispatchEvent(new Event("online"));
+    expect(peer.transport.connect).toHaveBeenCalledTimes(4);
+  });
 });

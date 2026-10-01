@@ -268,6 +268,8 @@ export function createWsClient({
   let restartOffsetMs = 0;
   // P5-S04: a SERVER_BUSY refusal's retry_after_ms, for the close that follows.
   let busyRetryAfterMs: number | undefined;
+  // P5-S04: the pending redial waits out that hint. Consumed by the next redial.
+  let busyHold = false;
 
   // The transport's reports, for the lifetime of this client. Each one is a
   // thin forwarder into the app-side logic that already handled the matching
@@ -407,9 +409,10 @@ export function createWsClient({
     }
     if (state !== "reconnecting" || reconnectTimer === null) return;
     if (intentionalClose || certMismatchBlock || !config) return;
-    // P5-S04: a restart's spread is the server pacing its herd, not a
-    // network blip; the network coming back does not cut it short.
-    if (restartRedialAt !== null) return;
+    // P5-S04: a restart's spread or a SERVER_BUSY hint is the server pacing
+    // its herd, not a network blip; the network coming back does not cut it
+    // short.
+    if (restartRedialAt !== null || busyHold) return;
     const now = Date.now();
     if (now - lastWakeKickAt < WAKE_KICK_FLOOR_MS) return;
     lastWakeKickAt = now;
@@ -488,6 +491,7 @@ export function createWsClient({
     // can race, and a second timer would redial twice.
     if (reconnectTimer !== null) return;
     const hint = retryAfterMs ?? busyRetryAfterMs;
+    busyHold = busyRetryAfterMs !== undefined;
     busyRetryAfterMs = undefined;
     // A drop later than announced still waits this client's own offset, so a
     // late drop does not re-synchronise the herd.
@@ -509,6 +513,7 @@ export function createWsClient({
   function redial(): void {
     reconnectTimer = null;
     restartRedialAt = null;
+    busyHold = false;
     reconnectAttempt++;
     // U4: the process may have been suspended while this timer was pending
     // (a wake often outlives the backoff window), or a previous wake dial
@@ -881,6 +886,7 @@ export function createWsClient({
     pendingWake = false;
     restartRedialAt = null;
     busyRetryAfterMs = undefined;
+    busyHold = false;
     cancelReconnect();
     stopHeartbeat();
     stopLiveness();
