@@ -423,16 +423,32 @@ function isStoredImage(value: unknown): value is StoredImage {
   );
 }
 
-/** Read a cached image from IndexedDB by its scoped key, marking it read. */
+/** How stale an entry's read time gets before a read refreshes it. The
+ *  refresh rewrites the whole record, Blob included, so the eviction order
+ *  is only approximately least recently read. */
+const IDB_TOUCH_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Refresh an entry's read time, unless it went away since it was read. */
+function idbTouch(db: IDBDatabase, key: string): void {
+  const store = db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE);
+  const req = store.get(key);
+  // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
+  req.onsuccess = () => {
+    const entry: unknown = req.result;
+    if (isStoredImage(entry)) store.put({ ...entry, used: Date.now() }, key);
+  };
+}
+
+/** Read a cached image from IndexedDB by its scoped key, marking it read
+ *  when its read time is stale. */
 async function idbGet(key: string): Promise<Blob | null> {
   const db = await openCacheDb();
   if (db === null) return null;
   return new Promise((resolve) => {
     try {
-      const tx = db.transaction(IDB_STORE, "readwrite");
+      const tx = db.transaction(IDB_STORE, "readonly");
       closeDbAfterTransaction(tx, db);
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.get(key);
+      const req = tx.objectStore(IDB_STORE).get(key);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => {
         const entry: unknown = req.result;
@@ -440,7 +456,13 @@ async function idbGet(key: string): Promise<Blob | null> {
           resolve(null);
           return;
         }
-        store.put({ ...entry, used: Date.now() }, key);
+        if (Date.now() - entry.used >= IDB_TOUCH_AFTER_MS) {
+          try {
+            idbTouch(db, key);
+          } catch {
+            // The database closed first — the read time stays stale
+          }
+        }
         resolve(entry.blob);
       };
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
@@ -864,6 +886,7 @@ function buildPlayButton(
       player.hidden = false;
       player.controls = true;
       player.src = objectUrl;
+      if (!wrap.isConnected) return;
       void player.play().catch((err: unknown) => {
         // Playback refused (an autoplay policy): the controls are there to press.
         log.debug("Media playback refused", { error: String(err) });

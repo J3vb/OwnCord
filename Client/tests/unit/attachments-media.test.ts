@@ -74,6 +74,7 @@ beforeEach(() => {
   HTMLMediaElement.prototype.play = playMock;
   clearAttachmentCaches();
   setServerHost("myserver.local:8443");
+  document.body.innerHTML = "";
 });
 
 describe("isVideoMime / isAudioMime", () => {
@@ -130,7 +131,9 @@ describe("renderAttachment — video", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
     });
 
-    const el = renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" }));
+    const el = document.body.appendChild(
+      renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" })),
+    );
     await new Promise((r) => setTimeout(r, 0));
     expect(fetchMock).not.toHaveBeenCalled();
 
@@ -288,7 +291,9 @@ describe("renderAttachment — audio", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const el = renderAttachment(att({ mime: "audio/wav", filename: "sound.wav" }));
+    const el = document.body.appendChild(
+      renderAttachment(att({ mime: "audio/wav", filename: "sound.wav" })),
+    );
     const audio = el.querySelector("audio") as HTMLAudioElement;
     pressPlay(el);
 
@@ -298,6 +303,32 @@ describe("renderAttachment — audio", () => {
     expect(audio.hidden).toBe(false);
     expect(audio.controls).toBe(true);
     expect(playMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start a player whose row left the document while downloading", async () => {
+    let respond!: (value: unknown) => void;
+    fetchMock.mockReturnValue(new Promise((resolve) => (respond = resolve)));
+
+    const el = document.body.appendChild(
+      renderAttachment(att({ mime: "audio/wav", filename: "sound.wav" })),
+    );
+    const audio = el.querySelector("audio") as HTMLAudioElement;
+    pressPlay(el);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    el.remove();
+    respond({
+      ok: true,
+      headers: { get: () => "audio/wav" },
+      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+    });
+
+    await vi.waitFor(() => {
+      expect(audio.src).toContain("blob:mock-1");
+    });
+    expect(audio.hidden).toBe(false);
+    expect(audio.controls).toBe(true);
+    expect(playMock).not.toHaveBeenCalled();
   });
 });
 

@@ -623,15 +623,28 @@ describe("server image caches (DP-16)", () => {
     idbData.set(key(1), { blob: new Blob(["a"]), bytes: half, used: 1 });
     idbData.set(key(2), { blob: new Blob(["b"]), bytes: half, used: 2 });
 
-    // A read from disk (memory is empty) refreshes entry 1's place…
+    // A read from disk (memory is empty) refreshes entry 1's stale place…
     await expect(fetchImageAsObjectUrl(url(1))).resolves.toMatch(/^blob:/);
     expect(fetchMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(putSpy).toHaveBeenCalledWith(expect.anything(), key(1)));
 
     // …so the write that crosses the budget drops entry 2.
     fetchMock.mockResolvedValue(imageResponse());
     await fetchImageAsObjectUrl(url(3));
 
     await vi.waitFor(() => expect([...idbData.keys()].toSorted()).toEqual([key(1), key(3)]));
+  });
+
+  it("reads a recently read entry without rewriting its Blob", async () => {
+    const entry = { blob: new Blob(["a"]), bytes: 1, used: Date.now() };
+    idbData.set(key(1), entry);
+
+    await expect(fetchImageAsObjectUrl(url(1))).resolves.toMatch(/^blob:/);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(putSpy).not.toHaveBeenCalled();
+    expect(idbData.get(key(1))).toBe(entry);
   });
 
   it("treats a pre-blob data: URI entry as a miss and drops it", async () => {
