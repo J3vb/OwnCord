@@ -150,7 +150,7 @@ export class DeviceManager {
     // a null-deref that surfaces as a misleading "No audio input device
     // available" error after the user already left voice (v096).
     const room = this.room;
-    if (room === null) return;
+    if (room === null || room.state !== "connected") return;
     log.info("Device change detected");
 
     try {

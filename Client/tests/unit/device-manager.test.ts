@@ -100,6 +100,7 @@ describe("DeviceManager", () => {
     mockVoiceState.pttGated = false;
     dm = new DeviceManager();
     mockRoom = {
+      state: "connected",
       localParticipant: {
         setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
       },
@@ -754,6 +755,7 @@ describe("DeviceManager", () => {
       // A system-driven reconnect (LiveKit Disconnected -> syncModuleRooms)
       // swaps in a fresh Room while enumeration is still in flight.
       const newRoom = {
+        state: "connected",
         localParticipant: { setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined) },
         switchActiveDevice: vi.fn().mockResolvedValue(undefined),
       } as any;
@@ -931,6 +933,24 @@ describe("DeviceManager", () => {
       ]);
     });
 
+    it("a device change on a room that is not connected yet switches nothing and raises no error", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      prefs.set("audioOutputDevice", "headset");
+      await fireDeviceChange();
+      const onError = vi.fn();
+      dm.setOnError(onError);
+      mockRoom.state = "connecting";
+      mockRoom.switchActiveDevice.mockClear();
+      mockRoom.switchActiveDevice.mockRejectedValue(new Error("native room is not connected"));
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      await fireDeviceChange();
+
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
     it("the room swapped mid-await: no switch is applied to the old room", async () => {
       prefs.set("audioInputDevice", "headset-mic");
       await fireDeviceChange();
@@ -949,6 +969,7 @@ describe("DeviceManager", () => {
       await vi.advanceTimersByTimeAsync(500);
 
       const newRoom = {
+        state: "connected",
         localParticipant: { setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined) },
         switchActiveDevice: vi.fn().mockResolvedValue(undefined),
       } as any;
