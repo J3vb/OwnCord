@@ -282,6 +282,14 @@ const CHECK_HYGIENE = [
   // job instead of a new required check.
   step("node", ["--test", "scripts/check-release-environment.test.mjs"], "."),
   step("node", ["scripts/check-release-environment.mjs"], "."),
+  // The Linux desktop-artifact smoke drives a real native voice join on a
+  // runner with no sound card. If it defaults the sound server's source to a
+  // `<sink>.monitor`, the native capture filters it out (is_monitor,
+  // Client/src-tauri/src/native_voice/capture.rs), the app joins listen-only,
+  // and the journey's mute assertion can never pass. Node checking workflow
+  // Node, run here so it rides Repository Hygiene without a new required check.
+  step("node", ["--test", "scripts/check-artifact-smoke-audio.test.mjs"], "."),
+  step("node", ["scripts/check-artifact-smoke-audio.mjs"], "."),
   // OC-0448. Execute the release verification/promotion shell with a fake
   // registry and assert that no release tag moves before verification passes.
   step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
