@@ -10,6 +10,7 @@
 
 import type { ConnectionState, WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
+import { getActivePresenceSender } from "./presence";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { serverErrorText } from "./api";
@@ -325,6 +326,12 @@ export function wireDispatcher(
       // code-specific branch and never consumes the frame -> capacity
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
+      // A timeout refuses a custom status without writing or broadcasting
+      // anything, so the PresenceSender's optimistic apply would leave the
+      // user seeing and saving a status nobody else has. This is the one
+      // writer for server events, so the rollback (a store write) lives here;
+      // a no-op for any frame the sender did not put on the wire.
+      if (payload.code === "TIMED_OUT") getActivePresenceSender()?.rollbackTimedOut(id);
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
       if (handleMessagingError(payload, id)) return;

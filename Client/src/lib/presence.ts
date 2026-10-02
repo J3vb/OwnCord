@@ -21,9 +21,15 @@
 import type { WsClient } from "./ws";
 import type { RateLimiter } from "./rate-limiter";
 import type { UserStatus } from "./types";
-import { updatePresence } from "@stores/members.store";
-import { authStore } from "@stores/auth.store";
-import { loadUserStatus } from "./userStatus";
+import { updatePresence, membersStore } from "@stores/members.store";
+import { authStore, updateUser } from "@stores/auth.store";
+import {
+  loadUserStatus,
+  loadUserStatusOrigin,
+  saveCustomStatus,
+  saveUserStatus,
+  type StatusOrigin,
+} from "./userStatus";
 import { ServerMessageType as S } from "./protocolTypes";
 
 export interface PresenceSender {
@@ -34,6 +40,15 @@ export interface PresenceSender {
    * explicit custom-status commit wants.
    */
   send(status: UserStatus, customStatus?: string): void;
+  /**
+   * A TIMED_OUT refusal of the frame with this envelope id: put the status
+   * that was in effect before that frame's optimistic apply back, in the
+   * members store and in the saved prefs. Called by the dispatcher's error
+   * chain (the one writer for server events), never by this module's own
+   * `ws.on` — a presence sender may read store state there, not write it.
+   * A no-op when the id is not the frame this sender last put on the wire.
+   */
+  rollbackTimedOut(id: string | undefined): void;
   /** Cancel any pending retry. Call on teardown of the owning session. */
   destroy(): void;
 }
@@ -70,6 +85,41 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
   // sender's presence_update — never another producer's rate limit.
   let lastSentId: string | null = null;
   let lastSentCustom: string | undefined;
+  // The status/text in effect just before the optimistic apply of a change,
+  // so a TIMED_OUT reply can put it back. The server refuses a timed-out custom
+  // status without writing or broadcasting anything (service/channel.go's
+  // requireNotTimedOut), so leaving the optimistic value in place shows the user
+  // a status nobody else has. `pendingBaseline` belongs to the change(s) still
+  // queued behind the limiter: captured once, by the first apply that really
+  // changes the store, so a later edit or a coalescing retry re-entering with the
+  // value already applied never replaces it with a value the server has not
+  // accepted. `sentBaseline` is the one the frame on the wire carries.
+  type Baseline = {
+    readonly userId: number;
+    readonly status: UserStatus;
+    readonly origin: StatusOrigin;
+    readonly custom: string | null;
+  };
+  let pendingBaseline: Baseline | null = null;
+  let sentBaseline: Baseline | null = null;
+
+  /** Put a baseline back — both the store other members are rendered from and
+   *  the prefs the picker and auto-idle read. `customOnly` leaves the status
+   *  the user has since picked alone. Defined outside the ws.on callback below
+   *  so its store writes are not lexically inside a socket handler
+   *  (local/no-store-write-in-ws-on). */
+  function restoreBaseline(b: Baseline, customOnly: boolean): void {
+    const status = customOnly ? loadUserStatus() : b.status;
+    const origin = customOnly ? loadUserStatusOrigin() : b.origin;
+    if (b.userId !== 0) {
+      updatePresence(b.userId, status, b.custom);
+      // authStore.user is the picker's seed (serverCustomStatus) on a remount;
+      // an already-mounted picker re-seeds from the members store write above.
+      updateUser({ status, custom_status: b.custom });
+    }
+    saveUserStatus(status, origin);
+    saveCustomStatus(b.custom ?? "");
+  }
 
   /** Arm (or replace) the single coalescing retry the window can have. */
   function armRetry(delayMs: number, custom: string | undefined): void {
@@ -89,6 +139,20 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     const effectiveCustom =
       customStatus !== undefined ? customStatus : retry !== null ? pendingCustom : undefined;
     const userId = authStore.getState().user?.id ?? 0;
+    const existing = userId !== 0 ? membersStore.getState().members.get(userId) : undefined;
+    if (
+      pendingBaseline === null &&
+      existing !== undefined &&
+      (existing.status !== status ||
+        (effectiveCustom !== undefined && (existing.customStatus ?? null) !== effectiveCustom))
+    ) {
+      pendingBaseline = {
+        userId,
+        status: existing.status,
+        origin: loadUserStatusOrigin(),
+        custom: existing.customStatus ?? null,
+      };
+    }
     if (userId !== 0) {
       updatePresence(userId, status, effectiveCustom);
     }
@@ -97,6 +161,8 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       retry = null;
     }
     if (limiter.tryConsume()) {
+      sentBaseline = pendingBaseline;
+      pendingBaseline = null;
       pendingCustom = undefined;
       lastSentCustom = effectiveCustom;
       lastSentId =
@@ -130,8 +196,37 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     // status — do not clobber it, and do not double-send.
     if (retry !== null) return;
     if (id === undefined || id !== lastSentId) return; // not our frame
+    pendingBaseline = sentBaseline;
     armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, lastSentCustom);
   });
+
+  /**
+   * The dispatcher's TIMED_OUT branch for this sender. A timeout refuses a
+   * non-empty custom_status without writing or broadcasting anything
+   * (service/channel.go's requireNotTimedOut), so the optimistic apply in
+   * send() would otherwise leave the user seeing and saving a status nobody
+   * else has. A no-op unless the id is the frame this sender last put on the
+   * wire.
+   */
+  function rollbackTimedOut(id: string | undefined): void {
+    if (id === undefined || id !== lastSentId) return;
+    lastSentId = null;
+    const baseline = sentBaseline;
+    sentBaseline = null;
+    if (baseline === null) return;
+    if (retry === null) {
+      restoreBaseline(baseline, false);
+      return;
+    }
+    // A newer change is queued behind the limiter and is the user's current
+    // intent, so this refusal must not roll back over the status they picked.
+    // The value this frame applied was never accepted, though: the queued
+    // frame inherits this frame's baseline, and unless it carries a custom
+    // status of its own the refused text goes now. TIMED_OUT never arms a
+    // retry, so no loop.
+    pendingBaseline = baseline;
+    if (pendingCustom === undefined) restoreBaseline(baseline, true);
+  }
 
   function destroy(): void {
     if (retry !== null) {
@@ -142,7 +237,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     unsubError();
   }
 
-  return { send, destroy };
+  return { send, rollbackTimedOut, destroy };
 }
 
 // ---------------------------------------------------------------------------

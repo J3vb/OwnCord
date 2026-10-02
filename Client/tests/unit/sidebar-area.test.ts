@@ -331,6 +331,7 @@ function defaultOpts(): SidebarAreaOptions {
     } as unknown as SidebarAreaOptions["limiters"],
     presenceSender: {
       send: vi.fn(),
+      rollbackTimedOut: vi.fn(),
       destroy: vi.fn(),
     },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
