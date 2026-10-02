@@ -270,6 +270,59 @@ describe("the ringback", () => {
     }
   });
 
+  // P3-02: DND is re-checked while the ring is in flight, so a caller who
+  // switches it on mid-ring is silenced and hears the ring again when they
+  // switch it off.
+  it("follows a DND toggle made while the outgoing ring is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      frequencies.length = 0;
+
+      testPrefs.set("userStatus", "dnd");
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "userStatus" } }),
+      );
+      vi.advanceTimersByTime(6_000);
+      expect(frequencies).not.toContain(440);
+
+      testPrefs.set("userStatus", "online");
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "userStatus" } }),
+      );
+      expect(frequencies).toContain(440);
+    } finally {
+      stopRingback();
+      vi.useRealTimers();
+    }
+  });
+
+  // The same axis as the call-sound toggle (D2(b)): muting or unmuting call
+  // sounds mid-ring takes effect instead of being read only at start.
+  it("follows a call-sound toggle made while the outgoing ring is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      frequencies.length = 0;
+
+      testPrefs.set("callSounds", false);
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "callSounds" } }),
+      );
+      vi.advanceTimersByTime(6_000);
+      expect(frequencies).not.toContain(440);
+
+      testPrefs.set("callSounds", true);
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "callSounds" } }),
+      );
+      expect(frequencies).toContain(440);
+    } finally {
+      stopRingback();
+      vi.useRealTimers();
+    }
+  });
+
   // A caller who hangs up (or is answered) during the incoming ring must not
   // have a ringback come back when that incoming call ends.
   it("does not resume after stopRingback", () => {

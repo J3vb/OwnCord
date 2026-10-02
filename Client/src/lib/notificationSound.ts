@@ -6,8 +6,9 @@
  */
 
 import { loadPref } from "./preferences";
-import { loadUserStatus } from "./userStatus";
+import { USER_STATUS_PREF_KEY, loadUserStatus } from "./userStatus";
 import { createLogger } from "./logger";
+import { Disposable } from "./disposable";
 
 const log = createLogger("notifications");
 
@@ -67,6 +68,9 @@ let ringbackInterval: ReturnType<typeof setInterval> | null = null;
 /** The outgoing call still wants a ringback. Kept across a pre-emption so the
  *  sound can resume when the incoming chime ends. */
 let ringbackWanted = false;
+/** Owns the DND / call-sound listeners that re-evaluate the ringback while the
+ *  outgoing call wants it. Null while nothing is ringing. */
+let ringbackWatch: Disposable | null = null;
 
 /** Stop the ringback sound without forgetting that the outgoing call still
  *  wants it (used while an incoming ring pre-empts it). */
@@ -74,6 +78,27 @@ function silenceRingback(): void {
   if (ringbackInterval === null) return;
   clearInterval(ringbackInterval);
   ringbackInterval = null;
+}
+
+/** Watch the live inputs to the ringback gate (DND and the call-sound toggle)
+ *  so a mid-ring change takes effect instead of leaving the ring silent. */
+function watchRingbackInputs(): void {
+  if (ringbackWatch !== null) return;
+  const owner = new Disposable();
+  ringbackWatch = owner;
+  window.addEventListener(
+    "owncord:pref-change",
+    (e: Event) => {
+      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+      if (key === USER_STATUS_PREF_KEY || key === "callSounds") syncRingback();
+    },
+    { signal: owner.signal },
+  );
+}
+
+function unwatchRingbackInputs(): void {
+  ringbackWatch?.destroy();
+  ringbackWatch = null;
 }
 
 /** (Re)evaluate whether the ringback should be sounding right now. */
@@ -95,6 +120,7 @@ function syncRingback(): void {
 /** Start the repeating outgoing-call ringback. Idempotent. */
 export function startRingback(): void {
   ringbackWanted = true;
+  watchRingbackInputs();
   syncRingback();
 }
 
@@ -103,6 +129,7 @@ export function startRingback(): void {
  *  Idempotent. */
 export function stopRingback(): void {
   ringbackWanted = false;
+  unwatchRingbackInputs();
   silenceRingback();
 }
 
