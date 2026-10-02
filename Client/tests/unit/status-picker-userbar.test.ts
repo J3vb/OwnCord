@@ -1,6 +1,7 @@
 import { cascadedDeclaration, hasRule, keyword } from "../helpers/app-css";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
+import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
@@ -325,6 +326,51 @@ describe("StatusPicker wired to UserBar", () => {
       "[data-testid='custom-status-input']",
     ) as HTMLInputElement;
     expect(input.value).toBe("Brewing coffee");
+  });
+
+  // A TIMED_OUT refusal rolls the optimistic custom status back in the members
+  // store only (authStore never held it), so the mounted picker must follow that
+  // store or it keeps the refused text and ignores a retype of it.
+  it("re-seeds the custom-status input when a TIMED_OUT refusal rolls the status back", () => {
+    setAuthState({ username: "alice", custom_status: "" }, true);
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice",
+            displayName: null,
+            avatar: null,
+            role: "member",
+            status: "online",
+            customStatus: undefined,
+          } as never,
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+    const ws = createMockWs("connected");
+    (ws.send as ReturnType<typeof vi.fn>).mockReturnValue("frame-1");
+    const opts = userBarOptsWithPresence(ws);
+    comp = createUserBar(opts);
+    comp.mount(container);
+
+    (container.querySelector(".status-picker-dot") as HTMLElement).click();
+    const input = container.querySelector(
+      "[data-testid='custom-status-input']",
+    ) as HTMLInputElement;
+    input.value = "sneaky";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    membersStore.flush();
+    expect(input.value).toBe("sneaky");
+
+    opts.presenceSender.rollbackTimedOut("frame-1");
+    membersStore.flush();
+
+    expect(input.value).toBe("");
+    opts.presenceSender.destroy();
+    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   });
 
   it("status picker is disabled without a ws send path even when connected", () => {

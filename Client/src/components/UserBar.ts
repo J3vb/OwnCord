@@ -8,6 +8,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
+import { membersStore } from "@stores/members.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import type { UserStatus } from "@lib/types";
@@ -302,6 +303,19 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         updateFromState();
         statusPicker?.setCustomStatus(serverCustomStatus() ?? "");
       },
+    );
+
+    // A presence rollback (a TIMED_OUT refusal) puts the previous custom status
+    // back in the members store, which can leave authStore unchanged and so
+    // never fire the subscription above — the picker would keep the refused
+    // text and ignore a retype of it. Follow our own member entry as well.
+    disposable.onStoreChange(
+      membersStore,
+      (s) => {
+        const id = authStore.getState().user?.id;
+        return id === undefined ? "" : (s.members.get(id)?.customStatus ?? "");
+      },
+      (text) => statusPicker?.setCustomStatus(text),
     );
 
     container.appendChild(root);

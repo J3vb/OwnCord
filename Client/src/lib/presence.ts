@@ -113,9 +113,8 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     const origin = customOnly ? loadUserStatusOrigin() : b.origin;
     if (b.userId !== 0) {
       updatePresence(b.userId, status, b.custom);
-      // authStore.user is the picker's authoritative seed (serverCustomStatus);
-      // nudging it re-seeds an already-mounted picker through its own
-      // subscription.
+      // authStore.user is the picker's seed (serverCustomStatus) on a remount;
+      // an already-mounted picker re-seeds from the members store write above.
       updateUser({ status, custom_status: b.custom });
     }
     saveUserStatus(status, origin);
