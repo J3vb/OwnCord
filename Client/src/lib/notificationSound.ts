@@ -30,6 +30,9 @@ export function cleanupNotificationAudio(): void {
 // unlike a message chime, which fires once. It is its own rising pattern, not
 // the message blip, so a call is told apart from a message by ear (DP-24).
 let ringInterval: ReturnType<typeof setInterval> | null = null;
+/** The oscillators of the chime burst currently sounding, so stopping the
+ *  chime cuts the in-flight notes instead of leaving them under the ringback. */
+let ringtoneOscs: OscillatorNode[] = [];
 
 /** Start the repeating incoming-call chime. Idempotent. */
 export function startRingChime(): void {
@@ -51,11 +54,18 @@ export function startRingChime(): void {
 
 /** Stop the repeating incoming-call chime. Idempotent. */
 export function stopRingChime(): void {
+  stopRingtoneBurst();
   if (ringInterval === null) return;
   clearInterval(ringInterval);
   ringInterval = null;
   // The incoming ring ended: an outgoing ring that was pre-empted resumes.
   syncRingback();
+}
+
+/** Cut the chime burst that is sounding right now, if any. */
+function stopRingtoneBurst(): void {
+  for (const osc of ringtoneOscs) osc.stop();
+  ringtoneOscs = [];
 }
 
 // The outgoing call's ringback: a soft low tone the caller hears while the
@@ -65,6 +75,9 @@ export function stopRingChime(): void {
 // ringback, but the outgoing call is still ringing, so the ringback resumes
 // when that chime ends (unless the outgoing ring ended meanwhile).
 let ringbackInterval: ReturnType<typeof setInterval> | null = null;
+/** The oscillator of the ringback burst currently sounding, so silencing the
+ *  ringback cuts the in-flight tone instead of leaving it under the chime. */
+let ringbackOsc: OscillatorNode | null = null;
 /** The outgoing call still wants a ringback. Kept across a pre-emption so the
  *  sound can resume when the incoming chime ends. */
 let ringbackWanted = false;
@@ -75,6 +88,10 @@ let ringbackWatch: Disposable | null = null;
 /** Stop the ringback sound without forgetting that the outgoing call still
  *  wants it (used while an incoming ring pre-empts it). */
 function silenceRingback(): void {
+  if (ringbackOsc !== null) {
+    ringbackOsc.stop();
+    ringbackOsc = null;
+  }
   if (ringbackInterval === null) return;
   clearInterval(ringbackInterval);
   ringbackInterval = null;
@@ -143,6 +160,7 @@ function audioContext(): AudioContext {
 function playRingtone(): void {
   try {
     const ctx = audioContext();
+    const oscs: OscillatorNode[] = [];
     for (const [hz, at] of [
       [660, 0],
       [880, 0.18],
@@ -157,7 +175,9 @@ function playRingtone(): void {
       gain.gain.exponentialRampToValueAtTime(0.01, start + 0.16);
       osc.start(start);
       osc.stop(start + 0.16);
+      oscs.push(osc);
     }
+    ringtoneOscs = oscs;
   } catch (err) {
     log.debug("Ringtone not available", err);
   }
@@ -179,6 +199,7 @@ function playRingback(): void {
     gain.gain.exponentialRampToValueAtTime(0.01, start + 0.5);
     osc.start(start);
     osc.stop(start + 0.5);
+    ringbackOsc = osc;
   } catch (err) {
     log.debug("Ringback not available", err);
   }

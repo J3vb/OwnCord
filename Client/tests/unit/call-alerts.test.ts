@@ -32,16 +32,33 @@ const { setChannelMutesHost } = await import("../../src/lib/channel-mutes");
 
 /** Every frequency the app's audio graph was asked to play, in order. */
 const frequencies: number[] = [];
+/** Every oscillator created, so a test can check that a burst in flight was
+ *  cut (a `stop()` with no time), not merely left to finish its envelope. */
+const oscillators: Array<{
+  readonly hz: number;
+  readonly stop: ReturnType<typeof vi.fn>;
+}> = [];
 class MockAudioContext {
   readonly currentTime = 0;
   readonly destination = {};
   createOscillator() {
-    return {
+    let hz = 0;
+    const osc = {
       connect: vi.fn(),
-      frequency: { setValueAtTime: (hz: number) => frequencies.push(hz) },
+      frequency: {
+        setValueAtTime: (value: number) => {
+          hz = value;
+          frequencies.push(value);
+        },
+      },
       start: vi.fn(),
       stop: vi.fn(),
+      get hz() {
+        return hz;
+      },
     };
+    oscillators.push(osc);
+    return osc;
   }
   createGain() {
     return {
@@ -60,6 +77,7 @@ const ring: RingState = { channelId: 50, fromUserId: 10, fromUsername: "Otto" };
 beforeEach(() => {
   testPrefs.clear();
   frequencies.length = 0;
+  oscillators.length = 0;
   showCall.mockReset().mockResolvedValue(undefined);
   requestAttention.mockReset().mockResolvedValue(undefined);
   showToast.mockReset();
@@ -244,6 +262,33 @@ describe("the ringback", () => {
       stopRingback();
       stopRingChime();
       vi.useRealTimers();
+    }
+  });
+
+  // P3-02 acceptance: the two tones never overlap on one client. Clearing the
+  // repeating interval is not enough: the burst already in flight keeps
+  // sounding for its full envelope unless it is stopped.
+  it("cuts the ringback burst in flight when an incoming chime pre-empts it", () => {
+    startRingback();
+    const burst = oscillators.find((o) => o.hz === 440);
+    expect(burst).toBeDefined();
+    burst!.stop.mockClear();
+
+    startRingChime();
+
+    expect(burst!.stop.mock.calls.some((call) => call.length === 0)).toBe(true);
+  });
+
+  it("cuts the chime burst in flight when the incoming ring ends", () => {
+    startRingChime();
+    const burst = oscillators.filter((o) => o.hz === 660 || o.hz === 880);
+    expect(burst.length).toBeGreaterThan(0);
+    for (const o of burst) o.stop.mockClear();
+
+    stopRingChime();
+
+    for (const o of burst) {
+      expect(o.stop.mock.calls.some((call) => call.length === 0)).toBe(true);
     }
   });
 
