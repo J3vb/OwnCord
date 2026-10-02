@@ -15,7 +15,8 @@ export default defineConfig({
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
   grepInvert: quarantineGrepInvert(),
-  timeout: 120_000,
+  // Absorbs a slow cold start: the launch's own budget can spend up to 90 s.
+  timeout: 180_000,
   expect: {
     timeout: 15_000,
   },
