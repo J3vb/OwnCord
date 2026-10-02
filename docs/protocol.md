@@ -98,7 +98,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                                                               |
+| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                                              |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
@@ -958,6 +958,30 @@ Same access check as `channel_focus`: `READ_MESSAGES` on the channel, or DM
 participation. A denied channel answers `FORBIDDEN`; a non-positive
 `channel_id` answers `BAD_REQUEST`. There is no response on success — the client
 clears its local badge optimistically and the next `ready` confirms.
+
+### mention_count (Server -> Client, direct)
+
+```json
+{ "type": "mention_count", "payload": { "channel_id": 5, "count": 3 } }
+```
+
+Tells one reader that their `read_states.mention_count` in `channel_id` changed,
+carrying the new total. `count` is the reader's total after the bump (the server
+pushes the total, not a delta), so a lost or duplicated frame still converges.
+
+This is the live path for the sidebar and taskbar/tray unread badge when a
+mention lands in a channel the reader is **not** viewing: `chat_message` is
+published only to the channel's topic subscribers (the focused channel), so an
+unfocused reader never receives it. After the mention worker's batched write
+commits, it pushes one `mention_count` frame per reader whose read-state guard
+actually admitted the bump — a reader who had already read the message, or whose
+message was removed before the flush, is not pushed. Targeted, unsequenced and
+never replayed; a disconnected reader recovers the authoritative total on their
+next `ready`.
+
+The client ignores the frame for the channel currently on screen (its own
+`chat_message` handles that badge) and for a DM-channel id (a DM's badge lives
+in the DM store and its mention bump rides the DM's `chat_message`).
 
 ---
 
@@ -2201,7 +2225,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (43 types)
+### Server -> Client (44 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |
@@ -2244,6 +2268,7 @@ tables below add per-type behavioral notes.
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
 | `mod_action`          | No       | Direct to the live target only                                          |
 | `appeal_status`       | No       | Direct to the appellant only                                            |
+| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |

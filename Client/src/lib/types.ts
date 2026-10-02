@@ -385,6 +385,18 @@ export interface AppealStatusPayload {
 }
 
 /**
+ * mention_count (DP-27): one reader's `read_states.mention_count` changed in a
+ * channel. Targeted, unsequenced and never replayed. `count` is the reader's
+ * total after the bump, so a client repaints the badge from it directly rather
+ * than incrementing. This is how a mention in a channel the user is not viewing
+ * reaches their sidebar/taskbar badge live.
+ */
+export interface MentionCountPayload {
+  readonly channel_id: number;
+  readonly count: number;
+}
+
+/**
  * mod_queue (B5-8/B5-10): a report or appeal queue changed, to MODERATE_MEMBERS
  * holders only, unsequenced and never replayed. Exactly one id is set; it is
  * an invalidation signal, never the report itself.
@@ -955,6 +967,7 @@ export type ServerMessage =
   | (WsEnvelope<MemberBanPayload> & { readonly type: "member_ban" })
   | (WsEnvelope<ModActionPayload> & { readonly type: "mod_action" })
   | (WsEnvelope<AppealStatusPayload> & { readonly type: "appeal_status" })
+  | (WsEnvelope<MentionCountPayload> & { readonly type: "mention_count" })
   | (WsEnvelope<ModQueuePayload> & { readonly type: "mod_queue" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })

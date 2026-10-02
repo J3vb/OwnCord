@@ -33,6 +33,7 @@ import {
   handleChannelCreate,
   handleChannelDelete,
   handleChannelUpdate,
+  handleMentionCount,
   handleEmojiUpdate,
   handleMemberBan,
   handleMemberJoin,
@@ -254,6 +255,10 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
 
   unsubs.push(ws.on(S.NSFW_ACK, handleNsfwAck));
+
+  // mention_count: a mention raised this user's badge in a channel they may not
+  // be viewing (DP-27).
+  unsubs.push(ws.on(S.MENTION_COUNT, handleMentionCount));
 
   // ── Members ───────────────────────────────────────────
 

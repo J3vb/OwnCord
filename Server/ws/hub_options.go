@@ -253,6 +253,12 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// applies the same live-connection rule instead of only the ready
 		// payload's presentableDMChannels doing so (OC-0304).
 		svc.DMs.SetLiveStatusLookup(h.LiveStatus)
+		// DP-27: a mention that raises a reader's badge in a channel they are
+		// not viewing never reaches them through the channel topic, so the
+		// mention worker pushes them a per-user mention_count frame instead.
+		// Installed here, before the composition root starts the worker, so
+		// StartMentionWorker captures it.
+		svc.Messages.SetMentionNotifier(h)
 	}
 
 	registerChatHandlers(reg, chatDeps)

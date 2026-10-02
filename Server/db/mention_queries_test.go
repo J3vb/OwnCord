@@ -636,7 +636,7 @@ func TestIncrementMentionCountsBatch_AppliesEveryEntry(t *testing.T) {
 		t.Fatalf("UpdateReadState: %v", err)
 	}
 
-	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+	if _, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: m1, UserIDs: []int64{2, 3}},
 		{MsgID: m2, UserIDs: []int64{2, 3}},
 	}); err != nil {
@@ -670,7 +670,7 @@ func TestIncrementMentionCountsBatch_SkipsRemovedMessages(t *testing.T) {
 	if err := database.DeleteMessage(ctx, deleted, 1, false); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
-	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+	if _, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: deleted, UserIDs: []int64{2}},
 	}); err != nil {
 		t.Fatalf("IncrementMentionCountsBatch(deleted): %v", err)
@@ -680,7 +680,7 @@ func TestIncrementMentionCountsBatch_SkipsRemovedMessages(t *testing.T) {
 	}
 
 	// A message id that does not exist (erased) is likewise not live.
-	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+	if _, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
 		{MsgID: 999999, UserIDs: []int64{3}},
 	}); err != nil {
 		t.Fatalf("IncrementMentionCountsBatch(missing): %v", err)
@@ -693,7 +693,71 @@ func TestIncrementMentionCountsBatch_SkipsRemovedMessages(t *testing.T) {
 func TestIncrementMentionCountsBatch_EmptyIsNoop(t *testing.T) {
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
-	if err := database.IncrementMentionCountsBatch(context.Background(), 1, nil); err != nil {
+	if _, err := database.IncrementMentionCountsBatch(context.Background(), 1, nil); err != nil {
 		t.Fatalf("IncrementMentionCountsBatch(nil): %v", err)
+	}
+}
+
+// TestIncrementMentionCountsBatch_ReturnsOnlyBumpedReaders locks the live-badge
+// signal: the batch returns exactly the users whose read-state guard admitted
+// the bump, with their new total, so the mention worker can push a per-user
+// frame only to readers that actually gained a badge. A reader whose read
+// state already covers the message, and a removed message's recipients, are
+// both omitted — pushing them would resurrect a badge the read-state guard
+// deliberately dropped, or a phantom badge on a deleted message.
+func TestIncrementMentionCountsBatch_ReturnsOnlyBumpedReaders(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	m1, err := database.CreateMessage(ctx, 1, 1, "first @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(m1): %v", err)
+	}
+	m2, err := database.CreateMessage(ctx, 1, 1, "second @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(m2): %v", err)
+	}
+	// Bob has already read m1, so m1's bump is skipped for him.
+	if err := database.UpdateReadState(ctx, 2, 1, m1); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	got, err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+		{MsgID: m1, UserIDs: []int64{2, 3}},
+		{MsgID: m2, UserIDs: []int64{2, 3}},
+	})
+	if err != nil {
+		t.Fatalf("IncrementMentionCountsBatch: %v", err)
+	}
+
+	// Bob gains only m2 (m1 was read); Carol gains both. Each carries the
+	// total after the bump.
+	want := map[int64]int64{2: 1, 3: 2}
+	if len(got) != len(want) {
+		t.Fatalf("bumped readers = %v, want %v", got, want)
+	}
+	for uid, count := range want {
+		if got[uid] != count {
+			t.Errorf("bumped[%d] = %d, want %d", uid, got[uid], count)
+		}
+	}
+
+	// A removed message contributes nothing to the returned set.
+	deleted, err := database.CreateMessage(ctx, 1, 1, "deleted @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(deleted): %v", err)
+	}
+	if err := database.DeleteMessage(ctx, deleted, 1, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	got, err = database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+		{MsgID: deleted, UserIDs: []int64{2}},
+	})
+	if err != nil {
+		t.Fatalf("IncrementMentionCountsBatch(deleted): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("bumped readers for a deleted message = %v, want none", got)
 	}
 }

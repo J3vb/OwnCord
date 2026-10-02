@@ -10,6 +10,7 @@ import {
   removeChannel,
   addChannel,
   updateChannel,
+  setMentionCount,
   setNsfwAcknowledged,
 } from "../../stores/channels.store";
 import {
@@ -168,6 +169,29 @@ export function handleChannelUpdate(payload: Payload<"channel_update">): void {
 /** Another device of this account acknowledged or revoked a labelled channel (B5-7). */
 export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
   setNsfwAcknowledged(payload.channel_id, payload.acknowledged);
+}
+
+/**
+ * A mention raised this user's badge in a channel (DP-27). The server pushes
+ * the new total per user; the channel is typically one this client is not
+ * viewing, whose chat_message broadcast never arrives. The frame is the only
+ * way such a mention reaches the sidebar/taskbar badge live.
+ *
+ * Ignored for the active channel: a mention in the channel on screen is already
+ * handled by its own chat_message (and, when that window is detached from the
+ * live tail, counted there with the evenIfActive escape hatch). Applying the
+ * server total here would paint a red badge on the channel the user is reading —
+ * the badge the active-channel skip in noteChannelMessage exists to prevent.
+ * Ignored for a DM-channel id too: a DM's badge lives in dmStore and its
+ * mention bump rides the DM's own chat_message.
+ */
+export function handleMentionCount(payload: Payload<"mention_count">): void {
+  if (payload.channel_id === channelsStore.getState().activeChannelId) return;
+  const ch = channelsStore.getState().channels.get(payload.channel_id);
+  if (ch === undefined) return;
+  if (ch.type !== "dm") {
+    setMentionCount(payload.channel_id, payload.count);
+  }
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {

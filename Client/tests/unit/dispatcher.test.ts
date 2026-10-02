@@ -1020,6 +1020,28 @@ describe("WS Dispatcher", () => {
 
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
     });
+
+    // DP-27: a mention in a channel the user is NOT viewing never reaches this
+    // client as a chat_message (the server sends it to the channel topic only),
+    // so the server pushes the new total per user as mention_count. This is the
+    // taskbar/tray badge's live path.
+    it("repaints a non-viewed channel's badge from the server's mention_count frame", () => {
+      seedChannel();
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+
+      mock.dispatch("mention_count", { channel_id: 5, count: 3 });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(3);
+    });
+
+    it("ignores a mention_count frame for the channel on screen", () => {
+      seedChannel();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+
+      mock.dispatch("mention_count", { channel_id: 5, count: 3 });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
   });
 
   it("wires presence to members store", () => {
