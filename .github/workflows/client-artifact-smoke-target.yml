@@ -156,7 +156,12 @@ jobs:
       # The keyring backs the stored credential an update must preserve.
       # Linux voice runs in the native LiveKit backend, which captures and
       # plays through the sound server; a runner has no sound card, so a
-      # PulseAudio null sink (and its monitor as the source) stands in.
+      # PulseAudio null sink stands in. Its monitor alone is NOT a usable
+      # microphone: the native capture filters `<sink>.monitor` sources
+      # (is_monitor, Client/src-tauri/src/native_voice/capture.rs), so the app
+      # would join listen-only and its Mute control is inert there by design.
+      # Remap the monitor to a plain source and default to that, so the journey
+      # joins with a real, mutable mic.
       - name: Install the Linux WebDriver and audio stack
         if: runner.os == 'Linux'
         run: |
@@ -166,7 +171,8 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=smoke
           pactl set-default-sink smoke
-          pactl set-default-source smoke.monitor
+          pactl load-module module-remap-source master=smoke.monitor source_name=smoke_mic
+          pactl set-default-source smoke_mic
 
       - run: npm ci
       - run: npm run test:e2e:build-server
