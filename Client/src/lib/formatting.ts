@@ -7,6 +7,7 @@ import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { loadPref } from "@lib/preferences";
+import { getTimeFormat, refreshTimeFormat } from "@lib/timeFormat";
 import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../i18n/messageStatus";
 
@@ -56,11 +57,25 @@ const FULL_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
   month: "long",
   day: "numeric",
 });
-const CLOCK_TIME_FORMAT = new Intl.DateTimeFormat("en-US", {
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
-});
+
+// One clock formatter per preference. `getTimeFormat()` is a cached read, and
+// the 24h variant only exists once a user opts in.
+const CLOCK_TIME_FORMATS: Record<"12h" | "24h", Intl.DateTimeFormat> = {
+  "12h": new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }),
+  "24h": new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }),
+};
+
+function clockTimeFormat(): Intl.DateTimeFormat {
+  return CLOCK_TIME_FORMATS[getTimeFormat()];
+}
 
 export function formatTime(iso: string): string {
   const d = parseTimestamp(iso);
@@ -77,7 +92,7 @@ export function formatMessageTimestamp(iso: string): string {
   const date = parseTimestamp(iso);
   const now = new Date();
 
-  const timeStr = CLOCK_TIME_FORMAT.format(date);
+  const timeStr = clockTimeFormat().format(date);
 
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   // Built from the calendar date, not todayStart - 24h: a DST-transition day
@@ -113,7 +128,7 @@ export function formatDmRowTime(iso: string): string {
   const date = parseTimestamp(iso);
   const now = new Date();
   if (date >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
-    return CLOCK_TIME_FORMAT.format(date);
+    return clockTimeFormat().format(date);
   }
   return date.getFullYear() === now.getFullYear()
     ? SHORT_DATE_FORMAT.format(date)
@@ -170,6 +185,8 @@ let roleColorsEnabled = loadPref<boolean>("roleColors", true);
 window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
   if (e.detail.key === "roleColors") {
     roleColorsEnabled = loadPref<boolean>("roleColors", true);
+  } else if (e.detail.key === "timeFormat") {
+    refreshTimeFormat();
   }
 }) as EventListener);
 

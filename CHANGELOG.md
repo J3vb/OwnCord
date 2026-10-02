@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Desktop UI
 
+- **You can switch the clock between 12-hour and 24-hour.** Every timestamp was fixed to the 12-hour en-US format ("Today at 2:34 PM"). Settings › Appearance now has a **Time Format** choice; the default stays 12-hour, and the choice applies to message and system times, DM list times, search results, session and call times, and other date-and-time labels. It is stored on the device.
 - **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.
 
 ### Login & connection

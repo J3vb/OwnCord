@@ -1301,6 +1301,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // outside the window get fresh text when renderWindow builds them. Owned
     // by disposable.signal: destroy() releases the pending timer.
     atEachMidnight(disposable.signal, relabelRenderedTimes);
+
+    // Switching the 12h/24h clock preference relabels the rendered rows in
+    // place, the same way midnight does. Owned by disposable.signal, so the
+    // listener dies with the component.
+    window.addEventListener(
+      "owncord:pref-change",
+      ((e: CustomEvent<{ key: string }>) => {
+        if (e.detail.key === "timeFormat") relabelRenderedTimes();
+      }) as EventListener,
+      { signal: disposable.signal },
+    );
   }
 
   /**

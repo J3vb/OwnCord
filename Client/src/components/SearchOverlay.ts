@@ -14,6 +14,7 @@ import { channelsStore } from "@stores/channels.store";
 import { parseTimestamp, resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import { formatDate } from "../i18n/format";
 import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
@@ -96,9 +97,9 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     try {
       const d = parseTimestamp(ts);
       return (
-        d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+        formatDate(d, { month: "short", day: "numeric" }) +
         " " +
-        d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+        formatDate(d, { hour: "2-digit", minute: "2-digit" })
       );
     } catch {
       return ts;

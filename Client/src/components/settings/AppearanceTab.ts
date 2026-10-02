@@ -19,6 +19,7 @@ import {
   MIN_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
 } from "@lib/appearance";
+import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/timeFormat";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -144,6 +145,64 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   });
   appendChildren(compactRow, compactLabel, compactToggle);
   section.appendChild(compactRow);
+
+  // Time format (12-hour / 24-hour)
+  const timeFormatRow = createElement("div", { class: "setting-row" });
+  const timeFormatInfo = createElement("div", {});
+  appendChildren(
+    timeFormatInfo,
+    createElement("div", { class: "setting-label" }, t("appearance.timeFormat")),
+    createElement("div", { class: "setting-desc" }, t("appearance.timeFormat.desc")),
+  );
+  const timeFormatGroup = createElement("div", {
+    class: "level-options",
+    role: "radiogroup",
+    "aria-label": t("appearance.timeFormat"),
+    "data-testid": "time-format",
+  });
+  const timeFormatButtons = new Map<TimeFormat, HTMLButtonElement>();
+  const timeFormatLabels: Record<TimeFormat, string> = {
+    "12h": t("appearance.timeFormat.12h"),
+    "24h": t("appearance.timeFormat.24h"),
+  };
+  const paintTimeFormat = (): void => {
+    const current = getTimeFormat();
+    for (const [value, button] of timeFormatButtons) {
+      const on = value === current;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", String(on));
+    }
+  };
+  for (const value of ["12h", "24h"] as const) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `time-format-${value}`,
+        "data-value": value,
+      },
+      timeFormatLabels[value],
+    );
+    button.addEventListener(
+      "click",
+      () => {
+        saveTimeFormat(value);
+        paintTimeFormat();
+      },
+      { signal },
+    );
+    timeFormatButtons.set(value, button);
+    timeFormatGroup.appendChild(button);
+  }
+  paintTimeFormat();
+  setRovingTabindex(timeFormatGroup, "[role='radio']");
+  enableRovingNavigation(timeFormatGroup, "[role='radio']", signal);
+  appendChildren(timeFormatRow, timeFormatInfo, timeFormatGroup);
+  section.appendChild(timeFormatRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [
