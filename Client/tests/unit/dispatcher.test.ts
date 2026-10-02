@@ -44,6 +44,9 @@ import {
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
+import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
+import { createPresenceLimiter } from "../../src/lib/rate-limiter";
+import { loadCustomStatus, saveCustomStatus } from "../../src/lib/userStatus";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 
@@ -4136,6 +4139,52 @@ describe("WS Dispatcher", () => {
     mock.dispatch("error", { code: "INTERNAL", message: "db: sqlite busy" });
     expectConsole("error", /\[dispatcher\] Server error/);
     expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+  });
+
+  // A timeout refuses a custom status without writing or broadcasting
+  // anything, so the PresenceSender's optimistic apply would leave the user
+  // seeing and saving a status nobody else has. The dispatcher is the one
+  // writer for server events, so its error chain routes the rollback to the
+  // active sender.
+  it("rolls back the optimistic presence status on a TIMED_OUT refusal (PR #2067 follow-up)", () => {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    try {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "member" },
+      }));
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online",
+              customStatus: "old text",
+            } as never,
+          ],
+        ]),
+      }));
+      saveCustomStatus("old text");
+      saveCustomStatus("new text");
+      presenceSender.send("dnd", "new text");
+      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+
+      mock.dispatch("error", { code: "TIMED_OUT", message: "you are timed out" }, id);
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(membersStore.getState().members.get(1)?.status).toBe("online");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
+    }
   });
 
   it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {

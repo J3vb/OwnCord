@@ -90,6 +90,7 @@ and only when it changes something a contributor or fork holder must do
 ### Moderation
 
 - **Overturning an appeal now needs the authority the reversal itself needs.** A moderator could previously overturn any warning, timeout or ban with Moderate Members alone, even one a higher-ranked moderator or the owner had issued, and could clear a ban without Ban Members. Overturning now requires the decider to outrank the sanctioned user, and Ban Members for a ban — the same rule the direct lift and unban actions already apply.
+- **Setting a custom status while timed out no longer leaves you showing a status nobody else sees.** The app applied and saved the new text straight away, but a timeout refuses it and the server broadcasts nothing, so only you saw it until a reconnect. The previous status and text are now restored in the app, and the usual timeout notice appears.
 
 ### Messages
 

@@ -393,7 +393,11 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     // Stand in for the one PresenceSender MainPage.ts registers for the
     // session (via setActivePresenceSender) — the shared limiter token, the
     // coalescing retry, and the optimistic update all live inside it.
-    const fakeSender: PresenceSender = { send: vi.fn(), destroy: vi.fn() };
+    const fakeSender: PresenceSender = {
+      send: vi.fn(),
+      rollbackTimedOut: vi.fn(),
+      destroy: vi.fn(),
+    };
     setActivePresenceSender(fakeSender);
 
     emitTauriEvent("status-change", "dnd");
