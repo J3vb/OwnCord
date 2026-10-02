@@ -221,8 +221,8 @@ describe("API Client", () => {
     });
 
     it("treats the tunnel's bare 502 as a transport error, not a server refusal", async () => {
-      // The desktop proxy answers a refused (first-use or changed)
-      // certificate with an empty-body 502, so it carries no error code.
+      // A refused certificate now carries a TLS_CERT_UNVERIFIED JSON body (see
+      // the test below); only a code-less 502 stays a transport error.
       mockFetch.mockResolvedValue(brokenJsonErrorResponse(502, "Bad Gateway"));
       const err = await api.getMe().catch((e: unknown) => e);
       expect(err).toBeInstanceOf(TransportError);
