@@ -3787,7 +3787,7 @@ dependencies = [
 
 [[package]]
 name = "owncord-client"
-version = "2.0.1-beta.1"
+version = "2.1.0-beta.2"
 dependencies = [
  "base64 0.22.1",
  "cpal",
