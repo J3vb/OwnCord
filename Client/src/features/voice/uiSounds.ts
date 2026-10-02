@@ -74,6 +74,15 @@ export function startVoiceUiSounds(): () => void {
       prev = next;
     };
 
+    // Sign-out clears auth synchronously but only resets voiceStore (and
+    // notifies this subscriber) on the next microtask. A reset is a teardown,
+    // not a user edge: without this guard the cleared channel/deafen/mute
+    // flags read as leave/undeafen/mute over the logout screen.
+    if (!authStore.getState().isAuthenticated) {
+      finish();
+      return;
+    }
+
     // A deafen edge is its own sound and owns the notification: the mute that
     // a deafen implies (the keybind mutes too) must not also blip.
     const deafenChanged = next.localDeafened !== prev.localDeafened;

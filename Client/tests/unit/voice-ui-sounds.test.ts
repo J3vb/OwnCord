@@ -30,6 +30,7 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setPttGated,
+  resetVoiceStore,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { startVoiceUiSounds } from "../../src/features/voice/uiSounds";
@@ -228,6 +229,18 @@ describe("voice UI sounds", () => {
     voiceStore.flush();
 
     expect(playVoiceSound.mock.calls).toEqual([["undeafen"]]);
+  });
+
+  it("plays nothing on a voice-session reset (sign-out)", () => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10, localDeafened: true }));
+    voiceStore.flush();
+    playVoiceSound.mockClear();
+
+    authStore.setState((prev) => ({ ...prev, isAuthenticated: false }));
+    resetVoiceStore();
+    voiceStore.flush();
+
+    expect(playVoiceSound).not.toHaveBeenCalled();
   });
 
   it("obeys Do Not Disturb, matching the message chime", () => {
