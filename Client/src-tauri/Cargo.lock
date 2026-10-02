@@ -3796,6 +3796,7 @@ dependencies = [
  "futures-util",
  "html5ever 0.38.0",
  "keyring",
+ "libc",
  "livekit",
  "log",
  "nnnoiseless",

@@ -59,6 +59,14 @@ and only when it changes something a contributor or fork holder must do
 
 - **A caller hears ringback and always learns the outcome.** Placing a DM call was silent on your side while the other person's phone rang, and if you moved to another channel you never saw whether they declined or never answered. You now hear a soft ringback while the call is ringing — it stops the moment someone joins, every callee declines, the 30 seconds run out or you leave — and if you are looking at another channel a toast tells you "<name> declined" or "No answer". Do Not Disturb and the "Incoming Call Sound" switch silence it, and ringing again restarts it.
 
+### Changed
+
+- **Linux desktop:** a native crash (voice/video or the window system) now ends the client log with a line naming the signal and thread, instead of the log just stopping.
+
+### Known issues
+
+- **Linux desktop:** the app can close without warning when the camera and screen share are both on; the new crash line is there to pin it down.
+
 ## v2.1.0-beta.2
 
 `v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.

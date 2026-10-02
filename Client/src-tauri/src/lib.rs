@@ -4,6 +4,8 @@ mod commands;
 #[cfg(test)]
 mod config_gates;
 mod constants;
+#[cfg(target_os = "linux")]
+mod crash_log;
 mod credentials;
 mod diagnostics;
 #[cfg(windows)]
@@ -249,6 +251,13 @@ pub fn run() {
                 app.package_info().version,
                 std::process::id()
             );
+            // A native crash (signal, or GDK's exit on an X error) leaves no
+            // panic: give it a last log line. After GTK init, so GDK's X
+            // handlers are the ones it chains to.
+            #[cfg(target_os = "linux")]
+            if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
+                crash_log::install(&dir.join("owncord-client.log"));
+            }
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();

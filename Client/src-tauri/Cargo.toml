@@ -158,6 +158,9 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# sigaction/prctl/dlsym for crash_log.rs, the last log line of a native
+# crash. Already in the tree under most of the dependency graph.
+libc = "0.2"
 # Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
 # IdleMonitor and the freedesktop ScreenSaver interface. Already in the tree
 # as keyring's sync-secret-service transport, same libdbus, no new build.
