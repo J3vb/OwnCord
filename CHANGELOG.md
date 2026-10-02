@@ -47,9 +47,11 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-## v2.1.0-beta.1
+## v2.1.0-beta.2
 
-**OwnCord 2.1 beta 1** is the third public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It is the largest release since the beta began: the full Unicode emoji set with remembered skin tones, whole-server search that pages through older results, an unread count on the taskbar and tray, notifications for incoming calls, a message list that updates in place instead of redrawing, and a server that carries a thousand or more people through a restart. Existing `2.0.1-beta.1` servers and clients upgrade in place.
+`v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.
+
+**OwnCord 2.1 beta 2** is the third public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It is the largest release since the beta began: the full Unicode emoji set with remembered skin tones, whole-server search that pages through older results, an unread count on the taskbar and tray, notifications for incoming calls, a message list that updates in place instead of redrawing, and a server that carries a thousand or more people through a restart. Existing `2.0.1-beta.1` servers and clients upgrade in place.
 
 It is still a **beta and a hobby project** — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive.
 
