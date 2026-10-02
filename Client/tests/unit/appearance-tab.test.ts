@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAppearanceTab } from "@components/settings/AppearanceTab";
+import { refreshTimeFormat } from "@lib/timeFormat";
 
 const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
@@ -24,6 +25,7 @@ describe("AppearanceTab — Accessibility", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     localStorage.clear();
+    refreshTimeFormat();
     document.documentElement.removeAttribute("style");
     document.body.removeAttribute("style");
     vi.clearAllMocks();
@@ -488,6 +490,7 @@ describe("AppearanceTab — Accessibility", () => {
 
   it("loads a stored 24-hour choice as the active option", () => {
     localStorage.setItem("owncord:settings:timeFormat", '"24h"');
+    refreshTimeFormat();
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 

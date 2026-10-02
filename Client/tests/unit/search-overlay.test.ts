@@ -66,6 +66,7 @@ describe("createSearchOverlay", () => {
     container.remove();
     setDmChannels([]);
     localStorage.removeItem("owncord:settings:timeFormat");
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
   });
 
   it("mounts with overlay and input", () => {
