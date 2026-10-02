@@ -343,6 +343,32 @@ not dispatcher handlers (see [README §4](README.md)).
 
 ---
 
+## 10. App sounds (DP-40)
+
+The message chime, the DM ringtone and the voice UI sounds share one
+`AudioContext` (`lib/notificationSound.ts`), whose output follows the
+`audioOutputDevice` chosen in Settings › Voice & Audio through `setSinkId`.
+Where the webview cannot route an `AudioContext` (WebKitGTK, the Linux webview),
+those sounds fall back to the system default — see
+[known limitations](../../known-limitations.md#client).
+
+`features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
+leave and move; on another member joining or leaving the channel you are in; and
+on your mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
+Notifications, on by default) gates them, and DND silences them like the message
+chime. Two edges stay silent by design: push-to-talk, and the wholesale roster
+replacement (`setVoiceStates`) behind the initial `ready` and a reconnect
+resync — the module keys remote joins off a monotonic roster revision that only
+the incremental `voice_state`/`voice_leave` handlers bump, so a replay cannot
+storm.
+
+While you are deafened **in a voice session**, every non-ring sound is silent;
+the incoming ringtone is exempt (D2, §9). Leaving voice lifts the gate even
+though `localDeafened` persists, so a deafen taken in a call never silences
+message chimes for the rest of the session.
+
+---
+
 ## Source of truth
 
 `src/lib/livekitSession.ts`, `src/features/voice/`, `src/lib/livekitE2EE.ts`,
