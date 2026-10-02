@@ -8,7 +8,11 @@
  * voice-ui-sounds.test.ts's.
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { cleanupNotificationAudio, playNotificationSound } from "@lib/notificationSound";
+import {
+  cleanupNotificationAudio,
+  playNotificationSound,
+  startRingback,
+} from "@lib/notificationSound";
 import {
   setLocalDeafened,
   joinVoiceChannel,
@@ -112,6 +116,19 @@ describe("playNotificationSound and deafen", () => {
 
     expect(RecordingAudioContext.instances).toHaveLength(1);
     expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(1);
+  });
+});
+
+describe("the outgoing ringback and deafen", () => {
+  it("stays silent while locally deafened in a voice session", () => {
+    joinVoiceChannel(4);
+    voiceStore.flush();
+    setLocalDeafened(true);
+    voiceStore.flush();
+
+    startRingback();
+
+    expect(RecordingAudioContext.instances).toHaveLength(0);
   });
 });
 

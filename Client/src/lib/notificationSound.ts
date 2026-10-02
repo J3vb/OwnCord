@@ -228,8 +228,10 @@ function playRingtone(): void {
 
 /** One burst of the ringback: a single soft, low tone, slower than the
  *  incoming ringtone and quieter, so the caller and the callee hear different
- *  things (DP-25). */
+ *  things (DP-25). Silent while deafened: the interval keeps polling, so
+ *  undeafening mid-ring resumes the sound. */
 function playRingback(): void {
+  if (deafened()) return;
   try {
     const ctx = audioContext();
     const osc = ctx.createOscillator();
