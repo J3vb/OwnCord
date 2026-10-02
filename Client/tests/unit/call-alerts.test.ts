@@ -246,4 +246,47 @@ describe("the ringback", () => {
       vi.useRealTimers();
     }
   });
+
+  // An incoming ring pre-empts the outgoing ringback, but the outgoing call is
+  // still ringing: when the incoming call ends the ringback must resume, not
+  // stay silent for the rest of the outgoing ring.
+  it("resumes when the incoming chime that pre-empted it ends", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      frequencies.length = 0;
+
+      startRingChime();
+      frequencies.length = 0;
+      vi.advanceTimersByTime(4_000);
+      expect(frequencies).not.toContain(440);
+
+      stopRingChime();
+      expect(frequencies).toContain(440);
+    } finally {
+      stopRingback();
+      stopRingChime();
+      vi.useRealTimers();
+    }
+  });
+
+  // A caller who hangs up (or is answered) during the incoming ring must not
+  // have a ringback come back when that incoming call ends.
+  it("does not resume after stopRingback", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      startRingChime();
+      stopRingback();
+      frequencies.length = 0;
+
+      stopRingChime();
+      vi.advanceTimersByTime(4_000);
+      expect(frequencies).not.toContain(440);
+    } finally {
+      stopRingback();
+      stopRingChime();
+      vi.useRealTimers();
+    }
+  });
 });

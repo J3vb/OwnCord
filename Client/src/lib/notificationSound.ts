@@ -15,8 +15,8 @@ let notifAudioCtx: AudioContext | null = null;
 
 /** Close and release the notification AudioContext. Call on logout/cleanup. */
 export function cleanupNotificationAudio(): void {
-  stopRingChime();
   stopRingback();
+  stopRingChime();
   if (notifAudioCtx !== null) {
     notifAudioCtx.close().catch((err) => {
       log.warn("Failed to close notification AudioContext", err);
@@ -33,9 +33,10 @@ let ringInterval: ReturnType<typeof setInterval> | null = null;
 /** Start the repeating incoming-call chime. Idempotent. */
 export function startRingChime(): void {
   if (ringInterval !== null) return;
-  // A client is either calling or being called; the two call tones must never
-  // play over each other (DP-25 acceptance).
-  stopRingback();
+  // A client is either calling or being called; an incoming ring pre-empts the
+  // outgoing ringback (DP-25 acceptance). The outgoing call keeps wanting its
+  // ringback, so it resumes when this chime ends.
+  silenceRingback();
   // DND silences a call chime for the same reason it silences a message one:
   // the settings panel promises no notification sounds, and a ringing phone is
   // the loudest possible violation of that. The banner still appears.
@@ -52,35 +53,57 @@ export function stopRingChime(): void {
   if (ringInterval === null) return;
   clearInterval(ringInterval);
   ringInterval = null;
+  // The incoming ring ended: an outgoing ring that was pre-empted resumes.
+  syncRingback();
 }
 
 // The outgoing call's ringback: a soft low tone the caller hears while the
 // callees ring, its own pattern so it is told apart from the callee's incoming
 // chime by ear (DP-25). The two never run at once on one client: you are
-// either answering a call or placing one.
+// either answering a call or placing one. An incoming ring pre-empts the
+// ringback, but the outgoing call is still ringing, so the ringback resumes
+// when that chime ends (unless the outgoing ring ended meanwhile).
 let ringbackInterval: ReturnType<typeof setInterval> | null = null;
+/** The outgoing call still wants a ringback. Kept across a pre-emption so the
+ *  sound can resume when the incoming chime ends. */
+let ringbackWanted = false;
 
-/** Start the repeating outgoing-call ringback. Idempotent. */
-export function startRingback(): void {
+/** Stop the ringback sound without forgetting that the outgoing call still
+ *  wants it (used while an incoming ring pre-empts it). */
+function silenceRingback(): void {
+  if (ringbackInterval === null) return;
+  clearInterval(ringbackInterval);
+  ringbackInterval = null;
+}
+
+/** (Re)evaluate whether the ringback should be sounding right now. */
+function syncRingback(): void {
+  const shouldPlay =
+    ringbackWanted &&
+    ringInterval === null &&
+    loadUserStatus() !== "dnd" &&
+    loadPref<boolean>("callSounds", true);
+  if (!shouldPlay) {
+    silenceRingback();
+    return;
+  }
   if (ringbackInterval !== null) return;
-  // A client is either calling or being called; the two call tones must never
-  // sound over each other (DP-25 acceptance). An incoming ring is the alert
-  // the user must act on, so it wins: the ringback stays silent for as long as
-  // the chime is playing rather than silencing it.
-  if (ringInterval !== null) return;
-  // DND and the call-sound toggle silence the ringback exactly as they do the
-  // ring chime (D2(b)); the panel still shows "Calling…".
-  if (loadUserStatus() === "dnd") return;
-  if (!loadPref<boolean>("callSounds", true)) return;
   playRingback();
   ringbackInterval = setInterval(() => playRingback(), 3000);
 }
 
-/** Stop the repeating outgoing-call ringback. Idempotent. */
+/** Start the repeating outgoing-call ringback. Idempotent. */
+export function startRingback(): void {
+  ringbackWanted = true;
+  syncRingback();
+}
+
+/** Stop the repeating outgoing-call ringback and forget that it wanted to
+ *  play, so an incoming ring that ends later does not bring it back.
+ *  Idempotent. */
 export function stopRingback(): void {
-  if (ringbackInterval === null) return;
-  clearInterval(ringbackInterval);
-  ringbackInterval = null;
+  ringbackWanted = false;
+  silenceRingback();
 }
 
 /** The shared notification AudioContext, created on first use. */
