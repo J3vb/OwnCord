@@ -434,6 +434,45 @@ describe("main.ts pre-auth connection deadline", () => {
     clearAuth();
   });
 
+  // DP-54 follow-up: the pre-auth deadline must name a certificate failure
+  // rather than call an unreachable server. The transport reports the distinct
+  // code on the rejected connect (a failed TLS handshake), which the deadline
+  // reads to choose its copy.
+  it("shows the certificate copy when the pre-auth dial fails on TLS", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    // Fail the current dial on the certificate just before the deadline. The
+    // failure clears into a reconnect whose backoff (>= 500ms) lands after the
+    // deadline, so the code the transport reported is still the current
+    // attempt's when the deadline reads it — a fresh dial would clear it.
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd !== "ws_connect") return Promise.resolve(undefined);
+      return new Promise<never>((_, reject) => {
+        setTimeout(
+          () =>
+            reject(
+              JSON.stringify({
+                error: "TLS_CERT_UNVERIFIED",
+                message: "the server's certificate could not be verified",
+              }),
+            ),
+          PREAUTH_CONNECT_TIMEOUT_MS - 100,
+        );
+      });
+    });
+
+    await capturedConnectCallbacks.onLogin!("badcert.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(uiStore.getState().transientError).toContain("certificate couldn't be verified");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    clearAuth();
+  });
+
   it("does not tear down a session re-dialled after a certificate mismatch", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("rotated.example:8443", "alex", "hunter2");

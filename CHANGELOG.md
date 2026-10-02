@@ -51,6 +51,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.
 
+### Login & connection
+
+- **A certificate the client cannot verify now says so, distinctly.** A trust-on-first-use refusal or a failed TLS handshake used to reach the sign-in form as "Bad Gateway" or a dropped connection, indistinguishable from an offline server. The desktop proxy now reports these with a distinct certificate code, and the client says "The server's certificate couldn't be verified. Check the server address, or ask the server owner." The first-use and changed-certificate prompts themselves are unchanged.
+
 ### Messages
 
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).

@@ -13,6 +13,7 @@ import type {
   SocketConnectOptions,
   SocketConnection,
   SocketConnectionState,
+  SocketRetryHint,
   SocketTransport,
 } from "../contracts/socket";
 
@@ -34,6 +35,27 @@ function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
       log.debug("Sync unsubscribe error (safe to ignore)", err);
     }
   }
+}
+
+/**
+ * The distinct error code a rejected `ws_connect` carries, when it carries one.
+ * The Rust proxy rejects a certificate failure with a JSON `{error, message}`
+ * body (`tofu::cert_connect_error`); every other dial failure is a plain text
+ * rejection. Returns null when there is no structured code.
+ */
+function connectErrorCode(err: unknown): string | null {
+  const text = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  if (text === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed !== null && typeof parsed === "object" && "error" in parsed) {
+      const code = parsed.error;
+      return typeof code === "string" && code !== "" ? code : null;
+    }
+  } catch {
+    // Not JSON — an ordinary transport/text rejection.
+  }
+  return null;
 }
 
 /**
@@ -64,7 +86,9 @@ function createSocketConnection(): SocketConnection {
     null;
 
   const messageListeners = new Set<(text: string) => void>();
-  const stateListeners = new Set<(state: SocketConnectionState) => void>();
+  const stateListeners = new Set<
+    (state: SocketConnectionState, retryHint?: SocketRetryHint) => void
+  >();
   const certFirstUseListeners = new Set<(event: SocketCertEvent) => void>();
   const certMismatchListeners = new Set<(event: SocketCertEvent) => void>();
 
@@ -229,8 +253,13 @@ function createSocketConnection(): SocketConnection {
       log.error("ws_connect failed", err);
       // Cert mismatch is handled by the cert-tofu event listener, which
       // latches before this catch runs; the reconnect policy above the seam
-      // checks that latch and will no-op if it is set.
-      for (const listener of stateListeners) listener("disconnected");
+      // checks that latch and will no-op if it is set. A failed TLS handshake
+      // (not a TOFU prompt) arrives as a JSON `{error}` body from ws_connect;
+      // pass the code through so the app can show the certificate copy.
+      const errorCode = connectErrorCode(err);
+      for (const listener of stateListeners) {
+        listener("disconnected", errorCode === null ? undefined : { errorCode });
+      }
     }
   }
 
@@ -276,7 +305,9 @@ function createSocketConnection(): SocketConnection {
       return () => messageListeners.delete(handler);
     },
 
-    onStateChange(handler: (state: SocketConnectionState) => void): () => void {
+    onStateChange(
+      handler: (state: SocketConnectionState, retryHint?: SocketRetryHint) => void,
+    ): () => void {
       stateListeners.add(handler);
       return () => stateListeners.delete(handler);
     },

@@ -257,6 +257,12 @@ export function createWsClient({
   // accepted the dial), an explicit takeover ("Use here") or disconnect().
   let pendingWake = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
+  // DP-54 follow-up: the distinct failure code from the most recent rejected
+  // connect, when the transport could read one (a certificate failure carries
+  // `TLS_CERT_UNVERIFIED`). Lets the pre-auth deadline name a certificate
+  // failure instead of calling it unreachable. Cleared on each new dial and on
+  // a successful connect.
+  let connectFailureCode: string | null = null;
   // Mirror of the proxy's own open/closed state, kept here because the
   // send-failure codes below are decided on this side of the seam.
   let proxyOpen = false;
@@ -721,6 +727,7 @@ export function createWsClient({
   function handleTransportState(next: SocketConnectionState, retryHint?: SocketRetryHint): void {
     if (next === "connected") {
       proxyOpen = true;
+      connectFailureCode = null;
       log.info("WebSocket open, sending auth", {
         host: config?.host ?? "unknown",
         isReconnect: reconnectAttempt > 0,
@@ -750,6 +757,10 @@ export function createWsClient({
       });
     } else if (next === "disconnected") {
       proxyOpen = false;
+      // Record the transport's distinct failure code, if any: a failed connect
+      // can carry one (a certificate failure today), and a plain close clears
+      // it. The pre-auth deadline reads this to name the failure.
+      connectFailureCode = retryHint?.errorCode ?? null;
       log.info("WebSocket closed", {
         host: config?.host ?? "unknown",
         intentional: intentionalClose,
@@ -788,6 +799,7 @@ export function createWsClient({
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
+    connectFailureCode = null;
     restartRedialAt = null;
     busyRetryAfterMs = undefined;
     busyHold = false;
@@ -1035,6 +1047,14 @@ export function createWsClient({
 
     getState(): ConnectionState {
       return state;
+    },
+
+    /** The distinct failure code from the most recent rejected connect, when
+     *  the transport reported one (a certificate failure carries
+     *  `TLS_CERT_UNVERIFIED`); null otherwise. Read by the pre-auth deadline so
+     *  it can name a certificate failure instead of calling it unreachable. */
+    getConnectFailureCode(): string | null {
+      return connectFailureCode;
     },
 
     /** @internal for testing */

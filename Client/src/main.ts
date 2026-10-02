@@ -7,7 +7,7 @@ import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
-import { createApiClient, ApiClientError, errorText } from "@lib/api";
+import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
 import { setOwnedTimeout } from "@lib/dom";
 
@@ -531,7 +531,14 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       dispatcherCleanup = null;
       lastConnectHost = "";
       lastConnectToken = "";
-      setTransientError(connectText("session.connectTimeout"));
+      // A dial that failed on the certificate is not an unreachable server:
+      // name it. `getConnectFailureCode` reads the distinct code the transport
+      // reported for the rejected connect (ws.ts).
+      setTransientError(
+        ws.getConnectFailureCode() === TLS_CERT_CODE
+          ? connectText("error.tlsFailed")
+          : connectText("session.connectTimeout"),
+      );
       onPreauthTimeout?.();
     };
     let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(

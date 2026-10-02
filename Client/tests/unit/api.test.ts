@@ -221,8 +221,8 @@ describe("API Client", () => {
     });
 
     it("treats the tunnel's bare 502 as a transport error, not a server refusal", async () => {
-      // The desktop proxy answers a refused (first-use or changed)
-      // certificate with an empty-body 502, so it carries no error code.
+      // A refused certificate now carries a TLS_CERT_UNVERIFIED JSON body (see
+      // the test below); only a code-less 502 stays a transport error.
       mockFetch.mockResolvedValue(brokenJsonErrorResponse(502, "Bad Gateway"));
       const err = await api.getMe().catch((e: unknown) => e);
       expect(err).toBeInstanceOf(TransportError);
@@ -235,6 +235,21 @@ describe("API Client", () => {
     it("keeps a 502 that carries a server error code as a server error", async () => {
       mockFetch.mockResolvedValue(errorResponse(502, "BAD_GATEWAY", "upstream failed"));
       await expect(api.getMe()).rejects.toMatchObject({ status: 502, code: "BAD_GATEWAY" });
+      expectConsole("warn", /\[api\] API error/);
+    });
+
+    it("maps the tunnel's distinct TLS certificate code to the certificate copy", async () => {
+      // The desktop proxy answers a refused certificate with a 502 whose JSON
+      // body carries TLS_CERT_UNVERIFIED (http_pool.rs). The webview must show
+      // the certificate message, not the generic unreachable copy.
+      mockFetch.mockResolvedValue(
+        errorResponse(502, "TLS_CERT_UNVERIFIED", "the server's certificate could not be verified"),
+      );
+      const err = await api.getMe().catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 502, code: "TLS_CERT_UNVERIFIED" });
+      expect(errorText(err, "Fallback")).toBe(
+        "The server's certificate couldn't be verified. Check the server address, or ask the server owner.",
+      );
       expectConsole("warn", /\[api\] API error/);
     });
 

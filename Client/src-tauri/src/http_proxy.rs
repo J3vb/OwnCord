@@ -45,7 +45,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 
-use crate::http_pool::{self, BoxError, ConnPool, Fresh, BAD_GATEWAY};
+use crate::http_pool::{self, BoxError, ConnPool, Fresh};
 use crate::tofu::{self, TofuOutcome};
 
 /// Tauri-managed state: one running tunnel per remote host.
@@ -294,7 +294,7 @@ async fn handle_connection<R: Runtime>(
         Fresh::Verified(tls, _) => tls,
         Fresh::Rejected(e) => {
             // Give the local fetch a clean HTTP failure instead of a reset.
-            let _ = local.write_all(BAD_GATEWAY).await;
+            let _ = local.write_all(&http_pool::cert_error_response()).await;
             return Err(e);
         }
     };
@@ -312,6 +312,19 @@ async fn handle_connection<R: Runtime>(
         }
     }
     Ok(())
+}
+
+/// Whether a failed TLS handshake should be reported with the distinct
+/// certificate code. A rustls rejection (bad certificate, protocol error) is
+/// wrapped by tokio-rustls in an `io::Error` of kind `InvalidData` — the same
+/// precise signal the websocket path uses (`ws_proxy::is_tls_failure`). A
+/// handshake timeout, a reset, or a clean EOF means the host may simply be
+/// unreachable, so it keeps the generic offline path rather than telling the
+/// user its certificate could not be verified (DP-54 follow-up).
+fn is_tls_handshake_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::InvalidData)
 }
 
 /// Dial the upstream TCP socket with Nagle's algorithm off. A small request is
@@ -344,14 +357,34 @@ async fn connect_verified<R: Runtime>(
 
     let (server_name, dial_target) = resolve_remote_target(remote_host)?;
     let tcp = dial_upstream(&dial_target, Duration::from_secs(10)).await?;
-    let tls = connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await?;
+    // A handshake that fails on the certificate or protocol is a TLS failure,
+    // not an unreachable host: classify it as `Rejected` so the caller answers
+    // with the distinct cert JSON instead of dropping the socket (which the
+    // webview cannot tell from an offline server). A handshake that merely
+    // times out — and a failed dial above — stays `Err`: that is unreachable.
+    let tls = match connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await {
+        Ok(tls) => tls,
+        Err(e) => {
+            if !is_tls_handshake_failure(e.as_ref()) {
+                return Err(e);
+            }
+            return Ok(Fresh::Rejected(format!("TLS handshake failed: {e}").into()));
+        }
+    };
 
-    let observed = captured_fp
+    let observed = match captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
         .filter(|o| !o.fingerprint.is_empty())
-        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    {
+        Some(observed) => observed,
+        None => {
+            return Ok(Fresh::Rejected(
+                "TLS handshake completed but no certificate fingerprint was captured".into(),
+            ))
+        }
+    };
     let fingerprint = observed.fingerprint.clone();
 
     let state = app.try_state::<HttpProxyState>();
@@ -542,6 +575,37 @@ mod tests {
             tcp.nodelay().expect("read nodelay"),
             "dial_upstream must set TCP_NODELAY on the upstream socket"
         );
+    }
+
+    // DP-54 follow-up: a rustls rejection (bad certificate, protocol error)
+    // reaches here as an `io::Error` of kind `InvalidData` and must be a
+    // certificate failure, but a handshake timeout, a reset or a clean EOF
+    // means the host may simply be unreachable, so it keeps the generic
+    // offline path.
+    #[test]
+    fn a_handshake_rejection_is_certificate_but_network_failures_are_not() {
+        let invalid_data = std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid peer certificate: UnknownIssuer",
+        );
+        assert!(is_tls_handshake_failure(&invalid_data));
+
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset by peer",
+        )));
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "tls handshake eof",
+        )));
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        )));
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "TLS handshake timed out",
+        )));
     }
 
     // Regression: the accept-error exit path in run_accept_loop must be able to

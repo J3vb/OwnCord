@@ -217,7 +217,9 @@ applies, and it never fires after `disconnect()`, `auth_error` or a certificate-
 its `retry_after_ms` (P5-S04, [protocol.md](../../protocol.md#fresh-connect-admission-server_busy)). The **first**
 authentication is additionally bounded by a 20 s deadline (`PREAUTH_CONNECT_TIMEOUT_MS`): a login or stored-token
 auto-login that never reaches `auth_ok` returns to the form with "Couldn't reach this server — it may be offline"
-rather than retrying forever behind the connecting overlay. A `SERVER_BUSY` refusal is the server answering, so it
+rather than retrying forever behind the connecting overlay; a dial that failed on the certificate (a refused TOFU
+pin or a failed TLS handshake) instead names it — "The server's certificate couldn't be verified." — from the
+distinct `TLS_CERT_UNVERIFIED` code the proxy reports (see the error matrix in [README.md](README.md)). A `SERVER_BUSY` refusal is the server answering, so it
 restarts that deadline, up to 70 s after the first attempt (`PREAUTH_BUSY_CAP_MS`). A stored-token resume (auto-login or a quick switch
 back) that times out also shows "Waiting for <server>… Cancel" above the form and keeps probing the server's health
 (5 s, doubling to 30 s); when it answers, the stored token is resumed once, and if that resume also
