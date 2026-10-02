@@ -345,9 +345,10 @@ not dispatcher handlers (see [README §4](README.md)).
 
 ## 10. App sounds (DP-40)
 
-The message chime, the DM ringtone and the voice UI sounds share one
-`AudioContext` (`lib/notificationSound.ts`), whose output follows the
-`audioOutputDevice` chosen in Settings › Voice & Audio through `setSinkId`.
+The message chime, the DM ringtone, the caller's ringback and the voice UI
+sounds share one `AudioContext` (`lib/notificationSound.ts`), whose output
+follows the `audioOutputDevice` chosen in Settings › Voice & Audio through
+`setSinkId`.
 Where the webview cannot route an `AudioContext` (WebKitGTK, the Linux webview),
 those sounds fall back to the system default — see
 [known limitations](../../known-limitations.md#client).
