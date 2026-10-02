@@ -202,28 +202,39 @@ async function launchLinux(
       .not.toBeNull();
     return found![ELEMENT]!;
   };
+  // The app re-renders lists as data arrives, so a found element can be gone
+  // by the time WebDriver acts on it. Playwright re-resolves on that; do the same.
+  const act = async (css: string, text: string | undefined, run: (id: string) => Promise<void>) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run(await element(css, text));
+      } catch (error) {
+        if (attempt === 3 || !String(error).includes("stale element reference")) throw error;
+      }
+    }
+  };
   return {
     evaluate,
-    async click(css, text) {
-      const id = await element(css, text);
-      // WebDriver clicks the element's centre as computed now; Playwright (the
-      // Windows side) first waits for it to stop moving. Match that: a click
-      // during an entry animation (the settings panel scales in) can miss.
-      // Looping animations (spinners, speaking rings) never finish; skip them.
-      await expect
-        .poll(() =>
-          evaluate<boolean>(
-            `() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity)`,
-          ),
-        )
-        .toBe(true);
-      await call("POST", `/session/${session}/element/${id}/click`, {});
-    },
-    async fill(css, value) {
-      const id = await element(css);
-      await call("POST", `/session/${session}/element/${id}/clear`, {});
-      await call("POST", `/session/${session}/element/${id}/value`, { text: value });
-    },
+    click: (css, text) =>
+      act(css, text, async (id) => {
+        // WebDriver clicks the element's centre as computed now; Playwright (the
+        // Windows side) first waits for it to stop moving. Match that: a click
+        // during an entry animation (the settings panel scales in) can miss.
+        // Looping animations (spinners, speaking rings) never finish; skip them.
+        await expect
+          .poll(() =>
+            evaluate<boolean>(
+              `() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getTiming().iterations === Infinity)`,
+            ),
+          )
+          .toBe(true);
+        await call("POST", `/session/${session}/element/${id}/click`, {});
+      }),
+    fill: (css, value) =>
+      act(css, undefined, async (id) => {
+        await call("POST", `/session/${session}/element/${id}/clear`, {});
+        await call("POST", `/session/${session}/element/${id}/value`, { text: value });
+      }),
     async press(key) {
       const value = key === "Enter" ? "\uE007" : "\uE00C";
       await call("POST", `/session/${session}/actions`, {
