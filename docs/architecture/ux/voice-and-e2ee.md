@@ -363,10 +363,10 @@ resync — the module keys remote joins off a monotonic roster revision that onl
 the incremental `voice_state`/`voice_leave` handlers bump, so a replay cannot
 storm.
 
-While you are deafened **in a voice session**, every non-ring sound is silent;
-the incoming ringtone is exempt (D2, §9). Leaving voice lifts the gate even
-though `localDeafened` persists, so a deafen taken in a call never silences
-message chimes for the rest of the session.
+While you are deafened **in a voice session**, every sound is silent except the
+incoming ringtone (D2, §9) — the outgoing ringback is silenced too. Leaving voice
+lifts the gate even though `localDeafened` persists, so a deafen taken in a call
+never silences message chimes for the rest of the session.
 
 ---
 
