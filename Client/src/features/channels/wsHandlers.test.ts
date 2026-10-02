@@ -3,6 +3,7 @@ import {
   applyReadyActiveChannel,
   handleChannelDelete,
   handleMemberUpdate,
+  handleMentionCount,
   markReadyActiveChannelRead,
 } from "./wsHandlers";
 import {
@@ -11,6 +12,7 @@ import {
   setActiveChannel,
   setChannels,
 } from "../../stores/channels.store";
+import { dmStore } from "../../stores/dm.store";
 import { authStore } from "../../stores/auth.store";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
@@ -135,6 +137,44 @@ describe("handleChannelDelete", () => {
 
     expect(channelsStore.getState().activeChannelId).toBe(1);
     expect(showToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleMentionCount", () => {
+  it("sets the badge total on a guild channel from the server's frame", () => {
+    setChannels([{ ...channel(2, "text", 0), mention_count: 0, unread_count: 4 }]);
+
+    handleMentionCount({ channel_id: 2, count: 3 });
+
+    const ch = channelsStore.getState().channels.get(2);
+    expect(ch?.mentionCount).toBe(3);
+    // The frame carries no unread information, so unread is untouched.
+    expect(ch?.unreadCount).toBe(4);
+  });
+
+  it("ignores a frame for the channel on screen, whose chat_message handles it", () => {
+    setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
+    setActiveChannel(2);
+
+    handleMentionCount({ channel_id: 2, count: 3 });
+
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
+  });
+
+  it("ignores a frame for a channel this client does not know", () => {
+    const before = channelsStore.getState();
+    handleMentionCount({ channel_id: 999, count: 1 });
+    expect(channelsStore.getState()).toBe(before);
+  });
+
+  it("ignores a DM-channel id, whose badge lives in dmStore", () => {
+    setChannels([{ ...channel(7, "dm", 0), mention_count: 0 }]);
+    // dmStore's own row must not be disturbed by a channelsStore frame.
+    dmStore.setState(() => ({ channels: [] }));
+
+    handleMentionCount({ channel_id: 7, count: 3 });
+
+    expect(channelsStore.getState().channels.get(7)?.mentionCount).toBe(0);
   });
 });
 

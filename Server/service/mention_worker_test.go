@@ -20,10 +20,10 @@ type batchSpyStore struct {
 	entries int
 }
 
-func (b *batchSpyStore) IncrementMentionCountsBatch(_ context.Context, _ int64, entries []db.MentionBatchEntry) error {
+func (b *batchSpyStore) IncrementMentionCountsBatch(_ context.Context, _ int64, entries []db.MentionBatchEntry) (map[int64]int64, error) {
 	b.calls++
 	b.entries += len(entries)
-	return nil
+	return nil, nil
 }
 
 // TestMentionWorker_OneTransactionPerChannelPerWindow is the P5-O05 batching
@@ -50,6 +50,79 @@ func TestMentionWorker_OneTransactionPerChannelPerWindow(t *testing.T) {
 	}
 	if spy.entries != 9 {
 		t.Fatalf("batched entries = %d, want 9", spy.entries)
+	}
+}
+
+// mentionNotifyCall is one NotifyMentionCount delivery recorded by
+// fakeMentionNotifier.
+type mentionNotifyCall struct {
+	userID    int64
+	channelID int64
+	count     int64
+}
+
+// fakeMentionNotifier records every per-user mention-badge push.
+type fakeMentionNotifier struct {
+	mu    sync.Mutex
+	calls []mentionNotifyCall
+}
+
+func (f *fakeMentionNotifier) NotifyMentionCount(userID, channelID, count int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, mentionNotifyCall{userID, channelID, count})
+}
+
+func (f *fakeMentionNotifier) snapshot() []mentionNotifyCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]mentionNotifyCall(nil), f.calls...)
+}
+
+// TestMentionWorker_NotifiesOnlyReadersGainingABadge locks the live-badge
+// signal: flushing a mention push reaches exactly the readers whose badge the
+// read-state guard actually raised, with their new total, and nobody else. A
+// reader who already read the mentioning message is skipped (no phantom push),
+// and the author is never a recipient.
+func TestMentionWorker_NotifiesOnlyReadersGainingABadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	notifier := &fakeMentionNotifier{}
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	// alice (1) mentions bob (2) and carol (3).
+	res := sendAs(t, svc, 1, "@bob @carol hello")
+	// Bob reads the message before the coalesce window flushes, so his bump
+	// is guarded away; carol stays behind and gains the badge.
+	if err := database.UpdateReadState(ctx, 2, 10, res.MessageID); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	svc.mentionWorkerForSend().flushNow(context.Background())
+
+	calls := notifier.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("notifications = %v, want exactly carol's one push", calls)
+	}
+	if calls[0] != (mentionNotifyCall{userID: 3, channelID: 10, count: 1}) {
+		t.Errorf("notification = %+v, want {3 10 1}", calls[0])
+	}
+}
+
+// TestMentionWorker_NotifierNilIsSafe locks that a service with no notifier
+// (every test, any caller without a hub) flushes without panicking.
+func TestMentionWorker_NotifierNilIsSafe(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	sendAs(t, svc, 1, "@bob hello")
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob mention_count = %d, want 1", got)
 	}
 }
 
@@ -271,6 +344,71 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 	svc.mentionWorkerForSend().flushNow(context.Background())
 	if got := mentionCount(t, database, 2); got != 1 {
 		t.Errorf("bob mention_count = %d after purging the queued mention, want 1 (his earlier genuine badge must survive)", got)
+	}
+}
+
+// TestMentionWorker_DeleteNotifiesDecreasedBadge locks the reversal half of the
+// live badge: a mention pushed live must be pushed again with its lower total
+// when the mentioning message is deleted, or a reader not viewing the channel
+// keeps the stale-high badge until their next ready (OC-F1).
+func TestMentionWorker_DeleteNotifiesDecreasedBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	notifier := &fakeMentionNotifier{}
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	res := sendAs(t, svc, 1, "@bob look")
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if calls := notifier.snapshot(); len(calls) != 1 || calls[0] != (mentionNotifyCall{2, 10, 1}) {
+		t.Fatalf("after send, notifications = %v, want one {2 10 1}", calls)
+	}
+
+	if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Fatalf("bob mention_count = %d after delete, want 0", got)
+	}
+	calls := notifier.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("notifications = %v, want the send push and the delete push", calls)
+	}
+	if calls[1] != (mentionNotifyCall{2, 10, 0}) {
+		t.Errorf("delete notification = %+v, want {2 10 0}", calls[1])
+	}
+}
+
+// TestMentionWorker_PurgeNotifiesDecreasedBadge is the purge sibling of the
+// delete case: purging a pushed mention must push the lowered total too.
+func TestMentionWorker_PurgeNotifiesDecreasedBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
+	notifier := &fakeMentionNotifier{}
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	sendAs(t, svc, 1, "@bob look")
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if calls := notifier.snapshot(); len(calls) != 1 || calls[0] != (mentionNotifyCall{2, 10, 1}) {
+		t.Fatalf("after send, notifications = %v, want one {2 10 1}", calls)
+	}
+
+	if _, err := svc.PurgeMessages(context.Background(), 4, 10, 1, 0); err != nil {
+		t.Fatalf("PurgeMessages: %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Fatalf("bob mention_count = %d after purge, want 0", got)
+	}
+	calls := notifier.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("notifications = %v, want the send push and the purge push", calls)
+	}
+	if calls[1] != (mentionNotifyCall{2, 10, 0}) {
+		t.Errorf("purge notification = %+v, want {2 10 0}", calls[1])
 	}
 }
 
