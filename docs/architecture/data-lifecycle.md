@@ -93,7 +93,9 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    (the avatar is one) or attached to a message the subject wrote — the file
    list the job row carries;
 4. reverse the `read_states.mention_count` bumps the subject's own messages
-   made (OC-0294/OC-0293);
+   made (OC-0294/OC-0293); like the retention sweep, erasure pushes no live
+   `mention_count` frame, so an affected reader recovers the lowered total on
+   their next `ready`;
 5. delete the subject's `rate_lockouts` keys — every key is `<prefix>:<value>`
    with the value the id or the case-folded username, matched on the exact
    suffix;
@@ -350,7 +352,10 @@ pinned messages exempt; tombstones included), each batch one writer
 transaction that reverses the mention counts those messages raised
 (OC-0294), deletes their attachment rows and returns the `stored_as`
 names, and deletes the rows (the FTS trigger drops the index entries;
-`reply_to` on later messages becomes NULL). The run is journaled in
+`reply_to` on later messages becomes NULL). The reversed badge is not pushed
+live: unlike `deleteMessage`/`purgeMessages`, the sweep has no hub to send a
+`mention_count` frame (DP-27), so an affected reader keeps a stale-high badge
+until their next `ready`. The run is journaled in
 `retention_runs` — counts and the file list, before any unlink — then the
 files are removed through the upload storage (a missing file counts as
 removed) and the run is finished. Each batch's frames leave the replay

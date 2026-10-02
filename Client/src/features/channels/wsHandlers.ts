@@ -172,10 +172,11 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
 }
 
 /**
- * A mention raised this user's badge in a channel (DP-27). The server pushes
- * the new total per user; the channel is typically one this client is not
- * viewing, whose chat_message broadcast never arrives. The frame is the only
- * way such a mention reaches the sidebar/taskbar badge live.
+ * A mention changed this user's badge in a channel (DP-27). The server pushes
+ * the reader's new total per user, raising it when a mention lands and lowering
+ * it when a delete or purge reverses one; the channel is typically one this
+ * client is not viewing, whose chat_message broadcast never arrives. The frame
+ * is the only way such a change reaches the sidebar/taskbar badge live.
  *
  * Ignored for the active channel: a mention in the channel on screen is already
  * handled by its own chat_message (and, when that window is detached from the
