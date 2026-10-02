@@ -440,20 +440,24 @@ describe("main.ts pre-auth connection deadline", () => {
   // reads to choose its copy.
   it("shows the certificate copy when the pre-auth dial fails on TLS", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
-    // Reject the first dial with the certificate code; leave later attempts
-    // pending so the reconnect loop does not re-log and re-report before the
-    // deadline (which would add unclaimed console lines).
-    let dialed = false;
+    // Fail the current dial on the certificate just before the deadline. The
+    // failure clears into a reconnect whose backoff (>= 500ms) lands after the
+    // deadline, so the code the transport reported is still the current
+    // attempt's when the deadline reads it — a fresh dial would clear it.
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd !== "ws_connect") return Promise.resolve(undefined);
-      if (dialed) return new Promise<never>(() => {});
-      dialed = true;
-      return Promise.reject(
-        JSON.stringify({
-          error: "TLS_CERT_UNVERIFIED",
-          message: "the server's certificate could not be verified",
-        }),
-      );
+      return new Promise<never>((_, reject) => {
+        setTimeout(
+          () =>
+            reject(
+              JSON.stringify({
+                error: "TLS_CERT_UNVERIFIED",
+                message: "the server's certificate could not be verified",
+              }),
+            ),
+          PREAUTH_CONNECT_TIMEOUT_MS - 100,
+        );
+      });
     });
 
     await capturedConnectCallbacks.onLogin!("badcert.example:8443", "alex", "hunter2");
