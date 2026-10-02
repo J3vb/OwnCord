@@ -21,7 +21,7 @@ const TIME_FORMATS: readonly TimeFormat[] = ["12h", "24h"];
 
 function readTimeFormat(): TimeFormat {
   const raw = loadPref<TimeFormat>(TIME_FORMAT_KEY, DEFAULT_TIME_FORMAT);
-  return TIME_FORMATS.includes(raw) ? raw : DEFAULT_TIME_FORMAT;
+  return (TIME_FORMATS as readonly string[]).includes(raw) ? raw : DEFAULT_TIME_FORMAT;
 }
 
 // Lazily read on first use, not at import: this module sits under
