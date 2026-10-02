@@ -22,7 +22,8 @@ const log = createLogger("notifications");
 let notifAudioCtx: AudioContext | null = null;
 /** The output id currently applied to `notifAudioCtx`, so a play does not
  *  re-issue `setSinkId` for an unchanged device. Empty string means the system
- *  default. Reset with the context. */
+ *  default. Reset with the context, and cleared again if an apply fails so the
+ *  next play retries rather than staying on the default for the session. */
 let appliedSink = "";
 
 /** Close and release the notification AudioContext. Call on logout/cleanup. */
@@ -189,6 +190,10 @@ function syncSink(): void {
   if (deviceId === appliedSink) return;
   appliedSink = deviceId;
   ctx.setSinkId(deviceId).catch((err: unknown) => {
+    // A rejected apply leaves the context on its previous output; drop the
+    // cache entry so the next play re-issues it (transient OS/sink errors,
+    // or the first chime racing login, otherwise stick on the default).
+    if (appliedSink === deviceId) appliedSink = "";
     log.warn("Failed to set output device on notification audio", err);
   });
 }

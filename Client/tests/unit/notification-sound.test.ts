@@ -10,12 +10,13 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { cleanupNotificationAudio, playNotificationSound } from "@lib/notificationSound";
 import { setLocalDeafened } from "@stores/voice.store";
+import { expectConsole } from "../helpers/console";
 
 class RecordingAudioContext {
   static instances: RecordingAudioContext[] = [];
   readonly currentTime = 0;
   readonly destination = {};
-  readonly setSinkId = vi.fn(async () => {});
+  readonly setSinkId = vi.fn((id: string) => sinkState.impl(id));
   readonly oscillators: Array<{ hz: number[] }> = [];
   readonly close = vi.fn(async () => {});
 
@@ -45,7 +46,10 @@ class RecordingAudioContext {
   }
 }
 
-const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
+const { testPrefs, sinkState } = vi.hoisted(() => ({
+  testPrefs: new Map<string, unknown>(),
+  sinkState: { impl: async (_id: string): Promise<void> => {} },
+}));
 
 vi.mock("../../src/lib/preferences", () => ({
   STORAGE_PREFIX: "owncord:settings:",
@@ -55,6 +59,7 @@ vi.mock("../../src/lib/preferences", () => ({
 
 beforeEach(() => {
   testPrefs.clear();
+  sinkState.impl = async () => {};
   RecordingAudioContext.instances = [];
   vi.stubGlobal("AudioContext", RecordingAudioContext);
   setLocalDeafened(false);
@@ -115,5 +120,21 @@ describe("the shared AudioContext sink", () => {
     playNotificationSound();
 
     expect(RecordingAudioContext.instances[0]!.setSinkId).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries setSinkId on the next play after a failed apply", async () => {
+    testPrefs.set("audioOutputDevice", "speakers-a");
+    sinkState.impl = async () => {
+      throw new Error("device not ready");
+    };
+
+    playNotificationSound();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expectConsole("warn", "Failed to set output device on notification audio");
+
+    sinkState.impl = async () => {};
+    playNotificationSound();
+
+    expect(RecordingAudioContext.instances[0]!.setSinkId).toHaveBeenCalledTimes(2);
   });
 });
