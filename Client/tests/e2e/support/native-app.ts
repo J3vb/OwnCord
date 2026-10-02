@@ -61,8 +61,8 @@ export async function startNativeApp(
   // WebView2 browser process opens the CDP port well before the renderer
   // attaches its page target, so the page wait must share the same deadline.
   // A cold WebView2 start on a loaded Windows runner has reached ~64 s, past
-  // the old 60 s budget, so the page-ready/title wait gets 120 s.
-  const startupDeadline = Date.now() + 120_000;
+  // the old 60 s budget, so the page-ready/title wait gets 90 s.
+  const startupDeadline = Date.now() + 90_000;
   const started = Date.now();
   const running = startProcess(exe, [], directory);
   const firstOutput = () => {
