@@ -284,6 +284,67 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       sender.destroy?.();
     }
   });
+
+  it("keeps the pre-send status as the rollback target when a second edit queues behind the limiter", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveCustomStatus("hi");
+      sender.send("online", "hi");
+      expect(sent).toHaveLength(1);
+
+      saveCustomStatus("yo");
+      sender.send("online", "yo");
+      expect(sent).toHaveLength(1);
+
+      // The first frame's refusal must not roll back over the queued edit.
+      sender.rollbackTimedOut("id-1");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("yo");
+      expect(loadCustomStatus()).toBe("yo");
+
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.payload.custom_status).toBe("yo");
+
+      // The queued frame is refused too: back to what the server really has,
+      // not the first, also refused, text.
+      sender.rollbackTimedOut("id-2");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      sender.destroy?.();
+    }
+  });
+
+  it("drops the refused text but keeps the picked status when a plain flip queues behind it", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveCustomStatus("hi");
+      sender.send("online", "hi");
+
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      expect(sent).toHaveLength(1);
+
+      sender.rollbackTimedOut("id-1");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(membersStore.getState().members.get(1)?.status).toBe("dnd");
+      expect(authStore.getState().user?.custom_status).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+      expect(loadUserStatus()).toBe("dnd");
+
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.payload.status).toBe("dnd");
+    } finally {
+      sender.destroy?.();
+    }
+  });
 });
 
 describe("createPresenceSender — custom_status survival across supersession (OC-0156)", () => {
