@@ -360,6 +360,10 @@ describe("StatusPicker wired to UserBar", () => {
     const input = container.querySelector(
       "[data-testid='custom-status-input']",
     ) as HTMLInputElement;
+    // Typed with the input focused, as a user does: a hidden input keeps focus
+    // after Enter, and setCustomStatus() skips a focused input, so Enter has to
+    // hand focus back before the refusal can re-seed the field.
+    input.focus();
     input.value = "sneaky";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     membersStore.flush();

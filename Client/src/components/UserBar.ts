@@ -315,7 +315,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         const id = authStore.getState().user?.id;
         return id === undefined ? "" : (s.members.get(id)?.customStatus ?? "");
       },
-      (text) => statusPicker?.setCustomStatus(text),
+      (text: string) => statusPicker?.setCustomStatus(text),
     );
 
     container.appendChild(root);

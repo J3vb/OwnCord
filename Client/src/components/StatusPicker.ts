@@ -215,6 +215,10 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
           e.preventDefault();
           commit();
           closeDropdown();
+          // Leave the input: a hidden input keeps focus, and setCustomStatus()
+          // skips a focused one, so a TIMED_OUT rollback arriving right after
+          // this commit could not re-seed the refused text out of it.
+          dotEl?.focus();
         } else if (e.key === "Escape") {
           e.preventDefault();
           input.value = lastCommittedCustom;
