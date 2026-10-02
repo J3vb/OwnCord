@@ -315,12 +315,16 @@ async fn handle_connection<R: Runtime>(
 }
 
 /// Whether a failed TLS handshake should be reported with the distinct
-/// certificate code. Only a handshake *timeout* means the host may simply be
-/// unreachable — the peer never offered a certificate to judge. Every other
-/// handshake failure is a certificate/protocol rejection, which the webview
-/// should not conflate with an offline server (DP-54 follow-up).
-fn is_tls_handshake_failure(text: &str) -> bool {
-    !text.contains("timed out")
+/// certificate code. A rustls rejection (bad certificate, protocol error) is
+/// wrapped by tokio-rustls in an `io::Error` of kind `InvalidData` — the same
+/// precise signal the websocket path uses (`ws_proxy::is_tls_failure`). A
+/// handshake timeout, a reset, or a clean EOF means the host may simply be
+/// unreachable, so it keeps the generic offline path rather than telling the
+/// user its certificate could not be verified (DP-54 follow-up).
+fn is_tls_handshake_failure(error: &(dyn std::error::Error + 'static)) -> bool {
+    error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::InvalidData)
 }
 
 /// Dial the upstream TCP socket with Nagle's algorithm off. A small request is
@@ -361,13 +365,10 @@ async fn connect_verified<R: Runtime>(
     let tls = match connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await {
         Ok(tls) => tls,
         Err(e) => {
-            let text = e.to_string();
-            if !is_tls_handshake_failure(&text) {
+            if !is_tls_handshake_failure(e.as_ref()) {
                 return Err(e);
             }
-            return Ok(Fresh::Rejected(
-                format!("TLS handshake failed: {text}").into(),
-            ));
+            return Ok(Fresh::Rejected(format!("TLS handshake failed: {e}").into()));
         }
     };
 
@@ -576,18 +577,35 @@ mod tests {
         );
     }
 
-    // DP-54 follow-up: a handshake refusal (bad certificate, protocol error)
-    // must be a certificate failure, but a handshake timeout means the host may
-    // simply be unreachable, so it keeps the generic offline path.
+    // DP-54 follow-up: a rustls rejection (bad certificate, protocol error)
+    // reaches here as an `io::Error` of kind `InvalidData` and must be a
+    // certificate failure, but a handshake timeout, a reset or a clean EOF
+    // means the host may simply be unreachable, so it keeps the generic
+    // offline path.
     #[test]
-    fn a_handshake_refusal_is_certificate_but_a_timeout_is_not() {
-        assert!(is_tls_handshake_failure(
-            "invalid peer certificate: UnknownIssuer"
-        ));
-        assert!(is_tls_handshake_failure(
-            "received fatal alert: HandshakeFailure"
-        ));
-        assert!(!is_tls_handshake_failure("TLS handshake timed out"));
+    fn a_handshake_rejection_is_certificate_but_network_failures_are_not() {
+        let invalid_data = std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid peer certificate: UnknownIssuer",
+        );
+        assert!(is_tls_handshake_failure(&invalid_data));
+
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "connection reset by peer",
+        )));
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "tls handshake eof",
+        )));
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "broken pipe",
+        )));
+        assert!(!is_tls_handshake_failure(&std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "TLS handshake timed out",
+        )));
     }
 
     // Regression: the accept-error exit path in run_accept_loop must be able to

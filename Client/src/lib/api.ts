@@ -91,9 +91,8 @@ function parseRetryAfterMs(res: Response): number | undefined {
 
 /**
  * A request that never reached the server: the host is offline or
- * unreachable, or the desktop HTTP tunnel refused its certificate. `cause`
- * keeps the transport's raw text for the log; the display copy is
- * `errorText`'s.
+ * unreachable. `cause` keeps the transport's raw text for the log; the
+ * display copy is `errorText`'s.
  */
 export class TransportError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
