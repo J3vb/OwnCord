@@ -79,6 +79,9 @@ export const settingsText = defineCatalog("settings", {
   "notifications.sounds.desc": "Play sounds for notifications",
   "notifications.callSound.label": "Incoming Call Sound",
   "notifications.callSound.desc": "Ring when someone calls you, even with notification sounds off",
+  "notifications.voiceSounds.label": "Voice Sounds",
+  "notifications.voiceSounds.desc":
+    "Play a sound when someone joins or leaves your call, and when you mute or deafen",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All",
