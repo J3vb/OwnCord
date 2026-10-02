@@ -125,6 +125,17 @@ describe("filterEmojiSuggestions", () => {
     expect(first("mango")).toBe("🥭");
     expect(first("thumbsup")).toBe("👍");
     expect(first("thumbs")).toBe("👍");
+    // The complete Discord short-name table decides which row leads, so the
+    // first row matches Discord for names the Unicode data spells differently.
+    expect(first("cry")).toBe("😢");
+    expect(first("sob")).toBe("😭");
+    expect(first("joy")).toBe("😂");
+    expect(first("poop")).toBe("💩");
+    expect(first("sunglasses")).toBe("😎");
+    expect(first("dark_sunglasses")).toBe("🕶️");
+    // An exact short name beats one that only matches once its underscores go.
+    expect(first("icecream")).toBe("🍦");
+    expect(first("ice_cream")).toBe("🍨");
     // Discord's names: the face is the animal, the full body is its "2".
     for (const [name, face, body] of [
       ["dog", "🐶", "🐕"],

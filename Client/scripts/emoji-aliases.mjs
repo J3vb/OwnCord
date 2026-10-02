@@ -1,9 +1,10 @@
 // Curated data for the emoji generator (scripts/gen-emoji-data.mjs). Keys may
 // omit the U+FE0F presentation selector.
 
-// Discord-style names an emoji answers to ahead of its Unicode shortcode. The
-// first is the name the composer's `:` popup shows, and typing a name exactly
-// ranks the emoji first.
+// Extra Discord-style names the generator merges after Discord's own short
+// names and ahead of the Unicode shortcode. For an emoji Discord does not name,
+// the first one here is the name the composer's `:` popup shows; typing any of
+// them exactly ranks the emoji first.
 export const EMOJI_NAMES = {
   "❤️": "heart love",
   "💋": "kiss",
