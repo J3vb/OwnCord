@@ -47,4 +47,11 @@ describe("time format preference", () => {
   it("keeps the 12-hour clock for dates when unset", () => {
     expect(formatDate(new Date(2020, 5, 15, 18, 34), { timeStyle: "short" })).toBe("6:34 PM");
   });
+
+  it("falls back to the 12-hour clock for an invalid stored value", () => {
+    localStorage.setItem("owncord:settings:timeFormat", JSON.stringify("13h"));
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
+    const iso = new Date(2020, 5, 15, 18, 34).toISOString();
+    expect(formatMessageTimestamp(iso)).toContain("6:34 PM");
+  });
 });
