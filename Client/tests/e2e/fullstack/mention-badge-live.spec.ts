@@ -99,9 +99,9 @@ test("a mention in an unfocused channel updates the badge live, and clears on it
     undefined,
     server.owner!.token,
   );
-  expect(
-    history.messages.some((m: { content: string }) => m.content === "@bob look here"),
-  ).toBe(false);
+  expect(history.messages.some((m: { content: string }) => m.content === "@bob look here")).toBe(
+    false,
+  );
 
   aliceSocket.close();
   void general;
