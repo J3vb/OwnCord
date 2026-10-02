@@ -286,11 +286,13 @@ describe("ring controller — destroy", () => {
 
 function outgoingHarness() {
   const states: Array<OutgoingCallState | null> = [];
+  const ringbacks: boolean[] = [];
   let pending: (() => void) | null = null;
   let pendingMs = 0;
   let cleared = 0;
   const call = createOutgoingCall({
     onChange: (s) => states.push(s),
+    onRingback: (playing) => ringbacks.push(playing),
     setTimer: (fn, ms) => {
       pending = fn;
       pendingMs = ms;
@@ -304,6 +306,7 @@ function outgoingHarness() {
   return {
     call,
     states,
+    ringbacks,
     fireTimeout: () => pending?.(),
     timerFn: () => pending,
     timerMs: () => pendingMs,
@@ -398,5 +401,62 @@ describe("outgoing call", () => {
 
     expect(h.call.current()).toBeNull();
     expect(h.armed()).toBe(false);
+  });
+});
+
+// DP-25: the caller hears a ringback while the callee's phone rings, and it
+// stops the moment the ring ends — whichever way it ends.
+describe("outgoing call — ringback", () => {
+  it("starts on ringing and stops on declined", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    expect(h.ringbacks).toEqual([true]);
+
+    h.call.declined(5, 9);
+    expect(h.ringbacks).toEqual([true, false]);
+  });
+
+  it("stops on no-answer when the window runs out", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.fireTimeout();
+
+    expect(h.call.current()?.phase).toBe("no-answer");
+    expect(h.ringbacks).toEqual([true, false]);
+  });
+
+  it("stops on clear and destroy, and neither plays after clear", () => {
+    const cleared = outgoingHarness();
+    cleared.call.start(5, [9]);
+    cleared.call.clear();
+    cleared.call.clear();
+    cleared.fireTimeout();
+    expect(cleared.ringbacks).toEqual([true, false]);
+
+    const destroyed = outgoingHarness();
+    destroyed.call.start(5, [9]);
+    destroyed.call.destroy();
+    destroyed.fireTimeout();
+    expect(destroyed.ringbacks).toEqual([true, false]);
+  });
+
+  it("a group decline keeps ringing until the last callee declines", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9, 10]);
+    h.call.declined(5, 9);
+    // Still ringing for 10: the ringback must not stop on the first decline.
+    expect(h.ringbacks).toEqual([true]);
+
+    h.call.declined(5, 10);
+    expect(h.ringbacks).toEqual([true, false]);
+  });
+
+  it("a redial restarts the ringback", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    h.call.declined(5, 9);
+    h.call.start(5, [9]);
+
+    expect(h.ringbacks).toEqual([true, false, true]);
   });
 });

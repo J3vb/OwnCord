@@ -55,6 +55,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
 
+### Direct messages & members
+
+- **A caller hears ringback and always learns the outcome.** Placing a DM call was silent on your side while the other person's phone rang, and if you moved to another channel you never saw whether they declined or never answered. You now hear a soft ringback while the call is ringing — it stops the moment someone joins, every callee declines, the 30 seconds run out or you leave — and if you are looking at another channel a toast tells you "<name> declined" or "No answer". Do Not Disturb and the "Incoming Call Sound" switch silence it, and ringing again restarts it.
+
 ## v2.1.0-beta.2
 
 `v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.

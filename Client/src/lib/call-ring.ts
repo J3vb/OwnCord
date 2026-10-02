@@ -161,6 +161,9 @@ export interface OutgoingCallState {
 
 export interface OutgoingCallOptions {
   readonly onChange: (state: OutgoingCallState | null) => void;
+  /** The caller's ringback: true while `phase === "ringing"`, false the moment
+   *  the ring ends for any reason (DP-25). Never true after `clear`. */
+  readonly onRingback?: (playing: boolean) => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
@@ -183,6 +186,9 @@ export function createOutgoingCall(opts: OutgoingCallOptions): OutgoingCall {
 
   let state: OutgoingCallState | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Whether the ringback is currently playing, so it is toggled once per
+   *  phase change and not on every pending update. */
+  let ringbackPlaying = false;
 
   function stopTimer(): void {
     if (timer === null) return;
@@ -192,6 +198,11 @@ export function createOutgoingCall(opts: OutgoingCallOptions): OutgoingCall {
 
   function set(next: OutgoingCallState | null): void {
     state = next;
+    const playing = next?.phase === "ringing";
+    if (playing !== ringbackPlaying) {
+      ringbackPlaying = playing;
+      opts.onRingback?.(playing);
+    }
     opts.onChange(next);
   }
 

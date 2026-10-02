@@ -556,6 +556,29 @@ test.describe("DM calls — call panel", () => {
     await expect(voiceWidget(page)).toBeHidden();
   });
 
+  // DP-25: while the caller's DM is on screen the panel is the feedback, but a
+  // caller who moved to another channel still has to learn the result.
+  test("a callee's decline while the caller is on another channel shows a toast", async ({
+    page,
+  }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
+
+    // Move to the other DM: the call panel and its "Calling…" are gone.
+    await page.locator(".dm-item[data-channel-id='101']").click();
+    await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("thirduser");
+    await expect(panel(page)).toBeHidden();
+
+    await emitWsMessage(page, {
+      type: "call_declined",
+      payload: { channel_id: DM_CHANNEL_ID, from_user: OTHER_USER_ID, username: "otheruser" },
+    });
+
+    await expect(page.locator(".toast-text", { hasText: "Otto declined" })).toBeVisible();
+  });
+
   test("a ring for the open DM is answered in the panel, and the banner stays hidden until you look elsewhere", async ({
     page,
   }) => {
