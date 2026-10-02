@@ -65,6 +65,8 @@ describe("createSearchOverlay", () => {
     vi.useRealTimers();
     container.remove();
     setDmChannels([]);
+    localStorage.removeItem("owncord:settings:timeFormat");
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
   });
 
   it("mounts with overlay and input", () => {
@@ -188,6 +190,28 @@ describe("createSearchOverlay", () => {
 
     const times = container.querySelectorAll(".search-result-time");
     expect(times[0]!.textContent).toBe(times[1]!.textContent);
+
+    overlay.destroy?.();
+  });
+
+  it("renders search result times on the 24-hour clock when the pref is 24h", async () => {
+    localStorage.setItem("owncord:settings:timeFormat", JSON.stringify("24h"));
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
+    const at = new Date(2020, 5, 15, 18, 34);
+    const onSearch = vi
+      .fn()
+      .mockResolvedValue({ results: [makeResult({ timestamp: at.toISOString() })] });
+    const overlay = createSearchOverlay(makeOptions({ onSearch }));
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "hello";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const time = container.querySelector(".search-result-time")!.textContent!;
+    expect(time).toContain("18:34");
+    expect(time).not.toMatch(/AM|PM/i);
 
     overlay.destroy?.();
   });

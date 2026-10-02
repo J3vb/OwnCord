@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAppearanceTab } from "@components/settings/AppearanceTab";
+import { refreshTimeFormat } from "@lib/timeFormat";
 
 const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
@@ -24,6 +25,7 @@ describe("AppearanceTab — Accessibility", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     localStorage.clear();
+    refreshTimeFormat();
     document.documentElement.removeAttribute("style");
     document.body.removeAttribute("style");
     vi.clearAllMocks();
@@ -461,5 +463,40 @@ describe("AppearanceTab — Accessibility", () => {
 
     const prefix = container.querySelector(".accent-hex-prefix");
     expect(prefix?.textContent).toBe("#");
+  });
+
+  // --- Time format (12h / 24h) ---
+
+  it("shows a Time Format radiogroup defaulting to 12-hour", () => {
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    const group = container.querySelector('[data-testid="time-format"]');
+    expect(group?.getAttribute("role")).toBe("radiogroup");
+    const selected = group!.querySelector("[aria-checked='true']") as HTMLElement;
+    expect(selected.dataset["value"]).toBe("12h");
+  });
+
+  it("saves 24-hour and updates the selection when chosen", () => {
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    const option = container.querySelector('[data-testid="time-format-24h"]') as HTMLElement;
+    option.click();
+
+    expect(localStorage.getItem("owncord:settings:timeFormat")).toBe('"24h"');
+    expect(option.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("loads a stored 24-hour choice as the active option", () => {
+    localStorage.setItem("owncord:settings:timeFormat", '"24h"');
+    refreshTimeFormat();
+    const section = buildAppearanceTab(ac.signal);
+    container.appendChild(section);
+
+    const selected = container
+      .querySelector('[data-testid="time-format"]')!
+      .querySelector("[aria-checked='true']") as HTMLElement;
+    expect(selected.dataset["value"]).toBe("24h");
   });
 });

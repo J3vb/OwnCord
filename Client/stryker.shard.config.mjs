@@ -117,6 +117,7 @@ export const shards = {
     "src/lib/store.ts",
     "src/lib/supportBundle.ts",
     "src/lib/themes.ts",
+    "src/lib/timeFormat.ts",
     "src/lib/toast.ts",
     "src/lib/updater.ts",
     "src/lib/userStatus.ts",

@@ -53,6 +53,10 @@ export const settingsText = defineCatalog("settings", {
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
   "appearance.compactMode": "Compact Mode",
+  "appearance.timeFormat": "Time Format",
+  "appearance.timeFormat.desc": "Choose 12-hour or 24-hour clocks for timestamps",
+  "appearance.timeFormat.12h": "12-hour",
+  "appearance.timeFormat.24h": "24-hour",
   "appearance.accentColor": "Accent Color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":

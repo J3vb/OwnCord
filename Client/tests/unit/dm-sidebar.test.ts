@@ -815,18 +815,22 @@ describe("DmSidebar", () => {
 
 describe("DmSidebar — unread and mention badges", () => {
   let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createDmSidebar> | null = null;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
+    sidebar = null;
   });
 
   afterEach(() => {
+    sidebar?.destroy?.();
+    sidebar = null;
     container.remove();
   });
 
   function mountWith(convo: DmConversation): void {
-    const sidebar = createDmSidebar({
+    sidebar = createDmSidebar({
       conversations: [convo],
       onSelectConversation: vi.fn(),
       onNewDm: vi.fn(),

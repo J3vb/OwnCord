@@ -1691,6 +1691,37 @@ describe("MessageList", () => {
     });
   });
 
+  describe("time format preference", () => {
+    afterEach(() => {
+      localStorage.removeItem("owncord:settings:timeFormat");
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }),
+      );
+    });
+
+    it("relabels rendered message times when the clock format changes", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
+        setMessages(1, [makeMessage({ id: 1, timestamp: new Date().toISOString() })]);
+        msgList.mount(container);
+
+        expect(container.querySelector(".msg-time")!.textContent).toContain("6:34 PM");
+
+        localStorage.setItem("owncord:settings:timeFormat", JSON.stringify("24h"));
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }),
+        );
+
+        const text = container.querySelector(".msg-time")!.textContent!;
+        expect(text).toContain("18:34");
+        expect(text).not.toMatch(/AM|PM/i);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("scrollToMessage vs renderWindow rebuild breaker", () => {
     beforeEach(() => {
       vi.useFakeTimers();
