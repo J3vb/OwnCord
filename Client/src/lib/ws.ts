@@ -799,6 +799,7 @@ export function createWsClient({
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
+    connectFailureCode = null;
     restartRedialAt = null;
     busyRetryAfterMs = undefined;
     busyHold = false;
