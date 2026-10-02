@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Desktop UI
+
+- **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.
+
 ## v2.1.0-beta.2
 
 `v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.

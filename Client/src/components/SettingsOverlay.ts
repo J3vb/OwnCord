@@ -263,8 +263,13 @@ export function createSettingsOverlay(
     root?.classList.remove("open");
     // The hidden pane is rebuilt on reopen (contentLive), so drop its build
     // now: anything shown once (recovery codes, a recovery kit secret) is
-    // wiped from the DOM on abort rather than lingering while closed.
+    // wiped from the DOM rather than lingering while closed. Aborting the
+    // build's listeners is not enough — the nodes stay attached until the
+    // next renderActiveTab clears them, so a closed overlay kept the last
+    // tab's DOM (including the Account tab's asynchronously loaded session
+    // rows), and the soak's node count depended on that fetch's race.
     renderOwner?.destroy();
+    if (contentArea !== null) clearChildren(contentArea);
     // Stop camera preview, mic meter, and the log listener when the overlay closes
     cleanupActiveTab();
     contentLive = false;
