@@ -19,6 +19,20 @@ use tauri::{AppHandle, Runtime};
 
 use crate::constants::{CERTS_STORE, CERT_WEB_PKI_STORE};
 
+/// The distinct code a loopback proxy reports for a TLS/certificate failure.
+/// The webview maps it to its own certificate copy (DP-54 follow-up): without
+/// it, a refused or failed handshake is indistinguishable from an unreachable
+/// server. Kept in step with `Client/src/lib/api.ts`'s `TLS_CERT_CODE`.
+pub(crate) const TLS_CERT_ERROR_CODE: &str = "TLS_CERT_UNVERIFIED";
+
+/// A small JSON error body carrying [`TLS_CERT_ERROR_CODE`], for a websocket
+/// (`ws_connect`) command error. The `cert-tofu` event still drives the
+/// accept/reject modal; this is what lets the webview tell a certificate
+/// failure apart from an unreachable server.
+pub(crate) fn cert_connect_error(message: &str) -> String {
+    serde_json::json!({ "error": TLS_CERT_ERROR_CODE, "message": message }).to_string()
+}
+
 /// What the handshake showed: the leaf's fingerprint, and whether the chain
 /// validated against the public web-PKI roots for the connection's DNS name.
 #[derive(Debug, Clone, PartialEq, Eq)]

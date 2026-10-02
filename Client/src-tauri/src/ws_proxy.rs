@@ -172,6 +172,13 @@ pub async fn ws_connect<R: Runtime>(
         })?
         .map_err(|e| {
             error!("[ws_proxy] connect failed to {}: {}", url, e);
+            // A TLS handshake failure (as opposed to an unreachable host) is
+            // reported with the distinct certificate code so the webview can
+            // show the certificate copy instead of the generic unreachable one
+            // (DP-54 follow-up). The TOFU decision flow itself is unchanged.
+            if is_tls_failure(&e) {
+                return tofu::cert_connect_error(&format!("ws connect failed: {e}"));
+            }
             format!("ws connect failed: {e}")
         })?;
 
@@ -214,8 +221,12 @@ pub async fn ws_connect<R: Runtime>(
                 }),
             );
             // Do not open the socket: the user must confirm the fingerprint
-            // (accept_cert_fingerprint) before anything is sent over it.
-            return Err(crate::text::cert_not_trusted(&host));
+            // (accept_cert_fingerprint) before anything is sent over it. The
+            // refusal carries the distinct certificate code so the webview can
+            // tell it apart from an unreachable server.
+            return Err(tofu::cert_connect_error(&crate::text::cert_not_trusted(
+                &host,
+            )));
         }
         TofuOutcome::Mismatch { stored } => {
             let msg = tofu::mismatch_message(&host, &stored, &fingerprint);
@@ -234,8 +245,10 @@ pub async fn ws_connect<R: Runtime>(
                     "storedFingerprint": stored,
                 }),
             );
-            // Reject the connection — do not proceed.
-            return Err(msg);
+            // Reject the connection — do not proceed. The refusal carries the
+            // distinct certificate code so the webview can tell it apart from
+            // an unreachable server.
+            return Err(tofu::cert_connect_error(&msg));
         }
     }
     // ── End TOFU check ───────────────────────────────────────────────────
@@ -320,6 +333,23 @@ pub async fn ws_connect<R: Runtime>(
     });
 
     Ok(())
+}
+
+/// Whether a tungstenite connect error is a TLS/certificate rejection rather
+/// than an unreachable host. Drives the distinct `TLS_CERT_UNVERIFIED` code the
+/// webview maps to its certificate copy (DP-54 follow-up). `Error::Tls` is the
+/// direct case; when tokio-rustls rejects the handshake it wraps the rustls
+/// error in an `Error::Io` of kind `InvalidData` (a clean EOF is
+/// `UnexpectedEof`, and a dead socket keeps its own kind), so that kind is the
+/// precise signal — a plain network error is never mistaken for a certificate
+/// one.
+pub(crate) fn is_tls_failure(error: &tokio_tungstenite::tungstenite::Error) -> bool {
+    use tokio_tungstenite::tungstenite::Error;
+    match error {
+        Error::Tls(_) => true,
+        Error::Io(e) => e.kind() == std::io::ErrorKind::InvalidData,
+        _ => false,
+    }
 }
 
 /// Why [`read_frames`] stopped.
@@ -524,6 +554,43 @@ mod tests {
     /// A well-formed SHA-256 colon-hex fingerprint (32 pairs, 95 chars).
     const VALID: &str = "e3:b0:c4:42:98:fc:1c:14:9a:fb:f4:c8:99:6f:b9:24:\
 27:ae:41:e4:64:9b:93:4c:a4:95:99:1b:78:52:b8:55";
+
+    // DP-54 follow-up: a failed TLS handshake or a refused certificate must be
+    // distinguishable from an unreachable host by the webview. The connect
+    // error and the refused-cert command error both carry the distinct code.
+    #[test]
+    fn a_certificate_connect_error_carries_the_distinct_code() {
+        let raw = tofu::cert_connect_error("certificate for example.com is not yet trusted");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("JSON error body");
+        assert_eq!(
+            parsed.get("error").and_then(serde_json::Value::as_str),
+            Some(tofu::TLS_CERT_ERROR_CODE),
+        );
+        assert!(parsed
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
+    }
+
+    #[test]
+    fn a_tls_handshake_error_is_classified_but_a_plain_io_error_is_not() {
+        use tokio_tungstenite::tungstenite::{error::TlsError, Error};
+        assert!(is_tls_failure(&Error::Tls(TlsError::InvalidDnsName)));
+        // tokio-rustls wraps a rustls rejection inside Error::Io/InvalidData.
+        assert!(is_tls_failure(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid peer certificate: UnknownIssuer",
+        ))));
+        // A dropped or dead host is not a certificate failure.
+        assert!(!is_tls_failure(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "tls handshake eof",
+        ))));
+        assert!(!is_tls_failure(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "Connection refused",
+        ))));
+    }
 
     #[test]
     fn valid_fingerprint_is_accepted() {

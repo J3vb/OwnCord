@@ -238,6 +238,21 @@ describe("API Client", () => {
       expectConsole("warn", /\[api\] API error/);
     });
 
+    it("maps the tunnel's distinct TLS certificate code to the certificate copy", async () => {
+      // The desktop proxy answers a refused certificate with a 502 whose JSON
+      // body carries TLS_CERT_UNVERIFIED (http_pool.rs). The webview must show
+      // the certificate message, not the generic unreachable copy.
+      mockFetch.mockResolvedValue(
+        errorResponse(502, "TLS_CERT_UNVERIFIED", "the server's certificate could not be verified"),
+      );
+      const err = await api.getMe().catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 502, code: "TLS_CERT_UNVERIFIED" });
+      expect(errorText(err, "Fallback")).toBe(
+        "The server's certificate couldn't be verified. Check the server address, or ask the server owner.",
+      );
+      expectConsole("warn", /\[api\] API error/);
+    });
+
     it("parseError uses UNKNOWN when error field missing from JSON", async () => {
       mockFetch.mockResolvedValue({
         ok: false,

@@ -95,6 +95,10 @@ function createMockWsClient(): MockWsClient {
       // no-op in mock
     },
 
+    getConnectFailureCode(): string | null {
+      return null;
+    },
+
     getState(): ConnectionState {
       return currentState;
     },

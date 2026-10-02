@@ -434,6 +434,41 @@ describe("main.ts pre-auth connection deadline", () => {
     clearAuth();
   });
 
+  // DP-54 follow-up: the pre-auth deadline must name a certificate failure
+  // rather than call an unreachable server. The transport reports the distinct
+  // code on the rejected connect (a failed TLS handshake), which the deadline
+  // reads to choose its copy.
+  it("shows the certificate copy when the pre-auth dial fails on TLS", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    // Reject the first dial with the certificate code; leave later attempts
+    // pending so the reconnect loop does not re-log and re-report before the
+    // deadline (which would add unclaimed console lines).
+    let dialed = false;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd !== "ws_connect") return Promise.resolve(undefined);
+      if (dialed) return new Promise<never>(() => {});
+      dialed = true;
+      return Promise.reject(
+        JSON.stringify({
+          error: "TLS_CERT_UNVERIFIED",
+          message: "the server's certificate could not be verified",
+        }),
+      );
+    });
+
+    await capturedConnectCallbacks.onLogin!("badcert.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(uiStore.getState().transientError).toContain("certificate couldn't be verified");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    clearAuth();
+  });
+
   it("does not tear down a session re-dialled after a certificate mismatch", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("rotated.example:8443", "alex", "hunter2");

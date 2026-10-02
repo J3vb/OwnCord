@@ -738,6 +738,49 @@ describe("disconnect resets certMismatchBlock", () => {
     vi.useRealTimers();
   });
 
+  // DP-54 follow-up: the desktop proxy reports a failed TLS handshake (a
+  // certificate failure that never reached the TOFU modal, e.g. the server
+  // rejecting the handshake) with a distinct `TLS_CERT_UNVERIFIED` code in the
+  // rejected `ws_connect`. The client keeps it so the pre-auth deadline can
+  // show the certificate copy instead of the generic unreachable one.
+  it("records the certificate failure code from a rejected ws_connect", async () => {
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect"
+        ? Promise.reject(
+            JSON.stringify({
+              error: "TLS_CERT_UNVERIFIED",
+              message: "the server's certificate could not be verified",
+            }),
+          )
+        : Promise.resolve(undefined),
+    );
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expect(client.getConnectFailureCode()).toBe("TLS_CERT_UNVERIFIED");
+  });
+
+  it("has no connect failure code for an ordinary dial failure", async () => {
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect"
+        ? Promise.reject("ws connect failed: connection refused")
+        : Promise.resolve(undefined),
+    );
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expect(client.getConnectFailureCode()).toBeNull();
+    // And a successful reconnect clears it.
+    mockInvoke.mockImplementation(() => Promise.resolve(undefined));
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(client.getConnectFailureCode()).toBeNull();
+  });
+
   it("clears certMismatchBlock on intentional disconnect", async () => {
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);

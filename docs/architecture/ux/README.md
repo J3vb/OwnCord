@@ -168,11 +168,14 @@ only the displayed text is shared: `serverErrorText()`/`errorText()` in
 server overloads it — see `serverErrorCopy()`) to catalog text and show the
 server message, capitalised, only when there is no mapping. A request that
 never reached the server (`TransportError`) shows the "Couldn't reach this
-server" copy instead of the transport's raw text, which goes to the log. The
-desktop HTTP tunnel's bare `502` — its refusal of a first-use or changed
-certificate — is a `TransportError` too, and shows the same copy until a
-distinct certificate message exists. This matrix is the target
-contract.
+server" copy instead of the transport's raw text, which goes to the log. A
+certificate the desktop tunnel cannot verify (a refused first-use or changed
+TOFU pin, or a failed TLS handshake) carries the distinct `TLS_CERT_UNVERIFIED`
+code and shows "The server's certificate couldn't be verified." instead — from
+the HTTP tunnel's `502` JSON body, the rejected `ws_connect`, and the relaying
+saved-password login alike. A bare, code-less `502` (a legacy refusal shape) is
+still a `TransportError` and shows the unreachable copy. This matrix is the
+target contract.
 
 | Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -187,6 +190,7 @@ contract.
 | **Transport backpressure**       | WS `ws_send` "channel full" | Mark the optimistic row failed with Retry (✓ since 2026-07: `ws.onSendFailure` → dispatcher → `markSendFailed` with `NETWORK`/`OFFLINE`; id-less sends like heartbeats stay silent)                                                                              |
 | **Cert first-use**               | Rust `cert-tofu: first_use` | **Blocking trust modal** (`createCertFirstUseModal`): the Rust proxy _rejects_ the first connection rather than auto-pinning; Accept stores the pin and retries, Cancel leaves the server untrusted (already: the `ws.onCertFirstUse(...)` handler in `main.ts`) |
 | **Cert mismatch**                | Rust `cert-tofu: mismatch`  | Blocking `CertMismatchModal`; Accept re-pins + reconnects, Reject disconnects + returns to connect (already: the `ws.onCertMismatch(...)` handler in `main.ts`)                                                                                                  |
+| **Cert unverifiable**            | Rust `TLS_CERT_UNVERIFIED`  | Friendly copy "The server's certificate couldn't be verified." — from the HTTP tunnel's 502 JSON body, the rejected `ws_connect`, and the relaying saved-password login; distinct from the generic unreachable copy (DP-54 follow-up)                            |
 
 ---
 

@@ -146,6 +146,7 @@ function createMockWs() {
     onServerBusy: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
+    getConnectFailureCode: vi.fn(() => null),
     getState: vi.fn(() => "disconnected" as const),
     _getWs: vi.fn(() => null),
   };

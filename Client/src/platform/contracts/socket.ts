@@ -55,12 +55,17 @@ export interface SocketCertEvent {
   readonly storedFingerprint?: string;
 }
 
-/** Optional retry metadata for a disconnected state report. */
+/** Optional metadata for a disconnected state report. */
 export interface SocketRetryHint {
   /** Server minimum wait, relative to this disconnect, when the transport can
    * expose it. The app bounds it by maxReconnectDelayMs. The current desktop
    * proxy exposes neither handshake headers nor a structured retry delay. */
   readonly retryAfterMs?: number;
+  /** The failure code a *failed connect* reported, when the transport can read
+   * one (the desktop `ws_connect` command rejects with a JSON `{error}` body
+   * for a certificate failure — `TLS_CERT_UNVERIFIED`). Absent on an ordinary
+   * close, so the app can tell a refusal from a lost connection. */
+  readonly errorCode?: string;
 }
 
 /** One connection's transport. */

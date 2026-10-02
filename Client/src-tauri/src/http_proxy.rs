@@ -45,7 +45,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 
-use crate::http_pool::{self, BoxError, ConnPool, Fresh, BAD_GATEWAY};
+use crate::http_pool::{self, BoxError, ConnPool, Fresh};
 use crate::tofu::{self, TofuOutcome};
 
 /// Tauri-managed state: one running tunnel per remote host.
@@ -294,7 +294,7 @@ async fn handle_connection<R: Runtime>(
         Fresh::Verified(tls, _) => tls,
         Fresh::Rejected(e) => {
             // Give the local fetch a clean HTTP failure instead of a reset.
-            let _ = local.write_all(BAD_GATEWAY).await;
+            let _ = local.write_all(&http_pool::cert_error_response()).await;
             return Err(e);
         }
     };
@@ -312,6 +312,15 @@ async fn handle_connection<R: Runtime>(
         }
     }
     Ok(())
+}
+
+/// Whether a failed TLS handshake should be reported with the distinct
+/// certificate code. Only a handshake *timeout* means the host may simply be
+/// unreachable — the peer never offered a certificate to judge. Every other
+/// handshake failure is a certificate/protocol rejection, which the webview
+/// should not conflate with an offline server (DP-54 follow-up).
+fn is_tls_handshake_failure(text: &str) -> bool {
+    !text.contains("timed out")
 }
 
 /// Dial the upstream TCP socket with Nagle's algorithm off. A small request is
@@ -344,14 +353,37 @@ async fn connect_verified<R: Runtime>(
 
     let (server_name, dial_target) = resolve_remote_target(remote_host)?;
     let tcp = dial_upstream(&dial_target, Duration::from_secs(10)).await?;
-    let tls = connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await?;
+    // A handshake that fails on the certificate or protocol is a TLS failure,
+    // not an unreachable host: classify it as `Rejected` so the caller answers
+    // with the distinct cert JSON instead of dropping the socket (which the
+    // webview cannot tell from an offline server). A handshake that merely
+    // times out — and a failed dial above — stays `Err`: that is unreachable.
+    let tls = match connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await {
+        Ok(tls) => tls,
+        Err(e) => {
+            let text = e.to_string();
+            if !is_tls_handshake_failure(&text) {
+                return Err(e);
+            }
+            return Ok(Fresh::Rejected(
+                format!("TLS handshake failed: {text}").into(),
+            ));
+        }
+    };
 
-    let observed = captured_fp
+    let observed = match captured_fp
         .lock()
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
         .filter(|o| !o.fingerprint.is_empty())
-        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    {
+        Some(observed) => observed,
+        None => {
+            return Ok(Fresh::Rejected(
+                "TLS handshake completed but no certificate fingerprint was captured".into(),
+            ))
+        }
+    };
     let fingerprint = observed.fingerprint.clone();
 
     let state = app.try_state::<HttpProxyState>();
@@ -542,6 +574,20 @@ mod tests {
             tcp.nodelay().expect("read nodelay"),
             "dial_upstream must set TCP_NODELAY on the upstream socket"
         );
+    }
+
+    // DP-54 follow-up: a handshake refusal (bad certificate, protocol error)
+    // must be a certificate failure, but a handshake timeout means the host may
+    // simply be unreachable, so it keeps the generic offline path.
+    #[test]
+    fn a_handshake_refusal_is_certificate_but_a_timeout_is_not() {
+        assert!(is_tls_handshake_failure(
+            "invalid peer certificate: UnknownIssuer"
+        ));
+        assert!(is_tls_handshake_failure(
+            "received fatal alert: HandshakeFailure"
+        ));
+        assert!(!is_tls_handshake_failure("TLS handshake timed out"));
     }
 
     // Regression: the accept-error exit path in run_accept_loop must be able to

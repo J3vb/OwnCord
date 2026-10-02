@@ -7,7 +7,7 @@
 // The transport loads its native APIs lazily, so "there is no native host"
 // is expressed the way the transport sees it: the module's `invoke` accessor
 // throws, `ensureApis()` swallows it, and the command that follows fails.
-import { vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SocketConnection, SocketTransport } from "../../../src/platform/contracts/socket";
 import { describeSocketTransportSuite } from "./socket.suite";
 
@@ -132,4 +132,44 @@ describeSocketTransportSuite(async () => {
       accepted: () => acceptedPins.map((pin) => ({ ...pin })),
     },
   };
+});
+
+// DP-54 follow-up: a rejected ws_connect that carries the proxy's JSON
+// `{error}` body (a certificate failure) must be passed to the state
+// subscribers as a `retryHint.errorCode`; an ordinary text rejection must not.
+describe("desktop socket connect failure code", () => {
+  it("passes through a JSON error code from a rejected connect", async () => {
+    hostAvailable = true;
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "ws_connect"
+        ? Promise.reject(
+            JSON.stringify({
+              error: "TLS_CERT_UNVERIFIED",
+              message: "the server's certificate could not be verified",
+            }),
+          )
+        : Promise.resolve(undefined),
+    );
+
+    const connection = mod.socket.create();
+    const hints: Array<string | undefined> = [];
+    connection.onStateChange((_state, hint) => hints.push(hint?.errorCode));
+    await connection.connect({ url: "wss://x.example/api/v1/ws", token: "t" }).catch(() => {});
+    expect(hints).toContain("TLS_CERT_UNVERIFIED");
+  });
+
+  it("has no error code for an ordinary text rejection", async () => {
+    hostAvailable = true;
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "ws_connect" ? Promise.reject("connection refused") : Promise.resolve(undefined),
+    );
+
+    const connection = mod.socket.create();
+    const hints: Array<string | undefined> = [];
+    connection.onStateChange((_state, hint) => hints.push(hint?.errorCode));
+    await connection.connect({ url: "wss://x.example/api/v1/ws", token: "t" }).catch(() => {});
+    expect(hints.every((code) => code === undefined)).toBe(true);
+  });
 });

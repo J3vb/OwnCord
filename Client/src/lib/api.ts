@@ -60,6 +60,13 @@ interface RequestOptions {
   onUploadProgress?: (fraction: number) => void;
 }
 
+/**
+ * The distinct code the desktop proxy reports for a TLS/certificate failure
+ * (a refused first-use or changed TOFU pin, or a failed handshake). Kept in
+ * step with `Client/src-tauri/src/tofu.rs`'s `TLS_CERT_ERROR_CODE`.
+ */
+export const TLS_CERT_CODE = "TLS_CERT_UNVERIFIED";
+
 /** API client error with parsed error body. */
 export class ApiClientError extends Error {
   readonly status: number;
@@ -96,11 +103,11 @@ export class TransportError extends Error {
 }
 
 /**
- * The error for a non-2xx response. The desktop HTTP tunnel answers a
- * certificate it refused (TOFU: a first-use or changed certificate) with a
- * bare 502 that carries no error code, so that shape is a `TransportError`
- * rather than a server refusal. It shows the unreachable copy until a distinct
- * certificate message exists.
+ * The error for a non-2xx response. The desktop HTTP tunnel now answers a
+ * refused certificate with a 502 whose JSON body carries {@link TLS_CERT_CODE},
+ * which `serverErrorCopy` maps to the certificate copy. A code-less 502 (a
+ * legacy or intermediary refusal shape) is still a `TransportError`, showing
+ * the unreachable copy rather than a server refusal.
  */
 export function httpError(
   status: number,
@@ -199,6 +206,11 @@ const PERMISSION_REFUSAL =
  */
 export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
+    // The desktop HTTP tunnel reports a refused certificate or a failed TLS
+    // handshake with this distinct code (http_pool.rs's cert_error_response)
+    // rather than a bare 502, so the two failure classes stay distinguishable.
+    case TLS_CERT_CODE:
+      return connectText("error.tlsFailed");
     case "RATE_LIMITED":
       return authSliceCopy(message) ?? connectText("error.rateLimited");
     case "AUTH_BUSY":

@@ -59,6 +59,11 @@ pub fn startup_dialog_body(error: &str) -> String {
 pub const CERT_NOT_TRUSTED: &str =
     "certificate for {host} is not yet trusted; confirm the fingerprint to continue";
 
+/// The fallback message a certificate refusal carries in its `TLS_CERT_UNVERIFIED`
+/// JSON body. The webview shows its own catalog copy for that code; this is what
+/// a caller that ignores the code still reads.
+pub const CERT_UNVERIFIED: &str = "the server's certificate could not be verified";
+
 /// The first-use refusal, with the host as a parameter.
 pub fn cert_not_trusted(host: &str) -> String {
     CERT_NOT_TRUSTED.replace("{host}", host)
@@ -104,6 +109,10 @@ mod tests {
             cert_not_trusted("example.com:8443"),
             "certificate for example.com:8443 is not yet trusted; confirm the fingerprint to continue"
         );
+        assert_eq!(
+            CERT_UNVERIFIED,
+            "the server's certificate could not be verified"
+        );
         // The proxies build the mismatch message through tofu, so check it there.
         assert_eq!(
             crate::tofu::mismatch_message("example.com:8443", "aa:bb", "cc:dd"),
@@ -126,6 +135,7 @@ mod tests {
             ("tofu.rs", include_str!("tofu.rs")),
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
             ("http_proxy.rs", include_str!("http_proxy.rs")),
+            ("http_pool.rs", include_str!("http_pool.rs")),
         ];
         let quoted = [
             TRAY_SHOW_HIDE,
@@ -140,6 +150,7 @@ mod tests {
             TRAY_QUIT,
             TRAY_TOOLTIP,
             STARTUP_DIALOG_TITLE,
+            CERT_UNVERIFIED,
         ]
         .map(|literal| format!("\"{literal}\""));
         let prose = [
