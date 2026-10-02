@@ -13,7 +13,7 @@ import type {
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
-import { setVoiceDeafened } from "@lib/voiceDeafened";
+import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -147,6 +147,15 @@ const INITIAL_STATE: VoiceState = {
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 
+// Keep the sound module's session flag in step with channel membership on every
+// edge (join, leave, channel switch, reconnect roster, logout) without that
+// module importing this store (DP-40). localDeafened itself is mirrored
+// synchronously by setLocalDeafened/resetVoiceStore.
+voiceStore.subscribeSelector(
+  (state) => state.currentChannelId !== null,
+  setVoiceInSession,
+);
+
 /** Incremented by the incremental roster mutators (updateVoiceState,
  *  removeVoiceUser) — never by setVoiceStates, which replaces the whole
  *  roster on the initial `ready` and on a full resync. DP-40's voice UI sounds
@@ -164,6 +173,7 @@ export function getVoiceRosterRevision(): number {
 /** Reset voice store to initial state (e.g. on logout). */
 export function resetVoiceStore(): void {
   setVoiceDeafened(false);
+  setVoiceInSession(false);
   voiceStore.setState(() => ({
     currentChannelId: null,
     voiceUsers: new Map(),

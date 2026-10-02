@@ -9,7 +9,12 @@
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { cleanupNotificationAudio, playNotificationSound } from "@lib/notificationSound";
-import { setLocalDeafened } from "@stores/voice.store";
+import {
+  setLocalDeafened,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  voiceStore,
+} from "@stores/voice.store";
 import { expectConsole } from "../helpers/console";
 
 class RecordingAudioContext {
@@ -62,7 +67,10 @@ beforeEach(() => {
   sinkState.impl = async () => {};
   RecordingAudioContext.instances = [];
   vi.stubGlobal("AudioContext", RecordingAudioContext);
+  leaveVoiceChannel();
+  voiceStore.flush();
   setLocalDeafened(false);
+  voiceStore.flush();
 });
 
 afterEach(() => {
@@ -71,12 +79,32 @@ afterEach(() => {
 });
 
 describe("playNotificationSound and deafen", () => {
-  it("produces no oscillator while locally deafened", () => {
+  it("produces no oscillator while locally deafened in a voice session", () => {
+    joinVoiceChannel(4);
+    voiceStore.flush();
     setLocalDeafened(true);
+    voiceStore.flush();
 
     playNotificationSound();
 
     expect(RecordingAudioContext.instances).toHaveLength(0);
+  });
+
+  it("plays again after leaving voice, though the stored deafen persists", () => {
+    joinVoiceChannel(4);
+    voiceStore.flush();
+    setLocalDeafened(true);
+    voiceStore.flush();
+    playNotificationSound();
+    expect(RecordingAudioContext.instances).toHaveLength(0);
+
+    leaveVoiceChannel();
+    voiceStore.flush();
+
+    playNotificationSound();
+
+    expect(RecordingAudioContext.instances).toHaveLength(1);
+    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(1);
   });
 
   it("plays normally once undeafened", () => {

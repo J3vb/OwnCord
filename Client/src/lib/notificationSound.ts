@@ -164,9 +164,10 @@ export function stopRingback(): void {
 }
 
 /** Every sound this module makes is silenced while the local user is deafened
- *  — except the ringtone, which D2 keeps for calls. Reads the leaf the lazy
- *  voice store mirrors (see lib/voiceDeafened.ts), so this stays out of the
- *  startup closure. */
+ *  inside a voice session — except the ringtone, which D2 keeps for calls.
+ *  Leaving voice releases the gate even though the stored deafen persists.
+ *  Reads the leaf the lazy voice store mirrors (see lib/voiceDeafened.ts), so
+ *  this stays out of the startup closure. */
 function deafened(): boolean {
   return isVoiceDeafened();
 }
