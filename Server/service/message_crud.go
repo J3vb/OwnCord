@@ -653,8 +653,10 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	// Detached from ctx like the audit write above and the DM fan-out below —
 	// the soft-delete already committed, so a canceled request must not skip
 	// the correction.
-	if mcErr := s.st.DecrementMentionCounts(context.WithoutCancel(ctx), msg.ChannelID, []int64{msgID}); mcErr != nil {
+	if lowered, mcErr := s.st.DecrementMentionCounts(context.WithoutCancel(ctx), msg.ChannelID, []int64{msgID}); mcErr != nil {
 		slog.Error("MessageService.DeleteMessage DecrementMentionCounts", "err", mcErr, "channel_id", msg.ChannelID, "msg_id", msgID)
+	} else {
+		s.notifyMentionBumped(msg.ChannelID, lowered)
 	}
 
 	result := &DeleteMessageResult{

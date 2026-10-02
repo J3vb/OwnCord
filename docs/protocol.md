@@ -966,8 +966,9 @@ clears its local badge optimistically and the next `ready` confirms.
 ```
 
 Tells one reader that their `read_states.mention_count` in `channel_id` changed,
-carrying the new total. `count` is the reader's total after the bump (the server
-pushes the total, not a delta), so a lost or duplicated frame still converges.
+carrying the new total. `count` is the reader's total after the change (the
+server pushes the total, not a delta), so a lost or duplicated frame still
+converges.
 
 This is the live path for the sidebar and taskbar/tray unread badge when a
 mention lands in a channel the reader is **not** viewing: `chat_message` is
@@ -975,9 +976,11 @@ published only to the channel's topic subscribers (the focused channel), so an
 unfocused reader never receives it. After the mention worker's batched write
 commits, it pushes one `mention_count` frame per reader whose read-state guard
 actually admitted the bump — a reader who had already read the message, or whose
-message was removed before the flush, is not pushed. Targeted, unsequenced and
-never replayed; a disconnected reader recovers the authoritative total on their
-next `ready`.
+message was removed before the flush, is not pushed. Deleting or purging a
+mentioning message pushes the same frame with the reader's lowered total, so a
+badge the event raised is also cleared live. Targeted, unsequenced and never
+replayed; a disconnected reader recovers the authoritative total on their next
+`ready`.
 
 The client ignores the frame for the channel currently on screen (its own
 `chat_message` handles that badge) and for a DM-channel id (a DM's badge lives

@@ -63,7 +63,10 @@ type Store interface {
 	// returns userID → mention_count after the bump for exactly the recipients
 	// whose read-state guard admitted it, the live-badge signal (DP-27).
 	IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) (map[int64]int64, error)
-	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error
+	// DecrementMentionCounts reverses the mention_count bumps msgIDs made and
+	// returns userID → mention_count after the reversal for exactly the readers
+	// the guards admitted, the signal a removal path pushes as a live badge.
+	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) (map[int64]int64, error)
 	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
 	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)

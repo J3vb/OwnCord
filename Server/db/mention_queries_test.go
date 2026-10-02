@@ -318,8 +318,12 @@ func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
 
 	// Alice deletes her message. DecrementMentionCounts must not touch Bob's
 	// mention_count: that message never contributed to it.
-	if err := database.DecrementMentionCounts(ctx, 1, []int64{blockedMsg.ID}); err != nil {
+	lowered, err := database.DecrementMentionCounts(ctx, 1, []int64{blockedMsg.ID})
+	if err != nil {
 		t.Fatalf("DecrementMentionCounts: %v", err)
+	}
+	if len(lowered) != 0 {
+		t.Errorf("lowered readers = %v, want none (Bob's bump was never counted)", lowered)
 	}
 
 	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {

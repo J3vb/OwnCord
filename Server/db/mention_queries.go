@@ -212,18 +212,23 @@ const mentionCountChunkSize = 500
 // same channel — from some other message — has that real badge wiped out
 // when the blocked author's message is deleted, because the UPDATE cannot
 // otherwise tell "never counted" apart from "counted, now reversing".
-func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
+// The returned map is userID → mention_count after the reversal, holding
+// exactly the readers the guards admitted (the RETURNING rows) — the same
+// live-badge signal IncrementMentionCountsBatch returns, so a removal path can
+// push the lowered total to a client whose badge it just changed.
+func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) (map[int64]int64, error) {
 	if len(msgIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("DecrementMentionCounts begin tx: %w", err)
+		return nil, fmt.Errorf("DecrementMentionCounts begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	lowered := make(map[int64]int64)
 	for _, msgID := range msgIDs {
-		if _, err := tx.ExecContext(ctx,
+		rows, err := tx.QueryContext(ctx,
 			`UPDATE read_states
 			 SET mention_count = mention_count - 1
 			 WHERE channel_id = ?
@@ -234,16 +239,31 @@ func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs
 			       SELECT 1 FROM user_blocks b
 			       WHERE b.blocker_id = read_states.user_id
 			         AND b.blocked_id = (SELECT user_id FROM messages WHERE id = ?)
-			   )`,
+			   )
+			 RETURNING user_id, mention_count`,
 			channelID, msgID, msgID, msgID,
-		); err != nil {
-			return fmt.Errorf("DecrementMentionCounts: %w", err)
+		)
+		if err != nil {
+			return nil, fmt.Errorf("DecrementMentionCounts: %w", err)
 		}
+		for rows.Next() {
+			var uid, count int64
+			if scanErr := rows.Scan(&uid, &count); scanErr != nil {
+				rows.Close() //nolint:errcheck // read path; the scan error is the one that matters
+				return nil, fmt.Errorf("DecrementMentionCounts scan: %w", scanErr)
+			}
+			lowered[uid] = count
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close() //nolint:errcheck // read path; the rows error is the one that matters
+			return nil, fmt.Errorf("DecrementMentionCounts rows: %w", err)
+		}
+		rows.Close() //nolint:errcheck // read path; a close error adds nothing over the committed txn
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("DecrementMentionCounts commit: %w", err)
+		return nil, fmt.Errorf("DecrementMentionCounts commit: %w", err)
 	}
-	return nil
+	return lowered, nil
 }
 
 // GetMentionCount returns the unread mention count for a user in a channel.

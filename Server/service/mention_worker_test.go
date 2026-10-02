@@ -347,6 +347,71 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 	}
 }
 
+// TestMentionWorker_DeleteNotifiesDecreasedBadge locks the reversal half of the
+// live badge: a mention pushed live must be pushed again with its lower total
+// when the mentioning message is deleted, or a reader not viewing the channel
+// keeps the stale-high badge until their next ready (OC-F1).
+func TestMentionWorker_DeleteNotifiesDecreasedBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	notifier := &fakeMentionNotifier{}
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	res := sendAs(t, svc, 1, "@bob look")
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if calls := notifier.snapshot(); len(calls) != 1 || calls[0] != (mentionNotifyCall{2, 10, 1}) {
+		t.Fatalf("after send, notifications = %v, want one {2 10 1}", calls)
+	}
+
+	if _, err := svc.DeleteMessage(context.Background(), 1, res.MessageID); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Fatalf("bob mention_count = %d after delete, want 0", got)
+	}
+	calls := notifier.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("notifications = %v, want the send push and the delete push", calls)
+	}
+	if calls[1] != (mentionNotifyCall{2, 10, 0}) {
+		t.Errorf("delete notification = %+v, want {2 10 0}", calls[1])
+	}
+}
+
+// TestMentionWorker_PurgeNotifiesDecreasedBadge is the purge sibling of the
+// delete case: purging a pushed mention must push the lowered total too.
+func TestMentionWorker_PurgeNotifiesDecreasedBadge(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, permissions.ManageMessages, 0)
+	notifier := &fakeMentionNotifier{}
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	sendAs(t, svc, 1, "@bob look")
+	svc.mentionWorkerForSend().flushNow(context.Background())
+	if calls := notifier.snapshot(); len(calls) != 1 || calls[0] != (mentionNotifyCall{2, 10, 1}) {
+		t.Fatalf("after send, notifications = %v, want one {2 10 1}", calls)
+	}
+
+	if _, err := svc.PurgeMessages(context.Background(), 4, 10, 1, 0); err != nil {
+		t.Fatalf("PurgeMessages: %v", err)
+	}
+	if got := mentionCount(t, database, 2); got != 0 {
+		t.Fatalf("bob mention_count = %d after purge, want 0", got)
+	}
+	calls := notifier.snapshot()
+	if len(calls) != 2 {
+		t.Fatalf("notifications = %v, want the send push and the purge push", calls)
+	}
+	if calls[1] != (mentionNotifyCall{2, 10, 0}) {
+		t.Errorf("purge notification = %+v, want {2 10 0}", calls[1])
+	}
+}
+
 // TestMentionWorker_FlushMessagesOnlyTargetsNamed locks the targeted flush:
 // flushing one message's job leaves another pending job untouched until its own
 // window elapses.
