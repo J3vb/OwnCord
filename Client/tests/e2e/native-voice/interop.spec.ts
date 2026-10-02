@@ -491,6 +491,48 @@ test("native and browser peers decode each other's video with the same key", asy
   expect(camAfter - camBefore).toBeLessThanOrEqual(3 * 5 + 2);
 });
 
+test("a simulcast native camera keeps decoding in the browser", async ({ page }) => {
+  // The app publishes its camera simulcast at every quality but "source",
+  // 1280x720 for the default "high" preset (screenShare.ts), unlike the
+  // 640x360 single-layer camera above.
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    key,
+    "--secs",
+    "20",
+    "--video",
+    "1280x720",
+    "--simulcast",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  const perSecond: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    await resetBrowserMeters(page);
+    await page.waitForTimeout(1_000);
+    perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
+  }
+  const browser = await readBrowserPeer(page, "user-2");
+  await peer.done;
+  console.log(
+    `browser decoded simulcast native camera, frames/s: ${perSecond.join(",")} at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  // Every second of the window, not just its total: a camera that sends one
+  // frame and then stalls must fail here.
+  expect(Math.min(...perSecond)).toBeGreaterThan(10);
+  expect(browser.videoWidth).toBeGreaterThan(0);
+  expect(browser.encErrors).toBe(0);
+});
+
 test("a native peer with the wrong key decodes no video and is decoded by no one", async ({
   page,
 }) => {
