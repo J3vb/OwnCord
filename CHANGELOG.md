@@ -56,7 +56,7 @@ and only when it changes something a contributor or fork holder must do
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
 ### Mentions
 
-- **A mention in a channel you are not viewing now updates the taskbar and tray badge at once.** The badge only caught up on your next reconnect; the server now tells the client directly when a mention raises its count, so the taskbar/tray badge and the channel's red badge update live wherever you are.
+- **A mention in a channel you are not viewing now updates the taskbar and tray badge at once.** The badge only caught up on your next reconnect; it is now live, alongside the channel's own red badge.
 
 ### Direct messages & members
 
@@ -100,7 +100,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 **Notifications and calls**
 
-- The taskbar and tray show your unread count (mentions plus unread direct messages); KDE and Ubuntu use the launcher count.
+- The taskbar and tray show your unread count (mentions plus unread direct messages), updated live as mentions arrive; KDE and Ubuntu use the launcher count.
 - An incoming DM call raises a notification, flashes the taskbar and rings; after 30 seconds it reports **Missed call from …**, with a new **Incoming Call Sound** switch.
 - Desktop notifications strip markdown and hide spoilered text, and clicking one opens that message — including from a Windows Action Center toast.
 - Notifications for other channels are suppressed while the window is focused, and an attachment-only message reads "sent an attachment".
@@ -228,7 +228,6 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 ### Known issues
 
-- **Mentions in channels you are not viewing do not update the taskbar or tray badge live yet.** The count catches up when you open the channel or the app receives a fresh unread update.
 - **Incoming-call notification clicks on Windows, and Linux voice device selection, still await a real-machine check.** Both are covered by automated tests but want a hands-on pass before they are called settled.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway". Code signing stays declined for the beta.
 - **A certificate change that is not a public-CA renewal still prompts every member.** A rotated self-signed or private-CA certificate, or any certificate on an IP-address server, shows "Certificate Changed"; compare the new fingerprint with the server owner out of band before accepting.
