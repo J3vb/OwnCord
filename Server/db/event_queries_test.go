@@ -283,6 +283,58 @@ func TestPruneEventsOlderThan(t *testing.T) {
 	}
 }
 
+// TestPruneEventsOlderThan_ChunksDelete pins the batching contract: a large
+// backlog is deleted in bounded chunks (each chunk a separate statement, so
+// the single writer connection is released between them) rather than one
+// unbounded DELETE. 20,000 rows at the 5,000 chunk size is four full chunks
+// plus the terminating empty statement.
+func TestPruneEventsOlderThan_ChunksDelete(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+
+	const oldRows = 20000
+	batch := make([]db.PersistedEvent, 0, oldRows)
+	for i := 1; i <= oldRows; i++ {
+		batch = append(batch, db.PersistedEvent{Seq: int64(i), EventType: "e", Payload: []byte(`{}`)})
+	}
+	if n, err := database.PersistEvents(ctx, batch); err != nil || n != oldRows {
+		t.Fatalf("PersistEvents = %d, %v; want %d, nil", n, err, oldRows)
+	}
+
+	// Backdate every inserted row past the retention window.
+	old := time.Now().UTC().Add(-48 * time.Hour).Format("2006-01-02 15:04:05")
+	if _, err := database.ExecContext(ctx, `UPDATE events SET created_at = ?`, old); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	// One fresh row that must survive the prune.
+	if err := database.PersistEvent(ctx, oldRows+1, "e", 0, []byte(`{}`)); err != nil {
+		t.Fatalf("PersistEvent(recent): %v", err)
+	}
+
+	statements := 0
+	db.SetEventPruneStatementHookForTest(func() { statements++ })
+	defer db.SetEventPruneStatementHookForTest(nil)
+
+	deleted, err := database.PruneEventsOlderThan(ctx, time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		t.Fatalf("PruneEventsOlderThan: %v", err)
+	}
+	if deleted != oldRows {
+		t.Errorf("deleted = %d, want %d", deleted, oldRows)
+	}
+	if statements < 4 {
+		t.Errorf("prune issued %d statements for %d rows; want >= 4 chunked DELETEs", statements, oldRows)
+	}
+
+	remaining, err := database.GetEventsSince(ctx, 0, 10)
+	if err != nil {
+		t.Fatalf("GetEventsSince: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Seq != oldRows+1 {
+		t.Errorf("remaining = %+v, want only the fresh seq %d", remaining, oldRows+1)
+	}
+}
+
 func TestPruneEventsOlderThan_NothingToPrune(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()

@@ -24,10 +24,10 @@
 //
 // ── What a green required check means, and where ────────────────────────────
 // Since `dfa5f66a`, ci.yml selects which jobs run from the diff, but ONLY on a
-// pull request into `dev`. On a push to `main` and a PR into `main` the
-// selector answers `--all`, so every required context really does run there —
-// and that is what keeps this gate sound, because a tagged commit sits on
-// `main` and its latest run for each context is that full one.
+// pull request into `dev`. On a push to `main`, a push to `dev` and a PR into
+// `main` the selector answers `--all`, so every required context really does run
+// there — and that is what keeps this gate sound, because a tagged commit sits
+// on `main` and its latest run for each context is that full one.
 //
 // On a pull request into `dev` the same names mean less. A gated job that was
 // not selected reports `skipped`, which evaluate() already refuses. The two

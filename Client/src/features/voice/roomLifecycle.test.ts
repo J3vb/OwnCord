@@ -11,10 +11,16 @@ vi.mock("livekit-client", () => {
       this.options = options;
       this.on = vi.fn();
       this.setE2EEEnabled = vi.fn(async () => {});
+      this.localParticipant = {
+        createTracks: vi.fn(async () => [
+          { kind: "audio", stop: vi.fn() },
+          { kind: "video", stop: vi.fn() },
+        ]),
+      };
     }),
     { cleanupRegistry: new FinalizationRegistry(() => {}) },
   );
-  return { Room, RoomEvent: {} };
+  return { Room, RoomEvent: {}, Track: { Kind: { Audio: "audio", Video: "video" } } };
 });
 vi.mock("../../stores/voice.store", () => ({
   setLocalCamera: vi.fn(),
@@ -52,7 +58,11 @@ import { RoomLifecycle, type RoomLifecycleHost } from "./roomLifecycle";
 
 function setup(initial: SessionState = { type: "idle" }) {
   let state = initial;
-  const audioPipeline = { setRoom: vi.fn(), teardownAudioPipeline: vi.fn() };
+  const audioPipeline = {
+    setRoom: vi.fn(),
+    teardownAudioPipeline: vi.fn(),
+    attach: vi.fn(async () => {}),
+  };
   const audioElements = {
     setRoom: vi.fn(),
     cleanupAllAudioElementsFull: vi.fn(),
@@ -77,7 +87,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     getWs: () => ws,
     getOnError: () => null,
     getE2EE: () => e2ee,
-    getEventHandlers: () => ({ removeAutoplayUnlock: vi.fn() }),
+    getEventHandlers: () => ({ removeAutoplayUnlock: vi.fn(), resetEncryptionRecovery: vi.fn() }),
     getAudioPipeline: () => audioPipeline,
     getAudioElements: () => audioElements,
     getDeviceManager: () => deviceManager,
@@ -137,6 +147,27 @@ describe("createRoom", () => {
     expect(workers[1]!.terminate).not.toHaveBeenCalled();
     expect(e2ee.keyProvider.removeAllListeners).toHaveBeenCalledTimes(2);
     expect(first.setE2EEEnabled).toHaveBeenCalledWith(true);
+  });
+
+  // The processor has to be on the microphone before it is published: a
+  // publish followed by setProcessor sends the raw capture track until the
+  // processor's replaceTrack lands.
+  it("attaches the mic processor to every audio track the room creates, before the publish", async () => {
+    const { lifecycle, audioPipeline } = setup();
+    const room = await lifecycle.createRoom(1);
+
+    const tracks = await room.localParticipant.createTracks({ audio: true });
+
+    expect(audioPipeline.attach).toHaveBeenCalledTimes(1);
+    expect(audioPipeline.attach).toHaveBeenCalledWith(tracks[0]);
+  });
+
+  it("fails the track creation, and stops the track, when the processor cannot attach", async () => {
+    const { lifecycle, audioPipeline } = setup();
+    audioPipeline.attach.mockRejectedValueOnce(new Error("no worklet"));
+    const room = await lifecycle.createRoom(1);
+
+    await expect(room.localParticipant.createTracks({ audio: true })).rejects.toThrow("no worklet");
   });
 
   it("builds every Room on livekit's direct devicechange listener, which disconnect removes", async () => {

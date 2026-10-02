@@ -221,6 +221,41 @@ describe("SidebarMemberSection", () => {
 
       section.destroy();
     });
+
+    // P1-01: the section fills the space the channel list leaves (a flex
+    // share) until a definite height is set, when it becomes a fixed size so
+    // the channel list above can grow. The `.sized` class carries that state.
+    it("marks the section sized only when a definite height is set", () => {
+      const unsized = createSidebarMemberSection(defaultOpts());
+      expect(unsized.element.classList.contains("sized")).toBe(false);
+      unsized.destroy();
+
+      localStorage.setItem(LS_KEY_HEIGHT, "250");
+      const sized = createSidebarMemberSection(defaultOpts());
+      expect(sized.element.style.height).toBe("250px");
+      expect(sized.element.classList.contains("sized")).toBe(true);
+      sized.destroy();
+    });
+
+    it("drops the sized class when a saved height is cleared", () => {
+      localStorage.setItem(LS_KEY_HEIGHT, "250");
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+      const header = section.element.querySelector(".sidebar-members-header") as HTMLElement;
+      expect(section.element.classList.contains("sized")).toBe(true);
+
+      // Collapsing pins it to auto (still a definite height), and expanding
+      // with no saved height returns it to a flex share.
+      localStorage.removeItem(LS_KEY_HEIGHT);
+      header.click();
+      expect(section.element.style.height).toBe("auto");
+      expect(section.element.classList.contains("sized")).toBe(true);
+      header.click();
+      expect(section.element.style.height).toBe("");
+      expect(section.element.classList.contains("sized")).toBe(false);
+
+      section.destroy();
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -286,6 +321,30 @@ describe("SidebarMemberSection", () => {
 
       // Persisted to localStorage
       expect(localStorage.getItem(LS_KEY_COLLAPSED)).toBe("true");
+
+      section.destroy();
+    });
+
+    // The header was a click-only div with a bare arrow span, so a keyboard
+    // user could never collapse the member list — unlike the channel
+    // categories and DM section, which use a real <button>.
+    it("exposes the collapse control as a focusable button that toggles on Enter", () => {
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+
+      const arrow = container.querySelector(".sidebar-members-header .category-arrow");
+      expect(arrow).not.toBeNull();
+      expect(arrow!.tagName).toBe("BUTTON");
+
+      (arrow as HTMLButtonElement).focus();
+      expect(document.activeElement).toBe(arrow);
+
+      // A native button fires click on Enter/Space, which is what the header
+      // handler listens for.
+      (arrow as HTMLElement).click();
+
+      const content = container.querySelector(".sidebar-members-content") as HTMLElement;
+      expect(content.style.display).toBe("none");
 
       section.destroy();
     });

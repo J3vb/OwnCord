@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { auditWorkflow } from "./check-workflow-guards.mjs";
+import { auditWorkflow, signingKeyHolders } from "./check-workflow-guards.mjs";
 
 const good = [
   "name: X",
@@ -60,5 +60,37 @@ test("a commented-out timeout does not count", () => {
     missing(good.replace("    timeout-minutes: 30", "    # timeout-minutes: 30")).includes(
       "timeout-minutes",
     ),
+  );
+});
+
+// The updater signing key is released to release.yml only.
+test("the signing key referenced outside release.yml is caught", () => {
+  const ref = "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}";
+  assert.deepEqual(
+    signingKeyHolders([
+      { name: "release.yml", src: ref },
+      { name: "ci.yml", src: ref },
+      { name: "nightly.yml", src: "run: npm run tauri build" },
+    ]),
+    ["ci.yml"],
+  );
+});
+
+test("the signing key password counts as the key", () => {
+  assert.deepEqual(
+    signingKeyHolders([
+      { name: "ci.yml", src: "p: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" },
+    ]),
+    ["ci.yml"],
+  );
+});
+
+test("the signing key read by bracket or set as an env var from another secret is caught", () => {
+  assert.deepEqual(
+    signingKeyHolders([
+      { name: "a.yml", src: "k: ${{ secrets['TAURI_SIGNING_PRIVATE_KEY'] }}" },
+      { name: "b.yml", src: "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.OTHER_ALIAS }}" },
+    ]),
+    ["a.yml", "b.yml"],
   );
 });

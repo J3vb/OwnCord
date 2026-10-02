@@ -207,7 +207,9 @@ export const MOCK_MESSAGES_RICH = {
       deleted: false,
     },
   ],
-  has_more: true,
+  // The whole channel: the mock serves this same page for every `before=`
+  // fetch, so claiming more history would prepend duplicate rows.
+  has_more: false,
 };
 
 // Remote users only — the ready payload must never claim the LOCAL user
@@ -797,10 +799,15 @@ export function buildTauriMockScript(opts: {
         // Explicit desktop-only no-ops. Unknown commands are never success.
         if (["plugin:process|restart", "plugin:app|version", "plugin:app|name",
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
-             "plugin:notification|is_permission_granted", "plugin:notification|notify",
+             "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message",
              "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
+        // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
+        // mocked app keeps the in-window idle timer it had before the poll.
+        if (cmd === "system_idle_ms") return null;
+        // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
+        if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
         if (cmd === "voice_shortcuts_supported") return false;
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
@@ -1139,6 +1146,16 @@ export async function emitWsEvent(page: Page, eventName: string, payload: unknow
  */
 export async function emitWsMessage(page: Page, message: unknown): Promise<void> {
   await emitWsEvent(page, "ws-message", JSON.stringify(message));
+}
+
+/**
+ * With the mock's `deferReady`, assert the connected overlay shows from
+ * auth_ok, then release `ready` and assert the main app replaces it.
+ */
+export async function expectOverlayUntilReady(page: Page, timeout: number): Promise<void> {
+  await expect(page.getByTestId("connected-overlay")).toBeVisible({ timeout });
+  await emitWsMessage(page, MOCK_READY_PAYLOAD);
+  await expect(page.getByTestId("app-layout")).toBeVisible({ timeout });
 }
 
 // ---------------------------------------------------------------------------

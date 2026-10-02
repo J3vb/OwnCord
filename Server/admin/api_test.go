@@ -196,7 +196,8 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
     reply_to   INTEGER REFERENCES messages(id) ON DELETE SET NULL,
     edited_at  TEXT,
-    mentions_everyone INTEGER NOT NULL DEFAULT 0
+    mentions_everyone INTEGER NOT NULL DEFAULT 0,
+    pinned_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -1403,6 +1404,8 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 	// Boolean-typed settings require valid boolean values; others accept any
 	// string, except the enumerated/validated keys which need a valid value.
 	validValues := map[string]string{
+		"max_upload_bytes":  "104857600",
+		"voice_quality":     "high",
 		"require_2fa":       "0",
 		"registration_mode": "closed",
 		"backup_schedule":   "daily",

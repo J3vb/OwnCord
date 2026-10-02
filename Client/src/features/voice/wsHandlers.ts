@@ -11,6 +11,7 @@ import {
   joinVoiceChannel,
   leaveVoiceChannel,
   setVoiceConfig,
+  setModeratorDeafened,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
@@ -55,8 +56,18 @@ import { connectText } from "../../i18n/connect";
  * voice_mute/voice_deafen) — requiring them to also be false before
  * releasing means a genuine self-mute that happens to coincide with the
  * moderator's release is never clobbered.
+ *
+ * Lifting a moderator deafen also clears the row's own deafen (the server
+ * cannot tell whose it was), so a member who had deafened themselves before
+ * the moderator did would hear the room again unasked. The client knows:
+ * `moderatorDeafened` marks a deafen it applied for the moderator, so any
+ * other deafen in effect at the lift is the member's own, kept and restated
+ * to the server. It follows the local deafen, not the moderator flags, so a
+ * moderator move (a leave that clears those flags, then a re-join that
+ * restates them) cannot mistake the moderator's deafen for the member's.
  */
 function enforceModeratorAudioState(
+  ws: DispatchWs,
   serverMuted: boolean,
   serverDeafened: boolean,
   prevServerMuted: boolean,
@@ -66,10 +77,14 @@ function enforceModeratorAudioState(
 ): void {
   const voice = voiceStore.getState();
   const applyDeafen = serverDeafened && !voice.localDeafened;
+  if (applyDeafen) setModeratorDeafened(true);
+  const deafenLifted = prevServerDeafened && !serverDeafened;
+  const keepOwnDeafen = deafenLifted && voice.localDeafened && voice.moderatorDeafened !== true;
+  if (deafenLifted) setModeratorDeafened(false);
+  if (keepOwnDeafen) ws.send({ type: "voice_deafen", payload: { deafened: true } });
   const applyMute = serverMuted && !voice.localMuted;
   const releaseMute = prevServerMuted && !serverMuted && voice.localMuted && !selfMuted;
-  const releaseDeafen =
-    prevServerDeafened && !serverDeafened && voice.localDeafened && !selfDeafened;
+  const releaseDeafen = deafenLifted && !keepOwnDeafen && voice.localDeafened && !selfDeafened;
   if (applyDeafen || applyMute || releaseMute || releaseDeafen) {
     void livekitSession().then(({ setDeafened, setMuted }) => {
       if (applyDeafen) setDeafened(true);
@@ -133,6 +148,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       // that produced this `ready` never replays the voice_state that
       // would otherwise have carried it.
       enforceModeratorAudioState(
+        ws,
         selfVoiceState.server_muted === true,
         selfVoiceState.server_deafened === true,
         prevSelfServerMuted,
@@ -189,7 +205,7 @@ export function publishReadyIdentity(
   }
 }
 
-export function handleVoiceState(payload: Payload<"voice_state">): void {
+export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">): void {
   // Auto-join voice channel if the event is for the current user
   const currentUserId = authStore.getState().user?.id ?? 0;
   const isSelf = payload.user_id === currentUserId;
@@ -203,6 +219,7 @@ export function handleVoiceState(payload: Payload<"voice_state">): void {
   if (!isSelf) return;
   joinVoiceChannel(payload.channel_id);
   enforceModeratorAudioState(
+    ws,
     payload.server_muted === true,
     payload.server_deafened === true,
     prevServerMuted,
@@ -302,22 +319,26 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // voice channel so a peer leaving a channel we merely read (and never
   // shared a call with) cannot delete their key, clear their
   // verification, or trigger a room-key rotation in our live session.
-  void livekitSession().then(({ handleParticipantLeft, leaveVoice }) => {
-    if (sameChannel) void handleParticipantLeft(payload.user_id);
-    if (shouldTeardownSession) void leaveVoice(false);
-  });
-  // Clear local voice state only for the same channel-match case as the
-  // LiveKit teardown above. A channel switch optimistically moves the
-  // store's currentChannelId to the NEW channel before the server
-  // responds (VoiceCallbacks.onVoiceJoin); the server always leaves the
-  // OLD channel first, so an unconditional clear here would blank the
-  // store back to null on every switch — hiding the whole voice widget
-  // (including its leave/mute controls) until a later voice_state
-  // happens to restore it, or forever if the switch then fails
+  // Clear local voice state only for the same channel-match case: a channel
+  // switch optimistically moves the store's currentChannelId to the NEW
+  // channel before the server responds (VoiceCallbacks.onVoiceJoin); the
+  // server always leaves the OLD channel first, so an unconditional clear
+  // here would blank the store back to null on every switch — hiding the
+  // whole voice widget (including its leave/mute controls) until a later
+  // voice_state happens to restore it, or forever if the switch then fails
   // server-side.
-  if (shouldTeardownSession) {
-    leaveVoiceChannel();
-  }
+  // P2-T5: while the auto-reconnect loop owns the session, it decides what a
+  // released membership means — it rejoins, or gives up with its toast. Only a
+  // "reconnecting" badge can mean the loop, so any other clears the store now.
+  const loopMayOwn = voiceStore.getState().voiceStatus === "reconnecting";
+  if (shouldTeardownSession && !loopMayOwn) leaveVoiceChannel();
+  void livekitSession().then(({ handleParticipantLeft, leaveVoice, isAutoReconnecting }) => {
+    if (sameChannel) void handleParticipantLeft(payload.user_id);
+    if (shouldTeardownSession && !isAutoReconnecting()) {
+      void leaveVoice(false);
+      if (loopMayOwn) leaveVoiceChannel();
+    }
+  });
   // RT-12: a self voice_leave means the user is out of voice for real — their
   // own Disconnect, or a server-initiated eviction. Either way a pending
   // restart-rejoin must not fire. Cancelled on `isSelf` rather than the
@@ -398,7 +419,8 @@ export function handleVoiceJoinRollback(): void {
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
   if (voiceStore.getState().voiceStatus === "joining") {
-    void livekitSession().then(({ isVoiceSessionActive, leaveVoice }) => {
+    void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
+      failPendingRejoin();
       if (isVoiceSessionActive()) leaveVoice(true);
     });
     leaveVoiceChannel();

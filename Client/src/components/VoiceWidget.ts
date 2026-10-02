@@ -10,15 +10,14 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
-import { voiceStore, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, isSelfMuted, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
 import {
   createConnectionStatsPoller,
   formatBytes,
-  formatRate,
-  formatBitrate,
+  formatRateCompact,
   type ConnectionStats,
   type ConnectionStatsPoller,
   type QualityLevel,
@@ -77,6 +76,37 @@ function swapIcon(btn: HTMLButtonElement, name: IconName): void {
   btn.appendChild(createIcon(name, 18));
 }
 
+/** Update a stats value and mark it empty (zero/missing) so the CSS can
+ *  soften it instead of showing it at full strength. */
+function setStatValue(el: HTMLSpanElement | null, text: string, empty: boolean): void {
+  if (el === null) return;
+  setText(el, text);
+  el.classList.toggle("vw-stat-value--empty", empty);
+}
+
+/** One direction's tile: an arrow + label, a big rate, and its packet count. */
+function statTile(
+  arrow: string,
+  label: string,
+): { tile: HTMLDivElement; rate: HTMLSpanElement; packets: HTMLSpanElement } {
+  const tile = createElement("div", { class: "vw-stats-tile" });
+  const labelEl = createElement("div", { class: "vw-stats-tile-label" });
+  appendChildren(
+    labelEl,
+    createElement("span", { class: "vw-stat-arrow", "aria-hidden": "true" }, arrow),
+    createElement("span", {}, label),
+  );
+  const rate = createElement("span", { class: "vw-stat-value vw-stat-rate" });
+  const packets = createElement("span", { class: "vw-stat-packets" });
+  appendChildren(tile, labelEl, rate, packets);
+  return { tile, rate, packets };
+}
+
+/** A direction's packet count as prose; zero reads "no packets". */
+function packetText(count: number): string {
+  return count === 0 ? t("widget.noPackets") : t("widget.packetCount", { count });
+}
+
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
@@ -85,6 +115,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let linkedChannelId: number | null = null;
   let statusLabel: HTMLSpanElement | null = null;
   let securedBadge: HTMLSpanElement | null = null;
+  let securedText: HTMLSpanElement | null = null;
   let controlsRow: HTMLDivElement | null = null;
   let muteBtn: HTMLButtonElement | null = null;
   let deafenBtn: HTMLButtonElement | null = null;
@@ -123,9 +154,11 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   // Stats pane field elements (set during mount)
   let outRateEl: HTMLSpanElement | null = null;
   let outPacketsEl: HTMLSpanElement | null = null;
-  let rttEl: HTMLSpanElement | null = null;
   let inRateEl: HTMLSpanElement | null = null;
   let inPacketsEl: HTMLSpanElement | null = null;
+  /** The footer's leading slot: "RTT 42.0 ms" once known, else "Session". */
+  let footerLeadEl: HTMLSpanElement | null = null;
+  let rttEl: HTMLSpanElement | null = null;
   let totalUpEl: HTMLSpanElement | null = null;
   let totalDownEl: HTMLSpanElement | null = null;
 
@@ -133,54 +166,70 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   function updateSignalIcon(stats: ConnectionStats): void {
     if (signalWrap === null || pingLabel === null) return;
-    const color = QUALITY_COLORS[stats.quality];
-    const bars = QUALITY_BARS[stats.quality];
+    const color = stats.available ? QUALITY_COLORS[stats.quality] : "var(--text-muted)";
+    const bars = stats.available ? QUALITY_BARS[stats.quality] : 0;
 
     // Replace signal icon
     const oldSvg = signalWrap.querySelector("svg");
     if (oldSvg) oldSvg.remove();
     signalWrap.insertBefore(createSignalIcon(bars, color, 14), pingLabel);
 
-    // Update ping text
-    const rttText = stats.rtt > 0 ? `${Math.round(stats.rtt)}ms` : "—";
+    // Update ping text. No transport to measure (native Linux voice, the
+    // SDK's internals changed, or the first sample has not landed yet) reads
+    // as unavailable, not a false 4-green-bars "excellent".
+    const rttText = stats.available && stats.rtt > 0 ? `${Math.round(stats.rtt)}ms` : "—";
     setText(pingLabel, rttText);
     pingLabel.style.color = color;
+    signalWrap.classList.toggle("vw-signal--unavailable", !stats.available);
 
-    // Update expanded stats pane fields if they exist
-    if (outRateEl)
-      setText(outRateEl, `${formatRate(stats.outRate)} (${formatBitrate(stats.outRate)})`);
-    if (outPacketsEl) setText(outPacketsEl, String(stats.outPackets));
-    if (rttEl) {
-      // i18n-exempt: numeric RTT value with its unit, not translatable prose
-      setText(rttEl, stats.rtt > 0 ? `${stats.rtt.toFixed(1)} ms` : "—");
-      rttEl.style.color = color;
+    // Update expanded stats pane fields if they exist. An idle direction
+    // reads "Idle" / "no packets" softly (the CSS dims .vw-stat-value--empty)
+    // rather than as another full-strength zero competing for attention.
+    setStatValue(
+      outRateEl,
+      stats.outRate === 0 ? t("widget.idle") : formatRateCompact(stats.outRate),
+      stats.outRate === 0,
+    );
+    if (outPacketsEl) setText(outPacketsEl, packetText(stats.outPackets));
+    setStatValue(
+      inRateEl,
+      stats.inRate === 0 ? t("widget.idle") : formatRateCompact(stats.inRate),
+      stats.inRate === 0,
+    );
+    if (inPacketsEl) setText(inPacketsEl, packetText(stats.inPackets));
+    // The RTT only takes the footer's lead once it is known; until then the
+    // slot just labels the totals, so no "—" placeholder is ever shown.
+    if (footerLeadEl !== null && rttEl !== null) {
+      if (stats.rtt > 0) {
+        // i18n-exempt: numeric RTT value with its unit, not translatable prose
+        setText(rttEl, `${stats.rtt.toFixed(1)} ms`);
+        if (!rttEl.isConnected) {
+          footerLeadEl.replaceChildren(`${t("widget.rtt")} `, rttEl);
+        }
+      } else if (footerLeadEl.textContent !== t("widget.session")) {
+        setText(footerLeadEl, t("widget.session"));
+      }
     }
-    if (inRateEl) setText(inRateEl, `${formatRate(stats.inRate)} (${formatBitrate(stats.inRate)})`);
-    if (inPacketsEl) setText(inPacketsEl, String(stats.inPackets));
-    if (totalUpEl) setText(totalUpEl, formatBytes(stats.totalUp));
-    if (totalDownEl) setText(totalDownEl, formatBytes(stats.totalDown));
+    setStatValue(totalUpEl, formatBytes(stats.totalUp), stats.totalUp === 0);
+    setStatValue(totalDownEl, formatBytes(stats.totalDown), stats.totalDown === 0);
   }
-
-  let qualityUnlisten: (() => void) | null = null;
 
   function startStatsPoller(): void {
     if (statsPoller !== null) return;
     statsPoller = createConnectionStatsPoller(() => getRoomForStats());
     statsUnlisten = statsPoller.onUpdate(updateSignalIcon);
-    qualityUnlisten = statsPoller.onQualityChanged((quality, _prevQuality) => {
-      // Auto-expand stats pane when quality degrades
-      if ((quality === "poor" || quality === "bad") && statsPane !== null) {
-        statsPane.classList.add("visible");
-      }
-    });
+    // The stats pane opens only on demand. A quality change updates the signal
+    // bars via onUpdate, but never expands the pane on its own (DP-41).
     statsPoller.start();
+    // Paint the initial state now. updateSignalIcon only runs on a sample;
+    // where none ever arrives (native Linux voice has no peer connection)
+    // the widget would otherwise keep its constructed 4-green-bars default.
+    updateSignalIcon(statsPoller.getStats());
   }
 
   function stopStatsPoller(): void {
     statsUnlisten?.();
     statsUnlisten = null;
-    qualityUnlisten?.();
-    qualityUnlisten = null;
     statsPoller?.stop();
     statsPoller = null;
   }
@@ -219,15 +268,20 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
     }
-    if (securedBadge !== null) {
+    if (securedBadge !== null && securedText !== null) {
       const connected = status === "connected";
       const degraded = connected && encryptionDegraded;
+      const wasDegraded = securedBadge.classList.contains("vw-secured--degraded");
       securedBadge.classList.toggle("vw-secured--degraded", degraded);
+      if (degraded !== wasDegraded) {
+        securedBadge.querySelector("svg")?.remove();
+        securedBadge.prepend(createIcon(degraded ? "shield-alert" : "shield-check", 12));
+      }
       if (degraded) {
-        setText(securedBadge, t("encryption.unsecured"));
+        setText(securedText, t("widget.unsecured"));
         securedBadge.title = t("encryption.unsecuredLabel");
       } else {
-        setText(securedBadge, t("encryption.secured"));
+        setText(securedText, t("widget.secured"));
         securedBadge.title = t("encryption.securedLabel");
       }
       securedBadge.style.display = connected ? "inline-flex" : "none";
@@ -287,24 +341,44 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback")),
     );
 
-    // Toggle button active states, swap icons, and update aria-pressed
-    muteBtn?.classList.toggle("active-ctrl", voice.localMuted);
+    // Toggle button active states, swap icons, and update aria-pressed.
+    // The mic "active" (red/muted) state reflects the user's OWN mute, not the
+    // one a PTT release applied: PTT routes through setMuted and writes
+    // localMuted, so a PTT user would otherwise read as permanently muted
+    // between presses. An idle PTT gate gets its own (non-active) affordance.
+    const userMuted = isSelfMuted(voice);
+    const serverMuted = voice.localServerMuted === true;
+    const serverDeafened = voice.localServerDeafened === true;
+    // Joined listen-only (no mic permission/track): there is nothing to mute,
+    // so the control reads mic-off and visibly inert. "Grant Microphone" is
+    // the action that changes this state.
+    const listenOnly = voice.listenOnly && !serverMuted;
+    const pttGated = voice.pttGated === true && !userMuted && !listenOnly;
+    muteBtn?.classList.toggle("active-ctrl", userMuted);
+    muteBtn?.classList.toggle("ptt-gated", pttGated);
+    muteBtn?.classList.toggle("vw-listen-only", listenOnly);
     deafenBtn?.classList.toggle("active-ctrl", voice.localDeafened);
     cameraBtn?.classList.toggle("active-ctrl", voice.localCamera);
 
     // A moderator-imposed mute/deafen is not ours to lift: the server refuses
     // the unmute, so disable the control and say why instead of letting the
     // click bounce off with an error toast.
-    const serverMuted = voice.localServerMuted === true;
-    const serverDeafened = voice.localServerDeafened === true;
     if (muteBtn) {
-      swapIcon(muteBtn, voice.localMuted ? "mic-off" : "mic");
-      muteBtn.setAttribute("aria-pressed", String(voice.localMuted));
+      swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
+      muteBtn.setAttribute("aria-pressed", String(userMuted));
+      // A PTT gate gets its own title; the ordinary mute case leaves the
+      // title to updateFrozen (which owns the freeze reason) as before.
+      if (pttGated) {
+        muteBtn.title = t("widget.control.pttGated");
+      }
       // Only ever tighten: updateFrozen ran above and owns the socket-down
       // disable, which must not be relaxed here.
       if (serverMuted) {
         muteBtn.disabled = true;
         muteBtn.title = t("widget.mutedByModerator");
+      } else if (listenOnly) {
+        muteBtn.disabled = true;
+        muteBtn.title = t("widget.control.listenOnly");
       }
     }
     if (deafenBtn) {
@@ -333,17 +407,13 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
               : "";
       if (modStatusEl.textContent !== text) setText(modStatusEl, text);
     }
+    // The screen-share active state lives entirely on the button: the
+    // aria-pressed state, the icon swap and the active-control tint. The old
+    // squeezed "Sharing" text label is gone.
     shareBtn?.classList.toggle("active-ctrl", voice.localScreenshare);
-    shareBtn?.classList.toggle("sharing-active", voice.localScreenshare);
     if (shareBtn) {
       swapIcon(shareBtn, voice.localScreenshare ? "monitor-off" : "monitor");
       shareBtn.setAttribute("aria-pressed", String(voice.localScreenshare));
-      // Update button label to show "Sharing" when active
-      const labelSpan = shareBtn.querySelector(".vw-share-label");
-      if (labelSpan !== null) {
-        labelSpan.textContent = voice.localScreenshare ? t("widget.sharing") : "";
-        (labelSpan as HTMLElement).style.display = voice.localScreenshare ? "inline" : "none";
-      }
     }
 
     // Leaving listen-only clears the "retry failed" memory, so a later join
@@ -407,7 +477,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function mount(container: Element): void {
     root = createElement("div", { class: "voice-widget", "data-testid": "voice-widget" });
 
-    // Header row: lifecycle status + secured lock + channel name + signal icon
+    // Header, two lines: lifecycle status + elapsed timer, then the channel
+    // name + a small Secured chip + the signal/ping button.
     const header = createElement("div", { class: "vw-header" });
     statusLabel = createElement("span", {
       class: "vw-connected",
@@ -420,7 +491,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       "data-testid": "vw-secured",
       title: t("encryption.securedLabel"),
     });
-    setText(securedBadge, t("encryption.secured"));
+    securedText = createElement("span", {}, t("widget.secured"));
+    appendChildren(securedBadge, createIcon("shield-check", 12), securedText);
     securedBadge.style.display = "none";
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
@@ -447,78 +519,51 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
     signalWrap.addEventListener("click", toggleStatsPane, { signal: disposable.signal });
 
-    appendChildren(header, statusLabel, securedBadge, timerEl, channelNameEl, signalWrap);
+    const headerMain = createElement("div", { class: "vw-header-main" });
+    appendChildren(headerMain, statusLabel, timerEl);
+    const headerSub = createElement("div", { class: "vw-header-sub" });
+    appendChildren(headerSub, channelNameEl, securedBadge, signalWrap);
+    appendChildren(header, headerMain, headerSub);
 
-    // Expanded stats pane (hidden by default)
-    statsPane = createElement("div", { class: "vw-stats" });
-    const statsTitle = createElement(
-      "div",
-      { class: "vw-stats-title" },
-      t("widget.transportStatistics"),
-    );
+    // Expanded stats pane (hidden by default): Upload and Download tiles,
+    // then one footer line with the RTT (once known) and the session totals.
+    // The old visible "Transport Statistics" title is the pane's name now.
+    statsPane = createElement("div", {
+      class: "vw-stats",
+      role: "group",
+      "aria-label": t("widget.transportStatistics"),
+    });
     const statsGrid = createElement("div", { class: "vw-stats-grid" });
-
-    // Outgoing column
-    const outCol = createElement("div", {});
-    const outLabel = createElement(
-      "div",
-      { class: "vw-stats-col-label out" },
-      t("widget.outgoing"),
-    );
-    outRateEl = createElement("span", {}, t("widget.zeroRate"));
-    outPacketsEl = createElement("span", {}, "0");
-    rttEl = createElement("span", {}, "—");
-    rttEl.style.fontWeight = "600";
-    const outBody = createElement("div", { class: "vw-stats-row" });
-    for (const [label, el] of [
-      [t("widget.rate"), outRateEl],
-      [t("widget.packets"), outPacketsEl],
-      [t("widget.rtt"), rttEl],
-    ] as const) {
-      outBody.appendChild(document.createTextNode(label));
-      outBody.appendChild(el);
-      outBody.appendChild(createElement("br", {}));
+    const upload = statTile("\u2191", t("widget.upload"));
+    outRateEl = upload.rate;
+    outPacketsEl = upload.packets;
+    const download = statTile("\u2193", t("widget.download"));
+    inRateEl = download.rate;
+    inPacketsEl = download.packets;
+    for (const dir of [upload, download]) {
+      setStatValue(dir.rate, t("widget.idle"), true);
+      setText(dir.packets, packetText(0));
     }
-    appendChildren(outCol, outLabel, outBody);
+    appendChildren(statsGrid, upload.tile, download.tile);
 
-    // Incoming column
-    const inCol = createElement("div", {});
-    const inLabel = createElement("div", { class: "vw-stats-col-label in" }, t("widget.incoming"));
-    inRateEl = createElement("span", {}, t("widget.zeroRate"));
-    inPacketsEl = createElement("span", {}, "0");
-    const inBody = createElement("div", { class: "vw-stats-row" });
-    for (const [label, el] of [
-      [t("widget.rate"), inRateEl],
-      [t("widget.packets"), inPacketsEl],
-    ] as const) {
-      inBody.appendChild(document.createTextNode(label));
-      inBody.appendChild(el);
-      inBody.appendChild(createElement("br", {}));
-    }
-    appendChildren(inCol, inLabel, inBody);
-
-    appendChildren(statsGrid, outCol, inCol);
-
-    // Session totals
-    const totals = createElement("div", { class: "vw-stats-totals" });
-    const totalsLabel = createElement(
-      "div",
-      { class: "vw-stats-totals-label" },
-      t("widget.sessionTotals"),
-    );
-    const totalsRow = createElement("div", { class: "vw-stats-totals-row" });
-    totalUpEl = createElement("span", {}, t("widget.zeroBytes"));
-    totalDownEl = createElement("span", {}, t("widget.zeroBytes"));
-    const upWrap = createElement("span", {});
-    upWrap.appendChild(document.createTextNode("\u2191 "));
+    const footer = createElement("div", { class: "vw-stats-footer" });
+    footerLeadEl = createElement("span", { class: "vw-stats-footer-lead" }, t("widget.session"));
+    rttEl = createElement("span", { class: "vw-stat-value" });
+    const totalsRow = createElement("span", { class: "vw-stats-totals" });
+    totalUpEl = createElement("span", { class: "vw-stat-value" });
+    totalDownEl = createElement("span", { class: "vw-stat-value" });
+    setStatValue(totalUpEl, t("widget.zeroBytes"), true);
+    setStatValue(totalDownEl, t("widget.zeroBytes"), true);
+    const upWrap = createElement("span", { class: "vw-stat-total" });
+    upWrap.appendChild(createElement("span", { class: "vw-stat-arrow" }, "\u2191"));
     upWrap.appendChild(totalUpEl);
-    const downWrap = createElement("span", {});
-    downWrap.appendChild(document.createTextNode("\u2193 "));
+    const downWrap = createElement("span", { class: "vw-stat-total" });
+    downWrap.appendChild(createElement("span", { class: "vw-stat-arrow" }, "\u2193"));
     downWrap.appendChild(totalDownEl);
     appendChildren(totalsRow, upWrap, downWrap);
-    appendChildren(totals, totalsLabel, totalsRow);
+    appendChildren(footer, footerLeadEl, totalsRow);
 
-    appendChildren(statsPane, statsTitle, statsGrid, totals);
+    appendChildren(statsPane, statsGrid, footer);
 
     // Controls row
     const controls = createElement("div", { class: "vw-controls" });
@@ -536,9 +581,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onScreenshareToggle,
       "vw-share-btn",
     );
-    const shareLabelSpan = createElement("span", { class: "vw-share-label" });
-    shareLabelSpan.style.display = "none";
-    shareBtn.appendChild(shareLabelSpan);
     disconnectBtn = createControlButton(
       t("widget.control.disconnect"),
       "phone",
@@ -623,6 +665,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           camera: s.localCamera,
           screenshare: s.localScreenshare,
           listenOnly: s.listenOnly,
+          pttGated: s.pttGated === true,
           voiceStatus: s.voiceStatus,
           encryptionDegraded: s.encryptionDegraded === true,
         }),
@@ -636,6 +679,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
           a.camera === b.camera &&
           a.screenshare === b.screenshare &&
           a.listenOnly === b.listenOnly &&
+          a.pttGated === b.pttGated &&
           a.voiceStatus === b.voiceStatus &&
           a.encryptionDegraded === b.encryptionDegraded,
       ),
@@ -679,6 +723,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     channelNameEl = null;
     statusLabel = null;
     securedBadge = null;
+    securedText = null;
     controlsRow = null;
     muteBtn = null;
     deafenBtn = null;
@@ -694,6 +739,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     outRateEl = null;
     outPacketsEl = null;
     rttEl = null;
+    footerLeadEl = null;
     inRateEl = null;
     inPacketsEl = null;
     totalUpEl = null;

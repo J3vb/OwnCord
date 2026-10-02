@@ -2,6 +2,7 @@ package ws
 
 import (
 	"log/slog"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -111,8 +112,8 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 }
 
 // allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed
-// under the per-channel topic rate limit. The limit is a sliding 1s window via
-// the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
+// under the topic rate limit, counted per channel and sender. The limit is a
+// sliding 1s window via the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
 // with a full refill at each window boundary — sliding is stricter on
 // boundary-straddling bursts, the same sustained rate).
 //
@@ -129,7 +130,14 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.recipients != nil || bm.channelID == 0 {
 		return true
 	}
-	if h.limiter.Allow("topic:"+string(ChannelTopic(bm.channelID)), topicRateLimitPerSecond, time.Second) {
+	// Counted per sender, so a few members cannot use up a channel's budget
+	// and suppress live delivery for everyone else in it; server-originated
+	// frames (senderID 0) share the channel's own key.
+	key := "topic:" + string(ChannelTopic(bm.channelID))
+	if bm.senderID != 0 {
+		key += ":" + strconv.FormatInt(bm.senderID, 10)
+	}
+	if h.limiter.Allow(key, topicRateLimitPerSecond, time.Second) {
 		return true
 	}
 	h.latency.topicSheds.Add(1)
@@ -153,11 +161,12 @@ type queueDropState struct {
 }
 
 // recordQueueDrop counts a frame enqueue dropped on a full broadcast queue. A
-// content-bearing one is also left for applyQueueContentDrops to settle into
-// the resync watermark under seqMu (SRV-03).
+// content-bearing one, or a presence_batch window, is also left for
+// applyQueueContentDrops to settle into the resync watermark under seqMu
+// (SRV-03).
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 	h.broadcastDrops.Add(1)
-	if bm.nsfwChannelID != 0 {
+	if bm.nsfwChannelID != 0 || bm.presence != nil {
 		h.queueDrops.dropped.Add(1)
 	}
 	slog.Warn("hub: broadcast channel full, dropping "+kind,
@@ -299,6 +308,11 @@ func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uin
 	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
 }
 
+// PresenceDropCount is the process-lifetime count of presence frames dropped
+// on a full normal buffer, each repaired by a snapshot rather than a
+// disconnect (Client.sendPresenceMsg). Safe to call from any goroutine.
+func (h *Hub) PresenceDropCount() uint64 { return h.presenceRepair.drops.Load() }
+
 // DeliveryDropCount is the attention panel's delivery-pressure counter: hub
 // broadcast drops, topic-limiter sheds, and send-queue overflow disconnects.
 // Low-priority drops are excluded because they lose nothing and disconnect
@@ -325,6 +339,6 @@ func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, o
 }
 
 // topicRateLimitPerSecond is the default maximum messages per second for any
-// single channel topic. Prevents a busy channel from saturating the broadcast
-// loop and starving other channels.
+// single channel topic, per sender. Prevents a busy channel from saturating
+// the broadcast loop and starving other channels.
 const topicRateLimitPerSecond = 100

@@ -226,16 +226,25 @@ describe("notifyIncomingMessage", () => {
     expect(sendNotification).not.toHaveBeenCalled();
   });
 
-  it("notifies when window is focused but message is in a different channel", async () => {
+  it("with document.hasFocus() true and a message in a non-active channel, no OS notification and no taskbar flash fire", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
+    mockOscillator.start.mockClear();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+    testPrefs.set("desktopNotifications", true);
+    testPrefs.set("flashTaskbar", true);
+    testPrefs.set("notificationSounds", true);
     const payload = makePayload({ channel_id: 1 });
     notifyIncomingMessage(payload);
-    await vi.waitFor(() => {
-      expect(sendNotification).toHaveBeenCalled();
-    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sendNotification).not.toHaveBeenCalled();
+    expect(win.requestUserAttention).not.toHaveBeenCalled();
+    // D3 (b), Discord desktop: the chime still plays while focused.
+    expect(mockOscillator.start).toHaveBeenCalled();
   });
 
   it("suppresses @everyone when toggle is enabled", async () => {
@@ -1206,22 +1215,25 @@ describe("notifyIncomingMessage", () => {
       expect(sendNotification).not.toHaveBeenCalled();
     });
 
-    it("proceeds when window focused but channel DIFFERS", async () => {
+    it("suppresses popup and flash when window focused but channel DIFFERS (D3)", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
 
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
 
       testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
+      testPrefs.set("flashTaskbar", true);
       testPrefs.set("notificationSounds", false);
 
       notifyIncomingMessage(makePayload({ channel_id: 1 }));
 
-      await vi.waitFor(() => {
-        expect(sendNotification).toHaveBeenCalled();
-      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(win.requestUserAttention).not.toHaveBeenCalled();
     });
 
     it("proceeds when window NOT focused even for active channel", async () => {
@@ -1555,6 +1567,27 @@ describe("notifyIncomingMessage", () => {
       notifyIncomingMessage(makePayload({ id: 2, channel_id: 2 }));
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalledTimes(2);
+      });
+      now.mockRestore();
+    });
+
+    it("a message that raised no alert does not start the window", async () => {
+      const { sendNotification } = await import("@tauri-apps/plugin-notification");
+      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      testPrefs.set("notificationSounds", false);
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+
+      notifyIncomingMessage(makePayload({ id: 1, channel_id: 1 }));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(sendNotification).not.toHaveBeenCalled();
+
+      vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      now.mockReturnValue(1_003_000);
+      notifyIncomingMessage(makePayload({ id: 2, channel_id: 1 }));
+      await vi.waitFor(() => {
+        expect(sendNotification).toHaveBeenCalledTimes(1);
       });
       now.mockRestore();
     });
@@ -1921,6 +1954,63 @@ describe("notifyIncomingMessage", () => {
       setChannelMutesHost("b.example");
       try {
         openMessageTarget(7, 42, "a.example");
+        expect(jump).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    // DP-24: a call notification's target has no message id. It goes through
+    // the same guard: opened on its own server, dropped from another one.
+    it("opens a call target (no message) on its own server and drops one from another", () => {
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      try {
+        setChannelMutesHost("a.example");
+        openMessageTarget(7, undefined, "a.example");
+        setChannelMutesHost("b.example");
+        openMessageTarget(7, undefined, "a.example");
+        expect(jump.mock.calls).toEqual([[7, undefined]]);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("buffers a cold-start target until a jumper is registered, then opens it once the page is live (F6)", async () => {
+      // A Windows toast activated from Action Center launches the app before
+      // any MainPage registers the jumper and sets the host.
+      setChannelMutesHost(null);
+      openMessageTarget(7, 42, "a.example");
+
+      // MainPage mounts: host now known, then the jumper registers — before
+      // the rest of the synchronous mount creates the channel controller the
+      // jump needs.
+      setChannelMutesHost("a.example");
+      let pageLive = false;
+      const jump = vi.fn(() => pageLive);
+      const unregister = setMessageJumpHandler(jump);
+      pageLive = true;
+      try {
+        await Promise.resolve();
+        expect(jump.mock.calls).toEqual([[7, 42]]);
+        expect(jump.mock.results[0]?.value).toBe(true);
+      } finally {
+        unregister();
+        setChannelMutesHost(null);
+      }
+    });
+
+    it("drops a buffered cold-start target that names another server (F6)", async () => {
+      setChannelMutesHost(null);
+      openMessageTarget(7, 42, "a.example");
+
+      setChannelMutesHost("b.example");
+      const jump = vi.fn();
+      const unregister = setMessageJumpHandler(jump);
+      try {
+        await Promise.resolve();
         expect(jump).not.toHaveBeenCalled();
       } finally {
         unregister();

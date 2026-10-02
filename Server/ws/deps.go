@@ -40,6 +40,9 @@ type PingDeps struct {
 type ChatDeps struct {
 	Limiter    *auth.RateLimiter
 	MessageSvc *service.MessageService
+	// LiveStatus is Hub.LiveStatus: the dm_channel_open a send fans out
+	// presents each participant's live status, not the users.status row.
+	LiveStatus func(userID int64) string
 }
 
 // PresenceDeps holds dependencies for presence, typing, and channel focus handlers.
@@ -256,7 +259,8 @@ func channelSubject(ctx context.Context, database DispatchReader, perms *permiss
 }
 
 // joinDenial maps a CanJoinVoice refusal to the error frame the voice_join
-// gate has always sent for that reason.
+// gate sends for that reason. A missing permission bit gets one neutral
+// message that does not name the bit.
 func joinDenial(err error) ClientError {
 	switch {
 	case errors.Is(err, permissions.ErrNotVoiceChannel):
@@ -268,7 +272,7 @@ func joinDenial(err error) ClientError {
 	case errors.Is(err, permissions.ErrTimedOut):
 		return ClientError{Code: ErrCodeTimedOut, Message: "you are timed out"}
 	default:
-		return ClientError{Code: ErrCodeForbidden, Message: "missing CONNECT_VOICE permission"}
+		return ClientError{Code: ErrCodeForbidden, Message: "missing permission to join this voice channel"}
 	}
 }
 

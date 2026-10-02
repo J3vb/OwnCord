@@ -24,6 +24,7 @@ import { pushToTalk } from "./pushToTalk";
 import { globalShortcuts } from "./globalShortcuts";
 import { settings } from "./settings";
 import { socket } from "./socket";
+import { systemIdle } from "./systemIdle";
 import { trayStatus } from "./trayStatus";
 import { updater } from "./updater";
 import { urlOpener } from "./urlOpener";
@@ -50,6 +51,7 @@ export const desktop: Platform = {
   globalShortcuts,
   settings,
   socket,
+  systemIdle,
   trayStatus,
   updater,
   urlOpener,

@@ -252,6 +252,67 @@ describe("showContextMenu", () => {
     expect(document.querySelector(".context-menu")).not.toBeNull();
   });
 
+  it("keeps the menu inside the viewport when the anchor is near an edge (F9)", () => {
+    // A short window puts a menu opened near the bottom/right edge partly
+    // off-screen, leaving its last actions unclickable. jsdom has no layout,
+    // so stub the measured size.
+    const innerWidth = window.innerWidth;
+    const innerHeight = window.innerHeight;
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      value: 300,
+    });
+    try {
+      showContextMenu({
+        x: innerWidth - 10,
+        y: innerHeight - 10,
+        items: [{ label: "Purge", onClick: vi.fn(), danger: true }],
+        signal: ac.signal,
+      });
+
+      const menu = document.querySelector(".context-menu") as HTMLElement;
+      expect(parseInt(menu.style.left, 10)).toBeLessThanOrEqual(innerWidth - 200);
+      expect(menu.style.bottom).not.toBe("");
+    } finally {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
+    }
+  });
+
+  it("never pushes a tall menu past the top of a short window", () => {
+    vi.stubGlobal("innerWidth", 940);
+    vi.stubGlobal("innerHeight", 500);
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      value: 300,
+    });
+    try {
+      showContextMenu({
+        x: 100,
+        y: 250,
+        items: [{ label: "Mark read", onClick: vi.fn() }],
+        signal: ac.signal,
+      });
+
+      const menu = document.querySelector(".context-menu") as HTMLElement;
+      // Spans y 8..308: its first item stays reachable.
+      expect(menu.style.top).toBe("");
+      expect(menu.style.bottom).toBe("192px");
+    } finally {
+      vi.unstubAllGlobals();
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
+    }
+  });
+
   it("handles empty items list", () => {
     showContextMenu({
       x: 0,

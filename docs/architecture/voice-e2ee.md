@@ -132,15 +132,18 @@ and `tests/unit/platform/nativeVoice.suite.ts` pins the host contract.
 **Commands and events.** `native_voice_set_key` (install/rotate),
 `native_voice_clear_key` (leave), `native_voice_connect` → `{session, identity}`,
 `native_voice_disconnect(session)`, `native_voice_set_microphone`,
-`native_voice_set_subscribed` (deafen), `native_voice_set_volume` and
+`native_voice_set_ptt_gated` (push-to-talk's gate: silence from an open capture),
+`native_voice_set_subscribed` (deafen), `native_voice_set_video_view` (a
+remote video's layer, or none while no tile shows it), `native_voice_set_volume` and
 `native_voice_set_screenshare_volume` (per-user and screen-share audio volume,
 see Audio parity below), `native_voice_debug_info`. Room events
 arrive on one Tauri event, `native-voice`, tagged with the session id; the
 adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state — at once for the local
-identity, and for a remote peer only if no `Ok` follows within the web path's
-3 s decrypt grace, since the backend reports each transition once —
-participant join/leave).
+identity; the backend reports each transition once, so a remote peer's failure
+is re-raised every second until its `Ok`, as the web worker does, and the
+shared 3 s decrypt grace in `lib/roomEventHandlers.ts` decides when it degrades
+the call — participant join/leave).
 No audio `TrackSubscribed` is raised: there is no browser track. Capture and
 playout run in the Rust process on the session's own streams, with
 libwebrtc's APM (AEC/NS/AGC from the same preferences the web path uses) and
@@ -253,8 +256,10 @@ the webview only as the `native_voice_connect` result
 (`NativeVoiceConnected.frames`); the handshake is refused unless the request
 path starts with the token (compared in constant time), so no other local
 process or web page can read or inject frames. Closing the session drops the
-server, which aborts the listener and every connection it accepted. Two
-routes:
+server, which aborts the listener and every connection it accepted. A
+renderer or camera uplink whose socket closes while it is still in use reopens
+it after 1 s, so a dropped connection does not freeze the tile for the rest of
+the call. Two routes:
 
 - `/<token>/remote/<track sid>`: one subscribed remote video track's decoded
   frames, native to webview, as width, height and the three I420 planes
@@ -407,8 +412,13 @@ the backend captures with libwebrtc's `DesktopCapturer`
 `localParticipant.createScreenTracks`, which `NativeRoom` implements as pick,
 then `native_voice_start_screen`. That resolves once the first frame arrives
 (on Wayland, after the dialog), so the web path's generation guard around the
-OS picker covers the portal dialog too; a cancelled or refused dialog rejects
-and is reported as a `NotAllowedError`, as a cancelled browser picker is. The
+OS picker covers the portal dialog too. libwebrtc cannot tell a dismissed
+portal dialog from a refused or failed one, so a portal capture that ends
+before its first frame gets a soft "didn't start" notice; the X11 picker's own
+dismissal raises the `NotAllowedError` a dismissed browser picker does, which
+the shared code keeps silent, and a picked source that fails or produces no
+first frame is reported as a failure. The portal's dialog is not time-bounded;
+a stop or leave ends the wait. The
 returned `NativeScreenTrack` stands in for the browser track: its
 `mediaStreamTrack` is the local preview (the frame socket's `/screen` route,
 drawn by the same WebGL renderer as remote video), `publishTrack` publishes
@@ -547,15 +557,25 @@ first, ids are `cpal`'s stable device ids, names the sink descriptions) and an
 `audiooutput` switch reopens the output stream on the chosen device (an unknown
 id falls back to the default and reports it; the device already playing is
 left alone, and a device that fails to open leaves the current stream
-playing). A sink that disappears mid-call is moved by the sound server itself;
-the stream error is only logged. The stream is opened on a concrete sink, so
-"System default" (an empty id) would stay on the sink it opened on. A
-`devicechange` re-applies it (the hot-plug re-apply above), and a default
-changed in the system mixer with no hot-plug raises no `devicechange`, so
-while "System default" is selected a watcher thread asks the sound server for
-the default sink every 2 s and reopens the stream there when it moves. It
-polls through the host connection that opened the stream, adds one thread
-for the call, and is stopped and joined when another device is chosen or the
+playing). A sink that disappears mid-call is moved by the sound server itself.
+The stream is opened on a concrete sink, so "System default" (an empty id)
+would stay on the sink it opened on. A `devicechange` re-applies it (the
+hot-plug re-apply above), and a default changed in the system mixer with no
+hot-plug raises no `devicechange`, so a watcher thread asks the sound server
+for the default sink every 2 s and, while "System default" is selected,
+reopens the stream there when it moves. The same watcher reopens a stream the
+sound server tore down (a suspend and resume, a PipeWire or PulseAudio
+restart): the stream's error callback flags it, and the next tick reopens it
+on the chosen device, or on the current default for "System default"; a
+reopen or a default-move follow that fails is retried every tick until the
+sound server answers. A chosen device not yet listed after the restart (a
+Bluetooth sink that reconnects seconds later) falls back to the default, and
+the watcher switches back to it on the first tick it is listed again. A
+restart kills the host connection, so the watcher rebuilds it (`WatchedHost`
+in `playout.rs`), never onto a lower backend than the one in use: while the
+server is down `cpal`'s default host is ALSA, whose constant `default` device
+would hide every later move of the real default. It adds one thread for the
+call, starts when the stream first opens, and is stopped and joined when the
 session closes.
 
 **Echo cancellation reference.** At first the echo canceller's reference was
@@ -587,11 +607,21 @@ device module is no longer acquired at all. Each 10 ms of mono 48 kHz capture
 goes through libwebrtc's standalone APM (`livekit::webrtc::native::apm`: echo
 cancellation, noise suppression and gain control from the same three
 preferences, plus a high-pass filter), then, with Enhanced Noise Suppression
-on, through RNNoise (`nnnoiseless`, a pure-Rust port of the same model), into
+on, through RNNoise (`nnnoiseless`, a pure-Rust port of RNNoise's 2018 model;
+the web path ships the newer one), into
 an unbuffered `NativeAudioSource` that backs the published microphone track.
 Mute closes the input stream (the OS in-use indicator goes out) and keeps the
-publication; unmute reopens it on the device it last resolved, so a
-push-to-talk press does not enumerate devices.
+publication; unmute reopens it on the device it last resolved, without
+enumerating devices. Push-to-talk never closes it: with the key up
+(`native_voice_set_ptt_gated`) each processed frame is zeroed after the APM
+and RNNoise ran, so the stream and their state stay up and the indicator
+stays lit while PTT is armed. The capture shares the
+playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
+sound server tore down, switches back to a chosen microphone once it is listed
+again, and, while "System default" is selected, follows the default source as
+it moves; while muted it only re-resolves, so the next unmute opens the device
+the selection now names. Unmuted, the device it last resolved changes only
+once the new stream is open, so a failed open is retried on the next tick.
 
 **APM and RNNoise together.** Both stay on when both are enabled, as on the
 web path, where the browser's processing precedes the RNNoise worklet. The

@@ -20,6 +20,7 @@ import type {
 import { uiStore } from "@stores/ui.store";
 import { settingsText } from "../i18n/settings";
 import { authStore } from "@stores/auth.store";
+import { createAvatarElement } from "./message-list/avatar";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";
@@ -317,11 +318,18 @@ export function createSettingsOverlay(
     // User profile section at top of sidebar
     const user = authStore.getState().user;
     const profileSection = createElement("div", { class: "settings-sidebar-profile" });
-    const avatarEl = createElement(
-      "div",
-      { class: "settings-sidebar-avatar" },
-      (user?.username ?? "U").charAt(0).toUpperCase(),
-    );
+    // Show the uploaded avatar image, not only the initial, matching every
+    // other identity surface (F24).
+    const buildAvatar = (u: typeof user): HTMLDivElement =>
+      createAvatarElement(
+        {
+          username: u?.username ?? "U",
+          displayName: u?.display_name ?? null,
+          avatar: u?.avatar ?? null,
+        },
+        { className: "settings-sidebar-avatar" },
+      );
+    let avatarEl = buildAvatar(user);
     const profileInfo = createElement("div", {});
     const profileName = createElement(
       "div",
@@ -344,13 +352,16 @@ export function createSettingsOverlay(
     appendChildren(profileSection, avatarEl, profileInfo);
     sidebar.appendChild(profileSection);
 
-    // Keep the sidebar identity in step with the store — renaming yourself on
-    // the Account tab used to leave the old name sitting here until restart.
+    // Keep the sidebar identity in step with the store — renaming yourself or
+    // changing your avatar on the Account tab used to leave the old one
+    // sitting here until restart.
     unsubAuth = authStore.subscribeSelector(
-      (s) => s.user?.username,
-      (name) => {
-        profileName.textContent = name ?? settingsText("common.unknown");
-        avatarEl.textContent = (name ?? "U").charAt(0).toUpperCase();
+      (s) => s.user,
+      (u) => {
+        profileName.textContent = u?.username ?? settingsText("common.unknown");
+        const next = buildAvatar(u);
+        avatarEl.replaceWith(next);
+        avatarEl = next;
       },
     );
 
@@ -493,10 +504,13 @@ export function createSettingsOverlay(
     );
 
     root.appendChild(panel);
-    renderActiveTab();
-    // Content built while the panel is closed is only a placeholder: opening
-    // rebuilds it so the first view is as fresh as every later one.
+    // Don't build the active tab while the overlay is closed (DP-52): its
+    // builders issue REST reads (sessions, TOTP and recovery-kit status) that
+    // are wasted work until the panel is actually shown. The first open
+    // rebuilds via show() → !contentLive, so its data is as fresh as any later
+    // open's.
     contentLive = uiStore.getState().settingsOpen;
+    if (contentLive) renderActiveTab();
 
     // Subscribe to uiStore for open/close
     unsubUi = uiStore.subscribeSelector(

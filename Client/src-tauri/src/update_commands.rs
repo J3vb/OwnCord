@@ -179,7 +179,7 @@ fn build_updater(
         .map_err(|e| format!("failed to set endpoints: {e}"))?
         .configure_client(move |client| {
             // This callback applies to both metadata checks and downloads.
-            // UpdaterBuilder::timeout only bounds checks in updater 2.10.1;
+            // UpdaterBuilder::timeout only bounds checks through updater 2.13;
             // its returned Update has no timeout. Bound idle reads instead
             // of total download time so slow, progressing downloads finish.
             let client = client
@@ -224,6 +224,82 @@ fn cannot_self_update(bundle: Option<&BundleType>) -> bool {
     matches!(bundle, Some(BundleType::Deb | BundleType::Rpm))
 }
 
+/// Whether the artifact a release offers is built for the given machine target
+/// (`{os}-{arch}` in the updater plugin's spelling, e.g. `windows-x86_64`).
+///
+/// The signature only proves the bytes came from OwnCord; it says nothing about
+/// which machine can run them. A signed file for another OS or processor
+/// therefore downloads and installs cleanly and then will not start, so the
+/// offered file name is checked against the running machine before anything is
+/// written. Fail closed: a name that does not name both an operating system and
+/// an architecture is refused, because every signed OwnCord artifact names both.
+fn artifact_matches_target(download_url: &str, machine_target: &str) -> bool {
+    let Some((machine_os, machine_arch)) = machine_target.split_once('-') else {
+        return false;
+    };
+
+    let filename = download_url
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("");
+
+    let tokens: Vec<String> = filename
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect();
+
+    let mut seen_arch: Option<&'static str> = None;
+    let mut seen_os: Option<&'static str> = None;
+    for (index, token) in tokens.iter().enumerate() {
+        if seen_arch.is_none() {
+            let is_x86_64 =
+                token == "x86" && tokens.get(index + 1).map(String::as_str) == Some("64");
+            seen_arch = plugin_arch(if is_x86_64 { "x86_64" } else { token });
+        }
+        if seen_os.is_none() {
+            seen_os = plugin_os(token);
+        }
+    }
+
+    match (seen_arch, seen_os) {
+        (Some(arch), Some(os)) => arch == machine_arch && os == machine_os,
+        _ => false,
+    }
+}
+
+/// Wrap `artifact_matches_target` for the running machine.
+fn artifact_matches_this_machine(download_url: &str) -> bool {
+    tauri_plugin_updater::target().is_none_or(|t| artifact_matches_target(download_url, &t))
+}
+
+/// Map a file-name token to the updater plugin's architecture spelling.
+fn plugin_arch(token: &str) -> Option<&'static str> {
+    match token {
+        "x86_64" | "x64" | "amd64" => Some("x86_64"),
+        "aarch64" | "arm64" => Some("aarch64"),
+        "i686" | "i386" | "ia32" | "x86" => Some("i686"),
+        "armv7" | "arm" => Some("armv7"),
+        "riscv64" => Some("riscv64"),
+        _ => None,
+    }
+}
+
+/// Map a file-name token to the updater plugin's OS spelling. Bare `app` is
+/// deliberately absent: it appears in product names and `appimage` is handled
+/// separately, so mapping it would misread unrelated names.
+fn plugin_os(token: &str) -> Option<&'static str> {
+    match token {
+        "windows" | "win" | "nsis" | "msi" | "exe" => Some("windows"),
+        "linux" | "appimage" | "deb" | "rpm" => Some("linux"),
+        "darwin" | "macos" | "dmg" => Some("darwin"),
+        _ => None,
+    }
+}
+
 /// Check for a client update using the given server URL to build the endpoint
 /// dynamically. This is required because OwnCord is self-hosted and the
 /// server address varies per user.
@@ -240,12 +316,29 @@ pub async fn check_client_update(
         .map_err(|e| format!("update check failed: {e}"))?;
 
     match update {
-        Some(u) => Ok(UpdateCheckResult {
-            available: true,
-            version: Some(u.version.clone()),
-            body: Some(u.body.clone().unwrap_or_default()),
-            manual_upgrade: false,
-        }),
+        Some(u) if artifact_matches_this_machine(u.download_url.as_str()) => {
+            Ok(UpdateCheckResult {
+                available: true,
+                version: Some(u.version.clone()),
+                body: Some(u.body.clone().unwrap_or_default()),
+                manual_upgrade: false,
+            })
+        }
+        // An offered file built for another OS or processor is not an update
+        // this machine can take, so it must not raise the banner. The install
+        // path refuses it too; this keeps the two commands from disagreeing.
+        Some(u) => {
+            log::warn!(
+                "[update] ignoring version {}: offered artifact is not for this machine",
+                u.version
+            );
+            Ok(UpdateCheckResult {
+                available: false,
+                version: None,
+                body: None,
+                manual_upgrade: false,
+            })
+        }
         None => Ok(UpdateCheckResult {
             available: false,
             version: None,
@@ -268,7 +361,7 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
         .map_err(|e| format!("update check failed: {e}"))?;
 
     match update {
-        Some(u) => {
+        Some(u) if artifact_matches_this_machine(u.download_url.as_str()) => {
             // Accumulate downloaded bytes and emit progress to the webview.
             // A failed emit must never abort the install, hence `let _ =`.
             let progress_app = app.clone();
@@ -310,6 +403,13 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
             install_guard.installed();
             Ok(())
         }
+        // Refuse a signed artifact built for another OS or processor: its
+        // signature is valid, but installing it replaces this install with a
+        // binary that cannot start.
+        Some(u) => Err(format!(
+            "update refused: version {} is not built for this machine",
+            u.version
+        )),
         None => Err("no update available".into()),
     }
 }
@@ -454,6 +554,189 @@ mod tests {
                 "expected {url} to be rejected"
             );
         }
+    }
+
+    // One payload signed three times by an ephemeral test key with
+    // `tauri signer sign`: without `--app-version` (the shape of every release
+    // signed before the CLI recorded one), with `--app-version 2.0.0`, and with
+    // `--app-version 99.0.0`. The private key was discarded.
+    const FIXTURE_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2RDY3NzVFQkQyNjI4NTgKUldSWUtDYTlYbmZXcHQ2WHJqUXpkNXNMUWdVbFVDM1FiOXhLK2lNUlVwWUsvSm8yQTJzWGF6UHkK";
+    const FIXTURE_PAYLOAD: &[u8] = b"owncord update fixture\n";
+    const SIG_UNVERSIONED: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWUtDYTlYbmZXcHZ0RGc4VG1JZkxrOW1xWG85QUczUmg4dlhaMzhlMnRKNVZZMlJnWUxCSVdaNmRuYU9EYnJjWHpTQ0VGdGlyTndhblNxRnVBb0w0Zy9BUVNBT1YzendRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzk1ODMxCWZpbGU6YTEKMVJ5YWR0aTlsZDRGa256bGNsS2hjZDg5VTROcys1eDh3a2hVUTRTRXV2bmZmb3VjQk9DU1BOUHY3VVArTkhUK0N2ZU14UnJ1Yjd6eFlXQUg5R24rQWc9PQo=";
+    const SIG_V2_0_0: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWUtDYTlYbmZXcHZnWHdubHBXKzFxSjVWdFpkdkw1enArZDR3NzA4UWRONlhLZXU5dzB3VUFCRklycitzSW1HNVZWcUZqNXRFTU5ETFdsdFZGazBJcFRQZkRiMGs1NkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzk1ODMxCWZpbGU6YTIJdmVyc2lvbjoyLjAuMAo2cHFWbzZlUFVLTW94NEJ1UlU5SDFIL1RRYnFLb3FleVdlVG5lSG92UFFEd01qcmdVb1FVTVk5S3ZzbXkzczUrTzhUdGNuUUxyZHlROEEreGY5bXNEUT09Cg==";
+    const SIG_V99_0_0: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSWUtDYTlYbmZXcG4weWU1Y3JZNWxUbXBoYjVsMnhYV0ZBM3NhT2t2SytacU43c010M3o4M1pSSTBQOHBLenNZNFd5emh5RzlmNE0vcWRoKytmRXpvcVdFeUxOMnNuSUEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNzk1ODMxCWZpbGU6YTMJdmVyc2lvbjo5OS4wLjAKWEVreUJhdk9SaHFJblBUbkx3eUZSS2xnZ2o5dkpUMU4xYzJNekFQNlRMalUxSzRwWjczNnFRWG56NWE3bWcyUHpRTFY5eU1mT1Fsb2xXOUxCWFFwQ0E9PQo=";
+
+    /// A stub OwnCord server that answers every update check with `version`,
+    /// `signature` and a URL serving FIXTURE_PAYLOAD. Returns its base URL.
+    fn serve_update_offer(version: &str, signature: &str) -> String {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let base = format!("http://{}", listener.local_addr().expect("stub address"));
+        let offer = serde_json::json!({
+            "version": version,
+            "url": format!("{base}/artifact"),
+            "signature": signature,
+        })
+        .to_string();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut request = [0u8; 4096];
+                let n = stream.read(&mut request).unwrap_or(0);
+                let body = if request[..n].starts_with(b"GET /artifact") {
+                    FIXTURE_PAYLOAD.to_vec()
+                } else {
+                    offer.clone().into_bytes()
+                };
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+            }
+        });
+        base
+    }
+
+    /// Runs the shipped updater configuration (tauri.conf.json) against a stub
+    /// server's offer and downloads it. Only the trust anchor is swapped for
+    /// the fixture key, and plain http allowed for the loopback stub.
+    async fn download_offer(version: &str, signature: &str) -> Result<(), String> {
+        let base = serve_update_offer(version, signature);
+        let shipped: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let mut updater_config = shipped["plugins"]["updater"].clone();
+        updater_config["pubkey"] = FIXTURE_PUBKEY.into();
+        updater_config["dangerousInsecureTransportProtocol"] = true.into();
+
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), updater_config);
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .map_err(|e| e.to_string())?;
+
+        let update = app
+            .updater_builder()
+            .endpoints(vec![format!("{base}/update").parse().expect("endpoint")])
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?
+            .check()
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("no update offered")?;
+        update
+            .download(|_, _| {}, || {})
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    #[tokio::test]
+    async fn update_signed_for_an_older_version_is_refused() {
+        // A signature is valid for the bytes it covers whatever version the
+        // server announces next to it, so the offered version must itself be
+        // bound by the signature.
+        assert!(download_offer("99.0.0", SIG_V2_0_0).await.is_err());
+        // Releases signed before versions were recorded carry none at all.
+        assert!(download_offer("99.0.0", SIG_UNVERSIONED).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_signed_for_the_offered_version_is_accepted() {
+        assert_eq!(download_offer("99.0.0", SIG_V99_0_0).await, Ok(()));
+    }
+
+    #[test]
+    fn artifact_target_check_accepts_the_running_machines_own_artifacts() {
+        // The actual release file names (Client/scripts/stage-release-assets.sh,
+        // Server/updater/assets.go clientAssetSuffixByTarget).
+        for (target, url) in [
+            (
+                "windows-x86_64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_x64-setup.nsis.zip",
+            ),
+            (
+                "windows-aarch64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_arm64-setup.nsis.zip",
+            ),
+            (
+                "linux-x86_64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_amd64.AppImage.tar.gz",
+            ),
+            (
+                "linux-aarch64",
+                "https://releases.example.com/v1/OwnCord_1.0.0_aarch64.AppImage.tar.gz",
+            ),
+        ] {
+            assert!(
+                artifact_matches_target(url, target),
+                "{url} must be accepted on {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn artifact_target_check_refuses_another_platform_or_architecture() {
+        let x64_nsis = "https://releases.example.com/v1/OwnCord_1.0.0_x64-setup.nsis.zip";
+        let arm64_nsis = "https://releases.example.com/v1/OwnCord_1.0.0_arm64-setup.nsis.zip";
+        let x64_appimage = "https://releases.example.com/v1/OwnCord_1.0.0_amd64.AppImage.tar.gz";
+        let arm64_appimage =
+            "https://releases.example.com/v1/OwnCord_1.0.0_aarch64.AppImage.tar.gz";
+
+        // Wrong architecture, same OS.
+        assert!(!artifact_matches_target(x64_nsis, "windows-aarch64"));
+        assert!(!artifact_matches_target(arm64_nsis, "windows-x86_64"));
+        assert!(!artifact_matches_target(x64_appimage, "linux-aarch64"));
+        assert!(!artifact_matches_target(arm64_appimage, "linux-x86_64"));
+
+        // Wrong OS, same architecture.
+        assert!(!artifact_matches_target(x64_nsis, "linux-x86_64"));
+        assert!(!artifact_matches_target(x64_appimage, "windows-x86_64"));
+    }
+
+    #[test]
+    fn artifact_target_check_is_case_insensitive_and_ignores_url_suffixes() {
+        assert!(artifact_matches_target(
+            "https://example.com/OwnCord_1.0.0_AMD64.AppImage.tar.gz",
+            "linux-x86_64",
+        ));
+        assert!(artifact_matches_target(
+            "https://example.com/OwnCord_1.0.0_x64-setup.nsis.zip?token=abc123",
+            "windows-x86_64",
+        ));
+    }
+
+    #[test]
+    fn artifact_target_check_reads_the_canonical_x86_64_spelling() {
+        // The updater plugin spells the 64-bit x86 architecture `x86_64`
+        // (tauri_plugin_updater::target()), so a file carrying that whole
+        // spelling must not be misread as the 32-bit `i686` its `x86` prefix
+        // would otherwise tokenise to.
+        assert!(artifact_matches_target(
+            "https://releases.example.com/v1/OwnCord_1.0.0_x86_64-setup.nsis.zip",
+            "windows-x86_64",
+        ));
+        assert!(!artifact_matches_target(
+            "https://releases.example.com/v1/OwnCord_1.0.0_x86_64-setup.nsis.zip",
+            "windows-i686",
+        ));
+    }
+
+    #[test]
+    fn artifact_target_check_fails_closed_on_an_unrecognised_name() {
+        // No architecture in the name: refuse rather than guess, because every
+        // signed OwnCord artifact names its own.
+        assert!(!artifact_matches_target(
+            "https://example.com/OwnCord_1.0.0.zip",
+            "linux-x86_64",
+        ));
     }
 
     #[test]

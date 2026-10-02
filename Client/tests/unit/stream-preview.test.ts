@@ -3,9 +3,11 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vite
 // Mock livekitSession before importing streamPreview
 const mockGetRemoteVideoStream =
   vi.fn<(uid: number, type: "camera" | "screenshare") => MediaStream | null>();
+const mockSetRemoteVideoView = vi.fn();
 vi.mock("@lib/livekitSession", () => ({
   getRemoteVideoStream: (uid: number, type: "camera" | "screenshare") =>
     mockGetRemoteVideoStream(uid, type),
+  setRemoteVideoView: (...args: unknown[]) => mockSetRemoteVideoView(...args),
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
 }));
@@ -149,6 +151,36 @@ describe("streamPreview", () => {
     vi.advanceTimersByTime(150 + 200); // 150ms delayed check + 200ms animation
 
     expect(getPreview(row)).toBeNull();
+  });
+
+  it("asks for the previewed stream at its size while open, and releases it on close (P3-07)", () => {
+    mockGetRemoteVideoStream.mockReturnValue(createMockMediaStream());
+    mockSetRemoteVideoView.mockClear();
+    const row = createRow(42);
+    vi.spyOn(row, "getBoundingClientRect").mockReturnValue({ width: 240 } as DOMRect);
+    attachStreamPreview(row, 42, "Alice", true, true, ac.signal);
+
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    vi.advanceTimersByTime(300);
+    const width = Math.round(240 * devicePixelRatio);
+    expect(mockSetRemoteVideoView.mock.calls).toEqual([
+      [
+        42,
+        "screenshare",
+        { enabled: true, size: { width, height: Math.round((width * 9) / 16) } },
+        true,
+      ],
+    ]);
+
+    row.dispatchEvent(new MouseEvent("mouseleave"));
+    vi.advanceTimersByTime(150 + 200);
+    expect(mockSetRemoteVideoView).toHaveBeenLastCalledWith(
+      42,
+      "screenshare",
+      { enabled: false },
+      true,
+    );
+    expect(mockSetRemoteVideoView).toHaveBeenCalledTimes(2);
   });
 
   // T11: Debounce: rapid hover/unhover → no preview

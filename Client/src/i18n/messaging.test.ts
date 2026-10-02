@@ -39,7 +39,7 @@ describe("B9-19 catalogs", () => {
     expect(messagingText("error.tooLong", { max: "4000" })).toBe(
       "Messages are limited to 4000 characters",
     );
-    expect(messagingText("error.fileTooLarge", { filename: "clip.mp4" })).toBe(
+    expect(messagingText("error.fileTooLarge", { filename: "clip.mp4", limit: "100" })).toBe(
       "File too large: clip.mp4 exceeds 100 MB limit",
     );
     expect(messagingText("composer.slowMode", { seconds: "5" })).toBe("Slow mode — 5s");

@@ -151,24 +151,49 @@ func (h *Hub) sweepRevokedSessions() {
 	for _, c := range snapshot {
 		// A hash the authenticator did not answer for reads as the map's
 		// zero value, which is SessionRevoked by design: fail closed.
-		switch verdicts[c.tokenHash] {
-		case service.SessionRevoked:
-			slog.Info("session sweep: revoked/expired session, disconnecting",
-				"user_id", c.userID)
-			h.kickClientTerminal(c)
-		case service.SessionBanned:
-			slog.Info("session sweep: banned user, disconnecting",
-				"user_id", c.userID)
-			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
-			h.kickClientTerminal(c)
-		case service.SessionLive:
-		}
+		h.applySessionVerdict(c, verdicts[c.tokenHash])
 	}
 }
 
+// applySessionVerdict drops c when its session is revoked, expired or
+// banned, and leaves it when the session is live.
+func (h *Hub) applySessionVerdict(c *Client, verdict service.SessionVerdict) {
+	switch verdict {
+	case service.SessionRevoked:
+		slog.Info("session sweep: revoked/expired session, disconnecting",
+			"user_id", c.userID)
+		h.kickClientTerminal(c)
+	case service.SessionBanned:
+		slog.Info("session sweep: banned user, disconnecting",
+			"user_id", c.userID)
+		c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
+		h.kickClientTerminal(c)
+	case service.SessionLive:
+	}
+}
+
+// DisconnectIfSessionRevoked is the revoked-session sweep for one account,
+// run now: after a password change or a single-session revoke, which remove
+// some of the account's sessions but perhaps not the one its socket rides,
+// the socket goes at once if its own session was among them. A failed
+// lookup leaves it to the sweep's next tick, as the sweep itself does.
+func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
+	c := h.GetClient(userID)
+	if c == nil || c.tokenHash == "" {
+		return
+	}
+	verdicts, err := h.authn.SweepSessions(context.Background(), []string{c.tokenHash})
+	if err != nil {
+		slog.Warn("session sweep: batch session lookup failed", "user_id", userID, "err", err)
+		return
+	}
+	h.applySessionVerdict(c, verdicts[c.tokenHash])
+}
+
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-checks CONNECT_VOICE for every client currently in voice, evicts the
-// ones who no longer hold it, and reconciles active media source permissions.
+// re-runs the voice join gate (permissions.CanJoinVoice) for every client
+// currently in voice, evicts the ones it now refuses, and reconciles active
+// media source permissions.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// The whole SFU reconciliation pass shares a budget. An unavailable
 	// companion cannot hold the hub loop for one network timeout per user.
@@ -223,9 +248,9 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if !h.handleVoiceLeaveIfStillIn(ctx, c, chID, voiceLeaveReasonRevoked) {
 			continue
 		}
-		slog.Warn("sweepStaleVoiceStates: evicted participant whose CONNECT_VOICE was revoked",
+		slog.Warn("sweepStaleVoiceStates: evicted participant who may no longer join the channel",
 			"user_id", c.userID, "channel_id", chID)
-		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing CONNECT_VOICE permission"))
+		c.sendMsg(buildErrorMsg(ErrCodeForbidden, "missing permission to join this voice channel"))
 	}
 }
 
@@ -421,10 +446,13 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 			}
 		}
 
-		// Remove from LiveKit (best-effort).
-		if h.livekit != nil {
-			_ = h.livekit.RemoveParticipant(ctx, channelID, vs.UserID, vs.JoinedAt)
-		}
+		// Remove from LiveKit (best-effort), off this goroutine: the caller
+		// is the admin archive/delete request, and LiveKit can take seconds
+		// to answer (OC-0453). The DB row and client state above are already
+		// conditional on this exact join instance, and the identity carries
+		// the join token, so the removal is safe to detach exactly as
+		// finishVoiceLeave does it.
+		h.removeLiveKitParticipantAsync(ctx, channelID, vs.UserID, vs.JoinedAt, "CleanupVoiceForChannel")
 	}
 
 	// Broadcast voice_leave for each participant. All leaves target the same
@@ -432,7 +460,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// The evicted participants themselves must always be in it (their client
 	// state is already cleared, so broadcastVoiceEvent's participant union
 	// cannot see them): the voice_leave is what drives their own E2EE
-	// teardown, and voice membership never required READ_MESSAGES.
+	// teardown, and voice membership can outlive READ_MESSAGES.
 	//
 	// Both callers of CleanupVoiceForChannel commit archived=1 to this
 	// channel before evicting (OC-0022) — deliberately, so a concurrent

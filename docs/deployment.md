@@ -293,6 +293,14 @@ in its header comments. The important choices it encodes:
 - `AmbientCapabilities=CAP_NET_BIND_SERVICE` — only needed for
   `tls.mode: acme`, which binds :80 for HTTP-01 challenges as a non-root
   user.
+- `LimitNOFILE=65536` — the open-file ceiling. Each WebSocket holds a
+  descriptor. The Go runtime already lifts the soft limit to just under the
+  hard one at init, and the server raises it the rest of the way, so this hard
+  limit is the real cap on how many people can be online (see
+  [Open-file limit](#open-file-limit-file-descriptors)). 65,536 is well above
+  what 2,000 online need (the boot budget for 2,000 is 4,256) and only needs
+  raising past roughly 30,000 connections; an old systemd default hard limit
+  of 1,024 would stop at a few hundred online.
 
 Pair it with the scheduled backups in the admin panel — or an external cron
 line (see Backup Strategy below) if you prefer driving backups outside the
@@ -346,6 +354,29 @@ self-update or restore the server starts its own replacement after draining.
 Task Scheduler discards the process's stdout: point the action at a redirect
 (wrap it as `cmd /c chatserver.exe >> logs\server.log 2>&1`) or the log is
 gone.
+
+### Running from a console window
+
+A server started by double-clicking `chatserver.exe`, or from cmd or
+PowerShell, is not supervised, so `auto` resolves to `spawn`. After a
+self-update, backup restore or setup-wizard restart, the replacement runs in the
+same console window and its log keeps printing there. The old process stays
+behind, idle, until the replacement exits, and then exits with the
+replacement's exit code. That keeps the window open under Windows Terminal,
+which closes a tab when the process it started exits, and a shell that started
+the server keeps waiting instead of printing its prompt over the log.
+
+`Ctrl+C` stops the replacement, which drains as usual, and then the old process
+exits with it. Closing the window stops both, and LiveKit. Each self-restart
+leaves one more idle process behind until the window closes or the server stops.
+
+The one exception is a restart whose teardown wedges past the 90-second restart
+backstop. The old process may still hold the port or the database lock, so it
+exits instead of staying behind, and the replacement opens in a new console
+window of its own.
+
+A server started without a console (by a service wrapper, for example) gets a
+new console window of its own on a self-restart.
 
 ## TLS Setup
 
@@ -532,7 +563,7 @@ cert management), three things matter:
    the proxy hops, never client networks. A proxy on the same host is
    `["127.0.0.1/32", "::1/128"]`: without it the allowlist sees the proxy's
    loopback address on every request, and the server warns about this shape
-   at start-up.
+   at start-up and again on the first forwarded request it admits.
 
 Working nginx snippet:
 
@@ -553,7 +584,7 @@ server {
         # the client pings every 30s, so 300s has comfortable margin.
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
-        client_max_body_size 100m;           # match upload.max_size_mb
+        client_max_body_size 101m;           # upload.max_size_mb plus 1m of multipart framing
     }
 }
 ```
@@ -630,6 +661,7 @@ The database uses SQLite WAL mode. Do NOT copy the `.db` file directly while the
 | `/admin/api/backups`                | GET    | List all backups (newest first)                                                     |
 | `/admin/api/backups/{name}`         | DELETE | Delete a backup (owner-only)                                                        |
 | `/admin/api/backups/{name}/restore` | POST   | Restore from backup (owner-only; creates pre-restore safety backup first)           |
+| `/admin/api/backups/{name}/link`    | POST   | Issue a short-lived single-use download link for one backup (owner-only)            |
 | `/admin/api/archive`                | GET    | Download the full archive (owner-only; database snapshot + `data/` + `config.yaml`) |
 | `/admin/api/archive/link`           | POST   | Issue a short-lived single-use archive download link (owner-only)                   |
 
@@ -885,7 +917,7 @@ and what — if anything — ever deletes it:
 | Path                                        | Written by                                                                                    | Bounded by                                                                                                         | Pruned by                                                                                                                                      |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chatserver.db` + `chatserver.db-wal`       | every feature                                                                                 | messages: the server window or a per-channel retention policy (`0` = keep forever); the persisted event tier: 24 h | retention sweep, at most 5 000 messages per tick; the event pruner, every 60 minutes; the WAL is truncated after an erasure completes          |
-| `uploads/`                                  | attachments, avatars, emoji                                                                   | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick        |
+| `uploads/`                                  | attachments, avatars, emoji, and a kept preview of a large image (`thumbs/`)                  | `upload.max_size_mb` (default 100) per file, `upload.user_quota_mb` (default `0` = unlimited) per user             | the orphan sweep (unlinked for more than 1 hour), the retention sweep, erasure, and the reconciliation pass, at most 500 files per tick        |
 | `backups/`                                  | manual and scheduled backups, and the `pre_restore_*.db` and `pre_migrate_*.db` safety copies | `Keep backups for (days)` on the admin panel's Backups & restore page                                              | retention always keeps the newest backup and never removes the `pre_restore_*` or `pre_migrate_*` safety copies, which must be deleted by hand |
 | `acme_certs/`                               | `tls.mode: acme` only                                                                         | one certificate for the configured domain                                                                          | the ACME client manages renewal itself                                                                                                         |
 | `livekit/`                                  | `voice.auto_download_livekit`                                                                 | one pinned release of the LiveKit server binary                                                                    | never — delete the file by hand to force a fresh download                                                                                      |
@@ -1043,9 +1075,9 @@ how recent the archive is.
 
 You also need the version you are rolling back **to**. Keep the binary, or the
 image tag, you upgraded from: GitHub Releases usually still has it, but an
-in-place self-update leaves nothing local (it rotates the old binary to `.old`
-and the replacement deletes that), and a yanked or air-gapped release leaves
-you no rollback at all. Step 4 of the archive above is that copy.
+in-place self-update leaves nothing local (it rotates the old binary to
+`.old-*` and the replacement deletes that), and a yanked or air-gapped release
+leaves you no rollback at all. Step 4 of the archive above is that copy.
 
 **Standalone:**
 
@@ -1134,6 +1166,8 @@ than none:
 
 ## Capacity limits
 
+What one server carries on which hardware, and the size to buy for a
+community of 1,000–2,000 online, is in [Capacity](capacity.md#sizing-for-10002000-online).
 The qualified profile is **250 registered users, 100 simultaneous connections
 and 25 concurrent voice sessions on 2 vCPU / 4 GB RAM** — see
 [The profile](capacity.md#the-profile) and
@@ -1146,22 +1180,51 @@ which one is near:
 - `server.max_ws_connections` (default `0` = unlimited) → further WebSocket
   upgrades are refused with 503 before the upgrade completes, until
   connections free up → `ws_conn_rejects` (nonzero means you hit it).
-- `database.max_readers` (default `0` = automatic, `max(4, CPU count)`,
+- `database.max_readers` (default `0` = automatic, `max(8, 2× CPU count)`,
   clamped to 1–64) → read queries queue behind the pool →
   `db_reader_wait_seconds` growing.
-- `upload.max_size_mb` (default `100`) and `upload.user_quota_mb` (default
-  `0` = unlimited) → an upload past either is refused with
-  `507 STORAGE_QUOTA_EXCEEDED` → `upload_storage_used_mb` for where the
-  number is.
+- `upload.max_size_mb` (default `100`) → a larger file is refused with
+  `400 BAD_REQUEST`. `upload.user_quota_mb` (default `0` = unlimited) → an
+  upload past it is refused with `507 STORAGE_QUOTA_EXCEEDED` →
+  `upload_storage_used_mb` for where the number is.
 - `server.min_free_disk_mb` (default `256`) → uploads are refused with
   `507 STORAGE_LOW_DISK` and `/health` reports `degraded`/`disk` → `disk_low`
   on metrics.
 - `security.auth_rate_limit_multiplier` (default `1.0`) → auth requests
-  refused with `429 RATE_LIMITED`; raise it for a community behind one shared
+  and WebSocket upgrades refused with `429 RATE_LIMITED`; raise it for a community behind one shared
   NAT (office, school) — the defaults assume roughly one person per IP.
 
 The reading of these and the other growth signals is covered once, under
 [Metrics Endpoint](#metrics-endpoint); that list is the one to alert on.
+
+### Open-file limit (file descriptors)
+
+Every WebSocket holds a file descriptor, so the number of people who can be
+online at once is bounded by the process's `RLIMIT_NOFILE`. The Go runtime
+already lifts the soft limit to just under the hard one at init, and the server
+**raises its soft limit to the hard limit at start-up** and logs the result
+under `open-file limit`; the number that matters is therefore the **hard**
+limit, which the supervisor or shell sets. The risk is a low hard limit — a
+plain `ulimit -n 1024`, or an old daemon or unit default of 1,024 — enough for
+a small community but not for 1,000–2,000, which need about 2,100 descriptors:
+
+- **systemd:** `LimitNOFILE=65536` in the unit (the shipped
+  [`deploy/owncord.service`](../deploy/owncord.service) sets it), or
+  `infinity`. `systemctl edit owncord` overrides it without touching the file.
+- **Docker Compose:** `ulimits.nofile` on the `owncord` service (the shipped
+  `Server/docker-compose.yml` sets 65,536). Without it the hard limit is
+  whatever the host daemon passes down, which an old or tuned-down daemon can
+  set to 1,024.
+- **Bare binary or another supervisor:** set the soft and hard limit with
+  `ulimit -n` (or `LimitNOFILE`-equivalent) before the server starts.
+
+The server also warns at boot when the resulting limit is below
+`2 × max_ws_connections + 256` — the descriptors that many connections need,
+doubled for headroom, plus a fixed allowance for the database, LiveKit, TLS
+and the rest of the process. With `server.max_ws_connections` unset
+(unlimited), the budget is the 2,000-online target: 4,256. A server started
+under `ulimit -n 1024` reports a raised limit or a warning naming this setting,
+never a silent fall-over at 1,000 connections.
 
 ## Monitoring
 
@@ -1287,6 +1350,7 @@ have chosen the third stage as your normal state.
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
+  "backpressure_presence_drops": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
   "disk_min_free_mb": 256,
@@ -1307,7 +1371,7 @@ descriptions):
 
 - `broadcast_drops` growing at all → the hub-wide broadcast queue overflowed
   and sequenced events were lost; alert on any growth. `topic_sheds_total`
-  growing → a single channel exceeded the per-channel topic limit and frames
+  growing → a sender exceeded its per-channel topic limit and frames
   were shed before sequencing; replay cannot recover them, so alert on any
   growth too. A content frame lost to either counter also forces the next
   reconnect of a client at or behind the loss onto the full-ready path, so
@@ -1344,9 +1408,9 @@ the webhook, and stale voice seats then wait for the slower reconcile to clear.
 
 `/health` checks the hub, database and disk, but **not voice**. A green
 `/health` therefore does not mean voice works: LiveKit can be down while
-`/health` says `ok`, and the failure that follows — a call that connects and
-then carries no audio — is invisible from the server, which never probes the
-media path. To catch a voice outage, poll both endpoints:
+`/health` says `ok` (joins are then refused), and a blocked media path — a call
+that connects and then carries no audio — is invisible from the server, which
+never probes it. To catch a voice outage, poll both endpoints:
 
 - **Server liveness:** `GET /health` (public, no allowlist entry). Any `503`
   is actionable; `reason` names the subsystem (`hub`, `database`, `disk`).
@@ -1448,6 +1512,12 @@ exponential backoff (3 s up to 60 s) and gives up after ten consecutive rapid
 failures; the recovery steps are in
 [LiveKit Setup](livekit-setup.md).
 
+An externally managed LiveKit (no `voice.livekit_binary`, auto-download off)
+is probed at each join instead: when it does not answer at
+`voice.livekit_url` within 3 s, the join is refused with "voice is temporarily
+unavailable — LiveKit is not reachable" and the server logs
+`handleVoiceJoin: external LiveKit unreachable`.
+
 ### Clients see a certificate mismatch
 
 You rotated or renewed the certificate, or restored a `config.yaml` whose
@@ -1469,7 +1539,7 @@ per-file or per-user limit ([Capacity limits](#capacity-limits));
 
 ### An update did not come back
 
-[If the update fails](#if-the-update-fails) — audit rows, the `.old`
+[If the update fails](#if-the-update-fails) — audit rows, the `.old-*`
 fallback and the Docker refusal are there.
 
 ### What to send when asking for help
@@ -1500,7 +1570,9 @@ Applying an update runs in this order:
 
 1. Download and verify the replacement beside the installed executable.
 2. Give connected clients a "restarting in 5s" notice, then rotate the current
-   binary to `.old` and put the verified download at the installation path.
+   binary to a uniquely named `.old-*` beside it (for example
+   `chatserver.exe.old-123456789`) and put the verified download at the
+   installation path.
 3. Drain HTTP requests, stop the WebSocket hub and the managed `livekit-server`,
    flush queued event/audit writes, and close the database and its process lock.
    LiveKit's process must finish exiting before the handoff can continue. Unix
@@ -1512,16 +1584,20 @@ Applying an update runs in this order:
    emergency restart backstop share one handoff, so only one replacement is
    launched. The backstop also waits for the managed LiveKit process to exit.
 5. Once every start-up stage has come up — data dir, TLS, database, migrations,
-   and the rest — the new process removes `.old`, retrying briefly while
-   Windows finishes releasing the predecessor's executable file. A start-up
-   stage that fails before then leaves `.old` in place.
+   and the rest — the new process removes every `.old-*` (and a `.old` left by
+   an older release). One that Windows still holds open, because that binary
+   is still running, is left for a later start: a server started from a
+   console window stays behind until its replacement exits (see
+   [Running from a console window](#running-from-a-console-window)). A
+   start-up stage that fails before then leaves `.old-*` in place.
 6. That removal is the only recovery start-up performs. A new process does not
-   put `.old` back if the installed binary turns out to be broken after it has
+   put `.old-*` back if the installed binary turns out to be broken after it has
    started serving, and it does not delete a stale `.new` left by an interrupted
    download — staging refuses to write through an existing `.new`, and the next
    update attempt removes it before downloading. If the server dies between
    step 2 and step 5, the previous binary is still beside the installation path
-   as `.old`; restoring it is a manual rename.
+   as a `.old-*` (the most recently modified one, if there are several);
+   restoring it is a manual rename.
 
 #### If the update fails
 
@@ -1534,10 +1610,10 @@ then `update_applied` or `update_failed` (see
   The installed binary is untouched and the admin panel says why; retry, and
   if it persists compare your version against the release page.
 - **The rotation succeeded and the server died before or during the handoff**
-  — the previous binary is still beside the installation path as `.old` until
-  a successor passes its start-up stages. If the new one never boots, put
-  `.old` back by hand (rename it over the broken binary) and start. This is a
-  rollback of the binary only: if the failed start was a migration, the
+  — the previous binary is still beside the installation path as a `.old-*`
+  until a successor passes its start-up stages. If the new one never boots,
+  put that file back by hand (rename it over the broken binary) and start.
+  This is a rollback of the binary only: if the failed start was a migration, the
   database has already moved forward, and an older binary refuses to start on
   it rather than corrupting it (restore the pre-upgrade database first).
 - **Docker refuses the whole flow** — the panel answers `503
@@ -1748,15 +1824,15 @@ broadcast on their way out, and those frames have to reach a live hub and event
 persister or they vanish from the replay store across the restart. Shutdown
 does not wait on hijacked WebSocket connections, so connected clients do not
 delay the drain — they get the restart notice immediately afterwards. The order
-is the reverse of the start sequence in `Server/internal/app/lifecycle.go`, not
+is the reverse of the start sequence in `Server/internal/app/stages.go`, not
 a hand-written teardown.
 
 A managed livekit-server never outlives the server, even when the server dies
 without running this sequence: on Linux the kernel kills it with its parent
 (`Pdeathsig`), and on Windows it runs in a job object that is killed when the
 server exits. On Windows, closing the server's console window stops the server
-and LiveKit together; after a self-restart in `spawn` mode, the replacement
-opens a new console window of its own.
+and LiveKit together, including after a self-restart (see
+[Running from a console window](#running-from-a-console-window)).
 
 ## See Also
 

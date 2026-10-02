@@ -5,7 +5,7 @@
 // The plugin stays a dynamic `import()`: it is not part of the startup chunk
 // today, and this registry is statically reachable from the entry.
 import { createLogger } from "@lib/logger";
-import { parseInviteLink, parseMessageLink } from "@lib/deep-link";
+import { parseChannelLink, parseInviteLink, parseMessageLink } from "@lib/deep-link";
 import type { DeepLinks } from "../contracts/deepLinks";
 
 const log = createLogger("deep-link");
@@ -14,12 +14,12 @@ const SCHEME = "owncord";
 
 /**
  * Wire owncord:// deep links. No-op outside Tauri. `onInvite` is called once per
- * recognized invite link and `onMessage` once per message permalink, on both
- * cold start and warm launches.
+ * recognized invite link and `onMessage` once per message permalink, or per
+ * channel link with no message id, on both cold start and warm launches.
  */
 async function init(
   onInvite: (code: string, host?: string) => void,
-  onMessage?: (channelId: number, messageId: number, host?: string) => void,
+  onMessage?: (channelId: number, messageId: number | undefined, host?: string) => void,
 ): Promise<void> {
   let plugin: typeof import("@tauri-apps/plugin-deep-link");
   try {
@@ -34,6 +34,12 @@ async function init(
       if (message !== null) {
         log.info("Deep-link message permalink received");
         onMessage?.(message.channelId, message.messageId, message.host);
+        continue;
+      }
+      const channel = parseChannelLink(url);
+      if (channel !== null) {
+        log.info("Deep-link channel received");
+        onMessage?.(channel.channelId, undefined, channel.host);
         continue;
       }
       const invite = parseInviteLink(url);

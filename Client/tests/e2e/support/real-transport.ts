@@ -23,8 +23,21 @@ export async function installRealTransport(page: Page, server: TestServer) {
   let sendObserver: ((message: TestEnvelope) => void) | undefined;
   let httpFailure: ((request: { path: string; method: string }) => boolean) | undefined;
   const pendingEvents = new Set<Promise<void>>();
+  // Main-frame navigations replace the document, and with it the frontend that
+  // owned the current socket. The native proxy's frames for that document then
+  // have no receiver: drop the stale socket so it stops delivering, and never
+  // record a `page.evaluate` rejection caused by the document it was replacing.
+  let documents = 0;
+  page.on("request", (request) => {
+    if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) return;
+    documents++;
+    const stale = socket;
+    socket = undefined;
+    stale?.close();
+  });
   const emit = (event: string, payload: unknown) => {
     if (closed) return;
+    const sentTo = documents;
     const pending = page
       .evaluate(
         ({ event, payload }) => {
@@ -36,7 +49,7 @@ export async function installRealTransport(page: Page, server: TestServer) {
         { event, payload },
       )
       .catch((error: Error) => {
-        if (!closed) errors.push(error.message);
+        if (!closed && sentTo === documents) errors.push(error.message);
       });
     pendingEvents.add(pending);
     void pending.finally(() => pendingEvents.delete(pending));
@@ -196,6 +209,10 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "plugin:window|inner_size":
         case "plugin:window|outer_position":
         case "plugin:notification|is_permission_granted":
+        // Auto-idle's OS idle poll: "the OS cannot say", in-window idle only.
+        case "system_idle_ms":
+        // The taskbar/tray unread badge (DP-27): nothing to draw here.
+        case "set_unread_badge":
           return null;
         case "external_preview":
         case "external_image":

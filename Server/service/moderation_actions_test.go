@@ -519,9 +519,11 @@ func TestTimeout_BlocksMessageEdit_DM(t *testing.T) {
 	}
 }
 
-// timeoutLookupErrorStore wraps a real Store and injects a failure on
-// HasActiveTimeout only, for P2-11's fail-closed proof — every other method
-// promotes straight through to the embedded implementation.
+// timeoutLookupErrorStore wraps a real Store and injects a failure on the
+// two timeout lookups only — HasActiveTimeout and the active-timeout
+// mirror's ListActiveTimeoutExpiries (P5-O02) — for P2-11's fail-closed
+// proof; every other method promotes straight through to the embedded
+// implementation.
 type timeoutLookupErrorStore struct {
 	Store
 	err error
@@ -529,6 +531,10 @@ type timeoutLookupErrorStore struct {
 
 func (s *timeoutLookupErrorStore) HasActiveTimeout(ctx context.Context, userID int64) (bool, error) {
 	return false, s.err
+}
+
+func (s *timeoutLookupErrorStore) ListActiveTimeoutExpiries(context.Context) ([]db.ActiveTimeoutExpiry, error) {
+	return nil, s.err
 }
 
 // TestChannelSubject_TimeoutLookupErrorFailsClosedForDM is P2-11 (Codex

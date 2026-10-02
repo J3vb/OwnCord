@@ -83,9 +83,9 @@ type chatMessagePayload struct {
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
 	// MentionsHere reports that MentionsEveryone came from @here rather than
-	// @everyone (never both). applyMentionCounts (service/mentions.go) skips
-	// the mention-count bump for an @here reader with no live connection at
-	// send time, so a client replaying this frame during a reconnect must not
+	// @everyone (never both). Mention fan-out (service/mentions.go,
+	// mentionEntries) skips the mention-count bump for an @here reader with no
+	// live connection when the badge is written, so a client replaying this frame during a reconnect must not
 	// raise a badge the server never counted (OC-0271).
 	MentionsHere bool `json:"mentions_here"`
 }
@@ -185,14 +185,18 @@ type typingPayload struct {
 }
 
 type voiceStatePayload struct {
-	ChannelID   int64  `json:"channel_id"`
-	UserID      int64  `json:"user_id"`
-	Username    string `json:"username"`
-	Muted       bool   `json:"muted"`
-	Deafened    bool   `json:"deafened"`
-	Speaking    bool   `json:"speaking"`
-	Camera      bool   `json:"camera"`
-	Screenshare bool   `json:"screenshare"`
+	ChannelID int64  `json:"channel_id"`
+	UserID    int64  `json:"user_id"`
+	Username  string `json:"username"`
+	Muted     bool   `json:"muted"`
+	Deafened  bool   `json:"deafened"`
+	// Speaking is always false on the wire: the column is reset to 0 on
+	// insert and never updated, and LiveKit's ActiveSpeakersChanged
+	// (voice_speakers) is the speaking authority. Kept for
+	// protocol-compatibility (voice report #15).
+	Speaking    bool `json:"speaking"`
+	Camera      bool `json:"camera"`
+	Screenshare bool `json:"screenshare"`
 	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are
 	// always set alongside them, so a client that ignores these two still
 	// renders the user as silenced; they exist so the UI can distinguish a
@@ -215,10 +219,15 @@ type voiceDisconnectedPayload struct {
 }
 
 type voiceConfigPayload struct {
-	ChannelID       int64  `json:"channel_id"`
-	Quality         string `json:"quality"`
-	Bitrate         int    `json:"bitrate"`
-	MaxUsers        int    `json:"max_users"`
+	ChannelID int64  `json:"channel_id"`
+	Quality   string `json:"quality"`
+	Bitrate   int    `json:"bitrate"`
+	MaxUsers  int    `json:"max_users"`
+	// ThresholdMode, MixingThreshold and TopSpeakers are reserved: they ship
+	// on every frame but the client stores and never reads them (voice report
+	// #15). LiveKit's ActiveSpeakersChanged is authoritative for speaking, so
+	// there is no mixing configuration to drive. Kept on the wire for
+	// protocol-compatibility; do not build on them without a reader.
 	ThresholdMode   string `json:"threshold_mode"`
 	MixingThreshold int    `json:"mixing_threshold"`
 	TopSpeakers     int    `json:"top_speakers"`
@@ -317,6 +326,15 @@ type channelDeletePayload struct {
 type serverRestartPayload struct {
 	Reason       RestartReason `json:"reason"`
 	DelaySeconds int           `json:"delay_seconds"`
+	// ReconnectSpreadMS is the window after delay_seconds over which clients
+	// spread their redial (P5-S04), scaled to the connected count.
+	ReconnectSpreadMS int64 `json:"reconnect_spread_ms"`
+}
+
+// restartSpreadMS spreads a restart's redials over 10 ms per connected
+// client, capped at 30 s: 2,000 clients redial over 20 s, not at once.
+func restartSpreadMS(connected int) int64 {
+	return min(int64(connected)*10, 30_000)
 }
 
 // callSignalPayload carries an ephemeral DM call signal (call_incoming /
@@ -444,14 +462,7 @@ func buildMemberJoin(user *db.User, roleName string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeMemberJoin,
 		Payload: memberJoinPayload{
-			User: memberUserPayload{
-				ID:                user.ID,
-				Username:          user.Username,
-				Avatar:            user.Avatar,
-				Role:              roleName,
-				DisplayName:       user.DisplayName,
-				IdentityPublicKey: user.IdentityPublicKey,
-			},
+			User:   memberPayloadFor(user, roleName),
 			Status: db.BroadcastStatus(user.Status),
 		},
 	})
@@ -798,18 +809,20 @@ func buildChannelDelete(channelID int64) []byte {
 // The payload is a db.DMChannelInfo, the same shape the REST list and the
 // ready payload carry, so a client has exactly one DM shape to parse. It is
 // built per viewer rather than once per channel because `recipient` and
-// `recipients` are both defined relative to who is reading them.
-func buildDMChannelOpen(info db.DMChannelInfo) []byte {
+// `recipients` are both defined relative to who is reading them, and each
+// participant's status is the live one (presentDMStatuses), not the
+// users.status row.
+func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeDMChannelOpen,
-		Payload: info,
+		Payload: presentDMStatuses([]db.DMChannelInfo{info}, viewerID, liveStatus)[0],
 	})
 }
 
 // buildDMChannelOpenFor constructs a dm_channel_open event announcing a 1:1 DM
 // to the user on the other end of it. Returns nil if recipient is nil to avoid
 // a panic on dereferencing.
-func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) []byte {
+func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, liveStatus func(userID int64) string) []byte {
 	if recipient == nil {
 		slog.Warn("buildDMChannelOpenFor called with nil recipient", "channel_id", channelID)
 		return nil
@@ -826,14 +839,13 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64) 
 		ID:          recipient.ID,
 		Username:    recipient.Username,
 		Avatar:      avatarStr,
-		Status:      db.StatusForViewer(recipient.Status, recipient.ID, viewerID),
 		DisplayName: displayName,
 	}
 	return buildDMChannelOpen(db.DMChannelInfo{
 		ChannelID:  channelID,
 		Recipient:  other,
 		Recipients: []db.DMUser{other},
-	})
+	}, viewerID, liveStatus)
 }
 
 // dmRequestSenderPayload is the sender profile a dm_request frame carries —
@@ -926,12 +938,13 @@ func buildCallSignal(msgType string, channelID, fromUserID int64, username strin
 }
 
 // buildServerRestartMsg constructs a server_restart broadcast.
-func buildServerRestartMsg(reason RestartReason, delaySeconds int) []byte {
+func buildServerRestartMsg(reason RestartReason, delaySeconds int, spreadMS int64) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeServerRestart,
 		Payload: serverRestartPayload{
-			Reason:       reason,
-			DelaySeconds: delaySeconds,
+			Reason:            reason,
+			DelaySeconds:      delaySeconds,
+			ReconnectSpreadMS: spreadMS,
 		},
 	})
 }

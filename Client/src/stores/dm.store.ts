@@ -93,6 +93,18 @@ export function addDmChannel(channel: DmChannel): void {
   });
 }
 
+/**
+ * Put a DM back at `index` after a failed close, keeping the list's recency
+ * order rather than moving it to the front as addDmChannel does. No-op if the
+ * DM has come back some other way in the meantime.
+ */
+export function restoreDmChannel(channel: DmChannel, index: number): void {
+  dmStore.setState((prev) => {
+    if (prev.channels.some((c) => c.channelId === channel.channelId)) return prev;
+    return { channels: prev.channels.toSpliced(index, 0, channel) };
+  });
+}
+
 /** Remove a DM channel from the list (from dm_channel_close event). */
 export function removeDmChannel(channelId: number): void {
   dmStore.setState((prev) => ({
@@ -277,6 +289,21 @@ export function updateDmLastMessagePreview(
         ...rest,
       ],
     };
+  });
+}
+
+/** Keep a DM's preview in step with an edit or delete of the message it shows:
+ *  a no-op unless `messageId` is still the channel's `lastMessageId`. Neither
+ *  moves the channel in the list nor touches its counts. */
+export function reviseDmLastMessage(
+  channelId: number,
+  messageId: number,
+  patch: Partial<Pick<DmChannel, "lastMessageId" | "lastMessage" | "lastMessageAt">>,
+): void {
+  dmStore.setState((prev) => {
+    const dm = prev.channels.find((c) => c.channelId === channelId);
+    if (dm === undefined || dm.lastMessageId !== messageId) return prev;
+    return { channels: prev.channels.map((c) => (c === dm ? { ...dm, ...patch } : c)) };
   });
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -123,7 +124,8 @@ CREATE TABLE IF NOT EXISTS messages (
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0
+    mentions_everyone INTEGER NOT NULL DEFAULT 0,
+    pinned_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -625,6 +627,84 @@ func TestSearch_LimitCappedAt100(t *testing.T) {
 	}
 }
 
+// searchPage decodes a /api/v1/search response into its hit ids and cursor.
+func searchPage(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, nextBefore *int64) {
+	t.Helper()
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Results []struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"results"`
+		NextBefore *int64 `json:"next_before"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, r := range resp.Results {
+		ids = append(ids, r.MessageID)
+	}
+	return ids, resp.NextBefore
+}
+
+// DP-20: sort=recent pages newest first through next_before; every page
+// holds only ids strictly below the cursor it was asked with.
+func TestSearch_SortRecentPagesWithBefore(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "recentpager", 1)
+	user, _ := database.GetUserByUsername(context.Background(), "recentpager")
+	chID, _ := database.CreateChannel(context.Background(), "pager", "text", "", "", 0)
+	ids := make([]int64, 5)
+	for i := range ids {
+		ids[i], _ = database.CreateMessage(context.Background(), chID, user.ID, "pagerword hit", nil)
+	}
+
+	got, next := searchPage(t, chGet(t, router, "/api/v1/search?q=pagerword&sort=recent&limit=2", token))
+	if !slices.Equal(got, []int64{ids[4], ids[3]}) || next == nil || *next != ids[3] {
+		t.Fatalf("page 1 = %v next_before %v, want [%d %d] next_before %d", got, next, ids[4], ids[3], ids[3])
+	}
+	got, next = searchPage(t, chGet(t, router, fmt.Sprintf("/api/v1/search?q=pagerword&sort=recent&limit=2&before=%d", *next), token))
+	if !slices.Equal(got, []int64{ids[2], ids[1]}) || next == nil || *next != ids[1] {
+		t.Fatalf("page 2 = %v next_before %v, want [%d %d] next_before %d", got, next, ids[2], ids[1], ids[1])
+	}
+	got, next = searchPage(t, chGet(t, router, fmt.Sprintf("/api/v1/search?q=pagerword&sort=recent&limit=2&before=%d", *next), token))
+	if !slices.Equal(got, []int64{ids[0]}) || next != nil {
+		t.Fatalf("page 3 = %v next_before %v, want [%d] and no cursor", got, next, ids[0])
+	}
+
+	// The default stays rank order with no cursor, however many hits remain.
+	got, next = searchPage(t, chGet(t, router, "/api/v1/search?q=pagerword&limit=2", token))
+	if len(got) != 2 || next != nil {
+		t.Errorf("default page = %v next_before %v, want 2 hits and no cursor", got, next)
+	}
+	got, _ = searchPage(t, chGet(t, router, "/api/v1/search?q=pagerword&sort=relevance", token))
+	if len(got) != 5 {
+		t.Errorf("sort=relevance = %d hits, want 5", len(got))
+	}
+}
+
+func TestSearch_InvalidSortOrCursor(t *testing.T) {
+	database := newChannelTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "badcursor", 1)
+
+	for _, q := range []string{
+		"sort=newest",
+		"sort=recent&before=abc",
+		"sort=recent&before=0",
+		"sort=recent&before=-5",
+		"before=10",                // a cursor only means something newest first
+		"sort=relevance&before=10", // likewise
+	} {
+		rr := chGet(t, router, "/api/v1/search?q=test&"+q, token)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", q, rr.Code)
+		}
+	}
+}
+
 func TestSearch_ChannelTypeLookupFailure_FailsClosed(t *testing.T) {
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
@@ -843,6 +923,54 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 	}
 }
 
+// TestGetPins_HasMoreOnlyPastCap: exactly MaxPinnedMessages pins is the whole
+// list (has_more false); one more pin is truncated to the cap (has_more true).
+func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
+	database := newPinTestDB(t)
+	router := buildChannelRouter(database)
+	token := chTestCreateToken(t, database, "pincap", 1)
+	user, _ := database.GetUserByUsername(context.Background(), "pincap")
+	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
+
+	pin := func() {
+		t.Helper()
+		id, err := database.CreateMessage(context.Background(), chID, user.ID, "pin", nil)
+		if err != nil {
+			t.Fatalf("CreateMessage: %v", err)
+		}
+		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+			t.Fatalf("SetMessagePinned: %v", err)
+		}
+	}
+	get := func() (int, bool) {
+		t.Helper()
+		rr := chGet(t, router, fmt.Sprintf("/api/v1/channels/%d/pins", chID), token)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Messages []any `json:"messages"`
+			HasMore  bool  `json:"has_more"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return len(resp.Messages), resp.HasMore
+	}
+
+	for range db.MaxPinnedMessages {
+		pin()
+	}
+	if n, more := get(); n != db.MaxPinnedMessages || more {
+		t.Errorf("at the cap: got %d pins, has_more=%v; want %d, false", n, more, db.MaxPinnedMessages)
+	}
+
+	pin()
+	if n, more := get(); n != db.MaxPinnedMessages || !more {
+		t.Errorf("past the cap: got %d pins, has_more=%v; want %d, true", n, more, db.MaxPinnedMessages)
+	}
+}
+
 func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
@@ -1020,6 +1148,10 @@ type purgeBroadcast struct {
 func (b *recordingPurgeBroadcaster) BroadcastChatBulkDeleted(channelID int64, ids []int64) {
 	b.calls = append(b.calls, purgeBroadcast{channelID: channelID, ids: ids})
 }
+
+// BroadcastMessagePinned satisfies PurgeBroadcaster; the pin fan-out itself is
+// asserted in ws/messages_test.go.
+func (b *recordingPurgeBroadcaster) BroadcastMessagePinned(_ int64, _ int64, _ bool) {}
 
 // buildPurgeRouter wires the channel routes with a recording broadcaster onto a
 // DB that has the DM and audit tables the purge path touches.

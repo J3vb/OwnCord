@@ -199,10 +199,31 @@ function revealSubmenu(submenu: HTMLElement): void {
 const noop = (): void => {};
 
 // Tracks each open menu's per-invocation dismiss owner, so a menu swept away
-// by a same-class reopen (see below) can release its own teardown listener on
-// the caller's signal instead of leaving it pinned until the caller's signal
+// by a same-class reopen can release its own teardown listener on the
+// caller's signal instead of leaving it pinned until the caller's signal
 // eventually aborts.
 const dismissOwners = new WeakMap<Element, Disposable>();
+
+/**
+ * Keep a menu inside the viewport, anchored by its top-left, flipping to its
+ * bottom/right edge when it does not fit — and never above the top margin.
+ * Shared by the menus that are mounted directly (showContextMenu) and the
+ * channel sidebar's own menus, so they cannot drift — a menu opened low in a
+ * short window otherwise runs off and its last actions are unreachable (F9).
+ */
+export function clampMenuToViewport(menu: HTMLElement, x: number, y: number): void {
+  const margin = 8;
+  const { innerWidth: vw, innerHeight: vh } = window;
+  const left = Math.min(x, vw - menu.offsetWidth - margin);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  if (y + menu.offsetHeight > vh - margin) {
+    menu.style.top = "";
+    menu.style.bottom = `${Math.max(margin, Math.min(vh - y, vh - menu.offsetHeight - margin))}px`;
+  } else {
+    menu.style.bottom = "";
+    menu.style.top = `${y}px`;
+  }
+}
 
 /**
  * Show a context menu at the given coordinates.
@@ -222,8 +243,6 @@ export function showContextMenu(opts: ContextMenuOptions): void {
   });
 
   const menu = createElement("div", { class: `context-menu ${menuClass}` });
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
 
   const dismiss = new Disposable();
   dismissOwners.set(menu, dismiss);
@@ -258,7 +277,20 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     hasSeparator = !item.danger;
   }
 
+  // Kept on screen: a menu opened near the bottom/right edge (a channel low
+  // in the sidebar at the 940x500 minimum window) otherwise runs off and its
+  // last actions are unreachable. Runs after the items are appended so the
+  // measured size is real, and again on resize (the purge reveal form, a
+  // nested submenu) so a later expand cannot push an action off-screen.
+  const clamp = (): void => clampMenuToViewport(menu, x, y);
+
   document.body.appendChild(menu);
+  clamp();
+  const reposition = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clamp);
+  if (reposition !== null) {
+    reposition.observe(menu);
+    dismiss.addCleanup(() => reposition.disconnect());
+  }
 
   restoreFocus = enableMenuKeyboard(menu, { signal: dismiss.signal, onClose: closeMenu });
 

@@ -30,7 +30,7 @@ Every file-backed connection gets these through `_pragma=` DSN parameters (`file
 SQLite allows one writer at a time, so `Server/db/db.go` runs a split pool for file-backed (production) databases:
 
 - A single-connection writer pool (`SetMaxOpenConns(1)`). Its DSN adds `_txlock=immediate`, so every transaction takes the write lock at `BEGIN`.
-- A multi-connection read-only pool, sized `max(4, NumCPU)` when `database.max_readers` is `0` (the default); an explicit `max_readers` is clamped to 1–64.
+- A multi-connection read-only pool, sized `max(8, 2× NumCPU)` (capped at 64) when `database.max_readers` is `0` (the default); an explicit `max_readers` is clamped to 1–64.
 - A statement runs on the reader only when its first keyword after `--` comments is `SELECT` or `PRAGMA`. Everything else, including `INSERT … RETURNING` and `WITH …`, runs on the writer.
 
 In-memory databases (tests) keep a single shared connection instead.

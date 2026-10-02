@@ -7,9 +7,10 @@
 export interface DeepLinks {
   /** Wire owncord:// deep links. No-op outside the native host. `onInvite`
    *  fires once per recognized invite link and `onMessage` once per message
-   *  permalink, on both cold start and warm launches. */
+   *  permalink, or per channel link (a call toast's) with no message id, on
+   *  both cold start and warm launches. */
   init(
     onInvite: (code: string, host?: string) => void,
-    onMessage?: (channelId: number, messageId: number, host?: string) => void,
+    onMessage?: (channelId: number, messageId: number | undefined, host?: string) => void,
   ): Promise<void>;
 }

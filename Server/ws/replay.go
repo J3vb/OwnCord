@@ -31,7 +31,7 @@ const (
 //     unregisterFailedHandshake teardown and closed conn themselves, so no
 //     pump may start — readPump's defer would find the client already gone
 //     (unregisterNow reporting replaced=false) and run that same teardown a
-//     second time (OC-0051): a duplicate MarkUserDisconnected, a duplicate
+//     second time (OC-0051): a duplicate StampDisconnect, a duplicate
 //     offline presence broadcast, and a duplicate hub seq for it.
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
@@ -41,8 +41,8 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// Voice membership needs only CONNECT_VOICE, not READ_MESSAGES
-	// (voice_join.go), so a live participant resuming can have their own room
+	// Voice membership can outlive READ_MESSAGES (voice_join.go checks it
+	// only at join), so a live participant resuming can have their own room
 	// excluded from allowedChannelIDs entirely — most commonly a DM voice call
 	// after the DM was closed (computeAllowedChannels sources DM IDs from
 	// dm_open_state). Capture it before registerNow performs the same
@@ -185,7 +185,7 @@ func (h *Hub) handleReconnect(
 	// handleFreshConnect's ordering: reconnectWriteReplay reads c.user.Status
 	// to build auth_ok, so if this ran after that write the resumed client
 	// would be told its disconnect-time status (routinely "offline", since
-	// MarkUserDisconnected just rewrote it) instead of the status it is about
+	// StampDisconnect just rewrote it) instead of the status it is about
 	// to come online as and broadcast (OC-0222). Skips member_join — the user
 	// was already known.
 	h.applyConnectStatus(ctx, c)
@@ -215,11 +215,11 @@ func (h *Hub) reconnectPrecheck(
 	// what lets a service-backed or instrumented reader actually intercept the
 	// two reads below — the same posture handleFreshConnect takes.
 	database := h.readers.Visibility
-	// Visibility changes are targeted and unsequenced, and a shed content
-	// frame (SRV-03) never got a seq, so replay cannot bring a client that
-	// missed one back into a coherent state — force the full-ready path.
-	if h.mustFullResync(lastSeq) {
-		slog.Info("ws replay skipped (resync watermark at or past last_seq), sending full ready",
+	// Replay cannot repair a missed visibility change (targeted and
+	// unsequenced), a shed content frame (SRV-03, never got a seq) or a
+	// presence frame this user's connection dropped (P5-S03): full ready.
+	if h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID) {
+		slog.Info("ws replay skipped (resync watermark at or past last_seq, or presence dropped), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
 		h.reconnectTierFull.Add(1)
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
@@ -579,7 +579,8 @@ func liveVoiceEventsSinceCore(ringRead, coldRead func() [][]byte, keep func([]by
 
 // liveVoiceEventsSince returns voice_state/voice_leave events for chID at or
 // after afterSeq, bypassing the READ-gated channel filter entirely. Voice
-// membership needs only CONNECT_VOICE (voice_join.go), so a resuming
+// membership can outlive READ_MESSAGES (voice_join.go checks it only at
+// join), so a resuming
 // participant's own room is not always in their READ-visible set — a stock
 // example is a DM voice call after the DM was closed. Tries the ring buffer
 // first (fresh, so it observes anything pushed concurrently with the caller),

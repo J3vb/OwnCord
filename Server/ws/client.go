@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -12,7 +13,7 @@ import (
 const (
 	sendBufSize     = 256 // per-client outbound send-channel capacity (normal priority)
 	sendHighBufSize = 64  // high-priority buffer (DMs, mentions)
-	sendLowBufSize  = 64  // low-priority buffer (typing, presence)
+	sendLowBufSize  = 64  // low-priority buffer (typing, moderation notices)
 )
 
 // SessionCheckInterval is the number of messages processed between periodic
@@ -95,13 +96,21 @@ type Client struct {
 	msgsDropped   int64          // messages dropped due to full send buffer
 	invalidCount  int            // consecutive invalid messages; reset on valid parse
 	lastActivity  time.Time      // last message received from this client; guarded by mu
+	lastTouch     time.Time      // last touchSession write for this socket's session; guarded by mu
 	sendClosed    bool           // true after all send channels have been closed
 	terminalKick  bool           // set by markTerminalKick: the server ended this session for good; guarded by mu
 	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
 	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
-	sendLow       chan []byte    // low-priority outbound messages (typing, presence) — dropped on overflow
+	sendLow       chan []byte    // low-priority outbound messages (typing, moderation notices) — dropped on overflow
+	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
 	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
+
+	// presence is the status and custom status this connection last stamped
+	// (applyConnectStatus) or chose (presence_update); nil until the connect
+	// stamp. presentableMembers and presence snapshots read it from other
+	// goroutines, hence atomic.
+	presence atomic.Pointer[livePresence]
 }
 
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.
@@ -148,6 +157,26 @@ func (c *Client) getChannelID() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.channelID
+}
+
+// livePresence is a connection's live presence: its status and custom status.
+type livePresence struct {
+	status       string
+	customStatus *string
+}
+
+// livePresence returns the connection's live presence, a zero value (status
+// "") before the connect stamp.
+func (c *Client) livePresence() livePresence {
+	if p := c.presence.Load(); p != nil {
+		return *p
+	}
+	return livePresence{}
+}
+
+// setLivePresence records the presence this connection just stamped or chose.
+func (c *Client) setLivePresence(status string, customStatus *string) {
+	c.presence.Store(&livePresence{status: status, customStatus: customStatus})
 }
 
 // getVoiceChID returns the voice channel ID under voiceMu.
@@ -294,6 +323,34 @@ func (c *Client) sendMsg(msg []byte) {
 	}
 }
 
+// sendPresenceMsg queues a presence frame (presence, presence_batch) on the
+// normal queue, the FIFO every sequenced frame shares. Unlike sendMsg, a full
+// queue does not close the client: in a connect herd every arrival's presence
+// reaches every client, and kicking the slow ones only made them rejoin the
+// herd. The frame is dropped and the client marked stale instead; the next
+// presence flush sends it a full snapshot, and its next resume takes the full
+// ready (presenceDropped), so the seq it never saw is not lost for good.
+func (c *Client) sendPresenceMsg(msg []byte) {
+	c.mu.Lock()
+	if c.sendClosed {
+		c.mu.Unlock()
+		return
+	}
+	select {
+	case c.send <- msg:
+		c.msgsSent++
+		c.mu.Unlock()
+		return
+	default:
+		c.msgsDropped++
+	}
+	c.mu.Unlock()
+	c.presenceStale.Store(true)
+	if c.hub != nil {
+		c.hub.presenceDropped(c.userID)
+	}
+}
+
 // sendHighMsg queues a high-priority message (DMs, direct mentions).
 // High-priority messages are drained before normal and low-priority messages
 // by writePump. If the high-priority buffer is full, falls back to the normal
@@ -327,7 +384,7 @@ func (c *Client) sendHighMsg(msg []byte) {
 	}
 }
 
-// sendLowMsg queues a low-priority message (typing indicators, presence updates).
+// sendLowMsg queues a low-priority message (typing indicators, moderation notices).
 // If the buffer is full the message is silently dropped — the client is NOT
 // disconnected, since these events are ephemeral and can be safely lost.
 func (c *Client) sendLowMsg(msg []byte) {

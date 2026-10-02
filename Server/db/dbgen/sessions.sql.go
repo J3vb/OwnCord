@@ -8,6 +8,7 @@ package dbgen
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
@@ -229,11 +230,41 @@ func (q *Queries) MarkSessionsSeen(ctx context.Context, arg MarkSessionsSeenPara
 	return q.db.ExecContext(ctx, markSessionsSeen, arg.UserID, arg.ID)
 }
 
-const touchSession = `-- name: TouchSession :exec
-UPDATE sessions SET last_used = datetime('now') WHERE token = ?
+const touchSessions = `-- name: TouchSessions :exec
+UPDATE sessions
+SET last_used = datetime('now'),
+    expires_at = MIN(CAST(?1 AS TEXT), strftime('%Y-%m-%dT%H:%M:%SZ', created_at, '+365 days'))
+WHERE expires_at > ?2 AND token IN (/*SLICE:tokens*/?)
 `
 
-func (q *Queries) TouchSession(ctx context.Context, token string) error {
-	_, err := q.db.ExecContext(ctx, touchSession, token)
+type TouchSessionsParams struct {
+	ExpiresAt string   `json:"expiresAt"`
+	Now       string   `json:"now"`
+	Tokens    []string `json:"tokens"`
+}
+
+// Slides the idle expiry (DP-05) of every named session: a used session
+// expires sessionTTL after its last touch, capped at created_at + 365 days,
+// the absolute lifetime from sign-in. expires_at > now keeps a lapsed row
+// lapsed, so a touch racing an expiry can never revive it. Both bounds use
+// sessionTimeLayout, which keeps the sweep's index comparison in
+// DeleteExpiredSessions valid. The hub batches its touches (P5-S07), so now is
+// the flush time, at most one flush interval after the use it records. The
+// slice stays last: sqlc numbers the named args (?1, ?2), and a slice expanded
+// ahead of one would shift the parameter it points at.
+func (q *Queries) TouchSessions(ctx context.Context, arg TouchSessionsParams) error {
+	query := touchSessions
+	var queryParams []interface{}
+	queryParams = append(queryParams, arg.ExpiresAt)
+	queryParams = append(queryParams, arg.Now)
+	if len(arg.Tokens) > 0 {
+		for _, v := range arg.Tokens {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:tokens*/?", strings.Repeat(",?", len(arg.Tokens))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:tokens*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }

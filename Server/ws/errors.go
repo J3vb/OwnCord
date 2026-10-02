@@ -16,13 +16,19 @@ const (
 	ErrCodeUnknownType   = "UNKNOWN_TYPE"
 	ErrCodeSlowMode      = "SLOW_MODE"
 	ErrCodeConflict      = "CONFLICT"
-	ErrCodeBadPayload    = "BAD_PAYLOAD"
-	ErrCodeNotKeyHolder  = "NOT_KEY_HOLDER"
+	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
+	// same "already in the requested end state" refusal, so a client sees one
+	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED
+	// over REST (F23).
+	ErrCodeAlreadyDeleted = "ALREADY_DELETED"
+	ErrCodeBadPayload     = "BAD_PAYLOAD"
+	ErrCodeNotKeyHolder   = "NOT_KEY_HOLDER"
 	// Returned when a user tries to lift a moderator-imposed voice state.
 	ErrCodeServerMuted    = "SERVER_MUTED"
 	ErrCodeServerDeafened = "SERVER_DEAFENED"
-	// ErrCodeTimedOut is returned for a send, reaction or voice join refused
-	// by an active moderator timeout (B5-9).
+	// ErrCodeTimedOut is returned for a send, edit, reaction, voice join,
+	// call ring or custom status refused by an active moderator timeout
+	// (B5-9).
 	ErrCodeTimedOut = "TIMED_OUT"
 	// ErrCodeSessionReplaced is sent to a connection the hub displaces
 	// because the same user connected from another device. The client stops
@@ -36,4 +42,8 @@ const (
 	// displacing the live session; the client stops reconnecting and offers
 	// "Use here" so the user chooses whether to take over.
 	ErrCodeAnotherDeviceActive = "ANOTHER_DEVICE_ACTIVE"
+	// ErrCodeServerBusy refuses a fresh connect that waited readyAdmissionWait
+	// for a ready-build permit (P5-S04). It carries retry_after_ms, and the
+	// socket closes 1013 right after; the client redials no sooner.
+	ErrCodeServerBusy = "SERVER_BUSY"
 )

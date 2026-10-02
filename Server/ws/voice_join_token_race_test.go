@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -37,14 +36,7 @@ func TestVoiceJoin_SupersededDuringTokenGeneration_WithholdsToken(t *testing.T) 
 	uid := seedHarvestVoiceUser(t, database, "join-race-victim")
 	chID := mustCreateVoiceChannel(t, database, "voice-join-race")
 
-	lk, err := NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-race-0008",
-		LiveKitAPISecret: "test-api-secret-race-0008-xyz",
-		LiveKitURL:       "ws://127.0.0.1:1", // never dialed: GenerateToken is local
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyTestLiveKit(t)
 
 	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: lk})
 

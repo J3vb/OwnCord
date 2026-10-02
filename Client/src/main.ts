@@ -9,6 +9,7 @@ import "@styles/theme-neon-glow.css";
 import { installGlobalErrorHandlers, safeMount } from "@lib/safe-render";
 import { createApiClient, ApiClientError, errorText } from "@lib/api";
 import { SessionScope } from "@lib/sessionScope";
+import { setOwnedTimeout } from "@lib/dom";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import {
@@ -18,7 +19,13 @@ import {
 } from "@lib/notifications";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { settleNotificationLevelDefault } from "@lib/notificationLevel";
-import { bracketBareIPv6Host, createWsClient, normalizeHostForCertCompare } from "@lib/ws";
+import {
+  bracketBareIPv6Host,
+  createWsClient,
+  normalizeHostForCertCompare,
+  PREAUTH_BUSY_CAP_MS,
+  PREAUTH_CONNECT_TIMEOUT_MS,
+} from "@lib/ws";
 import { wireDispatcher, wireConnectionStatus } from "@lib/dispatcher";
 import { setLastChannelHost } from "@lib/last-channel";
 import { authStore, clearAuth, onAuthCleared } from "@stores/auth.store";
@@ -62,6 +69,7 @@ import type { CertTofuEvent } from "@lib/ws";
 import type { AuthResponse } from "@lib/types";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
+import { setChannelMutesHost } from "@lib/channel-mutes";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
@@ -354,83 +362,89 @@ let currentPage: { destroy?(): void } | null = null;
  */
 const serverInfoByHost = new Map<string, ServerInfoResponse>();
 
+/** The connect page's per-server health readouts. */
+interface HealthReadout {
+  updateHealthStatus(
+    host: string,
+    status: {
+      status: string;
+      latencyMs: number | null;
+      version: string | null;
+      onlineUsers: number | null;
+    },
+  ): void;
+  updateCompatibility(host: string, compatibility: Compatibility, serverEpoch: number | null): void;
+}
+
 /** Run health checks for a list of profiles and update the connect page. */
 function runHealthChecks(
-  connectPage: {
-    updateHealthStatus(
-      host: string,
-      status: {
-        status: string;
-        latencyMs: number | null;
-        version: string | null;
-        onlineUsers: number | null;
-      },
-    ): void;
-    updateCompatibility(
-      host: string,
-      compatibility: Compatibility,
-      serverEpoch: number | null,
-    ): void;
-  },
+  connectPage: HealthReadout,
   profiles: readonly { host: string }[],
   owner: SessionScope,
 ): void {
-  for (const profile of profiles) {
-    void (async () => {
-      try {
-        owner.assertCurrent();
-        connectPage.updateHealthStatus(profile.host, {
-          status: "checking",
-          latencyMs: null,
-          version: null,
-          onlineUsers: null,
-        });
-        const start = performance.now();
-        const health = await api.getHealth(profile.host, 3000, owner.signal);
-        owner.assertCurrent();
-        const elapsed = Math.round(performance.now() - start);
-        connectPage.updateHealthStatus(profile.host, {
-          status: elapsed > 1500 ? "slow" : "online",
-          latencyMs: elapsed,
-          version: health.version ?? null,
-          onlineUsers: health.online_users ?? null,
-        });
+  for (const profile of profiles) void checkHealth(connectPage, profile.host, owner);
+}
 
-        // Advisory epoch preflight, beside the health probe and sharing its
-        // timeout/dispose shape. A failed probe is `unreachable` — no badge,
-        // never an error banner (the WebSocket refusal stays authoritative).
-        let serverEpoch: number | null = null;
-        let compatibility: Compatibility = "unreachable";
-        try {
-          const info = await api.getServerInfo(profile.host, 3000, owner.signal);
-          owner.assertCurrent();
-          serverInfoByHost.set(profile.host, info);
-          serverEpoch = info.protocol_epoch;
-          compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
-        } catch (infoErr) {
-          if (!owner.isCurrent()) return;
-          serverInfoByHost.delete(profile.host);
-          log.debug("server-info preflight failed", {
-            host: profile.host,
-            error: String(infoErr),
-          });
-        }
-        connectPage.updateCompatibility(profile.host, compatibility, serverEpoch);
-      } catch (err) {
-        if (!owner.isCurrent()) return;
-        serverInfoByHost.delete(profile.host);
-        // Record why the check failed (TLS/cert-pin/network) — otherwise a
-        // "can't connect" report has no logged cause to diagnose.
-        log.warn("health check failed", { host: profile.host, error: String(err) });
-        connectPage.updateHealthStatus(profile.host, {
-          status: "offline",
-          latencyMs: null,
-          version: null,
-          onlineUsers: null,
-        });
-        connectPage.updateCompatibility(profile.host, "unreachable", null);
-      }
-    })();
+/** Probe one server and update its row; resolves whether it answered. */
+async function checkHealth(
+  connectPage: HealthReadout,
+  host: string,
+  owner: SessionScope,
+): Promise<boolean> {
+  try {
+    owner.assertCurrent();
+    connectPage.updateHealthStatus(host, {
+      status: "checking",
+      latencyMs: null,
+      version: null,
+      onlineUsers: null,
+    });
+    const start = performance.now();
+    const health = await api.getHealth(host, 3000, owner.signal);
+    owner.assertCurrent();
+    const elapsed = Math.round(performance.now() - start);
+    connectPage.updateHealthStatus(host, {
+      status: elapsed > 1500 ? "slow" : "online",
+      latencyMs: elapsed,
+      version: health.version ?? null,
+      onlineUsers: health.online_users ?? null,
+    });
+
+    // Advisory epoch preflight, beside the health probe and sharing its
+    // timeout/dispose shape. A failed probe is `unreachable` — no badge,
+    // never an error banner (the WebSocket refusal stays authoritative).
+    let serverEpoch: number | null = null;
+    let compatibility: Compatibility = "unreachable";
+    try {
+      const info = await api.getServerInfo(host, 3000, owner.signal);
+      owner.assertCurrent();
+      serverInfoByHost.set(host, info);
+      serverEpoch = info.protocol_epoch;
+      compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
+    } catch (infoErr) {
+      if (!owner.isCurrent()) return false;
+      serverInfoByHost.delete(host);
+      log.debug("server-info preflight failed", {
+        host,
+        error: String(infoErr),
+      });
+    }
+    connectPage.updateCompatibility(host, compatibility, serverEpoch);
+    return true;
+  } catch (err) {
+    if (!owner.isCurrent()) return false;
+    serverInfoByHost.delete(host);
+    // Record why the check failed (TLS/cert-pin/network) — otherwise a
+    // "can't connect" report has no logged cause to diagnose.
+    log.warn("health check failed", { host, error: String(err) });
+    connectPage.updateHealthStatus(host, {
+      status: "offline",
+      latencyMs: null,
+      version: null,
+      onlineUsers: null,
+    });
+    connectPage.updateCompatibility(host, "unreachable", null);
+    return false;
   }
 }
 
@@ -464,6 +478,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     // credential rather than expressing a preference, and deleting there would
     // destroy the very credential it just used.
     rememberIsUserChoice = false,
+    // Runs after the pre-auth deadline gives up; a stored-token resume uses it
+    // to keep waiting for a server that is still down.
+    onPreauthTimeout?: () => void,
   ): void {
     log.info("Post-auth wiring", { host, username });
     // Tear down any prior session wiring so listeners and the connected
@@ -491,9 +508,61 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     owner.addCleanup(dispatcherCleanup);
     log.info("Dispatcher wired, connecting WS");
 
+    // A stored-token resume (auto-login / quick switch) sends no REST preflight,
+    // so a server that is down leaves this handshake behind the "Auto-connecting…"
+    // overlay (or a manual login's spinner) while ws.ts retries forever. Bound the
+    // FIRST authentication with a deadline: a never-authenticated attempt returns
+    // to the form and says why, while a live session's later outages keep the
+    // in-app reconnect banner and its retry loop. Cleared on the first "connected"
+    // (auth_ok), a terminal disconnect, a first-use certificate prompt for this
+    // host, or when the session tears down. A SERVER_BUSY refusal restarts it,
+    // up to PREAUTH_BUSY_CAP_MS after this first attempt (P5-S04).
+    const preauthStartedAt = Date.now();
+    const onPreauthDeadline = (): void => {
+      if (!owner.isCurrent()) return;
+      log.warn("Pre-auth connection timed out", { host, timeoutMs: PREAUTH_CONNECT_TIMEOUT_MS });
+      // Stop the retry loop and tear the dead attempt down exactly as a
+      // cancelled auto-login does, then tell the user on the connect form.
+      api.endSession();
+      ws.disconnect();
+      sessionCleanup?.();
+      sessionCleanup = null;
+      dispatcherCleanup?.();
+      dispatcherCleanup = null;
+      lastConnectHost = "";
+      lastConnectToken = "";
+      setTransientError(connectText("session.connectTimeout"));
+      onPreauthTimeout?.();
+    };
+    let preauthTimer: ReturnType<typeof setTimeout> | null = setTimeout(
+      onPreauthDeadline,
+      PREAUTH_CONNECT_TIMEOUT_MS,
+    );
+    const clearPreauthDeadline = (): void => {
+      if (preauthTimer !== null) clearTimeout(preauthTimer);
+      preauthTimer = null;
+    };
+
     // Session-scoped WS listeners — collected so they're all removed together
     // on logout/disconnect (or the next wirePostAuth).
-    const sessionUnsubs: Array<() => void> = [];
+    const sessionUnsubs: Array<() => void> = [clearPreauthDeadline];
+    // A first-use certificate prompt means the server answered: the user is
+    // deciding, not waiting on an offline host, and Accept resumes this login.
+    sessionUnsubs.push(
+      ws.onCertFirstUse((evt) => {
+        if (evt.host === normalizeHostForCertCompare(host)) clearPreauthDeadline();
+      }),
+    );
+    sessionUnsubs.push(
+      ws.onServerBusy(() => {
+        if (preauthTimer === null) return;
+        clearTimeout(preauthTimer);
+        preauthTimer = setTimeout(
+          onPreauthDeadline,
+          Math.min(PREAUTH_CONNECT_TIMEOUT_MS, preauthStartedAt + PREAUTH_BUSY_CAP_MS - Date.now()),
+        );
+      }),
+    );
 
     // BUG-135: Only persist credentials when the user opted in. Declining is
     // an active instruction, not just an absence of one (OCV-022): a password
@@ -550,6 +619,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     const unsubState = ws.onStateChange((wsState) => {
       log.debug("WS state change", { state: wsState });
       if (wsState === "connected") {
+        // Authenticated: the pre-auth deadline has nothing left to bound, and
+        // keeping it would bounce a live session out on its first later outage.
+        clearPreauthDeadline();
         // Stop listening once connected so a later transition can't fire this
         // handler again.
         unsubState();
@@ -560,7 +632,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       } else if (wsState === "disconnected") {
         // Terminal non-connected transition (auth_error, cert-mismatch reject,
         // or intentional disconnect before ever connecting): drop the handler
-        // so it doesn't linger and fire on a later connect.
+        // so it doesn't linger and fire on a later connect. The pre-auth
+        // deadline goes with it: it bounds only the endless retry loop, and
+        // with this handler gone nothing would clear it on a later auth_ok
+        // (a certificate re-dial after a mismatch).
+        clearPreauthDeadline();
         unsubState();
       }
     });
@@ -585,12 +661,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           if (!owner.isCurrent()) return;
           connectedOverlay?.destroy();
           connectedOverlay = null;
+          // This handler's closures (the owner cleanup, the `ready` listener in
+          // sessionUnsubs) outlive the overlay until logout; drop their shared
+          // reference so the destroyed overlay's DOM can be collected.
+          ownedOverlay = null;
           navigate("main");
         },
       });
-      const ownedOverlay = connectedOverlay;
+      let ownedOverlay: ConnectedOverlayControl | null = connectedOverlay;
       owner.addCleanup(() => {
-        ownedOverlay.destroy();
+        ownedOverlay?.destroy();
         if (connectedOverlay === ownedOverlay) connectedOverlay = null;
       });
       appEl!.appendChild(connectedOverlay.element);
@@ -760,10 +840,10 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           attempt.assertCurrent();
           pageOwner.assertCurrent();
           if (result.status === "pending_approval" || result.token === undefined) {
-            // Approval mode (B4-1): no session yet — an admin decides. The
-            // dedicated notice is B9's; until then the form's message line
-            // carries it.
-            connectPage.showError(connectText("registration.pendingApproval"));
+            // Approval mode (B4-1): no session yet — an admin decides. This is
+            // an expected state, not a failure, so it is an informational
+            // notice rather than a red error (DP-54).
+            connectPage.showNotice(connectText("registration.pendingApproval"));
             return;
           }
           const remember = connectPage.getRememberPassword();
@@ -835,7 +915,16 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           runHealthChecks(connectPage, getProfileList(), pageOwner);
         },
         onDeleteProfile(profileId) {
+          // Look the host up before removal: deleting a saved profile must
+          // also drop its OS credential, or re-adding the same host resumes
+          // the old remembered password (F11). Credentials are keyed by host,
+          // so keep it while another profile still points at that server.
+          const host = profileManager.getAll().find((p) => p.id === profileId)?.host;
           profileManager.removeProfile(profileId);
+          if (host && !profileManager.getAll().some((p) => p.host === host)) {
+            void deleteCredential(host);
+            if (serverWait?.host === host) serverWait.scope.dispose();
+          }
           persistProfiles();
           connectPage.refreshProfiles(getProfileList());
         },
@@ -871,16 +960,60 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
     );
 
     let autoLoginCancelled = false;
+    let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
 
-    // Resume a profile's session from its stored token — startup auto-login
-    // and a quick switch back to a server share this path. No-op when the
-    // host has no stored token.
-    async function resumeStoredSession(profile: {
+    interface ResumableProfile {
       readonly name: string;
       readonly host: string;
       readonly autoConnect: boolean;
       readonly rememberPassword: boolean;
-    }): Promise<void> {
+    }
+
+    // A stored-token resume that timed out against a down server (a home
+    // server still booting after a power cut) keeps probing it, 5 s doubling to
+    // 30 s, and resumes once when it answers. The wait belongs to the API
+    // session the timeout left behind, so whatever ends that session ends the
+    // wait: a manual login, Cancel, typing or picking another server
+    // (onAutoLoginCancel), the resume itself (wirePostAuth's setConfig),
+    // deleting the server's last profile, or leaving this page.
+    function waitForServer(profile: ResumableProfile): void {
+      const wait = pageOwner.fork(api.getSession().signal);
+      serverWait = { host: profile.host, scope: wait };
+      wait.addCleanup(() => connectPage.hideServerWait());
+      connectPage.showServerWait(profile.name, profile.host);
+      const probeAfter = (delayMs: number): void => {
+        setOwnedTimeout(
+          wait.signal,
+          () => {
+            void checkHealth(connectPage, profile.host, wait).then((up) => {
+              if (!wait.isCurrent()) return;
+              const current = profileManager.getAll().find((p) => p.host === profile.host);
+              if (current === undefined) {
+                wait.dispose();
+                return;
+              }
+              if (!up) {
+                probeAfter(Math.min(delayMs * 2, 30_000));
+                return;
+              }
+              wait.dispose();
+              void resumeStoredSession(current, false);
+            });
+          },
+          delayMs,
+        );
+      };
+      probeAfter(5_000);
+    }
+
+    // Resume a profile's session from its stored token — startup auto-login
+    // and a quick switch back to a server share this path. No-op when the
+    // host has no stored token. A resume the wait itself started does not wait
+    // again: a server that answers but never signs in gets the offline error.
+    async function resumeStoredSession(
+      profile: ResumableProfile,
+      waitIfDown = true,
+    ): Promise<void> {
       const attempt = api.getSession();
       try {
         const cred = await loadCredential(profile.host);
@@ -915,6 +1048,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
             cred.username,
             undefined,
             profile.rememberPassword,
+            false,
+            waitIfDown ? () => waitForServer(profile) : undefined,
           );
         }
       } catch (err) {
@@ -1076,7 +1211,7 @@ authStore.subscribeSelector(
   (s) => s.isAuthenticated,
   (isAuthenticated) => {
     // The router only reaches "main" from the connected overlay's own
-    // onReady, 800ms after `ready` arrives — so a session that ends between
+    // onReady, a task after `ready` arrives — so a session that ends between
     // auth_ok and ready (a ban, an auth_error on an intervening reconnect)
     // flips isAuthenticated false while the router is still "connect". The synchronous session cleanup has already
     // destroyed its overlay; lastConnectHost retains the transport ownership
@@ -1108,6 +1243,12 @@ authStore.subscribeSelector(
       ws.disconnect();
       lastConnectToken = "";
       lastConnectHost = "";
+      // The per-server scope (channel mutes, notification-level override) is
+      // set by MainPage on mount and never cleared by clearAuth; without this
+      // the connect page's Settings still offers the departed server's
+      // override and writes its key (F13). A server switch re-sets it when the
+      // next MainPage mounts.
+      setChannelMutesHost(null);
       // Clear stored credential on logout. (A server restart never gets
       // here: it keeps the session and reconnects.)
       const host = api.getConfig().host;
@@ -1163,7 +1304,11 @@ function handleInviteDeepLink(code: string, host?: string): void {
     // so the authStore subscriber above runs its full teardown (voice leave,
     // dispatcher/session cleanup, ws.disconnect) and navigates to "connect"
     // itself — whose render branch consumes pendingInviteLink below.
-    clearAuth();
+    //
+    // "server_switch", not the default "user": the invite is not a logout, so
+    // the current server's credential must survive (the user may return to A
+    // later) — the same reason the quick-switch path uses it (F7).
+    clearAuth("server_switch");
     return;
   }
   deactivatePendingMessages();
@@ -1171,7 +1316,7 @@ function handleInviteDeepLink(code: string, host?: string): void {
   if (lastConnectHost !== "") {
     // wirePostAuth already ran — a login/auto-login/register is connecting,
     // or reached auth_ok (isAuthenticated flipped true) but the connected
-    // overlay's ready countdown hasn't called navigate("main") yet, so
+    // overlay's ready hand-off hasn't called navigate("main") yet, so
     // the branch above never triggered. The authStore subscriber only tears
     // down once the active page IS "main", so it won't fire for this window
     // either: left alone, the overlay's timer fires navigate("main")
@@ -1199,13 +1344,18 @@ function handleInviteDeepLink(code: string, host?: string): void {
     pendingInviteLink = null;
   }
 }
-// Route owncord://message/<channelId>/<messageId> permalinks to the main
+// Route owncord://message/<channelId>/<messageId> permalinks, and a call
+// toast's owncord://channel/<channelId> (no message id), to the main
 // page's jumper. Before the main page mounts (or when the channel isn't
 // visible to this user) the jump is a logged no-op — a link into a server the
 // user is not signed into has nothing to open. A link that named a server (a
 // Windows toast's launch URI) is ignored when another server is signed in now,
 // the same guard a clicked notification goes through.
-function handleMessageDeepLink(channelId: number, messageId: number, host?: string): void {
+function handleMessageDeepLink(
+  channelId: number,
+  messageId: number | undefined,
+  host?: string,
+): void {
   openMessageTarget(channelId, messageId, host);
 }
 void desktop.deepLinks.init(handleInviteDeepLink, handleMessageDeepLink);

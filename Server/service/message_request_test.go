@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -387,5 +388,74 @@ func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
 	// 2) eventual reply — see db.CreateMessageRequest's own comment.
 	if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = 1 AND sender_id = 2 AND source = 'sent_first'`); n != 1 {
 		t.Errorf("sent_first trusted_senders rows = %d, want 1", n)
+	}
+}
+
+// DP-51: a one-to-one send to a recipient who already trusts the sender and
+// has the DM open reads that trust once, together with the participants, and
+// derives the delivery audience from the same read — no per-recipient trust
+// lookup, no DMAudience re-read, no OpenDM write.
+func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	if err := database.TrustSender(ctx, 2, 1, "accepted"); err != nil {
+		t.Fatalf("TrustSender: %v", err)
+	}
+	for _, id := range []int64{1, 2} {
+		if _, err := database.OpenDM(ctx, id, 50); err != nil {
+			t.Fatalf("OpenDM(%d): %v", id, err)
+		}
+	}
+	spy := &dmSendSpyStore{DB: database}
+	svc := New(spy, nil)
+
+	result, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi bob",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if n := spy.trusted.Load(); n != 0 {
+		t.Errorf("IsTrustedSender calls = %d, want 0 — trust rides on the participant read", n)
+	}
+	if n := spy.participantIDs.Load() + spy.isGroup.Load(); n != 0 {
+		t.Errorf("separate GetDMParticipantIDs/IsGroupDM reads = %d, want 0", n)
+	}
+	if n := spy.openDM.Load(); n != 0 {
+		t.Errorf("OpenDM calls = %d, want 0 — bob's DM is already open", n)
+	}
+	slices.Sort(result.ParticipantIDs)
+	if !slices.Equal(result.ParticipantIDs, []int64{1, 2}) {
+		t.Errorf("ParticipantIDs = %v, want [1 2]", result.ParticipantIDs)
+	}
+	if len(result.RequestCreatedFor) != 0 {
+		t.Errorf("RequestCreatedFor = %v, want none for a trusted sender", result.RequestCreatedFor)
+	}
+}
+
+// DP-51: an untrusted recipient is still staged as a request and still kept
+// out of the audience when the audience comes from the send's own read.
+func TestMessageRequest_UntrustedSendAudienceFromSameRead(t *testing.T) {
+	database, _ := newDMFixture(t)
+	spy := &dmSendSpyStore{DB: database}
+	svc := New(spy, nil)
+
+	result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(result.RequestCreatedFor) != 1 {
+		t.Fatalf("RequestCreatedFor = %v, want one", result.RequestCreatedFor)
+	}
+	if !slices.Equal(result.ParticipantIDs, []int64{1}) {
+		t.Errorf("ParticipantIDs = %v, want [1] — the untrusted recipient's only frame is dm_request", result.ParticipantIDs)
+	}
+	if n := spy.openDM.Load(); n != 0 {
+		t.Errorf("OpenDM calls = %d, want 0 for an untrusted recipient", n)
+	}
+	if n := spy.trusted.Load() + spy.participantIDs.Load() + spy.isGroup.Load(); n != 0 {
+		t.Errorf("separate participant/group/trust reads = %d, want 0", n)
 	}
 }

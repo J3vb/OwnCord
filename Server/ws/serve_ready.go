@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"fmt"
+	"iter"
 	"log/slog"
 
 	"github.com/coder/websocket"
@@ -50,52 +51,82 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			"server_name":   serverName,
 			"motd":          motd,
 			"replay_source": replaySource,
+			"upload_policy": h.cachedUploadPolicy(ctx),
 		},
 	})
 }
 
 // presentableMembers rewrites each member's status into what viewerID may see.
 //
-// Two rules, both applied here so no payload builder can implement only one:
+// Three rules, all applied here so no payload builder can implement only one:
 //
 //  1. A member with no live connection is offline, whatever the row says.
 //     users.status keeps a *chosen* idle/dnd/invisible across a disconnect so
 //     the next connect can honour it, which would otherwise leave a signed-out
 //     user showing as "Do Not Disturb" indefinitely.
-//  2. An invisible member is offline to everyone but themselves
+//  2. A connected member shows the status their connection last stamped or
+//     chose, never the row's: members comes from the shared read
+//     (readyMembers), which may predate that write, since users.status does
+//     not move the member generation. A connection that has not stamped one
+//     yet shows as offline, like no connection; its connect presence is
+//     announced after the stamp, so the viewer still converges.
+//  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
-func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) []db.MemberSummary {
-	connected := h.connectedUserIDs()
-	out := make([]db.MemberSummary, 0, len(members))
-	for _, m := range members {
-		if !connected[m.ID] {
-			m.Status = db.StatusOffline
-			m.CustomStatus = nil
+//
+// It yields members[i] as presented at index i, and changes only Status and
+// CustomStatus, the latter only to nil: writeReadyMembers splices exactly
+// those two into each member's cached encoding. members is shared with other
+// ready payloads: each element is copied, never changed in place.
+func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
+	live := h.livePresences()
+	return func(yield func(int, db.MemberSummary) bool) {
+		for i, m := range members {
+			if status := live[m.ID].status; status != "" {
+				m.Status = status
+			} else {
+				m.Status = db.StatusOffline
+				m.CustomStatus = nil
+			}
+			if !yield(i, m.ForViewer(viewerID)) {
+				return
+			}
 		}
-		out = append(out, m.ForViewer(viewerID))
 	}
-	return out
 }
 
-// presentableDMChannels applies presentableMembers' "no live connection means
-// offline" rule to a DM channel list's recipient statuses. GetUserDMChannels
-// already applies db.StatusForViewer (the invisible-to-others half); this
-// adds the missing "no live connection" half so dm_channels cannot disagree
-// with the members array about whether the same disconnected user is online.
-// Both Recipient (the legacy single-recipient field) and every entry of
+// presentableDMChannels applies presentableMembers' rules to a DM channel
+// list's recipient statuses, so dm_channels cannot disagree with the members
+// array about the same user: a recipient with no live connection (or one not
+// yet stamped) is offline, a connected one shows their live status rather
+// than the users.status row (whose connect stamp may still be pending), and
+// db.StatusForViewer hides an invisible recipient from the viewer. Both
+// Recipient (the legacy single-recipient field) and every entry of
 // Recipients (the group-aware field) are rewritten, since a 1:1 DM's
 // Recipient is a copy of Recipients[0], not a shared reference.
-func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo) []db.DMChannelInfo {
-	connected := h.connectedUserIDs()
-	for i := range dmChannels {
-		if dmChannels[i].Recipient.ID != 0 && !connected[dmChannels[i].Recipient.ID] {
-			dmChannels[i].Recipient.Status = db.StatusOffline
+func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
+	live := h.livePresences()
+	return presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id].status })
+}
+
+// presentDMStatuses is presentableDMChannels over any live-status lookup
+// ("" for no stamped connection), for a caller that presents a single DM and
+// need not snapshot every connection.
+func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []db.DMChannelInfo {
+	status := func(id int64) string {
+		if s := liveStatus(id); s != "" {
+			return db.StatusForViewer(s, id, viewerID)
 		}
-		for j := range dmChannels[i].Recipients {
-			if !connected[dmChannels[i].Recipients[j].ID] {
-				dmChannels[i].Recipients[j].Status = db.StatusOffline
-			}
+		return db.StatusOffline
+	}
+	for i := range dmChannels {
+		ch := &dmChannels[i]
+		if ch.Recipient.ID != 0 {
+			ch.Recipient.Status = status(ch.Recipient.ID)
+		}
+		for j := range ch.Recipients {
+			r := &ch.Recipients[j]
+			r.Status = status(r.ID)
 		}
 	}
 	return dmChannels
@@ -128,7 +159,7 @@ func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions
 // round-trip. It is permissions.CanSendMessage, the same predicate the send
 // path enforces, so the affordance cannot drift from the rule (S-12).
 //
-// timedOut is the caller's live HasActiveTimeout verdict (via subjectFor),
+// timedOut is the caller's current timeout verdict (via subjectFor),
 // threaded through as a plain bool so the lookup happens once per ready
 // payload instead of once per channel — a timed-out user must not see
 // can_send: true anywhere (OC-0434).
@@ -211,7 +242,7 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 // carries the caller's own acknowledgement per NSFW-labelled channel id
 // (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
 // gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there. timedOut is the caller's live HasActiveTimeout verdict,
+// acknowledging there. timedOut is the caller's current timeout verdict,
 // fed into every channel's can_send — see channelCanSend (OC-0434).
 func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
@@ -268,30 +299,17 @@ func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.C
 }
 
 // readyDMChannels loads the user's open DM channels and reconciles them with
-// the rest of the ready payload: mention counts from unreadMap, and the same
-// presence rule presentableMembers applies to the members array.
-func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64, unreadMap map[int64]db.ChannelUnread) ([]db.DMChannelInfo, error) {
+// the rest of the ready payload: the same presence rule presentableMembers
+// applies to the members array.
+func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader, userID int64) ([]db.DMChannelInfo, error) {
 	dmChannels, err := database.GetUserDMChannels(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady GetUserDMChannels: %w", err)
 	}
-	// GetUserDMChannels computes unread from read_states but carries no mention
-	// count, so a DM mention badge used to vanish on every reconnect. The
-	// unread map now includes the user's DM rows — pull mention_count from it.
-	for i := range dmChannels {
-		if u, ok := unreadMap[dmChannels[i].ChannelID]; ok {
-			dmChannels[i].MentionCount = u.MentionCount
-		}
-	}
-	// GetUserDMChannels only applies db.StatusForViewer, which collapses
-	// invisible to offline but passes a disconnected recipient's saved
-	// idle/dnd through verbatim (MarkUserDisconnected deliberately keeps a
-	// chosen idle/dnd across a disconnect so the next connect can honour it,
-	// relying on every read path to hide it in the meantime). members already
-	// gets the "no live connection means offline" half of that rule from
-	// presentableMembers above; apply the same half here so dm_channels
-	// cannot disagree with members about the same user within one payload.
-	dmChannels = h.presentableDMChannels(dmChannels)
+	// GetUserDMChannels reads users.status, which keeps a chosen idle/dnd
+	// across a disconnect and trails a connect by the batched stamp; overlay
+	// the live status the members array uses so the two cannot disagree.
+	dmChannels = h.presentableDMChannels(dmChannels, userID)
 	return dmChannels, nil
 }
 
@@ -318,8 +336,8 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 		visibleSet[dmChannels[i].ChannelID] = struct{}{}
 	}
 	// The caller's own live voice room can never leak by definition -- seed it
-	// even if it fell outside both sets above (e.g. CONNECT_VOICE granted
-	// without READ_MESSAGES, or a DM voice call after the DM was closed:
+	// even if it fell outside both sets above (e.g. READ_MESSAGES revoked
+	// mid-call, or a DM voice call after the DM was closed:
 	// CloseDM removes dm_open_state but performs no voice eviction). This
 	// mirrors liveVoiceEventsSince's rationale on the reconnect-replay tier
 	// (serve.go), which this full-ready tier had no equivalent for (OC-0028).
@@ -362,11 +380,11 @@ func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, u
 	return ackMap
 }
 
-// buildReady constructs the ready server→client message.
+// readReady reads everything the ready server→client message carries.
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
+func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyFields, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -376,11 +394,10 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, fmt.Errorf("buildReady ListRoles: %w", err)
 	}
 
-	members, err := database.ListMembers(ctx)
+	roster, err := h.readyMembers(ctx, database)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
 	}
-	members = h.presentableMembers(members, userID)
 
 	visibleChannels, overrides, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
 	if err != nil {
@@ -393,7 +410,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
-	// Live, uncached timeout verdict (OC-0434): channelCanSend's Subject must
+	// Current timeout verdict (OC-0434): channelCanSend's Subject must
 	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
 	// live socket (via the identical subjectFor), or a just-timed-out user's
 	// fresh-connect ready payload ships can_send: true on every channel right
@@ -415,7 +432,7 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	// (and therefore visibleChannels) deliberately skips DM channels, since
 	// their visibility is membership-based rather than role-based, so without
 	// this a DM voice call's voice_state rows would never make it into ready.
-	dmChannels, err := h.readyDMChannels(ctx, database, userID, unreadMap)
+	dmChannels, err := h.readyDMChannels(ctx, database, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -433,24 +450,26 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
 
-	return buildJSON(map[string]any{
-		"type": MsgTypeReady,
-		"payload": map[string]any{
-			"capabilities": map[string]any{
+	return &readyFields{
+		head: readyHead{
+			Capabilities: map[string]any{
 				"message_deduplication":        true,
 				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
 				"message_retry_floor_ms":       retryFloorMS,
 			},
-			"channels":     channelPayloads,
-			"members":      members,
-			"voice_states": voiceStates,
-			"roles":        roles,
-			"dm_channels":  dmChannels,
-			"server_name":  serverName,
-			"motd":         motd,
-			"notices":      notices,
+			Channels:   channelPayloads,
+			DMChannels: dmChannels,
 		},
-	}), nil
+		tail: readyTail{
+			MOTD:        motd,
+			Notices:     notices,
+			Roles:       roles,
+			ServerName:  serverName,
+			VoiceStates: voiceStates,
+		},
+		roster:   roster,
+		viewerID: userID,
+	}, nil
 }
 
 // readyNoticePayload is one row of ready's notices slot (B5-9): an
@@ -486,6 +505,15 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
 	}
+	// P5-S04: bound concurrent ready builds. Taken before any handshake state
+	// change or registration, so a waiting connect neither touches the
+	// database nor queues broadcasts it cannot drain yet.
+	release, admitted := h.admitReady(ctx)
+	if !admitted {
+		refuseBusy(ctx, conn, c)
+		return fmt.Errorf("handleFreshConnect: ready builds saturated for user %d", c.userID)
+	}
+	defer release()
 	// The configured seam, never a caller-supplied handle: binding here is what
 	// lets a service-backed or instrumented Ready reader actually intercept the
 	// snapshot reads below — same posture as freshConnectCleanStaleVoice's
@@ -582,25 +610,16 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
 		return err
 	}
-	if ready, readyErr := h.buildReady(ctx, database, c.userID, userRole); readyErr == nil {
-		slog.Info("ws sending ready payload", "user_id", c.userID, "payload_bytes", len(ready))
-		if err := handshakeWrite(ctx, conn, ready); err != nil {
-			slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
-			h.unregisterFailedHandshake(ctx, c)
-			_ = conn.Close(websocket.StatusInternalError, "handshake failed")
-			return err
-		}
-	} else {
-		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
-		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
-		h.unregisterFailedHandshake(ctx, c)
-		_ = conn.Close(websocket.StatusInternalError, "failed to build ready payload")
-		return readyErr
+	// This ready carries every member's status, so it settles any presence
+	// resync owed (P5-S03). Cleared before the build, so a drop after it
+	// marks the user again; restored if the ready never reaches the client.
+	owedResync := h.setPresenceResync(c.userID, false)
+	ready, readyErr := h.buildReady(ctx, database, c.userID, userRole)
+	release() // the write below is the peer's pace, not the database's
+	if err := h.sendFreshReady(ctx, conn, c, ready, readyErr, owedResync); err != nil {
+		return err
 	}
-
-	slog.Info("ws broadcasting member_join and presence", "user_id", c.userID, "username", c.user.Username)
-	h.BroadcastToAll(buildMemberJoin(c.user, c.roleName))
-	h.announceConnectPresence(c)
+	h.announceFreshConnect(c)
 
 	return nil
 }

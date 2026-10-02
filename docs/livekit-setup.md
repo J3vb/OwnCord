@@ -174,7 +174,7 @@ How a client joins voice:
 Client                     OwnCord Server              LiveKit Server
   |                             |                           |
   |-- voice_join (channel_id)-->|                           |
-  |                             |-- check CONNECT_VOICE     |
+  |                             |-- check READ+CONNECT_VOICE|
   |                             |-- persist to voice_states |
   |                             |-- GenerateToken()         |
   |<-- voice_token ------------|                           |
@@ -188,11 +188,10 @@ Client                     OwnCord Server              LiveKit Server
 **Token details:**
 
 - Room name: `"channel-{channelID}"`
-- Identity: `"user-{userID}"`
-- TTL: 24 hours (refresh at 23h)
-- `canPublish` is derived from the `SPEAK_VOICE` permission
+- Identity: `"user-{userID}:{joinToken}"` (the join instance token is appended, so a rejoin creates a distinct participant; `"user-{userID}"` when no token is present)
+- TTL: 5 minutes; the client refreshes via `voice_token_refresh` every 4 minutes (rate limited to 1/60s)
+- Publish is scoped per track source via `CanPublishSources`: microphone from `SPEAK_VOICE`, camera from `USE_VIDEO`, screen share from `SHARE_SCREEN`, each independently
 - `canSubscribe` is always true
-- Client can request refresh via `voice_token_refresh` (rate limited to 1/60s)
 
 **Client connection paths:**
 
@@ -204,15 +203,34 @@ Client                     OwnCord Server              LiveKit Server
 ## 6. Webhook Integration
 
 Neither shipped LiveKit config (`Server/livekit.yaml.example`, the managed
-`Server/ws/livekit_process.go`) defines a `webhook:` block, so LiveKit sends no
+`Server/ws/livekit_process.go`) enables a `webhook:` block, so LiveKit sends no
 webhooks by default and the server relies on its own server SDK plus client
 `voice_leave` frames. To catch a user whose LiveKit connection died without a
 `voice_leave`, the server polls LiveKit's participant list for every room with
 a voice member once a minute and removes a membership whose participant has
-been missing for two consecutive checks (`Server/ws/voice_reconcile.go`). If
-you configure LiveKit to post webhooks to `POST /api/v1/livekit/webhook`
-(operator opt-in), the endpoint verifies the JWT and handles
-`participant_left` to clean up such ghost voice states immediately.
+been missing for two consecutive checks (`Server/ws/voice_reconcile.go`). The
+same poll also lists every room LiveKit has open and removes any participant
+with no matching voice state, including in a room nobody is in voice for.
+
+If you run LiveKit yourself and it can reach OwnCord at a URL whose TLS
+certificate it trusts, you can also have it post webhooks to
+`POST /api/v1/livekit/webhook` (operator opt-in; the managed LiveKit is never
+configured this way, because OwnCord's default self-signed certificate fails
+LiveKit's TLS check). Add this block to your `livekit.yaml` (a commented copy is
+in `Server/livekit.yaml.example`):
+
+```yaml
+webhook:
+  api_key: YOUR_API_KEY # the key from the keys block
+  urls:
+    - https://chat.example.com/api/v1/livekit/webhook
+```
+
+The sender's address must be inside `server.livekit_webhook_allowed_cidrs`
+(default: `server.admin_allowed_cidrs`). The endpoint verifies the JWT, handles
+`participant_joined` to remove a participant with no matching voice state as it
+joins, and handles `participant_left` to clean up ghost voice states
+immediately, instead of at the next check.
 
 ---
 

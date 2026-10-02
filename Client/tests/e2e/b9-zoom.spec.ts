@@ -188,6 +188,9 @@ async function boot(page: Page, routes: Route[], dm = false): Promise<void> {
   await page.goto("/");
   await submitLogin(page);
   await waitForWsReady(page);
+  // The drawer controller loads on demand and adds its backdrop when it binds
+  // the menu button; a press before that is lost.
+  await expect(page.getByTestId("sidebar-drawer-backdrop")).toBeAttached();
 }
 
 /** Open the collapsed sidebar as a drawer with the chat header's menu button. */

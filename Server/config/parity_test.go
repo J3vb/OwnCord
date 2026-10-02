@@ -88,7 +88,8 @@ func perturb(v reflect.Value) any {
 		for i := range v.Len() {
 			out = append(out, v.Index(i).String())
 		}
-		return append(out, "203.0.113.0/24")
+		// Valid as an extension too: the upload extension lists reject a "/".
+		return append(out, "perturbed-7")
 	default:
 		panic("unhandled config kind " + v.Kind().String())
 	}
@@ -185,8 +186,8 @@ func TestParityEveryLeafRoundTrips(t *testing.T) {
 		want[key] = p
 	})
 	// A walk that silently loses a key would make the rest of this test vacuous.
-	if len(want) != 73 {
-		t.Fatalf("walked %d config leaves, want the full 73-key surface", len(want))
+	if len(want) != 77 {
+		t.Fatalf("walked %d config leaves, want the full 77-key surface", len(want))
 	}
 
 	body, err := goyaml.Marshal(tree)
@@ -226,6 +227,8 @@ func TestParityEnvScalars(t *testing.T) {
 	waf := func(c *config.Config) any { return c.Server.WAFEnabled }
 	name := func(c *config.Config) any { return c.Server.Name }
 	retention := func(c *config.Config) any { return c.EventPersistence.RetentionHours }
+	blockRate := func(c *config.Config) any { return c.Server.PprofBlockProfileRate }
+	mutexFraction := func(c *config.Config) any { return c.Server.PprofMutexProfileFraction }
 
 	cases := []struct {
 		name string
@@ -241,6 +244,8 @@ func TestParityEnvScalars(t *testing.T) {
 		{"zero is false", "OWNCORD_SERVER_WAF_ENABLED", "0", waf, false, false},
 		{"a numeric string stays a string", "OWNCORD_SERVER_NAME", "8443", name, "8443", false},
 		{"two-word section", "OWNCORD_EVENT_PERSISTENCE_RETENTION_HOURS", "48", retention, 48, false},
+		{"pprof block rate is env-overridable", "OWNCORD_SERVER_PPROF_BLOCK_PROFILE_RATE", "5000", blockRate, 5000, false},
+		{"pprof mutex fraction is env-overridable", "OWNCORD_SERVER_PPROF_MUTEX_PROFILE_FRACTION", "20", mutexFraction, 20, false},
 		{"unknown env key is ignored", "OWNCORD_SERVER_PROT", "9999", port, 8443, false},
 		{"a non-integer int key fails the boot", "OWNCORD_SERVER_PORT", "abc", port, nil, true},
 	}

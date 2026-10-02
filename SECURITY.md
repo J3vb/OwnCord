@@ -84,8 +84,10 @@ disagreement is a doc bug.
   comparison (`subtle.ConstantTimeCompare`).
 - Every bcrypt computation on an authentication route (password checks and
   hashes, recovery-code matching) is admitted through one process-wide
-  concurrency budget; an over-budget attempt is refused with `429
-RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
+  concurrency budget. Login, registration and recovery-code checks over it
+  wait in a bounded FIFO queue (up to 10 s); an attempt refused (queue full,
+  wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`,
+  runs no bcrypt, and counts as no failed attempt.
 - TOTP-based 2FA is supported (enrolment via QR code plus backup codes), and
   admins can require it server-wide. Second-factor state (the login
   challenge, a pending enrolment and the 90-second replay window) survives a
@@ -93,23 +95,24 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   AES-256-GCM ciphertext under the TOTP key (a pending enrolment's secret),
   never as a token, code or secret in the clear.
 - Auth routes are rate-limited per IP: login 5/min, registration 3/min, 2FA
-  verification 10/min, account recovery 5/min, each scaled by
+  verification 10/min, account recovery 5/min, WebSocket upgrades 60/min, each scaled by
   `security.auth_rate_limit_multiplier` (default 1.0). Ten failed logins
   within 15 minutes lock the username for 15 minutes whatever the source IP
   (never scaled: it is the only cross-IP defence); the same count, scaled,
   locks the source IP.
-- Lifetimes: a session expires 30 days after it was created, and use does not
-  extend it; a 2FA login challenge (`partial_token`) lives 10 minutes and is
+- Lifetimes: a session expires 30 days after it was last used (REST requests
+  and the WebSocket handshake and heartbeat each count, at most once a
+  minute), and never more than a year after sign-in; a 2FA login challenge (`partial_token`) lives 10 minutes and is
   revoked after 5 wrong codes; a LiveKit access token lives 5 minutes; an API
   token lives as long as its creator chose, and one created without a lifetime
   never expires.
 - Sessions: a user may hold up to 25 sessions, with the oldest evicted beyond
-  that. Users can list and revoke their own sessions and sign out everywhere,
-  and a password change revokes every other session. Admin force-logout
-  revokes all of a user's sessions.
+  that. Users can list and revoke their own sessions and sign out everywhere
+  (which also revokes their API tokens), and a password change revokes every
+  other session. Admin force-logout revokes all of a user's sessions.
 - Account recovery (a self-held recovery kit, or owner-assisted recovery after
   out-of-band identity verification) replaces the password and revokes every
-  session in one transaction. Both paths then sign the holder in without the
+  session and API token in one transaction. Both paths then sign the holder in without the
   second factor (an owner decision: recovery exists for lost devices). The kit
   is stored only as an argon2id verifier, and a spent or lost kit cannot be
   recovered by the server; the owner-issued credential is single-use and
@@ -137,8 +140,9 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   administrator short-circuits. The `authz-chokepoint` invariant fails any
   other raw call, and that list only shrinks.
 - Voice permission is enforced twice: once at `voice_join` (channel
-  permission) and again inside the LiveKit JWT itself (`CanPublishSources`
-  scoped by role permission). The client is never the sole gate.
+  `CONNECT_VOICE`, plus `READ_MESSAGES` outside a DM) and again inside the
+  LiveKit JWT itself (`CanPublishSources` scoped by role permission). The
+  client is never the sole gate.
 - Admin panel access is IP/CIDR-gated (`admin_allowed_cidrs`), separately from
   bearer admin auth on its API.
 - The rule contributors must follow: never trust a client-supplied permission
@@ -183,12 +187,16 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
 - IPC commands validate host format, string lengths and character
   allowlists; PTT virtual key codes are range-checked; the LiveKit proxy
   validates `remote_host` against CRLF injection.
-- Uploads: the composer filters attachments by a MIME-prefix allowlist
-  (`ALLOWED_TYPES`, `Client/src/components/MessageInput.ts`) as a convenience,
-  but the server does not rely on it. It sniffs the type from the file bytes,
+- Uploads: the composer pre-checks the size and file type against
+  `auth_ok`'s `upload_policy`; the server is authoritative. It
+  sniffs the type from the file bytes,
   refuses executable and script magic bytes (`blockedMagic`,
-  `Server/storage/storage.go`), and serves HTML, SVG, XML, PDF and XSL as
+  `Server/storage/storage.go`), refuses names under the owner's file-type
+  policy (`storage.FileTypePolicy`: blocked final extensions, by default Windows
+  scripts, installers and disk images, plus an optional allow-only list;
+  owner-only in the admin panel), and serves HTML, SVG, XML, PDF and XSL as
   `Content-Disposition: attachment` with `X-Content-Type-Options: nosniff`.
+  Allowing an extension never lifts the magic-byte blocks.
 - All user-generated content in the desktop client renders via
   `textContent`/`setText`, never `innerHTML` (the one exception operates on a
   compile-time constant with a runtime guard). URLs are validated to allow
@@ -318,7 +326,9 @@ RATE_LIMITED`, runs no bcrypt, and counts as no failed attempt.
   against a public key committed in the repository. A verification failure
   leaves the installed binary untouched.
 - The Tauri desktop client's own updater performs Ed25519 signature
-  verification before applying an update.
+  verification before applying an update, requires that signature to name the
+  version the update check offered, and refuses a file whose name names an
+  operating system or architecture other than the running machine's.
 - Release artifacts also carry SLSA Build L2 provenance attestations (binding
   a file to the workflow and commit that produced it, not to a person), and
   SBOMs for the server binaries (CycloneDX, one per binary or archive) and the

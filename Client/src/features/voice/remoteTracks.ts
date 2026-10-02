@@ -2,7 +2,7 @@
 // Owns the remote-video callbacks the room event handlers fire, and the
 // local/remote video stream lookups the UI polls. The stream implementations
 // stay in screenShare.ts; the room is read from LiveKitSession on every call.
-import type { Room } from "livekit-client";
+import { VideoQuality, type Room } from "livekit-client";
 import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
@@ -27,6 +27,13 @@ export interface StreamSample {
   readonly packetsReceived?: number;
 }
 
+/** What a remote video tile shows: nothing, or its rendered device pixels
+ *  (no size: the top layer, for the stream you are watching). */
+export interface VideoView {
+  readonly enabled: boolean;
+  readonly size?: { readonly width: number; readonly height: number };
+}
+
 /** What a receiver-stats lookup needs of a subscribed remote video track. */
 interface StatsTrack {
   readonly currentBitrate?: number;
@@ -44,9 +51,20 @@ interface StatsTrack {
   >;
 }
 
+/** The view that shows the more of a stream; either may be unset. */
+function larger(a: VideoView | undefined, b: VideoView | undefined): VideoView | undefined {
+  if (a?.enabled !== true) return b ?? a;
+  if (b?.enabled !== true) return a;
+  if (a.size === undefined || b.size === undefined) return { enabled: true };
+  return a.size.width >= b.size.width ? a : b;
+}
+
 export class RemoteTracks {
   onRemoteVideoCallback: RemoteVideoCallback | null = null;
   onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
+  /** The grid tile's and the open hover preview's views, by `type:userId`. */
+  private readonly gridViews = new Map<string, VideoView>();
+  private readonly previews = new Map<string, VideoView>();
 
   constructor(private readonly getRoom: () => Room | null) {}
 
@@ -82,15 +100,7 @@ export class RemoteTracks {
     userId: number,
     type: "camera" | "screenshare",
   ): Promise<StreamSample | null> {
-    const room = this.getRoom();
-    if (room === null) return null;
-    const source = type === "screenshare" ? "screen_share" : "camera";
-    let track: StatsTrack | undefined;
-    for (const participant of room.remoteParticipants.values()) {
-      if (parseUserId(participant.identity) !== userId) continue;
-      track = participant.getTrackPublication(source as never)?.track;
-      break;
-    }
+    const track: StatsTrack | undefined = this.publication(userId, type)?.track;
     if (typeof track?.getReceiverStats !== "function") return null;
     const stats = await track.getReceiverStats();
     if (stats === undefined) return null;
@@ -104,5 +114,39 @@ export class RemoteTracks {
       packetsLost: stats.packetsLost,
       packetsReceived: stats.packetsReceived,
     };
+  }
+
+  /** Ask the SFU for only what a user's stream shows (P3-07): the grid tile
+   *  drives the layer because adaptiveStream is off (roomLifecycle.ts), and
+   *  the sidebar's hover preview (`preview`, `{ enabled: false }` once it
+   *  closes) plays the same track, so while it is open the stream gets the
+   *  larger of the two. The layer is set before enabling, so a re-shown tile
+   *  resumes at its own size. */
+  setRemoteVideoView(
+    userId: number,
+    type: "camera" | "screenshare",
+    view: VideoView,
+    preview = false,
+  ): void {
+    const key = `${type}:${userId}`;
+    if (!preview) this.gridViews.set(key, view);
+    else if (view.enabled) this.previews.set(key, view);
+    else this.previews.delete(key);
+    const wanted = larger(this.gridViews.get(key), this.previews.get(key));
+    const pub = this.publication(userId, type);
+    if (wanted === undefined || pub === undefined) return;
+    if (wanted.size !== undefined) pub.setVideoDimensions(wanted.size);
+    else if (wanted.enabled) pub.setVideoQuality(VideoQuality.HIGH);
+    pub.setEnabled(wanted.enabled);
+  }
+
+  private publication(userId: number, type: "camera" | "screenshare") {
+    for (const participant of this.getRoom()?.remoteParticipants.values() ?? []) {
+      if (parseUserId(participant.identity) !== userId) continue;
+      return participant.getTrackPublication(
+        (type === "screenshare" ? "screen_share" : "camera") as never,
+      );
+    }
+    return undefined;
   }
 }

@@ -24,22 +24,24 @@ vi.mock("@lib/connectionStats", () => ({
       inPackets: 0,
       totalUp: 0,
       totalDown: 0,
+      available: true,
     }),
     onUpdate: vi.fn().mockReturnValue(() => {}),
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
   }),
   formatBytes: vi.fn((v: number) => `${v} B`),
-  formatRate: vi.fn((v: number) => `${v} B/s`),
-  formatBitrate: vi.fn((v: number) => `${v} bps`),
+  formatRateCompact: vi.fn((v: number) => `${v} B/s`),
 }));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { createConnectionStatsPoller } from "@lib/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
+import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -307,6 +309,64 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  // Rewritten: PTT no longer writes localMuted (its gate closes inside the mic
+  // processor), so the idle gate is pttGated && !localMuted.
+  it("reads an idle PTT gate as not muted, with its own affordance", () => {
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localMuted: false, pttGated: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
+
+    // A genuine self-mute (no PTT gate) still paints muted.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: false }));
+    voiceStore.flush();
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
+
+    widget.destroy?.();
+  });
+
+  it("paints a PTT user's own mute as muted while the key is up", () => {
+    // The user's own mute wins over the idle gate: no ptt-gated affordance.
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true, pttGated: true }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(true);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(false);
+
+    // Unmuting while the key is still up reads as the idle gate.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: false }));
+    voiceStore.flush();
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
+    expect(muteBtn.classList.contains("ptt-gated")).toBe(true);
+
+    widget.destroy?.();
+  });
+
   it("toggles screenshare active state based on store", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
@@ -554,6 +614,47 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("does not paint the mic button as unmuted while joined listen-only", () => {
+    // Listen-only means no microphone track is published; the button must not
+    // read "unmuted" as if the user were hot. It is disabled with no active
+    // state, matching the "Grant Microphone" call to action.
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: true, localMuted: false }));
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const muteBtn = container.querySelector('[aria-label="Mute"]') as HTMLButtonElement;
+    expect(muteBtn.disabled).toBe(true);
+    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
+    expect(muteBtn.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+    expect(muteBtn.classList.contains("vw-listen-only")).toBe(true);
+    expect(muteBtn.classList.contains("active-ctrl")).toBe(false);
+    expect(muteBtn.title).toBe("Listening only — no microphone access");
+    // jsdom applies no stylesheet: the class must carry a disabled look and
+    // cancel the hover highlight in the parsed app.css.
+    expect(keyword(cascadedDeclaration(".vw-controls button.vw-listen-only", "opacity"))).toBe(
+      "0.5",
+    );
+    expect(
+      varToken(cascadedDeclaration(".vw-controls button.vw-listen-only:hover", "background")),
+    ).toBe("--bg-active");
+
+    // A granted microphone clears it.
+    voiceStore.setState((prev) => ({ ...prev, listenOnly: false }));
+    voiceStore.flush();
+    expect(muteBtn.classList.contains("vw-listen-only")).toBe(false);
+    expect(muteBtn.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
+
+    widget.destroy?.();
+  });
+
   it("shows an actionable mic notice in listen-only mode and hides it otherwise", () => {
     setVoiceChannel(1, []);
     voiceStore.setState((prev) => ({ ...prev, listenOnly: true }));
@@ -670,6 +771,43 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("renders the signal readout as unavailable, not a false green, when no stats sample arrives", () => {
+    const poller = createConnectionStatsPoller as unknown as ReturnType<typeof vi.fn>;
+    poller.mockReturnValueOnce({
+      start: vi.fn(),
+      stop: vi.fn(),
+      getStats: vi.fn().mockReturnValue({
+        rtt: 0,
+        quality: "excellent",
+        outRate: 0,
+        inRate: 0,
+        outPackets: 0,
+        inPackets: 0,
+        totalUp: 0,
+        totalDown: 0,
+        available: false,
+      }),
+      onUpdate: vi.fn().mockReturnValue(() => {}),
+      onQualityChanged: vi.fn().mockReturnValue(() => {}),
+    });
+    setVoiceChannel(1, []);
+
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onMuteToggle: vi.fn(),
+      onDeafenToggle: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+
+    const signalWrap = container.querySelector(".vw-signal") as HTMLButtonElement;
+    expect(signalWrap.classList.contains("vw-signal--unavailable")).toBe(true);
+    expect(container.querySelector(".vw-ping")!.textContent).toBe("—");
+
+    widget.destroy?.();
+  });
+
   it("displays elapsed timer element with initial 00:00", () => {
     setVoiceChannel(1, []);
 
@@ -715,7 +853,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("contains transport stats labels (Outgoing, Incoming, Session Totals)", () => {
+  it("contains transport stats labels (Upload, Download, Session)", () => {
     setVoiceChannel(1, []);
 
     const widget = createVoiceWidget({
@@ -728,10 +866,10 @@ describe("VoiceWidget", () => {
     widget.mount(container);
 
     const statsPane = container.querySelector(".vw-stats") as HTMLDivElement;
-    expect(statsPane.textContent).toContain("Transport Statistics");
-    expect(statsPane.textContent).toContain("Outgoing");
-    expect(statsPane.textContent).toContain("Incoming");
-    expect(statsPane.textContent).toContain("Session Totals");
+    expect(statsPane.getAttribute("aria-label")).toBe("Transport Statistics");
+    expect(statsPane.textContent).toContain("Upload");
+    expect(statsPane.textContent).toContain("Download");
+    expect(statsPane.textContent).toContain("Session");
 
     widget.destroy?.();
   });

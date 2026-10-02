@@ -126,6 +126,25 @@ func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error
 	return conn.Write(wCtx, websocket.MessageText, msg)
 }
 
+// handshakeWriteReady streams the ready frame to conn as one message, in
+// frames the size of writeReady's buffer, so the roster's encoding is written
+// from the shared cache and never copied into a per-viewer buffer.
+func (h *Hub) handshakeWriteReady(ctx context.Context, conn *websocket.Conn, p *readyPayload) (int64, error) {
+	wCtx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	w, err := conn.Writer(wCtx, websocket.MessageText)
+	if err != nil {
+		return 0, err
+	}
+	n, err := h.writeReady(w, p)
+	if err != nil {
+		// No Close: its fin frame would deliver the frames so far as a whole,
+		// truncated ready. The caller closes the connection instead.
+		return n, err
+	}
+	return n, w.Close()
+}
+
 // refuseWake answers a wake reconnect (auth payload `wake: true`) refused
 // because another device holds the session (wakeBlockedLocked): an `error`
 // frame with ANOTHER_DEVICE_ACTIVE (not auth_error — the token is still
@@ -160,8 +179,8 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	// Look up role name for protocol-compliant payloads and cache on client.
 	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):
 	// this value is authoritative on the wire — auth_ok reports it as the
-	// user's own role, member_join broadcasts it to every other client, and
-	// every chat_message carries it — so a lookup failure must not silently
+	// user's own role, a new member's presence_batch entry carries it to
+	// every other client, and every chat_message carries it — so a lookup failure must not silently
 	// substitute "member" and pin the whole session to a fabricated role
 	// (OC-0269).
 	role, roleErr := h.readers.Visibility.GetRoleByID(r.Context(), user.RoleID)

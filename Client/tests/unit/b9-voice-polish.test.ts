@@ -25,12 +25,22 @@ vi.mock("@lib/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
+    getStats: vi.fn().mockReturnValue({
+      rtt: 0,
+      quality: "excellent",
+      outRate: 0,
+      inRate: 0,
+      outPackets: 0,
+      inPackets: 0,
+      totalUp: 0,
+      totalDown: 0,
+      available: true,
+    }),
     onUpdate: vi.fn().mockReturnValue(() => {}),
     onQualityChanged: vi.fn().mockReturnValue(() => {}),
   }),
   formatBytes: vi.fn((v: number) => `${v} B`),
-  formatRate: vi.fn((v: number) => `${v} B/s`),
-  formatBitrate: vi.fn((v: number) => `${v} bps`),
+  formatRateCompact: vi.fn((v: number) => `${v} B/s`),
 }));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";

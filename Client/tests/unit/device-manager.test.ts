@@ -79,9 +79,9 @@ describe("isMicPolicyGated", () => {
     expect(isMicPolicyGated()).toBe(true);
   });
 
-  it("is true when pttGated", () => {
+  it("is false when only pttGated (PTT gates inside the mic processor, not via mute)", () => {
     mockVoiceState.pttGated = true;
-    expect(isMicPolicyGated()).toBe(true);
+    expect(isMicPolicyGated()).toBe(false);
   });
 });
 
@@ -93,12 +93,14 @@ describe("DeviceManager", () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockNativeAudioDevices.mockImplementation(async () => null);
+    mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
     mockVoiceState.localServerMuted = false;
     mockVoiceState.pttGated = false;
     dm = new DeviceManager();
     mockRoom = {
+      state: "connected",
       localParticipant: {
         setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined),
       },
@@ -167,8 +169,6 @@ describe("DeviceManager", () => {
     it("clears the pipeline so device switches skip pipeline setup", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn(),
-        removeNoiseSuppressor: vi.fn(),
       } as any;
       dm.setAudioPipeline(pipeline);
       dm.setAudioPipeline(null);
@@ -181,8 +181,6 @@ describe("DeviceManager", () => {
     it("stores a pipeline that is invoked during device switches", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);
@@ -210,8 +208,6 @@ describe("DeviceManager", () => {
         setupAudioPipeline: vi.fn(() => {
           throw new Error("pipeline error");
         }),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setOnToast(onToast);
       dm.setOnToast(null);
@@ -284,77 +280,22 @@ describe("DeviceManager", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
     });
 
-    it("does not re-enable the mic on default-device switch while push-to-talk is gating it", async () => {
+    it("still re-enables the mic on default-device switch while push-to-talk is armed (PTT gates in the processor, not via mute)", async () => {
       mockVoiceState.pttGated = true;
       dm.setRoom(mockRoom);
       await dm.switchInputDevice("");
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
-      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
     });
 
     it("calls setupAudioPipeline on the pipeline after switch", async () => {
       const pipeline = {
         setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);
       await dm.switchInputDevice("device-1");
       expect(pipeline.setupAudioPipeline).toHaveBeenCalled();
-    });
-
-    it("applies enhanced noise suppression when enabled", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return true;
-        return defaultVal;
-      });
-      const pipeline = {
-        setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-      } as any;
-      dm.setRoom(mockRoom);
-      dm.setAudioPipeline(pipeline);
-      await dm.switchInputDevice("device-1");
-      expect(pipeline.applyNoiseSuppressor).toHaveBeenCalled();
-    });
-
-    it("OC-0474: leaves RNNoise alone on a device switch while the mic is gated", async () => {
-      // A muted track keeps any attached processor across the switch and
-      // re-inits it on unmute; attaching one now only builds a live RNNoise
-      // context on the ended track for the whole muted period.
-      mockVoiceState.localMuted = true;
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return true;
-        return defaultVal;
-      });
-      const pipeline = {
-        setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-      } as any;
-      dm.setRoom(mockRoom);
-      dm.setAudioPipeline(pipeline);
-      await dm.switchInputDevice("device-1");
-      expect(pipeline.applyNoiseSuppressor).not.toHaveBeenCalled();
-      expect(pipeline.removeNoiseSuppressor).not.toHaveBeenCalled();
-    });
-
-    it("removes noise suppression when not enabled", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "enhancedNoiseSuppression") return false;
-        return defaultVal;
-      });
-      const pipeline = {
-        setupAudioPipeline: vi.fn(),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-      } as any;
-      dm.setRoom(mockRoom);
-      dm.setAudioPipeline(pipeline);
-      await dm.switchInputDevice("device-1");
-      expect(pipeline.removeNoiseSuppressor).toHaveBeenCalled();
     });
 
     it("calls onError callback on device switch failure", async () => {
@@ -372,8 +313,6 @@ describe("DeviceManager", () => {
         setupAudioPipeline: vi.fn(() => {
           throw new Error("pipeline error");
         }),
-        applyNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
-        removeNoiseSuppressor: vi.fn().mockResolvedValue(undefined),
       } as any;
       dm.setRoom(mockRoom);
       dm.setAudioPipeline(pipeline);
@@ -417,6 +356,23 @@ describe("DeviceManager", () => {
   // -----------------------------------------------------------------------
 
   describe("handleDeviceChange", () => {
+    /** Attach with the saved devices listed, as at join, so the next device
+     *  change sees them removed. */
+    const attachWhileListed = async (): Promise<void> => {
+      const later = mockGetLocalDevices.getMockImplementation();
+      mockGetLocalDevices.mockImplementation(async (kind: string) => [
+        {
+          deviceId: mockLoadPref(
+            kind === "audioinput" ? "audioInputDevice" : "audioOutputDevice",
+            "",
+          ),
+        },
+      ]);
+      dm.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      mockGetLocalDevices.mockImplementation(later!);
+    };
+
     it("re-applies both saved devices on the native backend so shifted indexes refresh", async () => {
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
         if (key === "audioInputDevice") return "Headset Mic";
@@ -503,7 +459,7 @@ describe("DeviceManager", () => {
       });
 
       const onToast = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
 
       // Trigger device change
@@ -511,7 +467,8 @@ describe("DeviceManager", () => {
       handler();
       await vi.advanceTimersByTimeAsync(600);
 
-      expect(mockSavePref).toHaveBeenCalledWith("audioInputDevice", "");
+      // The user's pick is kept for when the device comes back (DP-31).
+      expect(mockSavePref).not.toHaveBeenCalled();
       // The removed device's pinned constraint must be reset so the cycle
       // actually reaches the system default.
       expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
@@ -534,7 +491,7 @@ describe("DeviceManager", () => {
       });
       mockVoiceState.localMuted = true;
 
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
       handler();
       await vi.advanceTimersByTimeAsync(600);
@@ -588,7 +545,7 @@ describe("DeviceManager", () => {
       });
 
       const onToast = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
 
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -596,7 +553,7 @@ describe("DeviceManager", () => {
       await vi.advanceTimersByTimeAsync(600);
 
       expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
-      expect(mockSavePref).toHaveBeenCalledWith("audioOutputDevice", "");
+      expect(mockSavePref).not.toHaveBeenCalled();
       expect(onToast).toHaveBeenCalledWith(
         "Audio output device disconnected — switched to default",
       );
@@ -610,7 +567,7 @@ describe("DeviceManager", () => {
       mockRoom.switchActiveDevice.mockRejectedValue(new Error("sink unavailable"));
       const onToast = vi.fn();
       const onError = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
       dm.setOnError(onError);
 
@@ -635,7 +592,7 @@ describe("DeviceManager", () => {
         }),
       );
       const onToast = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnToast(onToast);
 
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -666,7 +623,7 @@ describe("DeviceManager", () => {
         );
         const onToast = vi.fn();
         const onError = vi.fn();
-        dm.setRoom(mockRoom);
+        await attachWhileListed();
         dm.setOnToast(onToast);
         dm.setOnError(onError);
 
@@ -698,7 +655,7 @@ describe("DeviceManager", () => {
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValue(new Error("no device"));
 
       const onError = vi.fn();
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setOnError(onError);
 
       const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
@@ -747,7 +704,7 @@ describe("DeviceManager", () => {
       } as any;
       const onToast = vi.fn();
 
-      dm.setRoom(mockRoom);
+      await attachWhileListed();
       dm.setAudioPipeline(pipeline);
       dm.setOnToast(onToast);
 
@@ -798,6 +755,7 @@ describe("DeviceManager", () => {
       // A system-driven reconnect (LiveKit Disconnected -> syncModuleRooms)
       // swaps in a fresh Room while enumeration is still in flight.
       const newRoom = {
+        state: "connected",
         localParticipant: { setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined) },
         switchActiveDevice: vi.fn().mockResolvedValue(undefined),
       } as any;
@@ -812,6 +770,350 @@ describe("DeviceManager", () => {
       // "current" anymore) or the new one (this attempt was never for it).
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
       expect(newRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // DP-31: an unplugged device is remembered and restored on replug
+  // -----------------------------------------------------------------------
+
+  describe("unplug and replug", () => {
+    let prefs: Map<string, string>;
+    let inputs: Array<{ deviceId: string }>;
+    let outputs: Array<{ deviceId: string }>;
+    let fireDeviceChange: () => Promise<void>;
+
+    beforeEach(() => {
+      prefs = new Map();
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        prefs.has(key) ? prefs.get(key) : defaultVal,
+      );
+      mockSavePref.mockImplementation((key: string, val: unknown) => {
+        prefs.set(key, val as string);
+      });
+      inputs = [{ deviceId: "built-in-mic" }];
+      outputs = [{ deviceId: "speakers" }];
+      mockGetLocalDevices.mockImplementation(async (kind: string) =>
+        kind === "audioinput" ? inputs : outputs,
+      );
+      dm.setRoom(mockRoom);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      fireDeviceChange = async () => {
+        handler();
+        await vi.advanceTimersByTimeAsync(600);
+      };
+    });
+
+    afterEach(() => {
+      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      mockSavePref.mockImplementation(() => undefined);
+    });
+
+    const switchesTo = (deviceId: string): unknown[][] =>
+      mockRoom.switchActiveDevice.mock.calls.filter((c: unknown[]) => c[1] === deviceId);
+
+    it("after the saved input disappears, the pref still holds its id, and when it reappears the manager switches back to it once", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+
+      await fireDeviceChange();
+      expect(prefs.get("audioInputDevice")).toBe("headset-mic");
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(onToast).toHaveBeenCalledWith("Audio device disconnected — switched to default");
+
+      // Another device event while it is still unplugged changes nothing.
+      mockRoom.switchActiveDevice.mockClear();
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset-mic")).toEqual([["audioinput", "headset-mic"]]);
+      expect(prefs.get("audioInputDevice")).toBe("headset-mic");
+    });
+
+    it("after the saved output disappears, the pref still holds its id, and when it reappears the manager switches back to it once", async () => {
+      prefs.set("audioOutputDevice", "headset");
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+
+      await fireDeviceChange();
+      expect(prefs.get("audioOutputDevice")).toBe("headset");
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
+      expect(onToast).toHaveBeenCalledWith(
+        "Audio output device disconnected — switched to default",
+      );
+
+      mockRoom.switchActiveDevice.mockClear();
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset")).toEqual([["audiooutput", "headset"]]);
+      expect(prefs.get("audioOutputDevice")).toBe("headset");
+    });
+
+    it("switches the output back when it is replugged within the debounce after LiveKit moved it to the default", async () => {
+      prefs.set("audioOutputDevice", "headset");
+      outputs = [{ deviceId: "default" }, { deviceId: "headset" }];
+      const active = new Map([["audiooutput", "headset"]]);
+      mockRoom.getActiveDevice = (kind: string) => active.get(kind);
+      mockRoom.switchActiveDevice.mockImplementation(async (kind: string, id: string) => {
+        active.set(kind, id);
+      });
+      // The unplug and replug both land inside one debounce window; LiveKit's
+      // own (undebounced) devicechange handler already moved output to default.
+      active.set("audiooutput", "default");
+
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset")).toEqual([["audiooutput", "headset"]]);
+      expect(active.get("audiooutput")).toBe("headset");
+    });
+
+    it("falls back again on the next unplug after the device returned while out of a call", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      prefs.set("audioOutputDevice", "headset");
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+      await fireDeviceChange();
+      expect(onToast).toHaveBeenCalledTimes(2);
+
+      dm.setRoom(null);
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      dm.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls.at(-1)[1];
+
+      inputs = [{ deviceId: "built-in-mic" }];
+      outputs = [{ deviceId: "speakers" }];
+      mockRoom.switchActiveDevice.mockClear();
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audiooutput", "");
+      expect(onToast).toHaveBeenCalledTimes(4);
+    });
+
+    it("restores a device unplugged while no room was attached once it is plugged back in", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      prefs.set("audioOutputDevice", "headset");
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+
+      dm.setRoom(null);
+      inputs = [{ deviceId: "built-in-mic" }];
+      outputs = [{ deviceId: "speakers" }];
+      dm.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+      expect(onToast).not.toHaveBeenCalled();
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", "headset-mic"],
+        ["audiooutput", "headset"],
+      ]);
+    });
+
+    it("switches to a saved device that was absent at join when it appears mid-call", async () => {
+      dm.setRoom(null);
+      prefs.set("audioInputDevice", "bt-mic");
+      prefs.set("audioOutputDevice", "bt-out");
+      const joined = new DeviceManager();
+      joined.setRoom(mockRoom);
+      await vi.advanceTimersByTimeAsync(0);
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls.at(-1)[1];
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "bt-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "bt-out" }];
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+      handler();
+      await vi.advanceTimersByTimeAsync(600);
+      joined.setRoom(null);
+
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", "bt-mic"],
+        ["audiooutput", "bt-out"],
+      ]);
+    });
+
+    it("a device change on a room that is not connected yet switches nothing and raises no error", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      prefs.set("audioOutputDevice", "headset");
+      await fireDeviceChange();
+      const onError = vi.fn();
+      dm.setOnError(onError);
+      mockRoom.state = "connecting";
+      mockRoom.switchActiveDevice.mockClear();
+      mockRoom.switchActiveDevice.mockRejectedValue(new Error("native room is not connected"));
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
+      await fireDeviceChange();
+
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("records an unplug while the room is connecting and restores the device on replug once connected", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      mockRoom.state = "connecting";
+
+      inputs = [{ deviceId: "built-in-mic" }];
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+
+      mockRoom.state = "connected";
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset-mic")).toEqual([["audioinput", "headset-mic"]]);
+    });
+
+    it("falls back with the toast on an unplug while the signal reconnects, and restores on replug", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      const onToast = vi.fn();
+      dm.setOnToast(onToast);
+      mockRoom.state = "signalReconnecting";
+
+      inputs = [{ deviceId: "built-in-mic" }];
+      await fireDeviceChange();
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(onToast).toHaveBeenCalledWith("Audio device disconnected — switched to default");
+
+      mockRoom.state = "connected";
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+      await fireDeviceChange();
+      expect(switchesTo("headset-mic")).toEqual([["audioinput", "headset-mic"]]);
+    });
+
+    it("the room swapped mid-await: no switch is applied to the old room", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      await fireDeviceChange();
+      mockRoom.switchActiveDevice.mockClear();
+
+      let resolveInputs!: (devices: Array<{ deviceId: string }>) => void;
+      mockGetLocalDevices.mockImplementation((kind: string) =>
+        kind === "audioinput"
+          ? new Promise((resolve) => {
+              resolveInputs = resolve;
+            })
+          : Promise.resolve(outputs),
+      );
+      const handler = (navigator.mediaDevices.addEventListener as any).mock.calls[0][1];
+      handler();
+      await vi.advanceTimersByTimeAsync(500);
+
+      const newRoom = {
+        state: "connected",
+        localParticipant: { setMicrophoneEnabled: vi.fn().mockResolvedValue(undefined) },
+        switchActiveDevice: vi.fn().mockResolvedValue(undefined),
+      } as any;
+      dm.setRoom(newRoom);
+      resolveInputs([{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+      expect(newRoom.switchActiveDevice).not.toHaveBeenCalled();
+    });
+
+    it("switches back while muted without re-enabling the mic (OC-0474)", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      mockVoiceState.localMuted = true;
+      await fireDeviceChange();
+      mockRoom.localParticipant.setMicrophoneEnabled.mockClear();
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+
+      expect(switchesTo("headset-mic")).toEqual([["audioinput", "headset-mic"]]);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the default again when switching back fails", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      await fireDeviceChange();
+      mockRoom.switchActiveDevice.mockClear();
+      mockRoom.localParticipant.setMicrophoneEnabled.mockClear();
+      mockRoom.switchActiveDevice.mockImplementation(async (_kind: string, id: string) => {
+        if (id === "headset-mic") throw new Error("device busy");
+      });
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      await fireDeviceChange();
+
+      // The failed restart stopped the capture; the default is re-acquired.
+      expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "default", false);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+      expect(prefs.get("audioInputDevice")).toBe("headset-mic");
+    });
+
+    it("a manual pick ends the fallback, so a later device change does not switch again", async () => {
+      prefs.set("audioInputDevice", "headset-mic");
+      await fireDeviceChange();
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "headset-mic" }];
+      // The user picks the headset themselves before any device event lands.
+      await dm.switchInputDevice("headset-mic");
+      mockRoom.switchActiveDevice.mockClear();
+
+      await fireDeviceChange();
+
+      expect(mockRoom.switchActiveDevice).not.toHaveBeenCalled();
+    });
+
+    it("re-applies a returning device once on the native backend", async () => {
+      prefs.set("audioInputDevice", "Headset Mic");
+      mockNativeAudioDevices.mockImplementation(async (kind: string) =>
+        kind === "audioinput"
+          ? inputs.map((d) => ({ deviceId: d.deviceId }))
+          : outputs.map((d) => ({ deviceId: d.deviceId })),
+      );
+      await fireDeviceChange();
+      expect(prefs.get("audioInputDevice")).toBe("Headset Mic");
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "Headset Mic" }];
+      mockRoom.switchActiveDevice.mockClear();
+      await fireDeviceChange();
+
+      expect(switchesTo("Headset Mic")).toEqual([["audioinput", "Headset Mic"]]);
+    });
+
+    it("keeps following a hot-plugged system default on the native backend while fallen back", async () => {
+      prefs.set("audioInputDevice", "Headset Mic");
+      prefs.set("audioOutputDevice", "Headset Out");
+      mockNativeAudioDevices.mockImplementation(async (kind: string) =>
+        kind === "audioinput" ? inputs : outputs,
+      );
+      await fireDeviceChange();
+
+      inputs = [{ deviceId: "built-in-mic" }, { deviceId: "BT Mic" }];
+      outputs = [{ deviceId: "speakers" }, { deviceId: "BT Out" }];
+      mockRoom.switchActiveDevice.mockClear();
+      await fireDeviceChange();
+
+      expect(mockRoom.switchActiveDevice.mock.calls).toEqual([
+        ["audioinput", ""],
+        ["audiooutput", ""],
+      ]);
+      expect(prefs.get("audioInputDevice")).toBe("Headset Mic");
+      expect(prefs.get("audioOutputDevice")).toBe("Headset Out");
     });
   });
 });

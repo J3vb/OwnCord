@@ -10,6 +10,7 @@
 
 import type { ConnectionState, WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
+import { getActivePresenceSender } from "./presence";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { serverErrorText } from "./api";
@@ -38,6 +39,7 @@ import {
   handleMemberUpdate,
   handleNsfwAck,
   handlePresence,
+  handlePresenceBatch,
   handleRolesUpdate,
   handleUserUpdate,
   markReadyActiveChannelRead,
@@ -49,6 +51,7 @@ import {
   handleChatBulkDeleted,
   handleChatDeleted,
   handleChatEdited,
+  handleChatPinned,
   handleChatMessage,
   handleChatSendOk,
   handleMessagingError,
@@ -219,11 +222,13 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
 
-  unsubs.push(ws.on(S.CHAT_EDITED, handleChatEdited));
+  unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));
 
-  unsubs.push(ws.on(S.CHAT_DELETED, handleChatDeleted));
+  unsubs.push(ws.on(S.CHAT_DELETED, (payload) => handleChatDeleted(api, payload)));
 
-  unsubs.push(ws.on(S.CHAT_BULK_DELETED, handleChatBulkDeleted));
+  unsubs.push(ws.on(S.CHAT_BULK_DELETED, (payload) => handleChatBulkDeleted(api, payload)));
+
+  unsubs.push(ws.on(S.CHAT_PINNED, handleChatPinned));
 
   unsubs.push(ws.on(S.CHAT_SEND_OK, (payload, id) => handleChatSendOk(api, payload, id)));
 
@@ -238,6 +243,7 @@ export function wireDispatcher(
   // ── Presence ──────────────────────────────────────────
 
   unsubs.push(ws.on(S.PRESENCE, handlePresence));
+  unsubs.push(ws.on(S.PRESENCE_BATCH, handlePresenceBatch));
 
   // ── Channels ──────────────────────────────────────────
 
@@ -272,7 +278,7 @@ export function wireDispatcher(
 
   // ── Voice ─────────────────────────────────────────────
 
-  unsubs.push(ws.on(S.VOICE_STATE, handleVoiceState));
+  unsubs.push(ws.on(S.VOICE_STATE, (payload) => handleVoiceState(ws, payload)));
 
   unsubs.push(ws.on(S.VOICE_MOVED, (payload) => handleVoiceMoved(ws, payload, clock)));
 
@@ -320,6 +326,12 @@ export function wireDispatcher(
       // code-specific branch and never consumes the frame -> capacity
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
+      // A timeout refuses a custom status without writing or broadcasting
+      // anything, so the PresenceSender's optimistic apply would leave the
+      // user seeing and saving a status nobody else has. This is the one
+      // writer for server events, so the rollback (a store write) lives here;
+      // a no-op for any frame the sender did not put on the wire.
+      if (payload.code === "TIMED_OUT") getActivePresenceSender()?.rollbackTimedOut(id);
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
       if (handleMessagingError(payload, id)) return;

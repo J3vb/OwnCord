@@ -70,11 +70,11 @@ flowchart LR
     EV["deliverBroadcast<br/>assign seq"] --> RB["EventRingBuffer<br/>(event_persistence.replay_ring_size, default 1000, Tier 1)"]
     EV --> EP["EventPersister<br/>async batched → events table<br/>(Tier 2; drops if queue full)"]
     EV --> PLG["plugin EventSink"]
-    EV --> PS["PubSub topics<br/>global / channel:N / voice:N / user:N<br/>(per-topic 100 msg/s limit)"]
+    EV --> PS["PubSub topics<br/>global / channel:N / voice:N / user:N<br/>(channel:N 100 msg/s limit per sender)"]
     PS --> CH{"per-client queues"}
     CH --> HI["sendHigh (64)<br/>DMs, mentions"]
-    CH --> NO["send (256)<br/>chat, reactions"]
-    CH --> LO["sendLow (64)<br/>typing, presence"]
+    CH --> NO["send (256)<br/>chat, reactions, presence"]
+    CH --> LO["sendLow (64)<br/>typing, moderation notices"]
     HI --> WP["writePump<br/>drains high-first"]
     NO --> WP
     LO --> WP
@@ -84,7 +84,10 @@ flowchart LR
 
 **What this shows.** Overflow policy is intentional: dropping a chat message
 would corrupt state, so a full normal/high queue disconnects the client and the
-replay pipeline restores consistency; typing/presence are lossy by design. The
+replay pipeline restores consistency. Presence shares the normal queue but is
+the exception: a presence frame that finds it full is dropped and repaired by a
+full presence snapshot (`Client.sendPresenceMsg`), so a reconnect herd cannot
+kick clients. Typing and moderation notices are lossy by design. The
 global `broadcast` channel (1024) drops with a `broadcastDrops` counter when
 saturated.
 
@@ -120,7 +123,9 @@ The `Hub` also owns: stale-client sweep (30s ticker, 90s idle threshold; each
 connection's protocol Ping every 25s refreshes activity and closes a peer that
 misses a Pong),
 revoked-session sweep (30s, plus
-per-connection revalidation every 10 messages), stale-voice-state sweep (60s),
+per-connection revalidation every 10 messages, plus an immediate per-account
+check, `DisconnectIfSessionRevoked`, after a password or 2FA change or a
+session revoke), stale-voice-state sweep (60s),
 LiveKit membership reconciler (60s, `voice_reconcile.go`; see
 [livekit-setup.md](../livekit-setup.md)),
 panic containment on the run loop (3 panics/60s, or one Windows memory fault

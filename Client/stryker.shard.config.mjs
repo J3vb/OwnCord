@@ -38,6 +38,7 @@ export const shards = {
   ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",
+    "src/lib/micProcessor.ts",
     "src/lib/audioElements.ts",
     "src/lib/noise-suppression.ts",
     "src/lib/deviceManager.ts",
@@ -81,6 +82,7 @@ export const shards = {
     "src/lib/avatar.ts",
     "src/components/message-list/avatar.ts",
     "src/lib/call-ring.ts",
+    "src/features/direct-messages/callAlerts.ts",
     "src/lib/channel-mutes.ts",
     "src/lib/channel-navigation.ts",
     "src/lib/color-contrast.ts",
@@ -102,6 +104,7 @@ export const shards = {
     "src/lib/notificationLevel.ts",
     "src/lib/notificationSound.ts",
     "src/lib/notifications.ts",
+    "src/features/unread-badge/unreadBadge.ts",
     "src/lib/os-motion.ts",
     "src/lib/preferences.ts",
     "src/lib/presence.ts",
@@ -134,8 +137,10 @@ export const shards = {
     "src/features/messaging/echoReconcile.ts",
     "src/features/messaging/liveMessages.ts",
     "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/readingAnchor.ts",
     "src/features/messaging/messageEdits.ts",
     "src/features/messaging/reactionState.ts",
+    "src/features/messaging/emojiCatalog.ts",
   ], // 1918 mutants
   // D6 of the check-reliability pain-points report: the safety, moderation,
   // message-request, content-consent, navigation and reports feature modules

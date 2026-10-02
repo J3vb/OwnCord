@@ -102,7 +102,7 @@ none reaches a log entry, the console or browser storage.
 | Action                   | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | List sessions            | `GET /users/me/sessions`; show device/IP/last-used; current session marked. Both desktop User-Agents read "OwnCord desktop"                                                                                                                                                                                                                                                                                                                                                                                       |
-| Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device. Revoke-one never drops a live socket: its REST requests fail at once, but when a device showing "Signed in elsewhere" revokes the device holding the live socket, that socket closes within the hub's 30 s session sweep (or the per-message recheck), and the toast says so                                                                 |
+| Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device. Its REST requests fail at once; when a device showing "Signed in elsewhere" revokes the device holding the live socket, the server closes that socket in the same request                                                                                                                                                                    |
 | Sign out everywhere      | Inline confirm stating this device is included → `DELETE /users/me/sessions`; when `current_session_revoked`, `clearAuth()` → connect page                                                                                                                                                                                                                                                                                                                                                                        |
 | Sign-in not yet reviewed | On connect and on window focus the main page lists sessions, at most once per 30 s after a successful listing; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/session-notice.ts`)                                                                                                                                                                                      |
 | Signed in elsewhere      | A second device connecting displaces this socket; the server sends `SESSION_REPLACED` first. A wake reconnect after a sleep is refused with `ANOTHER_DEVICE_ACTIVE` while another device holds the session (its live connection or a call it parked in the voice grace window), so it cannot displace it at all. Either way the client does not reconnect and keeps the credential; the connection banner shows "Signed in elsewhere" with "Use here", which reconnects without a wake marker (last connect wins) |
@@ -117,16 +117,16 @@ The desktop client exposes a **subset** of admin operations inline, gated by the
 actor's role. Everything here must (a) only appear for users who can perform it,
 and (b) confirm destructive actions.
 
-| Operation        | Affordance                         | REST                                                 | Reaction                                                                                     |
-| ---------------- | ---------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Change role      | Member context menu → submenu      | `PATCH /admin/api/users/{id}` `{role_id}`            | Toast; `member_update` reflects live                                                         |
-| Kick             | Member menu, two-click confirm     | `DELETE /admin/api/users/{id}/sessions`              | Toast "Kicked {user}"; sessions revoked, sockets drop on the next sweep → `presence` offline |
-| Ban              | Member menu, two-click confirm     | `PATCH /admin/api/users/{id}` `{banned, ban_reason}` | Toast; `member_ban` removes them                                                             |
-| Create channel   | Sidebar → modal                    | `POST /admin/api/channels`                           | Modal closes on success; `channel_create`                                                    |
-| Edit channel     | Channel menu → modal               | `PATCH /admin/api/channels/{id}`                     | `channel_update`                                                                             |
-| Delete channel   | Channel menu, two-click confirm    | `DELETE /admin/api/channels/{id}`                    | `channel_delete`; redirect if active                                                         |
-| Reorder channels | Drag, or channel menu Move Up/Down | `PATCH …/{id}` `{position}` per moved                | Optimistic; roll back on failure                                                             |
-| Invites          | Invite manager modal               | `GET/POST/DELETE /invites`                           | List with masked codes, copy, revoke; empty state "No active invites"                        |
+| Operation        | Affordance                         | REST                                                 | Reaction                                                                                                      |
+| ---------------- | ---------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Change role      | Member context menu → submenu      | `PATCH /admin/api/users/{id}` `{role_id}`            | Toast; `member_update` reflects live                                                                          |
+| Kick             | Member menu, two-click confirm     | `DELETE /admin/api/users/{id}/sessions`              | Toast "Kicked {user}"; sessions revoked, socket dropped at once → `presence` offline                          |
+| Ban              | Member menu, two-click confirm     | `PATCH /admin/api/users/{id}` `{banned, ban_reason}` | Toast; `member_ban` removes them                                                                              |
+| Create channel   | Sidebar → modal                    | `POST /admin/api/channels`                           | Modal closes on success; `channel_create`                                                                     |
+| Edit channel     | Channel menu → modal               | `PATCH /admin/api/channels/{id}`                     | `channel_update`                                                                                              |
+| Delete channel   | Channel menu, two-click confirm    | `DELETE /admin/api/channels/{id}`                    | `channel_delete`; redirect if active                                                                          |
+| Reorder channels | Drag, or channel menu Move Up/Down | `PATCH …/{id}` `{position}` per moved                | Optimistic; roll back on failure                                                                              |
+| Invites          | Invite manager modal               | `GET/POST/DELETE /invites`                           | Live codes only (expired/revoked hidden), masked, with creator; copy, revoke; empty state "No active invites" |
 
 **Target rules:**
 
@@ -196,14 +196,14 @@ sequenceDiagram
     end
 ```
 
-| State       | Presentation                                                                                                                                                                                                                                                   |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| checking    | Silent (no UI until a result)                                                                                                                                                                                                                                  |
-| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`); on Windows a line below says SmartScreen will warn about the unsigned installer (More info → Run anyway)                 |
-| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                                                                                                                                                  |
-| applied     | App relaunches automatically                                                                                                                                                                                                                                   |
-| failed      | "Update failed. Please try again later." + Dismiss                                                                                                                                                                                                             |
-| no update   | Silent. A `204` from `/client-update` ("already latest", or the server withholding a release **newer than itself**) and a failed/offline check both render nothing — a connected client is compatible by definition, so silence is correct (B7-12, Decision 5) |
+| State       | Presentation                                                                                                                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| checking    | Silent (no UI until a result)                                                                                                                                                                                                                                                                                      |
+| available   | Non-modal banner with version + Update Now / Later (already `createUpdateNotifier()`/`showBanner()`, `components/UpdateNotifier.ts`); on Windows a line below says SmartScreen will warn about the unsigned installer (More info → Run anyway)                                                                     |
+| downloading | Banner "Downloading update… N%" (or "… N.N MB" until Content-Length is known)                                                                                                                                                                                                                                      |
+| applied     | App relaunches automatically                                                                                                                                                                                                                                                                                       |
+| failed      | "Update failed. Please try again later." + Dismiss                                                                                                                                                                                                                                                                 |
+| no update   | Silent. A `204` from `/client-update` ("already latest", or the server withholding a release **newer than itself**), an offered file built for another OS or processor, and a failed/offline check both render nothing — a connected client is compatible by definition, so silence is correct (B7-12, Decision 5) |
 
 **Update required (B7-12).** When the server's `protocol_epoch` is **newer**
 than this build's, the connect page raises the `IncompatibleNotice`
@@ -238,6 +238,21 @@ Keybinds tab) also emits,
 toggling the same controls as the in-app shortcuts (a no-op outside a voice
 channel), **Open Log Folder** opens the client log directory, and **Quit** exits
 the app.
+
+**Unread badge (DP-27).** The taskbar button and the tray tooltip carry the
+unread count: mentions in server channels plus unread direct messages (a muted
+conversation adds only its mentions; the `nothing` notification level shows
+none). `src/features/unread-badge/unreadBadge.ts` counts from the stores and
+calls the `set_unread_badge` command (`src-tauri/src/unread_badge.rs`) when
+the count changes, and again when the window is shown or focused (Windows drops
+the overlay when the taskbar button is recreated); a message that leaves the
+count unchanged costs no IPC call. Windows draws a red overlay icon with the count, capped
+at "9+"; Linux sends the Unity `LauncherEntry` D-Bus signal on the session
+bus, which KDE Plasma and Ubuntu's dock read but **stock GNOME does not** (it
+needs an extension such as Dash to Dock); macOS badges the dock icon. On
+Windows and macOS the tray tooltip reads "OwnCord — N unread mentions"; Linux
+tray icons (libappindicator) have no tooltip, so there the launcher count is
+the only indicator. Both clear at 0 and on logout.
 
 ---
 

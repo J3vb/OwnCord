@@ -37,6 +37,7 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			LiveKitHealth:       func(_ context.Context) (bool, error) { return true, nil },
 			ReconnectTiers:      func() (uint64, uint64, uint64) { return 7, 3, 1 },
 			Backpressure:        func() (uint64, uint64, uint64) { return 4, 9, 11 },
+			PresenceDrops:       func() uint64 { return 5 },
 			PersisterStats:      func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
 			DBStats:             func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
 			DBReaderStats:       func() sql.DBStats { return sql.DBStats{WaitCount: 3, WaitDuration: 700 * time.Millisecond} },
@@ -69,7 +70,7 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 		"ws_broadcast_ms", "ws_dispatch_lag_ms", "chat_send_ack_ms", "voice_join_ms",
 		"hub_broadcast_queue_depth", "hub_seqmu_max_hold_ms", "livekit_healthy",
 		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
-		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops",
+		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops", "backpressure_presence_drops",
 		"db_writer_wait_count", "db_writer_wait_seconds",
 		"db_reader_wait_count", "db_reader_wait_seconds",
 		"perm_cache_hits", "perm_cache_misses",
@@ -127,6 +128,9 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	}
 	if int(resp["backpressure_low_drops"].(float64)) != 11 {
 		t.Errorf("backpressure_low_drops = %v, want 11", resp["backpressure_low_drops"])
+	}
+	if int(resp["backpressure_presence_drops"].(float64)) != 5 {
+		t.Errorf("backpressure_presence_drops = %v, want 5", resp["backpressure_presence_drops"])
 	}
 	if got := resp["db_writer_wait_seconds"].(float64); got != 1.5 {
 		t.Errorf("db_writer_wait_seconds = %v, want 1.5", got)

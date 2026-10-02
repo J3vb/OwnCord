@@ -307,7 +307,7 @@ func TestAvatarUpload_IsChargedAndQuotaGated(t *testing.T) {
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	r := chi.NewRouter()
-	api.MountProfileRoutes(r, database, svc, store, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, svc, store, limiter, nil, nil, nil)
 	token := uploadCreateToken(t, database, "avatar_user", int(permissions.MemberRoleID))
 	var userID int64
 	if err := database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'avatar_user'`).Scan(&userID); err != nil {

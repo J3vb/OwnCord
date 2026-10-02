@@ -56,10 +56,11 @@ export const shellText = defineCatalog("shell", {
   "channel.live": "LIVE",
   "channel.mutedByModerator": "Muted by a moderator",
   "channel.deafenedByModerator": "Deafened by a moderator",
+  "channel.deafened": "Deafened",
   "channel.ownSessionFingerprint":
     "Your session fingerprint (changes every call — not an identity): {fingerprint}",
   "channel.empty": "No channels yet",
-  "channel.emptyHint": "Right-click a category to create one",
+  "channel.emptyHint": "Ask a moderator to create a channel",
   "channel.markAllRead": "Mark All as Read",
   "channel.deleteWarning":
     "Are you sure you want to delete {channel}? This action cannot be undone and all messages in this channel will be lost.",
@@ -118,6 +119,8 @@ export const shellText = defineCatalog("shell", {
   "identity.participant": "Participant",
   "identity.newKey": "New key",
   "identity.accept": "Trust New Key",
+  "identity.rePinFailed":
+    "Couldn't save the new security key — the participant stays blocked. Try again.",
 
   "banner.restarting": "Server restarting in {seconds} seconds...",
   "banner.reconnecting": "Reconnecting...",
@@ -134,6 +137,7 @@ export const shellText = defineCatalog("shell", {
   "invite.title": "Server Invites",
   "invite.empty": "No active invites",
   "invite.meta": "Created by {creator} · {uses}",
+  "invite.unknownCreator": "unknown",
   "invite.uses": "{uses} uses",
   "invite.usesOfMax": "{uses}/{max} uses",
   "invite.copy": "Copy",

@@ -59,6 +59,66 @@ func (q *Queries) FindDMChannelIDBetween(ctx context.Context, arg FindDMChannelI
 	return channel_id, err
 }
 
+const getDMDeliveryTargets = `-- name: GetDMDeliveryTargets :many
+SELECT
+    dp.user_id AS user_id,
+    c.is_group AS is_group,
+    CAST(EXISTS (
+        SELECT 1 FROM dm_open_state o
+        WHERE o.user_id = dp.user_id AND o.channel_id = dp.channel_id
+    ) AS INTEGER) AS is_open,
+    CAST(EXISTS (
+        SELECT 1 FROM trusted_senders t
+        WHERE t.recipient_id = dp.user_id AND t.sender_id = ?1
+    ) AS INTEGER) AS trusts_sender
+FROM dm_participants dp
+JOIN channels c ON c.id = dp.channel_id AND c.type = 'dm'
+WHERE dp.channel_id = ?2
+`
+
+type GetDMDeliveryTargetsParams struct {
+	SenderID  int64 `json:"senderId"`
+	ChannelID int64 `json:"channelId"`
+}
+
+type GetDMDeliveryTargetsRow struct {
+	UserID       int64 `json:"userId"`
+	IsGroup      int64 `json:"isGroup"`
+	IsOpen       int64 `json:"isOpen"`
+	TrustsSender int64 `json:"trustsSender"`
+}
+
+// One read for a DM send's whole fan-out decision: every participant, the
+// channel's group flag, whether the participant's DM row is already open, and
+// whether the participant trusts sender_id (message requests).
+func (q *Queries) GetDMDeliveryTargets(ctx context.Context, arg GetDMDeliveryTargetsParams) ([]GetDMDeliveryTargetsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getDMDeliveryTargets, arg.SenderID, arg.ChannelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetDMDeliveryTargetsRow{}
+	for rows.Next() {
+		var i GetDMDeliveryTargetsRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.IsGroup,
+			&i.IsOpen,
+			&i.TrustsSender,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDMParticipantIDs = `-- name: GetDMParticipantIDs :many
 SELECT user_id FROM dm_participants WHERE channel_id = ?
 `
@@ -228,11 +288,14 @@ SELECT
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
-    (SELECT COUNT(*) FROM messages mu
+    (SELECT COUNT(*) FROM (SELECT 1 FROM messages mu
       WHERE mu.channel_id = c.id AND mu.deleted = 0
         AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
                                WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0)
-    ) AS unread_count
+      LIMIT 100)
+    ) AS unread_count,
+    CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (
@@ -250,6 +313,7 @@ type GetUserDMChannelsRow struct {
 	LastMessage   string `json:"lastMessage"`
 	LastMessageAt string `json:"lastMessageAt"`
 	UnreadCount   int64  `json:"unreadCount"`
+	MentionCount  int64  `json:"mentionCount"`
 }
 
 // A DM row carries no recipient any more: dm_participants holds N users, so
@@ -273,6 +337,7 @@ func (q *Queries) GetUserDMChannels(ctx context.Context, userID int64) ([]GetUse
 			&i.LastMessage,
 			&i.LastMessageAt,
 			&i.UnreadCount,
+			&i.MentionCount,
 		); err != nil {
 			return nil, err
 		}

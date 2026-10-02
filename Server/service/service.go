@@ -101,6 +101,10 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	// needs MessageService's own authorization and effect — never a second
 	// copy of DeleteMessage's checks (B5-9).
 	moderation.messages = messages
+	// Erasure must flush any queued mention-badge increment before its own
+	// reversal, or a message the subject sent inside the worker's coalesce
+	// window is reversed without its increment ever having landed (P5-O05).
+	erasure.flushMentions = messages.FlushAllPendingMentionCounts
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)
@@ -111,7 +115,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Channels:        NewChannelService(st, permSvc),
 		Permissions:     permSvc,
 		Users:           NewUserService(st),
-		DMs:             NewDMService(st),
+		DMs:             NewDMService(st, permSvc),
 		Invites:         NewInviteService(st),
 		Blocks:          blocks,
 		Moderation:      moderation,

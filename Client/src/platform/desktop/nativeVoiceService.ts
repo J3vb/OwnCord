@@ -24,8 +24,11 @@ export const nativeVoice: NativeVoice = {
   disconnect: (session) => invoke<NativeVoiceResources>("native_voice_disconnect", { session }),
   setMicrophone: (session, enabled) =>
     invoke<void>("native_voice_set_microphone", { session, enabled }),
+  setPttGated: (session, gated) => invoke<void>("native_voice_set_ptt_gated", { session, gated }),
   setSubscribed: (session, identity, sid, subscribed) =>
     invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
+  setVideoView: (session, identity, sid, enabled, quality) =>
+    invoke<void>("native_voice_set_video_view", { session, identity, sid, enabled, quality }),
   setVolume: (session, identity, volume) =>
     invoke<void>("native_voice_set_volume", { session, identity, volume }),
   setScreenshareVolume: (session, identity, volume) =>

@@ -465,7 +465,13 @@ func ReversalAuditActionFor(kind string) (action string, ok bool) {
 // so a decider lacking THOSE gates — or a crash between the two writes —
 // could leave the appellant told "overturned" while still sanctioned; it is
 // now a store-level consequence of the decision, not a second moderation
-// action, so it never calls ModerationService and never re-checks outrank).
+// action, so it never calls ModerationService). The actor's authority for an
+// overturn — outranking the target and, for a ban, holding BAN_MEMBERS — is
+// enforced by AppealService.Decide's requireOverturnAuthority BEFORE this
+// transaction opens, and the outrank half is re-checked LIVE inside
+// DecideAppealTx's own transaction (P2-8 parity with LiftTimeout), mirroring
+// the direct reversal path; the reversal itself stays a mechanical store
+// write.
 // Zero rows affected is NOT an error (N1: the appealed timeout may already
 // be superseded/lifted, or the appealed ban may already be superseded by a
 // later ban action — "nothing to reverse" is a valid outcome and the
@@ -598,6 +604,18 @@ func (d *DB) DecideAppealTx(
 			return AppealWriteConflict, false, false, nil
 		}
 		if checkAuthority(rolePerms, banned, banExpires) != nil {
+			return AppealWriteForbidden, false, false, nil
+		}
+	}
+
+	// P2-8 parity with LiftTimeout: an OVERTURN re-checks the decider
+	// strictly outranks the target LIVE, inside this transaction, never
+	// trusted from the service's earlier (permission-cache-backed) check — so
+	// a decider demoted to equal or below the target between that check and
+	// this write cannot still commit the reversal. "removal" is excluded
+	// (overturning it is record-only, mirroring requireOverturnAuthority).
+	if outcome == "overturned" && action.Kind != "removal" {
+		if !strictlyOutranks(ctx, tx, decidedBy, action.TargetID) {
 			return AppealWriteForbidden, false, false, nil
 		}
 	}

@@ -1227,7 +1227,7 @@ func TestChatDelete_RateLimit_ReturnsError(t *testing.T) {
 
 // ─── BUG-126: Deleted messages must not be editable ─────────────────────────
 
-func TestChatEdit_DeletedMessage_ReturnsForbidden(t *testing.T) {
+func TestChatEdit_DeletedMessage_ReturnsAlreadyDeleted(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	user := seedOwnerUser(t, database, "edit-del-owner")
 	chID := seedTestChannel(t, database, "edit-del-chan")
@@ -1246,8 +1246,8 @@ func TestChatEdit_DeletedMessage_ReturnsForbidden(t *testing.T) {
 	hub.HandleMessageForTest(c, chatEditMsg(msgID, "ghost edit"))
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
-	if code != "FORBIDDEN" {
-		t.Errorf("expected FORBIDDEN for editing deleted message, got %q", code)
+	if code != "ALREADY_DELETED" {
+		t.Errorf("expected ALREADY_DELETED for editing a deleted message, got %q", code)
 	}
 }
 

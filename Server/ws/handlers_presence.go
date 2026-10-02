@@ -102,7 +102,7 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	return Result{Events: presenceEvents(userID, status, customStatus)}
+	return Result{Events: presenceEvents(userID, status, customStatus), SetPresence: &livePresence{status: status, customStatus: customStatus}}
 }
 
 // handleChannelFocusV2 is the V2 handler for channel_focus messages.

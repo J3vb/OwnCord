@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // GetUserByID has no banned filter (unlike ListMembers and the other lookups
@@ -21,7 +22,7 @@ func TestDMService_CreateDM_RefusesBannedRecipient(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Banned: true})
 
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	_, err := svc.CreateDM(context.Background(), 1, 2)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("CreateDM to a banned recipient = %v, want ErrNotFound", err)
@@ -41,7 +42,7 @@ func TestDMService_CreateDM_AllowsLapsedTemporaryBan(t *testing.T) {
 		t.Fatalf("set stale ban_expires: %v", err)
 	}
 
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	result, err := svc.CreateDM(context.Background(), 1, 2)
 	if err != nil {
 		t.Fatalf("CreateDM to a user with a lapsed temporary ban: %v", err)
@@ -57,7 +58,7 @@ func TestDMService_CreateGroupDM_RefusesBannedRecipient(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUser(t, database, &db.User{ID: 3, Username: "carol", Banned: true})
 
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	_, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("CreateGroupDM with a banned recipient = %v, want ErrNotFound", err)
@@ -75,7 +76,7 @@ func TestDMService_CreateGroupDM_RefusesBannedRecipient(t *testing.T) {
 func TestDMService_CreateGroupDM_OversizedNameRejectedBeforeSanitizing(t *testing.T) {
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	// Adversarial nested-entity payload (16 KB) — see sanitizeToFixpoint's
 	// doc comment (message.go) for why this shape is quadratic to sanitize.
@@ -107,7 +108,7 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
 	if err != nil {
@@ -145,7 +146,7 @@ func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
 	created, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
 	if err != nil {
@@ -210,7 +211,7 @@ func TestDMService_CreateGroupDM_SurvivesCancelledPostCommitRead(t *testing.T) {
 	st := &cancelAfterCreateGroupDMStore{DB: database}
 	st.cancel = cancel
 
-	svc := NewDMService(st)
+	svc := NewDMService(st, NewPermissionService(database, permissions.NewChecker(database)))
 	result, err := svc.CreateGroupDM(ctx, 1, []int64{2, 3}, "")
 	if err != nil {
 		t.Fatalf("CreateGroupDM with context cancelled right after commit: %v (the channel is already persisted at this point — this must not fail the request)", err)
@@ -238,12 +239,12 @@ func TestDMService_CreateGroupDM_SurvivesCancelledPostCommitRead(t *testing.T) {
 // ─── OC-0304: disconnected recipients must read as offline ────────────────
 //
 // users.status keeps a *chosen* idle/dnd/invisible across a disconnect
-// (MarkUserDisconnected only ever rewrites "online" -> "offline") so a
+// (StampDisconnect only ever rewrites "online" -> "offline") so a
 // reconnect can honour it. ws/serve_ready.go's presentableMembers documents
 // the resulting obligation on every read path: "a member with no live
 // connection is offline, whatever the row says." DMSummaryFor, ListDMs and
 // CreateGroupDM are the service-layer choke points every DM payload in this
-// package is built from, so each must apply that rule once SetOnlineChecker
+// package is built from, so each must apply that rule once SetLiveStatusLookup
 // is wired — otherwise a signed-out user's last chosen status leaks into the
 // DM sidebar as a live presence dot, contradicting the member list right
 // next to it.
@@ -253,14 +254,14 @@ func TestDMService_DMSummaryFor_RecipientOfflineWhenDisconnected(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: db.StatusDND})
 
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	created, err := svc.CreateDM(context.Background(), 1, 2)
 	if err != nil {
 		t.Fatalf("setup CreateDM: %v", err)
 	}
 
 	// Bob chose "dnd" and then signed out — nobody holds a live connection.
-	svc.SetOnlineChecker(func(userID int64) bool { return false })
+	svc.SetLiveStatusLookup(func(int64) string { return "" })
 
 	summary, err := svc.DMSummaryFor(context.Background(), 1, created.Channel.ID)
 	if err != nil {
@@ -280,12 +281,12 @@ func TestDMService_ListDMs_RecipientOfflineWhenDisconnected(t *testing.T) {
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: db.StatusDND})
 
-	svc := NewDMService(database)
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	if _, err := svc.CreateDM(context.Background(), 1, 2); err != nil {
 		t.Fatalf("setup CreateDM: %v", err)
 	}
 
-	svc.SetOnlineChecker(func(userID int64) bool { return false })
+	svc.SetLiveStatusLookup(func(int64) string { return "" })
 
 	dms, err := svc.ListDMs(context.Background(), 1)
 	if err != nil {
@@ -306,8 +307,13 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: db.StatusDND})
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 
-	svc := NewDMService(database)
-	svc.SetOnlineChecker(func(userID int64) bool { return userID != 2 })
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	svc.SetLiveStatusLookup(func(userID int64) string {
+		if userID == 2 {
+			return ""
+		}
+		return db.StatusOnline
+	})
 
 	result, err := svc.CreateGroupDM(context.Background(), 1, []int64{2, 3}, "")
 	if err != nil {
@@ -331,13 +337,54 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 	}
 }
 
-// erroringIsGroupDMStore forces RingTargets' IsGroupDM call to fail.
+// TestDMService_ListDMs_CarriesMentionCount locks that GET /dms reports the
+// same DM mention_count the ready payload does: both read it from
+// GetUserDMChannels. ListDMs used to return the zero value, so a DM mention
+// badge silently vanished on the documented REST recovery path (the client
+// calls GET /dms when accepting a message request).
+func TestDMService_ListDMs_CarriesMentionCount(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
+
+	ch, _, err := database.GetOrCreateDMChannel(context.Background(), 1, 2)
+	if err != nil {
+		t.Fatalf("GetOrCreateDMChannel: %v", err)
+	}
+	msgID, err := database.CreateMessage(context.Background(), ch.ID, 1, "hi @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.IncrementMentionCounts(context.Background(), ch.ID, msgID, []int64{2}); err != nil {
+		t.Fatalf("IncrementMentionCounts: %v", err)
+	}
+
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	dms, err := svc.ListDMs(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("ListDMs: %v", err)
+	}
+	if len(dms) != 1 {
+		t.Fatalf("ListDMs: got %d channels, want 1", len(dms))
+	}
+	if dms[0].MentionCount != 1 {
+		t.Errorf("MentionCount = %d, want 1: GET /dms must carry the DM mention count, as ready does", dms[0].MentionCount)
+	}
+}
+
+// erroringIsGroupDMStore forces every group-flag lookup to fail: RingTargets'
+// IsGroupDM call, and SendMessage's GetDMDeliveryTargets read, which carries
+// the group flag for the send (DP-51).
 type erroringIsGroupDMStore struct {
 	*db.DB
 }
 
 func (s *erroringIsGroupDMStore) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
 	return false, errors.New("simulated IsGroupDM failure")
+}
+
+func (s *erroringIsGroupDMStore) GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (bool, []db.DMDeliveryTarget, error) {
+	return false, nil, errors.New("simulated GetDMDeliveryTargets failure")
 }
 
 // TestRingTargets_GroupLookupErrorFailsClosedToNoTargets is Codex review
@@ -348,7 +395,7 @@ func (s *erroringIsGroupDMStore) IsGroupDM(ctx context.Context, channelID int64)
 // rung (mirrors decision 5's "the actor's own action always succeeds").
 func TestRingTargets_GroupLookupErrorFailsClosedToNoTargets(t *testing.T) {
 	database, _ := newDMFixture(t)
-	svc := NewDMService(&erroringIsGroupDMStore{DB: database})
+	svc := NewDMService(&erroringIsGroupDMStore{DB: database}, NewPermissionService(database, permissions.NewChecker(database)))
 
 	targets, err := svc.RingTargets(context.Background(), 1, 50)
 	if err != nil {

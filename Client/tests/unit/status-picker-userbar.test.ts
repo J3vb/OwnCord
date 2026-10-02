@@ -1,6 +1,7 @@
 import { cascadedDeclaration, hasRule, keyword } from "../helpers/app-css";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
+import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
@@ -54,6 +55,7 @@ function createMockWs(state: "connected" | "disconnected" = "connected"): WsClie
     }),
     startCertListener: vi.fn().mockResolvedValue(undefined),
     onCertFirstUse: vi.fn().mockReturnValue(() => {}),
+    onServerBusy: vi.fn().mockReturnValue(() => {}),
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => currentState),
@@ -94,7 +96,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("click on status picker dot opens the dropdown", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -185,6 +187,21 @@ describe("StatusPicker wired to UserBar", () => {
     expect(wrap.title).toBe("Offline");
   });
 
+  it("offline picker is inert: no Tab stop, cannot open or select (#16)", () => {
+    setAuthState({ username: "alice" }, true);
+    setConnectionStatus("disconnected");
+    const ws = createMockWs("disconnected");
+    comp = createUserBar({ ws });
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    expect(dot.getAttribute("tabindex")).toBeNull();
+    expect(dot.getAttribute("aria-disabled")).toBe("true");
+
+    dot.click();
+    expect(container.querySelector(".status-picker-dropdown--open")).toBeNull();
+  });
+
   it("status picker reacts to a connection status change through the store", async () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
@@ -205,7 +222,7 @@ describe("StatusPicker wired to UserBar", () => {
     setAuthState({ username: "alice" }, true);
     saveUserStatus("dnd");
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -219,7 +236,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("persists the selected status so the settings panel agrees", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     (container.querySelector(".status-picker-dot") as HTMLElement).click();
@@ -229,10 +246,28 @@ describe("StatusPicker wired to UserBar", () => {
     expect(loadUserStatus()).toBe("idle");
   });
 
+  it("tracks the stored status on the trigger dot with a design token, never a literal hex (P4-19)", () => {
+    setAuthState({ username: "alice" }, true);
+    saveUserStatus("idle");
+    const ws = createMockWs("connected");
+    comp = createUserBar(userBarOptsWithPresence(ws));
+    comp.mount(container);
+
+    const dot = container.querySelector(".status-picker-dot") as HTMLElement;
+    expect(dot.style.background).toBe("var(--yellow)");
+
+    dot.click();
+    const dnd = Array.from(container.querySelectorAll(".status-picker-option")).find(
+      (el) => el.querySelector(".status-picker-option-label")?.textContent === "Do Not Disturb",
+    ) as HTMLElement;
+    dnd.click();
+    expect(dot.style.background).toBe("var(--red)");
+  });
+
   it("follows a status change made elsewhere (settings Account tab)", () => {
     setAuthState({ username: "alice" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -257,7 +292,7 @@ describe("StatusPicker wired to UserBar", () => {
     saveCustomStatus("stale local value");
     setAuthState({ username: "alice", custom_status: "In a meeting" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -275,7 +310,7 @@ describe("StatusPicker wired to UserBar", () => {
   it("follows a custom-status change delivered through the auth store", async () => {
     setAuthState({ username: "alice", custom_status: "" }, true);
     const ws = createMockWs("connected");
-    comp = createUserBar({ ws });
+    comp = createUserBar(userBarOptsWithPresence(ws));
     comp.mount(container);
 
     const dot = container.querySelector(".status-picker-dot") as HTMLElement;
@@ -291,6 +326,55 @@ describe("StatusPicker wired to UserBar", () => {
       "[data-testid='custom-status-input']",
     ) as HTMLInputElement;
     expect(input.value).toBe("Brewing coffee");
+  });
+
+  // A TIMED_OUT refusal rolls the optimistic custom status back in the members
+  // store only (authStore never held it), so the mounted picker must follow that
+  // store or it keeps the refused text and ignores a retype of it.
+  it("re-seeds the custom-status input when a TIMED_OUT refusal rolls the status back", () => {
+    setAuthState({ username: "alice", custom_status: "" }, true);
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice",
+            displayName: null,
+            avatar: null,
+            role: "member",
+            status: "online",
+            customStatus: undefined,
+          } as never,
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+    const ws = createMockWs("connected");
+    (ws.send as ReturnType<typeof vi.fn>).mockReturnValue("frame-1");
+    const opts = userBarOptsWithPresence(ws);
+    comp = createUserBar(opts);
+    comp.mount(container);
+
+    (container.querySelector(".status-picker-dot") as HTMLElement).click();
+    const input = container.querySelector(
+      "[data-testid='custom-status-input']",
+    ) as HTMLInputElement;
+    // Typed with the input focused, as a user does: a hidden input keeps focus
+    // after Enter, and setCustomStatus() skips a focused input, so Enter has to
+    // hand focus back before the refusal can re-seed the field.
+    input.focus();
+    input.value = "sneaky";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    membersStore.flush();
+    expect(input.value).toBe("sneaky");
+
+    opts.presenceSender.rollbackTimedOut("frame-1");
+    membersStore.flush();
+
+    expect(input.value).toBe("");
+    opts.presenceSender.destroy();
+    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
   });
 
   it("status picker is disabled without a ws send path even when connected", () => {

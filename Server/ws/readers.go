@@ -50,6 +50,10 @@ type ReadySnapshotReader interface {
 	VisibilityReader
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
+	// MemberGeneration and NextMemberBanLapse decide when the shared
+	// ListMembers result (serve_ready_members_cache.go) must be read again.
+	MemberGeneration(ctx context.Context) (int64, error)
+	NextMemberBanLapse(ctx context.Context) (string, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
@@ -214,4 +218,5 @@ type SocketAuthenticator interface {
 	ResolveSocketPrincipal(ctx context.Context, tokenHash string) (*db.User, error)
 	SweepSessions(ctx context.Context, tokenHashes []string) (map[string]service.SessionVerdict, error)
 	RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string)
+	TouchSession(ctx context.Context, tokenHash string) error
 }

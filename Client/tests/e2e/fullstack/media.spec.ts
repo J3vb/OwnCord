@@ -115,6 +115,56 @@ test("watching a stream focuses its tile, and clicking a thumbnail switches focu
   );
 });
 
+/** Open `page`'s grid on a peer's camera from their voice roster row. A
+ *  closed grid receives no video (P3-07), so decoded video needs a watcher. */
+async function watchCamera(page: Page, userId: number): Promise<void> {
+  const row = page.locator(`.voice-user-item[data-voice-uid='${String(userId)}']`);
+  await expect(row.locator(".vu-status")).toBeVisible({ timeout: 10_000 });
+  await row.click();
+  await expect(page.locator(`.video-cell[data-user-id='${String(userId)}']`)).toBeVisible();
+}
+
+/** Inbound video bytes this page received over `ms`. */
+async function videoBytesOver(page: Page, ms: number): Promise<number> {
+  const before = (await mediaStats(page)).videoBytes;
+  await page.waitForTimeout(ms);
+  return (await mediaStats(page)).videoBytes - before;
+}
+
+test("a remote camera sends no video while the grid is closed, and resumes when it is shown", async ({
+  alice,
+  bob,
+}) => {
+  await joinVoice(alice);
+  await joinVoice(bob);
+  await expectDecodedMedia(alice);
+
+  // Bob's camera becomes a tile in alice's grid, which stays closed: only a
+  // local camera opens it (BUG-105).
+  await bob.locator(".voice-widget button[aria-label='Camera']").click();
+  const gridSlot = alice.locator("[data-testid='video-grid-slot']");
+  const bobTile = alice.locator(".video-cell[data-user-id='2']");
+  await expect(bobTile).toBeAttached({ timeout: 10_000 });
+  await expect(gridSlot).toBeHidden();
+  // Let the disable reach the SFU and any in-flight frames drain.
+  await alice.waitForTimeout(1_500);
+  const closed = await videoBytesOver(alice, 3_000);
+
+  // Watching bob opens the grid on his tile: his video decodes again.
+  await watchCamera(alice, 2);
+  await expectDecodedMedia(alice, true);
+  const shown = await videoBytesOver(alice, 3_000);
+  expect(closed).toBeLessThan(shown / 10);
+
+  // Back to the chat: the video stops again, and comes back on the next watch.
+  await alice.locator("[data-tile-control='exit-grid']").click();
+  await expect(gridSlot).toBeHidden();
+  await alice.waitForTimeout(1_500);
+  expect(await videoBytesOver(alice, 3_000)).toBeLessThan(shown / 10);
+  await watchCamera(alice, 2);
+  await expectDecodedMedia(alice, true);
+});
+
 test("a tile's mute button and volume slider change the peer's real playback volume", async ({
   alice,
   bob,
@@ -176,9 +226,10 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
 
   // Local UI: the control reports sharing and a self screen tile (offset id)
   // is published under the grid, which auto-opens for local video.
+  // The active state lives on the button itself (aria-pressed + the
+  // active-control tint); the redesign removed the "Sharing" text label.
   await expect(shareBtn).toHaveAttribute("aria-pressed", "true", { timeout: 20_000 });
-  await expect(shareBtn).toHaveClass(/sharing-active/);
-  await expect(alice.locator(".vw-share-label")).toHaveText("Sharing");
+  await expect(shareBtn).toHaveClass(/active-ctrl/);
   const selfScreen = alice.locator(`.video-cell[data-user-id='${1 + SCREENSHARE_TILE_ID_OFFSET}']`);
   await expect(selfScreen).toBeVisible({ timeout: 10_000 });
   await expect(selfScreen).toHaveAttribute("data-stream-type", "screenshare");
@@ -205,7 +256,7 @@ test("starting and stopping a screen share publishes a labelled screenshare tile
   // Stop: UI clears, the announcement goes out, and every tile/stream is gone.
   await shareBtn.click();
   await expect(shareBtn).toHaveAttribute("aria-pressed", "false", { timeout: 20_000 });
-  await expect(alice.locator(".vw-share-label")).not.toHaveText("Sharing");
+  await expect(shareBtn).not.toHaveClass(/active-ctrl/);
   await expect(selfScreen).toHaveCount(0);
   await expect(alice.locator("[data-testid='video-grid'] .video-cell")).toHaveCount(0);
   await expect(alice.locator("[data-testid='video-grid-slot']")).toBeHidden();
@@ -244,6 +295,7 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   await expectDecodedMedia(alice);
   await expectDecodedMedia(bob);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
+  await watchCamera(bob, 1);
   await expectDecodedMedia(bob, true);
   const baseline = await mediaStats(alice);
   const signalCount = await alice.evaluate(() => window.__ocMedia.signaling.length);
@@ -270,18 +322,21 @@ test("encrypted media recovers from LiveKit signaling loss and application recon
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
 
   // A blip longer than the grace window does end the membership: the expiry
-  // removes the SFU participant, which ends the client's LiveKit room, then a
-  // fresh authorized join and key exchange works as before.
+  // removes the SFU participant, which ends the client's LiveKit room. P2-T5:
+  // the voice reconnect loop then sees the released membership once the chat
+  // socket is back and rejoins on its own — a fresh authorized join and key
+  // exchange, with the camera off as after any join.
   await aliceTransport.offline();
   await expect(alice.locator(".reconnecting-banner")).toBeVisible();
   await alice.waitForTimeout(16_000); // outlast the 15 s server grace window
   aliceTransport.online();
   await expect(alice.locator(".reconnecting-banner")).not.toBeVisible();
-  await expect(alice.locator(".voice-widget")).not.toHaveClass(/visible/);
-  await expect.poll(async () => (await mediaStats(alice)).liveCapture).toBe(0);
-  await joinVoice(alice);
+  await expect(alice.locator(".voice-widget.visible")).toContainText("Voice Connected", {
+    timeout: 45_000,
+  });
   await expectDecodedMedia(alice);
   await alice.locator(".voice-widget button[aria-label='Camera']").click();
+  await watchCamera(bob, 1);
   await expectDecodedMedia(bob, true);
   expect((await mediaStats(alice)).senders).toBe(baseline.senders);
 
@@ -327,7 +382,7 @@ test("microphone denial offers recovery and device removal produces the applicat
   await expectDecodedMedia(bob);
 });
 
-test("the real stats poller expands connection details when RTT degrades", async ({
+test("a quality crash updates the readout without opening the stats pane", async ({
   alice,
   bob,
 }) => {
@@ -338,6 +393,14 @@ test("the real stats poller expands connection details when RTT degrades", async
   await alice.evaluate(() => {
     window.__ocMedia.poorQuality = true;
   });
+  // The degraded RTT reaches the ping readout, but the pane is on-demand:
+  // only a click on the signal icon opens it.
+  await expect(alice.locator(".vw-signal .vw-ping")).toHaveText("800ms");
+  // Outlast the 3 s quality debounce, so an auto-expand on the quality change
+  // would have fired before the pane is checked.
+  await alice.waitForTimeout(4_000);
+  await expect(alice.locator(".vw-stats")).not.toHaveClass(/visible/);
+  await alice.locator(".vw-signal").click();
   await expect(alice.locator(".vw-stats")).toHaveClass(/visible/);
   await expect(alice.locator(".vw-stats")).toContainText("800");
 });
@@ -390,6 +453,10 @@ for (const fault of ["missing", "wrong"] as const) {
       await expect(bobWidget).not.toHaveClass(/visible/);
     }
     await joinVoice(bob);
+    // A closed grid receives no remote video (P3-07), so the recovery control
+    // must watch alice's camera first — the two control steps in the
+    // signaling-loss test above do the same.
+    await watchCamera(bob, 1);
     await expectDecodedMedia(bob, true);
   });
 }

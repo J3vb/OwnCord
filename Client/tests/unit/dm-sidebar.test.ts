@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
+const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
 vi.mock("@components/message-list/attachments", () => ({
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
@@ -31,13 +31,14 @@ describe("DmSidebar", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    fetchImageAsDataUrl.mockReset();
+    fetchImageAsObjectUrl.mockReset();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
   afterEach(() => {
     container.remove();
+    vi.useRealTimers();
   });
 
   it("renders the sidebar with search input", () => {
@@ -198,7 +199,10 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("sorts unread conversations first", () => {
+  // DP-42: the header promised "sorted by most recent" while the rows were
+  // sorted unread-first. Recency is the order the store hands over (the server
+  // orders by last message), so the list must not reorder on unread.
+  it("renders rows in recency order regardless of unread", () => {
     const conversations: DmConversation[] = [
       makeConvo({ channelId: 1, userId: 1, username: "Alice", unread: false }),
       makeConvo({ channelId: 2, userId: 2, username: "Bob", unread: true }),
@@ -211,10 +215,8 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    const items = container.querySelectorAll(".dm-item");
-    // Bob (unread) should come first
-    expect(items[0]!.querySelector(".dm-name")!.textContent).toBe("Bob");
-    expect(items[1]!.querySelector(".dm-name")!.textContent).toBe("Alice");
+    const names = [...container.querySelectorAll(".dm-item .dm-name")].map((n) => n.textContent);
+    expect(names).toEqual(["Alice", "Bob"]);
 
     sidebar.destroy?.();
   });
@@ -262,6 +264,98 @@ describe("DmSidebar", () => {
     const closeBtn = container.querySelector(".dm-close") as HTMLButtonElement;
     closeBtn.click();
     expect(onCloseDm).toHaveBeenCalledWith(42);
+    // A 1:1 close stays one click (DP-34): no confirm dialog.
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
+  // DP-34: leaving a group is destructive (the caller cannot return unaided),
+  // so the ✕ asks first; a 1:1 hide does not.
+  it("asks to confirm leaving a group, and calls onCloseDm only after confirm", () => {
+    const onCloseDm = vi.fn();
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    expect(onCloseDm).not.toHaveBeenCalled();
+    const confirm = document.querySelector("[data-testid='dm-leave-confirm']") as HTMLElement;
+    expect(confirm).not.toBeNull();
+
+    confirm.click();
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+
+    sidebar.destroy?.();
+  });
+
+  it("cancelling the group-leave confirm leaves the conversation alone", () => {
+    const onCloseDm = vi.fn();
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    (document.querySelector("[data-testid='dm-leave-cancel']") as HTMLButtonElement).click();
+
+    expect(onCloseDm).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
+  it("keeps the group-leave confirm open while its row is rebuilt, and closes it when the row goes", () => {
+    const onCloseDm = vi.fn();
+    const group = makeConvo({ channelId: 7, isGroup: true, username: "Crew" });
+    const sidebar = createDmSidebar({
+      conversations: [group],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    // A new message rebuilds the row; the prompt must survive it.
+    sidebar.update([{ ...group, lastMessage: "new!", unread: true, unreadCount: 1 }]);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+    (document.querySelector("[data-testid='dm-leave-confirm']") as HTMLButtonElement).click();
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+
+    // Reopened, then the group leaves the list some other way: the prompt goes.
+    sidebar.update([group]);
+    (container.querySelector(".dm-close") as HTMLButtonElement).click();
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).not.toBeNull();
+    sidebar.update([]);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
+
+    sidebar.destroy?.();
+  });
+
+  it("shift-click skips the group-leave confirm", () => {
+    const onCloseDm = vi.fn();
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+      onCloseDm,
+    });
+    sidebar.mount(container);
+
+    (container.querySelector(".dm-close") as HTMLButtonElement).dispatchEvent(
+      new MouseEvent("click", { bubbles: true, shiftKey: true }),
+    );
+
+    expect(onCloseDm).toHaveBeenCalledWith(7);
+    expect(document.querySelector("[data-testid='dm-leave-modal']")).toBeNull();
 
     sidebar.destroy?.();
   });
@@ -301,7 +395,7 @@ describe("DmSidebar", () => {
     // needs, so the picture is fetched through the same cert-pinned path
     // attachments use and swapped in once the bytes arrive -- never assigned
     // as a raw src.
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ avatar: "http://example.com/img.png" })],
       onSelectConversation: vi.fn(),
@@ -309,7 +403,7 @@ describe("DmSidebar", () => {
     });
     sidebar.mount(container);
 
-    expect(fetchImageAsDataUrl).toHaveBeenCalledWith("http://example.com/img.png");
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("http://example.com/img.png");
     await vi.waitFor(() => {
       const img = container.querySelector(".dm-avatar img") as HTMLImageElement;
       expect(img).not.toBeNull();
@@ -320,7 +414,7 @@ describe("DmSidebar", () => {
   });
 
   it("fetches a server-relative avatar through the authenticated path instead of leaving a raw <img src> that 404s", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,BBB");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,BBB");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ username: "Bob", avatar: "/api/v1/files/42" })],
       onSelectConversation: vi.fn(),
@@ -334,7 +428,7 @@ describe("DmSidebar", () => {
     expect(avatar.textContent).toBe("B");
 
     await vi.waitFor(() => {
-      expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
       const img = avatar.querySelector("img");
       expect(img).not.toBeNull();
       expect(img?.getAttribute("src")).toBe("data:image/png;base64,BBB");
@@ -344,7 +438,7 @@ describe("DmSidebar", () => {
   });
 
   it("keeps the presence dot when the fetched avatar image is swapped in", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,CCC");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,CCC");
     const sidebar = createDmSidebar({
       conversations: [makeConvo({ avatar: "/api/v1/files/42", status: "online" })],
       onSelectConversation: vi.fn(),
@@ -371,7 +465,7 @@ describe("DmSidebar", () => {
   });
 
   it("swaps fetched images into group faces, keeping the letter for members without one", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,DDD");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,DDD");
     const sidebar = createDmSidebar({
       conversations: [
         makeConvo({
@@ -400,7 +494,7 @@ describe("DmSidebar", () => {
     // Carol has no avatar: her letter stays and nothing was fetched for her.
     expect(faces[1]!.textContent).toBe("C");
     expect(faces[1]!.querySelector("img")).toBeNull();
-    expect(fetchImageAsDataUrl).toHaveBeenCalledTimes(1);
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
 
     sidebar.destroy?.();
   });
@@ -642,6 +736,76 @@ describe("DmSidebar", () => {
 
     sidebar.destroy?.();
   });
+
+  // Discord's DM list always shows the last line and when it arrived; the
+  // data was already computed onto DmConversation but never drawn.
+  it("renders the last-message preview and a relative timestamp per row", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({
+          channelId: 1,
+          userId: 1,
+          username: "Alice",
+          lastMessage: "see you at 6",
+          timestamp: "2020-06-15T12:00:00Z",
+        }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+
+    expect(container.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
+    // A compact date for an older timestamp, not the raw ISO string.
+    expect(container.querySelector(".dm-preview-time")?.textContent).toBe("Jun 15, 2020");
+
+    sidebar.destroy?.();
+  });
+
+  it("rolls a row's time from a clock time to a date at midnight", () => {
+    vi.useFakeTimers({ now: new Date(2026, 8, 29, 23, 58) });
+    const sidebar = createDmSidebar({
+      conversations: [makeConvo({ timestamp: new Date(2026, 8, 29, 23, 50).toISOString() })],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+    const time = () => container.querySelector(".dm-preview-time")?.textContent;
+    expect(time()).toBe("11:50 PM");
+
+    vi.advanceTimersByTime(3 * 60 * 1000);
+
+    expect(time()).toBe("Sep 29");
+
+    sidebar.destroy?.();
+  });
+
+  it("rebuilds a row when only its preview or timestamp changes", () => {
+    const sidebar = createDmSidebar({
+      conversations: [
+        makeConvo({ channelId: 1, userId: 1, username: "Alice", lastMessage: "old" }),
+      ],
+      onSelectConversation: vi.fn(),
+      onNewDm: vi.fn(),
+    });
+    sidebar.mount(container);
+    const row = container.querySelector(".dm-item") as HTMLElement;
+
+    sidebar.update([
+      makeConvo({
+        channelId: 1,
+        userId: 1,
+        username: "Alice",
+        lastMessage: "new",
+        timestamp: "2020-06-15T12:00:00Z",
+      }),
+    ]);
+
+    expect(container.querySelector(".dm-item")).not.toBe(row);
+    expect(container.querySelector(".dm-preview")?.textContent).toBe("new");
+
+    sidebar.destroy?.();
+  });
 });
 
 // ── Unread / mention badges ────────────────────────────────────────────────
@@ -678,6 +842,23 @@ describe("DmSidebar — unread and mention badges", () => {
     expect(container.querySelector(".dm-unread")).toBeNull();
   });
 
+  it("caps the unread badge at 99+", () => {
+    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 137 }));
+
+    const badge = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
+    expect(badge.textContent).toBe("99+");
+    // The tooltip matches the badge text, never a four-digit number.
+    expect(badge.title).toBe("99+ unread messages");
+  });
+
+  it("keeps the mention badge uncapped", () => {
+    mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 137 }));
+
+    const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
+    expect(mentions.textContent).toBe("137");
+    expect(mentions.title).toBe("137 mentions");
+  });
+
   it("renders a mention badge instead of the unread badge", () => {
     mountWith(
       makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 5, mentionCount: 2 }),
@@ -694,12 +875,7 @@ describe("DmSidebar — unread and mention badges", () => {
     );
   });
 
-  it("keeps large badge counts ungrouped in the tooltip, matching the badge text", () => {
-    mountWith(makeConvo({ channelId: 7, userId: 7, unread: true, unreadCount: 1234 }));
-    const unread = container.querySelector('[data-testid="dm-unread-7"]') as HTMLElement;
-    expect(unread.textContent).toBe("1234");
-    expect(unread.title).toBe("1234 unread messages");
-
+  it("keeps large mention counts ungrouped in the tooltip, matching the badge text", () => {
     mountWith(makeConvo({ channelId: 8, userId: 8, unread: true, mentionCount: 1234 }));
     const mentions = container.querySelector('[data-testid="dm-mentions-8"]') as HTMLElement;
     expect(mentions.textContent).toBe("1234");

@@ -26,11 +26,12 @@ import (
 type AppealService struct {
 	st    Store
 	perms *PermissionService
-	// moderation is used for requireOutranksRole's hierarchy rule and, since
-	// round 4/5, FinalizeTimeoutLift — the overturn effects themselves
-	// (LiftTimeoutByActionID, UnbanUser's ledger half, warning acknowledged)
-	// run at the DB layer, inside DecideAppealTx's own transaction (F1
-	// review), never through a second ModerationService call.
+	// moderation is used for requireOverturnAuthority (the outrank check and,
+	// for a ban, BAN_MEMBERS) and, since round 4/5, FinalizeTimeoutLift — the
+	// overturn effects themselves (LiftTimeoutByActionID, UnbanUser's ledger
+	// half, warning acknowledged) run at the DB layer, inside DecideAppealTx's
+	// own transaction (F1 review), never through a second ModerationService
+	// call.
 	moderation *ModerationService
 	limiter    *auth.RateLimiter
 	notifier   AppealStatusNotifier
@@ -548,13 +549,15 @@ var validAppealOutcomes = map[string]bool{"upheld": true, "overturned": true}
 var ErrReversalFailed = fmt.Errorf("%w: could not apply the decision's effect", ErrConflict)
 
 // Decide records outcome ("upheld" or "overturned") against appeal
-// publicID. The self-review eligibility count, the guarded write (on the
-// OBSERVED state/assignee, Claim 5), and — for an overturn — the
-// kind-specific reversal all run in ONE transaction (db.DecideAppealTx,
-// F1/F2/F3/N1 review): a moderator banned or erased between the count and
-// the write, or a reversal that genuinely fails, cannot land a decision the
-// data no longer supports. Upholding changes nothing further. Both audit
-// appeal_decide with the outcome word.
+// publicID. An overturn first passes requireOverturnAuthority — the decider
+// must outrank the sanctioned target and, for a ban, hold BAN_MEMBERS, the
+// same authority the direct reversal path enforces. The self-review
+// eligibility count, the guarded write (on the OBSERVED state/assignee,
+// Claim 5), and — for an overturn — the kind-specific reversal all run in ONE
+// transaction (db.DecideAppealTx, F1/F2/F3/N1 review): a moderator banned or
+// erased between the count and the write, or a reversal that genuinely fails,
+// cannot land a decision the data no longer supports. Upholding changes
+// nothing further. Both audit appeal_decide with the outcome word.
 func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, outcome, note string) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
@@ -582,6 +585,11 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	action, err := s.st.GetModerationAction(ctx, appeal.ActionID)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	if outcome == "overturned" {
+		if err := s.requireOverturnAuthority(ctx, actorID, action); err != nil {
+			return err
+		}
 	}
 
 	needsSelfReviewCheck := action.ActorID != 0 && action.ActorID == actorID

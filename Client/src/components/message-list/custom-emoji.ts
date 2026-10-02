@@ -14,7 +14,7 @@
 
 import { createElement } from "@lib/dom";
 import { resolveEmoji, type CustomEmoji } from "@stores/emoji.store";
-import { fetchImageAsDataUrl, resolveServerUrl } from "./attachments";
+import { fetchImageAsObjectUrl, recoverEvictedImage, resolveServerUrl } from "./attachments";
 
 /**
  * A `:shortcode:` token. Case-insensitive on the way in (the store lowercases
@@ -98,8 +98,10 @@ export function buildCustomEmojiImage(emoji: CustomEmoji): HTMLImageElement {
     "data-shortcode": emoji.shortcode,
     draggable: "false",
   });
-  void fetchImageAsDataUrl(resolveServerUrl(emoji.url)).then((dataUrl) => {
-    if (dataUrl !== null) img.src = dataUrl;
+  const url = resolveServerUrl(emoji.url);
+  recoverEvictedImage(img, { url });
+  void fetchImageAsObjectUrl(url).then((objectUrl) => {
+    if (objectUrl !== null) img.src = objectUrl;
   });
   return img;
 }

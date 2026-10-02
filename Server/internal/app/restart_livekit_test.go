@@ -115,7 +115,7 @@ func TestAppRun_RestartReleasesManagedCompanionBeforeHandoff(t *testing.T) {
 	listeners := waitForRestartCompanion(t, filepath.Join(a.cfg.Server.DataDir, "restart-listeners.json"))
 	spawns := 0
 	prev := spawnReplacement
-	spawnReplacement = func(string, []string) error {
+	spawnReplacement = func(string, []string) (func() int, error) {
 		spawns++
 		if err := a.database.PingRead(t.Context()); err == nil {
 			t.Error("replacement spawned before the previous database handle closed")
@@ -123,26 +123,26 @@ func TestAppRun_RestartReleasesManagedCompanionBeforeHandoff(t *testing.T) {
 		nextDB, err := db.Open(a.cfg.Database.Path)
 		if err != nil {
 			t.Errorf("replacement cannot acquire the database process lock: %v", err)
-			return err
+			return nil, err
 		}
 		defer nextDB.Close()
 		for _, addr := range []string{fmt.Sprintf("127.0.0.1:%d", port), listeners.TCP} {
 			next, err := net.Listen("tcp4", addr)
 			if err != nil {
 				t.Errorf("replacement cannot bind previous TCP listener %s: %v", addr, err)
-				return err
+				return nil, err
 			}
 			if err := next.Close(); err != nil {
 				t.Errorf("closing replacement TCP listener: %v", err)
-				return err
+				return nil, err
 			}
 		}
 		nextUDP, err := net.ListenPacket("udp4", listeners.UDP)
 		if err != nil {
 			t.Errorf("replacement cannot bind previous companion UDP listener: %v", err)
-			return err
+			return nil, err
 		}
-		return nextUDP.Close()
+		return nil, nextUDP.Close()
 	}
 	defer func() { spawnReplacement = prev }()
 

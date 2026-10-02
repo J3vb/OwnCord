@@ -203,6 +203,8 @@ const CONFIG_FACTS = {
   moderation_action_retention_days: 90,
   gif_configured: true,
   github_configured: false,
+  upload_blocked_extensions: ["bat", "ps1"],
+  upload_allowed_extensions: [],
   // A field the card does not know must not be rendered: were the server
   // ever to send a secret, the card still would not show it.
   gif_api_key: "klipy-secret",
@@ -258,6 +260,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "General",
       "Access & registration",
       "Security",
+      "Upload file types",
       "Running configuration",
     ]);
     // Config-file values are facts from GET /config, not inputs that do nothing.
@@ -666,6 +669,43 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
     expect(modal.classList.contains("visible")).toBe(true);
   });
 
+  // A single backup can be large, so like the full archive it is never
+  // fetched into a Blob: the panel asks for that file's single-use link with
+  // its Bearer auth and opens the link as a plain navigation.
+  it("downloads one backup through its single-use link, never a Blob", async () => {
+    const fetchCalls: FetchCall[] = [];
+    const booted = await boot(
+      fetchCalls,
+      respondWith({
+        [`POST /backups/${BACKUP}/link`]: {
+          json: { path: `/admin/api/backups/${BACKUP}/download?token=TOK-B` },
+        },
+      }),
+    );
+    dom = booted.dom;
+    const { window } = dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    booted.bridge.state.token = "SESSION";
+    booted.bridge.state.section = "backups";
+    const content = await render(booted.bridge, window, booted.bridge.renderBackups);
+    const clicked: string[] = [];
+    window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      clicked.push(this.href);
+    };
+
+    const button = content.querySelector<HTMLButtonElement>('[data-action="downloadBackup"]');
+    expect(button?.getAttribute("aria-label")).toBe(`Download ${BACKUP}`);
+    fetchCalls.length = 0;
+    button!.click();
+    await expect
+      .poll(() => clicked)
+      .toEqual([`http://localhost:8080/admin/api/backups/${BACKUP}/download?token=TOK-B`]);
+    expect(fetchCalls.map((c) => `${c.method} ${c.path}`)).toContain(
+      `POST /backups/${BACKUP}/link`,
+    );
+    expect(fetchCalls.some((c) => c.path.includes("/download"))).toBe(false);
+  });
+
   it("lets a failed restore close again", async () => {
     const booted = await boot(
       [],
@@ -860,5 +900,102 @@ describe("Server/admin/static — Plugins empty state (A6)", () => {
     expect(doc.querySelector(".empty-state")).toBeNull();
     expect(doc.querySelector("#pluginFile")).toBeNull();
     expect(doc.querySelector(".tbl")).toBeNull();
+  });
+});
+
+// The owner's upload file-type policy: config.yaml's lists show until the
+// owner saves their own, and only the owner can edit them.
+describe("Server/admin/static — upload file types", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  const field = (document: Document, key: string) =>
+    document.getElementById(`s-${key}`) as HTMLInputElement;
+
+  it("shows config.yaml's lists and saves only the list the owner changed, normalized", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+
+    const blocked = field(document, "upload_blocked_extensions");
+    const allowed = field(document, "upload_allowed_extensions");
+    expect(blocked.value).toBe("bat, ps1");
+    expect(allowed.value).toBe("");
+    expect(blocked.disabled).toBe(false);
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    // The same list, spelled differently, is not a change.
+    blocked.value = ".BAT ps1";
+    blocked.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    expect(save.disabled).toBe(true);
+
+    allowed.value = ".PNG, jpg jpg";
+    allowed.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    expect(save.disabled).toBe(false);
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      upload_allowed_extensions: "png,jpg",
+    });
+  });
+
+  it("shows a list the owner saved instead of config.yaml's", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /settings": { json: { ...LOADED_SETTINGS, upload_blocked_extensions: "" } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(field(dom.window.document, "upload_blocked_extensions").value).toBe("");
+  });
+
+  it("keeps config.yaml's lists as the baseline after a save, so a later save sends only its own edit", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(
+      calls,
+      respondWith({
+        "PATCH /settings": { json: { ...LOADED_SETTINGS, server_name: "Renamed" } },
+      }),
+    );
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    const input = (key: string, value: string) => {
+      field(document, key).value = value;
+      field(document, key).dispatchEvent(new dom!.window.Event("input", { bubbles: true }));
+    };
+
+    input("server_name", "Renamed");
+    await booted.bridge.saveSettings();
+    input("motd", "New MOTD");
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      motd: "New MOTD",
+    });
+  });
+
+  it("is read-only for anyone but the owner", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
+    const content = await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    for (const key of ["upload_blocked_extensions", "upload_allowed_extensions"]) {
+      expect(field(document, key).disabled).toBe(true);
+    }
+    expect(content.textContent).toContain("Only the server owner can change the file types");
   });
 });

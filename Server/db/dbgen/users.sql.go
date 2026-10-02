@@ -8,6 +8,7 @@ package dbgen
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const approvePendingUser = `-- name: ApprovePendingUser :execresult
@@ -140,6 +141,19 @@ type DenyPendingUserParams struct {
 
 func (q *Queries) DenyPendingUser(ctx context.Context, arg DenyPendingUserParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, denyPendingUser, arg.Username, arg.ID)
+}
+
+const getMemberGeneration = `-- name: GetMemberGeneration :one
+SELECT generation FROM member_generation WHERE id = 1
+`
+
+// The member generation (migration 057): bumped by every write that can
+// change what ListMembers returns, except users.status.
+func (q *Queries) GetMemberGeneration(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getMemberGeneration)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
@@ -305,21 +319,23 @@ func (q *Queries) ListPendingUsers(ctx context.Context, arg ListPendingUsersPara
 	return items, nil
 }
 
-const markUserDisconnected = `-- name: MarkUserDisconnected :exec
-UPDATE users
-SET status = CASE WHEN status = 'online' THEN 'offline' ELSE status END,
-    last_seen = datetime('now')
-WHERE id = ?
+const nextMemberBanLapse = `-- name: NextMemberBanLapse :one
+SELECT CAST(COALESCE(MIN(replace(ban_expires, ' ', 'T')), '') AS TEXT)
+FROM users
+WHERE banned != 0
+  AND ban_expires IS NOT NULL
+  AND replace(ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 `
 
-// Disconnect bookkeeping. It clears only 'online', which is the one status
-// that means "has a live session"; idle, dnd and invisible are choices the
-// user made and are what the next connect reads instead of stamping online
-// (db.ConnectStatus). A stale choice never renders as "present" because the
-// read path treats a member with no live connection as offline regardless.
-func (q *Queries) MarkUserDisconnected(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, markUserDisconnected, id)
-	return err
+// The earliest instant at which a user ListMembers currently hides for a
+// temporary ban will reappear, as the same normalised text ListMembers
+// compares against strftime('now'), or ” when no such ban is pending. A
+// lapse is a change nothing writes, so a cached member list must expire here.
+func (q *Queries) NextMemberBanLapse(ctx context.Context) (string, error) {
+	row := q.db.QueryRowContext(ctx, nextMemberBanLapse)
+	var column_1 string
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const resetAllUserStatuses = `-- name: ResetAllUserStatuses :exec
@@ -331,6 +347,63 @@ UPDATE users SET status = 'offline' WHERE status = 'online'
 // survive a disconnect.
 func (q *Queries) ResetAllUserStatuses(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, resetAllUserStatuses)
+	return err
+}
+
+const stampUsersConnected = `-- name: StampUsersConnected :exec
+UPDATE users
+SET status = CASE WHEN status IN ('idle', 'dnd', 'invisible') THEN status ELSE 'online' END,
+    last_seen = datetime('now')
+WHERE id IN (/*SLICE:ids*/?)
+`
+
+// Connect bookkeeping, db.ConnectStatus in SQL: a chosen idle, dnd or
+// invisible survives, anything else comes online, and last_seen is refreshed.
+// It reads the column at write time rather than taking a status from the
+// caller, so a batched stamp (P5-S07) keeps an idle, dnd or invisible that a
+// presence_update committed while it waited. A legacy 'offline' choice would
+// become 'online', so a committed presence_update drops the pending stamp
+// (ChannelService.HandlePresenceUpdate); only a flush already in flight can
+// still land once over that 'offline'.
+func (q *Queries) StampUsersConnected(ctx context.Context, ids []int64) error {
+	query := stampUsersConnected
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
+	return err
+}
+
+const stampUsersDisconnected = `-- name: StampUsersDisconnected :exec
+UPDATE users
+SET status = CASE WHEN status = 'online' THEN 'offline' ELSE status END,
+    last_seen = datetime('now')
+WHERE id IN (/*SLICE:ids*/?)
+`
+
+// Disconnect bookkeeping. It clears only 'online', which is the one status
+// that means "has a live session"; idle, dnd and invisible are choices the
+// user made and are what the next connect reads instead of stamping online
+// (db.ConnectStatus). A stale choice never renders as "present" because the
+// read path treats a member with no live connection as offline regardless.
+func (q *Queries) StampUsersDisconnected(ctx context.Context, ids []int64) error {
+	query := stampUsersDisconnected
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	_, err := q.db.ExecContext(ctx, query, queryParams...)
 	return err
 }
 

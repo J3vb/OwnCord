@@ -46,6 +46,17 @@ func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customSta
 	return nil
 }
 
+// UpdateUserPresence writes a presence_update's status and custom status line
+// in one transaction, so the two commit together or not at all (P5-O08).
+func (d *DB) UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error {
+	return d.inWriteTx(ctx, "UpdateUserPresence", func(q *dbgen.Queries) error {
+		if err := q.UpdateUserStatus(ctx, dbgen.UpdateUserStatusParams{Status: status, ID: userID}); err != nil {
+			return err
+		}
+		return q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{CustomStatus: customStatus, ID: userID})
+	})
+}
+
 // IsAvatarFileURL reports whether url is currently some user's avatar. It is
 // the authorization check that lets an uploaded avatar — an attachment with no
 // channel, and therefore private to its uploader by default — be served to
@@ -118,16 +129,33 @@ func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) err
 	return nil
 }
 
-// DeleteUserSessions removes every session of the user — the caller's own
-// included — and reports how many went. Sign-out-everywhere (B4-7).
-func (d *DB) DeleteUserSessions(ctx context.Context, userID int64) (int64, error) {
-	result, err := d.q.DeleteUserSessions(ctx, userID)
+// SignOutEverywhere revokes every session of the user — the caller's own
+// included — and every live API token in one transaction, so either both go
+// or neither does, and reports how many of each went (B4-7).
+func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error) {
+	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("DeleteUserSessions: %w", err)
+		return 0, 0, fmt.Errorf("SignOutEverywhere begin: %w", err)
 	}
-	rows, err := result.RowsAffected()
+	defer tx.Rollback() //nolint:errcheck
+	q := d.q.WithTx(tx)
+
+	tokRes, err := q.RevokeUserAPITokens(ctx, userID)
 	if err != nil {
-		return 0, fmt.Errorf("DeleteUserSessions rows: %w", err)
+		return 0, 0, fmt.Errorf("SignOutEverywhere api tokens: %w", err)
 	}
-	return rows, nil
+	if tokens, err = tokRes.RowsAffected(); err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere api tokens rows: %w", err)
+	}
+	sessRes, err := q.DeleteUserSessions(ctx, userID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere sessions: %w", err)
+	}
+	if sessions, err = sessRes.RowsAffected(); err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere sessions rows: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("SignOutEverywhere commit: %w", err)
+	}
+	return sessions, tokens, nil
 }

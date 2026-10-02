@@ -50,10 +50,12 @@ const (
 	MsgTypeChatSendOK          = "chat_send_ok"
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
+	MsgTypeChatPinned          = "chat_pinned" // a message was pinned or unpinned in a channel the recipient can read
 	MsgTypeChatBulkDeleted     = "chat_bulk_deleted"
 	MsgTypeReactionUpdate      = "reaction_update"
 	MsgTypeTyping              = "typing"
 	MsgTypePresence            = "presence"
+	MsgTypePresenceBatch       = "presence_batch" // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
 	MsgTypeChannelCreate       = "channel_create"
 	MsgTypeChannelUpdate       = "channel_update"
 	MsgTypeChannelDelete       = "channel_delete"

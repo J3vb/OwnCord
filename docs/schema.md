@@ -29,7 +29,7 @@ OwnCord uses a single SQLite database file (`data/chatserver.db`) with the pure-
 SQLite only allows one writer at a time. File-backed databases (the production
 mode) therefore run a split pool: a single-connection writer pool
 (`SetMaxOpenConns(1)`) plus a multi-connection read-only pool sized
-`max(4, NumCPU)` and clamped to 1–64, configurable via `database.max_readers`
+`max(8, 2× NumCPU)` and clamped to 1–64, configurable via `database.max_readers`
 (`Server/db/db.go`). Only in-memory databases (tests) keep the historical
 single shared connection.
 
@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 | `053_retention_revision.sql`                   | Adds a durable retention-policy revision and triggers covering server settings, channel overrides and cascade removal. Proposed previews compare this revision atomically when applied (RI-08).                                                                                                                                                                                                                                        |
 | `054_audit_action_index.sql`                   | Adds `idx_audit_log_action`, so the Dashboard's `SELECT DISTINCT action FROM audit_log` filter reads the index instead of scanning the unbounded log (PERF-09).                                                                                                                                                                                                                                                                        |
 | `055_invite_redemptions.sql`                   | Adds `invite_redemptions`, one row per invite use naming the redeemer, so a leaked invite can be traced (O1). `user_id` is nullable with no foreign key (the reports bare-id-plus-token shape): an account erasure keeps the row and nulls the link, cascaded away with the invitation when the creator is erased.                                                                                                                     |
+| `056_message_pinned_at.sql`                    | Adds `messages.pinned_at`, stamped when a message is pinned, so the pinned panel orders by pin recency instead of message id (a message pinned earlier now sorts below one pinned later). Rows pinned before this migration keep NULL and sort last.                                                                                                                                                                                   |
+| `057_member_generation.sql`                    | Adds `member_generation`, a one-row counter that triggers on `users` and `roles` bump in the same commit as every write that can change the ready payload's member list (join, ban, unban, role, profile, identity key, custom status, registration, role rename). `users.status` is deliberately not watched. The ready path shares one member-list read until the counter moves or a pending temporary ban lapses.                   |
 
 ---
 
@@ -112,7 +114,7 @@ CREATE TABLE IF NOT EXISTS schema_versions (
 
 <!-- gendocs:schema:start -->
 
-Generated from the migrated schema by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 55 tables: `sqlite_sequence` and the FTS5 shadow tables behind `messages_fts` are included; the `sqlite_stat*` tables `ANALYZE` writes are not, since they hold planner statistics and which of them exists depends on the SQLite build.
+Generated from the migrated schema by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 56 tables: `sqlite_sequence` and the FTS5 shadow tables behind `messages_fts` are included; the `sqlite_stat*` tables `ANALYZE` writes are not, since they hold planner statistics and which of them exists depends on the SQLite build.
 
 | Table                       | Columns                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Indexes                                                                                                                                             |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -132,10 +134,11 @@ Generated from the migrated schema by `cd Server && go run -tags otel,wazero ./c
 | `invite_redemptions`        | `id INTEGER PK`, `invite_id INTEGER NOT NULL`, `user_id INTEGER`, `redeemed_at TEXT NOT NULL`                                                                                                                                                                                                                                                                                                                                                                          | `idx_invite_redemptions_invite`, `idx_invite_redemptions_user`                                                                                      |
 | `invites`                   | `id INTEGER PK`, `code TEXT NOT NULL`, `created_by INTEGER NOT NULL`, `redeemed_by INTEGER`, `max_uses INTEGER`, `use_count INTEGER NOT NULL`, `expires_at TEXT`, `created_at TEXT NOT NULL`, `revoked INTEGER NOT NULL`                                                                                                                                                                                                                                               | `sqlite_autoindex_invites_1`                                                                                                                        |
 | `login_attempts`            | `id INTEGER PK`, `ip_address TEXT NOT NULL`, `username TEXT`, `success INTEGER NOT NULL`, `timestamp TEXT NOT NULL`                                                                                                                                                                                                                                                                                                                                                    | `idx_login_ip`                                                                                                                                      |
+| `member_generation`         | `id INTEGER PK`, `generation INTEGER NOT NULL`                                                                                                                                                                                                                                                                                                                                                                                                                         | —                                                                                                                                                   |
 | `message_delivery_receipts` | `user_id INTEGER NOT NULL PK`, `client_message_id TEXT NOT NULL PK`, `channel_id INTEGER NOT NULL`, `payload_hash BLOB NOT NULL`, `message_id INTEGER NOT NULL`, `timestamp TEXT NOT NULL`, `expires_at_ms INTEGER NOT NULL`                                                                                                                                                                                                                                           | `idx_message_delivery_receipts_expiry`, `sqlite_autoindex_message_delivery_receipts_1`                                                              |
 | `message_mentions`          | `message_id INTEGER NOT NULL PK`, `mentioned_user_id INTEGER NOT NULL PK`                                                                                                                                                                                                                                                                                                                                                                                              | `idx_message_mentions_user`, `sqlite_autoindex_message_mentions_1`                                                                                  |
 | `message_requests`          | `id INTEGER PK`, `sender_id INTEGER NOT NULL`, `recipient_id INTEGER NOT NULL`, `channel_id INTEGER NOT NULL`, `first_message_id INTEGER`, `state TEXT NOT NULL`, `created_at TEXT NOT NULL`, `decided_at TEXT`                                                                                                                                                                                                                                                        | `idx_message_requests_recipient_state`, `sqlite_autoindex_message_requests_1`                                                                       |
-| `messages`                  | `id INTEGER PK`, `channel_id INTEGER NOT NULL`, `user_id INTEGER NOT NULL`, `content TEXT NOT NULL`, `reply_to INTEGER`, `edited_at TEXT`, `deleted INTEGER NOT NULL`, `pinned INTEGER NOT NULL`, `timestamp TEXT NOT NULL`, `mentions_everyone INTEGER NOT NULL`                                                                                                                                                                                                      | `idx_messages_channel`, `idx_messages_pinned`, `idx_messages_reply_to`, `idx_messages_user`                                                         |
+| `messages`                  | `id INTEGER PK`, `channel_id INTEGER NOT NULL`, `user_id INTEGER NOT NULL`, `content TEXT NOT NULL`, `reply_to INTEGER`, `edited_at TEXT`, `deleted INTEGER NOT NULL`, `pinned INTEGER NOT NULL`, `timestamp TEXT NOT NULL`, `mentions_everyone INTEGER NOT NULL`, `pinned_at TEXT`                                                                                                                                                                                    | `idx_messages_channel`, `idx_messages_pinned`, `idx_messages_reply_to`, `idx_messages_user`                                                         |
 | `messages_fts`              | `content`                                                                                                                                                                                                                                                                                                                                                                                                                                                              | —                                                                                                                                                   |
 | `messages_fts_config`       | `k NOT NULL PK`, `v`                                                                                                                                                                                                                                                                                                                                                                                                                                                   | —                                                                                                                                                   |
 | `messages_fts_data`         | `id INTEGER PK`, `block BLOB`                                                                                                                                                                                                                                                                                                                                                                                                                                          | —                                                                                                                                                   |
@@ -336,8 +339,11 @@ connect. The collapse happens at read time instead (`db.BroadcastStatus` /
 `offline`, while the owner's own payloads keep the true value.
 
 A chosen `idle`/`dnd`/`invisible` therefore survives a disconnect (only
-`online` is cleared, by `MarkUserDisconnected`) and survives a server restart
-(`ResetAllUserStatuses` clears only `online`). It cannot render as "present" in
+`online` is cleared, by `StampUsersDisconnected`) and survives a server restart
+(`ResetAllUserStatuses` clears only `online`). The server batches the connect
+and disconnect stamps and writes them at most 2 seconds late
+(`service.ConnWrites`); a crash loses that window, and the boot-time reset
+clears the `online` it leaves behind. It cannot render as "present" in
 the meantime because the ready payload treats a member with no live connection
 as `offline` regardless of the column.
 
@@ -376,7 +382,7 @@ CREATE TABLE sessions (
 );
 ```
 
-Session TTL: 30 days. Token is stored as SHA-256 hash.
+Session TTL: 30 days after last use (`TouchSessions` slides `expires_at`), capped at 365 days after `created_at`. Touches are batched and flushed once a minute (and at shutdown), so `last_used` and the slide lag the use by at most 60 seconds; a flush never revives a lapsed row, so a session used in the last 60 seconds before its idle expiry can lapse before the flush slides it, signing the user out. Revocation deletes the row without waiting on it. Token is stored as SHA-256 hash.
 
 ---
 
@@ -399,8 +405,9 @@ Long-lived, revocable bearer tokens for headless clients (bots, CI, the introspe
 MCP tool). A token authenticates as `user_id`, inheriting that user's role/permissions,
 and is resolved by the same middleware as sessions (see `auth.ResolveTokenHash`). Only the
 SHA-256 hash is stored; the raw token is shown once at creation. `expires_at` NULL = never
-expires; `revoked_at` NULL = active. Mint/list/revoke via `server token …`. Separate from
-`sessions` so bulk logout and the per-user session cap never affect these.
+expires; `revoked_at` NULL = active. Mint/list/revoke via `server token …`. Kept in a
+separate table from `sessions` so the per-user session cap never affects these; the
+revocation paths are in [`docs/api.md`](api.md#api-tokens).
 
 ---
 
@@ -670,7 +677,10 @@ CREATE TABLE read_states (
 );
 ```
 
-`mention_count` is incremented on message insert for every mentioned user who
+`mention_count` is incremented shortly after message insert (a bounded worker
+batches a ~250 ms window of messages into one write per channel; deleting,
+purging or erasing a message flushes its pending write first) for every
+mentioned user who
 can read the channel, except the author and except users who have blocked the
 author. `@everyone` counts every reader; `@here` counts only readers whose
 _broadcast_ status is not `offline` — the column stores the status the user
@@ -949,7 +959,7 @@ Permissions are stored as an integer bitfield (31 bits used) in
 | 1   | `0x2`        | `READ_MESSAGES`    | View messages in text channels                                                                                                                                                                       |
 | 5   | `0x20`       | `ATTACH_FILES`     | Upload file attachments                                                                                                                                                                              |
 | 6   | `0x40`       | `ADD_REACTIONS`    | Add emoji reactions                                                                                                                                                                                  |
-| 9   | `0x200`      | `CONNECT_VOICE`    | Join voice channels                                                                                                                                                                                  |
+| 9   | `0x200`      | `CONNECT_VOICE`    | Join voice channels (outside a DM, `READ_MESSAGES` in the channel too)                                                                                                                               |
 | 10  | `0x400`      | `SPEAK_VOICE`      | Transmit audio in voice channels                                                                                                                                                                     |
 | 11  | `0x800`      | `USE_VIDEO`        | Enable camera in voice channels                                                                                                                                                                      |
 | 12  | `0x1000`     | `SHARE_SCREEN`     | Share screen in voice channels                                                                                                                                                                       |

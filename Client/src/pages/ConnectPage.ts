@@ -69,7 +69,12 @@ export function createConnectPage(
   showTotp(): void;
   showConnecting(): void;
   showAutoConnecting(serverName: string): void;
+  /** "Waiting for <server>… Cancel"; Cancel, typing and picking another server report `onAutoLoginCancel`. */
+  showServerWait(serverName: string, host: string): void;
+  hideServerWait(): void;
   showError(message: string): void;
+  /** A non-error informational message (pending approval), not the red banner. */
+  showNotice(message: string): void;
   resetToIdle(): void;
   updateHealthStatus(host: string, status: HealthStatus): void;
   /** Advisory per-row epoch badge; never disables Connect. */
@@ -139,6 +144,7 @@ export function createConnectPage(
     {
       signal,
       onServerClick(host: string, username?: string, autoConnect?: boolean) {
+        loginForm.cancelServerWaitUnless(host);
         loginForm.setHost(host);
         if (username) {
           loginForm.setCredentials(username);
@@ -386,7 +392,11 @@ export function createConnectPage(
     showTotp: () => loginForm.showTotp(),
     showConnecting: () => loginForm.showConnecting(),
     showAutoConnecting: (serverName: string) => loginForm.showAutoConnecting(serverName),
+    showServerWait: (serverName: string, host: string) =>
+      loginForm.showServerWait(serverName, host),
+    hideServerWait: () => loginForm.hideServerWait(),
     showError: (message: string) => loginForm.showError(message),
+    showNotice: (message: string) => loginForm.showNotice(message),
     resetToIdle: () => loginForm.resetToIdle(),
     updateHealthStatus: (host: string, status: HealthStatus) =>
       serverPanel.updateHealthStatus(host, status),

@@ -25,6 +25,7 @@ import {
   MOCK_MESSAGES,
   MOCK_MESSAGES_RICH,
   MOCK_PINNED_MESSAGES,
+  MOCK_READY_PAYLOAD,
   MOCK_ROLES,
   navigateToMainPageReady,
 } from "./helpers";
@@ -184,6 +185,8 @@ interface BootOptions {
   readonly routes?: readonly HttpRoute[];
   /** Overrides the `ready.roles` list (e.g. to strip MENTION_EVERYONE). */
   readonly roles?: readonly unknown[];
+  /** Overrides the `ready.members` list. */
+  readonly members?: unknown[];
 }
 
 async function bootComposer(page: Page, options: BootOptions = {}): Promise<void> {
@@ -201,13 +204,10 @@ async function bootComposer(page: Page, options: BootOptions = {}): Promise<void
       // `readyOverrides.roles` is honoured by buildReadyPayload but missing from
       // buildTauriMockScript's public option type; the cast bridges that (same
       // pattern as emoji-voicemod.parity.spec.ts).
-      ...(options.roles === undefined
-        ? {}
-        : {
-            readyOverrides: { roles: options.roles } as unknown as Parameters<
-              typeof buildTauriMockScript
-            >[0]["readyOverrides"],
-          }),
+      readyOverrides: {
+        ...(options.members === undefined ? {} : { members: options.members }),
+        ...(options.roles === undefined ? {} : { roles: options.roles }),
+      } as unknown as Parameters<typeof buildTauriMockScript>[0]["readyOverrides"],
     }),
   );
   await page.goto("/");
@@ -274,7 +274,8 @@ test.describe("Composer — mention autocomplete", () => {
 
   test("ArrowDown moves the active row and Enter inserts it", async ({ page }) => {
     // Two rows match "er" (otheruser and testuser), so the arrow key decides
-    // which one Enter picks; the first row is otheruser alphabetically.
+    // which one Enter picks; the first row is otheruser alphabetically. The
+    // only loaded message is the signed-in testuser's own, which never ranks.
     await textarea(page).fill("@er");
     await expect(mentionPopup(page)).toBeVisible();
     const first = page.locator("[data-testid='mention-option-otheruser']");
@@ -286,6 +287,52 @@ test.describe("Composer — mention autocomplete", () => {
 
     await textarea(page).press("Enter");
     await expect(textarea(page)).toHaveValue("@testuser ");
+  });
+});
+
+test.describe("Composer — mention ranking", () => {
+  test("ranks another member's recent message ahead of alphabetical order", async ({ page }) => {
+    // zuser sorts last alphabetically but spoke in the channel, so it leads the
+    // "er" matches. The signed-in testuser spoke more recently still, yet keeps
+    // its alphabetical place after otheruser.
+    const row = (id: number, user: { id: number; username: string }) => ({
+      ...MOCK_MESSAGES.messages[0]!,
+      id,
+      user: { ...user, avatar: "" },
+    });
+    await bootComposer(page, {
+      members: [
+        ...MOCK_READY_PAYLOAD.payload.members,
+        { id: 3, username: "zuser", avatar: "", status: "online", role: "member" },
+      ],
+      routes: [
+        {
+          pattern: "/channels/1/messages",
+          status: 200,
+          // Newest-first, as the history endpoint pages.
+          body: {
+            messages: [
+              row(202, { id: 1, username: "testuser" }),
+              row(201, { id: 3, username: "zuser" }),
+            ],
+            has_more: false,
+          },
+        },
+      ],
+    });
+
+    await textarea(page).fill("@er");
+    await expect(mentionPopup(page).locator(".ma-name")).toHaveText([
+      "@zuser",
+      "@otheruser",
+      "@testuser",
+    ]);
+    await expect(page.locator("[data-testid='mention-option-zuser']")).toHaveClass(
+      /ma-item--active/,
+    );
+
+    await textarea(page).press("Enter");
+    await expect(textarea(page)).toHaveValue("@zuser ");
   });
 });
 

@@ -2619,6 +2619,9 @@ itself gained one.
   `TestDecideAppealTx_ReversalFailureAbortsTheWholeTransaction`,
   `TestAppealQueries_DecideAppealTxAppliesEachReversalKind`,
   `TestAppeal_UpholdChangesNothing`).
+
+> **Superseded 2026-10-01 by the security-review fix in `fm/sec-appeal-rank`.** The claim above that a decider holding `MODERATE_MEMBERS` but not the standalone bits "still overturns", and the cited `TestAppeal_OverturnSucceedsWithoutOutrankOrMuteMembers` (deleted), no longer hold: overturning now requires the decider to strictly outrank the sanctioned target and, for a ban, to hold `BAN_MEMBERS`, and the rank half is re-checked live inside the decision transaction. The current rule is owned by [`docs/api.md`](../api.md#post-apiv1moderationappealsiddecide); the historical prose above is left unchanged.
+
 - **Protocol.** One new server→client type, `appeal_status`, to the
   appellant's own sockets — every device currently registered, with the
   decision note, which the spec gives them

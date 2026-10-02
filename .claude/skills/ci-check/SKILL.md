@@ -33,6 +33,7 @@ go vet ./...
 go test -race -timeout 20m ./...          # -timeout 20m matches CI; ws alone took 431 s here
 go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml), not just ./ws/
 go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/...  # plain leg: logstream_alloc_test.go is !race && !deadlock
+go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/        # plain leg: serve_ready_alloc_test.go is !race && !deadlock
 golangci-lint run                        # CI pins v2.13.2 — check `golangci-lint --version` first
 
 # `ci.yml` also runs these three first, in `Server Lint & Invariants`, so they
@@ -193,9 +194,7 @@ cargo install cargo-audit@0.22.1 --quiet && cargo audit   # CI runs this in taur
 
 `cargo audit` is the one gate here that turns red with **zero** local changes —
 an advisory published upstream breaks a branch that was clean yesterday. Check the
-advisory date before hunting your diff. It is skipped on Dependabot PRs by design
-(it overlaps the scanning that opened them), so a clean Dependabot run does not
-mean the advisory set is clean. The client equivalents, `npm audit --omit=dev
+advisory date before hunting your diff. The client equivalents, `npm audit --omit=dev
 --audit-level=high` and `knip`, **block** in `Client Static Checks`.
 
 `fallback_crypto` is `cfg(not(windows))`, so its tests compile to nothing on a

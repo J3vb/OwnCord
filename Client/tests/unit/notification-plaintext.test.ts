@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { markdownToPlainText } from "../../src/lib/markdown";
-import { notifyIncomingMessage } from "../../src/lib/notifications";
+import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -91,6 +91,7 @@ describe("markdownToPlainText", () => {
 describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
   beforeEach(() => {
     testPrefs.clear();
+    resetNotificationCoalescing();
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
     authStore.setState(() => ({
       token: "t",
@@ -151,6 +152,59 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
         body: string;
       };
       expect(call.body).toBe("hi Spoiler there");
+    });
+  });
+
+  it("an empty-content message with 2 attachments has the body 'sent 2 attachments'", async () => {
+    (invokeMock as ReturnType<typeof vi.fn>).mockClear();
+    testPrefs.set("desktopNotifications", true);
+    testPrefs.set("flashTaskbar", false);
+    testPrefs.set("notificationSounds", false);
+    testPrefs.set("notificationLevel", "all");
+
+    notifyIncomingMessage({
+      id: 1,
+      channel_id: 1,
+      user: { id: 2, username: "Bob", avatar: null },
+      content: "",
+      reply_to: null,
+      attachments: [
+        { id: "a1", filename: "a.png", size: 1, mime: "image/png", url: "/a.png" },
+        { id: "a2", filename: "b.png", size: 1, mime: "image/png", url: "/b.png" },
+      ],
+      timestamp: new Date().toISOString(),
+    });
+
+    await vi.waitFor(() => {
+      const call = invokeMock.mock.calls.find((c) => c[0] === "notify_message")![1] as {
+        body: string;
+      };
+      expect(call.body).toBe("sent 2 attachments");
+    });
+  });
+
+  it("an empty-content message with 1 attachment has the body 'sent an attachment'", async () => {
+    (invokeMock as ReturnType<typeof vi.fn>).mockClear();
+    testPrefs.set("desktopNotifications", true);
+    testPrefs.set("flashTaskbar", false);
+    testPrefs.set("notificationSounds", false);
+    testPrefs.set("notificationLevel", "all");
+
+    notifyIncomingMessage({
+      id: 1,
+      channel_id: 1,
+      user: { id: 2, username: "Bob", avatar: null },
+      content: "",
+      reply_to: null,
+      attachments: [{ id: "a1", filename: "a.png", size: 1, mime: "image/png", url: "/a.png" }],
+      timestamp: new Date().toISOString(),
+    });
+
+    await vi.waitFor(() => {
+      const call = invokeMock.mock.calls.find((c) => c[0] === "notify_message")![1] as {
+        body: string;
+      };
+      expect(call.body).toBe("sent an attachment");
     });
   });
 });

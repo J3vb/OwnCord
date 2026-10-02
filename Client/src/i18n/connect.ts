@@ -49,6 +49,10 @@ export const connectText = defineCatalog("connect", {
   "servers.autoLogin.enable": "Enable auto-login",
   "servers.autoLogin.enabled": "Auto-login enabled",
   "servers.delete": "Delete server",
+  "servers.deleteConfirmTitle": "Delete server?",
+  "servers.deleteConfirmBody":
+    "Remove {name} from your saved servers? Its remembered credential is deleted too.",
+  "servers.empty": "No saved servers yet — add one below.",
   // This number times one REST call through the desktop TLS tunnel (a fresh
   // connection and handshake per request, about 3× the network RTT), so it is
   // labelled "response time" rather than claimed to be a ping.
@@ -88,8 +92,10 @@ export const connectText = defineCatalog("connect", {
   "login.connecting": "Connecting…",
   "login.loggingIn": "Logging in…",
   "login.registering": "Registering…",
+  "login.serverBusyRetrying": "Server busy, retrying…",
   "login.registrationClosed": "Registration closed",
   "login.autoConnecting": "Auto-connecting...",
+  "login.waitingForServer": "Waiting for {server}…",
   "login.recoveryUnavailable": "Account recovery is unavailable.",
   "registration.closedNotice": "Registration is closed on this server.",
   "registration.approvalNotice":
@@ -186,6 +192,8 @@ export const connectText = defineCatalog("connect", {
     "Saved-password login is unavailable here — please type your password.",
   "session.autoLoginFailed": "Auto-login failed",
   "session.autoLoginFailedDetail": "Auto-login failed: {message}",
+  "session.connectTimeout":
+    "Couldn't reach this server — it may be offline. Check your connection and try again.",
   "session.loginFailedStatus": "Login failed ({status})",
   "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
 
@@ -196,6 +204,7 @@ export const connectText = defineCatalog("connect", {
   "app.dmCreateGroupFailed": "Failed to create group DM",
   "app.sendBeforeRestore":
     "The server was restored — check the conversation before sending this again.",
+  "app.loadHistoryFailed": "Failed to load message history",
 
   "dm.emptyGroup": "Empty group",
   "dm.unknownUser": "Unknown user",
@@ -205,6 +214,10 @@ export const connectText = defineCatalog("connect", {
   "notifications.mentioned": "{author} mentioned you in {channel}",
   "notifications.inChannel": "{author} in {channel}",
   "notifications.spoiler": "Spoiler",
+  "notifications.attachment": {
+    one: "sent an attachment",
+    other: "sent {count} attachments",
+  },
   "retention.kept": "keeps messages until they are deleted",
   "retention.deleted": {
     one: "deletes messages after {days} day",

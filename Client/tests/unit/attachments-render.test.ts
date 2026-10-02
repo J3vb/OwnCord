@@ -5,7 +5,7 @@
  * The sibling attachments-cache.test.ts covers cache invalidation flows.
  * This file covers the rendering paths and helper functions.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchMock, saveMock, writeFileMock, brokerImageMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
@@ -45,6 +45,13 @@ vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
+
+const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
+vi.mock("@lib/toast", () => ({
+  showToast: showToastMock,
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
 
 // Provide a minimal indexedDB stub that returns null from idbGet
 // so renderAttachment always goes through the network fetch path.
@@ -107,10 +114,15 @@ import {
   isSafeUrl,
   isTrustedServerUrl,
   clearAttachmentCaches,
-  uint8ToBase64,
   renderAttachment,
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
+  closeActiveLightbox,
 } from "../../src/components/message-list/attachments";
+import { authStore } from "@stores/auth.store";
+
+// jsdom implements no object URLs; server images are handed out as blob: URLs.
+URL.createObjectURL = vi.fn(() => "blob:test-image");
+URL.revokeObjectURL = vi.fn();
 
 describe("resolveServerUrl", () => {
   beforeEach(() => {
@@ -229,17 +241,6 @@ describe("isTrustedServerUrl", () => {
   });
 });
 
-describe("uint8ToBase64", () => {
-  it("encodes small arrays", () => {
-    const bytes = new Uint8Array([72, 101, 108, 108, 111]); // "Hello"
-    expect(uint8ToBase64(bytes)).toBe(btoa("Hello"));
-  });
-
-  it("handles empty arrays", () => {
-    expect(uint8ToBase64(new Uint8Array([]))).toBe("");
-  });
-});
-
 describe("renderAttachment — non-image file", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -311,6 +312,25 @@ describe("renderAttachment — non-image file", () => {
 
     await vi.waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({ defaultPath: "archive.zip" });
+    });
+  });
+
+  it("reports a failed download through a toast, not a native alert (F14)", async () => {
+    showToastMock.mockClear();
+    saveMock.mockResolvedValue("C:\\Downloads\\archive.zip");
+    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+
+    const el = renderAttachment({
+      id: "1",
+      url: "https://myserver.local:8443/file.zip",
+      filename: "archive.zip",
+      size: 2048,
+      mime: "application/zip",
+    });
+    (el.querySelector(".msg-file-download") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith(expect.stringContaining("403"), "error");
     });
   });
 
@@ -386,9 +406,54 @@ describe("renderAttachment — image with dimensions", () => {
 
     expect(el.style.minHeight).toBe("200px");
   });
+
+  it("shows a typed failure with retry when the image fetch fails (F14)", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+    const el = renderAttachment({
+      id: "1",
+      url: "https://myserver.local:8443/missing.png",
+      filename: "missing.png",
+      size: 1000,
+      mime: "image/png",
+    });
+
+    await vi.waitFor(() => {
+      expect(el.querySelector(".msg-media-fallback")).not.toBeNull();
+    });
+    const retry = el.querySelector(".msg-media-retry") as HTMLButtonElement;
+    expect(retry).not.toBeNull();
+    // The filename box must not sit there looking like it is still loading.
+    expect(el.querySelector(".placeholder-img.loading")).toBeNull();
+  });
+
+  it("a retry that succeeds replaces the failure line with the image", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+    const el = renderAttachment({
+      id: "1",
+      url: "https://myserver.local:8443/flaky.png",
+      filename: "flaky.png",
+      size: 1000,
+      mime: "image/png",
+    });
+    await vi.waitFor(() => {
+      expect(el.querySelector(".msg-media-fallback")).not.toBeNull();
+    });
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      headers: { get: () => "image/png" },
+      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+    });
+    (el.querySelector(".msg-media-retry") as HTMLButtonElement).click();
+
+    await vi.waitFor(() => {
+      expect(el.querySelector("img")).not.toBeNull();
+    });
+    expect(el.querySelector(".msg-media-fallback")).toBeNull();
+  });
 });
 
-describe("fetchImageAsDataUrl — network fetch failure", () => {
+describe("fetchImageAsObjectUrl — network fetch failure", () => {
   beforeEach(() => {
     clearAttachmentCaches();
     fetchMock.mockReset();
@@ -397,15 +462,21 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
 
   it("returns null when fetch response is not ok", async () => {
     fetchMock.mockResolvedValue({ ok: false });
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(result).toBeNull();
   });
 
   it("returns null and logs error when fetch throws", async () => {
     fetchMock.mockRejectedValue(new Error("network failure"));
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(result).toBeNull();
   });
+
+  /** The type of the Blob behind the last blob: URL handed out. */
+  function lastBlobType(): string {
+    const calls = vi.mocked(URL.createObjectURL).mock.calls;
+    return (calls[calls.length - 1]![0] as Blob).type;
+  }
 
   it("sanitizes unsafe content-type to application/octet-stream", async () => {
     fetchMock.mockResolvedValue({
@@ -414,22 +485,22 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(result).not.toBeNull();
     // Should use application/octet-stream, not text/html
-    expect(result!.startsWith("data:application/octet-stream;")).toBe(true);
+    expect(lastBlobType()).toBe("application/octet-stream");
   });
 
-  it("preserves safe content-type in data URL", async () => {
+  it("preserves safe content-type on the Blob", async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       headers: { get: () => "image/jpeg" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
-    const result = await fetchImageAsDataUrl("https://myserver.local:8443/img.jpg");
+    const result = await fetchImageAsObjectUrl("https://myserver.local:8443/img.jpg");
     expect(result).not.toBeNull();
-    expect(result!.startsWith("data:image/jpeg;")).toBe(true);
+    expect(lastBlobType()).toBe("image/jpeg");
   });
 
   it("routes server URLs through the cert-pinned proxy and external URLs to the broker", async () => {
@@ -442,7 +513,7 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
     // A server URL is rewritten to the loopback proxy origin (path + query
     // preserved) and carries no danger option — the proxy pins the cert. The
     // bearer token rides along when a session exists (none in this test).
-    await fetchImageAsDataUrl("https://myserver.local:8443/img.png");
+    await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png", { headers: {} });
 
     fetchMock.mockReset();
@@ -451,10 +522,75 @@ describe("fetchImageAsDataUrl — network fetch failure", () => {
 
     // A third-party URL never reaches a direct fetch: the external-content
     // broker owns it (B7-16), and a refusal there is simply no image.
-    await expect(fetchImageAsDataUrl("https://cdn.example.com/img.png")).resolves.toBeNull();
+    await expect(fetchImageAsObjectUrl("https://cdn.example.com/img.png")).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(brokerImageMock).toHaveBeenCalledWith(expect.any(String), {
       url: "https://cdn.example.com/img.png",
     });
+  });
+});
+
+// P4-08: a server that advertises upload_policy.thumbnails serves a bounded
+// preview at /api/v1/files/{id}/thumb; the inline image uses it, and the full
+// file loads only when the image is opened.
+describe("renderAttachment — server thumbnails", () => {
+  const att = {
+    id: "abc",
+    url: "/api/v1/files/abc",
+    filename: "photo.jpg",
+    size: 4_000_000,
+    mime: "image/jpeg",
+    width: 4000,
+    height: 3000,
+  };
+  const okImage = {
+    ok: true,
+    headers: { get: () => "image/jpeg" },
+    arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
+  };
+  const fetchedPaths = (): string[] =>
+    fetchMock.mock.calls.map((call) => new URL(String(call[0])).pathname);
+
+  beforeEach(() => {
+    clearAttachmentCaches();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(okImage);
+    setServerHost("myserver.local:8443");
+  });
+
+  afterEach(() => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: null }));
+    closeActiveLightbox();
+  });
+
+  it("requests /thumb for an image row when the server has thumbnails", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
+  });
+
+  it("requests the original for a GIF row, which the server passes through", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment({ ...att, filename: "anim.gif", mime: "image/gif" });
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc"]);
+  });
+
+  it("requests the original from a server without thumbnails", async () => {
+    const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    expect(fetchedPaths()).toEqual(["/api/v1/files/abc"]);
+  });
+
+  it("opening a thumbnail loads the original into the lightbox", async () => {
+    authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+    const el = renderAttachment(att);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+    (el.querySelector("img") as HTMLImageElement).click();
+    await vi.waitFor(() =>
+      expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb", "/api/v1/files/abc"]),
+    );
+    expect(document.querySelector(".image-lightbox img")).not.toBeNull();
   });
 });

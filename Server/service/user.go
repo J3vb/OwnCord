@@ -17,6 +17,10 @@ import (
 type UserService struct {
 	st           Store
 	profileLocks keyedMutex
+	// batch, when set, queues the connection stamps instead of writing them
+	// (P5-S07). nil writes each at once, which is what tests and the admin
+	// panel's own instance get.
+	batch *ConnWrites
 }
 
 // NewUserService creates a UserService.
@@ -421,26 +425,25 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 }
 
 // RevokeAllSessions is sign-out-everywhere (B4-7, BG-08): every session of
-// the user goes, the caller's own included, so a stolen token anywhere stops
-// working now and the caller re-authenticates. Returns how many were
-// revoked; zero is not an error (an API-token principal has none).
+// the user goes, the caller's own included, and so does every API token, so
+// a stolen credential anywhere stops working now and the caller
+// re-authenticates. Returns how many sessions were revoked.
 func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
-	n, err := s.st.DeleteUserSessions(ctx, userID)
+	n, tokens, err := s.st.SignOutEverywhere(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
 	}
-	if n == 0 {
-		// Nothing changed, so there is nothing to audit: an API-token
-		// principal keeps its (session-less) credential and could otherwise
-		// grow the audit log one row per call (Codex P2 on PR #1500).
-		slog.Debug("sign-out-everywhere found no session to revoke", "user_id", userID)
+	if n == 0 && tokens == 0 {
+		// Nothing changed, so there is nothing to audit (Codex P2 on PR
+		// #1500): a repeated call cannot grow the audit log.
+		slog.Debug("sign-out-everywhere found nothing to revoke", "user_id", userID)
 		return 0, nil
 	}
 	// Audit rows must survive a request canceled after the delete committed.
-	// The row names the account and the count, never a token or a device.
+	// The row names the account and the counts, never a token or a device.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,
-		fmt.Sprintf("signed out everywhere (%d sessions revoked)", n))
-	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n)
+		fmt.Sprintf("signed out everywhere (%d sessions, %d API tokens revoked)", n, tokens))
+	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n, "api_tokens_revoked", tokens)
 	return n, nil
 }
 
@@ -515,7 +518,7 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 // on purpose — the second is only correct because of what the first chose to
 // preserve.
 
-// StampConnect writes the status this session comes online as and returns it.
+// StampConnect records the status this session comes online as and returns it.
 //
 // It is db.ConnectStatus(saved), not a flat "online": stamping online on every
 // connect is what made a saved Do Not Disturb — and, before this phase, an
@@ -524,12 +527,26 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 // choices and survive; anything else becomes online. The write still happens
 // when the status is unchanged, because it also refreshes last_seen.
 //
-// The caller must not cache the returned status unless the error is nil: a
-// value the users row disagrees with is exactly the divergence OC-0298 is
-// about.
+// With a batch installed the write is queued and lands on the next flush, at
+// most StampFlushInterval later. The member list does not wait on it (the hub
+// overlays each connection's live status, ws presentableMembers, and @here
+// and DM payloads read the same live status); a reader of the row itself may
+// see the pre-connect value for that long.
+// The SQL re-derives the status from the column at write time, which keeps
+// a chosen idle/dnd/invisible committed meanwhile, but it would turn a legacy
+// "offline" choice into online, so a committed presence_update drops the
+// pending stamp (ChannelService.HandlePresenceUpdate). A flush already in
+// flight when the presence_update commits can still land once, affecting
+// only that legacy "offline" value.
+//
+// The caller must not cache the returned status unless the error is nil.
 func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {
 	status := db.ConnectStatus(savedStatus)
-	if err := s.st.UpdateUserStatus(ctx, userID, status); err != nil {
+	if s.batch != nil {
+		s.batch.queueStamp(userID, true)
+		return status, nil
+	}
+	if err := s.st.StampConnections(ctx, []int64{userID}, nil); err != nil {
 		return "", fmt.Errorf("%w: failed to stamp connect status: %w", ErrInternal, err)
 	}
 	return status, nil
@@ -541,10 +558,19 @@ func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatu
 // idle/dnd/invisible is left standing, which is what StampConnect reads back
 // on the next connect. The stale-choice that leaves behind is handled at read
 // time instead: a member with no live connection renders offline whatever the
-// column says.
+// column says. A batched stamp lost to a crash leaves "online" behind, which
+// the boot-time ResetAllUserStatuses clears.
 func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
-	if err := s.st.MarkUserDisconnected(ctx, userID); err != nil {
+	if s.batch != nil {
+		s.batch.queueStamp(userID, false)
+		return nil
+	}
+	if err := s.st.StampConnections(ctx, nil, []int64{userID}); err != nil {
 		return fmt.Errorf("%w: failed to stamp disconnect: %w", ErrInternal, err)
 	}
 	return nil
 }
+
+// SetConnWrites installs the batch the connection stamps queue into. Call
+// once at startup, before the service is shared.
+func (s *UserService) SetConnWrites(w *ConnWrites) { s.batch = w }

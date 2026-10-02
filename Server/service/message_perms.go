@@ -150,8 +150,8 @@ func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, 
 // channelSubject resolves what the channel predicates need for userID in ch:
 // role bits and both override layers from the permission cache, the
 // channel's flags, and for a DM its membership and, when withBlock is set,
-// the two-party block state. A perms.Subject failure (which now includes an
-// uncached HasActiveTimeout lookup, B5-9) is PROPAGATED rather than
+// the two-party block state. A perms.Subject failure (which now includes the
+// timeout lookup, B5-9) is PROPAGATED rather than
 // collapsed into a permissive zero-bit Subject (P2-11, Codex review): a
 // zero Subject fails closed for a non-DM channel (no SEND_MESSAGES bit,
 // TimedOut also defaults false) but a DM's CanSendMessage/CanAddReaction
@@ -199,6 +199,23 @@ func denial(err error) error {
 	default:
 		return fmt.Errorf("%w: %w", ErrForbidden, err)
 	}
+}
+
+// requireNotTimedOut is CanSendMessage's timeout clause for the writes a
+// timeout refuses beyond sends, edits, reactions and voice joins, which have
+// no channel predicate of their own: creating a new DM or group DM, renaming
+// a group DM, ringing a DM call, pinning in a DM, and setting a custom status.
+// TimedOut is resolved exactly as for a send (administrators exempt) and
+// refused with the same ErrTimedOut.
+func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID int64) error {
+	sub, err := perms.Subject(ctx, userID, 0)
+	if err != nil {
+		return fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
+	}
+	if sub.TimedOut {
+		return denial(permissions.ErrTimedOut)
+	}
+	return nil
 }
 
 // readSubject resolves what CanReadContent needs for userID in ch: role bits

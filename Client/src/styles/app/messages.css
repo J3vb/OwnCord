@@ -44,6 +44,17 @@
   padding: 48px 0;
   color: var(--text-muted);
 }
+/* Older-page spinner: overlays the scroller's top padding, so it moves no row. */
+.messages-older-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
 .messages-loading .spinner {
   width: 24px;
   height: 24px;
@@ -483,8 +494,22 @@
   padding: 12px 16px;
   max-width: 520px;
 }
+/* The flex display above would otherwise beat the UA's [hidden] rule. */
+.msg-embed-link[hidden] {
+  display: none;
+}
 .msg-embed-link-content {
   min-width: 0;
+}
+/* DP-44: a link preview holds no space until its metadata settles, so the row
+   grows once rather than twice. Kept focusable (not display:none) so the
+   consent hand-off can focus the card's link. */
+.msg-embed-link-pending {
+  height: 0;
+  margin-top: 0;
+  padding: 0;
+  border-left-width: 0;
+  overflow: hidden;
 }
 .msg-embed-host {
   font-size: var(--font-size-xs);
@@ -1066,6 +1091,44 @@ ul.md-list-nested {
   margin-top: 6px;
   height: 32px;
 }
+.msg-audio audio[hidden] {
+  display: none;
+}
+
+/* Stands in for a video/audio player until the clip is wanted: nothing is
+   downloaded before it is pressed. */
+.msg-media-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: var(--scrim);
+  color: var(--on-fill);
+  cursor: pointer;
+}
+.msg-media-play:hover {
+  background: var(--scrim-strong);
+}
+.msg-media-play:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.msg-video .msg-media-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+.msg-audio .msg-media-play {
+  width: 32px;
+  height: 32px;
+  margin-top: 6px;
+}
 
 /* A media attachment whose authenticated fetch failed keeps its download
    affordance; the player is just dimmed so it does not read as loading. */
@@ -1240,9 +1303,6 @@ ul.md-list-nested {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   flex-shrink: 0;
-}
-.typing-bar:empty {
-  height: 0;
 }
 .typing-dots {
   display: inline-flex;

@@ -91,9 +91,10 @@ test.describe("TOTP Submission Flow", () => {
     const verifyBtn = page.locator(".totp-overlay button.btn-primary");
     await verifyBtn.click();
 
-    // Should transition to connected overlay
-    const overlay = page.locator(".connected-overlay");
-    await expect(overlay).toBeVisible({ timeout: 5000 });
+    // Should transition to the main app: the connected overlay hands off as
+    // soon as `ready` arrives, so assert the destination, not the transient
+    // overlay.
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 5000 });
   });
 
   test("submitting invalid code shows error banner", async ({ page }) => {

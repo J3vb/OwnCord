@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "2.0.1-beta.1",
+  "version": "2.1.0-beta.1",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
@@ -60,6 +60,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJCQkQ0NzM1MjkxRTlGQTIKUldTaW54NHBOVWU5dTRqYW0yalI5VTJBd0NXOUZwM2UrcDM4YkhCSmlMZWJKWWVXaGJWdHBaSHgK",
       "endpoints": [],
+      "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
       }

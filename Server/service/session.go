@@ -22,6 +22,10 @@ import (
 // depending on it would close a construction cycle.
 type SessionService struct {
 	st Store
+	// batch, when set, takes TouchSession's write off the writer's hot path
+	// (P5-S07). nil writes each touch at once, which is what tests and the
+	// admin panel's own instance get.
+	batch *ConnWrites
 }
 
 // NewSessionService creates a SessionService.
@@ -143,12 +147,24 @@ func (s *SessionService) SweepSessions(ctx context.Context, tokenHashes []string
 	return verdicts, nil
 }
 
-// TouchSession records that a login session was used, throttled by the caller
-// — the REST middleware only calls this once per interval per session so hot
-// API traffic does not queue a write per request.
+// TouchSession records that a login session was used and slides its expiry
+// (DP-05), throttled by the caller — the REST middleware and the WebSocket
+// hub each call this at most once per interval per session so hot traffic
+// does not queue a write per request. With a batch installed it only queues
+// the touch; the write lands on the next flush, at most TouchFlushInterval
+// later, which the 30-day sliding window absorbs. Revocation never waits on
+// it: a revoked row is gone, and the touch's WHERE never revives one.
 func (s *SessionService) TouchSession(ctx context.Context, tokenHash string) error {
-	return s.st.TouchSession(ctx, tokenHash)
+	if s.batch != nil {
+		s.batch.queueTouch(tokenHash)
+		return nil
+	}
+	return s.st.TouchSessions(ctx, []string{tokenHash})
 }
+
+// SetConnWrites installs the batch TouchSession queues into. Call once at
+// startup, before the service is shared.
+func (s *SessionService) SetConnWrites(w *ConnWrites) { s.batch = w }
 
 // TouchAPIToken records that an API token was used. The REST middleware calls
 // it off the hot path so bot and CI traffic pays no latency for it.

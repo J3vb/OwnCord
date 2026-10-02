@@ -5,9 +5,18 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
-import { EMOJI_NAMES } from "@components/emoji-keywords";
 import { messagingText } from "../i18n/messaging";
 import { resolveEmoji } from "@stores/emoji.store";
+import {
+  emojiCatalog,
+  emojiMatches,
+  loadEmojiCatalog,
+  setSkinTone,
+  skinTone,
+  withSkinTone,
+  SKIN_TONES,
+  type EmojiGroupKey,
+} from "../features/messaging/emojiCatalog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,270 +43,12 @@ export const SERVER_CATEGORY = "emoji.category.server" as const;
 
 /** A category heading; the key is resolved through the messaging catalog. */
 type EmojiCategoryKey =
-  | typeof SERVER_CATEGORY
-  | "emoji.category.recent"
-  | "emoji.category.smileys"
-  | "emoji.category.people"
-  | "emoji.category.nature"
-  | "emoji.category.food"
-  | "emoji.category.objects"
-  | "emoji.category.symbols";
-
-// ---------------------------------------------------------------------------
-// Built-in emoji data (common subset by category)
-// ---------------------------------------------------------------------------
+  typeof SERVER_CATEGORY | "emoji.category.recent" | `emoji.category.${EmojiGroupKey}`;
 
 interface EmojiCategory {
   readonly name: EmojiCategoryKey;
   readonly emoji: readonly string[];
 }
-
-const CATEGORIES: readonly EmojiCategory[] = [
-  {
-    name: "emoji.category.recent",
-    emoji: [], // populated at runtime from localStorage
-  },
-  {
-    name: "emoji.category.smileys",
-    emoji: [
-      "😀",
-      "😃",
-      "😄",
-      "😁",
-      "😆",
-      "😅",
-      "🤣",
-      "😂",
-      "🙂",
-      "😊",
-      "😇",
-      "🥰",
-      "😍",
-      "🤩",
-      "😘",
-      "😗",
-      "😋",
-      "😛",
-      "😜",
-      "🤪",
-      "😝",
-      "🤑",
-      "🤗",
-      "🤭",
-      "🤫",
-      "🤔",
-      "🤐",
-      "🤨",
-      "😐",
-      "😑",
-      "😶",
-      "😏",
-      "😒",
-      "🙄",
-      "😬",
-      "🤥",
-      "😌",
-      "😔",
-      "😪",
-      "🤤",
-      "😴",
-      "😷",
-      "🤒",
-      "🤕",
-      "🤢",
-      "🤮",
-      "🥵",
-      "🥶",
-      "🥴",
-      "😵",
-      "🤯",
-      "🤠",
-      "🥳",
-      "😎",
-      "🤓",
-      "🧐",
-      "😕",
-      "😟",
-      "🙁",
-      "😮",
-      "😲",
-      "😳",
-      "🥺",
-      "😢",
-      "😭",
-      "😤",
-      "😠",
-      "😡",
-      "🤬",
-      "💀",
-    ],
-  },
-  {
-    name: "emoji.category.people",
-    emoji: [
-      "👋",
-      "🤚",
-      "🖐",
-      "✋",
-      "🖖",
-      "👌",
-      "🤌",
-      "🤏",
-      "✌️",
-      "🤞",
-      "🤟",
-      "🤘",
-      "🤙",
-      "👈",
-      "👉",
-      "👆",
-      "👇",
-      "☝️",
-      "👍",
-      "👎",
-      "✊",
-      "👊",
-      "🤛",
-      "🤜",
-      "👏",
-      "🙌",
-      "👐",
-      "🤲",
-      "🤝",
-      "🙏",
-    ],
-  },
-  {
-    name: "emoji.category.nature",
-    emoji: [
-      "🐶",
-      "🐱",
-      "🐭",
-      "🐹",
-      "🐰",
-      "🦊",
-      "🐻",
-      "🐼",
-      "🐨",
-      "🐯",
-      "🦁",
-      "🐮",
-      "🐷",
-      "🐸",
-      "🐵",
-      "🐔",
-      "🐧",
-      "🐦",
-      "🐤",
-      "🦄",
-      "🌸",
-      "🌹",
-      "🌺",
-      "🌻",
-      "🌼",
-      "🌷",
-      "🌱",
-      "🌲",
-      "🌳",
-      "🍀",
-    ],
-  },
-  {
-    name: "emoji.category.food",
-    emoji: [
-      "🍎",
-      "🍊",
-      "🍋",
-      "🍌",
-      "🍉",
-      "🍇",
-      "🍓",
-      "🍒",
-      "🍑",
-      "🍍",
-      "🥝",
-      "🍔",
-      "🍟",
-      "🍕",
-      "🌭",
-      "🍿",
-      "🧀",
-      "🥚",
-      "🍳",
-      "🥓",
-      "☕",
-      "🍵",
-      "🍺",
-      "🍻",
-      "🥂",
-      "🍷",
-      "🍸",
-      "🍹",
-      "🍾",
-      "🧁",
-    ],
-  },
-  {
-    name: "emoji.category.objects",
-    emoji: [
-      "⚽",
-      "🏀",
-      "🏈",
-      "⚾",
-      "🎾",
-      "🎮",
-      "🎲",
-      "🎯",
-      "🎵",
-      "🎶",
-      "💡",
-      "🔥",
-      "⭐",
-      "🌟",
-      "💫",
-      "✨",
-      "💥",
-      "❤️",
-      "🧡",
-      "💛",
-      "💚",
-      "💙",
-      "💜",
-      "🖤",
-      "🤍",
-      "💯",
-      "💢",
-      "💬",
-      "👁‍🗨",
-      "🗨",
-    ],
-  },
-  {
-    name: "emoji.category.symbols",
-    emoji: [
-      "✅",
-      "❌",
-      "❓",
-      "❗",
-      "‼️",
-      "⁉️",
-      "💤",
-      "💮",
-      "♻️",
-      "🔰",
-      "⚠️",
-      "🚫",
-      "🔴",
-      "🟠",
-      "🟡",
-      "🟢",
-      "🔵",
-      "🟣",
-      "⚫",
-      "⚪",
-    ],
-  },
-];
 
 const MAX_RECENT = 20;
 const RECENT_KEY = "owncord:recent-emoji";
@@ -412,7 +163,36 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     placeholder: messagingText("emoji.searchPlaceholder"),
   });
   header.appendChild(searchInput);
+  // Skin tone for every emoji that has one, remembered across pickers and the
+  // composer's `:` popup. A native select keeps it one keyboard control.
+  const toneSelect = createElement("select", {
+    class: "ep-tone",
+    title: messagingText("emoji.skinTone"),
+    "aria-label": messagingText("emoji.skinTone"),
+  });
+  SKIN_TONES.forEach((mod, i) => {
+    toneSelect.appendChild(createElement("option", { value: String(i) }, `✋${mod}`));
+  });
+  toneSelect.value = String(skinTone());
+  header.appendChild(toneSelect);
   root.appendChild(header);
+
+  // Category bar: one button per category jumps its heading into view, as a
+  // single roving Tab stop (Left/Right between buttons). Built
+  // once from the unfiltered set and rebuilt only on mount, so the targets
+  // stay put while a search filters the grids underneath.
+  const categoryBar = createElement("div", {
+    class: "ep-categories",
+    role: "toolbar",
+    "aria-label": messagingText("emoji.categoriesLabel"),
+  });
+  root.appendChild(categoryBar);
+  enableRovingNavigation(categoryBar, ".ep-category-btn", signal);
+
+  // The picker grid is `.ep-grid { grid-template-columns: repeat(8, 1fr) }`,
+  // so roving navigation is a grid with eight columns (ArrowDown = one row
+  // within a category's grid).
+  const GRID_COLUMNS = 8;
 
   // Scrollable content area (holds category labels + grids). Announced as a
   // single flat listbox — the category grids are visual grouping only, and
@@ -423,7 +203,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     "aria-label": messagingText("emoji.listLabel"),
   });
   root.appendChild(scrollArea);
-  enableRovingNavigation(scrollArea, ".ep-emoji", signal);
+  enableRovingNavigation(scrollArea, ".ep-emoji", signal, "grid", GRID_COLUMNS);
 
   // Single delegated listener for the whole grid, registered once at mount
   // time. renderAllCategories() discards and rebuilds every cell on each
@@ -446,7 +226,30 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     { signal },
   );
 
-  // Build categories with recent + custom
+  function renderCategoryBar(categories: readonly EmojiCategory[]): void {
+    clearChildren(categoryBar);
+    for (const cat of categories) {
+      if (cat.emoji.length === 0) continue;
+      const btn = createElement(
+        "button",
+        { class: "ep-category-btn", type: "button", "data-category": cat.name },
+        messagingText(cat.name),
+      );
+      btn.addEventListener(
+        "click",
+        () => {
+          scrollArea
+            .querySelector(`.ep-category-label[data-category="${cat.name}"]`)
+            ?.scrollIntoView({ block: "start" });
+        },
+        { signal },
+      );
+      categoryBar.appendChild(btn);
+    }
+    setRovingTabindex(categoryBar, ".ep-category-btn");
+  }
+
+  // Build categories with recent + custom, then the Unicode set once loaded.
   function getAllCategories(): readonly EmojiCategory[] {
     const recent = getRecentEmoji();
     const cats: EmojiCategory[] = [{ name: "emoji.category.recent", emoji: recent }];
@@ -459,10 +262,12 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       });
     }
 
-    // Add built-in categories (skip the empty "Recent" placeholder)
-    for (const cat of CATEGORIES) {
-      if (cat.name === "emoji.category.recent") continue;
-      cats.push(cat);
+    const tone = skinTone();
+    for (const group of emojiCatalog()?.groups ?? []) {
+      cats.push({
+        name: `emoji.category.${group.key}`,
+        emoji: group.emoji.map((e) => withSkinTone(e, tone)),
+      });
     }
 
     return cats;
@@ -476,23 +281,32 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   function renderAllCategories(categories: readonly EmojiCategory[]): void {
     clearChildren(scrollArea);
 
+    // Shortcodes join words with "_", so "thumbs up" also searches as thumbs_up.
+    const raw = searchQuery.toLowerCase();
+    const q = raw.replace(/\s+/g, "_");
+    const byChar = emojiCatalog()?.byChar;
     for (const cat of categories) {
       if (cat.emoji.length === 0) continue;
 
-      const filtered = searchQuery
+      const filtered = q
         ? cat.emoji.filter((e) => {
-            const q = searchQuery.toLowerCase();
-            // Match against emoji name/keywords, or the character itself
-            const name = EMOJI_NAMES[e];
-            if (name !== undefined && name.includes(q)) return true;
-            // Also match custom emoji shortcodes like :wave:
-            return e.toLowerCase().includes(q);
+            // Match against emoji name/keywords (a toned Recent entry included)
+            const entry = byChar?.get(e);
+            if (entry !== undefined && (emojiMatches(entry, raw) || emojiMatches(entry, q))) {
+              return true;
+            }
+            // Also match the character itself and custom shortcodes like :wave:
+            const lower = e.toLowerCase();
+            return lower.includes(raw) || lower.includes(q);
           })
         : cat.emoji;
 
       if (filtered.length === 0) continue;
 
-      const label = createElement("div", { class: "ep-category-label" });
+      const label = createElement("div", {
+        class: "ep-category-label",
+        "data-category": cat.name,
+      });
       setText(label, messagingText(cat.name));
       scrollArea.appendChild(label);
 
@@ -503,8 +317,12 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       scrollArea.appendChild(grid);
     }
 
-    // If nothing rendered at all, show empty state
-    if (scrollArea.children.length === 0) {
+    if (emojiCatalog() === null && !loadFailed) {
+      scrollArea.appendChild(
+        createElement("div", { class: "ep-loading" }, messagingText("emoji.loading")),
+      );
+    } else if (scrollArea.children.length === 0) {
+      // Nothing rendered at all: show the empty state
       const empty = createElement(
         "div",
         {
@@ -520,8 +338,35 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     setRovingTabindex(scrollArea, ".ep-emoji");
   }
 
-  // Initial render
-  renderAllCategories(getAllCategories());
+  function renderAll(): void {
+    renderCategoryBar(getAllCategories());
+    renderAllCategories(getAllCategories());
+  }
+
+  // Initial render: Recent and Server straight away, the Unicode set when its
+  // lazy chunk lands (at once, if an earlier picker or popup loaded it).
+  let loadFailed = false;
+  renderAll();
+  if (emojiCatalog() === null) {
+    void loadEmojiCatalog().then(
+      () => {
+        if (!signal.aborted) renderAll();
+      },
+      () => {
+        loadFailed = true;
+        if (!signal.aborted) renderAll();
+      },
+    );
+  }
+
+  toneSelect.addEventListener(
+    "change",
+    () => {
+      setSkinTone(Number(toneSelect.value));
+      renderAllCategories(getAllCategories());
+    },
+    { signal },
+  );
 
   // Search handler
   searchInput.addEventListener(
@@ -529,6 +374,22 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     () => {
       searchQuery = searchInput.value.trim();
       renderAllCategories(getAllCategories());
+    },
+    { signal },
+  );
+
+  // Enter in the search box picks the first visible match, so a typed search
+  // is one Enter away from insertion. Empty results are a no-op.
+  searchInput.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Enter") return;
+      if (e.isComposing || e.keyCode === 229) return;
+      const first = scrollArea.querySelector<HTMLElement>(".ep-emoji");
+      if (first === null) return;
+      e.preventDefault();
+      const emoji = first.dataset.emoji;
+      if (emoji !== undefined) handleEmojiClick(emoji);
     },
     { signal },
   );

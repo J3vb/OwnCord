@@ -19,6 +19,8 @@ type fakeKickDisconnectNotifier struct {
 
 func (f *fakeKickDisconnectNotifier) NotifyModAction(int64, int64, string, string, *time.Time) {}
 
+func (*fakeKickDisconnectNotifier) DisconnectIfSessionRevoked(int64) {}
+
 func (f *fakeKickDisconnectNotifier) DisconnectRevokedUser(userID int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

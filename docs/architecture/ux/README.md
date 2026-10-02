@@ -66,7 +66,7 @@ decision table, don't improvise.
 | **Inline section error + Retry**                                          | per-view                                                             | A failed load of a view's own data (messages, invites, pins)                                   | One-shot actions (use a toast)                                       |
 | **Persistent banner**                                                     | `components/ServerBanner.ts` (reconnect/restart), ad-hoc cert banner | Connection status: reconnecting, server-restart countdown, first-trust cert notice             | Per-action results                                                   |
 | **Blocking modal**                                                        | `lib/modalFactory.ts` (+ `CertMismatchModal`)                        | Decisions that must be made before proceeding: cert mismatch, destructive confirm              | Routine feedback; anything dismissable-by-ignoring                   |
-| **Two-click / inline confirm**                                            | `AdminActions.ts` `withConfirmation`, `PendingDeleteManager`         | Reversible-ish destructive actions in dense menus (kick, ban, delete channel, delete message)  | Irreversible account-level actions (use a modal with typed confirm)  |
+| **Two-click / inline confirm**                                            | `AdminActions.ts` `withConfirmation`                                 | Reversible-ish destructive actions in dense menus (kick, ban, delete channel)                  | Irreversible account-level actions (use a modal with typed confirm)  |
 | **Disabled control + reason**                                             | per-control                                                          | Actions not currently permitted (offline, no permission, slow-mode cooldown, upload in flight) | Errors that already happened                                         |
 | **Transient-error store** (`ui.store.setTransientError`)                  | survives navigation                                                  | A message that must appear on the _connect_ page after a forced disconnect (banned, kicked)    | In-session messaging (use a toast)                                   |
 
@@ -127,7 +127,7 @@ detail each; this is the index.
 | `auth_ok`                                              | `auth.setAuth`                                                                                                              | Advance handshake → ready overlay                                                                                 |
 | `auth_error`                                           | `ui.setTransientError` + `auth.clearAuth`                                                                                   | Return to connect page with the reason shown                                                                      |
 | `ready`                                                | bulk-load channels/roles/members/voice/dm                                                                                   | Render main view; resolve the connected overlay                                                                   |
-| `chat_message`                                         | `messages.addMessage` (+ unread/DM/notify)                                                                                  | Append; reconcile a pending optimistic row if it's our echo                                                       |
+| `chat_message`                                         | `messages.addMessage` (+ unread/DM/notify) + `members.clearTyping` for the sender                                           | Append; reconcile a pending optimistic row if it's our echo                                                       |
 | `chat_send_ok`                                         | `messages.confirmSend`                                                                                                      | Mark the optimistic row **sent** (see gap in [messaging.md](messaging.md))                                        |
 | `chat_edited` / `chat_deleted`                         | `messages.editMessage` / `deleteMessage`                                                                                    | In-place edit / tombstone                                                                                         |
 | `chat_bulk_deleted`                                    | `messages.bulkDeleteMessages`                                                                                               | Remove every purged row in one pass                                                                               |
@@ -166,8 +166,13 @@ reaction is per-call-site (`doFetch()` in `lib/api.ts` centralizes only 401);
 only the displayed text is shared: `serverErrorText()`/`errorText()` in
 `lib/api.ts` map a server error code (disambiguated by its message where the
 server overloads it — see `serverErrorCopy()`) to catalog text and show the
-server message, capitalised, only when there is no mapping. This matrix is the
-target contract.
+server message, capitalised, only when there is no mapping. A request that
+never reached the server (`TransportError`) shows the "Couldn't reach this
+server" copy instead of the transport's raw text, which goes to the log. The
+desktop HTTP tunnel's bare `502` — its refusal of a first-use or changed
+certificate — is a `TransportError` too, and shows the same copy until a
+distinct certificate message exists. This matrix is the target
+contract.
 
 | Class                            | Source                      | Target reaction                                                                                                                                                                                                                                                  |
 | -------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

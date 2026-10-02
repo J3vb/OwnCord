@@ -52,9 +52,10 @@ export interface ReconnectClock {
    *  once by `ready`, and cleared by any path that means the user must NOT
    *  re-join (a kick, a move, a ban or a leave). */
   voiceRejoinChannelId: number | null;
-  /** When the last rejoin-eligible restart notice arrived (Date.now()); null
-   *  when the last notice was not one, so the drop records no channel. */
-  voiceRejoinNoticeAt: number | null;
+  /** When the last rejoin-eligible restart notice expires (Date.now() plus the
+   *  reason's window); null when the last notice was not one, so the drop
+   *  records no channel. */
+  voiceRejoinExpiresAt: number | null;
 }
 
 /** The socket surface a handler may use: send and disconnect, never subscribe. */
@@ -98,7 +99,7 @@ export function createReconnectClock(): ReconnectClock {
     serverClockSkewMs: 0,
     restartAnnounced: false,
     voiceRejoinChannelId: null,
-    voiceRejoinNoticeAt: null,
+    voiceRejoinExpiresAt: null,
   };
 }
 

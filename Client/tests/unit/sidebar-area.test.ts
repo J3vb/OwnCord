@@ -331,6 +331,7 @@ function defaultOpts(): SidebarAreaOptions {
     } as unknown as SidebarAreaOptions["limiters"],
     presenceSender: {
       send: vi.fn(),
+      rollbackTimedOut: vi.fn(),
       destroy: vi.fn(),
     },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
@@ -920,8 +921,39 @@ describe("SidebarArea", () => {
 
     it("keeps the channel list a floor the member section yields to (B9 Q1 reflow)", () => {
       expect(cascadedDeclaration(".sidebar-content-inner", "min-height")).toBeDefined();
-      expect(cascadedDeclaration(".sidebar-members-section", "flex-shrink")?.value).toMatchObject({
-        value: 1,
+      expect(cascadedDeclaration(".sidebar-members-section", "flex")?.value).toMatchObject({
+        value: {
+          grow: 1,
+          shrink: 1,
+          basis: { type: "length-percentage", value: { type: "dimension", value: { value: 0 } } },
+        },
+      });
+    });
+
+    it("sizes the member section to a definite height once one is saved (P1-01)", () => {
+      // The channel slot shrink-wraps its rows instead of collapsing to the
+      // floor, and the member section fills the rest (P1-01).
+      expect(cascadedDeclaration(".sidebar-content-inner", "flex")?.value).toMatchObject({
+        value: { grow: 0, shrink: 1, basis: { type: "auto" } },
+      });
+      // A saved/dragged/collapsed height switches it back to a definite size,
+      // so the channel list above can grow to the rest.
+      expect(cascadedDeclaration(".sidebar-members-section.sized", "flex")?.value).toMatchObject({
+        value: { grow: 0, shrink: 1, basis: { type: "auto" } },
+      });
+      // And with the section pinned, the channel slot takes the rest back so
+      // no gap opens below the member section.
+      expect(
+        cascadedDeclaration(
+          ".sidebar-content:has(.sidebar-members-section.sized) .sidebar-content-inner",
+          "flex",
+        )?.value,
+      ).toMatchObject({
+        value: {
+          grow: 1,
+          shrink: 1,
+          basis: { type: "length-percentage", value: { type: "dimension", value: { value: 0 } } },
+        },
       });
     });
   });
@@ -1820,6 +1852,56 @@ describe("SidebarArea", () => {
       lastCall.onCloseDm(100);
 
       expect(opts.api.closeDm).toHaveBeenCalledWith(100);
+
+      cleanup(result);
+    });
+
+    // DP-34: the optimistic removal is rolled back when the server refuses.
+    it("restores the DM row when closeDm rejects", async () => {
+      const dm = makeDm({
+        channelId: 100,
+        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+      });
+      addDmChannel(dm);
+
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 100 }));
+
+      const opts = defaultOpts();
+      (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      lastCall.onCloseDm(100);
+
+      // Gone immediately (optimistic), back once the request rejects.
+      expect(dmStore.getState().channels).toHaveLength(0);
+      await vi.waitFor(() => {
+        expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
+      });
+
+      cleanup(result);
+    });
+
+    it("restores a rejected closeDm row at its old place, not the top", async () => {
+      addDmChannel(makeDm({ channelId: 103 }));
+      addDmChannel(makeDm({ channelId: 102 }));
+      addDmChannel(makeDm({ channelId: 101 }));
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+
+      const opts = defaultOpts();
+      (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+      const result = createSidebarArea(opts);
+      container.appendChild(result.sidebarWrapper);
+
+      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
+      dmSidebarCalls[dmSidebarCalls.length - 1]![0].onCloseDm(102);
+
+      await vi.waitFor(() => {
+        expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([101, 102, 103]);
+      });
 
       cleanup(result);
     });

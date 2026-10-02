@@ -19,13 +19,13 @@ vi.mock("@lib/livekitSession", () => ({
 // The emoji image is behind the session token, so buildCustomEmojiImage goes
 // through the same authenticated fetch attachments use. Stub just that call —
 // everything else in the module (isSafeUrl, resolveServerUrl) is real.
-const { fetchImageAsDataUrlMock } = vi.hoisted(() => ({
-  fetchImageAsDataUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
 vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/components/message-list/attachments")>();
-  return { ...actual, fetchImageAsDataUrl: fetchImageAsDataUrlMock };
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
 import {
@@ -34,7 +34,10 @@ import {
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
 } from "../../src/components/message-list/custom-emoji";
-import { renderMessageContent } from "../../src/components/message-list/content-parser";
+import {
+  renderMessageContent,
+  clearContentParseCache,
+} from "../../src/components/message-list/content-parser";
 import { renderReactions } from "../../src/components/message-list/reactions";
 import {
   emojiStore,
@@ -56,7 +59,7 @@ beforeEach(() => {
   emojiStore.flush();
   setCustomEmoji(EMOJI);
   emojiStore.flush();
-  fetchImageAsDataUrlMock.mockClear();
+  fetchImageAsObjectUrlMock.mockClear();
 });
 
 // ---------------------------------------------------------------------------
@@ -171,9 +174,9 @@ describe("emoji tokens", () => {
 
   it("fetches the image through the authenticated path, not img.src", () => {
     buildCustomEmojiNode("wave");
-    expect(fetchImageAsDataUrlMock).toHaveBeenCalledTimes(1);
+    expect(fetchImageAsObjectUrlMock).toHaveBeenCalledTimes(1);
     // resolveServerUrl leaves the path relative when no host has been set.
-    const [url] = fetchImageAsDataUrlMock.mock.calls[0] as unknown as [string];
+    const [url] = fetchImageAsObjectUrlMock.mock.calls[0] as unknown as [string];
     expect(url).toContain("/api/v1/emoji/1/image");
   });
 });
@@ -281,6 +284,25 @@ describe("jumbo emoji", () => {
     expect(render("🔥🔥").querySelector(".msg-text-jumbo")).not.toBeNull();
     expect(render("hi :wave:").querySelector(".msg-text-jumbo")).toBeNull();
     expect(render("hi :wave:").querySelector(".msg-text")).not.toBeNull();
+  });
+
+  it("recomputes jumbo from the live emoji store under an unchanged cache key", () => {
+    clearContentParseCache();
+    const host = document.createElement("div");
+    // Drawn before the custom emoji set is known: the shortcode is unresolved,
+    // so this is not emoji-only.
+    clearCustomEmoji();
+    emojiStore.flush();
+    host.appendChild(renderMessageContent(":wave:", undefined, "1\u00000"));
+    expect(host.querySelector(".msg-text-jumbo")).toBeNull();
+
+    // The same message identity (id + editedAt), now that :wave: resolves, must
+    // render jumbo rather than serving the cached non-jumbo decision.
+    host.replaceChildren();
+    setCustomEmoji(EMOJI);
+    emojiStore.flush();
+    host.appendChild(renderMessageContent(":wave:", undefined, "1\u00000"));
+    expect(host.querySelector(".msg-text-jumbo")).not.toBeNull();
   });
 });
 

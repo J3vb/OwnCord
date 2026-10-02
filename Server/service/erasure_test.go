@@ -103,6 +103,71 @@ func TestErasureService_EraseRemovesRowsAndFiles(t *testing.T) {
 	}
 }
 
+// P4-08: a thumbnail of an erased user's image goes with the original.
+func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
+	database := newTestDB(t)
+	dir := t.TempDir()
+	uid, files := seedErasureMember(t, database, dir)
+	st := newTestStorage(t, dir)
+	for _, f := range files {
+		if err := st.SaveThumb(f, []byte("thumb")); err != nil {
+			t.Fatalf("SaveThumb(%s): %v", f, err)
+		}
+	}
+	svc := NewErasureService(database)
+	svc.SetFiles(st)
+
+	if err := svc.Erase(context.Background(), uid); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	for _, f := range files {
+		if _, err := st.OpenThumb(f); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("thumbnail of %s survived the erasure: %v", f, err)
+		}
+	}
+}
+
+// TestErasureService_PreservesPriorBadgeForQueuedMention locks P5-O05's
+// erasure half through the real wiring (service.New): bob holds a genuine badge
+// from m0; alice sends m mentioning him and is erased before the mention
+// worker's coalesce window flushes m. The erasure must flush m's increment
+// before its reversal, so the reversal takes exactly m back and bob keeps m0's
+// badge. Without the flush the reversal consumes m0's badge and the later
+// increment is skipped (m is gone), leaving bob at 0.
+func TestErasureService_PreservesPriorBadgeForQueuedMention(t *testing.T) {
+	_, _, database := newMentionFixture(t)
+	ctx := context.Background()
+	if _, err := database.CreateUser(ctx, "erasure-owner", "hash", 1); err != nil {
+		t.Fatalf("CreateUser(owner): %v", err)
+	}
+	svcs := New(database, nil)
+	svcs.Erasure.SetFiles(newTestStorage(t, t.TempDir()))
+	stop := svcs.Messages.StartMentionWorker(t.Context())
+	defer stop(context.Background())
+
+	m0, err := database.CreateMessage(ctx, 10, 3, "hey @bob earlier", nil)
+	if err != nil {
+		t.Fatalf("seed m0: %v", err)
+	}
+	if err := database.IncrementMentionCounts(ctx, 10, m0, []int64{2}); err != nil {
+		t.Fatalf("seed increment: %v", err)
+	}
+
+	sendAs(t, svcs.Messages, 1, "@bob look")
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Fatalf("setup: bob mention_count = %d before the flush, want 1", got)
+	}
+
+	if err := svcs.Erasure.Erase(ctx, 1); err != nil {
+		t.Fatalf("Erase: %v", err)
+	}
+	svcs.Messages.FlushAllPendingMentionCounts(ctx)
+
+	if got := mentionCount(t, database, 2); got != 1 {
+		t.Errorf("bob mention_count = %d after erasing the author of a queued mention, want 1 (his earlier genuine badge must survive)", got)
+	}
+}
+
 // Interruption between the commit and the file removal: the process dies
 // with the files on disk and the job at db_done. A restart — a fresh handle
 // on the same file, as the maintenance loop's startup resume sees it —

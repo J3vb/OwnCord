@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import type { ReadyMember, MemberJoinPayload, UserStatus } from "@lib/types";
+import type { ReadyMember, MemberJoinPayload, PresenceBatchEntry, UserStatus } from "@lib/types";
 
 export interface Member {
   readonly id: number;
@@ -172,6 +172,28 @@ export function updatePresence(
       status,
       customStatus: customStatus === undefined ? existing.customStatus : customStatus,
     });
+    return { ...prev, members: next };
+  });
+}
+
+/** Apply a presence_batch in one store update. An entry only updates a member
+ *  the list already has (a new member arrives first as member_join). A `full`
+ *  snapshot also marks everyone it leaves out offline, clearing their text
+ *  (what ready shows for an offline member). */
+export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full: boolean): void {
+  membersStore.setState((prev) => {
+    const next = new Map(prev.members);
+    if (full) {
+      const listed = new Set(updates.map((u) => u.user_id));
+      for (const [id, m] of next) {
+        if (!listed.has(id)) next.set(id, { ...m, status: "offline", customStatus: null });
+      }
+    }
+    for (const u of updates) {
+      const existing = next.get(u.user_id);
+      if (existing === undefined) continue;
+      next.set(u.user_id, { ...existing, status: u.status, customStatus: u.custom_status });
+    }
     return { ...prev, members: next };
   });
 }

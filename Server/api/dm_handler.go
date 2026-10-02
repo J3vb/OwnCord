@@ -163,16 +163,15 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		if result.Recipient.DisplayName != nil {
 			displayName = *result.Recipient.DisplayName
 		}
-		// PresentableStatus applies the "no live connection is offline,
-		// whatever the row says" half of the rule ws/serve_ready.go's
-		// presentableMembers documents — StatusForViewer alone only
-		// collapses invisible to offline and would otherwise ship a
-		// disconnected recipient's saved idle/dnd verbatim (OC-0304).
+		// PresentableStatus applies the live-status rule ws/serve_ready.go's
+		// presentableMembers documents — StatusForViewer on the row alone
+		// would ship a disconnected recipient's saved idle/dnd verbatim
+		// (OC-0304) or a connected one's not-yet-flushed "offline".
 		dmUser := db.DMUser{
 			ID:          result.Recipient.ID,
 			Username:    result.Recipient.Username,
 			Avatar:      avatarStr,
-			Status:      svc.DMs.PresentableStatus(result.Recipient.ID, db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID)),
+			Status:      svc.DMs.PresentableStatus(result.Recipient.ID, user.ID, db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID)),
 			DisplayName: displayName,
 		}
 

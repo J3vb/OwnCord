@@ -4,13 +4,14 @@ package config
 import (
 	"fmt"
 	"log/slog"
-	"math"
 	"net"
 	"os"
 	"slices"
 	"strings"
 
 	goyaml "go.yaml.in/yaml/v3"
+
+	"github.com/J3vb/OwnCord/Server/storage"
 )
 
 // Config holds the full server configuration.
@@ -265,9 +266,10 @@ type ServerConfig struct {
 	// text the CRS false-positives on, so blocking needs tuning against real
 	// traffic first. Unknown values fall back to "detect".
 	WAFCRSMode string `yaml:"waf_crs_mode"`
-	// MaxWSConnections caps concurrently connected WebSocket clients; new
-	// upgrade requests beyond the cap are refused with 503 before the
-	// upgrade. 0 (the default) means unlimited — every connection costs
+	// MaxWSConnections caps concurrently connected WebSocket clients,
+	// counting sockets still authenticating or waiting for a ready-build
+	// permit; new upgrade requests beyond the cap are refused with 503 before
+	// the upgrade. 0 (the default) means unlimited — every connection costs
 	// goroutines and buffered send queues, so set a ceiling that matches the
 	// host's memory before pointing a large community at it.
 	MaxWSConnections int `yaml:"max_ws_connections"`
@@ -284,6 +286,16 @@ type ServerConfig struct {
 	// it remotely through an SSH port-forward. See
 	// docs/server-configuration.md.
 	PprofEnabled bool `yaml:"pprof_enabled"`
+	// PprofBlockProfileRate is the average interval, in nanoseconds, between
+	// block samples while the pprof listener is enabled (Go's
+	// runtime.SetBlockProfileRate unit). 100000 samples roughly every 100 µs
+	// of blocked time, enough to see the single SQLite writer's contention
+	// that a CPU profile cannot. 0 disables block sampling.
+	PprofBlockProfileRate int `yaml:"pprof_block_profile_rate"`
+	// PprofMutexProfileFraction samples one in N contended mutex events while
+	// the pprof listener is enabled (Go's runtime.SetMutexProfileFraction).
+	// 0 disables mutex sampling.
+	PprofMutexProfileFraction int `yaml:"pprof_mutex_profile_fraction"`
 	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
 	// endpoints. The webhook already authenticates cryptographically (LiveKit
 	// JWT signature over the body hash) — this perimeter is defence-in-depth,
@@ -339,8 +351,9 @@ type DatabaseConfig struct {
 	Path string `yaml:"path"`
 
 	// MaxReaders bounds the read-only connection pool. 0 (default) keeps the
-	// automatic sizing of max(4, NumCPU). Values are clamped to [1, 64] —
-	// readers beyond the CPU count mostly buy queueing, not throughput.
+	// automatic sizing of max(8, 2×NumCPU). Values are clamped to [1, 64] —
+	// readers beyond roughly twice the CPU count mostly buy queueing, not
+	// throughput.
 	MaxReaders int `yaml:"max_readers"`
 }
 
@@ -370,6 +383,9 @@ type UploadConfig struct {
 	// the disk-headroom floor, see migration 044. 0, the default, is
 	// unlimited, so no existing install changes behaviour on upgrade.
 	UserQuotaMB int `yaml:"user_quota_mb"`
+	// The storage.FileTypePolicy lists; an admin-panel value replaces each.
+	BlockedExtensions []string `yaml:"blocked_extensions"`
+	AllowedExtensions []string `yaml:"allowed_extensions"`
 }
 
 // UserQuotaBytes is the per-user quota in bytes; 0 means unlimited.
@@ -396,17 +412,19 @@ type BackupConfig struct {
 // defaults.
 type SecurityConfig struct {
 	// AuthRateLimitMultiplier scales the per-IP auth rate limits and failure
-	// thresholds (registration, login, TOTP, sensitive endpoints). The
-	// defaults assume roughly one person per IP address; a community behind a
-	// shared NAT (office, school) hits them collectively. 0 or unset = 1.0;
-	// clamped to [0.1, 100].
+	// thresholds (registration, login, TOTP, sensitive endpoints, WebSocket
+	// upgrades). The defaults assume roughly one person per IP address; a
+	// community behind a shared NAT (office, school) hits them collectively.
+	// 0 or unset = 1.0; clamped to [0.1, 100].
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
 	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
 	// checks and hashes on every auth route, recovery-code matching at the
-	// second-factor step — run at once: the B4-4 admission budget. An
-	// over-budget attempt is refused with 429 RATE_LIMITED, runs no bcrypt
-	// and consumes no lockout attempt. 0 or unset = twice the CPU count
-	// (never below 4); clamped to [1, 4096].
+	// second-factor step — run at once: the B4-4 admission budget. Login,
+	// registration and recovery-code checks over the budget queue for up to
+	// 10 s; an attempt refused (queue full, wait over, or a password
+	// confirmation over budget) gets 429 AUTH_BUSY, runs no bcrypt and
+	// consumes no lockout attempt. 0 or unset = twice the CPU count (never
+	// below 4); clamped to [1, 4096].
 	ExpensiveAuthConcurrency int `yaml:"expensive_auth_concurrency"`
 }
 
@@ -430,6 +448,10 @@ func defaults() Config {
 			WAFCRSMode:    "detect",
 			RestartMode:   "auto",
 			MinFreeDiskMB: 256,
+			// Applied only while PprofEnabled is true, so a disabled
+			// profiler still adds nothing at runtime.
+			PprofBlockProfileRate:     100_000,
+			PprofMutexProfileFraction: 5,
 		},
 		Database: DatabaseConfig{
 			Type: "sqlite",
@@ -445,8 +467,10 @@ func defaults() Config {
 			AcmeCacheDir: "data/acme_certs",
 		},
 		Upload: UploadConfig{
-			MaxSizeMB:  100,
-			StorageDir: "data/uploads",
+			MaxSizeMB:         100,
+			StorageDir:        "data/uploads",
+			BlockedExtensions: slices.Clone(storage.DefaultBlockedExtensions),
+			AllowedExtensions: []string{},
 		},
 		Voice: VoiceConfig{
 			LiveKitURL: "ws://localhost:7880",
@@ -527,6 +551,10 @@ server:
   #                           # container's own loopback: reach it with e.g.
   #                           # docker run --rm --network container:<name>
   #                           # curlimages/curl http://127.0.0.1:6060/debug/pprof/
+  # pprof_block_profile_rate: 100000       # nanoseconds between block samples when
+  #                           # pprof is on (0 disables); sees SQLite writer contention.
+  # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
+  #                           # when pprof is on (0 disables).
   # browser_client_enabled: false  # host a browser client from this server.
   #                           # Owner opt-in, off by default. This build ships no
   #                           # browser assets, so turning it on hosts nothing yet.
@@ -568,6 +596,9 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments and avatars); 0 = unlimited
+  # blocked_extensions: [bat, cmd, ps1]  # refused by name; a list replaces the
+  #                           # default (Windows scripts, installers, disk images)
+  # allowed_extensions: []    # non-empty = only these extensions may be uploaded
 
 # Web Push subscriptions. Disabled by default: with push.enabled false,
 # every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
@@ -736,15 +767,14 @@ func Load(cfgPath string) (*Config, error) {
 			"addresses that should reach the admin panel")
 	}
 
-	// A customized admin allowlist with no trusted_proxies is a footgun
-	// behind any reverse proxy or container network: the check then compares
-	// the PROXY'S (or bridge's) address — by construction a private one —
-	// instead of the real client's, so the customization silently doesn't do
-	// what the operator believes. Warn, don't fail: direct-exposure setups
-	// are exactly this shape and are fine.
-	if len(cfg.Server.TrustedProxies) == 0 &&
-		!slices.Equal(cfg.Server.AdminAllowedCIDRs, defaults().Server.AdminAllowedCIDRs) {
-		slog.Warn("config: admin_allowed_cidrs is customized but trusted_proxies is empty — " +
+	// An admin allowlist with no trusted_proxies is a footgun behind any
+	// reverse proxy or container network: the check then compares the
+	// PROXY'S (or bridge's) address — by construction a private one, which
+	// the compiled default admits — instead of the real client's, so every
+	// client passes. Warn, don't fail: direct-exposure setups are exactly this
+	// shape and are fine.
+	if len(cfg.Server.TrustedProxies) == 0 && len(cfg.Server.AdminAllowedCIDRs) > 0 {
+		slog.Warn("config: admin_allowed_cidrs is set but trusted_proxies is empty — " +
 			"behind a reverse proxy or Docker network the allowlist checks the proxy's private " +
 			"address, not the real client; set server.trusted_proxies to the proxy hop(s)")
 	}
@@ -787,10 +817,25 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 		}
 	}
 	applyBounds(&cfg)
+	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
+		return nil, err
+	}
 	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
 		return nil, fmt.Errorf("applying voice defaults: %w", err)
 	}
 	return &cfg, nil
+}
+
+// normalizeUploadExtensions fails the load on a bad entry: skipping it could
+// empty an allow-only list, and so switch allow-only mode off.
+func normalizeUploadExtensions(u *UploadConfig) (err error) {
+	if u.BlockedExtensions, err = storage.NormalizeExtensions(u.BlockedExtensions); err != nil {
+		return fmt.Errorf("upload.blocked_extensions: %w", err)
+	}
+	if u.AllowedExtensions, err = storage.NormalizeExtensions(u.AllowedExtensions); err != nil {
+		return fmt.Errorf("upload.allowed_extensions: %w", err)
+	}
+	return nil
 }
 
 // warnInvalidCIDRs logs a startup warning for each list entry that is not
@@ -801,73 +846,5 @@ func warnInvalidCIDRs(key string, cidrs []string) {
 			slog.Warn("config: ignoring invalid CIDR entry (use address/prefix notation, e.g. 10.0.0.1/32)",
 				"key", key, "entry", c)
 		}
-	}
-}
-
-// boundedKey is one integer key with a legal range. Out-of-range values are
-// clamped to the nearest bound and warned about, never rejected: Load is
-// warn-only by design (a warning must not brick a working install), and a
-// clamped value is the nearest thing to what the operator wrote.
-type boundedKey struct {
-	key      string
-	ptr      *int
-	min, max int
-	// def is what a value BELOW min becomes: the compiled default, not the
-	// minimum. A negative headroom clamped to 0 would silently turn the
-	// floor off, which fails open; falling back to the default fails safe,
-	// and an operator who wants the floor off writes 0 explicitly.
-	def int
-	// meaning names what the fallback stands for, so the warning says what
-	// happened to the operator's intent ("0 means unlimited").
-	meaning string
-	// highToDef sends a value ABOVE max to def as well, for a key where the
-	// max is no nearer the operator's intent than any other value (a port).
-	highToDef bool
-}
-
-// boundedKeys is the one place a bounded configuration key states its range
-// (B5-2). A new integer key with a range adds a row here — not a clamp in the
-// package that consumes it — so the checks stay together and every warning
-// reads the same. Bounds are on the MiB values as written; the byte helpers
-// (UserQuotaBytes, MinFreeDiskBytes) shift by 20, and maxMiB keeps that shift
-// inside int64.
-func boundedKeys(cfg *Config) []boundedKey {
-	const maxMiB = math.MaxInt64 >> 20
-	def := defaults()
-	return []boundedKey{
-		{"upload.max_size_mb", &cfg.Upload.MaxSizeMB, 0, maxMiB, def.Upload.MaxSizeMB, "the default, 100 MB", false},
-		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited", false},
-		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it", false},
-		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content", false},
-		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows", false},
-		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb", false},
-		{"attention.writer_wait_ms_per_min", &cfg.Attention.WriterWaitMsPerMin, 1, 60_000, def.Attention.WriterWaitMsPerMin, "the default, 5000 ms per minute", false},
-		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute", false},
-		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute", false},
-		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days", false},
-		{"voice.udp_port", &cfg.Voice.UDPPort, 0, 65535, def.Voice.UDPPort, "0, which uses the 50000-60000 range", true},
-	}
-}
-
-// applyBounds brings every bounded key into its range, warning by key name:
-// below the minimum falls back to the default, above the maximum clamps
-// (or falls back to the default too, for a highToDef key).
-func applyBounds(cfg *Config) {
-	for _, b := range boundedKeys(cfg) {
-		v := *b.ptr
-		fixed := v
-		switch {
-		case v < b.min:
-			fixed = b.def
-		case v > b.max && b.highToDef:
-			fixed = b.def
-		case v > b.max:
-			fixed = b.max
-		}
-		if fixed == v {
-			continue
-		}
-		slog.Warn("config: value out of range", "key", b.key, "value", v, "using", fixed, "note", b.meaning)
-		*b.ptr = fixed
 	}
 }

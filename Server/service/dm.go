@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -12,58 +13,57 @@ import (
 
 // DMService handles direct message channel operations.
 type DMService struct {
-	st Store
-	// online reports whether userID currently holds a live WebSocket
-	// connection. It is wired by the ws layer (Hub.IsUserConnected) after
-	// both are constructed, mirroring MessageService.online (see its doc
-	// comment in message.go) — so every DM payload this service builds can
-	// apply the same "no live connection is offline, whatever users.status
-	// stores" rule ws/serve_ready.go's presentableMembers/
-	// presentableDMChannels apply to the ready payload and members list.
-	// users.status keeps a *chosen* idle/dnd/invisible across a disconnect by
-	// design (MarkUserDisconnected only ever rewrites "online" ->
-	// "offline"), so without this a signed-out user's last chosen status
-	// leaks into the DM sidebar as if they were still connected. nil (the
-	// zero value, e.g. in tests and any caller with no hub) means "no
-	// live-connection information available" and applies no extra
-	// narrowing, preserving prior behavior.
-	online func(userID int64) bool
+	st    Store
+	perms *PermissionService
+	// liveStatus returns userID's live status: the one their WebSocket
+	// connection last stamped or chose, "" when they have no connection or
+	// it has not stamped one yet. It is wired by the ws layer
+	// (Hub.LiveStatus) after both are constructed, so every DM payload this
+	// service builds applies the rules ws/serve_ready.go's
+	// presentableMembers/presentableDMChannels apply to the ready payload
+	// and members list, rather than trusting users.status: that row keeps a
+	// *chosen* idle/dnd/invisible across a disconnect by design, and trails
+	// a connect by the batched connect stamp. nil (the zero value, e.g. in
+	// tests and any caller with no hub) means "no live-connection
+	// information available" and leaves the row's status untouched.
+	liveStatus func(userID int64) string
 }
 
-// NewDMService creates a DMService.
-func NewDMService(st Store) *DMService {
-	return &DMService{st: st}
+// NewDMService creates a DMService. perms answers whether an actor is timed
+// out, which refuses the writes here that publish to other participants.
+func NewDMService(st Store, perms *PermissionService) *DMService {
+	return &DMService{st: st, perms: perms}
 }
 
-// SetOnlineChecker wires the live-connection predicate every DM payload this
-// service builds consults in addition to users.status. Passing nil clears
-// it. Safe to call once at startup (the ws layer, after constructing both
-// the Hub and the Services) or from a test.
-func (s *DMService) SetOnlineChecker(online func(userID int64) bool) {
-	s.online = online
+// SetLiveStatusLookup wires the live-status lookup every DM payload this
+// service builds presents instead of users.status. Passing nil clears it.
+// Safe to call once at startup (the ws layer, after constructing both the
+// Hub and the Services) or from a test.
+func (s *DMService) SetLiveStatusLookup(liveStatus func(userID int64) string) {
+	s.liveStatus = liveStatus
 }
 
-// PresentableStatus narrows status to db.StatusOffline when subjectID holds
-// no live connection, whatever status says — the second half of the rule
-// ws/serve_ready.go's presentableMembers documents: users.status keeps a
-// *chosen* idle/dnd/invisible across a disconnect (MarkUserDisconnected only
-// ever rewrites "online" -> "offline") so the next connect can honour it,
-// which means every read path must apply this narrowing itself rather than
-// trusting the stored value alone. Exported so a caller that hand-builds a
-// db.DMUser outside this package (POST /dms) applies the identical rule
+// PresentableStatus returns the status viewerID should see for subjectID:
+// offline when subjectID holds no stamped live connection, otherwise their
+// live status with db.StatusForViewer applied, whatever status (the
+// users.status row) says. Exported so a caller that hand-builds a db.DMUser
+// outside this package (POST /dms) applies the identical rule
 // DMSummaryFor/ListDMs/CreateGroupDM apply via presentableDMChannelInfo
-// below. A checker that was never wired (SetOnlineChecker not called, e.g.
+// below. A lookup that was never wired (SetLiveStatusLookup not called, e.g.
 // in most tests) leaves status untouched.
-func (s *DMService) PresentableStatus(subjectID int64, status string) string {
-	if s.online != nil && !s.online(subjectID) {
-		return db.StatusOffline
+func (s *DMService) PresentableStatus(subjectID, viewerID int64, status string) string {
+	if s.liveStatus == nil {
+		return status
 	}
-	return status
+	if live := s.liveStatus(subjectID); live != "" {
+		return db.StatusForViewer(live, subjectID, viewerID)
+	}
+	return db.StatusOffline
 }
 
 // presentableDMUser applies PresentableStatus to one DM participant.
-func (s *DMService) presentableDMUser(u db.DMUser) db.DMUser {
-	u.Status = s.PresentableStatus(u.ID, u.Status)
+func (s *DMService) presentableDMUser(u db.DMUser, viewerID int64) db.DMUser {
+	u.Status = s.PresentableStatus(u.ID, viewerID, u.Status)
 	return u
 }
 
@@ -73,12 +73,12 @@ func (s *DMService) presentableDMUser(u db.DMUser) db.DMUser {
 // Recipients[0], not a shared reference. Mirrors Hub.presentableDMChannels
 // (ws/serve_ready.go) at the service layer so every REST response and push
 // event built from a db.DMChannelInfo need not duplicate the rule itself.
-func (s *DMService) presentableDMChannelInfo(info db.DMChannelInfo) db.DMChannelInfo {
+func (s *DMService) presentableDMChannelInfo(info db.DMChannelInfo, viewerID int64) db.DMChannelInfo {
 	if info.Recipient.ID != 0 {
-		info.Recipient = s.presentableDMUser(info.Recipient)
+		info.Recipient = s.presentableDMUser(info.Recipient, viewerID)
 	}
 	for i := range info.Recipients {
-		info.Recipients[i] = s.presentableDMUser(info.Recipients[i])
+		info.Recipients[i] = s.presentableDMUser(info.Recipients[i], viewerID)
 	}
 	return info
 }
@@ -142,6 +142,21 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
 	}
 
+	// A new channel can notify the recipient (dm_channel_open), which a
+	// timeout refuses like a send; reopening an existing one notifies nobody.
+	if timeoutErr := requireNotTimedOut(ctx, s.perms, userID); timeoutErr != nil {
+		if !errors.Is(timeoutErr, ErrTimedOut) {
+			return nil, timeoutErr
+		}
+		_, exists, err := s.st.FindDMChannelIDBetween(ctx, userID, recipientID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: failed to look up DM: %w", ErrInternal, err)
+		}
+		if !exists {
+			return nil, timeoutErr
+		}
+	}
+
 	// B5-6 (Codex review round 2, P1): the recipient's visibility is decided
 	// INSIDE GetOrCreateDMChannelGated's own transaction (does the recipient
 	// already trust the caller?) and written once, atomically, with the
@@ -172,7 +187,7 @@ func (s *DMService) ListDMs(ctx context.Context, userID int64) ([]db.DMChannelIn
 	// offline); apply the "no live connection" half too, see
 	// presentableDMChannelInfo.
 	for i := range dms {
-		dms[i] = s.presentableDMChannelInfo(dms[i])
+		dms[i] = s.presentableDMChannelInfo(dms[i], userID)
 	}
 	return dms, nil
 }
@@ -285,6 +300,10 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	)
 	defer done()
 
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
+	}
+
 	// De-duplicate and drop the caller: a payload naming the same person twice
 	// is a client bug, not a reason to refuse, but it must not inflate the
 	// participant count or double-insert.
@@ -370,7 +389,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	// See presentableDMChannelInfo: a participant with no live connection
 	// must read as offline, whatever users.status stored for them.
 	for i := range participants {
-		participants[i] = s.presentableDMUser(participants[i])
+		participants[i] = s.presentableDMUser(participants[i], userID)
 	}
 
 	return &CreateGroupDMResult{
@@ -394,6 +413,10 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 	ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
 	if err != nil || !ok {
 		return nil, fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
+	}
+	// The new name is pushed to every participant: text of the caller's own.
+	if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+		return nil, err
 	}
 
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
@@ -450,7 +473,7 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	// (group create/rename/leave refresh) and PATCH /dms/{id}'s response
 	// build their payload from, so applying the "no live connection" rule
 	// here covers every push of a DM's membership.
-	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, participants, viewerID)), nil
+	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, participants, viewerID), viewerID), nil
 }
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
@@ -465,7 +488,8 @@ func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (i
 }
 
 // RingTargets returns the other participants of a DM the caller is in — the
-// people a call_ring or call_decline is addressed to.
+// people a call_ring is addressed to. A timed-out caller is refused, as for a
+// send.
 //
 // Ringing carries no state: a "call" in a DM *is* somebody being present in
 // that DM's voice channel, and the ring is a nudge to come look. That is why
@@ -473,6 +497,16 @@ func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (i
 // there is nothing to persist that presence does not already say, and a
 // persisted call would be one more thing that can be left dangling by a crash.
 func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
+	return s.callTargets(ctx, userID, channelID, true)
+}
+
+// DeclineTargets is RingTargets for a call_decline. A decline carries no text
+// and only stops the ringer's client ringing, so a timeout does not refuse it.
+func (s *DMService) DeclineTargets(ctx context.Context, userID, channelID int64) ([]int64, error) {
+	return s.callTargets(ctx, userID, channelID, false)
+}
+
+func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ring bool) ([]int64, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
@@ -489,6 +523,11 @@ func (s *DMService) RingTargets(ctx context.Context, userID, channelID int64) ([
 	// sink — blocks are enforced at group creation instead.
 	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
 		return nil, err
+	}
+	if ring {
+		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
+			return nil, err
+		}
 	}
 
 	ids, err := s.st.GetDMParticipantIDs(ctx, channelID)

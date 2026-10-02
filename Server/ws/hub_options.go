@@ -1,10 +1,12 @@
 package ws
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
@@ -12,6 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/storage"
 )
 
 // HubOptions carries everything a Hub needs before Run starts (S-11 / B3-4).
@@ -83,13 +86,19 @@ type HubOptions struct {
 	ReplayColdLimit int
 
 	// VoiceQuality is the operator-configured voice.quality (cfg.Voice.Quality)
-	// — voice_join's fallback for a channel with no per-channel voice_quality
-	// override, which is every channel today (CreateChannel never writes that
-	// column, and it has no DEFAULT). Startup-only, like the rest of this
-	// struct: the setup wizard already treats voice.quality as
-	// restart-required. Empty or not one of voiceQualities' keys falls back
-	// to "medium", same as an invalid per-channel override does.
+	// — voice_join's only source of a channel's quality. Startup-only, like
+	// the rest of this struct: the setup wizard already treats voice.quality
+	// as restart-required. Empty or not one of voiceQualities' keys falls back
+	// to "medium".
 	VoiceQuality string
+
+	// UploadPolicy is advertised on every auth_ok as upload_policy.
+	// Startup-only, like voice.quality.
+	UploadPolicy UploadPolicy
+
+	// UploadFileTypes supplies upload_policy's two extension lists, read with
+	// the server_name/motd cache. Nil leaves them out.
+	UploadFileTypes UploadFileTypes
 
 	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose
 	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client
@@ -97,6 +106,29 @@ type HubOptions struct {
 	// Parsed once at construction; nil/empty means RemoteAddr is used and a
 	// client-supplied header is ignored.
 	TrustedProxies []string
+}
+
+// UploadPolicy is what a client needs to refuse a doomed upload before
+// sending it. The upload route stays authoritative; this is only the
+// client's pre-check.
+type UploadPolicy struct {
+	// MaxUploadBytes is upload.max_size_mb in bytes. 0 means uploads are
+	// disabled: the upload route refuses every non-empty file.
+	MaxUploadBytes int64 `json:"max_upload_bytes"`
+	// BlockedExtensions and AllowedExtensions are the file-type policy in
+	// force (storage.FileTypePolicy): a blocked final extension is refused,
+	// and a non-empty allowed list is allow-only mode.
+	BlockedExtensions []string `json:"blocked_extensions,omitempty"`
+	AllowedExtensions []string `json:"allowed_extensions,omitempty"`
+	// Thumbnails reports that GET /api/v1/files/{id}/thumb exists, so a
+	// client asks for an inline image's thumbnail instead of the original.
+	Thumbnails bool `json:"thumbnails,omitempty"`
+}
+
+// UploadFileTypes reads the upload file-type policy in force;
+// service.UploadService satisfies it.
+type UploadFileTypes interface {
+	FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error)
 }
 
 // NewHub creates a Hub ready to be started with Run, validating that the
@@ -144,12 +176,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	database, limiter, svc := opts.DB, opts.Limiter, opts.Services
-	settingsReader := opts.Settings
 
-	ringSize := 1000
-	if opts.ReplayRingSize > 0 {
-		ringSize = opts.ReplayRingSize
-	}
+	ringSize := cmp.Or(max(opts.ReplayRingSize, 0), 1000) // unset or negative: 1000
 
 	reg := NewHandlerRegistry()
 
@@ -164,16 +192,19 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		clients:             make(map[int64]*Client),
 		db:                  database,
 		limiter:             limiter,
-		settings:            settingsReader,
+		settings:            opts.Settings,
 		readers:             opts.Readers,
 		voice:               opts.Voice,
 		defaultVoiceQuality: defaultVoiceQuality,
+		settingsUpload:      opts.UploadPolicy,
+		uploadFileTypes:     opts.UploadFileTypes,
 		voiceMod:            newVoiceModLocks(),
 		presence:            opts.Presence,
 		authn:               opts.Auth,
 		trustedProxyNets:    clientip.ParseCIDRList(opts.TrustedProxies),
 		broadcast:           make(chan broadcastMsg, 1024),
 		clientEvents:        make(chan clientEvent, 64),
+		readyGate:           make(chan struct{}, 2*runtime.GOMAXPROCS(0)),
 		stop:                make(chan struct{}),
 		runDone:             make(chan struct{}),
 		pubsub:              NewPubSub(),
@@ -196,7 +227,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
 
 	chatDeps := ChatDeps{
-		Limiter: h.limiter,
+		Limiter:    h.limiter,
+		LiveStatus: h.LiveStatus,
 	}
 	presenceDeps := PresenceDeps{
 		Limiter: h.limiter,
@@ -215,12 +247,12 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// (users.status keeps their last *chosen* value across a disconnect)
 		// from one who is actually still connected — the same live-connection
 		// rule presentableMembers applies to the members array.
-		svc.Messages.SetOnlineChecker(h.IsUserConnected)
+		svc.Messages.SetLiveStatusLookup(h.LiveStatus)
 		// So every DM payload DMService builds (GET/POST /dms, POST
 		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
 		// applies the same live-connection rule instead of only the ready
 		// payload's presentableDMChannels doing so (OC-0304).
-		svc.DMs.SetOnlineChecker(h.IsUserConnected)
+		svc.DMs.SetLiveStatusLookup(h.LiveStatus)
 	}
 
 	registerChatHandlers(reg, chatDeps)

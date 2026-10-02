@@ -17,6 +17,7 @@ const {
   mockIsIdle,
   mockScrollToMessage,
   mockSetDisabled,
+  mockSetSendGate,
   mockGetDraft,
   mockRestoreDraft,
 } = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ const {
   mockIsIdle: vi.fn(() => true),
   mockScrollToMessage: vi.fn(() => true),
   mockSetDisabled: vi.fn(),
+  mockSetSendGate: vi.fn(),
   mockGetDraft: vi.fn<
     () => {
       content: string;
@@ -60,7 +62,17 @@ vi.mock("@lib/logger", () => ({
 }));
 
 vi.mock("@lib/dom", () => ({
-  createElement: vi.fn((tag: string) => document.createElement(tag)),
+  createElement: vi.fn((tag: string, attrs?: Record<string, string>, textContent?: string) => {
+    const el = document.createElement(tag);
+    if (attrs) {
+      for (const [key, value] of Object.entries(attrs)) {
+        if (key === "class") el.className = value;
+        else el.setAttribute(key, value);
+      }
+    }
+    if (textContent !== undefined) el.textContent = textContent;
+    return el;
+  }),
   clearChildren: vi.fn((el: HTMLElement) => {
     el.innerHTML = "";
   }),
@@ -97,6 +109,7 @@ vi.mock("@components/MessageInput", () => ({
       cancelEdit: vi.fn(),
       isIdle: mockIsIdle,
       setDisabled: mockSetDisabled,
+      setSendGate: mockSetSendGate,
       getDraft: mockGetDraft,
       restoreDraft: mockRestoreDraft,
     };
@@ -332,7 +345,6 @@ function makeOpts(overrides: Partial<ChannelControllerOptions> = {}): ChannelCon
       loadMessages: vi.fn(),
       loadOlderMessages: vi.fn(),
     } as unknown as ChannelControllerOptions["msgCtrl"],
-    pendingDeleteManager: { tryDelete: vi.fn(() => "pending" as const), cleanup: vi.fn() },
     reactionCtrl: {
       handleReaction: vi.fn(),
       destroy: vi.fn(),
@@ -607,6 +619,30 @@ describe("createChannelController", () => {
         expect.objectContaining({ content: "for 42" }),
       );
     });
+
+    it("restores the pre-edit draft after a channel switch mid-edit (P1-08)", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      // While an edit is in progress the composer reports the draft the edit
+      // displaced (not the edit text), so switching away and back keeps it.
+      mockGetDraft.mockReturnValue({
+        content: "pre-edit draft",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+      ctrl.mountChannel(99, "random");
+      mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+      mockGetChannelMessages.mockReturnValue([{ id: 7, content: "original" }]);
+      ctrl.mountChannel(42, "general");
+
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "pre-edit draft",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+    });
   });
 
   it("does not invalidate any window on the very first mount, which fetches exactly once", () => {
@@ -637,35 +673,151 @@ describe("createChannelController", () => {
 
     expect(ctrl.currentChannelId).toBeNull();
     expect(ctrl.messageList).toBeNull();
-    expect(opts.pendingDeleteManager.cleanup).toHaveBeenCalled();
   });
 
-  describe("MessageList callbacks", () => {
-    it("onDeleteClick sends delete on confirmed", () => {
+  describe("MessageList callbacks (P4-12 delete confirmation dialog)", () => {
+    function deleteModal(): HTMLElement | null {
+      return document.querySelector("[data-testid='msg-delete-modal']");
+    }
+    function confirmBtn(): HTMLButtonElement {
+      return document.querySelector("[data-testid='msg-delete-confirm']") as HTMLButtonElement;
+    }
+    function cancelBtn(): HTMLButtonElement {
+      return document.querySelector("[data-testid='msg-delete-cancel']") as HTMLButtonElement;
+    }
+
+    it("opens a dialog and sends nothing on the first click", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, false);
 
-      expect(opts.pendingDeleteManager.tryDelete).toHaveBeenCalledWith(5);
+      expect(deleteModal()).not.toBeNull();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toHaveLength(0);
+      ctrl.destroyChannel();
+    });
+
+    it("sends exactly one chat_delete when the dialog is confirmed", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      confirmBtn().click();
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([f]) => (f as { type: string }).type === "chat_delete",
+      );
+      expect(sends).toHaveLength(1);
+      expect(sends[0]![0]).toEqual({ type: "chat_delete", payload: { message_id: 5 } });
+      expect(deleteModal()).toBeNull();
+      ctrl.destroyChannel();
+    });
+
+    it("cancelling the dialog sends nothing and closes it", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      cancelBtn().click();
+
+      expect(deleteModal()).toBeNull();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toHaveLength(0);
+      ctrl.destroyChannel();
+    });
+
+    it("Escape cancels the dialog without deleting", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+      expect(deleteModal()).toBeNull();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toHaveLength(0);
+      ctrl.destroyChannel();
+    });
+
+    it("Shift-click deletes immediately with no dialog", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, true);
+
+      expect(deleteModal()).toBeNull();
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_delete",
         payload: { message_id: 5 },
       });
+      ctrl.destroyChannel();
     });
 
-    it("onDeleteClick shows info toast on pending", () => {
+    it("keeps the CLI-08 gate: confirming while disconnected shows one error and sends nothing", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      setConnectionStatus("disconnected");
+      vi.clearAllMocks();
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      confirmBtn().click();
+
+      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([f]) => (f as { type: string }).type === "chat_delete",
+      );
+      expect(sends).toHaveLength(0);
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("delete"), "error");
+      ctrl.destroyChannel();
+    });
+
+    it("closes an open dialog when the channel is destroyed", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, false);
+      expect(deleteModal()).not.toBeNull();
+      ctrl.destroyChannel();
 
-      expect(opts.showToast).toHaveBeenCalledWith("Click delete again to confirm", "info");
+      expect(deleteModal()).toBeNull();
     });
 
     it("onReactionClick delegates to reactionCtrl", () => {
@@ -1268,7 +1420,9 @@ describe("createChannelController", () => {
       expect(result).toEqual({ id: 1, url: "/f/1", filename: "f.txt" });
     });
 
-    it("onUploadFile shows toast on failure", async () => {
+    // P1-09: the composer reports a failed upload inline from the rejection,
+    // so the controller must not also toast it.
+    it("onUploadFile rethrows a failure for the composer's inline line, without a toast", async () => {
       const opts = makeOpts();
       (
         opts.api as unknown as { uploadFile: ReturnType<typeof vi.fn> }
@@ -1279,7 +1433,7 @@ describe("createChannelController", () => {
       await expect(
         capturedMessageInputOpts!.onUploadFile(new File(["x"], "test.txt")),
       ).rejects.toThrow("upload failed");
-      expect(opts.showToast).toHaveBeenCalledWith("File upload failed", "error");
+      expect(opts.showToast).not.toHaveBeenCalled();
     });
   });
 
@@ -1626,6 +1780,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1665,6 +1820,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1686,6 +1842,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1722,6 +1879,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1764,6 +1922,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1801,6 +1960,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1839,6 +1999,7 @@ describe("createChannelController", () => {
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
       };
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
@@ -1883,23 +2044,25 @@ describe("createChannelController", () => {
       setConnectionStatus("connected");
     });
 
-    it("disables the composer for the cooldown after an accepted send", () => {
+    it("gates only the send for the cooldown, leaving the draft editable (#12)", () => {
       vi.useFakeTimers();
       try {
         seedChannel(5);
         const opts = makeOpts();
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
-        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
 
         wsHandler(opts, "chat_send_ok")({} as never);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 5s");
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 5s");
+        // The composer itself must NOT be disabled — typing continues.
+        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
 
         vi.advanceTimersByTime(3000);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 2s");
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 2s");
 
         vi.advanceTimersByTime(2000);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+        expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
       } finally {
         vi.useRealTimers();
       }
@@ -1913,7 +2076,7 @@ describe("createChannelController", () => {
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
-      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
     it("does not charge slow mode again for a deduplicated receipt", () => {
@@ -1922,7 +2085,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       wsHandler(opts, "chat_send_ok")({ deduplicated: true } as never);
-      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
     it("restarts the cooldown when the server refuses with SLOW_MODE", () => {
@@ -1934,13 +2097,13 @@ describe("createChannelController", () => {
         ctrl.mountChannel(42, "general");
 
         wsHandler(opts, "error")({ code: "SLOW_MODE", message: "slow mode" } as never);
-        expect(mockSetDisabled).toHaveBeenLastCalledWith("Slow mode — 10s");
+        expect(mockSetSendGate).toHaveBeenLastCalledWith("Slow mode — 10s");
 
         // An unrelated error must not gate the composer.
         vi.advanceTimersByTime(10_000);
-        mockSetDisabled.mockClear();
+        mockSetSendGate.mockClear();
         wsHandler(opts, "error")({ code: "FORBIDDEN", message: "nope" } as never);
-        expect(mockSetDisabled).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+        expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
       } finally {
         vi.useRealTimers();
       }
@@ -1956,7 +2119,7 @@ describe("createChannelController", () => {
 
       wsHandler(opts, "chat_send_ok")({} as never);
 
-      expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
+      expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
     it("does not gate the newly mounted channel with a late ack for a message sent in the previous channel (OC-0059)", () => {
@@ -1996,7 +2159,7 @@ describe("createChannelController", () => {
       // Switch to channel B before A's ack arrives.
       setActiveChannel(43);
       ctrl.mountChannel(43, "other");
-      mockSetDisabled.mockClear();
+      mockSetSendGate.mockClear();
 
       // A's late chat_send_ok now arrives; only B's handler is subscribed.
       const ackCalls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -2006,7 +2169,7 @@ describe("createChannelController", () => {
       onAck({ message_id: 7, timestamp: "2024-01-01T00:00:00Z" }, "cid-2");
 
       // B was never sent to and must not be gated by A's cooldown.
-      expect(mockSetDisabled).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
     });
 
     it("stops the countdown when the channel unmounts", () => {
@@ -2019,10 +2182,10 @@ describe("createChannelController", () => {
         wsHandler(opts, "chat_send_ok")({} as never);
 
         ctrl.destroyChannel();
-        mockSetDisabled.mockClear();
+        mockSetSendGate.mockClear();
         vi.advanceTimersByTime(5000);
 
-        expect(mockSetDisabled).not.toHaveBeenCalled();
+        expect(mockSetSendGate).not.toHaveBeenCalled();
       } finally {
         vi.useRealTimers();
       }
@@ -2674,13 +2837,10 @@ describe("createChannelController", () => {
 
     it("does not toast success when a delete is sent and acknowledged", () => {
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, true);
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_delete",
@@ -2693,14 +2853,11 @@ describe("createChannelController", () => {
     it("shows one error and sends nothing when deleting while disconnected", () => {
       setConnectionStatus("disconnected");
       const opts = makeOpts();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       vi.clearAllMocks();
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, true);
 
       const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([frame]) => (frame as { type: string }).type === "chat_delete",
@@ -2795,14 +2952,11 @@ describe("createChannelController", () => {
 
     it("shows one error when a delete frame fails to send", () => {
       const { opts, ids } = optsWithIds();
-      (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-        "confirmed",
-      );
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       const onSendFailure = sendFailureListener(opts);
 
-      capturedMessageListOpts!.onDeleteClick(5);
+      capturedMessageListOpts!.onDeleteClick(5, true);
       const deleteId = ids().find((id) => id.endsWith("chat_delete"))!;
       vi.clearAllMocks();
 
@@ -2869,13 +3023,10 @@ describe("createChannelController", () => {
       try {
         mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
         const { opts } = optsWithIds();
-        (opts.pendingDeleteManager.tryDelete as ReturnType<typeof vi.fn>).mockReturnValue(
-          "confirmed",
-        );
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
         capturedMessageInputOpts!.onEditMessage(5, "new content");
-        capturedMessageListOpts!.onDeleteClick(6);
+        capturedMessageListOpts!.onDeleteClick(6, true);
 
         // The user moves on; the server unsubscribes channel 42's topic
         // before the echoes are delivered, so none ever arrives.

@@ -1,12 +1,12 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
 import { Room, Track } from "livekit-client";
-import type { StreamSample } from "../features/voice/remoteTracks";
+import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
   setLocalCamera,
   setLocalScreenshare,
-  setPttGated,
+  setPttGated as setPttGatedState,
   isPttPollingLive,
   setListenOnly,
   setVoiceStatus,
@@ -42,11 +42,18 @@ import { isLinuxDesktop } from "../features/voice/native/platform";
 import { nativeCounters } from "../features/voice/native/counters";
 import { desktop } from "../platform/desktop";
 import { voiceText } from "../i18n/voice";
+import { channelsStore } from "@stores/channels.store";
+import { dmStore } from "@stores/dm.store";
+import { authStore } from "@stores/auth.store";
 
 // Re-export StreamQuality so existing consumers don't break
 export type { StreamQuality } from "@lib/screenShare";
 
 const log = createLogger("livekitSession");
+
+/** P2-T5: how long a reconnect attempt waits for its voice_token_refresh
+ *  reply before trying with the token it has. */
+const RECONNECT_TOKEN_WAIT_MS = 10_000;
 
 // --- Push-to-talk liveness (cross-module signal, no instance state) ---
 
@@ -78,6 +85,15 @@ export class LiveKitSession {
    *  call gets a value no other attempt has ever held, regardless of how
    *  many times the session has bounced through "idle" in between. */
   private _joinGenerationCounter = 0;
+
+  /** P2-T5: the latest token and when it arrived, so a long reconnect knows
+   *  when it needs a fresh one (server TTL 5 minutes, OC-0014). */
+  private _stampedToken: string | null = null;
+  private _tokenReceivedAt = 0;
+  /** The reconnect attempt waiting for a voice_token_refresh reply. */
+  private _tokenWaiter: (() => void) | null = null;
+  /** P2-T5: the reconnect loop sent voice_join and awaits the server's answer. */
+  private _rejoinPending = false;
 
   // --- Non-connection fields (configuration / callbacks / infrastructure) ---
   private ws: WsClient | null = null;
@@ -141,7 +157,8 @@ export class LiveKitSession {
 
   private _tokenManager = new VoiceTokenManager({
     getWs: () => this.ws,
-    isRoomConnected: () => this._room !== null,
+    // P2-T5: a long auto-reconnect refreshes its token too (OC-0014).
+    hasVoiceSession: () => this._room !== null || this._state.type === "reconnecting",
     // OC-0429: retry at the rate-limit cadence, not the full periodic one —
     // see VoiceTokenManager.startRetryTimer.
     onRefreshTimeout: () => this._tokenManager.startRetryTimer(),
@@ -154,6 +171,13 @@ export class LiveKitSession {
   private setState(next: SessionState): void {
     const prev = this._state.type;
     this._state = next;
+    if (
+      (next.type === "connected" || next.type === "reconnecting") &&
+      next.latestToken !== this._stampedToken
+    ) {
+      this._stampedToken = next.latestToken;
+      this._tokenReceivedAt = Date.now();
+    }
     log.debug("Session state transition", { from: prev, to: next.type });
   }
 
@@ -330,6 +354,7 @@ export class LiveKitSession {
       getLatestToken: () => this._latestToken,
       getLastUrl: () => this._lastUrl,
       getLastDirectUrl: () => this._lastDirectUrl,
+      isNativeRoom: isLinuxDesktop,
       setReconnectAc: (ac) => {
         if (ac !== null && this._pendingReconnectFields !== null) {
           // Transition from idle → reconnecting atomically using the fields
@@ -388,6 +413,7 @@ export class LiveKitSession {
       },
       leaveVoice: (sendWs) => this.leaveVoice(sendWs),
       applyMicMuteState: (muted) => this.applyMicMuteState(muted),
+      setupAudioPipeline: () => this._audioPipeline.setupAudioPipeline(),
       attemptAutoReconnect: (token, url, channelId, directUrl, signal) =>
         this.attemptAutoReconnect(token, url, channelId, directUrl, signal),
     });
@@ -434,7 +460,27 @@ export class LiveKitSession {
       restoreLocalVoiceState: (m) => this.restoreLocalVoiceState(m),
       startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
       requestTokenRefresh: () => this.requestTokenRefresh(),
-      leaveVoice: () => this.leaveVoice(true),
+      refreshTokenAndWait: () => this.refreshTokenAndWait(),
+      tokenAgeMs: () => Date.now() - this._tokenReceivedAt,
+      canKeepRetrying: () =>
+        this.ws !== null &&
+        this.ws.getState() !== "disconnected" &&
+        (channelsStore.getState().channels.has(channelId) ||
+          dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
+      serverMembership: () => {
+        if (this.ws?.getState() !== "connected") return "unknown";
+        const self = authStore.getState().user?.id ?? 0;
+        return voiceStore.getState().voiceUsers.get(channelId)?.has(self) === true
+          ? "held"
+          : "released";
+      },
+      rejoinVoice: () => {
+        this.leaveVoice(false);
+        this._rejoinPending = true;
+        setVoiceStatus("joining");
+        this.ws?.send({ type: "voice_join", payload: { channel_id: channelId } });
+      },
+      leaveVoice: () => this.leaveVoice(this.ws?.getState() === "connected"),
       onError: (msg) => this.onErrorCallback?.(msg),
       isStateConnected: (id, room) => this._join.isStateConnected(id, room),
       disconnectSupersededLocalRoom: (room) => this._join.disconnectSupersededLocalRoom(room),
@@ -466,6 +512,19 @@ export class LiveKitSession {
     this._tokenManager.requestRefresh();
   }
 
+  /** Request a refresh and resolve once a token lands, or after
+   *  RECONNECT_TOKEN_WAIT_MS (rate-limited or unanswered). */
+  private refreshTokenAndWait(): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, RECONNECT_TOKEN_WAIT_MS);
+      this._tokenWaiter = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      this.requestTokenRefresh();
+    });
+  }
+
   handleVoiceTokenRefresh(token?: string): void {
     // KNOWN LIMITATION: The livekit-client SDK does not expose a method to
     // rotate the token on an active connection. We store the fresh token so
@@ -482,6 +541,8 @@ export class LiveKitSession {
     } else if (token && this._state.type === "reconnecting") {
       this.setState({ ...this._state, latestToken: token });
     }
+    this._tokenWaiter?.();
+    this._tokenWaiter = null;
     this._tokenManager.handleRefreshResponse();
   }
 
@@ -501,9 +562,8 @@ export class LiveKitSession {
     // platforms where PTT can never actually report state (macOS's
     // is_key_down stub, pure-Wayland Linux with no XWayland).
     // Record the gate in pttGated, NEVER in localMuted: localMuted means "the
-    // user muted themselves", and ptt.ts refuses to open the mic on a PTT
-    // press while it is set — writing it here would close the mic for the
-    // whole session instead of only until the first press.
+    // user muted themselves". The microphone is enabled either way, behind
+    // the gate (AudioPipeline.setPttGated), and a press only opens the gate.
     // On reconnect, don't recompute pttArmed from scratch — that always
     // yields false (mode !== "join") and ignores whatever pttGated the store
     // is still carrying from before the disconnect. If the user joined with
@@ -515,10 +575,9 @@ export class LiveKitSession {
       mode === "join"
         ? isPttPollingLive() && loadPref<number>("pttVk", 0) !== 0
         : state.pttGated === true;
-    if (mode === "join") {
-      setPttGated(pttArmed);
-    }
-    const muted = pttArmed || state.localMuted || state.localDeafened;
+    if (mode === "join") setPttGatedState(pttArmed);
+    this._audioPipeline.setPttGated(pttArmed);
+    const muted = state.localMuted || state.localDeafened;
     const deafened = state.localDeafened;
     const shouldEnableMicrophone = !muted;
 
@@ -531,9 +590,6 @@ export class LiveKitSession {
             ? "Published mic via LiveKit native capture"
             : "Auto-reconnect restored live microphone",
         );
-        if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-          await this._audioPipeline.applyNoiseSuppressor();
-        }
       }
       if (this._room !== room) return;
       setListenOnly(false); // Mic acquired successfully
@@ -632,7 +688,21 @@ export class LiveKitSession {
     directUrl?: string,
     isKeyHolder?: boolean,
   ): Promise<void> {
+    this._rejoinPending = false;
     return this._join.handleVoiceToken(token, url, channelId, directUrl, isKeyHolder);
+  }
+
+  /** A refused voice_join ends a reconnect's rejoin for good: tell the user
+   *  the call was lost, as the loop's own give-up does. */
+  failPendingRejoin(): void {
+    if (!this._rejoinPending) return;
+    this._rejoinPending = false;
+    this.onErrorCallback?.(voiceText("reconnect.voiceLost"));
+  }
+
+  /** True while the auto-reconnect loop owns the session. */
+  isAutoReconnecting(): boolean {
+    return this._state.type === "reconnecting";
   }
 
   // ── Client-side E2EE delegates (state + protocol live in E2EEManager) ───
@@ -683,6 +753,7 @@ export class LiveKitSession {
   }
 
   leaveVoice(sendWs = true): void {
+    this._rejoinPending = false;
     this._lifecycle.leaveVoice(sendWs);
   }
 
@@ -780,8 +851,23 @@ export class LiveKitSession {
     this._media.setVoiceSensitivity(sensitivity);
   }
 
+  /** Push-to-talk: close (key up) or open (key down) the gate — the mic
+   *  processor's, or the native room's own (AudioPipeline.setPttGated).
+   *  Recorded in the store for the widget, applied to the live processor and
+   *  to every one attached later. */
+  setPttGated(gated: boolean): void {
+    setPttGatedState(gated);
+    this._media.setPttGated(gated);
+  }
+
   async reapplyAudioProcessing(): Promise<void> {
     return this._media.reapplyAudioProcessing();
+  }
+
+  /** Route the live mic processor through or around RNNoise for the saved
+   *  preference, without restarting the capture. */
+  async reapplyEnhancedNoiseSuppression(): Promise<void> {
+    return this._media.reapplyEnhancedNoiseSuppression();
   }
 
   getLocalCameraStream(): MediaStream | null {
@@ -810,6 +896,16 @@ export class LiveKitSession {
     type: "camera" | "screenshare",
   ): Promise<StreamSample | null> {
     return this._remoteTracks.getRemoteVideoStats(userId, type);
+  }
+
+  /** Ask for only what a remote video tile, or the hover preview, shows (P3-07). */
+  setRemoteVideoView(
+    userId: number,
+    type: "camera" | "screenshare",
+    view: VideoView,
+    preview?: boolean,
+  ): void {
+    this._remoteTracks.setRemoteVideoView(userId, type, view, preview);
   }
 
   getRoom(): Room | null {
@@ -870,6 +966,8 @@ export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
 export const rePinPeerIdentity = session.rePinPeerIdentity.bind(session);
 export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
+export const failPendingRejoin = session.failPendingRejoin.bind(session);
+export const isAutoReconnecting = session.isAutoReconnecting.bind(session);
 export const retryMicPermission = session.retryMicPermission.bind(session);
 export const cleanupAll = session.cleanupAll.bind(session);
 export const setMuted = session.setMuted.bind(session);
@@ -885,12 +983,16 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
+export const setPttGated = session.setPttGated.bind(session);
 export const reapplyAudioProcessing = session.reapplyAudioProcessing.bind(session);
+export const reapplyEnhancedNoiseSuppression =
+  session.reapplyEnhancedNoiseSuppression.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
+export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);

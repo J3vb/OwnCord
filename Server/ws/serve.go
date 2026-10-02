@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -22,6 +23,10 @@ const (
 	// wsReadLimitBytes is the maximum size of a single inbound WebSocket
 	// message. Must match the client-side upload cap.
 	wsReadLimitBytes = config.MaxMessageBytes
+
+	// preAuthReadLimitBytes caps inbound messages until the auth frame is
+	// accepted; an auth frame is a few hundred bytes.
+	preAuthReadLimitBytes = 8 << 10
 )
 
 // ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
@@ -33,34 +38,52 @@ const (
 // Pass explicit origins such as []string{"https://example.com"} to restrict access.
 //
 // maxConns, when > 0, refuses new connections with 503 once that many clients
-// are registered — a static capacity guardrail (server.max_ws_connections).
-// The check runs before the upgrade so a refused connection costs one HTTP
-// request, not a socket plus goroutines. Registered count trails pre-auth
-// connections by design; the 10s auth deadline bounds that gap.
+// are registered or still handshaking — a static capacity guardrail
+// (server.max_ws_connections). The check runs before the upgrade so a refused
+// connection costs one HTTP request, not a socket plus goroutines.
 func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
+	// pending counts this handler's upgraded sockets that have not yet
+	// started their pumps (authenticating, waiting for a ready-build permit,
+	// or handshaking).
+	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
-		if maxConns > 0 && hub.ClientCount() >= maxConns {
+		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
 			hub.connRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
 			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
 			return
 		}
+		// Pending until the pumps start: the handshake can wait up to
+		// readyAdmissionWait for a permit before it registers, and the brief
+		// overlap with ClientCount after registerNow errs toward refusing.
+		pending.Add(1)
+		var ended bool
+		endPending := func() {
+			if !ended {
+				ended = true
+				pending.Add(-1)
+			}
+		}
+		defer endPending()
+
 		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			slog.Warn("ws upgrade failed", "err", err)
 			return
 		}
-		conn.SetReadLimit(wsReadLimitBytes) // match client-side upload cap
+		conn.SetReadLimit(preAuthReadLimitBytes)
 
 		c, lastSeq, err := hub.upgradeAndAuth(conn, r)
 		if err != nil {
 			return
 		}
+		conn.SetReadLimit(wsReadLimitBytes) // match client-side upload cap
 
 		ctx := r.Context()
 
 		startPumps := func() {
+			endPending()
 			writeCtx, writeCancel := context.WithCancel(ctx)
 			go writePump(writeCtx, conn, c)
 			go pingPump(writeCtx, conn, c, pingInterval)
@@ -169,6 +192,9 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 // It runs BEFORE the ready payload is built so the member list the client is
 // handed already agrees with the presence broadcast that follows it.
 func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
+	if c.user.LastSeen == nil {
+		h.presenceRepair.mark(&h.presenceRepair.joins, c.userID, true)
+	}
 	status, err := h.presence.StampConnect(ctx, c.userID, c.user.Status)
 	if err != nil {
 		slog.Warn("ws StampConnect", "err", err)
@@ -177,10 +203,31 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 		// that users.status disagrees with, and buildReady's ListMembers read
 		// of users.status (via presentableMembers, which only ever downgrades
 		// a connected user to offline, never upgrades one) would then never
-		// self-correct for the rest of this session (OC-0298).
+		// self-correct for the rest of this session (OC-0298). The live
+		// presence follows the row for the same reason.
+		c.setLivePresence(c.user.Status, c.user.CustomStatus)
 		return
 	}
 	c.user.Status = status
+	c.setLivePresence(status, c.user.CustomStatus)
+}
+
+// announceFreshConnect tells every other client that c came online after a
+// full ready. Coming online is presence, not a join: every client's ready
+// already lists every member, so a member_join goes ahead of the presence
+// only for a member other clients cannot have yet — a user still owed one
+// since their first-ever connect (applyConnectStatus marks it before the
+// stamp erases last_seen NULL; announceMember clears it), or the return of a
+// user whose temporary ban lapsed (member_ban removed them everywhere, and
+// users.banned stays 1 until an unban).
+func (h *Hub) announceFreshConnect(c *Client) {
+	p := pendingPresence{status: c.user.Status, customStatus: c.user.CustomStatus}
+	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
+		m := memberPayloadFor(c.user, c.roleName)
+		p.member = &m
+	}
+	slog.Info("ws announcing connect presence", "user_id", c.userID, "username", c.user.Username, "new_member", p.member != nil)
+	h.queuePresence(c.userID, p)
 }
 
 // announceConnectPresence fans out the status applyConnectStatus settled on,

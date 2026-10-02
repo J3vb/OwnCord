@@ -25,7 +25,9 @@ import (
 // a refresh via voice_token_refresh before expiry. Security mitigations:
 //   - Tokens are scoped to a single room
 //   - Server can revoke room access via LiveKit API on ban/kick
-//   - Webhook participant_joined validates voice_states membership
+//   - The RT-3 reconciler (voice_reconcile.go) removes any SFU participant
+//     with no matching voice_states row once a tick; the participant_joined
+//     webhook does the same at join time where the operator configured one
 //   - CanPublishSources restricts track types per permission (BUG-128)
 const tokenTTL = 5 * time.Minute
 
@@ -213,6 +215,25 @@ func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) (
 	ids := make([]string, 0, len(resp.GetParticipants()))
 	for _, p := range resp.GetParticipants() {
 		ids = append(ids, p.GetIdentity())
+	}
+	return ids, nil
+}
+
+// ListRoomChannelIDs returns the channel IDs of the OwnCord rooms the SFU has
+// open, for RT-3's reconciler: a room can hold participants after its last
+// voice_states row is gone. Rooms that are not OwnCord channels are skipped.
+func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	resp, err := c.roomSvc.ListRooms(ctx, &livekit.ListRoomsRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("livekit: listing rooms: %w", err)
+	}
+	ids := make([]int64, 0, len(resp.GetRooms()))
+	for _, r := range resp.GetRooms() {
+		if id, err := parseRoomChannelID(r.GetName()); err == nil {
+			ids = append(ids, id)
+		}
 	}
 	return ids, nil
 }

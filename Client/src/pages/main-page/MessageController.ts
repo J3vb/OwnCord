@@ -19,44 +19,6 @@ const log = createLogger("message-ctrl");
 const PAGE_SIZE = 50;
 
 // ---------------------------------------------------------------------------
-// Pending Delete Manager
-// ---------------------------------------------------------------------------
-
-export interface PendingDeleteManager {
-  /**
-   * Attempt to delete a message. Returns "confirmed" on the second click
-   * within the timeout window, "pending" on the first click.
-   */
-  tryDelete(msgId: number): "confirmed" | "pending";
-  /** Clear all pending timeouts. */
-  cleanup(): void;
-}
-
-export function createPendingDeleteManager(): PendingDeleteManager {
-  const pending = new Map<number, number>();
-
-  function tryDelete(msgId: number): "confirmed" | "pending" {
-    if (pending.has(msgId)) {
-      window.clearTimeout(pending.get(msgId));
-      pending.delete(msgId);
-      return "confirmed";
-    }
-    const tid = window.setTimeout(() => pending.delete(msgId), 5000);
-    pending.set(msgId, tid);
-    return "pending";
-  }
-
-  function cleanup(): void {
-    for (const tid of pending.values()) {
-      window.clearTimeout(tid);
-    }
-    pending.clear();
-  }
-
-  return { tryDelete, cleanup };
-}
-
-// ---------------------------------------------------------------------------
 // Message Controller
 // ---------------------------------------------------------------------------
 
@@ -78,8 +40,10 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
-    // Runs synchronously before the first await, so the message region shows
-    // its in-region loading placeholder from the very first render.
+    // Runs synchronously before the first await, so an empty message region
+    // shows its in-region loading placeholder from the very first render. A
+    // revisit's cached rows stay on screen instead, and setMessages below
+    // reconciles the refetched page into them.
     setChannelLoading(channelId);
     try {
       const resp = await api.getMessages(channelId, { limit: PAGE_SIZE }, signal);

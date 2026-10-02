@@ -10,7 +10,7 @@ package ws
 // failure and then returned true, which ServeWS reads as "success, start the
 // pumps" (serve.go:69-72). readPump then runs against the already-closed
 // conn, fails its first Read, and its defer runs the SAME disconnect
-// teardown a second time — a second MarkUserDisconnected and a second
+// teardown a second time — a second StampDisconnect and a second
 // offline presence broadcast for a connection that was already torn down.
 
 import (
@@ -121,7 +121,7 @@ func TestHandleReconnect_HandshakeWriteFailure_TearsDownOnlyOnce(t *testing.T) {
 	h.flushPresenceQueue() // presence is coalesced; flush before inspecting
 	for len(h.broadcast) > 0 {
 		bm := <-h.broadcast
-		if bytes.Contains(bm.msg, []byte(`"status":"offline"`)) {
+		if bytes.Contains(queuedFrame(h, bm), []byte(`"status":"offline"`)) {
 			offlineBroadcasts++
 		}
 	}

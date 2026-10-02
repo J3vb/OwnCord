@@ -16,7 +16,8 @@ import (
 // announcement that used to stamp everyone online.
 
 // readPresence drains ch until a presence message arrives, returning its
-// payload. Returns nil if none arrives before the deadline.
+// payload — for a presence_batch, its first entry. Returns nil if none
+// arrives before the deadline.
 func readPresence(ch <-chan []byte, deadline time.Duration) map[string]any {
 	timer := time.NewTimer(deadline)
 	defer timer.Stop()
@@ -27,11 +28,16 @@ func readPresence(ch <-chan []byte, deadline time.Duration) map[string]any {
 			if json.Unmarshal(raw, &env) != nil {
 				continue
 			}
-			if env["type"] != "presence" {
-				continue
-			}
 			payload, _ := env["payload"].(map[string]any)
-			return payload
+			switch env["type"] {
+			case "presence":
+				return payload
+			case "presence_batch":
+				if updates, _ := payload["updates"].([]any); len(updates) > 0 {
+					entry, _ := updates[0].(map[string]any)
+					return entry
+				}
+			}
 		case <-timer.C:
 			return nil
 		}
@@ -72,14 +78,19 @@ func TestReady_InvisibleMemberIsOfflineToOthersAndTrueToSelf(t *testing.T) {
 		t.Fatalf("UpdateUserStatus: %v", err)
 	}
 
-	// Both must be connected — a member with no live session renders offline
-	// regardless, which would mask the mapping this test is about.
+	ghost.Status, watcher.Status = db.StatusInvisible, db.StatusOnline
+
+	// Both must be connected and stamped — a member with no live status
+	// renders offline regardless, which would mask the mapping this test is
+	// about.
 	gc := ws.NewTestClientWithUser(hub, ghost, 0, make(chan []byte, 8))
 	wc := ws.NewTestClientWithUser(hub, watcher, 0, make(chan []byte, 8))
 	hub.Register(gc)
 	hub.Register(wc)
 	waitRegistered(t, hub, gc)
 	waitRegistered(t, hub, wc)
+	hub.ApplyConnectStatusForTest(gc)
+	hub.ApplyConnectStatusForTest(wc)
 
 	forWatcher, err := hub.BuildReadyForTest(database, watcher.ID)
 	if err != nil {
@@ -129,7 +140,7 @@ func TestReady_DisconnectedMemberWithChosenStatusRendersOffline(t *testing.T) {
 	}
 }
 
-func TestBroadcastPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
+func TestConnectPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
 	hub, database := newTestHub(t)
 	go hub.Run()
 	t.Cleanup(hub.Stop)
@@ -146,9 +157,9 @@ func TestBroadcastPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
 	waitRegistered(t, hub, oc)
 
 	text := "heads down"
-	hub.BroadcastPresence(ghost.ID, db.StatusInvisible, &text)
+	hub.QueuePresence(ghost.ID, db.StatusInvisible, &text)
 
-	self := readPresence(ghostCh, 500*time.Millisecond)
+	self := readPresence(ghostCh, 2*time.Second)
 	if self == nil {
 		t.Fatal("owner received no presence message")
 	}
@@ -159,7 +170,7 @@ func TestBroadcastPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
 		t.Errorf("owner custom_status = %v, want %q", self["custom_status"], text)
 	}
 
-	seen := readPresence(otherCh, 500*time.Millisecond)
+	seen := readPresence(otherCh, 2*time.Second)
 	if seen == nil {
 		t.Fatal("other client received no presence message")
 	}
@@ -168,16 +179,16 @@ func TestBroadcastPresence_InvisibleSplitsSelfFromEveryoneElse(t *testing.T) {
 	}
 }
 
-// TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers pins OC-0211:
-// BroadcastPresence maps an invisible user's *status* to "offline" for the
+// TestConnectPresence_InvisibleBlanksCustomStatusForObservers pins OC-0211:
+// the connect/disconnect presence path maps an invisible user's *status* to "offline" for the
 // public frame but used to pass customStatus through verbatim, so every
 // other connected client received {status:"offline", custom_status:"<real
 // text>"} — the surviving text is a tell that the "offline" member is
 // actually online, exactly what db.MemberSummary.ForViewer deliberately
 // blanks for the ready payload. This is the connect/reconnect path
-// (announceConnectPresence -> BroadcastPresence), reached whenever an
+// (announceConnectPresence -> the coalescer's presence_batch), reached whenever an
 // invisible user with a saved custom status connects or reconnects.
-func TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T) {
+func TestConnectPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T) {
 	hub, database := newTestHub(t)
 	go hub.Run()
 	t.Cleanup(hub.Stop)
@@ -194,9 +205,9 @@ func TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T)
 	waitRegistered(t, hub, oc)
 
 	text := "in a meeting"
-	hub.BroadcastPresence(ghost.ID, db.StatusInvisible, &text)
+	hub.QueuePresence(ghost.ID, db.StatusInvisible, &text)
 
-	self := readPresence(ghostCh, 500*time.Millisecond)
+	self := readPresence(ghostCh, 2*time.Second)
 	if self == nil {
 		t.Fatal("owner received no presence message")
 	}
@@ -205,7 +216,7 @@ func TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T)
 		t.Errorf("owner custom_status = %v, want %q", self["custom_status"], text)
 	}
 
-	seen := readPresence(otherCh, 500*time.Millisecond)
+	seen := readPresence(otherCh, 2*time.Second)
 	if seen == nil {
 		t.Fatal("other client received no presence message")
 	}
@@ -220,7 +231,7 @@ func TestBroadcastPresence_InvisibleBlanksCustomStatusForObservers(t *testing.T)
 	}
 }
 
-func TestBroadcastPresence_NonInvisibleGoesToEveryoneUnchanged(t *testing.T) {
+func TestConnectPresence_NonInvisibleGoesToEveryoneUnchanged(t *testing.T) {
 	hub, database := newTestHub(t)
 	go hub.Run()
 	t.Cleanup(hub.Stop)
@@ -231,9 +242,9 @@ func TestBroadcastPresence_NonInvisibleGoesToEveryoneUnchanged(t *testing.T) {
 	hub.Register(c)
 	waitRegistered(t, hub, c)
 
-	hub.BroadcastPresence(user.ID, db.StatusDND, nil)
+	hub.QueuePresence(user.ID, db.StatusDND, nil)
 
-	got := readPresence(ch, 500*time.Millisecond)
+	got := readPresence(ch, 2*time.Second)
 	if got == nil {
 		t.Fatal("no presence message")
 	}

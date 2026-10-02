@@ -116,6 +116,22 @@ const PONG_GRACE_MS = 15_000;
 // process was frozen (sleep, suspend) in between: Chromium's intensive
 // throttling of a long-hidden page spaces ticks ~60 s apart, well under this.
 const WAKE_GAP_MS = 3 * HEARTBEAT_INTERVAL_MS;
+// How long the login/auto-login handshake may stay in "connecting" before the
+// app gives up and returns to the login form. The native proxy already bounds
+// one dial at 10 s, but ws.ts's backoff retries a dead server forever, so
+// without an app-level deadline a stored-token auto-login to an offline server
+// sits on the "Auto-connecting…" screen indefinitely. Two proxy windows, so a
+// single slow handshake never trips it. Only the FIRST authentication is
+// bounded: once the session is live, an outage keeps the in-app reconnect
+// banner and its retry loop instead of bouncing the user out.
+export const PREAUTH_CONNECT_TIMEOUT_MS = 20_000;
+// P5-S04: a SERVER_BUSY refusal is the server answering, so each one restarts
+// the pre-auth deadline, but never past this long after the first attempt: a
+// server that stays saturated still ends in an error.
+export const PREAUTH_BUSY_CAP_MS = 70_000;
+// DP-02: the least time between two wake-signal redials, so a flapping network
+// or a burst of focus changes cannot spin the reconnect loop.
+const WAKE_KICK_FLOOR_MS = 2_000;
 // U4: a wall-clock gap past WAKE_GAP_MS means the process was suspended, so
 // the next dial is marked a wake (`auth.wake = true`). The SERVER arbitrates
 // whether that wake would displace another device's live session: a lone
@@ -216,8 +232,11 @@ export function createWsClient({
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
   let livenessDueAt = 0;
   // U7d: owns the visibilitychange / online wake-probe listeners.
-  // Armed on auth_ok and released on close or disconnect().
+  // Armed on auth_ok; kept through the reconnect loop (DP-02) and released on
+  // an intentional or certificate-blocked close, or disconnect().
   let wakeOwner: Disposable | null = null;
+  // DP-02: when a wake signal last cut a reconnect backoff short.
+  let lastWakeKickAt = -Infinity;
   // U4: the last time the app could observe the clock running: a parsed
   // inbound frame (handleMessage), a heartbeat tick (handleWakeSignal), a dial
   // (connect()) or a reconnect-point check (suspendGapExceeded). A jump larger
@@ -242,6 +261,15 @@ export function createWsClient({
   // send-failure codes below are decided on this side of the seam.
   let proxyOpen = false;
   let lastSeq = 0;
+  // P5-S04: an announced restart's redial point (receipt + delay_seconds +
+  // this client's random offset in reconnect_spread_ms), so the whole server
+  // does not redial into one instant. Cleared by the next dial.
+  let restartRedialAt: number | null = null;
+  let restartOffsetMs = 0;
+  // P5-S04: a SERVER_BUSY refusal's retry_after_ms, for the close that follows.
+  let busyRetryAfterMs: number | undefined;
+  // P5-S04: the pending redial waits out that hint. Cleared by the next dial.
+  let busyHold = false;
 
   // The transport's reports, for the lifetime of this client. Each one is a
   // thin forwarder into the app-side logic that already handled the matching
@@ -269,6 +297,9 @@ export function createWsClient({
 
   // TOFU first-use confirmation listeners (F4/F8)
   const certFirstUseListeners = new Set<CertFirstUseListener>();
+
+  // P5-S04: SERVER_BUSY refusals, which never reach the error listeners.
+  const serverBusyListeners = new Set<() => void>();
 
   function setState(newState: ConnectionState): void {
     if (state !== newState) {
@@ -366,16 +397,40 @@ export function createWsClient({
     setLivenessTimer(Math.max(0, Math.min(PONG_GRACE_MS, livenessDueAt - Date.now())));
   }
 
-  // Armed on auth_ok and released on close or disconnect(); the next auth_ok
-  // re-arms them. A signal owns each listener so the lifecycle inventory sees
-  // them as owned.
+  // DP-02: while the loop waits out a backoff, the network or the screen coming
+  // back means the next dial is likely to work now, so dial at once instead of
+  // after up to 30 s. It fires the pending timer's own callback, so the U4
+  // wake check still runs, and it never dials past a close the loop itself
+  // would not retry (disconnect(), auth_error, a TOFU mismatch latch).
+  function onWakeSignal(): void {
+    if (state === "connected") {
+      onWake();
+      return;
+    }
+    if (state !== "reconnecting" || reconnectTimer === null) return;
+    if (intentionalClose || certMismatchBlock || !config) return;
+    // P5-S04: a restart's spread or a SERVER_BUSY hint is the server pacing
+    // its herd, not a network blip; the network coming back does not cut it
+    // short.
+    if (restartRedialAt !== null || busyHold) return;
+    const now = Date.now();
+    if (now - lastWakeKickAt < WAKE_KICK_FLOOR_MS) return;
+    lastWakeKickAt = now;
+    cancelReconnect();
+    redial();
+  }
+
+  // Armed on auth_ok and kept through the reconnect loop (DP-02); released on
+  // an intentional or certificate-blocked close, or disconnect(). The next
+  // auth_ok re-arms them. A signal owns each listener so the lifecycle
+  // inventory sees them as owned.
   function armWakeListeners(): void {
     if (wakeOwner !== null) return;
     const owner = new Disposable();
-    window.addEventListener("online", onWake, { signal: owner.signal });
+    window.addEventListener("online", onWakeSignal, { signal: owner.signal });
     document.addEventListener(
       "visibilitychange",
-      () => document.visibilityState === "visible" && onWake(),
+      () => document.visibilityState === "visible" && onWakeSignal(),
       { signal: owner.signal },
     );
     wakeOwner = owner;
@@ -435,7 +490,15 @@ export function createWsClient({
     // One timer at a time: the CLI-01 silence deadline and an observed close
     // can race, and a second timer would redial twice.
     if (reconnectTimer !== null) return;
-    const delay = getReconnectDelay(retryAfterMs);
+    const hint = retryAfterMs ?? busyRetryAfterMs;
+    busyHold = busyRetryAfterMs !== undefined;
+    busyRetryAfterMs = undefined;
+    // A drop later than announced still waits this client's own offset, so a
+    // late drop does not re-synchronise the herd.
+    const delay =
+      restartRedialAt !== null
+        ? Math.max(restartRedialAt - Date.now(), restartOffsetMs)
+        : getReconnectDelay(hint);
     log.info("WebSocket reconnecting", {
       delayMs: delay,
       attempt: reconnectAttempt + 1,
@@ -443,22 +506,26 @@ export function createWsClient({
       lastSeq,
     });
     setState("reconnecting");
-    reconnectTimer = clock.setTimeout(() => {
-      reconnectAttempt++;
-      // U4: the process may have been suspended while this timer was pending
-      // (a wake often outlives the backoff window), or a previous wake dial
-      // may have failed at the transport — `pendingWake` persists across
-      // retries until auth_ok. Mark the dial a wake so the server can refuse
-      // it rather than displacing another device.
-      if (suspendGapExceeded()) pendingWake = true;
-      const nextConfig = config;
-      if (!nextConfig) {
-        log.warn("Reconnect aborted: missing config");
-        setState("disconnected");
-        return;
-      }
-      void connect(nextConfig);
-    }, delay);
+    reconnectTimer = clock.setTimeout(redial, delay);
+  }
+
+  // The backoff timer's callback, and a wake signal's early redial (DP-02).
+  function redial(): void {
+    reconnectTimer = null;
+    reconnectAttempt++;
+    // U4: the process may have been suspended while this timer was pending
+    // (a wake often outlives the backoff window), or a previous wake dial
+    // may have failed at the transport — `pendingWake` persists across
+    // retries until auth_ok. Mark the dial a wake so the server can refuse
+    // it rather than displacing another device.
+    if (suspendGapExceeded()) pendingWake = true;
+    const nextConfig = config;
+    if (!nextConfig) {
+      log.warn("Reconnect aborted: missing config");
+      setState("disconnected");
+      return;
+    }
+    void connect(nextConfig);
   }
 
   function cancelReconnect(): void {
@@ -534,6 +601,24 @@ export function createWsClient({
       void disconnectProxy();
       setState("disconnected");
       return;
+    }
+
+    // P5-S04: the server refused this connect while its ready builds are
+    // saturated. Not a user-facing error: the close that follows redials no
+    // sooner than the hint.
+    if (msg.type === "error" && msg.payload.code === "SERVER_BUSY") {
+      busyRetryAfterMs = msg.payload.retry_after_ms;
+      log.info("Server busy, redialling later", { retryAfterMs: busyRetryAfterMs });
+      for (const listener of serverBusyListeners) {
+        listener();
+      }
+      return;
+    }
+
+    if (msg.type === "server_restart") {
+      const delayMs = msg.payload.delay_seconds * 1000;
+      restartOffsetMs = random() * Math.max(0, msg.payload.reconnect_spread_ms ?? 0);
+      restartRedialAt = delayMs > 0 ? Date.now() + delayMs + restartOffsetMs : null;
     }
 
     // auth_ok — mark as connected
@@ -615,6 +700,7 @@ export function createWsClient({
     // permanently kill this socket's reconnect loop.
     if (config !== null && raw.host === normalizeHostForCertCompare(config.host)) {
       certMismatchBlock = true;
+      stopWakeListeners();
       // A reconnect armed before the mismatch arrived would still fire and
       // call connect(), which clears the latch — resuming the loop against
       // the very host whose certificate just changed. Latching only blocks
@@ -671,7 +757,9 @@ export function createWsClient({
       });
       stopHeartbeat();
       stopLiveness();
-      stopWakeListeners();
+      // DP-02: a close the loop will retry keeps the wake listeners, so the
+      // network or the screen coming back can cut the backoff short.
+      if (intentionalClose || certMismatchBlock) stopWakeListeners();
       if (!intentionalClose) {
         scheduleReconnect(retryHint?.retryAfterMs);
       } else {
@@ -700,6 +788,9 @@ export function createWsClient({
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
+    restartRedialAt = null;
+    busyRetryAfterMs = undefined;
+    busyHold = false;
     cancelReconnect();
     stopLiveness();
 
@@ -794,6 +885,9 @@ export function createWsClient({
     log.info("WebSocket disconnecting (intentional)", { host: config?.host ?? "unknown" });
     certMismatchBlock = false;
     pendingWake = false;
+    restartRedialAt = null;
+    busyRetryAfterMs = undefined;
+    busyHold = false;
     cancelReconnect();
     stopHeartbeat();
     stopLiveness();
@@ -915,6 +1009,12 @@ export function createWsClient({
     onCertFirstUse(listener: CertFirstUseListener): () => void {
       certFirstUseListeners.add(listener);
       return () => certFirstUseListeners.delete(listener);
+    },
+
+    /** Register a listener for SERVER_BUSY refusals (P5-S04). */
+    onServerBusy(listener: () => void): () => void {
+      serverBusyListeners.add(listener);
+      return () => serverBusyListeners.delete(listener);
     },
 
     /** Register a listener for TOFU certificate mismatch events. */

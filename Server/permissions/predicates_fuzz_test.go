@@ -174,11 +174,14 @@ func FuzzPredicateParity(f *testing.F) {
 		}
 		wantErr(t, "CanSendMessage", s, CanSendMessage(s), wantSend)
 
-		// Voice: the CONNECT bit first (so a channel type is never disclosed
-		// to someone without it), then the room, then the archive.
+		// Voice: the CONNECT bit first, then READ outside a DM (so a channel
+		// type is never disclosed to someone without either), then the room,
+		// then the archive.
 		var wantVoice error
 		switch {
 		case !has(ConnectVoice):
+			wantVoice = ErrPermissionDenied
+		case !isDM && !has(ReadMessages):
 			wantVoice = ErrPermissionDenied
 		case isDM && !dmParticipant:
 			wantVoice = ErrNotDMParticipant

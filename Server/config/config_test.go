@@ -885,10 +885,9 @@ func (h *recordingHandler) warned(substr string) bool {
 
 // adminPerimeterWarning is a distinctive phrase from the empty-allowlist
 // warning. Asserting on the message rather than on the key name is what keeps
-// the test off warnOnServerConfig's neighbouring warning, which also fires for
-// this config (an emptied list is "customized") and names the same key — in an
-// attribute, so a key-name assertion would match either one and pass for the
-// wrong reason.
+// the test off config.Load's neighbouring trusted_proxies warning, which fires
+// for the default config and names the same key, so a key-name assertion would
+// fail the defaults half for the wrong reason.
 const adminPerimeterWarning = "the /admin IP perimeter is disabled"
 
 // TestLoadWarnsOnEmptyAdminCIDRs pins the warning that fires when
@@ -929,5 +928,23 @@ func TestLoadWarnsOnEmptyAdminCIDRs(t *testing.T) {
 	}
 	if !rec.warned(adminPerimeterWarning) {
 		t.Error("Load() did not warn that an empty server.admin_allowed_cidrs disables the /admin IP perimeter")
+	}
+}
+
+// TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies pins that the shipped
+// allowlist with no trusted_proxies warns too: behind a same-host reverse
+// proxy every request arrives from loopback, which the default admits, so the
+// default is the case the warning matters most for.
+func TestLoadWarnsOnDefaultAdminCIDRsWithoutTrustedProxies(t *testing.T) {
+	rec := &recordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if _, err := config.Load(filepath.Join(t.TempDir(), "config.yaml")); err != nil {
+		t.Fatalf("Load() with defaults returned error: %v", err)
+	}
+	if !rec.warned("trusted_proxies is empty") {
+		t.Error("Load() with the default admin_allowed_cidrs and no trusted_proxies did not warn")
 	}
 }

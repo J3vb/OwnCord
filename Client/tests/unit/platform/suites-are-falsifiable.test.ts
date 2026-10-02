@@ -181,12 +181,14 @@ describePushToTalkSuite(async () => {
     stop: async () => undefined,
     updateKey: async () => undefined,
     captureKeyPress: async () => undefined,
+    supported: async () => undefined,
   } as unknown as PushToTalk;
   const native: PushToTalkNativeControl = {
     captureSucceedsWith: () => undefined,
     captureFailsWith: () => undefined,
     configuredKey: () => undefined,
     pollingStarted: () => false,
+    pollingSupported: () => undefined,
   };
   return { subject, native };
 }, failEveryTest);
@@ -291,8 +293,11 @@ describeNotifierSuite(async () => {
     requestPermission: async () => undefined,
     show: async () => undefined,
     showMessage: async () => undefined,
+    showCall: async () => undefined,
     onMessageActivated: () => () => undefined,
     flashTaskbar: async () => undefined,
+    requestAttention: async () => undefined,
+    setUnreadBadge: async () => undefined,
   } as unknown as Notifier;
   const native: NotifierNativeControl = {
     permissionIs: () => undefined,
@@ -302,6 +307,8 @@ describeNotifierSuite(async () => {
     messageShown: () => [],
     emitsActivation: async () => undefined,
     attentionRequests: () => 0,
+    urgentAttentionRequests: () => 0,
+    badgeCounts: () => [],
   };
   return { subject, native };
 }, failEveryTest);
@@ -412,6 +419,7 @@ describeNativeVoiceSuite(async () => {
     disconnect: async () => undefined,
     setMicrophone: async () => undefined,
     setSubscribed: async () => undefined,
+    setVideoView: async () => undefined,
     setVolume: async () => undefined,
     setScreenshareVolume: async () => undefined,
     debugInfo: async () => undefined,

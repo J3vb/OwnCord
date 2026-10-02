@@ -160,19 +160,24 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
-    let (id, key) = {
+    let (id, key, superseded) = {
         let mut inner = state.inner.lock().await;
         let key = inner
             .key
             .clone()
             .ok_or("no E2EE room key installed before connect")?;
-        if let Some((old, s)) = inner.session.take() {
-            log::info!("[native_voice] superseding session {old}");
-            s.close().await;
-        }
+        // Take the old session out under the lock but close it after
+        // releasing it: close() awaits the SFU, and holding the state lock
+        // across that serialised a fast leave→join behind the old teardown
+        // (voice #20).
+        let superseded = inner.session.take();
         inner.next_id += 1;
-        (inner.next_id, key)
+        (inner.next_id, key, superseded)
     };
+    if let Some((old, s)) = superseded {
+        log::info!("[native_voice] superseding session {old}");
+        s.close().await;
+    }
     let sink_app = app.clone();
     let on_event = std::sync::Arc::new(move |event: Event| {
         if let Err(e) = sink_app.emit(EVENT_NAME, Envelope { session: id, event }) {
@@ -240,14 +245,22 @@ pub async fn native_voice_disconnect(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
 ) -> Result<Resources, String> {
-    let mut inner = state.inner.lock().await;
-    if matches!(&inner.session, Some((id, _)) if *id == session) {
-        if let Some((_, s)) = inner.session.take() {
-            s.close().await;
-            log::info!("[native_voice] session {session} closed");
+    let closing = {
+        let mut inner = state.inner.lock().await;
+        if matches!(&inner.session, Some((id, _)) if *id == session) {
+            // Take it out under the lock, close it after releasing: close()
+            // awaits the SFU, and holding the lock across it blocked every
+            // other command (voice #20).
+            inner.session.take()
+        } else {
+            None
         }
+    };
+    if let Some((_, s)) = closing {
+        s.close().await;
+        log::info!("[native_voice] session {session} closed");
     }
-    Ok(inner.resources())
+    Ok(state.inner.lock().await.resources())
 }
 
 #[tauri::command]
@@ -263,6 +276,22 @@ pub async fn native_voice_set_microphone(
         .current(session)?
         .set_microphone(enabled)
         .await
+}
+
+/// Close or open push-to-talk's gate on `session`'s microphone (DP-30).
+#[tauri::command]
+pub async fn native_voice_set_ptt_gated(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    gated: bool,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_ptt_gated(gated);
+    Ok(())
 }
 
 /// Publish (or replace) the camera; its frames then arrive on the session's
@@ -323,10 +352,10 @@ pub struct ScreenStarted {
 /// Start capturing `source` (a `native_voice_screen_sources` id, or
 /// `portal`), replacing any running capture, and resolve once the first
 /// frame arrives: on Wayland that is after the user completed the portal's
-/// dialog, and a cancelled dialog rejects with [`screen::CANCELLED`]. The
-/// session is released while waiting, so a leave or stop meanwhile ends the
-/// wait instead of queueing behind it. Frames then preview on the frame
-/// socket's `screen` route.
+/// dialog, and a dialog that ends without one rejects with
+/// [`screen::PORTAL_NOT_STARTED`]. The session is released while waiting,
+/// so a leave or stop meanwhile ends the wait instead of queueing behind it.
+/// Frames then preview on the frame socket's `screen` route.
 #[tauri::command]
 pub async fn native_voice_start_screen(
     state: tauri::State<'_, NativeVoiceState>,
@@ -401,6 +430,29 @@ pub async fn native_voice_set_subscribed(
         .await
         .current(session)?
         .set_subscribed(&identity, &sid, subscribed)
+}
+
+/// Layer control for one remote video: stop it (`enabled` false) or ask for
+/// `quality` ("low", "medium" or "high"). The lock is held only for the
+/// lookup, not across the settle wait.
+#[tauri::command]
+pub async fn native_voice_set_video_view(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    identity: String,
+    sid: String,
+    enabled: bool,
+    quality: String,
+) -> Result<(), String> {
+    let quality = session::video_quality(&quality)?;
+    let publication = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .remote_publication(&identity, &sid)?;
+    session::set_video_view(&publication, enabled, quality).await;
+    Ok(())
 }
 
 /// Per-user volume: `volume` is the gain for `identity`'s microphone (1.0 is

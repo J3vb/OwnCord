@@ -79,13 +79,17 @@ export function createSidebarMemberSection(
   });
 
   // --- Header ---
+  // The arrow is a real <button> so the member list can be collapsed from the
+  // keyboard; the header div keeps its mouse click handler for a full-row
+  // target (a button click bubbles to it).
   const memberHeader = createElement("div", { class: "category sidebar-members-header" });
-  const memberArrow = createElement("span", { class: "category-arrow" }, "\u25BC");
   const memberLabelEl = createElement(
     "span",
     { class: "category-name" },
     shellText("members.heading"),
   );
+  const memberArrow = createElement("button", { type: "button", class: "category-arrow" });
+  memberArrow.textContent = "\u25BC";
   appendChildren(memberHeader, memberArrow, memberLabelEl);
   memberListContainer.appendChild(memberHeader);
 
@@ -93,10 +97,21 @@ export function createSidebarMemberSection(
   const resizeHandle = createElement("div", { class: "sidebar-resize-handle" });
   memberListContainer.appendChild(resizeHandle);
 
+  /**
+   * Give the section a definite height (a saved or dragged one, or `auto` when
+   * collapsed), or clear it back to its flex share of the column. The `.sized`
+   * class mirrors this, so the stylesheet can size the section to the height
+   * instead of flexing it to fill the space the channel list leaves (P1-01).
+   */
+  function applyMemberHeight(height: string | null): void {
+    memberListContainer.style.height = height ?? "";
+    memberListContainer.classList.toggle("sized", height !== null);
+  }
+
   // Restore saved height
   const savedHeight = localStorage.getItem(LS_KEY_HEIGHT);
   if (savedHeight !== null) {
-    memberListContainer.style.height = `${savedHeight}px`;
+    applyMemberHeight(`${savedHeight}px`);
   }
 
   // --- Drag-to-resize logic ---
@@ -110,8 +125,7 @@ export function createSidebarMemberSection(
     (e: MouseEvent) => {
       isDragging = true;
       startY = e.clientY;
-      startHeight =
-        parseFloat(memberListContainer.style.height) || memberListContainer.offsetHeight;
+      startHeight = memberListContainer.getBoundingClientRect().height;
       e.preventDefault();
     },
     { signal: resizeOwner.signal },
@@ -123,8 +137,8 @@ export function createSidebarMemberSection(
       if (!isDragging) return;
       const delta = startY - e.clientY;
       const maxH = window.innerHeight * 0.65;
-      const newHeight = Math.max(80, Math.min(startHeight + delta, maxH));
-      memberListContainer.style.height = `${newHeight}px`;
+      const newHeight = Math.max(80, Math.min(startHeight + delta, Math.max(maxH, startHeight)));
+      applyMemberHeight(`${newHeight}px`);
       localStorage.setItem(LS_KEY_HEIGHT, String(newHeight));
     },
     { signal: resizeOwner.signal },
@@ -153,14 +167,10 @@ export function createSidebarMemberSection(
     memberContent.style.display = membersCollapsed ? "none" : "";
     resizeHandle.style.display = membersCollapsed ? "none" : "";
     if (membersCollapsed) {
-      memberListContainer.style.height = "auto";
+      applyMemberHeight("auto");
     } else {
       const h = localStorage.getItem(LS_KEY_HEIGHT);
-      if (h !== null) {
-        memberListContainer.style.height = `${h}px`;
-      } else {
-        memberListContainer.style.height = "";
-      }
+      applyMemberHeight(h !== null ? `${h}px` : null);
     }
   }
 

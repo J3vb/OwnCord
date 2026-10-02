@@ -32,7 +32,7 @@ import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { clearCustomEmoji } from "@stores/emoji.store";
 import {
@@ -45,6 +45,7 @@ import {
   setOnError as setVoiceOnError,
   enableCamera,
   getRemoteVideoStats,
+  setRemoteVideoView,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
@@ -61,13 +62,14 @@ import {
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
 import { setMarkReadSender } from "@lib/read-state";
+import { stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
-import { createMessageController, createPendingDeleteManager } from "./main-page/MessageController";
+import { createMessageController } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
 import type { ReactionController } from "./main-page/ReactionController";
@@ -96,6 +98,12 @@ import type { ContentNavigator } from "../features/navigation/contentView";
 const log = createLogger("main-page");
 /** Long enough to read which sign-in it names (cf. toast.ts PARTIAL_SUCCESS_TOAST_MS). */
 const SESSION_NOTICE_TOAST_MS = 12_000;
+/**
+ * DP-24's call notification and missed-call notice. They are re-exported by the
+ * DM call panel, which the page already loads at mount, so the ring's OS alert
+ * costs no second dynamic chunk here.
+ */
+const callAlerts = () => import("@components/DmCallPanel");
 
 // ---------------------------------------------------------------------------
 // Options
@@ -268,9 +276,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let banner: ServerBannerControl | null = null;
   // Video grid (owned by ChatArea, referenced for remote video wiring)
   let videoGrid: VideoGridComponent | null = null;
-
-  // Pending delete confirmations (double-click to delete pattern)
-  const pendingDeleteManager = createPendingDeleteManager();
 
   // Extracted controllers (created in mount)
   let msgCtrl: MessageController | null = null;
@@ -633,8 +638,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Auto-idle. It only ever moves a status it is itself responsible for
     // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
-    // whole session.
-    autoIdle = startAutoIdle({ onStatusChange: (status) => applyPresence(status) });
+    // whole session. The OS idle source makes input in other apps count too.
+    autoIdle = startAutoIdle({
+      onStatusChange: (status) => applyPresence(status),
+      systemIdleMs: () => desktop.systemIdle.idleMs(),
+    });
 
     unsubscribers.push(
       ws.on("server_restart", (payload) => {
@@ -913,6 +921,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const qsManager = createQuickSwitcherManager(
       () => root,
       () => uiStore.getState().settingsOpen,
+      // A voice row in the switcher joins voice (matching the sidebar row)
+      // instead of mounting chat for an unjoined voice channel (F8).
+      (channelId: number) => createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId),
     );
     unsubscribers.push(qsManager.attach());
 
@@ -925,6 +936,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
         onUploadFile: () => channelCtrl?.openFilePicker(),
+        onStepChannel: (direction, unreadOnly) => {
+          if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
+          stepChannel(direction, unreadOnly);
+        },
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
       }),
@@ -955,6 +970,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // Not a Tauri host, or the command was refused: keep the native default.
       });
 
+    // DP-27: the taskbar and tray unread badge, cleared again on teardown so a
+    // logout or server switch does not leave this session's count behind.
+    // destroy() sets tornDown before it runs unsubscribers, so a stopper
+    // pushed while !tornDown always runs.
+    void import("../features/unread-badge/unreadBadge").then((badge) => {
+      if (!tornDown) unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
+    });
+
     // Toast container
     toast = createToastContainer();
     toast.mount(root);
@@ -974,6 +997,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDecline: (channelId) => {
         ws.send({ type: "call_decline", payload: { channel_id: channelId } });
       },
+      onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
+      onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
     });
     callBanner = createIncomingCallBanner({
       onAccept: () => acceptRing(false),
@@ -988,7 +1013,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Loaded on demand like the sidebar drawer: the panel is only drawn in a
     // DM with a call, so its code stays out of the eager MainPage chunk
     // (bundle budget). Until it lands, the banner answers every ring.
-    void import("@components/DmCallPanel").then(({ createDmCallPanel }) => {
+    void callAlerts().then(({ createDmCallPanel }) => {
       if (tornDown) return;
       const panel = createDmCallPanel({
         onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
@@ -1164,7 +1189,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ws,
       api,
       msgCtrl: msgCtrl,
-      pendingDeleteManager,
       reactionCtrl: reactionCtrl,
       typingLimiter: limiters.typing,
       showToast: (msg, type) => showToast(msg, type as "success" | "error" | "info"),
@@ -1252,10 +1276,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
+      setStreamView: (tileId, view) =>
+        tileId >= SCREENSHARE_TILE_ID_OFFSET
+          ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)
+          : setRemoteVideoView(tileId, "camera", view),
+      // The grid header's exit control: back to chat without leaving voice.
+      onExitGrid: () => videoModeCtrl?.showChat(),
     });
 
     let prevVideoSignature = "";
     let prevSpeaking = "";
+    let prevAudioState = "";
     let prevCallState = "";
     const prevTileLabels = new Map<number, string>();
     // Subscribe to voice store for camera/screenshare state changes, voice
@@ -1277,10 +1308,30 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             prevSpeaking = speakingKey;
             videoGrid?.setSpeaking(talking);
           }
-          const callKey = `${String(state.localMuted)}|${String(state.localDeafened)}`;
+          // Mute/deafen badges on the camera tiles, from the same roster state.
+          let audioKey = "";
+          const audioState = new Map<number, { muted: boolean; deafened: boolean }>();
+          for (const u of channelId !== null
+            ? (state.voiceUsers.get(channelId)?.values() ?? [])
+            : []) {
+            if (u.muted || u.deafened) {
+              audioState.set(u.userId, { muted: u.muted, deafened: u.deafened });
+              audioKey += `${String(u.userId)}:${String(u.muted)}${String(u.deafened)};`;
+            }
+          }
+          if (audioKey !== prevAudioState) {
+            prevAudioState = audioKey;
+            videoGrid?.setUserAudioState(audioState);
+          }
+          const selfMuted = isSelfMuted(state);
+          const callKey = `${String(selfMuted)}|${String(state.localDeafened)}|${String(state.listenOnly)}`;
           if (callKey !== prevCallState) {
             prevCallState = callKey;
-            videoGrid?.setCallState({ muted: state.localMuted, deafened: state.localDeafened });
+            videoGrid?.setCallState({
+              muted: selfMuted,
+              deafened: state.localDeafened,
+              listenOnly: state.listenOnly,
+            });
           }
 
           // Seed the signature with the channel id so ANY voice-channel

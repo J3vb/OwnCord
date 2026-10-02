@@ -118,7 +118,9 @@ role grouping.
 **Target:** show "X is typing…" / "X and Y are typing…" / "Several people are
 typing…" below the message list, excluding the current user (already
 `formatTypingText()` in `components/TypingIndicator.ts`). The client emits `typing_start` while composing
-(debounced), never per-keystroke.
+(debounced), never per-keystroke. A `chat_message` clears its sender's entry at
+once (`handleChatMessage`, `features/messaging/wsHandlers.ts`), and the bar keeps
+its 24 px row while empty so typing start/stop never shifts the message list.
 
 ### 2.2 Member actions (context menu)
 
@@ -142,14 +144,15 @@ role), consistent with the affordance principle.
 DM mode (`sidebarMode: "dms"`) renders from `dm.store` (`channels` list, each with
 recipient, last-message preview, unread).
 
-| State              | Trigger                | Target reaction                                                                                                                    |
-| ------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `ready`            | `ready.dm_channels`    | DM list sorted by recency                                                                                                          |
-| `empty`            | No DMs                 | "No direct messages yet" + "Start one from a member's profile"                                                                     |
-| open DM            | `dm_channel_open`      | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`)                                                        |
-| close DM           | `dm_channel_close`     | Remove from list                                                                                                                   |
-| new DM message     | `chat_message` in a DM | `updateDmLastMessage` (unread bump + reorder) if not focused; `updateDmLastMessagePreview` (no bump) if own/active                 |
-| last-message empty | Never messaged         | "No messages yet" fallback (already the `lastMessage` fallback in `buildDmConversations()`, `pages/main-page/SidebarDmHelpers.ts`) |
+| State                         | Trigger                                              | Target reaction                                                                                                                                              |
+| ----------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ready`                       | `ready.dm_channels`                                  | DM list sorted by recency                                                                                                                                    |
+| `empty`                       | No DMs                                               | "No direct messages yet" + "Start one from a member's profile"                                                                                               |
+| open DM                       | `dm_channel_open`                                    | Prepend/move-to-top, dedup (already `addDmChannel()`, `stores/dm.store.ts`)                                                                                  |
+| close DM                      | `dm_channel_close`                                   | Remove from list                                                                                                                                             |
+| new DM message                | `chat_message` in a DM                               | `updateDmLastMessage` (unread bump + reorder) if not focused; `updateDmLastMessagePreview` (no bump) if own/active                                           |
+| last-message empty            | Never messaged                                       | "No messages yet" fallback, keyed on an empty `lastMessageAt` (`dmPreviewText()`, `pages/main-page/SidebarDmHelpers.ts`)                                     |
+| last message edited / deleted | `chat_edited` / `chat_deleted` / `chat_bulk_deleted` | `reviseDmLastMessage` swaps the preview text; a delete blanks it, then takes the last message from `GET /dms` unless a newer message has already replaced it |
 
 ### 3.1 Opening a DM
 

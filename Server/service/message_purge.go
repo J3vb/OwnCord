@@ -63,6 +63,15 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 		return nil, fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
 	}
 
+	// Flush every queued mention-badge increment for this channel before the
+	// purge commits and the reversal below runs, so increment and reversal
+	// stay symmetric (P5-O05; see FlushPendingMentionCounts). A message purged
+	// inside the worker's coalesce window would otherwise be reversed before
+	// its increment landed, and the later flush would either raise a phantom
+	// badge or be skipped by the liveness guard and take a pre-existing
+	// genuine badge with it.
+	s.flushChannelMentionCounts(context.WithoutCancel(ctx), channelID)
+
 	ids, err := s.st.PurgeChannelMessagesWithAction(ctx, channelID, before, limit, userID, nil)
 	if err != nil {
 		slog.Error("MessageService.PurgeMessages", "err", err, "channel_id", channelID)

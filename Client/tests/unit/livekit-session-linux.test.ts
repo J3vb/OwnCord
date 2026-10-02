@@ -25,9 +25,15 @@ const mockVoiceState = vi.hoisted(() => ({
   listenOnly: false,
   currentChannelId: 1 as number | null,
   voiceConfigs: new Map<number, { bitrate: number }>(),
+  // The server still holds our membership, so the reconnect loop reuses the
+  // token rather than rejoining.
+  voiceUsers: { get: () => ({ has: () => true }) },
 }));
 
-vi.mock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
+vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+  isLinuxDesktop: () => true,
+}));
 
 const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
 vi.mock("livekit-client", () => ({
@@ -131,8 +137,16 @@ vi.mock("../../src/platform/desktop", () => ({
         host.commands.push(["setMicrophone", args]);
         return Promise.resolve();
       },
+      setPttGated: (...args: unknown[]) => {
+        host.commands.push(["setPttGated", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.commands.push(["setSubscribed", args]);
+        return Promise.resolve();
+      },
+      setVideoView: (...args: unknown[]) => {
+        host.commands.push(["setVideoView", args]);
         return Promise.resolve();
       },
       setVolume: (...args: unknown[]) => {
@@ -224,7 +238,10 @@ globalThis.Worker = vi.fn(function () {
 
 import { LiveKitSession } from "../../src/lib/livekitSession";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
+import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
+import { initToast, teardownToast } from "@lib/toast";
+import type { ToastContainer } from "@components/Toast";
 import { setScreenSourcePicker } from "../../src/features/voice/native/screenPickerSlot";
 import { showScreenSharePicker } from "../../src/components/ScreenSharePicker";
 
@@ -259,7 +276,13 @@ describe("LiveKitSession on the Linux native backend", () => {
     nativeCounters.listeners = 0;
     nativeCounters.rust = null;
     session = new LiveKitSession();
-    session.setWsClient({ send: vi.fn(), on: vi.fn() } as never);
+    // The reconnect loop only retries into a channel that still exists, over a
+    // chat socket that is not closed for good.
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, { id: 1, type: "voice" } as never]]),
+    }));
+    session.setWsClient({ send: vi.fn(), on: vi.fn(), getState: () => "connected" } as never);
     session.setServerHost("chat.example");
     // MainPage registers the screen-share dialog through the layer slot
     // (ARCH-06); mirror that here so the native share path reaches the real
@@ -273,7 +296,8 @@ describe("LiveKitSession on the Linux native backend", () => {
 
   it("installs the room key natively before connecting, then publishes the mic", async () => {
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
-    expect(names()).toEqual(["setRoomKey", "connect", "setMicrophone"]);
+    // The push-to-talk gate is set before the capture opens behind it.
+    expect(names()).toEqual(["setRoomKey", "connect", "setPttGated", "setMicrophone"]);
     expect(host.commands[0]).toEqual(["setRoomKey", ["mock-room-key-base64"]]);
     expect(host.commands[1]).toEqual([
       "connect",
@@ -288,7 +312,8 @@ describe("LiveKitSession on the Linux native backend", () => {
         },
       ],
     ]);
-    expect(host.commands[2]).toEqual(["setMicrophone", [1, true]]);
+    expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
+    expect(host.commands[3]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
     expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
     expect(setListenOnly).toHaveBeenCalledWith(false);
@@ -451,9 +476,15 @@ describe("LiveKitSession on the Linux native backend", () => {
       for (let i = 0; i < 30 && !names().includes("setMicrophone"); i++) {
         await vi.advanceTimersByTimeAsync(1000);
       }
-      expect(names()).toEqual(["disconnect", "setRoomKey", "connect", "setMicrophone"]);
+      expect(names()).toEqual([
+        "disconnect",
+        "setRoomKey",
+        "connect",
+        "setPttGated",
+        "setMicrophone",
+      ]);
       expect(host.commands[0]).toEqual(["disconnect", [1]]);
-      expect(host.commands[3]).toEqual(["setMicrophone", [2, true]]);
+      expect(host.commands[4]).toEqual(["setMicrophone", [2, true]]);
       expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
       // The old session's subscription is gone; only the new room listens.
       expect(host.handlers.size).toBe(1);
@@ -472,10 +503,11 @@ describe("LiveKitSession on the Linux native backend", () => {
       "clearRoomKey",
       "setRoomKey",
       "connect",
+      "setPttGated",
       "setMicrophone",
     ]);
     expect(host.commands[0]).toEqual(["disconnect", [1]]);
-    expect(host.commands[4]).toEqual(["setMicrophone", [2, true]]);
+    expect(host.commands[5]).toEqual(["setMicrophone", [2, true]]);
   });
 
   it("screen share captures natively and stops when the desktop ends it", async () => {
@@ -513,14 +545,43 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("a cancelled portal dialog is reported as a refused share", async () => {
+  it("a portal that never started shows a soft notice, not a refused share", async () => {
+    const onError = vi.fn();
+    session.setOnError(onError);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const { desktop } = await import("../../src/platform/desktop");
+    const real = desktop.nativeVoice.startScreen;
+    desktop.nativeVoice.startScreen = () => Promise.reject("screen capture portal did not start");
+    const toasts = { show: vi.fn() };
+    initToast(toasts as unknown as ToastContainer);
+    try {
+      const sharing = session.enableScreenshare();
+      await pressGoLive();
+      await sharing;
+    } finally {
+      desktop.nativeVoice.startScreen = real;
+      teardownToast();
+    }
+    // The portal cannot say whether the user cancelled, so neither silence
+    // nor a red "permission denied": an info notice covering both.
+    expect(onError).not.toHaveBeenCalled();
+    expect(toasts.show).toHaveBeenCalledWith(
+      "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
+      "info",
+      undefined,
+    );
+    expect(names()).not.toContain("publishScreen");
+    expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("a Linux capture that fails before its first frame is reported, not silent", async () => {
     const onError = vi.fn();
     session.setOnError(onError);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     const { desktop } = await import("../../src/platform/desktop");
     const real = desktop.nativeVoice.startScreen;
     desktop.nativeVoice.startScreen = () =>
-      Promise.reject("screen capture was cancelled or refused");
+      Promise.reject("screen capture produced no frame in time");
     try {
       const sharing = session.enableScreenshare();
       await pressGoLive();
@@ -528,7 +589,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     } finally {
       desktop.nativeVoice.startScreen = real;
     }
-    expect(onError).toHaveBeenCalledWith("Screen sharing permission denied");
+    expect(onError).toHaveBeenCalledWith("Failed to start screen sharing");
     expect(names()).not.toContain("publishScreen");
     expect(nativeCounters.screenTracks).toBe(0);
   });

@@ -1,3 +1,4 @@
+mod active_session;
 mod commands;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
@@ -10,7 +11,9 @@ mod dpapi;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
+mod http_pool;
 mod http_proxy;
+mod idle;
 mod json_store;
 #[cfg(target_os = "linux")]
 mod linux_media;
@@ -30,6 +33,7 @@ mod shortcuts;
 mod text;
 mod tofu;
 mod tray;
+mod unread_badge;
 mod update_commands;
 mod ws_proxy;
 
@@ -145,6 +149,7 @@ pub fn run() {
     match builder
         .manage(json_store::JsonStores::default())
         .manage(diagnostics::FrontendReady::new())
+        .manage(active_session::ActiveSession::new())
         .manage(ws_proxy::WsState::new())
         .manage(livekit_proxy::LiveKitProxyState::new())
         .manage(http_proxy::HttpProxyState::new())
@@ -157,6 +162,7 @@ pub fn run() {
             commands::get_cert_fingerprint,
             #[cfg(desktop)]
             message_notification::notify_message,
+            unread_badge::set_unread_badge,
             commands::store_identity_pin,
             commands::get_identity_pin,
             ws_proxy::ws_connect,
@@ -189,6 +195,7 @@ pub fn run() {
             http_proxy::stop_http_proxy,
             external_content::external_preview,
             external_content::external_image,
+            idle::system_idle_ms,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]
@@ -202,7 +209,11 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_microphone,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_ptt_gated,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_set_subscribed,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_video_view,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_volume,
             #[cfg(target_os = "linux")]

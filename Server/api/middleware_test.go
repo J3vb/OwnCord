@@ -128,6 +128,67 @@ func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
 	}
 }
 
+// TestAuthMiddleware_TouchSlidesExpiry pins DP-05 through the REST path: a
+// request after the throttle interval slides expires_at, and a second request
+// inside the interval writes nothing.
+func TestAuthMiddleware_TouchSlidesExpiry(t *testing.T) {
+	database := newAPITestDB(t)
+	uid, _ := database.CreateUser(context.Background(), "slider", "hash", 4)
+	token, _ := auth.GenerateToken()
+	hash := auth.HashToken(token)
+	_, _ = database.CreateSession(context.Background(), uid, hash, "test", "127.0.0.1")
+
+	t0 := time.Now()
+	clock := t0
+	api.SetMiddlewareClockForTest(t, func() time.Time { return clock })
+	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
+
+	// A near-expiry sentinel: still valid, but well short of a fresh window.
+	sentinel := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02T15:04:05Z")
+	backdate := func() {
+		t.Helper()
+		if _, err := database.ExecContext(context.Background(),
+			`UPDATE sessions SET expires_at = ? WHERE token = ?`, sentinel, hash); err != nil {
+			t.Fatalf("backdating expires_at: %v", err)
+		}
+	}
+	expiresAt := func() string {
+		t.Helper()
+		sess, err := database.GetSessionByTokenHash(context.Background(), hash)
+		if err != nil || sess == nil {
+			t.Fatalf("GetSessionByTokenHash: %v (sess=%v)", err, sess)
+		}
+		return sess.ExpiresAt
+	}
+	do := func() {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, withBearer(httptest.NewRequest(http.MethodGet, "/", nil), token))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+	}
+
+	backdate()
+	do()
+	if expiresAt() <= sentinel {
+		t.Fatal("first request did not slide expires_at")
+	}
+
+	backdate()
+	clock = t0.Add(30 * time.Second)
+	do()
+	if expiresAt() != sentinel {
+		t.Error("request within the throttle interval wrote expires_at; want it skipped")
+	}
+
+	clock = t0.Add(61 * time.Second)
+	do()
+	if expiresAt() <= sentinel {
+		t.Error("request 61s after the last touch did not slide expires_at")
+	}
+}
+
 func TestAuthMiddleware_MissingToken(t *testing.T) {
 	database := newAPITestDB(t)
 
@@ -1385,7 +1446,8 @@ CREATE TABLE IF NOT EXISTS messages (
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0
+    mentions_everyone INTEGER NOT NULL DEFAULT 0,
+    pinned_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -1444,3 +1506,72 @@ CREATE TABLE IF NOT EXISTS user_blocks (
     CHECK (blocker_id != blocked_id)
 );
 `)
+
+// TestRateLimitMiddleware_IPv6SharesSlash64Bucket pins that two addresses in
+// one IPv6 /64 draw from the same per-IP budget: a single host usually holds
+// the whole /64, so keying the full /128 would give it unlimited budget.
+func TestRateLimitMiddleware_IPv6SharesSlash64Bucket(t *testing.T) {
+	limiter := auth.NewRateLimiter()
+	h := api.RateLimitMiddleware(limiter, "test:", 1, time.Minute)(http.HandlerFunc(ok))
+
+	for i, remote := range []string{"[2001:db8:1:2::1]:1234", "[2001:db8:1:2::2]:1234"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = remote
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		want := http.StatusOK
+		if i == 1 {
+			want = http.StatusTooManyRequests
+		}
+		if rr.Code != want {
+			t.Errorf("request %d from %s: status = %d, want %d", i, remote, rr.Code, want)
+		}
+	}
+}
+
+// TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies pins the
+// runtime hint for a reverse proxy nobody declared: a loopback peer sending
+// X-Forwarded-For while trusted_proxies is empty means every client looks like
+// the proxy, so the allowlist admits them all. It warns once, not per request.
+func TestAdminIPRestrict_WarnsOnForwardedLocalPeerWithoutTrustedProxies(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = "127.0.0.1:9999"
+		req.Header.Set("X-Forwarded-For", "198.51.100.7")
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	if n := strings.Count(buf.String(), "trusted_proxies is empty"); n != 1 {
+		t.Errorf("warned %d times, want exactly 1; log:\n%s", n, buf.String())
+	}
+}
+
+// TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused: when the
+// allowlist refuses the local proxy's address, it does not admit every client,
+// so the warning claiming it does must stay silent.
+func TestAdminIPRestrict_NoForwardedPeerWarningWhenPeerRefused(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"203.0.113.0/24"}, nil)(http.HandlerFunc(ok))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rr.Code)
+	}
+	if strings.Contains(buf.String(), "trusted_proxies is empty") {
+		t.Errorf("warned although the allowlist refused the peer; log:\n%s", buf.String())
+	}
+}

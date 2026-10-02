@@ -50,6 +50,10 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if !ok {
 		return
 	}
+	// The app-level heartbeat keeps an idle socket's session sliding (DP-05).
+	if env.Type == MsgTypePing {
+		h.touchSession(c.ctx, c)
+	}
 
 	// ── Typed command dispatch ───────────────────────────────────────────
 	// Every message type parses through its constructor into a typed Command,
@@ -107,7 +111,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
 		}
 		// A rejection may still need to evict: voice_token_refresh returns
-		// LeaveVoice alongside its error when CONNECT_VOICE was revoked, so the
+		// LeaveVoice alongside its error when the join gate now refuses, so the
 		// user is removed from the SFU rather than merely denied a new token.
 		if result.LeaveVoice {
 			h.handleVoiceLeave(c.ctx, c, result.LeaveVoiceReason)
@@ -216,6 +220,9 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 	if result.SetChannelID != nil {
 		h.applySetChannelID(c, *result.SetChannelID)
 	}
+	if result.SetPresence != nil {
+		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus)
+	}
 	if result.SetE2EEPubKey != nil {
 		sig := ""
 		if result.SetE2EESignature != nil {
@@ -239,7 +246,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		}
 	}
 	if len(result.Events) > 0 {
-		h.EmitEvents(c.ctx, result.Events)
+		h.emitEventsFrom(c.ctx, c.userID, result.Events)
 	}
 	// Voice join/leave hand off to the hub-internal routines (also called
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id

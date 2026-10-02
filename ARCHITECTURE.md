@@ -182,7 +182,7 @@ sequenceDiagram
     C->>S: {type:"auth", payload:{token, last_seq, active_channel_id, epoch}}
     S->>S: validate token hash → session expiry → user → ban
     S->>H: register (kicks previous conn of same user)
-    S-->>C: auth_ok {user, server_name, motd, replay_source}
+    S-->>C: auth_ok {user, server_name, motd, replay_source, upload_policy}
 
     alt last_seq within in-memory ring buffer (Tier 1)
         H-->>C: replay from EventRingBuffer (perm-filtered, fail-closed)
@@ -279,7 +279,7 @@ OwnCord is explicitly **single-instance**; horizontal scale-out is out of scope 
 - The SQLite single writer (`MaxOpenConns=1`), enforced by an OS-level lock beside the database file, so a second process fails fast rather than corrupting state.
 - Presence and voice state, derived from live hub membership and cold-reset at every process boot.
 
-**Backpressure.** The hub disconnects a client whose normal `send` queue fills (forcing a replay-restoring reconnect) rather than dropping a sequenced frame; low-priority frames (typing indicators, moderation/appeal notices) are dropped silently when their queue fills. The global broadcast channel drops with a `broadcastDrops` counter when saturated. `GET /api/v1/metrics` exposes `broadcast_drops`, `db_writer_wait_seconds`, `db_reader_wait_seconds`, `reconnect_tier_full` and `backpressure_queue_disconnects` as the signals to alert on as a community grows.
+**Backpressure.** The hub disconnects a client whose normal `send` queue fills (forcing a replay-restoring reconnect) rather than dropping a sequenced frame — except presence (`presence`, `presence_batch`), which is dropped and repaired by a full presence snapshot and a full `ready` on the next resume, so a reconnect herd cannot kick clients; low-priority frames (typing indicators, moderation/appeal notices) are dropped silently when their queue fills. The global broadcast channel drops with a `broadcastDrops` counter when saturated. `GET /api/v1/metrics` exposes `broadcast_drops`, `db_writer_wait_seconds`, `db_reader_wait_seconds`, `reconnect_tier_full` and `backpressure_queue_disconnects` as the signals to alert on as a community grows.
 
 **Published capacity profile** ([docs/capacity.md](docs/capacity.md)): qualified for **250 registered users, 100 simultaneous connections (sustained 180 s) and 25 concurrent voice sessions** on reference hardware of **2 vCPU / 4 GB RAM** (reproduced in a cgroup-constrained Docker container, not on owned hardware), meeting every latency budget in [PRD.md](PRD.md#performance); the measured figures are in `docs/capacity.md`. The corrected, multi-channel ceiling search (run 36360932108) held every budget up to 300 connections; its per-step table and the limiting resources it names are under "Ceiling search" in `docs/capacity.md`. The qualified numbers are not a claim about where the real hardware ceiling lies; locating it is a separate, non-CI-gated exercise (`load-baseline.yml`, `workflow_dispatch` only).
 

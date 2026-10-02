@@ -9,9 +9,10 @@
  * All timers and listeners are cleaned up via AbortSignal on sidebar teardown.
  */
 
+import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { getRemoteVideoStream } from "@lib/livekitSession";
+import { getRemoteVideoStream, setRemoteVideoView } from "@lib/livekitSession";
 import { voiceStore } from "@stores/voice.store";
 import { shellText } from "../i18n/shell";
 
@@ -149,12 +150,24 @@ function showPreview(
       track.addEventListener("ended", onTrackDead);
       track.addEventListener("mute", onTrackDead);
 
-      // Store cleanup function
+      // Store cleanup function. The grid may have stopped this stream (grid
+      // closed, Stop watching): it plays at the preview's size while open,
+      // and like the grid, not at all while the app is hidden.
       const state = previewTimers.get(row);
       if (state !== undefined) {
+        const type = isScreen ? "screenshare" : "camera";
+        const width = Math.round(row.getBoundingClientRect().width * devicePixelRatio);
+        const size = { width, height: Math.round((width * 9) / 16) };
+        const report = (): void =>
+          setRemoteVideoView(userId, type, { enabled: !document.hidden, size }, true);
+        report();
+        const visibility = new Disposable();
+        document.addEventListener("visibilitychange", report, { signal: visibility.signal });
         state.trackCleanup = () => {
           track.removeEventListener("ended", onTrackDead);
           track.removeEventListener("mute", onTrackDead);
+          visibility.destroy();
+          setRemoteVideoView(userId, type, { enabled: false }, true);
         };
       }
     }

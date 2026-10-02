@@ -157,13 +157,22 @@ func Open(path string) (*DB, error) {
 
 // OpenWithMaxReaders is Open with an explicit reader-pool bound
 // (database.max_readers). maxReaders <= 0 keeps the automatic
-// max(4, NumCPU) sizing; values are clamped to [1, 64]. Ignored for
+// max(8, 2×NumCPU) sizing; values are clamped to [1, 64]. Ignored for
 // in-memory databases, which use a single shared connection.
 func OpenWithMaxReaders(path string, maxReaders int) (*DB, error) {
 	if isMemoryPath(path) {
 		return openMemory(path)
 	}
 	return openFile(path, maxReaders, true)
+}
+
+// defaultReaderConns is the automatic reader-pool size: twice the CPU count
+// with a floor of 8, clamped to the same [1, 64] bound an explicit value
+// gets. The floor matters on a small host, where the old max(4, NumCPU) left
+// a 2-core box with 4 connections and reader waits grew under a connect herd
+// (P5-S08).
+func defaultReaderConns(cpus int) int {
+	return min(max(8, 2*cpus), 64)
 }
 
 // OpenShared opens the database WITHOUT taking the single-process lock. It
@@ -283,14 +292,15 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
-	// Reader: sized for concurrent request handling. Idle == open so warm
-	// connections (and their page caches) are kept rather than churned.
+	// Reader: sized for concurrent request handling, defaulting to
+	// defaultReaderConns and bounded by database.max_readers. Idle == open so
+	// warm connections (and their page caches) are kept rather than churned.
 	reader, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		_ = writer.Close()
 		return nil, fmt.Errorf("opening sqlite reader pool: %w", err)
 	}
-	readConns := max(4, runtime.NumCPU())
+	readConns := defaultReaderConns(runtime.NumCPU())
 	if maxReaders > 0 {
 		readConns = min(max(maxReaders, 1), 64)
 	}

@@ -98,6 +98,29 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
     await expect(modal).toHaveCount(0);
   });
 
+  test("the delete-confirm dialog is labelled, focuses Cancel, and Escape restores focus (P4-12)", async ({
+    page,
+  }) => {
+    const row = page.locator("[data-testid='message-101']");
+    await row.hover();
+    await page.locator("[data-testid='msg-delete-101']").click();
+
+    const modal = page.locator("[data-testid='msg-delete-modal'] .modal");
+    await expect(modal).toBeVisible({ timeout: 5_000 });
+    await expect(modal).toHaveAttribute("role", "dialog");
+    await expect(modal).toHaveAttribute("aria-modal", "true");
+    await expect(modal).toHaveAttribute("aria-labelledby", "msg-delete-title-101");
+    await expect(page.locator("#msg-delete-title-101")).toHaveText("Delete message?");
+
+    // Cancel is the focused default, so a stray Enter does not delete.
+    await expect(page.locator("[data-testid='msg-delete-cancel']")).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-testid='msg-delete-modal']")).toHaveCount(0);
+    // Focus returned to the delete button that opened the dialog.
+    await expect(page.locator("[data-testid='msg-delete-101']")).toBeFocused();
+  });
+
   test("toast and typing surfaces are polite live regions", async ({ page }) => {
     await expect(page.locator(".toast-container")).toHaveAttribute("aria-live", "polite");
     await expect(page.locator(".toast-container")).toHaveAttribute("role", "status");

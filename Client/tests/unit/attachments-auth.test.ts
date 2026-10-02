@@ -28,6 +28,7 @@ vi.mock("@lib/httpProxy", () => ({
 
 vi.mock("@stores/auth.store", () => ({
   getToken: getTokenMock,
+  authStore: { getState: () => ({ uploadPolicy: null }) },
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -40,7 +41,7 @@ vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") 
 vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 
-// No-op IndexedDB so fetchImageAsDataUrl falls through to the network path.
+// No-op IndexedDB so fetchImageAsObjectUrl falls through to the network path.
 vi.stubGlobal("indexedDB", {
   open: () => {
     const req: Record<string, unknown> = { onsuccess: null, onerror: null, onupgradeneeded: null };
@@ -54,10 +55,14 @@ vi.stubGlobal("indexedDB", {
 
 import {
   clearAttachmentCaches,
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   isTrustedServerUrl,
   setServerHost,
 } from "../../src/components/message-list/attachments";
+
+// jsdom implements no object URLs; server images are handed out as blob: URLs.
+URL.createObjectURL = vi.fn(() => "blob:test-image");
+URL.revokeObjectURL = vi.fn();
 
 function imageResponse() {
   return {
@@ -81,7 +86,7 @@ describe("attachment fetch authentication", () => {
     ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
     fetchMock.mockResolvedValue(imageResponse());
 
-    const result = await fetchImageAsDataUrl("https://chat.example.com/api/v1/files/abc-123");
+    const result = await fetchImageAsObjectUrl("https://chat.example.com/api/v1/files/abc-123");
 
     expect(result).not.toBeNull();
     expect(ensureHttpProxyMock).toHaveBeenCalledWith("chat.example.com");
@@ -95,10 +100,38 @@ describe("attachment fetch authentication", () => {
     ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
     fetchMock.mockResolvedValue(imageResponse());
 
-    await fetchImageAsDataUrl("https://chat.example.com/api/v1/files/abc-456");
+    await fetchImageAsObjectUrl("https://chat.example.com/api/v1/files/abc-456");
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/files/abc-456", {
       headers: {},
+    });
+  });
+
+  it("omits the token for a same-host path that is not server content", async () => {
+    // A same-host avatar URL must not make every viewer issue an authenticated
+    // request to an arbitrary path on the server's own origin. Only the
+    // server-generated content routes (/api/v1/files/, /api/v1/emoji/) carry
+    // the bearer token.
+    getTokenMock.mockReturnValue("session-token");
+    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
+    fetchMock.mockResolvedValue(imageResponse());
+
+    await fetchImageAsObjectUrl("https://chat.example.com/admin/api/stats");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/admin/api/stats", {
+      headers: {},
+    });
+  });
+
+  it("still attaches the token to the server emoji content route", async () => {
+    getTokenMock.mockReturnValue("session-token");
+    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
+    fetchMock.mockResolvedValue(imageResponse());
+
+    await fetchImageAsObjectUrl("https://chat.example.com/api/v1/emoji/1/image");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/emoji/1/image", {
+      headers: { Authorization: "Bearer session-token" },
     });
   });
 
@@ -108,7 +141,7 @@ describe("attachment fetch authentication", () => {
 
     brokerImageMock.mockResolvedValue({ ok: false, failure: "unavailable" });
 
-    await fetchImageAsDataUrl("https://cdn.external.example/image.png");
+    await fetchImageAsObjectUrl("https://cdn.external.example/image.png");
 
     // An external image goes to the external-content broker, whose request
     // carries no credentials at all — never to the TOFU proxy or a direct
@@ -126,7 +159,7 @@ describe("attachment fetch authentication", () => {
     ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
     fetchMock.mockResolvedValue(imageResponse());
 
-    const result = await fetchImageAsDataUrl("https://chat.example.com/api/v1/files/abc-789");
+    const result = await fetchImageAsObjectUrl("https://chat.example.com/api/v1/files/abc-789");
 
     expect(result).not.toBeNull();
     expect(ensureHttpProxyMock).toHaveBeenCalledWith("chat.example.com");

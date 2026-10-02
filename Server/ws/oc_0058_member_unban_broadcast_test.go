@@ -65,18 +65,21 @@ func TestBroadcastMemberUnban_FansOutMemberJoin(t *testing.T) {
 // A temporary ban whose ban_expires has passed leaves users.banned at 1 but no
 // longer blocks a reconnect, so the user can be online when a moderator
 // overturns the appeal or an admin unbans them. The member_join must then
-// carry their stamped status, not "offline".
+// carry their live status, not "offline" — nor the users.status row, whose
+// batched connect stamp may still be pending.
 func TestBroadcastMemberUnban_ConnectedUserKeepsStatus(t *testing.T) {
 	hub, database := newVoiceHub(t)
 	alice := seedMemberUser(t, database, "unban-live-alice")
 	bob := seedMemberUser(t, database, "unban-live-bob")
-	if err := database.UpdateUserStatus(context.Background(), alice.ID, "idle"); err != nil {
-		t.Fatalf("UpdateUserStatus: %v", err)
-	}
 
+	alice.Status = "idle"
 	aliceClient := ws.NewTestClientWithUser(hub, alice, 0, make(chan []byte, 32))
 	hub.Register(aliceClient)
 	waitRegistered(t, hub, aliceClient)
+	hub.ApplyConnectStatusForTest(aliceClient)
+	if err := database.UpdateUserStatus(context.Background(), alice.ID, "offline"); err != nil {
+		t.Fatalf("UpdateUserStatus: %v", err)
+	}
 	send := make(chan []byte, 32)
 	c := ws.NewTestClientWithUser(hub, bob, 0, send)
 	hub.Register(c)

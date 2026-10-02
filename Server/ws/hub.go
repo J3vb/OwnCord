@@ -36,10 +36,12 @@ type Hub struct {
 	stop         chan struct{}
 	stopOnce     sync.Once
 	gracefulOnce sync.Once
-	livekit      *LiveKitClient
-	lkProcess    *LiveKitProcess
-	registry     *HandlerRegistry
-	permChecker  *permissions.Checker
+	// stopUsers: see StoppedUserIDs. Guarded by mu.
+	stopUsers   []int64
+	livekit     *LiveKitClient
+	lkProcess   *LiveKitProcess
+	registry    *HandlerRegistry
+	permChecker *permissions.Checker
 	// perms is the cached permission service (service.PermissionService). Nil in
 	// bare test hubs constructed without Services; every use falls back to the
 	// live permChecker path then. Revocation stays prompt because each mutation
@@ -105,9 +107,8 @@ type Hub struct {
 	bpHighFallbacks    atomic.Uint64 // high-priority sends that fell back to the normal buffer
 	bpLowDrops         atomic.Uint64 // low-priority messages silently dropped on overflow
 
-	// connRejects counts upgrade requests refused by the max_ws_connections
-	// capacity guardrail (ServeWS).
-	connRejects atomic.Uint64
+	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
+	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
 	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
 	// compiled-in default (maxColdReplay). HubOptions.ReplayColdLimit (B3-4).
@@ -122,6 +123,8 @@ type Hub struct {
 
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
 	voiceGrace     voiceGraceState     // RT-8 grace window (voice_grace.go)
+
+	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
 
 	// Phase B Step 7 — reconnection tier metrics. Incremented per resume.
 	reconnectTierBuf  atomic.Uint64
@@ -187,10 +190,10 @@ type Hub struct {
 	// defaultVoiceQuality is the operator-configured voice.quality
 	// (HubOptions.VoiceQuality), used by voiceJoinComplete as the fallback
 	// when a channel has no per-channel voice_quality override (OC-0439).
-	// Always one of voiceQualities' keys — NewHub normalizes it. Set once at
-	// construction and never mutated (voice.quality is startup-only), so no
-	// mutex guards it, like livekit/lkProcess below.
+	// Always one of voiceQualities' keys — NewHub normalizes it. Set once and
+	// never mutated (voice.quality is startup-only), so no mutex guards it.
 	defaultVoiceQuality string
+	uploadFileTypes     UploadFileTypes // HubOptions.UploadFileTypes; may be nil
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation
 	// DB transition with its paired LiveKit call (round 4, Codex review
@@ -202,19 +205,20 @@ type Hub struct {
 	settingsMu         syncutil.RWMutex
 	settingsName       string
 	settingsMotd       string
+	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
 
-	// voiceKeyHolders maps channelID → userID of the current key holder.
-	// The key holder is the connected participant with the lowest userID in the channel.
-	// Protected by keyHolderMu.
+	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
+	// participant with the lowest userID in the channel. Protected by keyHolderMu.
 	keyHolderMu     syncutil.RWMutex
 	voiceKeyHolders map[int64]int64
 
-	// Presence coalescer (QueuePresence): latest queued presence per user and
-	// whether a flush timer is armed. Guarded by presenceMu.
+	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
 	presenceMu         syncutil.Mutex
 	presenceQueue      map[int64]pendingPresence
 	presenceFlushArmed bool
+	presenceRepair     presenceRepairState // dropped presence and its repair (hub_presence.go)
+	members            memberCache         // the ready payloads' shared member list (serve_ready_members_cache.go)
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
@@ -362,6 +366,7 @@ func (h *Hub) GracefulStop() {
 // first call's ctx and reason are used).
 func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 	h.gracefulOnce.Do(func() {
+		h.recordStopUsers()
 		// The notice window matters only when someone is connected to hear
 		// it — an idle server (and every early-return startup path) skips
 		// straight to teardown.
@@ -381,11 +386,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		}
 
 		// Close all remaining client connections.
-		h.mu.Lock()
-		for _, c := range h.clients {
-			c.closeSend()
-		}
-		h.mu.Unlock()
+		h.closeClientsForStop()
 
 		// Stop LiveKit only now, so a client leaves voice on the socket drop
 		// while its room is still up instead of reconnecting to a dead one.

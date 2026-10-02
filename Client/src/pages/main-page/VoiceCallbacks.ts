@@ -5,7 +5,7 @@
 
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
-import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel, isSelfMuted } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import type { VoiceModerationCallbacks } from "@components/ChannelSidebar";
 import {
@@ -79,7 +79,9 @@ export function createVoiceWidgetCallbacks(
       // unmute, so don't spend the round-trip (keybinds reach here too, not
       // just the disabled button).
       if (state.localServerMuted === true) return;
-      if (state.localMuted) {
+      if (isSelfMuted(state)) {
+        // With the push-to-talk key up the gate inside the mic processor
+        // stays closed, so lifting the mute never opens a live mic.
         voiceSessionSetMuted(false);
         ws.send({ type: "voice_mute", payload: { muted: false } });
         // A moderator-imposed deafen is not ours to lift; the server refuses

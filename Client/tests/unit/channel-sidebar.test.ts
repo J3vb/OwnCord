@@ -20,6 +20,13 @@ vi.mock("@lib/streamPreview", () => ({
   attachScrollCollapse: (...args: unknown[]) => mockAttachScrollCollapse(...args),
 }));
 
+const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
+vi.mock("@lib/toast", () => ({
+  showToast: mockShowToast,
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
+
 // Stub the identity-key crypto so the mismatch modal's fingerprint compute is
 // deterministic in jsdom (real WebCrypto key import needs a valid SPKI blob).
 vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
@@ -43,7 +50,7 @@ import {
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
-import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
+import { voiceStore, updateVoiceState, setSpeakers } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
@@ -409,6 +416,32 @@ describe("ChannelSidebar", () => {
     expect(item.classList.contains("mentioned")).toBe(false);
     expect(item.querySelector(".mention-badge")).toBeNull();
     expect(item.querySelector(".unread-badge")?.textContent).toBe("7");
+  });
+
+  it("caps the unread badge at 99+", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 137, mention_count: 0 }]);
+    sidebar.mount(container);
+
+    const badge = container.querySelector('[data-channel-id="1"] .unread-badge');
+    expect(badge?.textContent).toBe("99+");
+  });
+
+  it("shows 99 without the plus at the cap, and 100 as 99+", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 99, mention_count: 0 }]);
+    sidebar.mount(container);
+    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99");
+
+    setChannels([{ ...testChannels[0]!, unread_count: 100, mention_count: 0 }]);
+    channelsStore.flush();
+    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99+");
+  });
+
+  it("leaves the mention badge uncapped", () => {
+    setChannels([{ ...testChannels[0]!, unread_count: 0, mention_count: 137 }]);
+    sidebar.mount(container);
+
+    const badge = container.querySelector('[data-channel-id="1"] .mention-badge');
+    expect(badge?.textContent).toBe("137");
   });
 
   it("clears the mention badge when the channel is activated", () => {
@@ -791,6 +824,28 @@ describe("ChannelSidebar", () => {
     expect(hint).not.toBeNull();
   });
 
+  it("offers a create affordance in the empty state for a channel manager (#9)", () => {
+    // With zero channels there is no category header and therefore no "+";
+    // the old hint pointed at a right-click that did nothing.
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave, onCreateChannel });
+    sidebar.mount(container);
+
+    const btn = container.querySelector(
+      "[data-testid='create-channel-empty']",
+    ) as HTMLButtonElement | null;
+    expect(btn).not.toBeNull();
+    btn!.click();
+    expect(onCreateChannel).toHaveBeenCalledWith("");
+  });
+
+  it("hides the empty-state create affordance from a non-manager (#9)", () => {
+    sidebar.mount(container);
+    expect(container.querySelector("[data-testid='create-channel-empty']")).toBeNull();
+  });
+
   // ── Server name updates ──
 
   it("updates server name when auth store changes", () => {
@@ -814,7 +869,7 @@ describe("ChannelSidebar", () => {
 
   // ── Deafened and camera icons on voice users ──
 
-  it("shows both mic-off and headphones-off icons for deafened user", () => {
+  it("shows only the headphones-off icon for a deafened user (deafen implies mute)", () => {
     setChannels(testChannels);
     updateVoiceState({
       channel_id: 3,
@@ -830,9 +885,11 @@ describe("ChannelSidebar", () => {
 
     const userRow = container.querySelector(".voice-user-item");
     expect(userRow).not.toBeNull();
-    // Deafened shows TWO .vu-muted elements (mic-off + headphones-off)
+    // Deafened implies muted, so showing both mic-off and headphones-off is a
+    // duplicate. Discord shows the single headphones-off.
     const mutedIcons = userRow!.querySelectorAll(".vu-muted");
-    expect(mutedIcons.length).toBe(2);
+    expect(mutedIcons.length).toBe(1);
+    expect(mutedIcons[0]!.querySelector("svg")).not.toBeNull();
   });
 
   it("shows camera icon for user with active camera", () => {
@@ -873,17 +930,10 @@ describe("ChannelSidebar", () => {
     expect(userRow).not.toBeNull();
     expect(userRow!.classList.contains("speaking")).toBe(false);
 
-    // Update only speaking flag (structural signature stays the same)
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 60,
-      username: "Talker",
-      muted: false,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    // Update only speaking flag (structural signature stays the same).
+    // setSpeakers is the only writer of speaking now (a voice_state no longer
+    // clobbers the LiveKit-authoritative flag).
+    setSpeakers({ channel_id: 3, speakers: [60] });
     voiceStore.flush();
 
     // The same DOM element should now have speaking class toggled
@@ -910,16 +960,7 @@ describe("ChannelSidebar", () => {
     expect(rowBefore).not.toBeNull();
 
     // speaking-only flip → patched via the cached row map, not re-rendered
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 61,
-      username: "Talker2",
-      muted: false,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    setSpeakers({ channel_id: 3, speakers: [61] });
     voiceStore.flush();
 
     const rowAfter = container.querySelector('.voice-user-item[data-voice-uid="61"]');
@@ -1752,6 +1793,30 @@ describe("ChannelSidebar", () => {
     expect(icon.title).toBe("Muted by a moderator");
   });
 
+  it("keeps a moderator's mute on the single icon of a self-deafened user", () => {
+    sidebar.destroy?.();
+    sidebar = createChannelSidebar({ onVoiceJoin, onVoiceLeave });
+    setChannels(testChannels);
+    updateVoiceState({
+      channel_id: 3,
+      user_id: 82,
+      username: "DeafAndModMuted",
+      muted: true,
+      deafened: true,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+      server_muted: true,
+    });
+    sidebar.mount(container);
+
+    const icons = container.querySelectorAll(".vu-muted");
+    expect(icons.length).toBe(1);
+    const icon = icons[0] as HTMLElement;
+    expect(icon.classList.contains("vu-server-muted")).toBe(true);
+    expect(icon.title).toBe("Muted by a moderator");
+  });
+
   // ── Collapsed category shows arrow-right, expanded shows arrow-down ──
 
   it("collapsed category header has 'collapsed' class", () => {
@@ -2355,7 +2420,11 @@ describe("ChannelSidebar voice identity badge", () => {
 
     // Pins the exact key whose fingerprint was displayed, not a bare userId.
     expect(mockRePinPeerIdentity).toHaveBeenCalledWith(10, "alice-published-key-b64");
-    expect(document.body.querySelector(".modal-overlay")).toBeNull();
+    // The modal closes once the re-pin confirms (#22: it no longer closes
+    // before the write is known to have succeeded).
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).toBeNull();
+    });
   });
 
   // The user verifies the DISPLAYED fingerprint out of band, which takes human
@@ -2431,6 +2500,40 @@ describe("ChannelSidebar voice identity badge", () => {
 
     expect(mockRePinPeerIdentity).not.toHaveBeenCalled();
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
+  });
+
+  it("surfaces a failed re-pin instead of silently staying blocked (#22)", async () => {
+    // rePinPeerIdentity returns false (rather than rejecting) when it could
+    // not persist the new pin; the caller used to ignore that boolean, so
+    // "Trust New Key" closed the modal and the peer stayed blocked silently.
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, {
+        id: 10,
+        username: "Alice",
+        avatar: null,
+        role: "member",
+        status: "online",
+        identityPublicKey: "alice-published-key-b64",
+      });
+      return { ...prev, members };
+    });
+    setPeerVerif(10, "mismatch", null);
+    mockRePinPeerIdentity.mockResolvedValueOnce(false);
+    sidebar.mount(container);
+
+    (badgeFor(10) as HTMLElement).click();
+    const trustBtn = await vi.waitFor(() => {
+      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      return btn;
+    });
+    trustBtn.click();
+
+    await vi.waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining("Couldn't"), "error");
+    });
   });
 
   it("closes an open mismatch modal on sidebar destroy", async () => {

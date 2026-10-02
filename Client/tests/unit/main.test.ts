@@ -35,6 +35,9 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
+const { mockOnOpenUrl } = vi.hoisted(() => ({
+  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
@@ -59,7 +62,7 @@ vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: vi.fn().mockResolvedValue(undefined),
+  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
@@ -67,20 +70,22 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+const mockProfileManager = vi.hoisted(() => ({
+  loadProfiles: vi.fn().mockResolvedValue(undefined),
+  saveProfiles: vi.fn().mockResolvedValue(undefined),
+  getAll: vi.fn((): { id: string; name: string; host: string }[] => []),
+  addProfile: vi.fn((data: unknown) => ({ id: "profile-1", ...(data as object) })),
+  updateProfile: vi.fn(() => null),
+  removeProfile: vi.fn(() => true),
+  getAutoConnectProfile: vi.fn(() => null),
+  setAutoLogin: vi.fn(),
+  setLastConnected: vi.fn(),
+}));
+
 vi.mock("@lib/profiles", async (importOriginal) => ({
   deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
-  createProfileManager: vi.fn(() => ({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    saveProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn(() => []),
-    addProfile: vi.fn((data: unknown) => ({ id: "profile-1", ...(data as object) })),
-    updateProfile: vi.fn(() => null),
-    removeProfile: vi.fn(() => true),
-    getAutoConnectProfile: vi.fn(() => null),
-    setAutoLogin: vi.fn(),
-    setLastConnected: vi.fn(),
-  })),
+  createProfileManager: vi.fn(() => mockProfileManager),
 }));
 
 // api.ts — only login() is exercised (it drives wirePostAuth); nothing else
@@ -91,6 +96,7 @@ vi.mock("@lib/profiles", async (importOriginal) => ({
 const mockLogin = vi.fn();
 const mockRecoverAccount = vi.fn();
 const mockVerifyTotp = vi.fn();
+const mockRegister = vi.fn();
 // UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
@@ -125,6 +131,7 @@ vi.mock("@lib/api", async (importOriginal) => {
         login: (...args: unknown[]) => mockLogin(...args),
         recoverAccount: (...args: unknown[]) => mockRecoverAccount(...args),
         verifyTotp: (...args: unknown[]) => mockVerifyTotp(...args),
+        register: (...args: unknown[]) => mockRegister(...args),
         getHealth: vi.fn(() =>
           mockHealthFails.value
             ? Promise.reject(new Error("offline"))
@@ -141,6 +148,12 @@ vi.mock("@lib/api", async (importOriginal) => {
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  onRegister?: (
+    host: string,
+    username: string,
+    password: string,
+    inviteCode: string,
+  ) => Promise<void>;
   onRecover?: (
     host: string,
     username: string,
@@ -150,6 +163,7 @@ const capturedConnectCallbacks: {
   onTotpSubmit?: (code: string) => Promise<void>;
   getRegistrationMode?: (host: string) => string | null;
   getRetentionNotice?: (host: string) => string | null;
+  onDeleteProfile?: (profileId: string) => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -161,6 +175,7 @@ vi.mock("@pages/ConnectPage", () => ({
       showConnecting: vi.fn(),
       showAutoConnecting: vi.fn(),
       showError: vi.fn(),
+      showNotice: vi.fn(),
       resetToIdle: vi.fn(),
       updateHealthStatus: vi.fn(),
       updateCompatibility: vi.fn(),
@@ -204,6 +219,7 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { createApiClient } from "@lib/api";
@@ -212,6 +228,8 @@ import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
+import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
+import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
@@ -237,6 +255,7 @@ beforeAll(async () => {
 beforeEach(() => {
   vi.useFakeTimers();
   mockInvoke.mockReset().mockResolvedValue(undefined);
+  mockRegister.mockReset();
   localStorage.clear();
   clearAuth();
 });
@@ -306,11 +325,27 @@ describe("main.ts notification-click opens the message (U1d)", () => {
 
     emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
 
-    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42);
+    // The cross-server guard lives in the real jumpToMessage (F6 buffers until
+    // the host and jumper are live); this mocked seam only checks forwarding.
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42, "a.example");
     setChannelMutesHost(null);
   });
 
-  it("drops a click from a notification another server raised", async () => {
+  it("routes a clicked call notification (no message id) to the jumper, to open the DM", async () => {
+    const { jumpToMessage } = await import("@lib/message-navigation");
+    await Promise.resolve();
+    await Promise.resolve();
+    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    setChannelMutesHost("a.example");
+    vi.mocked(jumpToMessage).mockClear();
+
+    emitTauriEvent("notification-click", { host: "a.example", channelId: 7 });
+
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, undefined, "a.example");
+    setChannelMutesHost(null);
+  });
+
+  it("forwards a cross-server click to the jumper, which applies the guard (F6)", async () => {
     const { jumpToMessage } = await import("@lib/message-navigation");
     await Promise.resolve();
     await Promise.resolve();
@@ -320,8 +355,32 @@ describe("main.ts notification-click opens the message (U1d)", () => {
 
     emitTauriEvent("notification-click", { host: "a.example", channelId: 7, messageId: 42 });
 
-    expect(vi.mocked(jumpToMessage)).not.toHaveBeenCalled();
+    // The guard is inside the real jumpToMessage; the mocked jumper is still
+    // the forwarding target, with the host attached so the real one can drop it.
+    expect(vi.mocked(jumpToMessage)).toHaveBeenCalledWith(7, 42, "a.example");
     setChannelMutesHost(null);
+  });
+});
+
+describe("main.ts clears the per-server notification scope on logout (F13)", () => {
+  it("drops the host so Settings stops showing a dead server's override", async () => {
+    await loginAndReachAuthOk("scope.example:8443", "alice", {
+      user: { id: 9, username: "alice", avatar: null, role: "member" },
+      server_name: "Scope Co",
+      motd: "",
+    });
+    const { getChannelMutesHost, setChannelMutesHost } = await import("@lib/channel-mutes");
+    // MainPage sets this on mount; stand in for that here.
+    setChannelMutesHost("scope.example:8443");
+
+    clearAuth();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // This standalone login stores a credential the mocked store cannot keep,
+    // so the teardown's delete warns.
+    expectConsole("warn", /Credential delete failed/);
+    expect(getChannelMutesHost()).toBeNull();
   });
 });
 
@@ -334,7 +393,11 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     // Stand in for the one PresenceSender MainPage.ts registers for the
     // session (via setActivePresenceSender) — the shared limiter token, the
     // coalescing retry, and the optimistic update all live inside it.
-    const fakeSender: PresenceSender = { send: vi.fn(), destroy: vi.fn() };
+    const fakeSender: PresenceSender = {
+      send: vi.fn(),
+      rollbackTimedOut: vi.fn(),
+      destroy: vi.fn(),
+    };
     setActivePresenceSender(fakeSender);
 
     emitTauriEvent("status-change", "dnd");
@@ -349,6 +412,105 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     setActivePresenceSender(null);
 
     expect(() => emitTauriEvent("status-change", "idle")).not.toThrow();
+  });
+});
+
+describe("main.ts pre-auth connection deadline", () => {
+  it("returns to the form with an error when a manual login never reaches auth_ok", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("offline.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    const attempt = vi.mocked(createApiClient).mock.results[0]!.value.getSession();
+
+    // The socket was asked to open, but the offline server never answers — so
+    // the deadline must give up rather than leave the spinner running forever.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    expect(uiStore.getState().transientError).toContain("offline");
+    // Ended like a cancelled auto-login: the dead attempt's scope is no longer live.
+    expect(attempt.isCurrent()).toBe(false);
+
+    clearAuth();
+  });
+
+  it("does not tear down a session re-dialled after a certificate mismatch", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("rotated.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "rotated.example:8443",
+      fingerprint: "sha256:CHANGED",
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    // The user reads the fingerprint in the mismatch modal for a while, then
+    // accepts: the re-dial must still have its host and token to resume with.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS / 2);
+    const { reconnectAfterCertAccept: realReconnect } =
+      await vi.importActual<typeof import("@lib/cert-reconnect")>("@lib/cert-reconnect");
+    vi.mocked(reconnectAfterCertAccept).mockImplementationOnce(realReconnect);
+    vi.mocked(createCertMismatchModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(reconnectAfterCertAccept).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "rotated.example:8443",
+      "test-token",
+    );
+
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "alex", avatar: null, role: "member" },
+          server_name: "Rotated",
+          motd: "",
+        },
+      }),
+    );
+    mockInvoke.mockClear();
+
+    // Past the original deadline, the re-dialled session is live: nothing may
+    // tear it down or claim the server is offline.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    clearAuth();
+  });
+
+  it("does not time out while the user answers a first-use certificate prompt", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("unpinned.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    emitTauriEvent("cert-tofu", {
+      host: "unpinned.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    mockInvoke.mockClear();
+
+    // The server answered; the user is reading the fingerprint past the deadline.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_disconnect");
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    // Accept still resumes this login against the same host.
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
+
+    clearAuth();
   });
 });
 
@@ -408,6 +570,29 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
   });
 });
 
+describe("main.ts profile deletion clears the saved credential (F11)", () => {
+  afterEach(() => {
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
+    mockProfileManager.removeProfile.mockReset().mockReturnValue(true);
+    mockProfileManager.getAll.mockReset().mockReturnValue([]);
+  });
+
+  it("deletes the removed profile's host credential so re-adding it cannot resume the old password", async () => {
+    // The first read finds the profile; after removal no profile is left on
+    // that host, so its credential goes too.
+    mockProfileManager.getAll.mockReturnValueOnce([
+      { id: "p1", name: "Home", host: "gone.example:8443" },
+    ]);
+    vi.mocked(deleteCredential).mockResolvedValue(true);
+
+    capturedConnectCallbacks.onDeleteProfile!("p1");
+    await Promise.resolve();
+
+    expect(mockProfileManager.removeProfile).toHaveBeenCalledWith("p1");
+    expect(deleteCredential).toHaveBeenCalledWith("gone.example:8443");
+  });
+});
+
 describe("main.ts connected overlay teardown on mid-handshake session end (OC-0157)", () => {
   it('destroys the connected overlay when auth clears before the router leaves "connect"', async () => {
     await loginAndReachAuthOk("mid-handshake.example:8443", "casey", {
@@ -419,7 +604,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
 
     // auth_ok landed: the overlay is mounted over #app while the router is
     // still "connect" — it only moves to "main" from the overlay's own
-    // onReady, 800ms after the `ready` event arrives.
+    // onReady, once the `ready` event arrives.
     expect(document.querySelector('[data-testid="connected-overlay"]')).not.toBeNull();
 
     // Simulate a session that ends here — a ban, an auth_error on an
@@ -439,7 +624,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
   });
 
-  it("cancels the overlay's armed onReady timer when the session ends inside the 800ms ready window", async () => {
+  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready` (OC-0107)", async () => {
     const mainPageCallsBefore = vi.mocked(createMainPage).mock.calls.length;
 
     await loginAndReachAuthOk("wide-window.example:8443", "riley", {
@@ -449,26 +634,23 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
 
-    // `ready` arrives and arms the overlay's 800ms onReady timer (which
-    // would otherwise call router.navigate("main") on its own).
+    // `ready` arrives and arms the overlay's onReady hand-off (which would
+    // otherwise call router.navigate("main") on its own on the next task).
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
 
-    // The ban/shutdown lands partway through that 800ms window — well after
-    // `ready`, well before the timer fires.
-    await vi.advanceTimersByTimeAsync(300);
+    // A queued ban/shutdown task lands before the hand-off task runs.
     clearAuth();
     await Promise.resolve();
     await Promise.resolve();
 
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
 
-    // Advance past the timer's original 800ms deadline. Before the fix, the
-    // subscriber never called connectedOverlay.destroy() (its AbortController
-    // is what cancels the pending setTimeout — see ConnectedOverlay.ts), so
-    // the already-armed timer still fires onReady() -> router.navigate("main"),
-    // mounting MainPage on a cleared authStore and a disconnected socket even
-    // though the isAuthenticated subscriber already ran and won't run again.
-    await vi.advanceTimersByTimeAsync(600);
+    // Let the hand-off's deadline pass. Without the subscriber's
+    // connectedOverlay.destroy() (its AbortController is what cancels the
+    // pending setTimeout — see ConnectedOverlay.ts), the already-armed timer
+    // still fires onReady() -> router.navigate("main"), mounting MainPage on a
+    // cleared authStore and a disconnected socket.
+    await vi.advanceTimersByTimeAsync(800);
 
     expect(vi.mocked(createMainPage).mock.calls.length).toBe(mainPageCallsBefore);
   });
@@ -490,10 +672,11 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     });
     expectConsole("warn", /\[main\] Credential delete failed/);
     emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
-    // ConnectedOverlay.markReady() fires onReady after READY_DELAY_MS (800ms),
-    // which calls router.navigate("main") — main.ts's only route away from
-    // "connect", needed so a later navigate("connect") is a real transition
-    // and not a same-page no-op.
+    // ConnectedOverlay.markReady() hands off on the next task, which starts
+    // router.navigate("main") — main.ts's only route away from "connect",
+    // needed so a later navigate("connect") is a real transition and not a
+    // same-page no-op. The advance flushes both that task and the dynamic
+    // MainPage import the navigation awaits.
     await vi.advanceTimersByTimeAsync(800);
 
     // Quick-switch overlay's flow (SidebarArea.ts:756-760): stash the target
@@ -520,6 +703,38 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
     // so the flag set by the clearAuth() above survives indefinitely — and
     // would go on to suppress a later, unrelated auto-login.
     expect(sessionStorage.getItem("owncord:skip-auto-login")).toBeNull();
+  });
+});
+
+describe("main.ts invite deep link keeps the current server's credential (F7)", () => {
+  afterEach(() => {
+    mockOnOpenUrl.mockClear();
+    vi.mocked(deleteCredential).mockClear();
+  });
+
+  it("does not delete the signed-in server's credential when an invite link arrives", async () => {
+    // An invite link is not a logout: signing in on server A and clicking an
+    // invite link must not silently lose A's remembered password.
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+
+    vi.mocked(deleteCredential).mockClear();
+
+    // The deep-link plugin hands the app the invite while the session is live.
+    const handler = mockOnOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
+    expect(handler).toBeTypeOf("function");
+    handler(["owncord://invite/ABC123"]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(vi.mocked(deleteCredential)).not.toHaveBeenCalled();
   });
 });
 
@@ -787,5 +1002,25 @@ describe("main.ts session ownership", () => {
     await rejected;
     expect(api.getSession()).toBe(current);
     expect(current.isCurrent()).toBe(true);
+  });
+});
+
+describe("main.ts pending-approval notice (DP-54)", () => {
+  it("shows registration pending approval as an info notice, not a red error", async () => {
+    mockRegister.mockResolvedValueOnce({
+      user: { id: 3, username: "newbie" },
+      status: "pending_approval",
+    });
+    await capturedConnectCallbacks.onRegister!("approve.example:8443", "newbie", "hunter22", "");
+
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showNotice: ReturnType<typeof vi.fn>;
+      showError: ReturnType<typeof vi.fn>;
+    };
+    expect(page.showNotice).toHaveBeenCalledWith(
+      "Registration received. An admin has to approve your account before you can sign in.",
+    );
+    // The info path, not the red error banner.
+    expect(page.showError).not.toHaveBeenCalled();
   });
 });

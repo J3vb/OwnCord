@@ -183,25 +183,22 @@ describe("reduceInvalidateLoadedMessageWindows", () => {
     expect(reduceInvalidateLoadedMessageWindows(prev)).toBe(prev);
   });
 
-  it("keeps only unreconciled rows and clears every window flag", () => {
+  it("clears loaded for every channel and keeps rows, hasMore and detachment (P2-T4)", () => {
     const prev: MessagesState = {
       ...INITIAL_STATE,
       messagesByChannel: new Map([
         [1, [row({ id: 1 }), pending]],
         [2, [row({ id: 2 })]],
-        [3, [row({ id: 3 })]],
       ]),
       loadedChannels: new Set([1, 2, 4]),
       hasMore: new Map([[1, true]]),
       detachedChannels: new Set([2]),
     };
     const next = reduceInvalidateLoadedMessageWindows(prev);
-    expect(ids(next, 1)).toEqual([0]);
-    expect(next.messagesByChannel.has(2)).toBe(false);
-    expect(ids(next, 3)).toEqual([3]);
+    expect(next.messagesByChannel).toBe(prev.messagesByChannel);
     expect(next.loadedChannels.size).toBe(0);
-    expect(next.hasMore.size).toBe(0);
-    expect(next.detachedChannels.size).toBe(0);
+    expect(next.hasMore).toBe(prev.hasMore);
+    expect(next.detachedChannels).toBe(prev.detachedChannels);
   });
 });
 

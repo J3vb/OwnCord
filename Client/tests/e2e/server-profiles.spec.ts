@@ -290,6 +290,9 @@ test.describe("Server profiles — row actions", () => {
 
   test("delete removes the row and persists the removal", async ({ page }) => {
     await page.locator(`.server-item[data-host='${A}'] .srv-btn.danger`).click();
+    // Delete asks first; the row stays until the removal is confirmed.
+    await expect(page.locator(`.server-item[data-host='${A}']`)).toBeVisible();
+    await page.locator("[data-testid='confirm-delete-server']").click();
 
     await expect(page.locator(`.server-item[data-host='${A}']`)).toHaveCount(0);
     await expect(page.locator(`.server-item[data-host='${B}']`)).toBeVisible();

@@ -357,3 +357,45 @@ func TestRateLimiter_AllowNeverShrinksAKeysRecordedWindow(t *testing.T) {
 		t.Fatalf("recorded window after a 60s Allow call on the same key = (%v, %v), want (6h, true) — the max ever observed must not be downgraded", got, ok)
 	}
 }
+
+func TestRateLimiter_RetryAfter_ZeroWhenNotLimited(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	if got := rl.RetryAfter("retryUnknown", 2, time.Minute); got != 0 {
+		t.Errorf("RetryAfter(unknown key) = %v, want 0", got)
+	}
+	rl.Allow("retryUnder", 2, time.Minute)
+	if got := rl.RetryAfter("retryUnder", 2, time.Minute); got != 0 {
+		t.Errorf("RetryAfter(under limit) = %v, want 0", got)
+	}
+}
+
+func TestRateLimiter_RetryAfter_RemainderOfWindow(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	window := time.Minute
+	rl.Allow("retryOver", 2, window)
+	rl.Allow("retryOver", 2, window)
+	got := rl.RetryAfter("retryOver", 2, window)
+	if got <= window-5*time.Second || got > window {
+		t.Errorf("RetryAfter(over limit) = %v, want just under %v", got, window)
+	}
+}
+
+func TestRateLimiter_RetryAfter_ExpiredTimestampsNotCounted(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	window := 30 * time.Millisecond
+	rl.Allow("retryExpired", 2, window)
+	rl.Allow("retryExpired", 2, window)
+	time.Sleep(window + 10*time.Millisecond)
+	if got := rl.RetryAfter("retryExpired", 2, window); got != 0 {
+		t.Errorf("RetryAfter(after window) = %v, want 0", got)
+	}
+}
+
+func TestRateLimiter_RetryAfter_Lockout(t *testing.T) {
+	rl := auth.NewRateLimiter()
+	rl.Lockout(context.Background(), "retryLocked", time.Hour)
+	got := rl.RetryAfter("retryLocked", 5, time.Minute)
+	if got <= 59*time.Minute || got > time.Hour {
+		t.Errorf("RetryAfter(locked out) = %v, want the lockout remainder (~1h)", got)
+	}
+}

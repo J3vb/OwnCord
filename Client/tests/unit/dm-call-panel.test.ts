@@ -20,6 +20,7 @@ import { membersStore, updateMemberProfile, updatePresence } from "../../src/sto
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
 import type { RingState, OutgoingCallState } from "../../src/lib/call-ring";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 const SELF = 1;
 const OTTO = 2;
@@ -329,6 +330,30 @@ describe("DmCallPanel — caller side", () => {
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto didn't answer");
   });
 
+  it("drops the callee's tile once the call went unanswered, keeping both actions", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
+
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBeNull();
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${SELF}']`)).not.toBeNull();
+    expect(q(root, "dcp-ring-again")).not.toBeNull();
+    expect(q(root, "dcp-leave-call")).not.toBeNull();
+  });
+
+  it("puts the callee's ringing tile back when Ring again starts a new ring", () => {
+    setVoice(DM, [vu(SELF)]);
+    const { root } = mount();
+    panel!.setOutgoing({ channelId: DM, phase: "no-answer", pending: [OTTO] });
+    expect(root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)).toBeNull();
+
+    panel!.setOutgoing({ channelId: DM, phase: "ringing", pending: [OTTO] });
+
+    const callee = root.querySelector(`.dcp-avatar[data-user-id='${OTTO}']`)!;
+    expect(callee).not.toBeNull();
+    expect(callee.classList.contains("dcp-avatar--ringing")).toBe(true);
+  });
+
   it("offers no Collapse once the call went unanswered, only while ringing", () => {
     setVoice(DM, [vu(SELF)]);
     const { root } = mount();
@@ -403,6 +428,44 @@ describe("DmCallPanel — connected", () => {
     const selfBadge = root.querySelector(`.dcp-avatar[data-user-id='${SELF}'] .dcp-avatar-badge`)!;
     expect((selfBadge as HTMLElement).hidden).toBe(false);
     expect(selfBadge.getAttribute("title")).toBe("Muted");
+  });
+
+  it("shows a listen-only join's mic as off and inert, not a live mic", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root, opts } = mount();
+    patchVoice({ listenOnly: true, localMuted: false });
+
+    const mute = q(root, "dcp-mute")!;
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.disabled).toBe(true);
+    expect(mute.title).toBe("Listening only — no microphone access");
+    expect(keyword(cascadedDeclaration(".dcp-btn:disabled", "opacity"))).toBe("0.5");
+    mute.click();
+    expect(opts.onMuteToggle).not.toHaveBeenCalled();
+
+    // A granted microphone makes it a live control again.
+    patchVoice({ listenOnly: false });
+    expect(mute.disabled).toBe(false);
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
+  });
+
+  it("does not read a push-to-talk user as muted between presses", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root } = mount();
+    // Push-to-talk gates inside the mic processor and never writes localMuted.
+    patchVoice({ localMuted: false, pttGated: true });
+
+    const mute = q(root, "dcp-mute")!;
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
+    const selfBadge = root.querySelector(`.dcp-avatar[data-user-id='${SELF}'] .dcp-avatar-badge`)!;
+    expect((selfBadge as HTMLElement).hidden).toBe(true);
+
+    // The user's own mute, key up, still reads muted.
+    patchVoice({ localMuted: true });
+    expect(mute.getAttribute("aria-pressed")).toBe("true");
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
   });
 
   it("keeps a moderator mute and a dropped socket out of reach, but never Leave", () => {
@@ -621,15 +684,14 @@ describe("DmCallPanel — video in the call", () => {
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
   });
 
-  it("keeps your own video once the call went unanswered, with the callee still shown", () => {
+  it("keeps your own video once the call went unanswered, without the absent callee's tile", () => {
     setVoice(DM, [vu(SELF)]);
     const { opts, root } = mount();
     panel!.setOutgoing({ channelId: DM, phase: "declined", pending: [] });
     panel!.setVideoActive(true);
 
     const people = lastPeople(opts);
-    expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
-    expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
+    expect(people.map((p) => p.userId)).toEqual([SELF]);
 
     expect(root.contains(panel!.videoElement())).toBe(true);
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto declined the call");

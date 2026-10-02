@@ -7,6 +7,7 @@ import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { loadPref } from "@lib/preferences";
+import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../i18n/messageStatus";
 
 // -- Constants ----------------------------------------------------------------
@@ -94,6 +95,55 @@ export function formatMessageTimestamp(iso: string): string {
   const dd = String(date.getDate()).padStart(2, "0");
   const yyyy = date.getFullYear();
   return `${mm}/${dd}/${yyyy} ${timeStr}`;
+}
+
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const SHORT_DATE_YEAR_FORMAT = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+/** A DM row's compact time: the clock time for today ("3:04 PM"), else a short
+ *  date ("Sep 29", with the year when it is not this one). "" stays "". The
+ *  label changes when the day turns, so rows re-render at each midnight
+ *  (atEachMidnight) and carry it in their signature. */
+export function formatDmRowTime(iso: string): string {
+  if (iso === "") return "";
+  const date = parseTimestamp(iso);
+  const now = new Date();
+  if (date >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+    return CLOCK_TIME_FORMAT.format(date);
+  }
+  return date.getFullYear() === now.getFullYear()
+    ? SHORT_DATE_FORMAT.format(date)
+    : SHORT_DATE_YEAR_FORMAT.format(date);
+}
+
+/** Run `fn` at every local midnight until `signal` aborts. */
+export function atEachMidnight(signal: AbortSignal, fn: () => void): void {
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  setOwnedTimeout(
+    signal,
+    () => {
+      fn();
+      atEachMidnight(signal, fn);
+    },
+    midnight.getTime() - now.getTime(),
+  );
+}
+
+/** The server caps `unread_count` here (see GetChannelUnreadCounts): a count
+ *  at or above it is a lower bound, not the real number. */
+export const UNREAD_COUNT_CAP = 100;
+
+/** Display text for an unread badge. Counts at or above the wire cap read as
+ *  "99+"; the raw count is never shown as a four-digit number. Mention counts
+ *  are not capped on the wire, but a muted DM's mentions still reach this
+ *  through the DM header total. */
+export function formatBadgeCount(count: number): string {
+  return count >= UNREAD_COUNT_CAP ? "99+" : String(count);
 }
 
 export function isSameDay(a: string, b: string): boolean {

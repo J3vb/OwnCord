@@ -9,12 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -115,25 +115,10 @@ type ProfileBroadcaster interface {
 	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
-// SessionDisconnector is the hub's half of sign-out-everywhere: once the
-// sessions are gone, the live sockets they authenticated must go too, or a
-// device keeps its connection until the revoked-session sweep notices
-// (Codex P1 on PR #1500). *ws.Hub implements it; a ProfileBroadcaster that
-// does not (tests, a nil hub) simply skips the disconnect.
-type SessionDisconnector interface {
-	DisconnectRevokedUser(userID int64)
-}
-
-// The production hub must keep satisfying it: the assertion at the call site
-// silently skips the disconnect when it stops matching, so a renamed method
-// would leave revoked devices connected until the sweep — the bug PR #1500
-// fixed — with nothing failing to say so.
-var _ SessionDisconnector = (*ws.Hub)(nil)
-
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account. A session principal revokes itself with the first call; an
-// API-token principal keeps its credential, so the cap is what keeps repeated
-// no-op calls from costing anything (Codex P2 on PR #1500).
+// per account (Codex P2 on PR #1500). Every call revokes the caller's own
+// session or API token, so the cap bounds how fast a fresh sign-in can
+// repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
 
 // MountProfileRoutes registers user profile management endpoints.
@@ -142,15 +127,22 @@ const revokeAllSessionsRateLimitPerMinute = 5
 // store may be nil, in which case the avatar-upload route is not registered —
 // a server with no storage backend has nowhere to put the bytes, and a route
 // that 500s on every call is worse than one that 404s.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster) {
+//
+// cfg may be nil (tests that mount only the profile surface): the same-host
+// avatar guard then falls back to the request's Host header alone. In
+// production the router always passes the running config, so the guard compares
+// against the server's own configured hosts rather than anything the client
+// supplied.
+func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
+	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 
 		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
-			Patch("/", handleUpdateProfile(svc, broadcaster))
+			Patch("/", handleUpdateProfile(svc, broadcaster, selfHosts))
 
 		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
-			Put("/password", handleChangePassword(svc, limiter))
+			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
@@ -162,7 +154,7 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		r.With(RateLimitMiddleware(limiter, "own_moderation:", ownModerationRateLimitPerMinute, time.Minute, trustedProxies)).
 			Get("/moderation", handleOwnModeration(svc))
 		r.Delete("/sessions", handleRevokeAllSessions(svc, limiter, broadcaster))
-		r.Delete("/sessions/{id}", handleRevokeSession(svc))
+		r.Delete("/sessions/{id}", handleRevokeSession(svc, broadcaster))
 	})
 }
 
@@ -183,22 +175,6 @@ func validateIdentityKey(key string) error {
 	}
 	if _, err := base64.RawStdEncoding.DecodeString(key); err != nil {
 		return fmt.Errorf("identity_public_key is not valid base64")
-	}
-	return nil
-}
-
-// validateAvatarURL checks that avatar is either empty or a valid https:// URL
-// no longer than maxAvatarURLLen characters.
-func validateAvatarURL(avatar string) error {
-	if avatar == "" {
-		return nil
-	}
-	if len(avatar) > maxAvatarURLLen {
-		return fmt.Errorf("avatar URL too long (max %d characters)", maxAvatarURLLen)
-	}
-	parsed, err := url.Parse(avatar)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return fmt.Errorf("avatar URL must use https://")
 	}
 	return nil
 }
@@ -238,7 +214,7 @@ var allowedAvatarMIME = map[string]bool{
 // and returns ok=false, and the caller must return without writing anything
 // further. Split out of handleUpdateProfile only to keep that handler under the
 // funlen limit; the field logic is unchanged.
-func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updateProfileRequest, bool) {
+func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
@@ -291,7 +267,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	// the username path above.
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
-		if err := validateAvatarURL(trimmed); err != nil {
+		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
@@ -339,14 +315,14 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request) (updatePr
 	return req, true
 }
 
-func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
+func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, selfHosts []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
 			return
 		}
 
-		req, ok := parseUpdateProfileRequest(w, r)
+		req, ok := parseUpdateProfileRequest(w, r, selfHosts)
 		if !ok {
 			return
 		}
@@ -406,7 +382,7 @@ func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 }
 
 // handleChangePassword processes PUT /api/v1/users/me/password.
-func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http.HandlerFunc {
+func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -437,7 +413,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		failKey := auth.Key("pw_confirm_fail", user.ID)
 		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
 		if !admitted {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", service.ErrAuthBusy.Error())
+			writeAuthBusy(w, service.ErrAuthBusy)
 			return
 		}
 		if !matched {
@@ -464,7 +440,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 		// Hash new password — bcrypt at full cost, so through the budget too.
 		hash, admitted, err := limiter.Admission().HashPassword(req.NewPassword)
 		if !admitted {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", service.ErrAuthBusy.Error())
+			writeAuthBusy(w, service.ErrAuthBusy)
 			return
 		}
 		if err != nil {
@@ -484,6 +460,11 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter) http
 			// Only reachable when the password itself failed to commit.
 			writeServiceError(r.Context(), w, err)
 			return
+		}
+		// The other sessions are gone; drop the account's socket now if it
+		// rode one of them, rather than at the sweep's next tick.
+		if res.SessionsRevoked > 0 {
+			disconnectIfSessionRevoked(broadcaster, user.ID)
 		}
 		if res.RevokeFailed {
 			// Partial success: the password IS changed; only revoking the
@@ -541,8 +522,10 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			callerSessionID = sess.ID
 		}
 		if err := svc.Users.MarkSessionsSeen(r.Context(), user.ID, callerSessionID); err != nil {
-			writeServiceError(r.Context(), w, err)
-			return
+			// A failed "seen" write must not discard a successfully built
+			// list: the sessions are still correct, so return them and log the
+			// write failure rather than 500ing (F23).
+			slog.WarnContext(r.Context(), "list sessions: failed to mark seen", "err", err)
 		}
 
 		writeJSON(w, http.StatusOK, resp)
@@ -550,7 +533,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 }
 
 // handleRevokeSession processes DELETE /api/v1/users/me/sessions/{id}.
-func handleRevokeSession(svc *service.Services) http.HandlerFunc {
+func handleRevokeSession(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -566,6 +549,7 @@ func handleRevokeSession(svc *service.Services) http.HandlerFunc {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
+		disconnectIfSessionRevoked(broadcaster, user.ID)
 
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -582,7 +566,7 @@ type revokeAllSessionsResponse struct {
 
 // handleRevokeAllSessions processes DELETE /api/v1/users/me/sessions —
 // sign-out-everywhere. The current session is revoked with the rest, and so
-// is every live WebSocket the account holds.
+// are every API token and every live WebSocket the account holds.
 func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -591,8 +575,7 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 		}
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
-		// Per account, not per IP: the principal is authenticated, and the
-		// no-op case (an API token with nothing to revoke) is the one to cap.
+		// Per account, not per IP: the principal is authenticated.
 		if !limiter.Allow(auth.Key("revoke_all", user.ID), revokeAllSessionsRateLimitPerMinute, time.Minute) {
 			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many sign-out-everywhere requests, try again later")
 			return

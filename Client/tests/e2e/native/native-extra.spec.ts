@@ -431,15 +431,18 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
       await sendKeys([[VK.F16, "up"]]);
       held = false;
     };
+    // A released key gates the mic without reading as the user's own mute:
+    // the button keeps aria-pressed="false" and carries the ptt-gated state.
     await hold();
     await release();
-    await expect(mute).toHaveAttribute("aria-pressed", "true");
-    await hold();
+    await expect(mute).toHaveClass(/\bptt-gated\b/);
     await expect(mute).toHaveAttribute("aria-pressed", "false");
+    await hold();
+    await expect(mute).not.toHaveClass(/\bptt-gated\b/);
     await release();
-    await expect(mute).toHaveAttribute("aria-pressed", "true");
+    await expect(mute).toHaveClass(/\bptt-gated\b/);
 
-    // Clearing the binding lifts the mute that PTT itself applied.
+    // Clearing the binding lifts the gate that PTT itself applied.
     await openKeybinds();
     await page
       .locator(".settings-content .settings-pane.active")
@@ -447,6 +450,7 @@ test("push-to-talk binds a key through capture and gates the mic on its real key
       .click();
     await expect(keybind).toHaveText("Not set");
     await page.keyboard.press("Escape");
+    await expect(mute).not.toHaveClass(/\bptt-gated\b/);
     await expect(mute).toHaveAttribute("aria-pressed", "false");
     await widget.getByRole("button", { name: "Disconnect", exact: true }).click();
     await expect(widget).toBeHidden();

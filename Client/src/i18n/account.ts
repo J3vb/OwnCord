@@ -87,7 +87,7 @@ export const accountText = defineCatalog("account", {
   "devices.unknownIp": "Unknown IP",
   "devices.signOut": "Sign out",
   "devices.signedOutReplaced":
-    "Device signed out. Its requests are refused now, and its current connection closes within about 30 seconds.",
+    "Device signed out. Its requests are refused and its current connection is closed.",
   "devices.signedOut": "Device signed out. It can no longer connect.",
   "devices.signOutFailed": "Failed to sign out the device.",
   "devices.sectionTitle": "Signed-in devices",
@@ -140,6 +140,7 @@ export const accountText = defineCatalog("account", {
   "recovery.replaceKit": "Replace recovery kit",
   "recovery.createKit": "Create recovery kit",
   "recovery.kitStatusFailed": "Could not load the recovery kit status.",
+  "recovery.unknown": "Unknown",
   "recovery.create": "Create",
   "recovery.creating": "Creating...",
   "recovery.secretMissing": "The server did not return a recovery kit secret.",

@@ -17,13 +17,19 @@ import { hasPermission, currentUserPermissions, canManageChannels } from "@lib/p
 import { Permission } from "@lib/types";
 import { markChannelRead, hasUnread } from "@lib/read-state";
 import { isChannelMuted, toggleChannelMute } from "@lib/channel-mutes";
-import { createMenuItem, enableMenuKeyboard, openMenuOnKeyboard } from "@lib/context-menu";
+import {
+  createMenuItem,
+  enableMenuKeyboard,
+  openMenuOnKeyboard,
+  clampMenuToViewport,
+} from "@lib/context-menu";
 import { appendPurgeSection } from "@components/purge-prompt";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
 
-/** Bubbles from a channel row when its mute is toggled. */
-export const CHANNEL_MUTE_CHANGED = "owncord:channel-mute-changed";
+/** Bubbles from a channel row when its mute is toggled. Re-exported from the
+ *  mute store, which dispatches it on every write (F16). */
+export { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
 
 /** The close hook of the currently-open channel menu, so a same-class reopen
  *  can tear the previous menu's listeners down before removing it. */
@@ -143,16 +149,6 @@ export function attachChannelContextMenu(
         "ctx-mute-channel",
         () => {
           toggleChannelMute(channel.id);
-          // Mute state lives in localStorage, so there is no store change to
-          // subscribe to. A bubbling DOM event lets the sidebar redraw the
-          // row without threading a callback through four layers of
-          // positional render arguments.
-          el.dispatchEvent(
-            new CustomEvent(CHANNEL_MUTE_CHANGED, {
-              bubbles: true,
-              detail: { channelId: channel.id },
-            }),
-          );
         },
       );
     }
@@ -225,6 +221,11 @@ export function attachChannelContextMenu(
     }
 
     document.body.appendChild(menu);
+
+    // Keep the full menu (Edit/Delete/Purge) inside the viewport when opened
+    // near the bottom/right edge; a later resize is not expected for this
+    // static menu, so a single placement is enough.
+    clampMenuToViewport(menu, anchorX, anchorY);
 
     // Focus the first item on open; Escape/close restores focus to the row.
     const restoreFocus = enableMenuKeyboard(menu, { signal: menuOwner.signal, onClose: closeMenu });

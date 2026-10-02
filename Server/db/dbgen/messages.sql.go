@@ -13,7 +13,7 @@ import (
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone
+          mentions_everyone, pinned_at
 `
 
 type CreateMessageParams struct {
@@ -42,6 +42,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -49,7 +50,7 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 const editMessageContent = `-- name: EditMessageContent :one
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone
+          mentions_everyone, pinned_at
 `
 
 type EditMessageContentParams struct {
@@ -75,6 +76,7 @@ func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContent
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -83,10 +85,11 @@ const getChannelUnreadCounts = `-- name: GetChannelUnreadCounts :many
 SELECT c.id,
        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
-       (SELECT COUNT(*) FROM messages m
+       (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
          WHERE m.channel_id = c.id AND m.deleted = 0
            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
-                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread,
+                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
+         LIMIT 100)) AS unread,
        COALESCE((SELECT rs.mention_count FROM read_states rs
                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 FROM channels c
@@ -149,7 +152,7 @@ func (q *Queries) GetLatestMessageID(ctx context.Context, channelID int64) (inte
 
 const getMessage = `-- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone
+       mentions_everyone, pinned_at
 FROM messages WHERE id = ?
 `
 
@@ -167,6 +170,7 @@ func (q *Queries) GetMessage(ctx context.Context, id int64) (Message, error) {
 		&i.Pinned,
 		&i.Timestamp,
 		&i.MentionsEveryone,
+		&i.PinnedAt,
 	)
 	return i, err
 }
@@ -286,16 +290,19 @@ func (q *Queries) MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelRe
 }
 
 const setMessagePinned = `-- name: SetMessagePinned :execresult
-UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0
 `
 
 type SetMessagePinnedParams struct {
-	Pinned int64 `json:"pinned"`
-	ID     int64 `json:"id"`
+	Pinned   int64   `json:"pinned"`
+	PinnedAt *string `json:"pinnedAt"`
+	ID       int64   `json:"id"`
 }
 
+// pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
+// pinning and NULL when unpinning (a re-pin stamps freshly).
 func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, setMessagePinned, arg.Pinned, arg.ID)
+	return q.db.ExecContext(ctx, setMessagePinned, arg.Pinned, arg.PinnedAt, arg.ID)
 }
 
 const softDeleteMessage = `-- name: SoftDeleteMessage :execresult

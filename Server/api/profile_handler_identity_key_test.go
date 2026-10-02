@@ -36,8 +36,7 @@ func TestUpdateProfile_IdentityKeyFailureStillBroadcastsCommittedProfile(t *test
 	spy := &userUpdateSpy{}
 
 	r := chi.NewRouter()
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, spy)
-
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, spy, nil)
 	token := profileCreateToken(t, database, "identitykeyuser", 4)
 
 	rr := patchJSON(t, r, "/api/v1/users/me", token, map[string]any{

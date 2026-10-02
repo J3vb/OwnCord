@@ -189,13 +189,13 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
   },
   {
     file: "components/message-list/content-parser.ts",
-    fn: "renderCodeBlock",
+    fn: "renderParsedCodeBlock",
     reason:
       "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
   {
     file: "components/message-list/content-parser.ts",
-    fn: "renderCodeBlock",
+    fn: "renderParsedCodeBlock",
     reason:
       "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
   },
@@ -204,9 +204,9 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
 const R4_ALLOWLIST: readonly R4Entry[] = [
   {
     file: "components/SearchOverlay.ts",
-    fn: "doSearch",
+    fn: "executeSearch",
     category: "cancellation-token",
-    reason: "owner: the next search, which aborts this one",
+    reason: "owner: the next search (query, scope or Load more), which aborts this one",
   },
   {
     file: "components/settings/ConnectionDiagnosticsPanel.ts",

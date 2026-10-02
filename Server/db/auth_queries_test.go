@@ -442,15 +442,15 @@ func TestTouchSession(t *testing.T) {
 	sess1, _ := database.GetSessionByTokenHash(context.Background(), "touchToken")
 	time.Sleep(2 * time.Millisecond)
 
-	if err := database.TouchSession(context.Background(), "touchToken"); err != nil {
-		t.Fatalf("TouchSession: %v", err)
+	if err := database.TouchSessions(context.Background(), []string{"touchToken"}); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
 	}
 
 	sess2, _ := database.GetSessionByTokenHash(context.Background(), "touchToken")
 	if sess1.LastUsed == sess2.LastUsed {
 		// last_used should have advanced; if they're equal the touch had no effect
 		// (This can be flaky at millisecond resolution, but is a reasonable sanity check.)
-		t.Log("TouchSession: last_used unchanged (may be a timing issue on fast machines)")
+		t.Log("TouchSessions: last_used unchanged (may be a timing issue on fast machines)")
 	}
 }
 

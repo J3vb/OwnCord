@@ -64,13 +64,52 @@ interface RequestOptions {
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;
+  /** The response's Retry-After, in milliseconds, when it sent one. */
+  readonly retryAfterMs: number | undefined;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, retryAfterMs?: number) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     this.code = code;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/** A Retry-After header in delta-seconds form, as milliseconds; undefined otherwise. */
+function parseRetryAfterMs(res: Response): number | undefined {
+  const value = res.headers.get("retry-after")?.trim();
+  return value !== undefined && /^\d+$/.test(value) ? Number(value) * 1000 : undefined;
+}
+
+/**
+ * A request that never reached the server: the host is offline or
+ * unreachable, or the desktop HTTP tunnel refused its certificate. `cause`
+ * keeps the transport's raw text for the log; the display copy is
+ * `errorText`'s.
+ */
+export class TransportError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "TransportError";
+  }
+}
+
+/**
+ * The error for a non-2xx response. The desktop HTTP tunnel answers a
+ * certificate it refused (TOFU: a first-use or changed certificate) with a
+ * bare 502 that carries no error code, so that shape is a `TransportError`
+ * rather than a server refusal. It shows the unreachable copy until a distinct
+ * certificate message exists.
+ */
+export function httpError(
+  status: number,
+  code: string,
+  message: string,
+  retryAfterMs?: number,
+): Error {
+  if (status === 502 && code === "UNKNOWN") return new TransportError(message);
+  return new ApiClientError(status, code, message, retryAfterMs);
 }
 
 function isSessionExpired(message: string): boolean {
@@ -152,7 +191,8 @@ const PERMISSION_REFUSAL =
  * suspended account, or an account-state refusal ("account is awaiting
  * approval"). Only a refused sign-in, session, suspension or permission has
  * fixed copy — the rest keep the server's own sentence, which says what went
- * wrong. RATE_LIMITED and INTERNAL_ERROR carry the auth slice's lockout,
+ * wrong. AUTH_BUSY is the server's authentication queue being full. RATE_LIMITED
+ * and INTERNAL_ERROR carry the auth slice's lockout,
  * budget and failure sentences, each of which gets copy of its own; any other
  * rate limit reads as the generic line and any other internal failure as the
  * caller's fallback.
@@ -161,6 +201,8 @@ export function serverErrorCopy(code: string, message: string): string | null {
   switch (code) {
     case "RATE_LIMITED":
       return authSliceCopy(message) ?? connectText("error.rateLimited");
+    case "AUTH_BUSY":
+      return connectText("error.authBusy");
     case "INTERNAL":
     case "INTERNAL_ERROR":
       return authSliceCopy(message);
@@ -215,8 +257,10 @@ export function serverErrorText(code: string, message: string, fallback: string)
   return message ? capitalise(message) : fallback;
 }
 
-/** A failed request's text: `serverErrorText` for an `ApiClientError`, else the error's own message. */
+/** A failed request's text: friendly copy for a `TransportError`, `serverErrorText`
+ *  for an `ApiClientError`, else the error's own message. */
 export function errorText(err: unknown, fallback: string): string {
+  if (err instanceof TransportError) return connectText("session.connectTimeout");
   if (err instanceof ApiClientError) return serverErrorText(err.code, err.message, fallback);
   return err instanceof Error ? err.message : fallback;
 }
@@ -582,9 +626,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         res = await owner.run(desktop.http.fetch(`${origin}${prefix}${path}`, init));
       } catch (fetchErr) {
         owner.assertCurrent();
+        // The raw detail stays in the log; the caller gets a typed error so
+        // display copy can be friendly (DP-54).
         log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
-        if (fetchErr instanceof Error) throw fetchErr;
-        throw new Error(String(fetchErr), { cause: fetchErr });
+        throw new TransportError(fetchErr instanceof Error ? fetchErr.message : String(fetchErr), {
+          cause: fetchErr,
+        });
       }
       owner.assertCurrent();
       log.debug(`${label} ←`, { method, path, status: res.status });
@@ -604,7 +651,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           message: err.message,
           reqId: res.headers.get("x-request-id") ?? undefined,
         });
-        throw new ApiClientError(res.status, err.error, err.message);
+        throw httpError(res.status, err.error, err.message, parseRetryAfterMs(res));
       }
       if (res.status === 204) {
         releaseTransport();
@@ -1147,12 +1194,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     search(
       query: string,
-      options?: { channelId?: number; limit?: number },
+      options?: {
+        channelId?: number;
+        limit?: number;
+        sort?: "relevance" | "recent";
+        before?: number;
+      },
       signal?: AbortSignal,
     ): Promise<SearchResponse> {
       const params = new URLSearchParams({ q: query });
       if (options?.channelId !== undefined) params.set("channel_id", String(options.channelId));
       if (options?.limit !== undefined) params.set("limit", String(options.limit));
+      if (options?.sort !== undefined) params.set("sort", options.sort);
+      // A `before` cursor only walks a newest-first list, so it implies the
+      // sort rather than letting the caller submit an invalid pairing.
+      if (options?.before !== undefined) {
+        params.set("sort", "recent");
+        params.set("before", String(options.before));
+      }
       const send = (): Promise<SearchResponse> =>
         request<SearchResponse>("GET", `/search?${params.toString()}`, undefined, signal);
       // A server-wide search already omits channels the caller has not

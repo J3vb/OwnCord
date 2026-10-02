@@ -53,10 +53,22 @@
     { "wire": "chat_send_ok", "go": "MsgTypeChatSendOK", "ts": "CHAT_SEND_OK" },
     { "wire": "chat_edited", "go": "MsgTypeChatEdited", "ts": "CHAT_EDITED" },
     { "wire": "chat_deleted", "go": "MsgTypeChatDeleted", "ts": "CHAT_DELETED" },
+    {
+      "wire": "chat_pinned",
+      "go": "MsgTypeChatPinned",
+      "ts": "CHAT_PINNED",
+      "note": "a message was pinned or unpinned in a channel the recipient can read"
+    },
     { "wire": "chat_bulk_deleted", "go": "MsgTypeChatBulkDeleted", "ts": "CHAT_BULK_DELETED" },
     { "wire": "reaction_update", "go": "MsgTypeReactionUpdate", "ts": "REACTION_UPDATE" },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
+    {
+      "wire": "presence_batch",
+      "go": "MsgTypePresenceBatch",
+      "ts": "PRESENCE_BATCH",
+      "note": "many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence"
+    },
     { "wire": "channel_create", "go": "MsgTypeChannelCreate", "ts": "CHANNEL_CREATE" },
     { "wire": "channel_update", "go": "MsgTypeChannelUpdate", "ts": "CHANNEL_UPDATE" },
     { "wire": "channel_delete", "go": "MsgTypeChannelDelete", "ts": "CHANNEL_DELETE" },

@@ -71,6 +71,8 @@ vi.mock("@lib/livekitSession", async () => {
     cleanupAll: vi.fn(),
     isVoiceConnected: vi.fn(() => false),
     isVoiceSessionActive: vi.fn(() => false),
+    isAutoReconnecting: vi.fn(() => false),
+    failPendingRejoin: vi.fn(),
     setMuted: vi.fn(),
     setDeafened: vi.fn(),
     disableCamera: vi.fn(async () => {}),

@@ -96,11 +96,14 @@ type Invite struct {
 	ID        int64
 	Code      string
 	CreatedBy int64
-	Uses      int
-	MaxUses   *int
-	ExpiresAt *string
-	Revoked   bool
-	CreatedAt string
+	// CreatorUsername is the invite creator's username, joined at read time for
+	// the invite list. Empty when the creator's account was erased.
+	CreatorUsername string
+	Uses            int
+	MaxUses         *int
+	ExpiresAt       *string
+	Revoked         bool
+	CreatedAt       string
 }
 
 // Expired reports whether the invite's expiry has passed at now. A nil
@@ -192,6 +195,17 @@ type MessageSearchResult struct {
 	Timestamp        string     `json:"timestamp"`
 	Mentions         []int64    `json:"mentions"`
 	MentionsEveryone bool       `json:"mentions_everyone"`
+}
+
+// SearchPage selects one page of full-text search results. The zero values
+// keep the original behaviour: best match first, no cursor.
+type SearchPage struct {
+	Limit int
+	// Recent orders newest first (message id descending) instead of by rank.
+	Recent bool
+	// Before, when positive, keeps only messages with an id below it — the
+	// cursor for the next page of a Recent search.
+	Before int64
 }
 
 // UserPublic is the public-facing user shape for API responses.
@@ -341,7 +355,10 @@ type Emoji struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-// sessionTTL is the duration a session remains valid after creation.
+// sessionTTL is the idle window: a session expires this long after it was
+// created or last touched (TouchSessions slides it). TouchSessions also caps
+// expires_at at created_at + 365 days, the absolute lifetime from sign-in,
+// in its query (sessions.sql).
 const sessionTTL = 30 * 24 * time.Hour
 
 // sessionTimeLayout is the storage format for sessions.expires_at (and the

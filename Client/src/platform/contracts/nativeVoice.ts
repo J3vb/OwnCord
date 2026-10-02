@@ -148,6 +148,9 @@ export interface NativeVoiceScreenOptions {
   maxFramerate: number;
 }
 
+/** A simulcast layer, as `native_voice_set_video_view` names it. */
+export type NativeVideoQuality = "low" | "medium" | "high";
+
 export interface NativeVoice {
   /** Install or rotate the room key: the same base64 text the web key
    *  provider receives, so both derive the same key (index 0). */
@@ -161,7 +164,18 @@ export interface NativeVoice {
   /** Close `session` if it is still the live one; a stale id is a no-op. */
   disconnect(session: number): Promise<NativeVoiceResources>;
   setMicrophone(session: number, enabled: boolean): Promise<void>;
+  /** Push-to-talk's gate: closed, the open capture sends silence (DP-30). */
+  setPttGated(session: number, gated: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
+  /** Layer control for remote video `sid` (P3-07): stop it, or ask for
+   *  `quality` while it is shown. */
+  setVideoView(
+    session: number,
+    identity: string,
+    sid: string,
+    enabled: boolean,
+    quality: NativeVideoQuality,
+  ): Promise<void>;
   /** Per-user volume: play `identity`'s microphone at `volume` (1 is unity),
    *  the value the web path hands `RemoteParticipant.setVolume`. */
   setVolume(session: number, identity: string, volume: number): Promise<void>;
@@ -180,8 +194,9 @@ export interface NativeVoice {
   screenSources(): Promise<NativeVoiceScreenSources>;
   /** Start capturing `source` (replacing any running capture) and resolve
    *  once its first frame arrives — on Wayland after the portal dialog
-   *  completes; a cancelled or refused dialog rejects with "screen capture
-   *  was cancelled or refused".
+   *  completes; a portal capture that ends before its first frame rejects
+   *  with "screen capture portal did not start", any other failure before
+   *  the first frame with its reason.
    *  The preview then plays on the frame socket's `/screen` route. */
   startScreen(
     session: number,

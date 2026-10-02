@@ -6,6 +6,7 @@
  */
 
 import { createElement, setText, clearChildren } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { isTextLikeChannel } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
@@ -42,13 +43,13 @@ import {
 import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
-import { toggleChannelMute } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
-import { dmStore, closeDmLocally } from "@stores/dm.store";
+import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
@@ -566,13 +567,20 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    * The client does not decide which: the server's DELETE /dms/{id} is a hide
    * for a 1:1 and a leave for a group, and duplicating that branch here would
    * be a second place to get it wrong. Locally, both mean "drop it from the
-   * list" — the row is removed optimistically because the request is a
-   * fire-and-forget one whose failure the sidebar cannot usefully recover from
-   * (the next `ready` restores the truth either way).
+   * list" — the row is removed optimistically so the sidebar reacts at once.
+   *
+   * If the server refuses, the row comes back (DP-34): the DmChannel and its
+   * index are kept from just before the removal and it is re-inserted at that
+   * index, so the list's recency order is unchanged. The failure toast still
+   * fires so the user knows why.
    */
   function closeOrLeaveDm(channelId: number): void {
+    const channels = dmStore.getState().channels;
+    const index = channels.findIndex((c) => c.channelId === channelId);
+    const removed = channels[index];
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
+      if (removed !== undefined) restoreDmChannel(removed, index);
       getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
   }
@@ -813,6 +821,15 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         },
       );
       channelModeUnsubs.push(unsubDmStore);
+
+      // A mute toggled anywhere (context menu, Settings) is not in a store, so
+      // the sidebar redraws from the mute store's own event (F16). Owned by a
+      // per-mount Disposable so the listener's lifetime matches this mount.
+      const muteOwner = new Disposable();
+      window.addEventListener(CHANNEL_MUTE_CHANGED, () => refreshDmSidebar(), {
+        signal: muteOwner.signal,
+      });
+      channelModeUnsubs.push(() => muteOwner.destroy());
 
       // The live-call glyph follows who is in each DM's voice channel.
       channelModeUnsubs.push(

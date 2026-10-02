@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 174 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 177 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -50,6 +50,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/backup`                                                  |
 | GET     | `/admin/api/backups`                                                 |
 | DELETE  | `/admin/api/backups/{name}`                                          |
+| GET     | `/admin/api/backups/{name}/download`                                 |
+| POST    | `/admin/api/backups/{name}/link`                                     |
 | POST    | `/admin/api/backups/{name}/restore`                                  |
 | GET     | `/admin/api/channels`                                                |
 | POST    | `/admin/api/channels`                                                |
@@ -144,6 +146,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
+| GET     | `/api/v1/files/{id}/thumb`                                           |
 | GET     | `/api/v1/gif/search`                                                 |
 | GET     | `/api/v1/gif/trending`                                               |
 | GET     | `/api/v1/health`                                                     |
@@ -238,8 +241,10 @@ endpoints return plain-text errors — see their section):
 | `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                            |
 | `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                |
 | `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                |
+| `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                          |
 | `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                |
-| `RATE_LIMITED`                  | 429         | Too many requests; response includes `Retry-After` header (seconds)                                                                                                                                                                              |
+| `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                          |
+| `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                           |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
@@ -254,6 +259,7 @@ endpoints return plain-text errors — see their section):
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
+| `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
 
 ---
 
@@ -335,6 +341,7 @@ application is anonymised and locked, and its username is released.
 | 400    | `INVALID_CREDENTIALS` | In `invite` mode: missing or bad invite code, expired/revoked invite; any mode: duplicate username                      |
 | 403    | `FORBIDDEN`           | Registration is closed or unavailable while server-wide 2FA is required                                                 |
 | 429    | `RATE_LIMITED`        | Exceeded 3 registrations/minute from this IP; in `approval`/`open` mode, 5 per address per day or a full approval queue |
+| 429    | `AUTH_BUSY`           | The password-hashing queue is full (`Retry-After` set)                                                                  |
 | 500    | `INTERNAL_ERROR`      | Hashing failure, session creation failure, or DB error                                                                  |
 
 ---
@@ -346,8 +353,8 @@ in `kit_secret`, or with an owner-issued credential (B4-6, BPR-045; owner
 decision 3) in `credential` — the two are told apart by shape (32 and 24
 characters), so one compare per attempt runs against the right verifier and
 the paths never interfere. Using either means "I lost my devices": on success
-the password is replaced by `new_password`, every existing session is
-revoked, the kit is spent (or the credential consumed) and a
+the password is replaced by `new_password`, every existing session and API
+token is revoked, the kit is spent (or the credential consumed) and a
 `recovery_kit_used` / `recovery_assist_used` audit row is written — all in
 one transaction — and a fresh session is issued **without** the second
 factor, so an account with 2FA enrolled signs in from this response and can
@@ -390,7 +397,8 @@ The login shape: `token` and `user`, `requires_2fa` false.
 | 400    | `INVALID_INPUT`       | A field missing, or a weak new password                     |
 | 401    | `INVALID_CREDENTIALS` | Unknown account, no live kit or credential, or wrong secret |
 | 403    | `FORBIDDEN`           | The account is banned                                       |
-| 429    | `RATE_LIMITED`        | Recovery lockout, or the admission budget full              |
+| 429    | `RATE_LIMITED`        | Recovery lockout                                            |
+| 429    | `AUTH_BUSY`           | The admission budget is full                                |
 
 ---
 
@@ -399,7 +407,7 @@ The login shape: `token` and `user`, `requires_2fa` false.
 Authenticate with username and password.
 
 **Auth:** None (public)
-**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes. Lockouts are persisted to the database and survive server restarts.
+**Rate limit:** 5 requests/minute per IP. After 10 failed attempts within 15 minutes from the same IP, the IP is locked out for 15 minutes. Independently, 10 failed attempts against the same username (from any IP) lock that account out for 15 minutes, except for an address that signed in to that account in the last 24 hours. Lockouts are persisted to the database and survive server restarts; the 24-hour exemption is held in memory and does not.
 
 #### Request
 
@@ -446,13 +454,14 @@ If the account has TOTP enabled:
 
 #### Errors
 
-| Status | Code             | Cause                                                         |
-| ------ | ---------------- | ------------------------------------------------------------- |
-| 400    | `INVALID_INPUT`  | Missing username or password                                  |
-| 401    | `UNAUTHORIZED`   | Wrong username or password                                    |
-| 403    | `FORBIDDEN`      | Account is banned/suspended                                   |
-| 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown) |
-| 500    | `INTERNAL_ERROR` | Session creation failure                                      |
+| Status | Code             | Cause                                                                                                                  |
+| ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Missing username or password                                                                                           |
+| 401    | `UNAUTHORIZED`   | Wrong username or password                                                                                             |
+| 403    | `FORBIDDEN`      | Account is banned/suspended                                                                                            |
+| 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown)                                                          |
+| 429    | `AUTH_BUSY`      | Too many logins in progress: the queue for password checks is full, or the login waited 10 s in it (`Retry-After` set) |
+| 500    | `INTERNAL_ERROR` | Session creation failure                                                                                               |
 
 ---
 
@@ -502,11 +511,12 @@ See [GET /api/v1/auth/me](#get-apiv1authme) for the full user-object field table
 
 #### Errors
 
-| Status | Code             | Cause                                                               |
-| ------ | ---------------- | ------------------------------------------------------------------- |
-| 400    | `INVALID_INPUT`  | Malformed request body                                              |
-| 401    | `UNAUTHORIZED`   | Missing/expired challenge, invalid TOTP code, or challenge consumed |
-| 500    | `INTERNAL_ERROR` | Session creation failure                                            |
+| Status | Code             | Cause                                                                                           |
+| ------ | ---------------- | ----------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`  | Malformed request body                                                                          |
+| 401    | `UNAUTHORIZED`   | Missing/expired challenge, invalid TOTP code, or challenge consumed                             |
+| 429    | `AUTH_BUSY`      | A recovery code could not be checked: the queue for password checks is full (`Retry-After` set) |
+| 500    | `INTERNAL_ERROR` | Session creation failure                                                                        |
 
 ---
 
@@ -600,6 +610,7 @@ the next maintenance tick.
 | 400    | `INVALID_INPUT`  | Missing or incorrect password                                 |
 | 403    | `FORBIDDEN`      | Cannot delete the last admin account                          |
 | 429    | `RATE_LIMITED`   | Locked out after 3 failed password attempts (15 min cooldown) |
+| 429    | `AUTH_BUSY`      | The admission budget for password checks is full              |
 | 500    | `INTERNAL_ERROR` | Database error during deletion                                |
 
 ---
@@ -638,7 +649,9 @@ disabling 2FA removes it.
 
 ### POST /api/v1/users/me/totp/confirm
 
-Confirm a pending TOTP enrollment.
+Confirm a pending TOTP enrollment. On success the account's other sessions are
+revoked, and its live WebSocket closes in the same request if it rode one of
+them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -658,7 +671,7 @@ Confirm a pending TOTP enrollment.
 
 ### DELETE /api/v1/users/me/totp
 
-Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret.
+Disable TOTP for the authenticated user. The account's recovery codes are removed with the secret, and its other sessions are revoked; the account's live WebSocket closes in the same request if it rode one of them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute per IP
@@ -731,10 +744,11 @@ any grouping or case) and the response never echoes it. Writes a
 
 #### Errors
 
-| Status | Code            | Cause                                                       |
-| ------ | --------------- | ----------------------------------------------------------- |
-| 400    | `INVALID_INPUT` | Wrong password, or a client secret of the wrong shape       |
-| 429    | `RATE_LIMITED`  | Password-confirmation lockout, or the admission budget full |
+| Status | Code            | Cause                                                 |
+| ------ | --------------- | ----------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Wrong password, or a client secret of the wrong shape |
+| 429    | `RATE_LIMITED`  | Password-confirmation lockout                         |
+| 429    | `AUTH_BUSY`     | The admission budget is full                          |
 
 ---
 
@@ -775,13 +789,13 @@ event replaces the client's copy rather than patching it).
 }
 ```
 
-| Field                 | Rules                                                                                                                                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                               |
-| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                           |
-| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters. |
-| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                              |
-| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).      |
+| Field                 | Rules                                                                                                                                                                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                                                                                       |
+| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`. |
+| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters.                                                         |
+| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                      |
+| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                              |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
@@ -852,7 +866,8 @@ client is expected to downscale and square-crop before uploading.
 ### PUT /api/v1/users/me/password
 
 Change the authenticated user's password. Verifies the old password, enforces
-password strength, and revokes all _other_ sessions on success.
+password strength, and revokes all _other_ sessions on success. The account's
+live WebSocket closes in the same request if it rode one of them.
 
 **Auth:** Required
 **Rate limit:** 5 requests/minute, plus a failed-confirmation lockout on
@@ -876,11 +891,12 @@ old one).
 
 #### Errors
 
-| Status | Code            | Cause                                         |
-| ------ | --------------- | --------------------------------------------- |
-| 400    | `INVALID_INPUT` | Weak new password, or new password equals old |
-| 403    | `FORBIDDEN`     | Incorrect old password                        |
-| 429    | `RATE_LIMITED`  | Too many attempts / lockout                   |
+| Status | Code            | Cause                                            |
+| ------ | --------------- | ------------------------------------------------ |
+| 400    | `INVALID_INPUT` | Weak new password, or new password equals old    |
+| 403    | `FORBIDDEN`     | Incorrect old password                           |
+| 429    | `RATE_LIMITED`  | Too many attempts / lockout                      |
+| 429    | `AUTH_BUSY`     | The admission budget for password checks is full |
 
 ---
 
@@ -921,7 +937,8 @@ route.
 
 ### DELETE /api/v1/users/me/sessions/{id}
 
-Revoke one of the authenticated user's sessions by ID.
+Revoke one of the authenticated user's sessions by ID. The account's live
+WebSocket closes in the same request if it rode that session.
 
 **Auth:** Required
 
@@ -931,15 +948,14 @@ Revoke one of the authenticated user's sessions by ID.
 
 ### DELETE /api/v1/users/me/sessions
 
-Sign out everywhere: revoke every session of the authenticated account,
-the current one included, and drop the account's live WebSocket
-connections in the same request. The caller's token stops working with this
-response, so the client re-authenticates rather than treating the next 401
-as an error. Never touches another account's sessions. Writes a
-`session_revoke_all` audit row naming the account and the count when at
-least one session was revoked (an API-token principal, which holds no
-session, revokes nothing and writes nothing). Limited to 5 calls per
-account per minute (`429 RATE_LIMITED`).
+Sign out everywhere: revoke every session and every API token of the
+authenticated account, the current one included, and drop the account's live
+WebSocket connections in the same request. The caller's token stops working
+with this response, so the client re-authenticates rather than treating the
+next 401 as an error. Never touches another account's credentials. Writes a
+`session_revoke_all` audit row naming the account and both counts when
+anything was revoked. Limited to 5 calls per account per minute
+(`429 RATE_LIMITED`).
 
 **Auth:** Required
 
@@ -1226,7 +1242,7 @@ emoji, which is also the answer for an emoji that does not exist). `avatar` is
 
 | Status | Error         | When                                                                                             |
 | ------ | ------------- | ------------------------------------------------------------------------------------------------ |
-| 400    | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-32-rune / control-character emoji              |
+| 400    | `BAD_REQUEST` | Non-positive `id`/`messageId`, or an empty / over-34-rune / control-character emoji              |
 | 403    | `FORBIDDEN`   | No `READ_MESSAGES` on the channel                                                                |
 | 404    | `NOT_FOUND`   | Channel or message not found, the message lives in another channel, or a DM the caller is not in |
 
@@ -1241,16 +1257,16 @@ Get all pinned messages for a channel.
 
 #### Response 200 OK
 
-Returns `{ "messages": [...], "has_more": false }`. `has_more` is always `false` for pins (all pinned messages are returned at once).
+Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (messages pinned before migration 056 have no pin time and sort last). At most 1000 pins are returned; `has_more` is `true` only when the channel holds more and the list was truncated.
 
 ---
 
 ### POST /api/v1/channels/{id}/pins/{messageId}
 
-Pin a message in a channel.
+Pin a message in a channel. A successful pin or unpin is broadcast to the channel as [`chat_pinned`](protocol.md#chat_pinned-server---client-broadcast).
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel
+**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
 
 #### Response 204 No Content
 
@@ -1261,7 +1277,7 @@ Pin a message in a channel.
 Unpin a message from a channel.
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel
+**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
 
 #### Response 204 No Content
 
@@ -1278,11 +1294,13 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 
 #### Query Parameters
 
-| Param        | Type   | Default        | Range     | Description                         |
-| ------------ | ------ | -------------- | --------- | ----------------------------------- |
-| `q`          | string | (required)     | non-empty | Search query (FTS5 syntax)          |
-| `channel_id` | int64  | (all channels) | > 0       | Restrict search to a single channel |
-| `limit`      | int    | 50             | 1-100     | Maximum results to return           |
+| Param        | Type   | Default        | Range                   | Description                                                                                                                                                    |
+| ------------ | ------ | -------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`          | string | (required)     | non-empty               | Search words. Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`) |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                            |
+| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                      |
+| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first                                                                                                      |
+| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                     |
 
 #### Response 200 OK
 
@@ -1302,9 +1320,22 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
       "mentions": [7],
       "mentions_everyone": false
     }
-  ]
+  ],
+  "next_before": 1042
 }
 ```
+
+`next_before` is the `before` value for the next `sort=recent` page, or `null`
+when there are no more results. It is always `null` for `sort=relevance`.
+
+#### Error Responses
+
+| Status | Code                            | When                                                                                       |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent` |
+| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                        |
+| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                         |
+| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                              |
 
 ---
 
@@ -1513,7 +1544,7 @@ DM channels use participant-based authorization rather than role-based permissio
 
 ### POST /api/v1/dms
 
-Create or retrieve a 1-on-1 DM channel with another user. If a DM channel already exists, it is returned and re-opened.
+Create or retrieve a 1-on-1 DM channel with another user. If a DM channel already exists, it is returned and re-opened. A timed-out caller may still reopen an existing channel, but creating a new one is refused with `403 TIMED_OUT`.
 
 **Auth:** Required
 
@@ -1588,18 +1619,21 @@ List all open DM channels for the authenticated user, ordered by most recent act
       "last_message_id": 5042,
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
-      "unread_count": 3
+      "unread_count": 3,
+      "mention_count": 1
     }
   ]
 }
 ```
 
-| Field        | Description                                                                                                            |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `recipient`  | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
-| `recipients` | Every participant except the caller. What group-aware clients read.                                                    |
-| `name`       | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
-| `is_group`   | True for a group DM. Stored, not derived from the live participant count.                                              |
+| Field           | Description                                                                                                            |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `recipient`     | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
+| `recipients`    | Every participant except the caller. What group-aware clients read.                                                    |
+| `name`          | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
+| `is_group`      | True for a group DM. Stored, not derived from the live participant count.                                              |
+| `unread_count`  | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
+| `mention_count` | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
 
 `status` is viewer-adjusted: an `invisible` participant reads as `offline`.
 
@@ -1646,6 +1680,7 @@ Every participant — the creator included — also receives a `dm_channel_open`
 | ------ | ------------- | --------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
 | 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 403    | `TIMED_OUT`   | The caller is timed out                                               |
 | 404    | `NOT_FOUND`   | A recipient does not exist                                            |
 
 ---
@@ -1679,6 +1714,7 @@ The DM summary shape, from the caller's seat. Every participant also receives a
 | Status | Code          | Reason                                                      |
 | ------ | ------------- | ----------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | The channel is a 1:1 DM, or the name exceeds 100 characters |
+| 403    | `TIMED_OUT`   | The caller is timed out                                     |
 | 404    | `NOT_FOUND`   | Not a participant of this DM                                |
 
 ---
@@ -1919,7 +1955,7 @@ Create a new invite code.
 }
 ```
 
-Both fields are optional. An empty body creates an invite with unlimited uses and no expiry.
+Both fields are optional. An empty body (or `0`) creates an invite with unlimited uses and no expiry; a negative value is `400 BAD_REQUEST`.
 
 #### Response 201 Created
 
@@ -1931,7 +1967,8 @@ Both fields are optional. An empty body creates an invite with unlimited uses an
   "uses": 0,
   "expires_at": "2026-03-30T10:30:00Z",
   "revoked": false,
-  "created_at": "2026-03-28T10:30:00Z"
+  "created_at": "2026-03-28T10:30:00Z",
+  "creator_username": ""
 }
 ```
 
@@ -1946,7 +1983,7 @@ List all invites (active, expired, and revoked).
 
 #### Response 200 OK
 
-Returns a JSON array of invite objects.
+Returns a JSON array of invite objects, newest first (at most 200). Each carries `creator_username`, the creator's username (empty once that account is erased); the create response leaves it empty.
 
 ---
 
@@ -1989,10 +2026,12 @@ Upload a file as multipart form data.
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
-**Body size limit:** 100 MiB
+**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB").
 **Content-Type:** `multipart/form-data`
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
+
+Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
 #### Response 201 Created
 
@@ -2022,6 +2061,28 @@ Serve a previously uploaded file by its UUID.
 Supports HTTP range requests and conditional requests. MIME types that could
 execute under the app origin (HTML, SVG, XML, PDF) are served with
 `Content-Disposition: attachment` to force download.
+
+---
+
+### GET /api/v1/files/{id}/thumb
+
+Serve a preview of an image file, for showing it inline. The full file stays
+at `GET /api/v1/files/{id}`.
+
+**Auth:** Required (Bearer token), with exactly the access rule of
+`GET /api/v1/files/{id}` (channel read, DM participation, the uploader for an
+unlinked file, and any NSFW acknowledgement) and the same headers.
+
+A JPEG or PNG larger than 800×800 is scaled to fit an 800×800 box, in the same
+format, turned upright by its EXIF orientation. Any other image — one that
+already fits, a GIF (kept animated), another format, one too large to decode
+within the server's memory bound (judged from its header, so a 16-bit image
+or a progressive JPEG reaches it at fewer pixels) or one that does not decode —
+is served as the original bytes. A file that is not an image is a `404`. A
+thumbnail is made on the first request, kept beside the original under
+`upload.storage_dir/thumbs/`, and removed with it; an image that fails to
+decode is remembered there too and not tried again. A server that has this
+route says so with `upload_policy.thumbnails` on `auth_ok`.
 
 ---
 
@@ -2470,8 +2531,11 @@ and unsequenced.
 
 ### POST /api/v1/moderation/users/{id}/timeout
 
-Time-box a restriction: the target cannot send messages, add reactions, or
-join voice while it is active (`403 TIMED_OUT`). **Auth:** Required.
+Time-box a restriction: the target cannot send or edit messages, add
+reactions, join voice, start a new DM, create or rename a group DM, ring a DM
+call, pin in a DM, or set a custom status while it is active
+(`403 TIMED_OUT`). Reopening an existing DM and declining a call still work.
+**Auth:** Required.
 **Permission:** `MODERATE_MEMBERS`.
 
 #### Request
@@ -2780,6 +2844,17 @@ one-moderator install, not a bug this route papers over.
 Decide the appeal. `{id}` is the opaque public id. **Auth:** Required.
 **Permission:** `MODERATE_MEMBERS` (or `ADMINISTRATOR`).
 
+**Overturning carries the reversal's own authority.** Reversing an appeal
+against a warning, timeout or ban requires the decider to strictly outrank
+the sanctioned target — the same hierarchy rule the direct lift paths
+enforce — so a moderator cannot reverse an action taken against a peer or a
+higher-ranked user, even one the owner issued. Overturning a **ban**
+additionally requires `BAN_MEMBERS`, mirroring `UnbanUser`; a
+`MODERATE_MEMBERS`-only holder cannot clear a ban through the appeal queue.
+Overturning a **removal** is record-only (the content is already gone) and
+needs no authority beyond `MODERATE_MEMBERS`. Upholding reverses nothing and
+needs no such authority.
+
 **Two self-review rules apply, and they are different:** the moderator who
 took the appealed action may not decide its appeal **where another eligible
 moderator exists** — eligible meaning a different user holding
@@ -2837,14 +2912,14 @@ live session was already ended when the ban landed.
 
 #### Errors
 
-| Status | Code              | Cause                                                                                                            |
-| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                     |
-| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, or the decider's own authority no longer holds when re-checked at decision time |
-| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists             |
-| 404    | `NOT_FOUND`       | no such appeal                                                                                                   |
-| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                       |
-| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself  |
+| Status | Code              | Cause                                                                                                                                                                                                                  |
+| ------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`     | invalid `outcome`, or `note` too long/unsafe                                                                                                                                                                           |
+| 403    | `FORBIDDEN`       | caller lacks `MODERATE_MEMBERS`, an overturn the caller may not apply (does not outrank the target, or lacks `BAN_MEMBERS` for a ban), or the decider's own authority no longer holds when re-checked at decision time |
+| 403    | `SELF_REVIEW`     | the caller is this appeal's own appellant, or the acting moderator where another eligible one exists                                                                                                                   |
+| 404    | `NOT_FOUND`       | no such appeal                                                                                                                                                                                                         |
+| 409    | `CONFLICT`        | the appeal is already decided or withdrawn                                                                                                                                                                             |
+| 409    | `REVERSAL_FAILED` | overturning hit a genuine error applying the ledger reversal — nothing committed, including the decision itself                                                                                                        |
 
 ---
 
@@ -2977,6 +3052,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
+  "backpressure_presence_drops": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
   "db_writer_wait_count": 3,
@@ -2997,7 +3073,7 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
 `voice_sessions` is the number of active voice connections. `broadcast_drops`
 is the cumulative count of events dropped because the **hub-wide broadcast
 queue** was full — sequenced events lost before delivery, worth alerting on
-if it ever grows. `topic_sheds_total` counts frames the **per-channel topic
+if it ever grows. `topic_sheds_total` counts frames the **per-sender channel topic
 limiter** dropped before a sequence was assigned; like `broadcast_drops`, replay
 cannot recover them, so alert on any growth. A **content** frame (a message
 body, or one that discloses it) lost to either counter additionally forces the
@@ -3007,9 +3083,12 @@ frame does not.
 Per-client send-queue pressure is reported separately:
 `backpressure_queue_disconnects` (clients disconnected to force a
 replay-recovering reconnect), `backpressure_high_fallbacks` (high-priority
-sends that fell back to the normal queue), and `backpressure_low_drops`
-(typing/presence messages silently dropped — safe to lose, but a growth trend
-means clients are draining too slowly). `reconnect_tier_*` counts resume
+sends that fell back to the normal queue), `backpressure_low_drops`
+(typing messages silently dropped — safe to lose, but a growth trend
+means clients are draining too slowly), and `backpressure_presence_drops`
+(presence frames dropped on a full normal queue instead of disconnecting the
+client; each is repaired by a presence snapshot, and growth during a reconnect
+herd is expected). `reconnect_tier_*` counts resume
 attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
 small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
@@ -3485,9 +3564,10 @@ Owner-assisted recovery (B4-6, BPR-045; owner decision 3). The server owner,
 having verified the person out of band, receives a **15-minute, single-use**
 recovery credential for the account, shown once. The user redeems it at
 [`POST /api/v1/auth/recover`](#post-apiv1authrecover) in the `credential`
-field: the password is replaced, every session revoked and a session issued
-without the second factor. Only an argon2id verifier is stored; issuing again
-replaces the outstanding credential, and a recovery by kit withdraws it.
+field: the password is replaced, every session and API token revoked, and a
+session issued without the second factor. Only an argon2id verifier is
+stored; issuing again replaces the outstanding credential, and a recovery by
+kit withdraws it.
 Refused for the caller's own account, a banned or pending account and an
 anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
 Audited as `recovery_assist_issued` with the verification wording only.
@@ -3522,7 +3602,8 @@ person exists to leak into the audit log.
 | 400    | `BAD_REQUEST`  | Unknown verification wording, or an account this cannot help |
 | 403    | `FORBIDDEN`    | Not the owner                                                |
 | 404    | `NOT_FOUND`    | No such account                                              |
-| 429    | `RATE_LIMITED` | Issuance budget spent, or the admission budget full          |
+| 429    | `RATE_LIMITED` | Issuance budget spent                                        |
+| 429    | `AUTH_BUSY`    | The admission budget for password checks is full             |
 
 ---
 
@@ -3802,7 +3883,8 @@ audited as `setting_change`.
 
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `max_upload_bytes`, `voice_quality`, `require_2fa`,
-`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`.
+`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
+`upload_blocked_extensions`, `upload_allowed_extensions`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -3820,6 +3902,15 @@ carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
 even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
 does not bypass it.
 
+`upload_blocked_extensions` and `upload_allowed_extensions` are the upload
+file-type policy (see [`POST /api/v1/uploads`](#post-apiv1uploads)): extensions
+separated by commas or spaces, with or without the dot, stored lower-case,
+deduplicated and comma-separated. An entry that is nothing but dots, holds a
+dot after its leading ones, a path or stream separator or an invisible
+character, or is longer than 32 bytes, is refused with `400`. A saved row
+replaces the matching config.yaml list; an empty allowed list turns allow-only
+mode off. Like the backup policy they need the **Owner** role (`403 FORBIDDEN` otherwise).
+
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
 is audited as `retention_policy_change` naming the old and new value. The
@@ -3828,12 +3919,18 @@ channel (pinned messages exempt, direct messages never in scope); a
 per-channel override in either direction is
 [`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
+`server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
+held to the same limits the first-run setup wizard enforces.
+
 Three keys are accepted and stored but have **no runtime effect**:
 `server_icon` (reserved for a future release), `max_upload_bytes` (the real
 limit is `upload.max_size_mb` in config.yaml, applied at startup), and
 `voice_quality` (the real setting is `voice.quality` in config.yaml). The
 admin panel does not show them; it reads the values in effect from
-[`GET /admin/api/config`](#get-adminapiconfig).
+[`GET /admin/api/config`](#get-adminapiconfig). They are still validated like
+the wizard's values: `max_upload_bytes` is a whole number of bytes from
+1048576 (1 MB) to 10737418240 (10240 MB), and `voice_quality` is `low`,
+`medium` or `high` (case-insensitive, stored lower-case).
 
 Enabling `require_2fa` is refused unless registration is closed **and** every
 user has TOTP enabled.
@@ -3842,9 +3939,9 @@ user has TOTP enabled.
 
 #### Errors
 
-| Status | Code          | Cause                                                                                     |
-| ------ | ------------- | ----------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Unknown key, invalid boolean or registration mode, or `require_2fa` preconditions not met |
+| Status | Code          | Cause                                                                                      |
+| ------ | ------------- | ------------------------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
 
@@ -3860,7 +3957,9 @@ booleans. `tls_domain`, `voice_url` and `backup_dir` are included only when
 the caller holds `ADMINISTRATOR` or is the owner. `logging_level` is the
 level the server booted at, normalised (an unrecognised value reads `info`,
 an unset one `""`); a debug boost in force shows in
-`GET /admin/api/logs/level`, not here.
+`GET /admin/api/logs/level`, not here. `upload_blocked_extensions` and
+`upload_allowed_extensions` are config.yaml's file-type lists, which the
+Settings page shows until the owner saves its own.
 
 #### Response 200 OK
 
@@ -3868,6 +3967,8 @@ an unset one `""`); a debug boost in force shows in
 {
   "upload_max_size_mb": 100,
   "voice_quality": "medium",
+  "upload_blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
+  "upload_allowed_extensions": [],
   "server_port": 8443,
   "min_free_disk_mb": 256,
   "max_ws_connections": 1000,
@@ -3895,8 +3996,9 @@ an unset one `""`); a debug boost in force shows in
 ## API Tokens
 
 Owner-only: minting a long-lived bearer credential over the network is the one
-admin action that, via a hijacked session, would outlive a password change and
-bulk logout (API tokens deliberately live outside the session table). These
+admin action that, via a hijacked session, would outlive a password change or an
+admin force-logout (API tokens deliberately live outside the session table;
+sign-out-everywhere and account recovery do revoke them). These
 routes are the HTTP equivalent of the `server token create|list|revoke` CLI.
 
 ### GET /admin/api/tokens
@@ -4008,6 +4110,40 @@ List backups, newest first.
 
 `name` is validated against path traversal. Returns `204 No Content`, or
 `404 NOT_FOUND` if the file does not exist.
+
+---
+
+### POST /admin/api/backups/{name}/link
+
+Issue a short-lived, single-use link to download one backup file, on the same
+terms as the [archive link](#post-adminapiarchivelink).
+
+**Auth:** Owner role
+
+#### Response 200 OK
+
+```json
+{
+  "path": "/admin/api/backups/chatserver_20260804_120000.db/download?token=…"
+}
+```
+
+The token is random, bound to the requesting owner and to this one file,
+valid for about a minute and consumable once. It is never logged. `400` for a
+name that fails the path-traversal check, `404 NOT_FOUND` when no such `.db`
+backup exists.
+
+---
+
+### GET /admin/api/backups/{name}/download
+
+Redeem a single-use backup link. **Auth:** the `token` query parameter, as for
+[`GET /admin/api/archive/download`](#get-adminapiarchivedownload); the
+credential that asked for it must still be a signed-in, non-banned Owner, and
+`{name}` must be the file the link was issued for. `200
+application/octet-stream` streamed from disk as an attachment, audited as
+`backup_download`; `403 FORBIDDEN` for an unknown, expired, already-used or
+other-file token or a principal that no longer qualifies.
 
 ---
 
@@ -4446,6 +4582,13 @@ literally named "Voice Channels", and any voice channel outside it.)
 
 `PATCH` accepts `category`, so moving a channel between categories is an edit
 rather than a delete-and-recreate. An empty string makes it uncategorized.
+
+A name already used by another channel of the same `type` in the same
+`category` is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
+or a `PATCH` that changes the name or the category. It is a check at write
+time, not a database constraint, so channels that already share a name are
+left as they are, and a `PATCH` that leaves both name and category alone still
+saves.
 
 ---
 

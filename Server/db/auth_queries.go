@@ -408,16 +408,6 @@ func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 	return nil
 }
 
-// MarkUserDisconnected records that a user's last session went away: last_seen
-// is refreshed and "online" falls back to "offline", while a chosen
-// idle/dnd/invisible is preserved for the next connect to honour.
-func (d *DB) MarkUserDisconnected(ctx context.Context, userID int64) error {
-	if err := d.q.MarkUserDisconnected(ctx, userID); err != nil {
-		return fmt.Errorf("MarkUserDisconnected: %w", err)
-	}
-	return nil
-}
-
 // BanUser marks a user as banned with an optional expiry. Pass nil for a
 // permanent ban.
 func (d *DB) BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error {
@@ -645,14 +635,6 @@ func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
 	return nil
 }
 
-// TouchSession updates last_used for the session with the given token hash.
-func (d *DB) TouchSession(ctx context.Context, tokenHash string) error {
-	if err := d.q.TouchSession(ctx, tokenHash); err != nil {
-		return fmt.Errorf("TouchSession: %w", err)
-	}
-	return nil
-}
-
 // ─── Invite Operations ────────────────────────────────────────────────────────
 
 // CreateInvite generates a random invite code, persists it, and returns the
@@ -800,6 +782,30 @@ func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
 		})
 	}
 	return members, nil
+}
+
+// MemberGeneration returns the member generation: a counter SQLite triggers
+// bump, in the same commit, on every write that can change ListMembers'
+// result except a users.status change (migration 057). Equal generations mean
+// no such write committed in between.
+func (d *DB) MemberGeneration(ctx context.Context) (int64, error) {
+	gen, err := d.q.GetMemberGeneration(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("MemberGeneration: %w", err)
+	}
+	return gen, nil
+}
+
+// NextMemberBanLapse returns when the earliest temporary ban ListMembers is
+// still hiding lapses, as the "2006-01-02T15:04:05Z"-shaped text ListMembers
+// compares against SQLite's clock, or "" when none is pending. A lapse changes
+// ListMembers' result without any write, so it bumps no generation.
+func (d *DB) NextMemberBanLapse(ctx context.Context) (string, error) {
+	at, err := d.q.NextMemberBanLapse(ctx)
+	if err != nil {
+		return "", fmt.Errorf("NextMemberBanLapse: %w", err)
+	}
+	return at, nil
 }
 
 // generateInviteCode produces a random 8-byte (16-char hex) code.

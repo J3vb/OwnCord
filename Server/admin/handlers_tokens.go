@@ -17,8 +17,9 @@ import (
 // twice and had already drifted apart. All three routes are Owner-gated in
 // api.go: minting a long-lived bearer credential over the network is the one
 // admin action that, via a hijacked session, would outlive a password change
-// and bulk logout (API tokens deliberately live outside the session table), so
-// it stays behind the Owner role rather than the broad ADMINISTRATOR bit.
+// or an admin force-logout (API tokens deliberately live outside the session
+// table; only sign-out-everywhere and account recovery revoke them), so it
+// stays behind the Owner role rather than the broad ADMINISTRATOR bit.
 
 func handleListAPITokens(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

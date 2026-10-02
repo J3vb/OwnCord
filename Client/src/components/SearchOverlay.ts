@@ -1,16 +1,19 @@
 /**
  * SearchOverlay — full-text message search overlay with debounced input,
- * result list rendering, and keyboard navigation.
+ * scope selection, cursor paging, result list rendering, and keyboard
+ * navigation.
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
-import type { SearchResultItem } from "@lib/types";
+import type { SearchResultItem, SearchResponse } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { channelsStore } from "@stores/channels.store";
 import { parseTimestamp, resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import { messagingText } from "../i18n/messaging";
 
 // ---------------------------------------------------------------------------
@@ -18,13 +21,19 @@ import { messagingText } from "../i18n/messaging";
 // ---------------------------------------------------------------------------
 
 export interface SearchOverlayOptions {
+  /**
+   * Run one search page. `before` pages a newest-first result set (the
+   * previous page's next_before cursor); omit it for the first page.
+   */
   readonly onSearch: (
     query: string,
     channelId?: number,
     signal?: AbortSignal,
-  ) => Promise<readonly SearchResultItem[]>;
+    before?: number,
+  ) => Promise<SearchResponse>;
   readonly onSelectResult: (result: SearchResultItem) => void;
   readonly onClose: () => void;
+  /** The channel the overlay opened on; omitted behind the NSFW gate (B9-7). */
   readonly currentChannelId?: number;
 }
 
@@ -41,6 +50,17 @@ const MIN_SEARCH_INTERVAL_MS = 500;
 // Factory
 // ---------------------------------------------------------------------------
 
+/** "in #general" / "in @bob", falling back to a generic label when unknown. */
+// oxlint-disable-next-line consistent-function-scoping -- co-located with its sole caller for readability
+function channelScopeLabel(channelId: number): string {
+  const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+  if (dm !== undefined) return messagingText("search.scope.inDm", { name: dmDisplayName(dm) });
+  const channel = channelsStore.getState().channels.get(channelId);
+  return channel !== undefined && channel.name !== ""
+    ? messagingText("search.scope.inChannel", { channel: channel.name })
+    : messagingText("search.scope.channel");
+}
+
 export function createSearchOverlay(options: SearchOverlayOptions): MountableComponent {
   const disposable = new Disposable();
   const signal = disposable.signal;
@@ -49,8 +69,24 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   let resultsDiv: HTMLDivElement;
   let input: HTMLInputElement;
   let statusEl: HTMLDivElement;
+  let loadMoreBtn: HTMLButtonElement | null = null;
+  let channelOption: HTMLButtonElement | null = null;
+  let serverOption: HTMLButtonElement | null = null;
   let activeIndex = 0;
   let results: readonly SearchResultItem[] = [];
+  // Whole server is the default scope (D4 option b: "Whole server by default
+  // with an 'in #channel' chip"), matching Discord. The chip that narrows to
+  // the current channel is only offered when the overlay opened on one, so the
+  // NSFW gate (which opens it without a channel) can never be narrowed back in
+  // (B9-7).
+  let scopeServer = true;
+  let nextBefore: number | null = null;
+  // The query that produced the currently displayed results. Paging must use it
+  // rather than the live input value: editing the box only schedules a debounce
+  // and leaves the old rows (and cursor) on screen until it fires, so a Load
+  // more inside that window would otherwise page a different query.
+  let lastQuery = "";
+  let loadingMore = false;
   let debounceTimer: number | null = null;
   let searchAbort: AbortController | null = null;
   let lastSearchTime = 0;
@@ -67,6 +103,11 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     } catch {
       return ts;
     }
+  }
+
+  /** The channel filter for the current scope: undefined = whole server. */
+  function scopeChannelId(): number | undefined {
+    return scopeServer ? undefined : options.currentChannelId;
   }
 
   function renderResults(): void {
@@ -117,9 +158,24 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     // go stale. An empty set clears it (pointing at a missing id is worse).
     if (results.length > 0) {
       input.setAttribute("aria-activedescendant", `search-result-option-${activeIndex}`);
+      // The results box is a fixed max-height scroller, so the roving highlight
+      // otherwise walks off the bottom while Enter still opens the hidden row.
+      // The sibling inline autocomplete already does this (OC-0370).
+      (resultsDiv.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
+        block: "nearest",
+      });
     } else {
       input.removeAttribute("aria-activedescendant");
     }
+
+    renderLoadMore();
+  }
+
+  function renderLoadMore(): void {
+    if (loadMoreBtn === null) return;
+    loadMoreBtn.style.display = nextBefore === null ? "none" : "block";
+    loadMoreBtn.disabled = loadingMore;
+    setText(loadMoreBtn, messagingText(loadingMore ? "search.loadingMore" : "search.loadMore"));
   }
 
   function setStatus(text: string): void {
@@ -127,7 +183,73 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     statusEl.style.display = text === "" ? "none" : "block";
   }
 
+  function executeSearch(query: string, before: number | undefined, append: boolean): void {
+    if (searchAbort !== null) {
+      searchAbort.abort();
+    }
+    searchAbort = new AbortController();
+    const thisSearch = searchAbort;
+    lastSearchTime = Date.now();
+
+    if (append) {
+      loadingMore = true;
+      renderLoadMore();
+    } else {
+      lastQuery = query;
+      nextBefore = null;
+      loadingMore = false;
+      renderLoadMore();
+      setStatus(messagingText("search.searching"));
+    }
+
+    options
+      .onSearch(query, scopeChannelId(), searchAbort.signal, before)
+      .then((resp) => {
+        // A stale response (superseded by a newer query, or by the query
+        // dropping below the minimum and clearing the box) must not repaint
+        // results under a different query.
+        if (thisSearch !== searchAbort) return;
+        results = append ? [...results, ...resp.results] : resp.results;
+        nextBefore = resp.next_before ?? null;
+        if (!append) activeIndex = 0;
+        loadingMore = false;
+        renderResults();
+        if (!append) setStatus(results.length === 0 ? messagingText("search.empty") : "");
+      })
+      .catch((err: unknown) => {
+        if (thisSearch !== searchAbort) return;
+        loadingMore = false;
+        renderLoadMore();
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setStatus(messagingText("search.failed"));
+      });
+  }
+
   function doSearch(): void {
+    const query = input.value.trim();
+    if (query.length < MIN_QUERY_LEN) {
+      // Clearing/shortening the query is a local action: it must not wait on
+      // the rate-limit window, and it must abort any outstanding request or
+      // its late response would repopulate `results` under the empty box (F5).
+      if (debounceTimer !== null) {
+        window.clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      if (searchAbort !== null) {
+        searchAbort.abort();
+        searchAbort = null;
+      }
+      results = [];
+      lastQuery = "";
+      nextBefore = null;
+      loadingMore = false;
+      renderResults();
+      setStatus(
+        query.length > 0 ? messagingText("search.minChars", { count: String(MIN_QUERY_LEN) }) : "",
+      );
+      return;
+    }
+
     const now = Date.now();
     const sinceLast = now - lastSearchTime;
     if (sinceLast < MIN_SEARCH_INTERVAL_MS) {
@@ -139,38 +261,48 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       debounceTimer = window.setTimeout(doSearch, MIN_SEARCH_INTERVAL_MS - sinceLast);
       return;
     }
-    lastSearchTime = now;
 
-    const query = input.value.trim();
-    if (query.length < MIN_QUERY_LEN) {
-      results = [];
-      renderResults();
-      setStatus(
-        query.length > 0 ? messagingText("search.minChars", { count: String(MIN_QUERY_LEN) }) : "",
-      );
-      return;
-    }
+    executeSearch(query, undefined, false);
+  }
 
-    // Cancel any in-flight search
+  function loadMore(): void {
+    if (nextBefore === null || loadingMore) return;
+    // Page the query the cursor belongs to, never the live input: an edit
+    // inside the debounce window leaves this page's rows (and cursor) on screen.
+    if (lastQuery.length < MIN_QUERY_LEN) return;
+    executeSearch(lastQuery, nextBefore, true);
+  }
+
+  function chooseScope(server: boolean): void {
+    // Re-selecting the active scope must not re-run the search: the chip is not
+    // a refresh control.
+    if (scopeServer === server) return;
+    scopeServer = server;
+    paintScope();
+    // A scope change invalidates every previous result: the rows and the paging
+    // cursor belong to the old scope. Abort the in-flight request and clear them
+    // before doSearch(), so a rate-limited reschedule cannot leave the other
+    // scope's rows and cursor on screen for a later Load more to mix with.
     if (searchAbort !== null) {
       searchAbort.abort();
+      searchAbort = null;
     }
-    searchAbort = new AbortController();
+    results = [];
+    lastQuery = "";
+    nextBefore = null;
+    loadingMore = false;
+    renderResults();
+    if (input.value.trim().length >= MIN_QUERY_LEN) {
+      doSearch();
+    }
+  }
 
-    setStatus(messagingText("search.searching"));
-
-    options
-      .onSearch(query, options.currentChannelId, searchAbort.signal)
-      .then((items) => {
-        results = items;
-        activeIndex = 0;
-        renderResults();
-        setStatus(items.length === 0 ? messagingText("search.empty") : "");
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        setStatus(messagingText("search.failed"));
-      });
+  function paintScope(): void {
+    if (channelOption === null || serverOption === null) return;
+    channelOption.classList.toggle("active", !scopeServer);
+    channelOption.setAttribute("aria-checked", String(!scopeServer));
+    serverOption.classList.toggle("active", scopeServer);
+    serverOption.setAttribute("aria-checked", String(scopeServer));
   }
 
   function handleInput(): void {
@@ -183,9 +315,16 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   function handleKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       e.preventDefault();
+      // Escape closes from anywhere: focus moves to the body after clicking a
+      // result row (and to the scope radiogroup or Load more after
+      // tabbing/roving), so an input-only handler left Escape dead there. Bound
+      // on document so the body-focus path is covered too; a single listener
+      // cannot double-fire.
       options.onClose();
       return;
     }
+    // Arrow/Enter combobox behaviour applies only while the input holds focus.
+    if (e.target !== input) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (results.length > 0) {
@@ -206,8 +345,9 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       e.preventDefault();
       const selected = results[activeIndex];
       if (selected !== undefined) {
+        // Picking a hit jumps to it without closing the panel, so a reader can
+        // walk through several hits (DP-20). Escape or the backdrop closes.
         options.onSelectResult(selected);
-        options.onClose();
       }
     }
   }
@@ -234,7 +374,6 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     const r = results[idx];
     if (r !== undefined) {
       options.onSelectResult(r);
-      options.onClose();
     }
   }
 
@@ -274,12 +413,70 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       "data-testid": "search-overlay-results",
     });
 
-    appendChildren(box, input, statusEl, resultsDiv);
+    appendChildren(box, input);
+    // A scope control is only meaningful when the overlay opened on a channel;
+    // without one, search is already whole-server and there is nothing to narrow.
+    if (options.currentChannelId !== undefined) {
+      const scope = createElement("div", {
+        class: "search-overlay-scope",
+        role: "radiogroup",
+        "aria-label": messagingText("search.scope.label"),
+        "data-testid": "search-scope",
+      });
+      channelOption = createElement(
+        "button",
+        {
+          class: "search-scope-option",
+          type: "button",
+          role: "radio",
+          "aria-checked": "false",
+          tabindex: "-1",
+          "data-testid": "search-scope-channel",
+        },
+        channelScopeLabel(options.currentChannelId),
+      );
+      serverOption = createElement(
+        "button",
+        {
+          class: "search-scope-option",
+          type: "button",
+          role: "radio",
+          "aria-checked": "true",
+          tabindex: "-1",
+          "data-testid": "search-scope-server",
+        },
+        messagingText("search.scope.server"),
+      );
+      channelOption.addEventListener("click", () => chooseScope(false), { signal });
+      serverOption.addEventListener("click", () => chooseScope(true), { signal });
+      appendChildren(scope, channelOption, serverOption);
+      paintScope();
+      setRovingTabindex(scope, "[role='radio']");
+      enableRovingNavigation(scope, "[role='radio']", signal);
+      box.appendChild(scope);
+    }
+
+    loadMoreBtn = createElement(
+      "button",
+      {
+        class: "search-overlay-load-more",
+        type: "button",
+        style: "display:none",
+        "data-testid": "search-load-more",
+      },
+      messagingText("search.loadMore"),
+    );
+    loadMoreBtn.addEventListener("click", loadMore, { signal });
+
+    appendChildren(box, statusEl, resultsDiv, loadMoreBtn);
     root.appendChild(box);
     container.appendChild(root);
 
     input.addEventListener("input", handleInput, { signal });
-    input.addEventListener("keydown", handleKeydown, { signal });
+    // Document-level keydown so Escape closes wherever focus is, including the
+    // body after a result click; the input still drives arrow/Enter combobox
+    // behaviour and the handler gates those on the event target.
+    document.addEventListener("keydown", handleKeydown, { signal });
     root.addEventListener("click", handleBackdropClick, { signal });
     resultsDiv.addEventListener("click", handleResultsClick, { signal });
 

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
+const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
 vi.mock("@components/message-list/attachments", () => ({
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
@@ -37,7 +37,7 @@ describe("DmProfileSidebar", () => {
   let container: HTMLDivElement;
 
   beforeEach(() => {
-    fetchImageAsDataUrl.mockReset();
+    fetchImageAsObjectUrl.mockReset();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -177,12 +177,12 @@ describe("DmProfileSidebar", () => {
   it("shows avatar image when avatar URL is provided", async () => {
     // <img src> cannot carry the bearer token an authenticated file route
     // needs, so the picture is fetched and swapped in, never assigned raw.
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
     const user = makeUser({ avatar: "https://example.com/avatar.png" });
     const sidebar = createDmProfileSidebar(makeOptions({ user }));
     sidebar.mount(container);
 
-    expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://example.com/avatar.png");
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://example.com/avatar.png");
     await vi.waitFor(() => {
       const img = container.querySelector(".dps-avatar-img") as HTMLImageElement;
       expect(img).not.toBeNull();
@@ -193,7 +193,7 @@ describe("DmProfileSidebar", () => {
   });
 
   it("fetches a server-relative avatar through the authenticated path and draws the letter until it arrives", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,BBB");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,BBB");
     const user = makeUser({ username: "Bob", avatar: "/api/v1/files/42" });
     const sidebar = createDmProfileSidebar(makeOptions({ user }));
     sidebar.mount(container);
@@ -203,10 +203,49 @@ describe("DmProfileSidebar", () => {
     expect(avatarEl.querySelector("img")).toBeNull();
 
     await vi.waitFor(() => {
-      expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
+      expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/42");
       const img = avatarEl.querySelector(".dps-avatar-img");
       expect(img).not.toBeNull();
     });
+
+    sidebar.destroy?.();
+  });
+
+  it("colors the status dots with design tokens, never a literal hex (P4-19)", () => {
+    const cases: Array<[DmProfileData["status"], string]> = [
+      ["online", "var(--green)"],
+      ["idle", "var(--yellow)"],
+      ["dnd", "var(--red)"],
+      ["invisible", "var(--text-micro)"],
+      ["offline", "var(--text-micro)"],
+    ];
+    for (const [status, token] of cases) {
+      const sidebar = createDmProfileSidebar(makeOptions({ user: makeUser({ status }) }));
+      sidebar.mount(container);
+
+      expect(
+        container.querySelector<HTMLElement>(".dps-status-dot")?.style.background,
+        status,
+      ).toBe(token);
+      expect(
+        container.querySelector<HTMLElement>(".dps-status-dot-inline")?.style.background,
+        status,
+      ).toBe(token);
+
+      sidebar.destroy?.();
+      container.replaceChildren();
+    }
+  });
+
+  it("repaints the token color on update() for a new status (P4-19)", () => {
+    const sidebar = createDmProfileSidebar(makeOptions({ user: makeUser({ status: "online" }) }));
+    sidebar.mount(container);
+
+    const dot = container.querySelector<HTMLElement>(".dps-status-dot")!;
+    expect(dot.style.background).toBe("var(--green)");
+
+    sidebar.update(makeUser({ status: "offline" }));
+    expect(dot.style.background).toBe("var(--text-micro)");
 
     sidebar.destroy?.();
   });

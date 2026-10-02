@@ -419,13 +419,15 @@ var erasureStatements = []struct {
 // (ws.wrapWithSeq), so every lookup goes through $.payload: state frames
 // carry user_id (presence, typing, reactions, voice, member_ban), message
 // frames carry the author as user.id, chat frames list the mentioned ids
-// under mentions, and a relayed E2EE offer names its sender as
-// from_user_id. ws.eventNamesUser is the same rule over the bytes in the
-// ring buffer; the two must stay in step.
+// under mentions, a relayed E2EE offer names its sender as from_user_id, and
+// a presence_batch lists each user under updates[].user_id.
+// ws.eventNamesUser is the same rule over the bytes in the ring buffer; the
+// two must stay in step.
 const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
 	 OR json_extract(payload, '$.payload.user.id') = ?1
 	 OR json_extract(payload, '$.payload.from_user_id') = ?1
-	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1))`
+	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
+	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
 
 // DeleteEventsForUser removes every persisted replay event naming userID —
 // the erasure's own statement, run again after the member_ban broadcast and
@@ -672,7 +674,7 @@ func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]strin
 // The subquery mirrors DecrementMentionCounts' guard: undeleted messages
 // past the recipient's last_message_id (a reader who has since marked the
 // channel read is left alone), excluding mentions to a user who has blocked
-// the departing author — applyMentionCounts (service/mentions.go) never
+// the departing author — mentionEntries (service/mentions.go) never
 // counted those (OC-0293), so reversing them would wipe a genuine, unrelated
 // badge on the same row. MAX(0, …) keeps the result monotonic.
 func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) error {

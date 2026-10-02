@@ -12,7 +12,6 @@ import {
   setLocalDeafened,
   setListenOnly,
 } from "../../stores/voice.store";
-import { loadPref } from "@lib/preferences";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
@@ -104,7 +103,6 @@ export class MediaControl {
         this.onErrorCallback?.(msg);
       },
       reapplyAudioPipeline: () => {
-        this._audioPipeline.setupAudioPipeline();
         this.reapplyMuteGain();
       },
     };
@@ -119,25 +117,21 @@ export class MediaControl {
       if (this._room !== room) return;
       setListenOnly(false);
       // BUG-103: Honor deafened state — keep mic muted if user is deafened.
-      // Also honor a moderator's server-mute, a genuine self-mute, and an
-      // unpressed push-to-talk key the same way: a listen-only join publishes
-      // no audio track, so none of these have anything to act on and persist
-      // silently — republishing here must not hand the whole channel a
-      // fresh, unmuted track. Shares applyMicMuteState's own gate rather
-      // than re-deriving a narrower one (the setMuted() guard does not cover
-      // this direct setMicrophoneEnabled call).
+      // Also honor a moderator's server-mute and a genuine self-mute the
+      // same way: a listen-only join publishes no audio track, so none of
+      // these have anything to act on and persist silently — republishing
+      // here must not hand the whole channel a fresh, unmuted track. Shares
+      // applyMicMuteState's own gate rather than re-deriving a narrower one
+      // (the setMuted() guard does not cover this direct
+      // setMicrophoneEnabled call). An unpressed push-to-talk key needs
+      // nothing here: the new track publishes behind its closed gate.
       if (isMicPolicyGated()) {
         await this.applyMicMuteState(true);
         if (this._room !== room) return;
-        log.info("Microphone acquired but muted (mute/deafen/server-mute/PTT gate active)");
+        log.info("Microphone acquired but muted (mute/deafen/server-mute active)");
       } else {
         setLocalMuted(false);
         log.info("Microphone permission granted — exited listen-only mode");
-      }
-      // Set up audio pipeline for the new mic track
-      this._audioPipeline.setupAudioPipeline();
-      if (loadPref<boolean>("enhancedNoiseSuppression", false)) {
-        await this._audioPipeline.applyNoiseSuppressor();
       }
     } catch (err) {
       if (this._room !== room) return;
@@ -178,7 +172,9 @@ export class MediaControl {
   /** Enable or disable the microphone, carrying the channel's configured
    *  audio bitrate on any publish (OC-0441). Disabling publishes nothing, and
    *  a channel with no voice_config keeps LiveKit's own default, so both leave
-   *  the call shaped exactly as it was before. */
+   *  the call shaped exactly as it was before. On the web path the room's
+   *  track creation attaches the mic processor before the publish
+   *  (RoomLifecycle.createRoom), so the sender never carries a raw track. */
   async enableMicrophone(room: Room, enabled: boolean): Promise<void> {
     const publishOptions = enabled
       ? this.configuredAudioOptions(this._currentChannelId)
@@ -207,9 +203,8 @@ export class MediaControl {
     if (room === null) return;
     if (muted) {
       this.pendingMicrophoneRoom = null;
-      // Tear down pipeline first so it doesn't hold refs to the track
-      this._audioPipeline.teardownAudioPipeline();
-      // Disable the mic through the SDK. With stopMicTrackOnMute in the
+      // Disable the mic through the SDK; the mic processor stays on the
+      // track and resumes on the unmute restart. With stopMicTrackOnMute in the
       // Room's publishDefaults this stops the underlying capture track, so
       // the OS microphone in-use indicator goes out. The LiveKit publication
       // itself is NOT removed — it survives muted, and unmute re-acquires the
@@ -218,13 +213,15 @@ export class MediaControl {
       await room.localParticipant.setMicrophoneEnabled(false);
       log.debug("Mic disabled (muted)");
     } else {
-      // A push-to-talk gate (or, defensively, a moderator's server-mute) is
-      // not this call's to lift — setMuted/setDeafened only guard their own
-      // flag before calling here, so this is the one place every re-enable
-      // path (present and future) shares the full policy check.
+      // A moderator's server-mute (or the user's own other flag) is not this
+      // call's to lift — setMuted/setDeafened only guard their own flag
+      // before calling here, so this is the one place every re-enable path
+      // (present and future) shares the full policy check. Push-to-talk is
+      // not part of it: the room enables the microphone behind its gate
+      // (AudioPipeline.setPttGated), which stays closed while the key is up.
       if (isMicPolicyGated()) {
         this.pendingMicrophoneRoom = null;
-        log.debug("Skipping mic re-publish — still gated (mute/deafen/server-mute/PTT)");
+        log.debug("Skipping mic re-publish — still gated (mute/deafen/server-mute)");
         return;
       }
       // Moderator unmute travels over OwnCord WS; the SFU grant arrives on
@@ -250,8 +247,6 @@ export class MediaControl {
       try {
         await this.enableMicrophone(room, true);
         if (this._room !== room) return;
-        // Rebuild the audio pipeline on the fresh track
-        this._audioPipeline.setupAudioPipeline();
         log.debug("Mic enabled (unmuted)");
       } catch (err) {
         if (this._room !== room) return;
@@ -264,16 +259,6 @@ export class MediaControl {
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
         this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
         return;
-      }
-      // A muted or PTT-armed join publishes no track and so attaches no
-      // RNNoise processor; the first unmute is where it gets one. Already
-      // attached is a no-op. A processor failure is not a mic failure.
-      if (!isMicPolicyGated() && loadPref<boolean>("enhancedNoiseSuppression", false)) {
-        try {
-          await this._audioPipeline.applyNoiseSuppressor();
-        } catch (err) {
-          log.warn("Noise suppressor apply failed after unmute", err);
-        }
       }
     }
   }
@@ -352,7 +337,16 @@ export class MediaControl {
     this._audioPipeline.setVoiceSensitivity(sensitivity);
   }
 
+  /** Close or open the push-to-talk gate (AudioPipeline.setPttGated). */
+  setPttGated(gated: boolean): void {
+    this._audioPipeline.setPttGated(gated);
+  }
+
   async reapplyAudioProcessing(): Promise<void> {
     return this._audioPipeline.reapplyAudioProcessing(this.onErrorCallback ?? undefined);
+  }
+
+  async reapplyEnhancedNoiseSuppression(): Promise<void> {
+    return this._audioPipeline.reapplyEnhancedNoiseSuppression(this.onErrorCallback ?? undefined);
   }
 }

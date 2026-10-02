@@ -15,12 +15,13 @@ import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage } from "@components/PinnedMessages";
 import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
-import { setActiveChannel } from "@stores/channels.store";
+import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { setMessagePinned } from "@stores/messages.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { shellText } from "../../i18n/shell";
+import { dialogOpen } from "./GlobalKeybinds";
 
 const log = createLogger("overlays");
 
@@ -30,15 +31,22 @@ const log = createLogger("overlays");
 
 export function mapInviteResponse(r: InviteResponse): InviteItem {
   const extra = r as unknown as Record<string, unknown>;
-  const createdBy =
-    typeof extra["created_by"] === "object" && extra["created_by"] !== null
-      ? ((extra["created_by"] as { username?: string }).username ?? "unknown")
-      : "unknown";
+  // The server now sends creator_username; the legacy nested created_by object
+  // is kept as a fallback for an older server.
+  const nested = extra["created_by"];
+  const creatorUsername =
+    typeof r.creator_username === "string" && r.creator_username !== ""
+      ? r.creator_username
+      : typeof nested === "object" && nested !== null
+        ? ((nested as { username?: string }).username ?? "")
+        : "";
   const uses = r.use_count ?? (typeof extra["uses"] === "number" ? extra["uses"] : 0);
   return {
     code: r.code,
-    createdBy,
-    createdAt: r.expires_at ?? "",
+    createdBy: creatorUsername !== "" ? creatorUsername : shellText("invite.unknownCreator"),
+    // created_at is when the invite was made; expires_at is when it lapses.
+    // The old code set createdAt from expires_at, so the two were conflated.
+    createdAt: r.created_at ?? "",
     uses,
     maxUses: r.max_uses,
     expiresAt: r.expires_at,
@@ -46,15 +54,21 @@ export function mapInviteResponse(r: InviteResponse): InviteItem {
 }
 
 /**
- * Whether the server marked this invite revoked. `InviteResponse` does not
- * declare the field (redemption enforces it server-side; the list endpoint
- * deliberately still includes revoked invites), so this reaches into the raw
- * payload the same way `mapInviteResponse` already does for `created_by`.
+ * Whether the server marked this invite revoked. The list endpoint
+ * deliberately still includes revoked invites, so the client filters them.
  * Without this, a revoked invite renders identically to a live one — Copy and
  * Revoke on a code that redemption always rejects.
  */
 function isInviteRevoked(r: InviteResponse): boolean {
-  return (r as unknown as Record<string, unknown>)["revoked"] === true;
+  return r.revoked === true;
+}
+
+/** Whether an invite's expiry has already passed, so it is not offered as a
+ *  live code (F4). A null expiry never expires. */
+function isInviteExpired(r: InviteResponse): boolean {
+  if (r.expires_at === null) return false;
+  const t = Date.parse(r.expires_at);
+  return Number.isNaN(t) ? true : t <= Date.now();
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +120,8 @@ export function createQuickSwitcherManager(
   getRoot: () => HTMLDivElement | null,
   /** Optional: suppress the shortcut while another overlay owns input (e.g. Settings). */
   isSuspended?: () => boolean,
+  /** Optional: join a voice channel selected in the switcher, matching the sidebar. */
+  onJoinVoice?: (channelId: number) => void,
 ): QuickSwitcherManager {
   let instance: MountableComponent | null = null;
 
@@ -114,6 +130,14 @@ export function createQuickSwitcherManager(
     if (instance !== null || root === null) return;
     instance = createQuickSwitcher({
       onSelectChannel: (channelId: number) => {
+        // A voice channel selected here must go through the same join path the
+        // sidebar row uses — a bare setActiveChannel mounts the chat surface
+        // for a voice channel the user never joined (F8).
+        const channel = channelsStore.getState().channels.get(channelId);
+        if (channel?.type === "voice" && onJoinVoice !== undefined) {
+          onJoinVoice(channelId);
+          return;
+        }
         setActiveChannel(channelId);
       },
       onClose: close,
@@ -136,12 +160,16 @@ export function createQuickSwitcherManager(
     // every other app-wide shortcut respects.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
     if (isSuspended?.() === true) return;
-    e.preventDefault();
     if (instance !== null) {
+      // Always let Ctrl+K close our own overlay.
+      e.preventDefault();
       close();
-    } else {
-      open();
+      return;
     }
+    // Do not open behind another modal (#17).
+    if (dialogOpen()) return;
+    e.preventDefault();
+    open();
   };
 
   function attach(): () => void {
@@ -236,7 +264,9 @@ export function createInviteManagerController(opts: {
     getRoot: opts.getRoot,
     load: () => opts.api.getInvites(),
     build: (raw, _root, close) => {
-      const invites = raw.filter((r) => !isInviteRevoked(r)).map(mapInviteResponse);
+      const invites = raw
+        .filter((r) => !isInviteRevoked(r) && !isInviteExpired(r))
+        .map(mapInviteResponse);
       return createInviteManager({
         invites,
         onCreateInvite: async () => {
@@ -290,6 +320,12 @@ export function createPinnedPanelController(opts: {
 
   readonly getCurrentChannelId: () => number | null;
   /**
+   * Whether the current channel allows the viewer to pin/unpin. Omitted means
+   * no — the panel then renders read-only rather than offering an action the
+   * server refuses (F1).
+   */
+  readonly canPin?: (channelId: number) => boolean;
+  /**
    * Jump to a pinned message, in the channel the panel was opened for (the
    * panel does not re-derive "current channel" live — a channel switch while
    * it is open must not silently retarget the jump). Fire-and-forget: the
@@ -317,6 +353,7 @@ export function createPinnedPanelController(opts: {
     build: (resp, _liveRoot, close) => {
       const id = channelId as number;
       const pins = resp.messages.map(mapToPinnedMessage);
+      const mayUnpin = opts.canPin?.(id) === true;
       return createPinnedMessages({
         channelId: id,
         pinnedMessages: pins,
@@ -324,21 +361,25 @@ export function createPinnedPanelController(opts: {
           opts.onJumpToMessage?.(id, msgId);
           close();
         },
-        onUnpin: (msgId: number) => {
-          void opts.api
-            .unpinMessage(id, msgId)
-            .then(() => {
-              // The server has no pin/unpin broadcast — this store write is
-              // the row's only local authority for `pinned`. Without it the
-              // row still says "Unpin" after this panel closes.
-              setMessagePinned(id, msgId, false);
-              close();
-            })
-            .catch((err: unknown) => {
-              log.error("Failed to unpin message", { msgId, error: String(err) });
-              showToast(shellText("pins.unpinFailed"), "error");
-            });
-        },
+        ...(mayUnpin
+          ? {
+              onUnpin: (msgId: number) => {
+                void opts.api
+                  .unpinMessage(id, msgId)
+                  .then(() => {
+                    // Update the row now rather than waiting for the server's
+                    // chat_pinned broadcast, so it cannot still say "Unpin"
+                    // after this panel closes.
+                    setMessagePinned(id, msgId, false);
+                    close();
+                  })
+                  .catch((err: unknown) => {
+                    log.error("Failed to unpin message", { msgId, error: String(err) });
+                    showToast(shellText("pins.unpinFailed"), "error");
+                  });
+              },
+            }
+          : {}),
         onClose: close,
       });
     },
@@ -403,10 +444,9 @@ export function createSearchOverlayController(opts: {
 
     instance = createSearchOverlay({
       currentChannelId: channelId ?? undefined,
-      onSearch: async (query, chId, signal) => {
+      onSearch: async (query, chId, signal, before) => {
         try {
-          const resp = await opts.api.search(query, { channelId: chId }, signal);
-          return resp.results;
+          return await opts.api.search(query, { channelId: chId, sort: "recent", before }, signal);
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           log.error("Search failed", { query, error: String(err) });

@@ -1,12 +1,22 @@
 name: CI
 
 on:
-  # dev is deliberately not a push trigger: while a dev -> main PR is open every
-  # push to dev already fires pull_request(synchronize), so listing it here ran
-  # the whole suite twice for one push. Use workflow_dispatch for a dev branch
-  # with no PR open yet.
+  # dev is a push trigger so a broken integration commit — two PRs that were
+  # each green alone but not together, which no PR run ever sees because both
+  # merged before either combined tree was built — shows up as a red run on the
+  # dev commit itself. Every push to dev selects every capability (the `changes`
+  # job answers --all for anything that is not a pull request into dev), so this
+  # is the full suite, at full cost, on each integration commit.
+  #
+  # The price: while a dev -> main release PR is open, a push to dev fires both
+  # this and pull_request(synchronize), and the two events fall in different
+  # `ci-${{ github.ref }}` concurrency groups, so the suite runs twice for that
+  # one push. The release window is short and a missed merge-combination break
+  # was worse, so the duplication is accepted rather than unified into one
+  # concurrency group (which would change how a PR and its merge serialize).
+  # workflow_dispatch still covers any other branch on demand.
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
@@ -31,14 +41,17 @@ jobs:
   # (`--all`) rather than by skipping this job, so that "this job ran" and
   # "these outputs exist" are the same statement.
   #
-  # Selection is deliberately limited to a pull request INTO DEV. A PR into main
-  # and a push to main run every capability, because
-  # scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each context in
-  # docs/plans/b0-dev-branch-protection.sh to have concluded `success` on the
-  # tagged commit and counts `skipped` as NOT success. Releases are cut from
-  # main, so a check legitimately skipped there would block the release instead
-  # of saving anything. Day-to-day work happens on PRs into dev, which is where
-  # the long runs the audit measured came from.
+  # Selection is deliberately limited to a pull request INTO DEV. A PR into main,
+  # a push to main and a push to dev all run every capability. A push to main is
+  # required because scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each
+  # context in docs/plans/b0-dev-branch-protection.sh to have concluded `success`
+  # on the tagged commit and counts `skipped` as NOT success; releases are cut
+  # from main, so a check legitimately skipped there would block the release
+  # instead of saving anything. A push to dev runs everything because that is the
+  # whole point of the trigger: only the combined tree can show a
+  # merge-combination break, so the diff-selected subset is not enough. Day-to-day
+  # work happens on PRs into dev, which is where the long runs the audit measured
+  # came from; a dev push selects everything rather than a subset.
   changes:
     name: Change selection
     runs-on: ubuntu-latest
@@ -517,6 +530,7 @@ jobs:
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
           go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
+          go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/
 
       # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
       # but placed after the other test steps so a floor miss does not hide
@@ -1344,28 +1358,13 @@ jobs:
 
   # Full Tauri build only on PRs to main (expensive: ~15 min x2 multiplier).
   #
-  # Skipped for Dependabot: its PRs run under the separate `dependabot` secrets
-  # scope, so TAURI_SIGNING_PRIVATE_KEY arrives empty and `npm run tauri build`
-  # always aborts with "failed to decode secret key" while signing the updater
-  # artifact — after a successful compile and bundle. That burned ~50 min of
-  # runner time per dependency PR to produce a red check that never carried any
-  # signal. Granting Dependabot the signing key would fix the symptom but hands
-  # a release key to workflows triggered by third-party dependency updates.
-  #
-  # What still covers Dependabot PRs: the required `rust-tests` job compiles the
-  # crate (cargo clippy --all-targets + cargo test --lib), so a dependency bump
-  # that breaks the Rust build is still caught.
-  # What this gives up on those PRs: bundling (NSIS/AppImage/deb), Windows and
-  # ARM-specific compilation, and the `cargo audit` step below — that last one
-  # overlaps with Dependabot's own cargo scanning, which is what opens these PRs
-  # in the first place.
+  # Built without updater artifacts, so no signing key is needed: this job runs
+  # PR-controlled npm and cargo build scripts, and the updater signing key is
+  # given to release.yml only (scripts/check-workflow-guards.mjs asserts it).
   tauri-build:
     name: Tauri Full Build (${{ matrix.os }})
     needs: client-check
-    if: >-
-      github.event_name == 'pull_request'
-      && github.base_ref == 'main'
-      && github.actor != 'dependabot[bot]'
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
     strategy:
       fail-fast: false
       matrix:
@@ -1443,10 +1442,7 @@ jobs:
           cargo audit
 
       - name: Build Tauri app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri build
+        run: npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       # The release build host is Ubuntu 22.04 precisely so the shipped binary
       # starts on older distros. Linking the prebuilt libwebrtc could raise that

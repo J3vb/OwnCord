@@ -9,7 +9,12 @@
  * including the 2FA union, which is the part nothing else exercises.
  */
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_2FA_RESPONSE, MOCK_TOKEN } from "./helpers";
+import {
+  buildTauriMockScript,
+  expectOverlayUntilReady,
+  MOCK_LOGIN_2FA_RESPONSE,
+  MOCK_TOKEN,
+} from "./helpers";
 
 const PROFILE = {
   id: "p1",
@@ -45,6 +50,7 @@ async function mockWithSavedPassword(
         },
       ],
       simulateWsFlow,
+      deferReady: true,
       storedCredential: { username: "saveduser", token: "stored-token", has_password: true },
       savedPasswordLogin,
       storedSettings: {
@@ -110,7 +116,7 @@ test.describe("Saved-password login", () => {
 
     // Verifying completes the session and the client moves on to connecting,
     // proving the saved-password path reaches the same end state as a typed one.
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 10000 });
+    await expectOverlayUntilReady(page, 10000);
   });
 
   test("shows the server's message when the saved password is rejected", async ({ page }) => {
@@ -182,7 +188,7 @@ test.describe("Saved-password login", () => {
     await page.locator("#remember-password").uncheck();
     await page.locator(".btn-primary[type='submit']").click();
 
-    await expect(page.locator(".connected-overlay")).toBeVisible({ timeout: 10000 });
+    await expectOverlayUntilReady(page, 10000);
     await expect
       .poll(async () => page.evaluate(() => window.__mockDeletedCredentials ?? []), {
         timeout: 10000,

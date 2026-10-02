@@ -91,9 +91,9 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 			var openPayload []byte
 			if len(result.DMParticipants) > 0 {
 				openPayload = buildDMChannelOpen(
-					db.NewDMChannelInfo(sendCmd.ChannelID, chName, result.DMIsGroup, result.DMParticipants, pid))
+					db.NewDMChannelInfo(sendCmd.ChannelID, chName, result.DMIsGroup, result.DMParticipants, pid), pid, d.LiveStatus)
 			} else {
-				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID, result.SenderUser, pid)
+				openPayload = buildDMChannelOpenFor(sendCmd.ChannelID, result.SenderUser, pid, d.LiveStatus)
 			}
 			if openPayload == nil {
 				continue
@@ -177,7 +177,7 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 
 // dmEventOrFallback returns the participant-targeted DM event, falling back
 // to the channel-topic broadcast when the participant list is empty — the
-// degraded shape a failed post-commit GetDMParticipantIDs leaves behind. A
+// degraded shape a failed post-commit participant lookup leaves behind. A
 // sequenced frame addressed to nobody would consume a seq and reach no one;
 // the topic fallback still reaches whoever has the DM focused.
 func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
@@ -200,9 +200,11 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeNotFound, Message: err.Error()}}
 	case errors.Is(err, service.ErrTimedOut):
 		return Result{Error: ClientError{Code: ErrCodeTimedOut, Message: err.Error()}}
-	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked),
-		errors.Is(err, service.ErrDeletedMessage):
+	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		return Result{Error: ClientError{Code: ErrCodeForbidden, Message: err.Error()}}
+	case errors.Is(err, service.ErrDeletedMessage):
+		// Same state as REST's 409 ALREADY_DELETED, not a permission refusal.
+		return Result{Error: ClientError{Code: ErrCodeAlreadyDeleted, Message: err.Error()}}
 	case errors.Is(err, service.ErrConflict):
 		return Result{Error: ClientError{Code: ErrCodeConflict, Message: err.Error()}}
 	default:

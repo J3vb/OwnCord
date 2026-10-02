@@ -58,10 +58,12 @@ type Subject struct {
 	// caller resolves it live, never from a cache — CanReadContent's whole
 	// point is that a revocation takes effect on the very next read.
 	NSFWAcknowledged bool
-	// TimedOut is filled from a live, uncached lookup ("an active timeout
-	// row exists for this subject") by permissions.Checker.Subject and
-	// service.PermissionService.Subject — never from the 30s permission
-	// cache, and never for an Administrator (B5-9, decision 6). It gates
+	// TimedOut ("an active timeout row exists for this subject") is filled
+	// by permissions.Checker.Subject from a live lookup and by
+	// service.PermissionService.Subject from its active-timeout mirror,
+	// reloaded by every timeout write and judged against the clock (P5-O02)
+	// — never from the 30s permission cache, and never for an Administrator
+	// (B5-9, decision 6). It gates
 	// CanSendMessage, CanAddReaction and CanJoinVoice independent of every
 	// channel-scoped bit: a timeout is a restriction on the subject, not a
 	// property of any one channel.
@@ -176,8 +178,10 @@ func CanAddReaction(s Subject) error {
 
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
 // (required for DM calls too — the role bit was always demanded on top of
-// membership, so this can only ever narrow), a channel that has a room, for
-// a DM membership plus no block, and no archive for either kind — the admin
+// membership, so this can only ever narrow), READ_MESSAGES for a non-DM
+// channel so a room hidden from a member (CanViewChannel) is not joinable, a
+// channel that has a room, for a DM membership plus no block, and no archive
+// for either kind — the admin
 // PATCH accepts `archived` for any channel type, and an evicted participant
 // must not rejoin the archived room. Applies at join, at token refresh, to
 // the target of a moderator move, and in the stale-voice sweep.
@@ -187,6 +191,9 @@ func CanJoinVoice(s Subject) error {
 	}
 	if !s.Has(ConnectVoice) {
 		return missing(ConnectVoice)
+	}
+	if s.Channel.Type != "dm" && !s.Has(ReadMessages) {
+		return missing(ReadMessages)
 	}
 	switch s.Channel.Type {
 	case "dm":

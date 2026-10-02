@@ -6,10 +6,13 @@ import {
   type Page,
   type TestInfo,
 } from "@playwright/test";
+import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { startProcess, stopProcess, waitForHttp } from "./process";
 
 export async function startNativeApp(
@@ -57,17 +60,24 @@ export async function startNativeApp(
   // exe on a cold Windows runner takes up to ~30s more than a warm one, and the
   // WebView2 browser process opens the CDP port well before the renderer
   // attaches its page target, so the page wait must share the same deadline.
-  const startupDeadline = Date.now() + 60_000;
+  // A cold WebView2 start on a loaded Windows runner has reached ~64 s, past
+  // the old 60 s budget, so the page-ready/title wait gets 90 s.
+  const startupDeadline = Date.now() + 90_000;
   const started = Date.now();
   const running = startProcess(exe, [], directory);
+  const firstOutput = () => {
+    const at = running.firstOutputAt();
+    return at === undefined ? "none" : `${at - started}ms`;
+  };
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
+  let cdpReady: number | undefined;
   try {
     await waitForHttp(
       `http://127.0.0.1:${port}/json/version`,
       running,
       startupDeadline - Date.now(),
     );
-    const cdpReady = Date.now() - started;
+    cdpReady = Date.now() - started;
     // connectOverCDP defaults to a 30 s timeout of its own, which cut into the
     // same startup budget waitForHttp just spent. Take the timeout from what is
     // left of the deadline so a slow cold runner fails at the budget, not at a
@@ -93,7 +103,9 @@ export async function startNativeApp(
     await expect(page).toHaveTitle("OwnCord", {
       timeout: Math.max(1, startupDeadline - Date.now()),
     });
-    console.log(`native app ready: CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`);
+    console.log(
+      `native app ready: first output after ${firstOutput()}, CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`,
+    );
     return {
       cdpURL: `http://127.0.0.1:${port}`,
       page,
@@ -112,12 +124,75 @@ export async function startNativeApp(
       },
     };
   } catch (error) {
-    await browser?.close().catch(() => {});
-    await stopProcess(running.child);
-    await clearProfiles();
-    await rm(directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
-    throw new Error(`${String(error)}\n${running.log()}`);
+    // Read the app's own log before clearProfiles deletes it.
+    const evidence = await launchEvidence(
+      running,
+      options.identifier ?? "com.owncord.e2e",
+      port,
+      `first output after ${firstOutput()}, CDP ${cdpReady === undefined ? "never ready" : `after ${cdpReady}ms`}, failed after ${Date.now() - started}ms`,
+    );
+    // Profile removal retries on locked files for up to ~46 s per folder; an
+    // unbounded wait here outlived the test timeout and hid this error.
+    const cleanup = (async () => {
+      await browser?.close().catch(() => {});
+      await stopProcess(running.child);
+      await clearProfiles();
+      await rm(directory, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+    })().then(
+      () => "",
+      (cleanupError) => `\nlaunch cleanup failed: ${String(cleanupError)}`,
+    );
+    const cleanupNote = await Promise.race([
+      cleanup,
+      delay(20_000, "\nlaunch cleanup still running after 20s", { ref: false }),
+    ]);
+    throw new Error(`${String(error)}\n${evidence}${cleanupNote}\n${running.log()}`);
   }
+}
+
+/** What the machine looked like when a launch failed, for a cause beyond "timed out". */
+async function launchEvidence(
+  running: ReturnType<typeof startProcess>,
+  identifier: string,
+  port: number,
+  timing: string,
+): Promise<string> {
+  const run = (file: string, args: string[]) =>
+    promisify(execFile)(file, args, { timeout: 10_000, windowsHide: true }).then(
+      ({ stdout }) => stdout.trim(),
+      (error: unknown) => `unavailable: ${String(error)}`,
+    );
+  const logFile = join(process.env.LOCALAPPDATA ?? "", identifier, "logs", "owncord-client.log");
+  const [appLog, client, webview, netstat, defender] = await Promise.all([
+    readFile(logFile, "utf8").then(
+      (text) => text.slice(-4000),
+      (error: NodeJS.ErrnoException) => `unreadable: ${error.code ?? String(error)}`,
+    ),
+    run("tasklist", ["/fo", "csv", "/nh", "/fi", "imagename eq owncord-client.exe"]),
+    run("tasklist", ["/fo", "csv", "/nh", "/fi", "imagename eq msedgewebview2.exe"]),
+    run("netstat", ["-ano", "-p", "tcp"]),
+    run("powershell", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "Get-MpComputerStatus | Format-List AMRunningMode,RealTimeProtectionEnabled,OnAccessProtectionEnabled",
+    ]),
+  ]);
+  const listeners = netstat
+    .split(/\r?\n/)
+    .filter((line) => line.includes(`:${port} `) && line.includes("LISTENING"));
+  const exit = running.child.exitCode ?? running.child.signalCode;
+  return [
+    "native launch evidence:",
+    `timing: ${timing}`,
+    `app process ${running.child.pid}: ${exit === null ? "still running" : `exited (${exit})`}`,
+    `owncord-client.exe: ${client}`,
+    `msedgewebview2.exe: ${webview}`,
+    `port ${port} listeners: ${listeners.join(" | ") || "none"}`,
+    `defender: ${defender.replace(/\s*\r?\n\s*/g, "; ")}`,
+    `app log tail (${logFile}):`,
+    appLog,
+  ].join("\n");
 }
 
 export type NativeApp = Awaited<ReturnType<typeof startNativeApp>>;

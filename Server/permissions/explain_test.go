@@ -62,6 +62,43 @@ func TestExplainTracesLayers(t *testing.T) {
 	}
 }
 
+// A DM call consults only CONNECT_VOICE; a server voice channel also reads
+// READ_MESSAGES, so hiding it by READ alone is traced as the refusal.
+func TestExplainJoinVoiceTracesTypeAwareBits(t *testing.T) {
+	cases := []struct {
+		name    string
+		s       Subject
+		allowed bool
+		want    []BitRule
+	}{
+		{
+			name:    "dm",
+			s:       Subject{RolePerms: ConnectVoice, Channel: dm(), DMParticipant: true},
+			allowed: true,
+			want:    []BitRule{{Bit: "CONNECT_VOICE", Base: true, Effective: true}},
+		},
+		{
+			name: "voice hidden by READ",
+			s:    Subject{RolePerms: memberBits, Override: deny(ReadMessages), Channel: voice(false)},
+			want: []BitRule{
+				{Bit: "READ_MESSAGES", Base: true, RoleOverride: "deny"},
+				{Bit: "CONNECT_VOICE", Base: true, Effective: true},
+			},
+		},
+	}
+	for _, tc := range cases {
+		d, err := Explain(ActionJoinVoice, tc.s)
+		if err != nil || d.Allowed != tc.allowed || len(d.Bits) != len(tc.want) {
+			t.Fatalf("%s: decision = %+v, err = %v", tc.name, d, err)
+		}
+		for i := range tc.want {
+			if d.Bits[i] != tc.want[i] {
+				t.Errorf("%s: bit %d = %+v, want %+v", tc.name, i, d.Bits[i], tc.want[i])
+			}
+		}
+	}
+}
+
 func TestExplainUnknownAction(t *testing.T) {
 	if _, err := Explain("fly", Subject{}); err == nil || errors.Is(err, ErrPermissionDenied) {
 		t.Fatalf("err = %v, want a non-denial error", err)

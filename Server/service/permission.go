@@ -42,6 +42,18 @@ type PermissionService struct {
 	// as an RLock, so a plain increment there would race.
 	hits   atomic.Uint64
 	misses atomic.Uint64
+
+	// timeouts mirrors every active timeout as user_id -> expires_at
+	// (P5-O02), so Subject answers TimedOut without a store read. The map is
+	// replaced whole, never mutated; nil means not loaded (never loaded, or
+	// the last reload failed), and Subject then loads it itself or fails
+	// closed. Expiry is judged against the clock at read time, so an entry
+	// needs no removal to stop denying.
+	timeouts atomic.Pointer[map[int64]time.Time]
+	// timeoutsReload serializes reloads, so the last one to finish is also
+	// the last to have read the store: a reload that started before a
+	// timeout write committed can never overwrite the one that started after.
+	timeoutsReload syncutil.Mutex
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
@@ -112,18 +124,69 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 		return permissions.Subject{}, nil
 	}
 	sub := permissions.Subject{RolePerms: cp.rolePerms, Override: cp.overrides[channelID]}
-	// TimedOut is a live, uncached lookup on every call (B5-9): a 30s-stale
-	// answer here would let a just-lifted timeout keep refusing, or a
-	// just-issued one keep landing. Administrator is exempt, mirroring
-	// permissions.Checker.Subject's own short-circuit.
+	// TimedOut comes from the timeout mirror, never the 30s role cache
+	// (B5-9): a stale answer would let a just-lifted timeout keep refusing,
+	// or a just-issued one keep landing. The mirror is reloaded synchronously
+	// by every timeout write (ModerationService) before that write returns.
+	// Administrator is exempt, mirroring permissions.Checker.Subject's own
+	// short-circuit.
 	if !permissions.HasAdmin(cp.rolePerms) {
-		timedOut, toErr := s.st.HasActiveTimeout(ctx, userID)
+		timedOut, toErr := s.timedOut(ctx, userID)
 		if toErr != nil {
 			return permissions.Subject{}, toErr
 		}
 		sub.TimedOut = timedOut
 	}
 	return sub, nil
+}
+
+// RefreshTimeouts reloads the active-timeout mirror from the store. Every
+// write that issues or lifts a timeout calls it after its commit; boot calls
+// it once up front. On failure the mirror is dropped, so Subject reloads it
+// or returns the error (fail closed) rather than answer from a set that may
+// be missing the timeout just written.
+func (s *PermissionService) RefreshTimeouts(ctx context.Context) error {
+	s.timeoutsReload.Lock()
+	defer s.timeoutsReload.Unlock()
+	return s.reloadTimeoutsLocked(ctx)
+}
+
+func (s *PermissionService) reloadTimeoutsLocked(ctx context.Context) error {
+	rows, err := s.st.ListActiveTimeoutExpiries(ctx)
+	if err != nil {
+		s.timeouts.Store(nil)
+		return err
+	}
+	m := make(map[int64]time.Time, len(rows))
+	for _, r := range rows {
+		// Normally one active row per user (TimeoutUser supersedes the
+		// rest); keep the latest expiry if a race ever leaves two.
+		if cur, ok := m[r.UserID]; !ok || r.ExpiresAt.After(cur) {
+			m[r.UserID] = r.ExpiresAt
+		}
+	}
+	s.timeouts.Store(&m)
+	return nil
+}
+
+// timedOut reports whether userID has an unexpired timeout, loading the
+// mirror first if it is not loaded.
+func (s *PermissionService) timedOut(ctx context.Context, userID int64) (bool, error) {
+	m := s.timeouts.Load()
+	if m == nil {
+		s.timeoutsReload.Lock()
+		// Another caller may have loaded it while this one waited.
+		if m = s.timeouts.Load(); m == nil {
+			if err := s.reloadTimeoutsLocked(ctx); err != nil {
+				s.timeoutsReload.Unlock()
+				return false, err
+			}
+			m = s.timeouts.Load()
+		}
+		s.timeoutsReload.Unlock()
+	}
+	until, ok := (*m)[userID]
+	return ok && time.Now().Before(until), nil
 }
 
 // GetRoleForUser returns the user's role, using the cache when available.

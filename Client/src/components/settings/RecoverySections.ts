@@ -323,6 +323,15 @@ export function buildRecoveryKitSection(
     confirm.setTriggerLabel(enrolled ? t("recovery.replaceKit") : t("recovery.createKit"));
   }
 
+  /** The status could not be fetched: stop showing "Checking…" and mark the
+   *  row unknown rather than pending forever (F18). */
+  function paintUnknown(): void {
+    setText(badge, t("recovery.unknown"));
+    missingHint.hidden = true;
+    setStatusIcon(icon, "warn");
+    onState("warn");
+  }
+
   function refresh(): void {
     void options
       .onGetRecoveryKitStatus()
@@ -334,6 +343,9 @@ export function buildRecoveryKitSection(
       .catch(() => {
         if (signal.aborted) return;
         setText(statusError, t("recovery.kitStatusFailed"));
+        // Settle the badge: a failed fetch must not leave "Checking…" forever
+        // next to the error (F18).
+        paintUnknown();
       });
   }
 

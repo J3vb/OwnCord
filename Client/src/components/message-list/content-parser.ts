@@ -28,11 +28,10 @@ import {
   parseInline,
   parseBlocks,
   splitCodeFences,
-  type BlockNode,
   type InlineNode,
   type InlineStyle,
 } from "@lib/markdown";
-import { highlightCode, resolveLanguage } from "./syntax-highlight";
+import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
 
 // -- Regex constants ----------------------------------------------------------
 
@@ -129,7 +128,7 @@ function buildMaskedLink(
   // origin, which is not something a message author gets to link to.
   if (!/^https?:\/\//i.test(node.url) || !isSafeUrl(node.url)) return null;
   const link = createElement("a", {
-    class: "msg-link",
+    class: "msg-link masked",
     href: node.url,
     title: node.url,
     target: "_blank",
@@ -156,7 +155,11 @@ function appendInline(parent: Node, nodes: readonly InlineNode[], info?: Mention
       case "link": {
         const link = buildMaskedLink(node, info);
         if (link !== null) parent.appendChild(link);
-        else parent.appendChild(document.createTextNode(node.raw));
+        else {
+          const raw = createElement("span", { class: "msg-link-raw" });
+          setText(raw, node.raw);
+          parent.appendChild(raw);
+        }
         break;
       }
       case "spoiler":
@@ -209,7 +212,9 @@ export function renderMentions(text: string, info?: MentionInfo): DocumentFragme
         fragment.appendChild(document.createTextNode(trailing));
       }
     } else {
-      fragment.appendChild(document.createTextNode(rawUrl));
+      const raw = createElement("span", { class: "msg-link-raw" });
+      setText(raw, rawUrl);
+      fragment.appendChild(raw);
     }
     lastIndex = idx + rawUrl.length;
   }
@@ -282,16 +287,19 @@ function buildMessageLinkNode(url: string): HTMLSpanElement | null {
   const channel = findChannelById(link.channelId);
   if (channel === null) return null;
 
+  // A DM channel has no user-visible #name; every other DM-labelling surface
+  // uses '@', so the chip must too (F15).
+  const channelLabel = `${channel.isDm ? "@" : "#"}${channel.name}`;
   const chip = createElement("span", {
     class: "message-link-chip",
     role: "link",
     tabindex: "0",
     "data-channel-id": String(link.channelId),
     "data-message-id": String(link.messageId),
-    title: messagingText("message.jumpIn", { channel: channel.name }),
+    title: messagingText("message.jumpIn", { channel: channelLabel }),
   });
   const label = createElement("span", { class: "mlc-channel" });
-  setText(label, `#${channel.name}`);
+  setText(label, channelLabel);
   const action = createElement("span", { class: "mlc-action" });
   setText(action, messagingText("message.jump"));
   chip.appendChild(label);
@@ -373,11 +381,193 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
   return fragment;
 }
 
+/** Elements whose text is never mention-highlighted at render time, so the
+ *  mention resync must leave them alone: code spans/blocks, existing pills and
+ *  chips, a rejected masked link left as raw text, and autolinked URLs (whose
+ *  text is the URL itself, which may contain an `/@token` path). A masked
+ *  `[text](url)` link does get mentions rendered inside it, so `.masked` links
+ *  stay transparent. */
+const MENTION_OPAQUE_SELECTOR =
+  "code, .msg-codeblock, .mention, .channel-mention, .message-link-chip, .msg-link-raw, .msg-link:not(.masked)";
+
+/** Whether a rebuilt pill is identical to the one already in the DOM. */
+function sameMention(a: HTMLElement, b: HTMLElement): boolean {
+  return a.className === b.className && (a.dataset["userId"] ?? "") === (b.dataset["userId"] ?? "");
+}
+
+/**
+ * Wrap the @tokens in one plain prose run that resolve against the live member
+ * store, leaving every other token (`#channel`, `:emoji:`, unresolved @) as the
+ * text it already is. Returns null when nothing in the run resolves.
+ */
+function wrapResolvedMentions(text: string, info?: MentionInfo): DocumentFragment | null {
+  const matches: TokenMatch[] = [];
+  for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
+    const idx = match.index;
+    const lead = match[1];
+    const token = match[2];
+    if (idx === undefined || lead === undefined || token === undefined) continue;
+    if (match[3] === "@") continue;
+    const start = idx + lead.length;
+    const node = buildMentionNode(`@${token}`, token, info);
+    if (node !== null) matches.push({ start, end: start + token.length + 1, node });
+  }
+  if (matches.length === 0) return null;
+  const fragment = document.createDocumentFragment();
+  let last = 0;
+  for (const m of matches) {
+    if (m.start < last) continue;
+    if (m.start > last) fragment.appendChild(document.createTextNode(text.slice(last, m.start)));
+    fragment.appendChild(m.node);
+    last = m.end;
+  }
+  if (last < text.length) fragment.appendChild(document.createTextNode(text.slice(last)));
+  return fragment;
+}
+
+/**
+ * Re-resolve the @mention spans already rendered under `root` against the live
+ * member store, and wrap plain @tokens inside it that now resolve. Called when
+ * a membership/role/profile change bumps roleRevision, so the pills track a
+ * rename without re-parsing or rebuilding the row (P4-02) — in both directions:
+ * a token that stopped resolving is unwrapped to plain text, one that started
+ * resolving becomes a pill. Scoped to the two regions mentions are rendered
+ * into (.msg-text and .sm-text), so an author's display name or a reply
+ * preview, where render never highlights a mention, is left alone.
+ */
+export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
+  for (const content of root.querySelectorAll(".msg-text, .sm-text")) {
+    // querySelectorAll returns a static list, so replacing a span as we go does
+    // not disturb the walk.
+    for (const span of content.querySelectorAll<HTMLElement>(".mention")) {
+      const raw = span.textContent ?? "";
+      const token = raw.startsWith("@") ? raw.slice(1) : raw;
+      const replacement = buildMentionNode(raw, token, info);
+      if (replacement !== null && sameMention(span, replacement)) continue;
+      span.replaceWith(replacement ?? document.createTextNode(raw));
+    }
+
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+    const textNodes: Text[] = [];
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      textNodes.push(n as Text);
+    }
+    for (const textNode of textNodes) {
+      if (textNode.nodeValue?.includes("@") !== true) continue;
+      const parent = textNode.parentElement;
+      if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) continue;
+      const wrapped = wrapResolvedMentions(textNode.nodeValue ?? "", info);
+      if (wrapped !== null) textNode.replaceWith(wrapped);
+    }
+  }
+}
+
+// -- Parsed content (the parse cache's payload) -------------------------------
+//
+// Parsing (splitCodeFences + parseBlocks + parseInline + highlightCode) is the
+// expensive half of rendering a message; building the DOM from it is cheap.
+// renderMessageContent caches the parse under a key the caller derives from the
+// message's identity (id + editedAt), so a row re-materialised by virtual
+// scrolling — or one of many rows repainted for a connection or role change —
+// does not re-tokenise content that has not changed. Mention resolution and
+// emoji lookup stay at render time, because they depend on live stores, not on
+// the parse.
+
+interface ParsedListItem {
+  readonly inline: readonly InlineNode[];
+  readonly level: 0 | 1;
+  readonly ordered: boolean;
+}
+
+type ParsedBlock =
+  | { readonly type: "paragraph"; readonly inline: readonly InlineNode[] }
+  | { readonly type: "heading"; readonly level: 1 | 2 | 3; readonly inline: readonly InlineNode[] }
+  | { readonly type: "quote"; readonly blocks: readonly ParsedBlock[] }
+  | {
+      readonly type: "list";
+      readonly ordered: boolean;
+      readonly start: number;
+      readonly items: readonly ParsedListItem[];
+    };
+
+type ParsedSegment =
+  | { readonly kind: "prose"; readonly blocks: readonly ParsedBlock[] }
+  | {
+      readonly kind: "code";
+      readonly code: string;
+      readonly lang: string | null;
+      readonly canonical: string | null;
+      readonly tokens: readonly CodeToken[];
+    };
+
+interface ParsedMessage {
+  readonly segments: readonly ParsedSegment[];
+}
+
+function parseBlocksInto(text: string, depth: number): readonly ParsedBlock[] {
+  const out: ParsedBlock[] = [];
+  for (const block of parseBlocks(text)) {
+    switch (block.type) {
+      case "heading":
+        out.push({ type: "heading", level: block.level, inline: parseInline(block.text) });
+        break;
+      case "quote":
+        if (depth + 1 >= MAX_BLOCK_DEPTH) {
+          out.push({
+            type: "quote",
+            blocks: [{ type: "paragraph", inline: parseInline(block.text) }],
+          });
+        } else {
+          out.push({ type: "quote", blocks: parseBlocksInto(block.text, depth + 1) });
+        }
+        break;
+      case "list":
+        out.push({
+          type: "list",
+          ordered: block.ordered,
+          start: block.start,
+          items: block.items.map((item) => ({
+            inline: parseInline(item.text),
+            level: item.level,
+            ordered: item.ordered,
+          })),
+        });
+        break;
+      default:
+        out.push({ type: "paragraph", inline: parseInline(block.text) });
+        break;
+    }
+  }
+  return out;
+}
+
+function parseMessageContent(content: string): ParsedMessage {
+  const segments: ParsedSegment[] = [];
+  for (const segment of splitCodeFences(content)) {
+    if (segment.kind === "code") {
+      const canonical = resolveLanguage(segment.lang);
+      segments.push({
+        kind: "code",
+        code: segment.text,
+        lang: segment.lang,
+        canonical,
+        tokens: highlightCode(segment.text, canonical),
+      });
+      continue;
+    }
+    // Blank lines hugging a fence are formatting, not content.
+    const prose = segment.text.replace(/^\n+/, "").replace(/\n+$/, "");
+    if (prose.trim().length === 0) continue;
+    segments.push({ kind: "prose", blocks: parseBlocksInto(prose, 0) });
+  }
+  return { segments };
+}
+
 // -- Block rendering ----------------------------------------------------------
 
 /** Render list items, folding indented ones into a single nested level. */
-function buildList(
-  block: Extract<BlockNode, { type: "list" }>,
+function renderParsedList(
+  block: Extract<ParsedBlock, { type: "list" }>,
   info: MentionInfo | undefined,
 ): HTMLElement {
   const root = createElement(block.ordered ? "ol" : "ul", { class: "md-list" });
@@ -386,7 +576,7 @@ function buildList(
 
   for (const item of block.items) {
     const li = createElement("li", { class: "md-li" });
-    appendInline(li, parseInline(item.text), info);
+    appendInline(li, item.inline, info);
 
     const parentLi = root.lastElementChild;
     if (item.level === 1 && parentLi !== null) {
@@ -403,36 +593,34 @@ function buildList(
   return root;
 }
 
-/** Append the block structure of `text` to `parent`. */
-function appendBlocks(parent: HTMLElement, text: string, info?: MentionInfo, depth = 0): void {
-  for (const block of parseBlocks(text)) {
+/** Append a parsed block structure to `parent`. */
+function renderParsedBlocks(
+  parent: HTMLElement,
+  blocks: readonly ParsedBlock[],
+  info?: MentionInfo,
+): void {
+  for (const block of blocks) {
     switch (block.type) {
       case "heading": {
         const heading = createElement(`h${block.level}`, {
           class: `md-heading md-h${block.level}`,
         });
-        appendInline(heading, parseInline(block.text), info);
+        appendInline(heading, block.inline, info);
         parent.appendChild(heading);
         break;
       }
       case "quote": {
         const quote = createElement("blockquote", { class: "md-quote" });
-        if (depth + 1 >= MAX_BLOCK_DEPTH) {
-          const para = createElement("div", { class: "md-p" });
-          appendInline(para, parseInline(block.text), info);
-          quote.appendChild(para);
-        } else {
-          appendBlocks(quote, block.text, info, depth + 1);
-        }
+        renderParsedBlocks(quote, block.blocks, info);
         parent.appendChild(quote);
         break;
       }
       case "list":
-        parent.appendChild(buildList(block, info));
+        parent.appendChild(renderParsedList(block, info));
         break;
       default: {
         const para = createElement("div", { class: "md-p" });
-        appendInline(para, parseInline(block.text), info);
+        appendInline(para, block.inline, info);
         parent.appendChild(para);
       }
     }
@@ -441,9 +629,10 @@ function appendBlocks(parent: HTMLElement, text: string, info?: MentionInfo, dep
 
 // -- Code fences --------------------------------------------------------------
 
-/** A code block: language label, highlighted body, copy button. */
-function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
+/** A code block from its parsed form: language label, highlighted body, copy button. */
+function renderParsedCodeBlock(segment: Extract<ParsedSegment, { kind: "code" }>): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-codeblock-wrap" });
+  const { code, lang } = segment;
 
   if (lang !== null) {
     const label = createElement("span", { class: "msg-codeblock-lang" });
@@ -452,9 +641,8 @@ function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
   }
 
   const block = createElement("div", { class: "msg-codeblock" });
-  const canonical = resolveLanguage(lang);
-  if (canonical !== null) block.setAttribute("data-lang", canonical);
-  for (const token of highlightCode(code, canonical)) {
+  if (segment.canonical !== null) block.setAttribute("data-lang", segment.canonical);
+  for (const token of segment.tokens) {
     if (token.cls === null) {
       block.appendChild(document.createTextNode(token.text));
       continue;
@@ -484,25 +672,67 @@ function renderCodeBlock(code: string, lang: string | null): HTMLDivElement {
   return wrap;
 }
 
-export function renderMessageContent(content: string, info?: MentionInfo): DocumentFragment {
-  const fragment = document.createDocumentFragment();
+// -- Parse cache --------------------------------------------------------------
 
-  // A message that is nothing but emoji renders them large, the way Discord
-  // does. Decided once over the whole content — the class is what sizes both
-  // the unicode glyphs and the custom-emoji images, so nothing downstream has
-  // to be told about it.
+/** Bounded LRU of parsed message content, keyed by the caller's identity
+ *  string (message id + editedAt). Bounded so a long session does not retain a
+ *  parse per message ever scrolled past; the cap is well above the rendered
+ *  window. Cleared on teardown (clearContentParseCache) and invalidated by the
+ *  key whenever a message is edited. */
+const PARSE_CACHE_MAX = 200;
+const parseCache = new Map<string, ParsedMessage>();
+
+/** Drop every cached parse. The message list calls this on destroy. */
+export function clearContentParseCache(): void {
+  parseCache.clear();
+}
+
+function parsedFor(content: string, cacheKey: string | undefined): ParsedMessage {
+  if (cacheKey === undefined) return parseMessageContent(content);
+  // The content is part of the internal key, not just the caller's id/editedAt:
+  // a row whose content changed without its identity key moving (an in-flight
+  // edit, or a test) must never be served the previous parse.
+  const key = `${cacheKey}\u0001${content}`;
+  const hit = parseCache.get(key);
+  if (hit !== undefined) {
+    // Re-insert to keep the entry at the LRU tail.
+    parseCache.delete(key);
+    parseCache.set(key, hit);
+    return hit;
+  }
+  const parsed = parseMessageContent(content);
+  parseCache.set(key, parsed);
+  if (parseCache.size > PARSE_CACHE_MAX) {
+    const oldest = parseCache.keys().next().value;
+    if (oldest !== undefined) parseCache.delete(oldest);
+  }
+  return parsed;
+}
+
+/**
+ * Render message content to DOM.
+ *
+ * `cacheKey` (the message id plus its editedAt) opts into the parse cache: an
+ * unchanged key reuses the parse and only rebuilds DOM, an edit changes the key
+ * and re-parses. Omitted, every call parses afresh (the behaviour callers that
+ * render ad-hoc strings rely on).
+ */
+export function renderMessageContent(
+  content: string,
+  info?: MentionInfo,
+  cacheKey?: string,
+): DocumentFragment {
+  const parsed = parsedFor(content, cacheKey);
+  const fragment = document.createDocumentFragment();
   const jumboClass = isEmojiOnlyMessage(content) ? "msg-text msg-text-jumbo" : "msg-text";
 
-  for (const segment of splitCodeFences(content)) {
+  for (const segment of parsed.segments) {
     if (segment.kind === "code") {
-      fragment.appendChild(renderCodeBlock(segment.text, segment.lang));
+      fragment.appendChild(renderParsedCodeBlock(segment));
       continue;
     }
-    // Blank lines hugging a fence are formatting, not content.
-    const prose = segment.text.replace(/^\n+/, "").replace(/\n+$/, "");
-    if (prose.trim().length === 0) continue;
     const text = createElement("div", { class: jumboClass });
-    appendBlocks(text, prose, info);
+    renderParsedBlocks(text, segment.blocks, info);
     fragment.appendChild(text);
   }
 

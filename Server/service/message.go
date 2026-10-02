@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -29,7 +31,9 @@ var (
 	ErrBlocked        = errors.New("blocked")
 	ErrDeletedMessage = errors.New("message is deleted")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
-	// timeout row (B5-9) and cannot send, react or join voice.
+	// timeout row (B5-9) and cannot send or edit messages, add reactions,
+	// join voice, start a new DM, create or rename a group DM, ring a DM
+	// call, pin in a DM, or set a custom status.
 	ErrTimedOut = errors.New("timed out")
 )
 
@@ -82,7 +86,7 @@ type SendMessageResult struct {
 	MentionsEveryone bool
 	// MentionsHere reports that MentionsEveryone came from @here rather than
 	// @everyone (mentionSet.HereOnly — never both, @here only narrows when
-	// @everyone is absent). applyMentionCounts skips the mention-count bump
+	// @everyone is absent). mentionEntries skips the mention-count bump
 	// for an @here reader with no live connection at send time; clients need
 	// this bit to tell that case apart from a plain @everyone, which reaches
 	// every reader regardless (OC-0271).
@@ -167,24 +171,29 @@ type MessageService struct {
 	st      Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
-	// bg runs mention-badge bookkeeping off the send path so a mention or
-	// @everyone message does not wait on the full reader-resolution chain
-	// before it is delivered to the rest of the channel. Defaults to `go fn()`;
-	// tests swap it for an inline runner via RunBackgroundInlineForTest so they
-	// can read the counts deterministically right after a send.
+	// bg runs the deferred bookkeeping that has no dedicated worker off the send
+	// path: Web Push dispatch, and the fallback mention write used when no
+	// mention worker is running. Defaults to `go fn()`; tests swap it for an
+	// inline runner via RunBackgroundInlineForTest so they can read the results
+	// deterministically right after a send.
 	bg func(fn func())
-	// online reports whether userID currently holds a live connection. It is
-	// wired by the ws layer (Hub.IsUserConnected) after both are constructed,
-	// so @here can apply the same "no live connection is offline, whatever the
-	// row stores" rule the read path uses (ws/serve_ready.go
-	// presentableMembers) instead of trusting users.status alone — that column
+	// mentionWorker is the single bounded worker that owns every mention-badge
+	// write (P5-O05). It is nil until the composition root starts it
+	// (app.startHub); with no worker, SendMessage resolves and writes mentions
+	// inline through bg, so a directly-constructed service (every test) behaves
+	// as before. An atomic pointer because the composition root starts it while
+	// other goroutines may already be sending.
+	mentionWorker atomic.Pointer[mentionWorker]
+	// liveStatus returns userID's live status, "" when they hold no live
+	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
+	// constructed, so @here reads the same status the member list overlays
+	// (ws/serve_ready.go presentableMembers) instead of users.status, which
 	// keeps a *chosen* idle/dnd/invisible across a disconnect by design
-	// (MarkUserDisconnected only ever rewrites "online" -> "offline"), so a
-	// disconnected idle/dnd reader would otherwise still collect an @here
-	// badge. nil (the zero value, e.g. in tests and any caller with no hub)
-	// means "no live-connection information available" and applies no extra
-	// narrowing, preserving prior behavior.
-	online func(userID int64) bool
+	// (StampDisconnect only ever rewrites "online" -> "offline") and lags a
+	// connect by up to one batched stamp flush (StampFlushInterval). nil (the
+	// zero value, e.g. in tests and any caller with no hub) falls back to the
+	// row.
+	liveStatus func(userID int64) string
 	// messageRequests is B5-6's first-contact gate and delivery-audience
 	// filter (service/message_request.go), wired by service.New(). nil (the
 	// zero value — every test and any caller built via NewMessageService
@@ -194,8 +203,9 @@ type MessageService struct {
 	// *MessageService directly green without themselves wiring it.
 	messageRequests *MessageRequestService
 	// afterFirstContactTrustCheck is a test seam (Codex review round 2,
-	// P2-8): called from dmFirstContactGate right after the trust read comes
-	// back false, before firstContact's insert — same package as its test,
+	// P2-8): called from dmFirstContactGate once the recipient's trust of the
+	// sender (read by GetDMDeliveryTargets) is false, before firstContact's
+	// insert — same package as its test,
 	// no exported setter, mirroring storage_quota.go's afterRecount. Nil in
 	// production.
 	afterFirstContactTrustCheck func()
@@ -221,12 +231,12 @@ func (s *MessageService) SetMessageRequests(mr *MessageRequestService) {
 	s.messageRequests = mr
 }
 
-// SetOnlineChecker wires the live-connection predicate @here's offline
-// narrowing consults in addition to users.status. Passing nil clears it. Safe
-// to call once at startup (the ws layer, after constructing both the Hub and
-// the Services) or from a test.
-func (s *MessageService) SetOnlineChecker(online func(userID int64) bool) {
-	s.online = online
+// SetLiveStatusLookup wires the live-status lookup @here's offline narrowing
+// reads in place of users.status. Passing nil clears it. Safe to call once at
+// startup (the ws layer, after constructing both the Hub and the Services) or
+// from a test.
+func (s *MessageService) SetLiveStatusLookup(liveStatus func(userID int64) string) {
+	s.liveStatus = liveStatus
 }
 
 // SetPushNotifier installs the Web Push dispatch hook. The composition root
@@ -247,12 +257,80 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 	}
 }
 
-// RunBackgroundInlineForTest makes deferred bookkeeping (mention counts) run
-// synchronously on the calling goroutine instead of in a background goroutine,
-// so tests can assert on the results immediately after SendMessage returns.
-// Test-only.
+// RunBackgroundInlineForTest makes the fallback mention write (used when no
+// mention worker is running) and Web Push dispatch run synchronously on the
+// calling goroutine, so tests can assert on the results right after
+// SendMessage returns. Test-only.
 func (s *MessageService) RunBackgroundInlineForTest() {
 	s.bg = func(fn func()) { fn() }
+}
+
+// StartMentionWorker creates and starts the single bounded mention-badge
+// worker and routes SendMessage's mention bookkeeping through it (P5-O05).
+// The composition root calls it once at start-up (app.startHub); tests
+// normally leave it uncalled so SendMessage resolves and writes mentions
+// inline and stays deterministic. ctx bounds the worker's loop; the returned
+// func drains and stops it, and is the caller's (App.Close) job.
+func (s *MessageService) StartMentionWorker(ctx context.Context) func(context.Context) {
+	w := newMentionWorker(s.st)
+	// Start before publishing: run sets started synchronously, so a sender that
+	// sees the worker through mentionWorkerForSend never observes it as
+	// not-started and drops a job.
+	w.run(ctx)
+	s.mentionWorker.Store(w)
+	return w.stopAndDrain
+}
+
+// mentionWorkerForSend returns the active worker, or nil when none is running.
+func (s *MessageService) mentionWorkerForSend() *mentionWorker {
+	if s == nil {
+		return nil
+	}
+	return s.mentionWorker.Load()
+}
+
+// FlushPendingMentionCounts applies any still-queued mention-badge job for
+// msgIDs before the caller reverses those messages' increments. A removal path
+// (DeleteMessage, PurgeMessages, erasure) must call this first so the
+// increment and its reversal stay symmetric: a message removed inside the
+// worker's coalesce window would otherwise be reversed before its increment
+// landed, and the later flush would either raise a phantom badge or (with the
+// liveness guard) be skipped and take a pre-existing genuine badge with it.
+//
+// A no-op when no worker is running: the inline fallback writes the increment
+// on the send path, so it is already on disk before any removal runs. ctx only
+// bounds the wait; the worker applies the jobs against its own loop context, so
+// a cancelled caller context cannot drop the flush.
+func (s *MessageService) FlushPendingMentionCounts(ctx context.Context, msgIDs []int64) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushMessages(ctx, msgIDs)
+}
+
+// flushChannelMentionCounts is FlushPendingMentionCounts for every queued job
+// on one channel — PurgeMessages' pre-purge flush, which cannot name the ids
+// until after the purge has run.
+func (s *MessageService) flushChannelMentionCounts(ctx context.Context, channelID int64) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushChannel(ctx, channelID)
+}
+
+// FlushAllPendingMentionCounts applies every queued mention-badge job,
+// ignoring the coalesce window. The erasure path calls it before its own
+// reversal and message deletion, since the erasure deletes all of a user's
+// messages and cannot cheaply name them first (P5-O05; see
+// FlushPendingMentionCounts). A no-op without a worker.
+func (s *MessageService) FlushAllPendingMentionCounts(ctx context.Context) {
+	w := s.mentionWorkerForSend()
+	if w == nil {
+		return
+	}
+	w.flushNow(ctx)
 }
 
 // sanitizePass is one unescape-sanitize-unescape cycle. Both unescapes are

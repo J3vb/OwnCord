@@ -627,8 +627,9 @@ func TestWebhook_ParticipantLeft_ClearsE2EEState_OnMatch(t *testing.T) {
 }
 
 // TestWebhook_ParticipantLeft_LeaverWithoutReadStillNotified locks OC-0038:
-// voice membership is gated on CONNECT_VOICE alone, so a participant can be
-// in a voice channel without READ_MESSAGES on it. The webhook-driven teardown
+// voice membership can outlive READ_MESSAGES (a mid-call revocation, or a
+// closed DM), so a participant can be in a voice channel without
+// READ_MESSAGES on it. The webhook-driven teardown
 // clears the leaver's own client voice state before broadcasting, so
 // broadcastVoiceEvent's audience — (READ_MESSAGES holders) ∪ (still-in-the-
 // room participants) — can no longer see them, and they never learn the

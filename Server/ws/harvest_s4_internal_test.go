@@ -248,8 +248,8 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 	h.flushPresenceQueue()
 	select {
 	case bm := <-h.broadcast:
-		if !bytes.Contains(bm.msg, []byte("presence")) {
-			t.Errorf("expected a presence broadcast, got %s", bm.msg)
+		if msg := queuedFrame(h, bm); !bytes.Contains(msg, []byte("presence")) {
+			t.Errorf("expected a presence broadcast, got %s", msg)
 		}
 	default:
 		t.Error("no presence broadcast queued after the failed handshake teardown")

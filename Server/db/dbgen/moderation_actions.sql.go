@@ -69,8 +69,9 @@ SELECT EXISTS (
 ) AS active
 `
 
-// The one indexed lookup permissions.Checker / service.PermissionService.Subject
-// run, uncached, to fill Subject.TimedOut.
+// The indexed lookup permissions.Checker.Subject runs, uncached, to fill
+// Subject.TimedOut (service.PermissionService.Subject reads its active-timeout
+// mirror instead, P5-O02).
 func (q *Queries) HasActiveTimeout(ctx context.Context, targetID int64) (int64, error) {
 	row := q.db.QueryRowContext(ctx, hasActiveTimeout, targetID)
 	var active int64
@@ -127,7 +128,8 @@ type ListActiveTimeoutExpiriesRow struct {
 }
 
 // Every currently-active timeout's target and expiry, across all users, so
-// the hub can re-arm its in-memory expiry refresh after a restart.
+// the hub can re-arm its in-memory expiry refresh after a restart and
+// service.PermissionService can load its active-timeout mirror (P5-O02).
 func (q *Queries) ListActiveTimeoutExpiries(ctx context.Context) ([]ListActiveTimeoutExpiriesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listActiveTimeoutExpiries)
 	if err != nil {

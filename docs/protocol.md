@@ -53,6 +53,7 @@ The client connects via the Tauri Rust backend's WS proxy rather than native Web
 | Limit                  | Value        |
 | ---------------------- | ------------ |
 | Max read size          | 1 MB         |
+| Max read size pre-auth | 8 KiB        |
 | Max message content    | 4000 runes   |
 | Write timeout          | 10 seconds   |
 | Auth deadline          | 10 seconds   |
@@ -93,28 +94,25 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                     |
-| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `reaction_update`                                                                                                        |
-| Global broadcasts  | Yes      | `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, `presence` from a `presence_update` (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                  |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                      |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                   |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                             |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                      |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                               |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
+| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                                                               |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                |
 
-**`presence` is split, and only one half is sequenced.** Connect and disconnect
-presence is a normal sequenced global broadcast, so it replays on a warm resume.
-A `presence` caused by the user changing their own status (`presence_update`) is
-sent on the low-priority, droppable tier instead: it carries no `seq`, it can be
-shed under send-buffer pressure for a fully connected client, and it is not
-replayed — so a status change made while a client was away is not delivered when
-that client resumes.
-
-This is deliberate, not an oversight: presence is best-effort by design, and
-`member_join` carries `status` precisely so a client can re-derive presence
-without depending on the correction arriving. Clients must treat presence as
-eventually-consistent and must not assume they have seen every transition. See
+**Presence is sequenced, but droppable.** Connect and disconnect presence
+arrives as `presence_batch` (one frame per coalescing window), a status change
+(`presence_update`) as `presence`; both are sequenced global broadcasts that
+replay on a warm resume. Unlike every other sequenced frame, a presence frame
+that finds a client's send buffer full is **dropped instead of disconnecting
+the client**: the client then gets a full `presence_batch` snapshot within one
+window, and its next resume takes the full `ready`, because replay cannot bring
+back a seq below ones it has since seen. Clients must treat presence as
+eventually consistent and must not assume they have seen every transition. See
 Presence for the invisible-member split.
 
 ---
@@ -194,7 +192,12 @@ keeps it until one authenticates.
     },
     "server_name": "My Server",
     "motd": "Welcome!",
-    "replay_source": "none"
+    "replay_source": "none",
+    "upload_policy": {
+      "max_upload_bytes": 104857600,
+      "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
+      "thumbnails": true
+    }
   }
 }
 ```
@@ -215,6 +218,26 @@ the server already agreed with.
 `"none"` (fresh connection / full re-sync), `"buffer"` (in-memory ring
 buffer), or `"db"` (persistent `events` table). See
 [Reconnection with State Recovery](#reconnection-with-state-recovery).
+
+`upload_policy` is what a client checks before an upload; the upload route
+stays authoritative, and later fields may be added. `max_upload_bytes` is
+`upload.max_size_mb` in bytes, the largest file `POST /api/v1/uploads`
+accepts. `0` means uploads are disabled on this server: the route refuses
+every non-empty file, and clients disable attaching. An older server omits
+`upload_policy`; clients then assume 100 MiB.
+
+`blocked_extensions` and `allowed_extensions` are the file-type policy in
+force (config.yaml's lists, or the owner's saved ones). Only a file name's
+final extension counts, case-insensitively, ignoring trailing dots and spaces:
+a blocked one is refused, and a non-empty `allowed_extensions` accepts only
+those. Either is omitted when empty or unknown, and clients then refuse
+nothing by name. The values are read with the server-name cache, so a change
+reaches a new connection within 30 seconds.
+
+`thumbnails` is `true` when the server serves
+`GET /api/v1/files/{id}/thumb`, an image's bounded preview. A client then shows
+an inline image from that route and loads the full file only when it is
+opened. It is omitted by older servers, and clients then show the full file.
 
 ### Step 3: Failure -- auth_error
 
@@ -291,13 +314,18 @@ refuses anything else with `protocol_epoch_unsupported`.
 
 After `auth_ok`, the server sends a `ready` message containing all initial state.
 
-### Step 5: Member Join + Presence
+### Step 5: Presence
 
-The server broadcasts to all connected clients:
+The user's arrival rides the next `presence_batch` to all connected clients,
+preceded by a `member_join` only for a member they cannot have yet (see
+`member_join`):
 
 ```json
-{ "type": "member_join", "seq": 15, "payload": { "user": { "id": 1, "username": "alex", "avatar": "uuid.png", "role": "admin" }, "status": "online" } }
-{ "type": "presence", "seq": 16, "payload": { "user_id": 1, "status": "online", "custom_status": null } }
+{
+  "type": "presence_batch",
+  "seq": 16,
+  "payload": { "updates": [{ "user_id": 1, "status": "online", "custom_status": null }] }
+}
 ```
 
 ### Periodic Session Revalidation
@@ -378,12 +406,12 @@ while the window is minimised. The JSON ping above is unchanged.
 
 When a connection drops, the client automatically reconnects with exponential backoff (1s to 30s max) and sends `last_seq` in the `auth` message. The server resolves the reconnect through a **3-tier replay pipeline** (cheapest first):
 
-| Tier | Condition                                                                        | Server Behavior                                                                                                                                  | `replay_source` |
-| ---- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| —    | `last_seq == 0`                                                                  | Full flow: `auth_ok` + `ready` + `member_join` + `presence`                                                                                      | `none`          |
-| 1    | seq within the in-memory ring buffer (1000 events)                               | Replay flow: `auth_ok` + missed events + `presence` (no `member_join`, no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
-| 2    | seq within the persistent `events` table (max 5000 events, subject to retention) | Same replay flow, served from the cold tier                                                                                                      | `db`            |
-| 3    | seq too far behind, or channel visibility changed while away                     | Full flow (fallback): same as `last_seq == 0`                                                                                                    | `none`          |
+| Tier | Condition                                                                                                | Server Behavior                                                                                                                      | `replay_source` |
+| ---- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
+| —    | `last_seq == 0`                                                                                          | Full flow: `auth_ok` + `ready`, then the user's presence in the next `presence_batch`                                                | `none`          |
+| 1    | seq within the in-memory ring buffer (1000 events)                                                       | Replay flow: `auth_ok` + missed events + `presence_batch` (no `ready`). Channel-scoped events are permission-filtered (fail-closed). | `buffer`        |
+| 2    | seq within the persistent `events` table (max 5000 events, subject to retention)                         | Same replay flow, served from the cold tier                                                                                          | `db`            |
+| 3    | seq too far behind, channel visibility changed while away, or a presence frame was dropped for this user | Full flow (fallback): same as `last_seq == 0`                                                                                        | `none`          |
 
 A visibility watermark forces the tier-3 full re-sync whenever channel
 visibility changed while the client was disconnected, so permission changes
@@ -451,13 +479,20 @@ servers omit it.
 `mention_count` is the number of unread messages that mention this user — a
 direct `@username` or an authorized `@everyone`/`@here` — in that channel. It is
 raised by the send that mentions them (never by an edit) and reset to 0 by
-`channel_focus` or `mark_read`.
+`channel_focus` or `mark_read`. Unlike `unread_count` it is never capped.
+
+`unread_count` counts unread messages but is **capped at 100**: any channel with
+100 or more unread messages reports exactly `100`, and the client renders the cap
+as `99+`. The cap bounds the per-channel count on every connect — a channel with
+thousands of never-read messages does not scan every row — so a client must not
+read `100` as an exact total.
 
 **dm_channels[]:** `channel_id`, `recipient` (user object with `id`, `username`, `avatar`, `status`), `last_message_id`, `last_message`, `last_message_at`, `unread_count`, `mention_count`
 
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
-every reconnect; the ready payload now ships the stored value.
+every reconnect; the ready payload now ships the stored value. A DM's
+`unread_count` is capped at 100 under the same rule as `channels[]` above.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name), `status`, `display_name` (`null` when unset — render it instead of `username`), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU)
 
@@ -467,7 +502,8 @@ to reconstruct them:
 1. A member with no live connection is `"offline"`, whatever status they last
    chose — a chosen `idle`/`dnd`/`invisible` is preserved server-side across a
    disconnect so the next connect can honour it, but it must not render as
-   "present" in the meantime.
+   "present" in the meantime. A member whose connection has not come online
+   yet is `"offline"` too; their `presence` broadcast follows once it does.
 2. An `"invisible"` member is `"offline"` to everyone but themselves. The
    viewer's own entry carries their true status.
 
@@ -613,9 +649,9 @@ highlight from these fields rather than re-parsing the content. DMs never carry
 `mentions_everyone`.
 
 `@everyone` and `@here` both raise `mention_count` for every reader except
-`@here` skips a reader with no live connection at send time (the server's
-`applyMentionCounts` treats that reader as unreachable, the same way a push
-notification would). A client cannot tell the two tokens apart from
+`@here` skips a reader with no live connection when the badge is written (the
+server's mention worker treats that reader as unreachable, the same way a push
+notification would; the write lands a fraction of a second after the send). A client cannot tell the two tokens apart from
 `mentions_everyone` alone, which is why `mentions_here` exists: a reconnecting
 client that replays this frame from the gap it was disconnected for must not
 raise a mention badge for a here-only mention the server never counted — there
@@ -702,6 +738,28 @@ are soft, so clients mark each id as a tombstone exactly as they do for
   "payload": {
     "channel_id": 5,
     "ids": [1042, 1041, 1040]
+  }
+}
+```
+
+---
+
+### chat_pinned (Server -> Client, broadcast)
+
+Emitted by the REST pin/unpin handlers
+(`POST`/`DELETE /api/v1/channels/{id}/pins/{messageId}`, gated on
+`READ_MESSAGES|MANAGE_MESSAGES`, or DM participant) to every reader of the
+channel, so other clients and the pinner's own other devices do not show stale
+pins. Sequenced and replayable like `chat_edited`; `pinned` is the new state.
+
+```json
+{
+  "seq": 46,
+  "type": "chat_pinned",
+  "payload": {
+    "message_id": 1042,
+    "channel_id": 5,
+    "pinned": true
   }
 }
 ```
@@ -798,7 +856,8 @@ Valid `status` values: `"online"`, `"idle"`, `"dnd"`, `"invisible"`.
 server-side. **Omitting the field leaves the stored text alone**; sending `""`
 clears it. The distinction matters because a client's auto-idle timer sends a
 bare status flip several times an hour and must not blank the text the user
-typed.
+typed. While the user is timed out a non-empty `custom_status` is refused with
+`TIMED_OUT`; a bare status change and `""` still apply.
 
 The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
@@ -828,6 +887,46 @@ the user themselves receives a separate, targeted `presence` carrying their
 true `"invisible"`. A client must therefore not assume it sees the same
 presence value for a user that everyone else does — and must not "correct" its
 own status back to online on the strength of a broadcast it did not receive.
+
+`presence` now carries only a user's own status changes (`presence_update`).
+Coming online and going offline arrive in `presence_batch`. A client older
+than this release ignores `presence_batch`, so it shows stale connect and
+disconnect presence until it updates.
+
+### presence_batch (Server -> Client, broadcast)
+
+Connect and disconnect presence is coalesced for 300 ms and sent as one frame
+listing every user whose presence changed in that window, so a reconnect herd
+of N users costs each client a handful of frames instead of N.
+
+```json
+{
+  "seq": 51,
+  "type": "presence_batch",
+  "payload": {
+    "updates": [
+      { "user_id": 1, "status": "online", "custom_status": "shipping phase 6" },
+      { "user_id": 4, "status": "offline", "custom_status": null }
+    ]
+  }
+}
+```
+
+Each entry means what a `presence` with the same fields means: `custom_status`
+is always present (`null` when unset), and an invisible user is `"offline"`
+with `custom_status: null` for everyone but themselves — the invisible user's
+own copy of the same frame (same `seq`) carries their true status. An entry
+for a user the client does not know is ignored: a member the recipient's list
+may not have yet arrives first as a `member_join` (see `member_join`).
+
+**Full snapshot.** A client whose send buffer was full when a presence frame
+arrived has that frame dropped (not the connection) and receives, within the
+next window, an unsequenced `presence_batch` with `"full": true`. It lists
+every connected user who is not offline to that client (its own true status
+and custom text included, even when invisible), each with their current
+`custom_status` (always present, `null` when unset); every member it leaves
+out is offline, so an invisible member is simply absent. Clear an offline
+member's custom text, which is what `ready` shows.
 
 ---
 
@@ -989,9 +1088,17 @@ All member messages are broadcast to all connected clients.
 
 ### member_join (Server -> Client, broadcast)
 
-Sent when a user first connects (fresh connection, not reconnect replay), and
-when a ban is lifted (an admin unban or an overturned ban appeal) so clients
-re-add the row `member_ban` removed. On an unban, `status` is `"offline"`
+Sent when a ban is lifted (an admin unban or an overturned ban appeal) so
+clients re-add the row `member_ban` removed. Coming online is presence, not a
+join: every client's `ready` already lists every member, so a connect sends no
+`member_join`. It is still sent, just ahead of the `presence_batch` (or the
+`presence`) carrying their status, for a member other clients cannot have
+yet: a first-ever connect (repeated on the next connect if that first
+handshake failed before the announcement, or if it comes within about 2
+seconds, before the first connect's status write), or the return of a user
+whose temporary ban lapsed. Unlike presence, `member_join` is never dropped for a
+full send buffer. Clients that watched `member_join` to learn someone came
+online must read presence instead. On an unban, `status` is `"offline"`
 unless the user holds a live connection (a lapsed temporary ban lets them
 reconnect before the unban).
 
@@ -1291,6 +1398,9 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 { "type": "voice_join", "payload": { "channel_id": 10 } }
 ```
 
+The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
+`READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
+
 On success, server sends:
 
 1. `voice_token` -- LiveKit JWT + URL
@@ -1344,6 +1454,10 @@ restricted by the user's permissions.
 }
 ```
 
+`quality` is the server's `voice.quality` setting; there is no per-channel
+override. `threshold_mode`, `mixing_threshold` and `top_speakers` are reserved:
+they are always sent, but no client reads them.
+
 Quality presets:
 
 | Preset   | Bitrate     |
@@ -1396,6 +1510,9 @@ Quality presets:
 Moderation](#voice-moderation)). `muted` / `deafened` are always set alongside
 them, so a client that ignores the two new fields still renders the user as
 silenced; they exist so the UI can show that the user may not lift it.
+
+`speaking` is always `false`: the speaking indicator comes from LiveKit's active
+speakers, not from the server. The field is kept for compatibility.
 
 `voice_state` also arrives **unsequenced** in one case: when a client joins a
 voice channel, the states of participants already in the room are relayed to
@@ -1487,7 +1604,11 @@ Sets `server_deafened` (and `deafened`) and broadcasts `voice_state`. Deafen has
 no SFU equivalent — it governs what the target plays back — so it is enforced by
 the target's client honoring the flag plus the server refusing their own
 undeafen. Deafening also applies a server mute, so a user who cannot hear the
-room cannot keep talking into it.
+room cannot keep talking into it. Clearing it clears `deafened` too, so the
+target hears the room again; `muted` is left as-is, and the target unmutes
+themselves. The server cannot tell a deafen the target chose from the one the
+moderator applied, so the desktop client keeps a deafen the target set before
+the moderator did and restates it with `voice_deafen`.
 
 ### voice_mod_move (Client -> Server)
 
@@ -1495,13 +1616,14 @@ room cannot keep talking into it.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
-The destination is checked against the TARGET's `CONNECT_VOICE` (a move must not
-place someone where they could not go themselves) and against the destination's
-`voice_max_users`. The server then runs its voice-leave routine for the target —
-`voice_leave` is broadcast, the LiveKit participant is removed, the row deleted
-— and sends the target `voice_moved`. The target's client answers with an
-ordinary `voice_join` for the destination, so capacity, token minting and
-key-holder election keep their single implementation.
+The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
+DM, `READ_MESSAGES` (a move must not place someone where they could not go
+themselves) and against the destination's `voice_max_users`. The server then
+runs its voice-leave routine for the target — `voice_leave` is broadcast, the
+LiveKit participant is removed, the row deleted — and sends the target
+`voice_moved`. The target's client answers with an ordinary `voice_join` for
+the destination, so capacity, token minting and key-holder election keep their
+single implementation.
 
 A target whose socket has dropped while the server holds its call open for a
 reconnect (up to 15 seconds) has no socket to receive `voice_moved`. The server
@@ -1528,6 +1650,12 @@ Removes the target from the LiveKit room, deletes their `voice_states` row and
 broadcasts `voice_leave`, then sends them `voice_disconnected`. A target whose
 call is being held for a reconnect is still removed, but gets no
 `voice_disconnected`; on resume it sees only the replayed `voice_leave`.
+
+For 60 seconds after any moderator kick or move, the server refuses a
+`voice_join` from the removed user to the channel it was removed from with
+`FORBIDDEN` ("You were removed from this voice channel"), so a client still
+reconnecting its voice cannot rejoin the call it was removed from. Other
+channels are unaffected.
 
 ### voice_disconnected (Server -> Client, direct)
 
@@ -1833,7 +1961,8 @@ dangling, in exchange for information the presence already carries.
 }
 ```
 
-Only a participant of the DM may ring it (`FORBIDDEN` otherwise). Rate limited
+Only a participant of the DM may ring it (`FORBIDDEN` otherwise), and not
+while timed out (`TIMED_OUT`; `call_decline` still works). Rate limited
 to one ring every 3 seconds per user — per _user_, not per channel, because the
 abuse it prevents is spamming somebody with call banners.
 
@@ -1884,7 +2013,8 @@ and the ringer's own 30s window already covers it.
   "type": "server_restart",
   "payload": {
     "reason": "update",
-    "delay_seconds": 5
+    "delay_seconds": 5,
+    "reconnect_spread_ms": 20000
   }
 }
 ```
@@ -1910,10 +2040,44 @@ reconnects with the same token once the server is back and returns to the
 channel it was in. Voice ends when the socket actually drops after an
 announcement, since the server's voice state goes with the process; the
 announcement alone leaves the call, because an update can still be aborted.
-After an `update`, `backup_restore` or `setup` drop, the client re-joins the
-call with one ordinary `voice_join` once `ready` arrives
+After the drop, the client re-joins the call with one ordinary `voice_join`
+once `ready` arrives, within a window that depends on the `reason`
 ([voice-and-e2ee.md](architecture/ux/voice-and-e2ee.md), RT-12).
 A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
+
+`reconnect_spread_ms` spreads the reconnect herd: 10 ms per client connected
+when the notice is sent, capped at 30 000 (2,000 clients get 20 s). Each client
+picks a uniform offset in `[0, reconnect_spread_ms]` and makes its first
+redial at `delay_seconds` plus that offset after the notice, or that offset
+after the drop when the socket drops later than announced. A network-return or
+focus signal does not cut this wait short, unlike an ordinary reconnect's
+backoff. A server that predates the field omits it; treat that as 0.
+
+### Fresh-connect admission (`SERVER_BUSY`)
+
+A fresh connect (and a resume that falls back to a full `ready`) takes one of
+a bounded number of ready-build permits (2 × the server's CPU count) after
+`auth` is accepted and before any handshake work. It waits up to 10 s for one;
+past that the server sends, before `auth_ok`,
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "SERVER_BUSY",
+    "message": "server busy, retrying shortly",
+    "retry_after_ms": 3712
+  }
+}
+```
+
+and closes with status 1013 (try again later). `retry_after_ms` is drawn from
+2.5–5 s per refusal, so the refused connects do not return together; a client
+waits at least that long before redialling. The desktop client does this
+silently, without an error toast. On a first sign-in it keeps its connecting
+screen: each refusal restarts the 20 s first-authentication deadline, up to
+70 s after the first attempt, after which the sign-in fails with an error. A
+warm resume served by replay never waits for a permit.
 
 ---
 
@@ -1951,10 +2115,13 @@ A zero `delay_seconds` cancels an earlier announcement (`update_aborted`).
 | `INVALID_JSON`          | Message is not valid JSON                                                                                                                                                                                                                                                        |
 | `UNKNOWN_TYPE`          | Unrecognized message type                                                                                                                                                                                                                                                        |
 | `SLOW_MODE`             | Channel has slow mode enabled                                                                                                                                                                                                                                                    |
+| `TIMED_OUT`             | A send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)                                                                                                                                                                     |
 | `CONFLICT`              | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
+| `ALREADY_DELETED`       | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
 | `SERVER_MUTED`          | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
 | `SERVER_DEAFENED`       | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
 | `SESSION_REPLACED`      | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
+| `SERVER_BUSY`           | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                                                     |
 | `ANOTHER_DEVICE_ACTIVE` | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
@@ -2034,7 +2201,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (42 types)
+### Server -> Client (43 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |
@@ -2046,9 +2213,11 @@ tables below add per-type behavioral notes.
 | `chat_edited`         | Yes      | Channel or DM participants                                              |
 | `chat_deleted`        | Yes      | Channel or DM participants                                              |
 | `chat_bulk_deleted`   | Yes      | Channel                                                                 |
+| `chat_pinned`         | Yes      | Channel                                                                 |
 | `reaction_update`     | Yes      | Channel or DM participants                                              |
 | `typing`              | No       | Channel (excl. sender) or DM                                            |
 | `presence`            | Yes      | All clients                                                             |
+| `presence_batch`      | Yes      | All clients (a full snapshot: no, direct to one client)                 |
 | `channel_create`      | No       | Each client that may view the channel (per-recipient)                   |
 | `channel_update`      | Yes      | All clients                                                             |
 | `channel_delete`      | Yes      | All clients                                                             |

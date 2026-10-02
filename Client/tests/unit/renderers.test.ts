@@ -78,6 +78,18 @@ function resetStores(): void {
   setConnectionStatus("connected");
 }
 
+/** Seed a moderator role (MANAGE_MESSAGES) so permission-gated actions render. */
+function seedMessageManager(): void {
+  setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
+  authStore.setState(() => ({
+    token: "tok",
+    user: { id: 999, username: "Mod", avatar: null, role: "moderator" },
+    serverName: null,
+    motd: null,
+    isAuthenticated: true,
+  }));
+}
+
 /** Seed the member list so @tokens resolve — unresolvable tokens stay plain text. */
 function seedMentionMembers(): void {
   membersStore.setState((prev) => ({
@@ -475,6 +487,19 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("renders the reply preview as plain text, not raw markdown (F24)", () => {
+      const original = makeMessage({ id: 1, content: "**bold** and `code`" });
+      const reply = makeMessage({ id: 2, replyTo: 1, content: "This is a reply" });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(reply, false, [original, reply], makeOpts(), ac.signal));
+
+      const preview = container.querySelector(".msg-reply-ref .rr-text")!.textContent;
+      expect(preview).not.toContain("**");
+      expect(preview).toContain("bold");
+
+      ac.abort();
+    });
+
     it("shows action buttons for non-deleted messages", () => {
       const msg = makeMessage();
       const ac = new AbortController();
@@ -488,6 +513,7 @@ describe("renderers", () => {
     });
 
     it("gives icon-only action buttons explicit accessible names", () => {
+      seedMessageManager();
       const msg = makeMessage();
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
@@ -513,6 +539,7 @@ describe("renderers", () => {
     });
 
     it("updates the pin button accessible name for pinned messages", () => {
+      seedMessageManager();
       const msg = makeMessage({ pinned: true });
       const ac = new AbortController();
       const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
@@ -939,6 +966,23 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("renders its time in the same clock format as the message header", () => {
+      const msg = makeMessage({
+        user: { id: 0, username: "System", avatar: null },
+        content: "@alice joined the server",
+        timestamp: new Date().toISOString(),
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      // The header format is "Today at 2:34 PM", not the bare 24h "14:34"
+      // formatTime used to render here (DP-48).
+      expect(el.querySelector(".sm-time")!.textContent).toMatch(/^Today at /);
+
+      ac.abort();
+    });
+
     it("renders mentions inside system message text", () => {
       const msg = makeMessage({
         user: { id: 0, username: "System", avatar: null },
@@ -1213,6 +1257,7 @@ describe("renderers", () => {
     });
 
     it("calls onPinClick with correct arguments", () => {
+      seedMessageManager();
       const opts = makeOpts();
       const msg = makeMessage({ pinned: false });
       const ac = new AbortController();
@@ -1240,7 +1285,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("calls onDeleteClick when delete button is clicked", () => {
+    it("calls onDeleteClick with shiftKey=false when delete button is clicked", () => {
       const opts = makeOpts();
       const msg = makeMessage();
       const ac = new AbortController();
@@ -1249,7 +1294,21 @@ describe("renderers", () => {
 
       const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
       deleteBtn.click();
-      expect(opts.onDeleteClick).toHaveBeenCalledWith(1);
+      expect(opts.onDeleteClick).toHaveBeenCalledWith(1, false);
+
+      ac.abort();
+    });
+
+    it("passes the shift state through to onDeleteClick (P4-12)", () => {
+      const opts = makeOpts();
+      const msg = makeMessage();
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], opts, ac.signal);
+      container.appendChild(el);
+
+      const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
+      deleteBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+      expect(opts.onDeleteClick).toHaveBeenCalledWith(1, true);
 
       ac.abort();
     });
@@ -1282,10 +1341,11 @@ describe("renderers", () => {
 
       expect(container.querySelector("[data-testid='msg-edit-1']")).toBeNull();
       expect(container.querySelector("[data-testid='msg-delete-1']")).toBeNull();
-      // But react, reply, pin should still be present
+      // React and reply stay available to everyone; Pin follows the server's
+      // MANAGE_MESSAGES gate and is withheld like delete (F1).
       expect(container.querySelector("[data-testid='msg-react-1']")).not.toBeNull();
       expect(container.querySelector("[data-testid='msg-reply-1']")).not.toBeNull();
-      expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='msg-pin-1']")).toBeNull();
 
       ac.abort();
     });
@@ -1332,6 +1392,73 @@ describe("renderers", () => {
 
       ac.abort();
     });
+
+    it("withholds Pin from a member without MANAGE_MESSAGES (F1)", () => {
+      // The server gates SetMessagePinned on MANAGE_MESSAGES, so offering
+      // Pin to a plain member is a broken affordance on every message.
+      setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 999, username: "Nobody", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      const opts = makeOpts({ currentUserId: 999 });
+      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      expect(container.querySelector("[data-testid='msg-pin-1']")).toBeNull();
+      // React/Reply stay available to everyone.
+      expect(container.querySelector("[data-testid='msg-react-1']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='msg-reply-1']")).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("offers Pin to a role with MANAGE_MESSAGES", () => {
+      setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 999, username: "Mod", avatar: null, role: "moderator" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      const opts = makeOpts({ currentUserId: 999 });
+      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
+
+      ac.abort();
+    });
+
+    it("offers Pin to a DM participant without MANAGE_MESSAGES (F1)", () => {
+      // The server lets any DM participant pin (SetMessagePinned's DM branch),
+      // so the gate must not hide it there.
+      setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
+      authStore.setState(() => ({
+        token: "tok",
+        user: { id: 999, username: "Nobody", avatar: null, role: "member" },
+        serverName: null,
+        motd: null,
+        isAuthenticated: true,
+      }));
+
+      const opts = makeOpts({ currentUserId: 999, channelType: "dm" });
+      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+
+      expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
+
+      ac.abort();
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -1347,7 +1474,9 @@ describe("renderers", () => {
 
       const hoverTime = container.querySelector(".msg-hover-time");
       expect(hoverTime).not.toBeNull();
-      expect(hoverTime!.textContent).toMatch(/^\d{2}:\d{2}$/);
+      // Same format as the message header (F24): it carries a time, not a
+      // bare 24h HH:MM.
+      expect(hoverTime!.textContent).toMatch(/\d{1,2}:\d{2}\s?(AM|PM)?/i);
 
       ac.abort();
     });

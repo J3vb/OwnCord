@@ -94,7 +94,7 @@ func FuzzSanitizeFTSQuery(f *testing.F) {
 		// the MATCH clause. A "no rows" result is fine; a query-syntax error
 		// is the bug (an FTS5 operator keyword or bare "-" slipping through
 		// unescaped).
-		if _, err := database.SearchMessages(context.Background(), got, nil, 10); err != nil {
+		if _, err := database.SearchMessages(context.Background(), got, nil, SearchPage{Limit: 10}); err != nil {
 			t.Fatalf("SearchMessages with sanitized query %q (from %q) errored: %v", got, q, err)
 		}
 	})

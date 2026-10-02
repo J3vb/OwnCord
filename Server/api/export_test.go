@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -179,3 +180,17 @@ func SetRouteTablePathForTest(t *testing.T, path string) {
 	routeTablePath = path
 	t.Cleanup(func() { routeTablePath = prev })
 }
+
+// SetMiddlewareClockForTest replaces the clock AuthMiddleware's touch
+// throttle reads, restoring it when t ends.
+func SetMiddlewareClockForTest(t *testing.T, now func() time.Time) {
+	prev := middlewareNow
+	middlewareNow = now
+	t.Cleanup(func() { middlewareNow = prev })
+}
+
+// UploadBodyCapForTest exposes uploadBodyCap for external tests.
+func UploadBodyCapForTest(fileCap int64) int64 { return uploadBodyCap(fileCap) }
+
+// UploadMultipartMarginForTest is uploadMultipartMargin for external tests.
+const UploadMultipartMarginForTest = uploadMultipartMargin

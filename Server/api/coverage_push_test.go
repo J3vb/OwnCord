@@ -222,7 +222,9 @@ func TestUpdateProfile_WithAvatar(t *testing.T) {
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "avataruser", 4)
 
-	avatar := "https://example.com/avatar.png"
+	// A different host: a URL on the request's own host must be an attachment
+	// route, which the same-host guard in validateAvatarURL enforces.
+	avatar := "https://avatars.example.net/avatar.png"
 	rr := patchJSON(t, router, "/api/v1/users/me", token, map[string]any{
 		"username": "avataruser2",
 		"avatar":   avatar,
@@ -751,7 +753,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 	r := chi.NewRouter()
 	svc := service.New(database, limiter)
 	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil)
+	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, nil)
 	api.MountInviteRoutes(r, database, svc)
 
 	token := loginAndGetToken(t, r, database, "combined1", 2)

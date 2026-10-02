@@ -4,8 +4,8 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { loadPref } from "./helpers";
-import { vkName } from "@lib/ptt";
+import { loadPref, savePref } from "./helpers";
+import { vkName, pttReleaseDelayMs, PTT_RELEASE_DELAY_MAX_MS } from "@lib/ptt";
 import {
   keyEventToVk,
   loadGlobalShortcutVks,
@@ -15,6 +15,8 @@ import {
 } from "@lib/voiceShortcuts";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
+
+const delayText = (ms: number): string => t("keybinds.pttReleaseDelay.value", { ms });
 
 export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
@@ -117,6 +119,57 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   );
   section.appendChild(pttHint);
 
+  // DP-30: how long the mic keeps transmitting after the key is released.
+  const delayHeader = createElement(
+    "div",
+    { class: "settings-field-label" },
+    t("keybinds.pttReleaseDelay"),
+  );
+  const delayRow = createElement("div", { class: "slider-row" });
+  const savedDelay = pttReleaseDelayMs();
+  const delaySlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: String(PTT_RELEASE_DELAY_MAX_MS),
+    step: "10",
+    value: String(savedDelay),
+    "aria-label": t("keybinds.pttReleaseDelay"),
+    "aria-valuetext": delayText(savedDelay),
+    "data-testid": "ptt-release-delay",
+  });
+  const delayValue = createElement(
+    "span",
+    { class: "slider-val", "data-testid": "ptt-release-delay-value" },
+    delayText(savedDelay),
+  );
+  delaySlider.addEventListener(
+    "input",
+    () => {
+      const ms = Number(delaySlider.value);
+      savePref("pttReleaseDelayMs", ms);
+      setText(delayValue, delayText(ms));
+      delaySlider.setAttribute("aria-valuetext", delayText(ms));
+    },
+    { signal },
+  );
+  appendChildren(delayRow, delaySlider, delayValue);
+  appendChildren(section, delayHeader, delayRow);
+
+  // voice #12: where the desktop cannot observe global key state (macOS or a
+  // Wayland session), a bound PTT key can never gate the mic — say so and
+  // disable the binding control rather than promising a privacy behaviour
+  // that will not happen.
+  void desktop.pushToTalk
+    .supported()
+    .catch(() => false)
+    .then((supported) => {
+      if (signal.aborted || supported) return;
+      setText(pttHint, t("keybinds.pttUnsupported"));
+      pttValue.disabled = true;
+      delaySlider.disabled = true;
+    });
+
   // ── Navigation section ────────────────────────────────────
   section.appendChild(createElement("div", { class: "settings-separator" }));
 
@@ -132,6 +185,8 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
   const navBinds: [string, string][] = [
     [t("keybinds.action.quickSwitcher"), t("keybinds.key.ctrlK")],
     [t("keybinds.action.searchMessages"), t("keybinds.key.ctrlF")],
+    [t("keybinds.action.nextChannel"), t("keybinds.key.altArrow")],
+    [t("keybinds.action.nextUnreadChannel"), t("keybinds.key.altShiftArrow")],
     [t("keybinds.action.closeOverlay"), t("keybinds.key.escape")],
   ];
   for (const [label, shortcut] of navBinds) {

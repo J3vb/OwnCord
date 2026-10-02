@@ -19,11 +19,18 @@
 //   `cert-tofu` mismatch event fires (CertMismatchModal flow).
 //
 // Design notes (docs/plans/http-tofu-proxy.md):
-// - One request per tunnel connection: the proxy rewrites the first request's
-//   Host header to the real host and injects `Connection: close`, so
-//   keep-alive reuse (whose later requests would bypass the rewrite) never
-//   happens. Per-request TLS overhead is acceptable for this app's REST
-//   traffic; the hot path is the WebSocket.
+// - One request per loopback connection: the proxy reads and rewrites every
+//   request's Host header to the real host, and the webview is always told
+//   `Connection: close`, so no request reaches the server without the rewrite.
+// - Upstream reuse (http_pool.rs): a bodyless GET/HEAD/OPTIONS rides an idle
+//   upstream TLS connection when one exists whose handshake verified the
+//   host's current pin; the pool drops a host's connections whenever its pin
+//   changes, is forgotten, or fails a check. Every other request (uploads,
+//   POST/PATCH/PUT/DELETE) opens its own TLS connection with
+//   `Connection: close` and runs the TOFU check, as before.
+// - Each upstream socket is dialed with TCP_NODELAY: Nagle's algorithm
+//   otherwise holds a small request for the server's delayed ACK, about 40 ms
+//   at a low RTT (docs/plans/http-tofu-proxy.md "TCP_NODELAY").
 // - Per-host tunnels: the Connect page polls health for every profile, so
 //   multiple proxies can run concurrently (bounded by profile count).
 // - The accept loop exits after 5 consecutive errors to prevent CPU spin.
@@ -38,15 +45,18 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 
+use crate::http_pool::{self, BoxError, ConnPool, Fresh, BAD_GATEWAY};
 use crate::tofu::{self, TofuOutcome};
 
 /// Tauri-managed state: one running tunnel per remote host.
 pub struct HttpProxyState {
     inner: Mutex<HashMap<String, ProxyEntry>>,
-    /// Hosts already reported as pinned this app session. Every request opens
-    /// its own tunnel connection and re-runs the TOFU check, so a trusted
-    /// outcome would otherwise emit a `cert-tofu` event (and the webview a log
-    /// line) once per request. CLI-04(a): emit the trusted event for a host once
+    /// Idle upstream connections shared by every tunnel, keyed by exact host.
+    pub(crate) pool: Arc<ConnPool<TlsConn>>,
+    /// Hosts already reported as pinned this app session. Every fresh upstream
+    /// connection re-runs the TOFU check, so a trusted outcome would otherwise
+    /// emit a `cert-tofu` event (and the webview a log line) once per
+    /// connection. CLI-04(a): emit the trusted event for a host once
     /// until a `first_use` or `mismatch` is emitted for it, which clears the
     /// claim. Those actionable statuses are never gated — the first-use ceremony
     /// must be able to prompt again after the user dismisses it.
@@ -62,6 +72,7 @@ impl HttpProxyState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            pool: ConnPool::new(),
             trusted_reported: std::sync::Mutex::new(HashSet::new()),
         }
     }
@@ -103,9 +114,9 @@ impl HttpProxyState {
 }
 
 use crate::proxy_common::{
-    connect_tls, content_length, copy_with_deadline, header_value, read_request_headers,
-    resolve_remote_target, rewrite_headers, run_accept_loop, spawn_watched, validate_remote_host,
-    CountingStream,
+    connect_tls_over, content_length, copy_with_deadline, dial_tcp, header_value,
+    read_request_headers, resolve_remote_target, rewrite_headers, run_accept_loop, spawn_watched,
+    validate_remote_host, CountingStream,
 };
 
 /// Start (or reuse) a local HTTP→TLS tunnel for `remote_host` and return the
@@ -184,6 +195,7 @@ pub async fn stop_http_proxy(
     remote_host: String,
 ) -> Result<(), String> {
     let mut inner = state.inner.lock().await;
+    state.pool.invalidate(&tofu::cert_store_key(&remote_host));
     if let Some(entry) = inner.remove(&remote_host) {
         let _ = entry.shutdown_tx.send(());
         info!("[http_proxy] tunnel stopped for {}", remote_host);
@@ -200,17 +212,20 @@ pub async fn stop_http_proxy(
 // Proxy internals
 // ---------------------------------------------------------------------------
 
-/// Rewrite the first request's headers: replace Host with the real remote
-/// host and force `Connection: close` so exactly one request rides each
-/// tunnel connection (later keep-alive requests would bypass this rewrite).
+/// Rewrite a request's headers: replace Host with the real remote host and
+/// set exactly one `Connection: {connection}`. The one-shot path passes
+/// `close`, so the upstream connection ends with the response; the pooled
+/// path passes `keep-alive`. Either way the webview sends one request per
+/// loopback connection (its response says `Connection: close`), so every
+/// request is read and rewritten here, never passed through unread.
 /// `raw` must end with the "\r\n\r\n" header terminator.
-fn rewrite_request_headers(raw: &[u8], remote_host: &str) -> String {
+fn rewrite_request_headers(raw: &[u8], remote_host: &str, connection: &str) -> String {
     let mut modified = rewrite_headers(&String::from_utf8_lossy(raw), |line| {
         let lower = line.to_ascii_lowercase();
         if lower.starts_with("host:") {
             Some(format!("Host: {remote_host}"))
         } else if lower.starts_with("connection:") {
-            Some("Connection: close".to_string())
+            Some(format!("Connection: {connection}"))
         } else {
             None
         }
@@ -221,131 +236,68 @@ fn rewrite_request_headers(raw: &[u8], remote_host: &str) -> String {
     // If the client never sent a Connection header, inject one.
     if !modified.to_ascii_lowercase().contains("\r\nconnection:") {
         let insert_at = modified.len() - 2; // before final CRLF
-        modified.insert_str(insert_at, "Connection: close\r\n");
+        modified.insert_str(insert_at, &format!("Connection: {connection}\r\n"));
     }
     modified
 }
 
+/// The upstream side of a tunnel: one TLS connection to the real server.
+type TlsConn = tokio_rustls::client::TlsStream<TcpStream>;
+
 /// Handle one proxied connection:
 /// 1. Read the request headers from the loopback side
-/// 2. TLS-connect to the remote and run the TOFU check (store/emit/reject)
-/// 3. Forward the rewritten request, then shovel bytes bidirectionally
+/// 2. A bodyless GET/HEAD/OPTIONS goes through the upstream connection pool
+///    (`http_pool`): an idle connection whose handshake verified the current
+///    pin, or a fresh verified one, kept alive for the next such request
+/// 3. Any other request TLS-connects and runs the TOFU check, forwards the
+///    rewritten request with `Connection: close`, then shovels bytes
+///    bidirectionally
 async fn handle_connection<R: Runtime>(
     app: AppHandle<R>,
     mut local: TcpStream,
     remote_host: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), BoxError> {
     // ── 1. Read HTTP request headers (up to \r\n\r\n), 10s guard ─────────
     let buf = read_request_headers(&mut local).await?;
 
     // Defense-in-depth (primary validation is in start_http_proxy).
     validate_remote_host(remote_host)?;
-    let modified = rewrite_request_headers(&buf, remote_host);
-
-    // ── 2. TLS connect + TOFU check ──────────────────────────────────────
-    let (verifier, captured_fp) = tofu::CaptureVerifier::new();
-    let tls_config = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_no_client_auth();
-    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
-
-    let (server_name, dial_target) = resolve_remote_target(remote_host)?;
-    let mut tls = connect_tls(
-        &connector,
-        server_name,
-        &dial_target,
-        Duration::from_secs(10),
-    )
-    .await?;
-
-    let observed = captured_fp
-        .lock()
-        .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
-        .clone()
-        .filter(|o| !o.fingerprint.is_empty())
-        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
-    let fingerprint = observed.fingerprint.clone();
-
     let store_key = tofu::cert_store_key(remote_host);
-    match tofu::evaluate(&app, &store_key, &observed)? {
-        // A routine public-CA renewal was re-pinned by evaluate: as trusted.
-        TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
-            // CLI-04(a): one trusted event per host until its status changes.
-            // Each request is its own tunnel connection and re-runs this check,
-            // so without the gate a busy server emits (and the webview logs) one
-            // line per REST call. Unmanaged state (a test harness) reports every time.
-            let first_report = app
-                .try_state::<HttpProxyState>()
-                .is_none_or(|state| state.claim_trusted_report(&store_key));
-            if first_report {
-                crate::ws_proxy::emit_cert_tofu(
-                    &app,
-                    serde_json::json!({
-                        "host": store_key,
-                        "fingerprint": fingerprint,
-                        "status": "trusted",
-                    }),
-                );
-            }
-        }
-        // F4/F8: a first-use cert is NOT silently pinned or forwarded to. Reject
-        // the request (502) and surface the fingerprint so the user can confirm
-        // it (accept_cert_fingerprint) before any credential-bearing request is
-        // sent. The connect page's health check triggers this before login.
-        TofuOutcome::FirstUse => {
-            info!(
-                "[http_proxy] first-use cert for {} — awaiting user confirmation",
-                store_key
-            );
-            if let Some(state) = app.try_state::<HttpProxyState>() {
-                state.clear_trusted_report(&store_key);
-            }
-            crate::ws_proxy::emit_cert_tofu(
-                &app,
-                serde_json::json!({
-                    "host": store_key,
-                    "fingerprint": fingerprint,
-                    "status": "first_use",
-                }),
-            );
-            let _ = local
-                .write_all(
-                    b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-                )
-                .await;
-            return Err(crate::text::cert_not_trusted(&store_key).into());
-        }
-        TofuOutcome::Mismatch { stored } => {
-            let mismatch_msg = tofu::mismatch_message(&store_key, &stored, &fingerprint);
-            warn!(
-                "[http_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch",
-                store_key
-            );
-            if let Some(state) = app.try_state::<HttpProxyState>() {
-                state.clear_trusted_report(&store_key);
-            }
-            crate::ws_proxy::emit_cert_tofu(
-                &app,
-                serde_json::json!({
-                    "host": store_key,
-                    "fingerprint": fingerprint,
-                    "status": "mismatch",
-                    "message": mismatch_msg,
-                    "storedFingerprint": stored,
-                }),
-            );
-            // Give the local fetch a clean HTTP failure instead of a reset.
-            let _ = local
-                .write_all(
-                    b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-                )
-                .await;
-            return Err(mismatch_msg.into());
-        }
+
+    // ── 2. Pooled path ───────────────────────────────────────────────────
+    let pool = app
+        .try_state::<HttpProxyState>()
+        .map(|state| Arc::clone(&state.pool));
+    if let Some(pool) = pool.filter(|_| http_pool::is_replayable(&buf)) {
+        let head = rewrite_request_headers(&buf, remote_host, "keep-alive");
+        let pin = tofu::load_stored_fingerprint(&app, &store_key)?;
+        return http_pool::forward_replayable(
+            &pool,
+            remote_host,
+            pin.as_deref(),
+            head.as_bytes(),
+            &mut local,
+            || async {
+                let fresh = connect_verified(&app, remote_host, &store_key).await?;
+                if let Fresh::Verified(tls, _) = &fresh {
+                    http_pool::detect_dead_path(tls.get_ref().0);
+                }
+                Ok::<_, BoxError>(fresh)
+            },
+        )
+        .await;
     }
 
-    // ── 3. Forward request + bidirectional copy ──────────────────────────
+    // ── 3. One-shot path: forward request + bidirectional copy ───────────
+    let modified = rewrite_request_headers(&buf, remote_host, "close");
+    let mut tls = match connect_verified(&app, remote_host, &store_key).await? {
+        Fresh::Verified(tls, _) => tls,
+        Fresh::Rejected(e) => {
+            // Give the local fetch a clean HTTP failure instead of a reset.
+            let _ = local.write_all(BAD_GATEWAY).await;
+            return Err(e);
+        }
+    };
     tls.write_all(modified.as_bytes()).await?;
     let result = run_data_phase(&app, &buf, &mut local, &mut tls).await;
     match result {
@@ -360,6 +312,123 @@ async fn handle_connection<R: Runtime>(
         }
     }
     Ok(())
+}
+
+/// Dial the upstream TCP socket with Nagle's algorithm off. A small request is
+/// otherwise held until the server's delayed ACK, about 40 ms per fresh
+/// connection at a low RTT (docs/plans/http-tofu-proxy.md, "Upstream
+/// connection reuse"). Best-effort: an option the system refuses is logged and
+/// the connection is used anyway, as the pooled keepalive options are.
+async fn dial_upstream(dial_target: &str, limit: Duration) -> Result<TcpStream, BoxError> {
+    let tcp = dial_tcp(dial_target, limit).await?;
+    if let Err(e) = tcp.set_nodelay(true) {
+        debug!("[http_proxy] TCP_NODELAY not set on the upstream connection: {e}");
+    }
+    Ok(tcp)
+}
+
+/// TLS-connect to `remote_host` and run the TOFU check (store/emit/reject).
+/// Every outcome but `Trusted` drops the host's pooled connections, so none
+/// outlives a pin that changed or was questioned.
+async fn connect_verified<R: Runtime>(
+    app: &AppHandle<R>,
+    remote_host: &str,
+    store_key: &str,
+) -> Result<Fresh<TlsConn>, BoxError> {
+    let (verifier, captured_fp) = tofu::CaptureVerifier::new();
+    let tls_config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
+
+    let (server_name, dial_target) = resolve_remote_target(remote_host)?;
+    let tcp = dial_upstream(&dial_target, Duration::from_secs(10)).await?;
+    let tls = connect_tls_over(&connector, server_name, tcp, Duration::from_secs(10)).await?;
+
+    let observed = captured_fp
+        .lock()
+        .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
+        .clone()
+        .filter(|o| !o.fingerprint.is_empty())
+        .ok_or("TLS handshake completed but no certificate fingerprint was captured")?;
+    let fingerprint = observed.fingerprint.clone();
+
+    let state = app.try_state::<HttpProxyState>();
+    let outcome = tofu::evaluate(app, store_key, &observed)?;
+    if !matches!(outcome, TofuOutcome::Trusted) {
+        if let Some(state) = &state {
+            state.pool.invalidate(store_key);
+        }
+    }
+    match outcome {
+        // A routine public-CA renewal was re-pinned by evaluate: as trusted.
+        TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
+            // CLI-04(a): one trusted event per host until its status changes.
+            // Each fresh connection re-runs this check, so without the gate a
+            // busy server emits (and the webview logs) one line per new
+            // connection. Unmanaged state (a test harness) reports every time.
+            let first_report = state
+                .as_ref()
+                .is_none_or(|state| state.claim_trusted_report(store_key));
+            if first_report {
+                crate::ws_proxy::emit_cert_tofu(
+                    app,
+                    serde_json::json!({
+                        "host": store_key,
+                        "fingerprint": fingerprint,
+                        "status": "trusted",
+                    }),
+                );
+            }
+            Ok(Fresh::Verified(tls, fingerprint))
+        }
+        // F4/F8: a first-use cert is NOT silently pinned or forwarded to. Reject
+        // the request (502) and surface the fingerprint so the user can confirm
+        // it (accept_cert_fingerprint) before any credential-bearing request is
+        // sent. The connect page's health check triggers this before login.
+        TofuOutcome::FirstUse => {
+            info!(
+                "[http_proxy] first-use cert for {} — awaiting user confirmation",
+                store_key
+            );
+            if let Some(state) = &state {
+                state.clear_trusted_report(store_key);
+            }
+            crate::ws_proxy::emit_cert_tofu(
+                app,
+                serde_json::json!({
+                    "host": store_key,
+                    "fingerprint": fingerprint,
+                    "status": "first_use",
+                }),
+            );
+            Ok(Fresh::Rejected(
+                crate::text::cert_not_trusted(store_key).into(),
+            ))
+        }
+        TofuOutcome::Mismatch { stored } => {
+            let mismatch_msg = tofu::mismatch_message(store_key, &stored, &fingerprint);
+            warn!(
+                "[http_proxy] TOFU check FAILED for {} — certificate fingerprint mismatch",
+                store_key
+            );
+            if let Some(state) = &state {
+                state.clear_trusted_report(store_key);
+            }
+            crate::ws_proxy::emit_cert_tofu(
+                app,
+                serde_json::json!({
+                    "host": store_key,
+                    "fingerprint": fingerprint,
+                    "status": "mismatch",
+                    "message": mismatch_msg,
+                    "storedFingerprint": stored,
+                }),
+            );
+            Ok(Fresh::Rejected(mismatch_msg.into()))
+        }
+    }
 }
 
 /// The upload an in-flight request belongs to: the webview-generated
@@ -442,7 +511,7 @@ async fn run_data_phase<R: Runtime>(
 /// only reclaims a connection that is genuinely stuck (e.g. a remote that
 /// completes the TLS handshake and then neither responds nor closes), not
 /// one that is merely slow.
-const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
+pub(crate) const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -451,6 +520,29 @@ const DATA_PHASE_TIMEOUT: Duration = Duration::from_secs(600);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Every upstream socket the tunnel opens must have Nagle's algorithm off:
+    // a fresh connection otherwise holds the request until the server's
+    // delayed ACK, about 40 ms at a low RTT. Both the one-shot and the pooled
+    // path dial through `connect_verified`, which dials via `dial_upstream`
+    // before the handshake, so the option is on the raw socket and this
+    // assertion covers both paths.
+    #[tokio::test]
+    async fn upstream_socket_has_nodelay_set() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let _accepted = listener.accept().await;
+        });
+
+        let tcp = dial_upstream(&addr.to_string(), Duration::from_secs(5))
+            .await
+            .expect("dial upstream");
+        assert!(
+            tcp.nodelay().expect("read nodelay"),
+            "dial_upstream must set TCP_NODELAY on the upstream socket"
+        );
+    }
 
     // Regression: the accept-error exit path in run_accept_loop must be able to
     // deregister its own dead entry, but must NOT clobber a newer tunnel that
@@ -495,7 +587,7 @@ mod tests {
     #[test]
     fn rewrite_replaces_host_and_forces_close() {
         let raw = b"GET /api/v1/health HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nAccept: */*\r\n\r\n";
-        let out = rewrite_request_headers(raw, "example.com:8443");
+        let out = rewrite_request_headers(raw, "example.com:8443", "close");
         assert!(out.contains("Host: example.com:8443\r\n"));
         assert!(!out.contains("127.0.0.1"));
         assert!(out.to_ascii_lowercase().contains("connection: close"));
@@ -505,7 +597,7 @@ mod tests {
     #[test]
     fn rewrite_overrides_existing_keepalive() {
         let raw = b"POST /x HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nConnection: keep-alive\r\n\r\n";
-        let out = rewrite_request_headers(raw, "example.com:8443");
+        let out = rewrite_request_headers(raw, "example.com:8443", "close");
         assert!(out.contains("Connection: close\r\n"));
         assert!(!out.to_ascii_lowercase().contains("keep-alive"));
         // Exactly one Connection header.
@@ -515,10 +607,26 @@ mod tests {
         );
     }
 
+    // A pooled request keeps its upstream connection open, and the Host
+    // rewrite still applies to it exactly as to a one-shot request.
+    #[test]
+    fn rewrite_for_a_pooled_request_keeps_alive_and_still_rewrites_host() {
+        let raw =
+            b"GET /api/v1/emoji HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nConnection: close\r\n\r\n";
+        let out = rewrite_request_headers(raw, "example.com:8443", "keep-alive");
+        assert!(out.contains("Host: example.com:8443\r\n"));
+        assert!(!out.contains("127.0.0.1"));
+        assert!(out.contains("Connection: keep-alive\r\n"));
+        assert_eq!(
+            out.to_ascii_lowercase().matches("\r\nconnection:").count(),
+            1
+        );
+    }
+
     #[test]
     fn rewrite_preserves_other_headers_and_body_boundary() {
         let raw = b"POST /api/v1/auth/login HTTP/1.1\r\nHost: 127.0.0.1:9\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n";
-        let out = rewrite_request_headers(raw, "myserver.lan:8443");
+        let out = rewrite_request_headers(raw, "myserver.lan:8443", "close");
         assert!(out.contains("Content-Type: application/json\r\n"));
         assert!(out.contains("Content-Length: 2\r\n"));
         assert!(out.ends_with("\r\n\r\n"));

@@ -44,6 +44,11 @@ export const notifier: Notifier = {
       messageId: target.messageId,
     });
   },
+  // A call is the same command with no message id: the host then opens the
+  // DM (`owncord://channel/…` on Windows) instead of a message.
+  async showCall(title: string, body: string, target): Promise<void> {
+    await notifier.showMessage(title, body, { host: target.host, channelId: target.channelId });
+  },
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     let active = true;
     let unlisten: (() => void) | null = null;
@@ -62,5 +67,15 @@ export const notifier: Notifier = {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const win = getCurrentWindow();
     await win.requestUserAttention(2); // Informational attention
+  },
+  async requestAttention(): Promise<void> {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().requestUserAttention(1); // Critical: until focused
+  },
+  // One host command draws the overlay (Windows) or launcher count (Linux,
+  // macOS) and sets the tray tooltip (src-tauri/src/unread_badge.rs).
+  async setUnreadBadge(count: number): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("set_unread_badge", { count });
   },
 };

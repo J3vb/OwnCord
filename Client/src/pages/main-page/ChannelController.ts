@@ -4,7 +4,9 @@
  * Extracted from MainPage to reduce god-object coupling and enable unit testing.
  */
 
-import { clearChildren, setText } from "@lib/dom";
+import { clearChildren, createElement, setText } from "@lib/dom";
+import { Disposable } from "@lib/disposable";
+import { createModal } from "@lib/modalFactory";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -31,7 +33,6 @@ import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
-import type { PendingDeleteManager } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import { updateChatHeaderForDm } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
@@ -73,7 +74,6 @@ export interface ChannelControllerOptions {
   readonly ws: WsClient;
   readonly api: ApiClient;
   readonly msgCtrl: MessageController;
-  readonly pendingDeleteManager: PendingDeleteManager;
   readonly reactionCtrl: ReactionController;
   readonly typingLimiter: { tryConsume(key?: string): boolean };
   readonly showToast: (msg: string, type: string) => void;
@@ -121,7 +121,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     ws,
     api,
     msgCtrl,
-    pendingDeleteManager,
     reactionCtrl,
     typingLimiter,
     showToast,
@@ -236,8 +235,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
    *  another channel's composer would target the wrong message id. At most
    *  one edit lands, the newest; the error toast (when asked for) says the text is back
    *  only if it is. Deferred a microtask because the synchronous disconnected
-   *  path runs inside MessageInput.handleSend, whose own cancelEdit() (right
-   *  after onEditMessage returns) would otherwise wipe the restored text. */
+   *  path runs inside MessageInput.handleSend, whose own restore of the
+   *  pre-edit draft (right after onEditMessage returns) would otherwise wipe
+   *  the restored edit text. */
   function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
       const newest = edits.findLast((edit) => edit.channelId === currentChannelId);
@@ -263,7 +263,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   }
 
   function destroyChannel(): void {
-    pendingDeleteManager.cleanup();
     // The reaction picker is a body-mounted overlay keyed to a message in
     // this channel — every other teardown path already routes through here,
     // so this is the one choke point to close it before the channel it was
@@ -617,6 +616,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
         updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
+        // A group DM has no profile panel to open, so the pointer cursor would
+        // promise a click that does nothing (F24).
+        chatHeaderRefs.nameGroupEl.style.cursor =
+          dmChannel !== undefined && dmChannel.isGroup ? "default" : "pointer";
       };
       refreshDmHeader();
       // Keep the subtitle live across presence and roster changes — otherwise
@@ -734,6 +737,68 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     void msgCtrl.loadMessages(channelId, signal);
 
+    /** Send the delete frame. CLI-08: a destructive menu action is gated on
+     *  the connection; a closed or half-open socket would drop the frame and
+     *  leave the moderator thinking the message was deleted. */
+    function sendDelete(msgId: number): void {
+      if (uiStore.getState().connectionStatus !== "connected") {
+        showToast(messagingText("toast.deleteFailed"), "error");
+        return;
+      }
+      const id = ws.send({
+        type: "chat_delete",
+        payload: { message_id: msgId },
+      });
+      track(pendingDeletes, id, { channelId, messageId: msgId });
+    }
+
+    /** P4-12: the destructive delete confirm, modelled on DmSidebar's
+     *  openLeaveConfirm / DeleteChannelModal: Cancel first and focused, Escape
+     *  and the backdrop cancel, focus returns to the opener. Tied to the
+     *  mounted channel's signal, so a switch or destroy closes it. */
+    function openDeleteConfirm(msgId: number): void {
+      const promptOwner = new Disposable();
+      const titleId = `msg-delete-title-${msgId}`;
+      const content = createElement("div");
+      const header = createElement("div", { class: "modal-header" });
+      header.appendChild(createElement("h3", { id: titleId }, messagingText("delete.title")));
+      const body = createElement("div", { class: "modal-body" });
+      body.appendChild(
+        createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
+      );
+      const footer = createElement("div", { class: "modal-footer" });
+      const cancel = createElement(
+        "button",
+        { class: "btn-modal-cancel", type: "button", "data-testid": "msg-delete-cancel" },
+        shellText("common.cancel"),
+      );
+      const confirm = createElement(
+        "button",
+        { class: "btn-danger", type: "button", "data-testid": "msg-delete-confirm" },
+        messagingText("delete.confirm"),
+      );
+      footer.append(cancel, confirm);
+      content.append(header, body, footer);
+
+      const modal = createModal({
+        content,
+        ariaLabelledBy: titleId,
+        overlayAttrs: { "data-testid": "msg-delete-modal" },
+        signal,
+        // The modal owns its own listeners; drop this prompt's with it.
+        onClose: () => promptOwner.destroy(),
+      });
+      cancel.addEventListener("click", () => modal.close(), { signal: promptOwner.signal });
+      confirm.addEventListener(
+        "click",
+        () => {
+          modal.close();
+          sendDelete(msgId);
+        },
+        { signal: promptOwner.signal },
+      );
+    }
+
     // MessageList
     messageList = createMessageList({
       channelId,
@@ -782,24 +847,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           messageInput?.startEdit(msgId, msg.content);
         }
       },
-      onDeleteClick: (msgId: number) => {
-        const result = pendingDeleteManager.tryDelete(msgId);
-        if (result !== "confirmed") {
-          showToast(messagingText("toast.deleteConfirm"), "info");
+      onDeleteClick: (msgId: number, shiftKey: boolean) => {
+        // Shift-click skips the prompt, as Discord's delete confirm does
+        // (P4-12). A plain click opens a confirm.
+        if (!shiftKey) {
+          openDeleteConfirm(msgId);
           return;
         }
-        // CLI-08: a destructive menu action is gated on the connection. A
-        // closed or half-open socket would drop the frame and leave the
-        // moderator thinking the message was deleted.
-        if (uiStore.getState().connectionStatus !== "connected") {
-          showToast(messagingText("toast.deleteFailed"), "error");
-          return;
-        }
-        const id = ws.send({
-          type: "chat_delete",
-          payload: { message_id: msgId },
-        });
-        track(pendingDeletes, id, { channelId, messageId: msgId });
+        sendDelete(msgId);
       },
       onReactionClick: (msgId: number, emoji: string) => {
         reactionCtrl.handleReaction(msgId, emoji);
@@ -870,10 +925,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           return { id: result.id, url: result.url, filename: result.filename };
         } catch (err) {
           // A user-cancelled upload is not a failure — the composer already
-          // removed its preview and does not want an error for it.
-          if (uploadSignal?.aborted) throw err;
-          log.error("File upload failed", { error: String(err) });
-          showToast(messagingText("toast.uploadFailed"), "error");
+          // removed its preview and does not want an error for it. A real
+          // failure is reported once, inline, by the composer from this
+          // rejection, so it is not toasted here too.
+          if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
           throw err;
         }
       },
@@ -968,12 +1023,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           ? messagingText("composer.announcementOnly")
           : messagingText("composer.noPermission");
       }
-      const remaining = slowModeRemaining();
-      if (remaining > 0) return messagingText("composer.slowMode", { seconds: String(remaining) });
       return null;
     };
     const refreshComposerState = (): void => {
       messageInput?.setDisabled(computeComposerReason());
+      // Slow mode gates the SEND only: the draft stays editable so the user
+      // can keep typing through the cooldown (Discord parity, F12).
+      const remaining = slowModeRemaining();
+      messageInput?.setSendGate(
+        remaining > 0 ? messagingText("composer.slowMode", { seconds: String(remaining) }) : null,
+      );
     };
 
     /**

@@ -519,7 +519,7 @@ describe("TypingIndicator", () => {
     indicator.mount(container);
 
     const root = container.querySelector(".typing-bar");
-    // Empty = hidden via CSS .typing-bar:empty { height: 0 }
+    // Empty = no typing text; the 24px row stays reserved (DP-15)
     expect(root?.children.length).toBe(0);
     indicator.destroy?.();
   });

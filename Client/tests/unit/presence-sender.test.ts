@@ -9,7 +9,12 @@ import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence";
 import { createPresenceLimiter } from "@lib/rate-limiter";
-import { saveUserStatus } from "@lib/userStatus";
+import {
+  loadCustomStatus,
+  loadUserStatus,
+  saveCustomStatus,
+  saveUserStatus,
+} from "@lib/userStatus";
 import type { WsClient } from "@lib/ws";
 
 function createMockWs(): WsClient {
@@ -21,6 +26,7 @@ function createMockWs(): WsClient {
     onStateChange: vi.fn().mockReturnValue(() => {}),
     startCertListener: vi.fn().mockResolvedValue(undefined),
     onCertFirstUse: vi.fn().mockReturnValue(() => {}),
+    onServerBusy: vi.fn().mockReturnValue(() => {}),
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => "connected"),
@@ -53,6 +59,7 @@ function createErrorableWs(): {
     onStateChange: vi.fn().mockReturnValue(() => {}),
     startCertListener: vi.fn().mockResolvedValue(undefined),
     onCertFirstUse: vi.fn().mockReturnValue(() => {}),
+    onServerBusy: vi.fn().mockReturnValue(() => {}),
     onCertMismatch: vi.fn().mockReturnValue(() => {}),
     acceptCertFingerprint: vi.fn(),
     getState: vi.fn(() => "connected"),
@@ -157,6 +164,183 @@ describe("createPresenceSender — last requested status always reaches the serv
       fireError("RATE_LIMITED", "some-other-id");
       vi.advanceTimersByTime(30_000);
       expect(sent).toHaveLength(1);
+    } finally {
+      sender.destroy?.();
+    }
+  });
+});
+
+describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic status", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "alice", avatar: null, role: "member" },
+      serverName: "TestServer",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice",
+            displayName: null,
+            avatar: null,
+            role: "member",
+            status: "online",
+            customStatus: "old text",
+          } as never,
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  });
+
+  // The server broadcasts nothing when it refuses a timed-out custom status
+  // (service/channel.go's requireNotTimedOut), so the optimistic apply in
+  // send() and UserBar's saveCustomStatus would leave the user seeing a status
+  // nobody else has. The dispatcher's error chain calls rollbackTimedOut for a
+  // TIMED_OUT frame; this pins the sender half.
+  it("restores the previous member status/text and the saved prefs for our own frame", () => {
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      // The status the server already knows, mirrored into the prefs.
+      saveUserStatus("online");
+      saveCustomStatus("old text");
+
+      // UserBar's onCustomStatusChange: persist the new text, then send.
+      saveCustomStatus("new text");
+      sender.send("dnd", "new text");
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.payload.status).toBe("dnd");
+      expect(sent[0]!.payload.custom_status).toBe("new text");
+      // Optimistic apply already moved the local copies.
+      expect(membersStore.getState().members.get(1)?.status).toBe("dnd");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("new text");
+      expect(loadCustomStatus()).toBe("new text");
+
+      sender.rollbackTimedOut("id-1");
+
+      // In memory (membersStore) and in what was saved (the prefs).
+      expect(membersStore.getState().members.get(1)?.status).toBe("online");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadUserStatus()).toBe("online");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      sender.destroy?.();
+    }
+  });
+
+  it("ignores a TIMED_OUT refusal of another producer's frame or an unknown id", () => {
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveCustomStatus("old text");
+      saveCustomStatus("new text");
+      sender.send("dnd", "new text");
+      expect(sent).toHaveLength(1);
+
+      sender.rollbackTimedOut("some-other-id");
+      sender.rollbackTimedOut(undefined);
+
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("new text");
+      expect(loadCustomStatus()).toBe("new text");
+    } finally {
+      sender.destroy?.();
+    }
+  });
+
+  it("does not arm a retry for a refused frame (a timeout is not transient)", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveCustomStatus("old text");
+      saveCustomStatus("new text");
+      sender.send("dnd", "new text");
+      sender.rollbackTimedOut("id-1");
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(1);
+    } finally {
+      sender.destroy?.();
+    }
+  });
+
+  it("keeps the pre-send status as the rollback target when a second edit queues behind the limiter", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveCustomStatus("hi");
+      sender.send("online", "hi");
+      expect(sent).toHaveLength(1);
+
+      saveCustomStatus("yo");
+      sender.send("online", "yo");
+      expect(sent).toHaveLength(1);
+
+      // The first frame's refusal must not roll back over the queued edit.
+      sender.rollbackTimedOut("id-1");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("yo");
+      expect(loadCustomStatus()).toBe("yo");
+
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.payload.custom_status).toBe("yo");
+
+      // The queued frame is refused too: back to what the server really has,
+      // not the first, also refused, text.
+      sender.rollbackTimedOut("id-2");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      sender.destroy?.();
+    }
+  });
+
+  it("drops the refused text but keeps the picked status when a plain flip queues behind it", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveCustomStatus("hi");
+      sender.send("online", "hi");
+
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      expect(sent).toHaveLength(1);
+
+      sender.rollbackTimedOut("id-1");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(membersStore.getState().members.get(1)?.status).toBe("dnd");
+      expect(authStore.getState().user?.custom_status).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+      expect(loadUserStatus()).toBe("dnd");
+
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.payload.status).toBe("dnd");
     } finally {
       sender.destroy?.();
     }

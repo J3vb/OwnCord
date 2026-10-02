@@ -46,3 +46,25 @@ var LogCertificateFailuresForTest = logCertificateFailures
 // TrackServedForTest exposes trackServed so the ACME served-leaf tracking can
 // be asserted against an injected issuer rather than a real ACME directory.
 var TrackServedForTest = trackServed
+
+// QueuedForTest is how many Acquire callers are waiting for a slot right
+// now; QueueCapForTest is the most that may wait. Exported for auth_test only.
+func (b *AdmissionBudget) QueuedForTest() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.waiters.Len()
+}
+
+func (b *AdmissionBudget) QueueCapForTest() int { return b.queueCap }
+
+// SetAvgHoldForTest sets the measured slot hold time behind the wait
+// estimate, standing in for a run of slow compares. Exported for auth_test only.
+func (b *AdmissionBudget) SetAvgHoldForTest(d time.Duration) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.avgHold = d
+}
+
+// ProductionBcryptCostForTest is bcryptCost as the package initialised it,
+// captured before any TestMain lowers it. Exported for auth_test only.
+var ProductionBcryptCostForTest = bcryptCost

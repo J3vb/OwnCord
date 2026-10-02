@@ -382,8 +382,10 @@ test.describe("Link preview", () => {
     const card = page.locator("[data-testid='message-203'] .msg-embed-link");
     await expect(card).toBeVisible();
     await expect(card.locator(".msg-embed-link-desc")).toHaveCSS("display", "none");
+    // The host names the failed card once, as the link itself; the separate
+    // host element carries nothing (DP-44).
     await expect(card.locator(".msg-embed-link-title")).toHaveText("example.com");
-    await expect(card.locator(".msg-embed-host")).toHaveText("example.com");
+    await expect(card.locator(".msg-embed-host")).toHaveText("");
     await expect(card.locator(".msg-embed-link-image")).toBeHidden();
     await expect(card.locator(".msg-embed-link-img")).toHaveCount(0);
   });

@@ -378,6 +378,24 @@ describe("createChatArea", () => {
     expect(vi.mocked(mockJumpTo).mock.calls.length).toBe(jumpsWithHandler);
   });
 
+  // DP-24: a call notification names a DM, not a message. Its click opens the
+  // conversation through the same registered handler (and so the same
+  // cross-server guard) as a message notification.
+  it("a target with no message — a call notification — opens its channel, with no message jump", () => {
+    setMessageJumpHandler(() => {})();
+    resetChannelsStore();
+    setChannels([{ id: 8, name: "plain", type: "text", category: null, position: 0 }]);
+    const result = createChatArea(makeOptions());
+    vi.mocked(mockJumpTo).mockClear();
+
+    jumpToMessage(8);
+
+    expect(channelsStore.getState().activeChannelId).toBe(8);
+    expect(mockJumpTo).not.toHaveBeenCalled();
+    for (const unsub of result.unsubscribers) unsub();
+    resetChannelsStore();
+  });
+
   // --- Pin button interaction ---
 
   it("clicking pin button toggles the pinned panel controller", () => {

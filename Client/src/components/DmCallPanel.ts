@@ -27,7 +27,7 @@ import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
 import type { MountableComponent } from "@lib/safe-render";
 import type { RingState, OutgoingCallState } from "@lib/call-ring";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import type { VoiceState, VoiceUser } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -224,6 +224,12 @@ function caption(main: string, sub: string): HTMLElement[] {
     createElement("div", { class: "dcp-sub" }, sub),
   ];
 }
+
+// DP-24: the OS call notification, urgent attention request and missed-call
+// notice. Re-exported here so they ride in this panel's lazy chunk (the page
+// imports the panel at mount) instead of a second dynamic chunk in MainPage,
+// which would push its bundle budget over.
+export { alertIncomingCall, alertMissedCall } from "../features/direct-messages/callAlerts";
 
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
@@ -595,7 +601,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   function renderUnanswered(v: Extract<DmCallView, { kind: "unanswered" }>): void {
     root.classList.add("dm-call-panel--expanded");
     const name = callName(v.dm, currentUserId());
-    const ids = [currentUserId(), ...v.dm.participants.map((p) => p.id)];
+    // Nobody else is in the room (deriveCallView hands us "unanswered" only
+    // then), so the absent callee has no tile: showing their placeholder would
+    // look like they joined. Ring again restores the ringing tile.
+    const ids = [currentUserId()];
     let stage: HTMLElement;
     if (videoActive) {
       stage = videoStage(v.dm, ids);
@@ -745,7 +754,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       const inCallHere = voice.currentChannelId === channelId;
       const u = voiceUser(voice, channelId, userId);
       const isSelf = userId === me;
-      const muted = isSelf && inCallHere ? voice.localMuted : (u?.muted ?? false);
+      const muted = isSelf && inCallHere ? isSelfMuted(voice) : (u?.muted ?? false);
       const deafened = isSelf && inCallHere ? voice.localDeafened : (u?.deafened ?? false);
       const speaking = u?.speaking === true && !muted;
       ref.wrap.classList.toggle("dcp-avatar--speaking", speaking);
@@ -784,13 +793,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const reason = frozen ? t("status.notConnected") : "";
     const { mute, deafen, camera, share } = controls;
     if (mute !== null) {
-      mute.setAttribute("aria-pressed", String(voice.localMuted));
-      swapIcon(mute, voice.localMuted ? "mic-off" : "mic", 20);
-      mute.disabled = frozen || voice.localServerMuted === true;
+      const selfMuted = isSelfMuted(voice);
+      mute.setAttribute("aria-pressed", String(selfMuted));
+      swapIcon(mute, selfMuted || voice.listenOnly ? "mic-off" : "mic", 20);
+      mute.disabled = frozen || voice.localServerMuted === true || voice.listenOnly;
       mute.title =
         voice.localServerMuted === true
           ? t("widget.mutedByModerator")
-          : reason || t("widget.control.mute");
+          : voice.listenOnly
+            ? t("widget.control.listenOnly")
+            : reason || t("widget.control.mute");
     }
     if (deafen !== null) {
       deafen.setAttribute("aria-pressed", String(voice.localDeafened));

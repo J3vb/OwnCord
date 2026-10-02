@@ -13,12 +13,13 @@ export interface NotifierShowOptions {
  * Where a clicked notification should take the reader: the message it was
  * raised for, on the server (`host`) it came from — channel and message ids are
  * only unique per server. The native host reports the target back when the
- * user activates the notification, and the app opens it.
+ * user activates the notification, and the app opens it. A call notification
+ * names no message: it opens the DM itself.
  */
 export interface NotificationTarget {
   readonly host: string;
   readonly channelId: number;
-  readonly messageId: number;
+  readonly messageId?: number;
 }
 
 export interface Notifier {
@@ -39,6 +40,12 @@ export interface Notifier {
    */
   showMessage(title: string, body: string, target: NotificationTarget): Promise<void>;
   /**
+   * Show an incoming- or missed-call notification that opens the DM `target`
+   * names when activated. Same delivery as `showMessage`, so the click reaches
+   * `onMessageActivated`, with no `messageId`.
+   */
+  showCall(title: string, body: string, target: { host: string; channelId: number }): Promise<void>;
+  /**
    * Subscribe to activations of message notifications. `handler` gets the
    * target the user clicked; the return value unsubscribes. Delivered once per
    * click, and never for a dismissal.
@@ -46,4 +53,16 @@ export interface Notifier {
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void;
   /** Draw attention to the app window (taskbar flash / dock bounce). */
   flashTaskbar(): Promise<void>;
+  /**
+   * The urgent kind of `flashTaskbar`, for a ringing call: the taskbar keeps
+   * flashing (the dock keeps bouncing) until the window is focused.
+   */
+  requestAttention(): Promise<void>;
+  /**
+   * Show `count` unread mentions on the taskbar button and the tray tooltip;
+   * 0 clears both. The caller pushes when the count changes, and again when
+   * the window is shown or focused (Windows drops the overlay when the taskbar
+   * button is recreated); never per message while the count is unchanged.
+   */
+  setUnreadBadge(count: number): Promise<void>;
 }

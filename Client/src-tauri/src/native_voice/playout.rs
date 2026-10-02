@@ -9,6 +9,7 @@
 //! with each participant's gain into the device's front pair. What it plays
 //! is also the echo canceller's reference (`capture::Reference`).
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle as Thread;
@@ -41,10 +42,11 @@ const MAX_QUEUED: usize = SAMPLE_RATE as usize * 200 / 1000;
 const TRIM_AFTER: usize = SAMPLE_RATE as usize * 2;
 /// The device callback period: 20 ms, so about 40 ms of output latency.
 const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
-/// How often "System default" checks where the default sink is. A default
+/// How often "System default" checks where the default device is. A default
 /// changed in the system mixer raises no `devicechange`, so this poll is the
-/// only thing that notices it.
-const FOLLOW_EVERY: Duration = Duration::from_secs(2);
+/// only thing that notices it, and it is also the interval at which a dead
+/// stream is reopened.
+pub(super) const FOLLOW_EVERY: Duration = Duration::from_secs(2);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -305,16 +307,110 @@ pub fn list_outputs() -> Vec<DeviceInfo> {
 /// The open output stream and the id of the device it plays on.
 type Output = Arc<Mutex<Option<(String, cpal::Stream)>>>;
 
+/// The device id the caller last chose (empty: "System default"), shared
+/// with the watcher so a later choice takes effect on its next tick.
+pub(super) type Selected = Arc<Mutex<String>>;
+
+/// Whether `target`, a pinned device the stream is not on (`current`), is
+/// listed again. Nothing is pinned under "System default" (an empty
+/// `target`), and `listed` is only walked while a pin is missing.
+pub(super) fn pinned_listed(
+    target: &str,
+    current: Option<&str>,
+    mut listed: impl Iterator<Item = impl AsRef<str>>,
+) -> bool {
+    !target.is_empty() && current != Some(target) && listed.any(|id| id.as_ref() == target)
+}
+
+/// Where a backend stands in cpal's own preference (PipeWire, PulseAudio,
+/// then ALSA).
+fn rank(id: cpal::HostId) -> usize {
+    cpal::ALL_HOSTS
+        .iter()
+        .position(|h| *h == id)
+        .unwrap_or(usize::MAX)
+}
+
+/// The best backend among `available` when it ranks above `current`, or is
+/// `current` itself and `same_too` asks for a fresh one of it.
+fn better_backend(
+    current: cpal::HostId,
+    available: &[cpal::HostId],
+    same_too: bool,
+) -> Option<cpal::HostId> {
+    let best = available.iter().copied().min_by_key(|h| rank(*h))?;
+    (rank(best) < rank(current) || (same_too && best == current)).then_some(best)
+}
+
+/// The sound-server host a watcher polls and reopens through. A sound-server
+/// restart kills a host's connection for good, so it is rebuilt; but while
+/// the server is down cpal's default is ALSA, whose constant `default` device
+/// would hide every later move of the real default, so a rebuild never
+/// settles on a lower backend than the one in use, and a lower one in use is
+/// replaced as soon as the preferred backend is back.
+pub(super) struct WatchedHost(Mutex<cpal::Host>);
+
+impl WatchedHost {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self(Mutex::new(cpal::default_host())))
+    }
+
+    /// `f` over a fresh connection to the best backend up now, no lower than
+    /// the one in use, which then serves the polls. `None` while only a lower
+    /// backend answers (the sound server is still restarting).
+    pub(super) fn reopen<R>(&self, f: impl FnOnce(&cpal::Host) -> R) -> Option<R> {
+        let mut host = lock(&self.0);
+        let id = better_backend(host.id(), &cpal::available_hosts(), true)?;
+        let fresh = cpal::host_from_id(id).ok()?;
+        let result = f(&fresh);
+        *host = fresh;
+        Some(result)
+    }
+
+    /// `f` over the host in use.
+    pub(super) fn with<R>(&self, f: impl FnOnce(&cpal::Host) -> R) -> R {
+        f(&lock(&self.0))
+    }
+
+    /// The id of the default device per `default`. A host that does not
+    /// answer is rebuilt so the next poll asks a live connection, and a
+    /// fallback backend is replaced once the preferred one is back.
+    pub(super) fn default_id(
+        &self,
+        default: impl Fn(&cpal::Host) -> Option<cpal::Device>,
+    ) -> Option<String> {
+        let mut host = lock(&self.0);
+        let id = default(&host)
+            .and_then(|d| d.id().ok())
+            .map(|d| d.to_string());
+        if let Some(better) = better_backend(host.id(), &cpal::available_hosts(), id.is_none()) {
+            if let Ok(fresh) = cpal::host_from_id(better) {
+                *host = fresh;
+            }
+        }
+        id
+    }
+}
+
 /// A session's playout: the mixer, its readers and the output stream.
 #[derive(Default)]
 pub struct Playout {
     mixer: Arc<Mixer>,
     readers: Readers,
-    /// Shared with the watcher, which reopens it when the default moves.
+    /// Shared with the watcher, which reopens it when the default moves or
+    /// the stream dies.
     output: Output,
     /// The processing whose echo canceller hears what is played.
     reference: Option<Arc<Apm>>,
-    /// Follows the default sink while "System default" is selected.
+    /// Set by the output stream's error callback when the sound server tears
+    /// the stream down. The watcher polls it and reopens.
+    dead: Arc<AtomicBool>,
+    /// The device the caller last chose (empty: the default). A reopen
+    /// re-pins it; the empty id re-resolves the current default.
+    selected: Selected,
+    /// Reopens a dead stream and, while "System default" is selected,
+    /// follows the default sink. Always-on so a stream torn down by the sound
+    /// server reopens even when a concrete device is pinned.
     watcher: Option<Watcher>,
 }
 
@@ -345,77 +441,174 @@ impl Playout {
     /// fallback as an error, the same contract as the capture switch. A
     /// device that fails to open leaves the current stream playing.
     ///
-    /// The stream is pinned to a concrete sink, so an empty id also starts a
-    /// watcher that reopens it whenever the default sink moves, until another
-    /// device is chosen or the playout is dropped.
+    /// One watcher starts on the first call and stays for the playout's life.
+    /// It reopens a stream the sound server tore down (the stream's error
+    /// callback sets `dead`) and, while the empty "System default" id is
+    /// selected, follows the default sink as it moves. A concrete id is
+    /// re-pinned to that id on reopen; the empty id re-resolves the default.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
-        // Stopped before the output is locked: it may be reopening it.
-        self.watcher = None;
-        let host = Arc::new(cpal::default_host());
-        let switch = {
-            let (output, mixer, reference) = (
-                self.output.clone(),
-                self.mixer.clone(),
-                self.reference.clone(),
-            );
-            let host = host.clone();
-            move |id: &str| {
-                let reference = reference.clone().map(Reference::new);
-                switch_output(&mut lock(&output), id, output_devices(&host), |device| {
-                    open_output(device, mixer.clone(), reference)
-                })
-            }
-        };
-        let result = switch(id);
-        if id.is_empty() {
-            let playing = lock(&self.output).as_ref().map(|(id, _)| id.clone());
-            // The watcher polls and reopens through the host that opened
-            // the stream, so it adds no sound-server connection of its own.
-            self.watcher = Some(Watcher::start(
-                FOLLOW_EVERY,
-                playing,
-                move || {
-                    host.default_output_device()?
-                        .id()
-                        .ok()
-                        .map(|d| d.to_string())
-                },
-                move || {
-                    if let Err(e) = switch("") {
-                        log::warn!("[native_voice] following the default sink: {e}");
-                    }
-                },
-            ));
+        *lock(&self.selected) = id.to_string();
+        let result = self.switch(id);
+        if self.watcher.is_none() {
+            self.watcher = Some(self.start_watcher());
         }
         result
     }
+
+    /// The current stream's device id, or None when nothing plays.
+    fn playing(&self) -> Option<String> {
+        lock(&self.output).as_ref().map(|(id, _)| id.clone())
+    }
+
+    /// Open/reopen the stream for `id` (empty re-resolves the default).
+    fn switch(&self, id: &str) -> Result<(), String> {
+        let host = cpal::default_host();
+        let reference = self.reference.clone();
+        let fell_back = switch_output(
+            &mut lock(&self.output),
+            id,
+            false,
+            output_devices(&host),
+            |device| {
+                open_output(
+                    device,
+                    self.mixer.clone(),
+                    reference.map(Reference::new),
+                    self.dead.clone(),
+                )
+            },
+        )?;
+        if fell_back {
+            return Err(format!(
+                "playout device {id} not found; switched to the default"
+            ));
+        }
+        Ok(())
+    }
+
+    fn start_watcher(&self) -> Watcher {
+        let host = WatchedHost::new();
+        let poll_host = host.clone();
+        let output = self.output.clone();
+        let mixer = self.mixer.clone();
+        let reference = self.reference.clone();
+        let dead = self.dead.clone();
+        let selected = self.selected.clone();
+        let follow_dead = dead.clone();
+        let pinned_returned = {
+            let (host, output, selected) =
+                (host.clone(), self.output.clone(), self.selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let playing = lock(&output).as_ref().map(|(id, _)| id.clone());
+                host.with(|h| {
+                    let listed = std::iter::once(h).flat_map(output_devices);
+                    pinned_listed(&target, playing.as_deref(), listed.map(|(d, _)| d.id))
+                })
+            }
+        };
+        let follow = move || {
+            let target = lock(&selected).clone();
+            // Always reopen: a dead stream is usually still on the same
+            // sink, so "already plays there" must not skip it.
+            let Some(result) = host.reopen(|fresh| {
+                switch_output(
+                    &mut lock(&output),
+                    &target,
+                    true,
+                    output_devices(fresh),
+                    |device| {
+                        open_output(
+                            device,
+                            mixer.clone(),
+                            reference.clone().map(Reference::new),
+                            follow_dead.clone(),
+                        )
+                    },
+                )
+            }) else {
+                log::warn!("[native_voice] reopening the playout stream: no sound server yet");
+                return false;
+            };
+            match result {
+                Ok(fell_back) => {
+                    if fell_back {
+                        log::warn!(
+                            "[native_voice] playout device {target} not found; using the default"
+                        );
+                    }
+                    true
+                }
+                Err(e) => {
+                    log::warn!("[native_voice] reopening the playout stream: {e}");
+                    false
+                }
+            }
+        };
+        Watcher::start(
+            FOLLOW_EVERY,
+            self.playing(),
+            dead,
+            self.selected.clone(),
+            move || poll_host.default_id(|h| h.default_output_device()),
+            pinned_returned,
+            follow,
+        )
+    }
 }
 
-/// A thread that calls `follow` each time the default sink changes, polled
-/// every `every`. Dropping it stops and joins the thread.
-struct Watcher {
+/// A thread that reopens a dead audio stream (the error callback set `dead`)
+/// and, while `selected` is the empty "System default" id, calls `follow`
+/// each time that default moves. `follow` reports whether it reopened; a
+/// failed reopen of a dead stream (the sound server still restarting) is
+/// retried on the next tick, as is a failed follow of a default move. A
+/// reopen that fell back from a pinned device
+/// (not listed yet after the restart) is followed again once
+/// `pinned_returned` says that device is listed. `selected` is read on every tick, so a
+/// device chosen after the watcher started is honoured. Dropping it stops
+/// and joins the thread. Shared by the playout (default sink) and the
+/// capture (default source).
+pub(super) struct Watcher {
     stop: mpsc::Sender<()>,
     thread: Option<Thread<()>>,
 }
 
 impl Watcher {
-    /// `playing` is the sink the stream is on; `default_sink` reports the
+    /// `playing` is the device the stream is on; `default_device` reports the
     /// current default's id (`None` when the sound server did not answer,
     /// which is never taken for a change).
-    fn start(
+    pub(super) fn start(
         every: Duration,
         playing: Option<String>,
-        mut default_sink: impl FnMut() -> Option<String> + Send + 'static,
-        mut follow: impl FnMut() + Send + 'static,
+        dead: Arc<AtomicBool>,
+        selected: Selected,
+        mut default_device: impl FnMut() -> Option<String> + Send + 'static,
+        mut pinned_returned: impl FnMut() -> bool + Send + 'static,
+        mut follow: impl FnMut() -> bool + Send + 'static,
     ) -> Self {
         let (stop, stopped) = mpsc::channel();
         let thread = std::thread::spawn(move || {
             let mut last = playing;
             while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
-                if let Some(now) = default_sink() {
+                if dead.swap(false, Ordering::Relaxed) {
+                    if !follow() {
+                        dead.store(true, Ordering::Relaxed);
+                    }
+                    continue;
+                }
+                if pinned_returned() {
+                    follow();
+                    continue;
+                }
+                // Tracked while pinned too, so returning to the default
+                // does not take the move that happened meanwhile for a new
+                // one.
+                if let Some(now) = default_device() {
                     if last.as_ref() != Some(&now) {
                         last = Some(now);
-                        follow();
+                        if lock(&selected).is_empty() && !follow() {
+                            dead.store(true, Ordering::Relaxed);
+                        }
                     }
                 }
             }
@@ -436,28 +629,27 @@ impl Drop for Watcher {
     }
 }
 
-/// `Playout::set_device` over any listed devices and stream opener.
+/// `Playout::set_device` over any listed devices and stream opener, and
+/// whether `id` fell back to the default. `reopen` opens a new stream even
+/// when `output` already plays on the resolved device (the watcher's path: a
+/// dead stream stays on its sink).
 fn switch_output<D, S>(
     output: &mut Option<(String, S)>,
     id: &str,
+    reopen: bool,
     listed: Vec<(DeviceInfo, D)>,
     open: impl FnOnce(&D) -> Result<S, String>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let infos: Vec<DeviceInfo> = listed.iter().map(|(i, _)| i.clone()).collect();
     let (index, fell_back) = resolve_device(id, &infos);
     let (info, device) = index
         .and_then(|i| listed.into_iter().find(|(d, _)| d.index == i))
         .ok_or("no playout device")?;
-    if output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
+    if reopen || output.as_ref().map(|(opened, _)| opened) != Some(&info.id) {
         let stream = open(&device)?;
         *output = Some((info.id, stream));
     }
-    if fell_back {
-        return Err(format!(
-            "playout device {id} not found; switched to the default"
-        ));
-    }
-    Ok(())
+    Ok(fell_back)
 }
 
 impl Drop for Playout {
@@ -471,6 +663,7 @@ fn open_output(
     device: &cpal::Device,
     mixer: Arc<Mixer>,
     reference: Option<Reference>,
+    dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
     let channels = device
         .default_output_config()
@@ -481,6 +674,7 @@ fn open_output(
     let build = |buffer_size| {
         let mixer = mixer.clone();
         let reference = reference.clone();
+        let dead = dead.clone();
         device.build_output_stream::<f32, _, _>(
             cpal::StreamConfig {
                 channels,
@@ -493,9 +687,14 @@ fn open_output(
                     r.feed(out, channels as usize);
                 }
             },
-            // ponytail: a lost device only logs; the sound servers move the
-            // stream to another sink themselves, and switching device reopens it.
-            |e| log::warn!("[native_voice] playout stream: {e}"),
+            // A stream the sound server tore down (suspend/resume, a
+            // pulseaudio restart) is only reported here: flag it so the
+            // watcher reopens it, or the call goes silently dead in this
+            // direction (voice #3).
+            move |e| {
+                log::warn!("[native_voice] playout stream: {e}");
+                dead.store(true, Ordering::Relaxed);
+            },
             None,
         )
     };
@@ -551,10 +750,11 @@ mod tests {
             opened.push(*sink);
             Ok(*sink)
         };
-        switch_output(&mut output, "", sinks(&["speakers"]), &mut open).unwrap();
+        switch_output(&mut output, "", false, sinks(&["speakers"]), &mut open).unwrap();
         switch_output(
             &mut output,
             "",
+            false,
             sinks(&["speakers", "headphones"]),
             &mut open,
         )
@@ -563,6 +763,7 @@ mod tests {
         switch_output(
             &mut output,
             "",
+            false,
             sinks(&["headphones", "speakers"]),
             &mut open,
         )
@@ -574,32 +775,77 @@ mod tests {
     #[test]
     fn a_device_that_fails_to_open_leaves_the_current_stream_playing() {
         let mut output = Some(("speakers".to_string(), "speakers"));
-        let result = switch_output(&mut output, "usb", sinks(&["speakers", "usb"]), |_| {
-            Err::<&str, _>("busy".to_string())
-        });
+        let result = switch_output(
+            &mut output,
+            "usb",
+            false,
+            sinks(&["speakers", "usb"]),
+            |_| Err::<&str, _>("busy".to_string()),
+        );
         assert_eq!(result, Err("busy".to_string()));
         assert_eq!(output, Some(("speakers".to_string(), "speakers")));
     }
 
+    #[test]
+    fn a_reopen_replaces_a_dead_stream_on_the_same_sink() {
+        // A suspend or sound-server restart kills the stream but leaves the
+        // sink in place: the watcher's reopen must not be skipped as
+        // "already plays there".
+        let mut output = Some(("speakers".to_string(), "dead"));
+        switch_output(&mut output, "speakers", true, sinks(&["speakers"]), |_| {
+            Ok("fresh")
+        })
+        .unwrap();
+        assert_eq!(output, Some(("speakers".to_string(), "fresh")));
+        // The user-facing switch still keeps a live stream on the same sink.
+        switch_output(&mut output, "speakers", false, sinks(&["speakers"]), |_| {
+            Ok("again")
+        })
+        .unwrap();
+        assert_eq!(output, Some(("speakers".to_string(), "fresh")));
+    }
+
+    /// The pieces `watch` hands back.
+    type Watched = (
+        Watcher,
+        Arc<Mutex<Option<String>>>,
+        Arc<AtomicBool>,
+        Selected,
+        mpsc::Receiver<()>,
+    );
+
     /// A watcher over a default sink the test moves, reporting each follow.
-    fn watch(playing: Option<&str>) -> (Watcher, Arc<Mutex<Option<String>>>, mpsc::Receiver<()>) {
+    /// `follows_default` starts the selection at the empty id (else "usb");
+    /// the selection and a dead-flag set on the returned handles also steer
+    /// it.
+    fn watch(playing: Option<&str>, follows_default: bool) -> Watched {
         let default = Arc::new(Mutex::new(playing.map(str::to_string)));
+        let dead = Arc::new(AtomicBool::new(false));
+        let selected: Selected = Arc::new(Mutex::new(
+            if follows_default { "" } else { "usb" }.to_string(),
+        ));
         let (followed, follows) = mpsc::channel();
         let source = default.clone();
         let watcher = Watcher::start(
             Duration::from_millis(2),
             playing.map(str::to_string),
+            dead.clone(),
+            selected.clone(),
             move || lock(&source).clone(),
-            move || followed.send(()).unwrap(),
+            || false,
+            move || {
+                followed.send(()).unwrap();
+                true
+            },
         );
-        (watcher, default, follows)
+        (watcher, default, dead, selected, follows)
     }
 
     const QUIET: Duration = Duration::from_millis(50);
 
     #[test]
     fn the_watcher_follows_each_move_of_the_default_sink_once() {
-        let (_watcher, default, follows) = watch(Some("speakers"));
+        let (_watcher, default, _dead, _selected, follows) = watch(Some("speakers"), true);
         assert!(follows.recv_timeout(QUIET).is_err(), "default unchanged");
         *lock(&default) = Some("headphones".to_string());
         follows.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -616,15 +862,201 @@ mod tests {
 
     #[test]
     fn a_watcher_with_nothing_playing_follows_the_first_default_it_sees() {
-        let (_watcher, default, follows) = watch(None);
+        let (_watcher, default, _dead, _selected, follows) = watch(None, true);
         assert!(follows.recv_timeout(QUIET).is_err());
         *lock(&default) = Some("speakers".to_string());
         follows.recv_timeout(Duration::from_secs(5)).unwrap();
     }
 
     #[test]
+    fn a_pinned_device_watcher_ignores_default_moves_but_reopens_a_dead_stream() {
+        // voice #3: even a pinned output must reopen after the sound server
+        // tears the stream down.
+        let (_watcher, default, dead, _selected, follows) = watch(Some("usb"), false);
+        *lock(&default) = Some("headphones".to_string());
+        assert!(
+            follows.recv_timeout(QUIET).is_err(),
+            "pinned: default moves are ignored"
+        );
+        dead.store(true, Ordering::Relaxed);
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn the_watcher_reads_the_selection_on_every_tick() {
+        // "System default" at start, then a device chosen mid-call: the
+        // pinned device must not be moved back to the default.
+        let (_watcher, default, _dead, selected, follows) = watch(Some("speakers"), true);
+        *lock(&selected) = "usb".to_string();
+        *lock(&default) = Some("headphones".to_string());
+        assert!(
+            follows.recv_timeout(QUIET).is_err(),
+            "pinned later: default moves are ignored"
+        );
+        // Back to "System default": the move seen while pinned is not a new
+        // one, the next move is.
+        *lock(&selected) = String::new();
+        assert!(follows.recv_timeout(QUIET).is_err());
+        *lock(&default) = Some("speakers".to_string());
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn a_failed_reopen_of_a_dead_stream_is_retried_until_it_succeeds() {
+        // A sound-server restart: the first reopens find no server yet.
+        let dead = Arc::new(AtomicBool::new(true));
+        let (attempted, attempts) = mpsc::channel();
+        let mut n = 0;
+        let _watcher = Watcher::start(
+            Duration::from_millis(2),
+            Some("speakers".to_string()),
+            dead,
+            Arc::new(Mutex::new(String::new())),
+            || Some("speakers".to_string()),
+            || false,
+            move || {
+                n += 1;
+                attempted.send(n).unwrap();
+                n >= 3
+            },
+        );
+        for expected in 1..=3 {
+            assert_eq!(attempts.recv_timeout(Duration::from_secs(5)), Ok(expected));
+        }
+        assert!(
+            attempts.recv_timeout(QUIET).is_err(),
+            "recovered: no more reopens"
+        );
+    }
+
+    #[test]
+    fn a_pinned_sink_that_returns_after_a_restart_is_switched_back_to() {
+        // A Bluetooth headset is pinned; after a sound-server restart only
+        // the built-in sink is listed at first, so the reopen falls back.
+        let listed = Arc::new(Mutex::new(vec!["speakers"]));
+        let output = Arc::new(Mutex::new(Some(("bt".to_string(), "dead"))));
+        let selected: Selected = Arc::new(Mutex::new("bt".to_string()));
+        let dead = Arc::new(AtomicBool::new(true));
+        let (opened, opens) = mpsc::channel();
+        let returned = {
+            let (listed, output, selected) = (listed.clone(), output.clone(), selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let playing = lock(&output).as_ref().map(|(id, _)| id.clone());
+                pinned_listed(&target, playing.as_deref(), lock(&listed).iter())
+            }
+        };
+        let follow = {
+            let (listed, output, selected) = (listed.clone(), output.clone(), selected.clone());
+            move || {
+                let target = lock(&selected).clone();
+                let sinks = sinks(&lock(&listed));
+                switch_output(&mut lock(&output), &target, true, sinks, |sink| {
+                    opened.send(*sink).unwrap();
+                    Ok("live")
+                })
+                .is_ok()
+            }
+        };
+        let _watcher = Watcher::start(
+            Duration::from_millis(2),
+            Some("bt".to_string()),
+            dead,
+            selected,
+            || None,
+            returned,
+            follow,
+        );
+        assert_eq!(opens.recv_timeout(Duration::from_secs(5)), Ok("speakers"));
+        assert!(
+            opens.recv_timeout(QUIET).is_err(),
+            "the headset is not back: no reopen storm"
+        );
+        lock(&listed).push("bt");
+        assert_eq!(opens.recv_timeout(Duration::from_secs(5)), Ok("bt"));
+        assert!(opens.recv_timeout(QUIET).is_err(), "back on the headset");
+        assert_eq!(
+            lock(&output).as_ref().map(|(id, _)| id.clone()),
+            Some("bt".to_string())
+        );
+    }
+
+    #[test]
+    fn only_a_missing_pin_that_is_listed_again_is_reacquired() {
+        let listed = ["speakers", "bt"];
+        assert!(pinned_listed("bt", Some("speakers"), listed.iter()));
+        assert!(
+            !pinned_listed("bt", Some("bt"), listed.iter()),
+            "already on it"
+        );
+        assert!(
+            !pinned_listed("bt", Some("speakers"), ["speakers"].iter()),
+            "not back yet"
+        );
+        assert!(pinned_listed("bt", None, listed.iter()), "nothing plays");
+        // "System default" pins nothing, even with the stream on no listed id.
+        assert!(!pinned_listed("", Some("gone"), listed.iter()));
+        assert!(!pinned_listed("", None, ["", "speakers"].iter()));
+    }
+
+    #[test]
+    fn a_restart_never_settles_on_a_lower_backend() {
+        use cpal::HostId::{Alsa, PulseAudio};
+        // Mid-restart only ALSA is up: no rebuild onto it.
+        assert_eq!(better_backend(PulseAudio, &[Alsa], true), None);
+        // The server is back: a fresh connection to it.
+        assert_eq!(
+            better_backend(PulseAudio, &[PulseAudio, Alsa], true),
+            Some(PulseAudio)
+        );
+        // Started on ALSA while the server was down: upgraded once it is up,
+        // but a live ALSA host is not rebuilt on every poll.
+        assert_eq!(
+            better_backend(Alsa, &[PulseAudio, Alsa], false),
+            Some(PulseAudio)
+        );
+        assert_eq!(better_backend(Alsa, &[Alsa], false), None);
+        // A machine with only ALSA still recovers through ALSA.
+        assert_eq!(better_backend(Alsa, &[Alsa], true), Some(Alsa));
+    }
+
+    #[test]
+    fn a_failed_follow_of_a_default_move_is_retried() {
+        let default = Arc::new(Mutex::new(Some("speakers".to_string())));
+        let (attempted, attempts) = mpsc::channel();
+        let mut n = 0;
+        let source = default.clone();
+        let _watcher = Watcher::start(
+            Duration::from_millis(2),
+            Some("speakers".to_string()),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(String::new())),
+            move || lock(&source).clone(),
+            || false,
+            move || {
+                n += 1;
+                attempted.send(n).unwrap();
+                n >= 2
+            },
+        );
+        *lock(&default) = Some("headphones".to_string());
+        assert_eq!(attempts.recv_timeout(Duration::from_secs(5)), Ok(1));
+        assert_eq!(attempts.recv_timeout(Duration::from_secs(5)), Ok(2));
+        assert!(attempts.recv_timeout(QUIET).is_err(), "followed: no more");
+    }
+
+    #[test]
+    fn the_dead_flag_reopens_once_per_set() {
+        let (_watcher, _default, dead, _selected, follows) = watch(Some("speakers"), true);
+        dead.store(true, Ordering::Relaxed);
+        follows.recv_timeout(Duration::from_secs(5)).unwrap();
+        // Cleared by the swap: no second follow without another set.
+        assert!(follows.recv_timeout(QUIET).is_err());
+    }
+
+    #[test]
     fn a_dropped_watcher_has_stopped_following() {
-        let (watcher, default, follows) = watch(Some("speakers"));
+        let (watcher, default, _dead, _selected, follows) = watch(Some("speakers"), true);
         drop(watcher);
         *lock(&default) = Some("headphones".to_string());
         // Dropping joined the thread and with it the follow callback.

@@ -18,7 +18,11 @@ import {
   markSendFailed,
   isChannelLoaded,
   getHistoryLoadState,
+  prependMessages,
+  setAroundMessages,
+  isWindowDetached,
 } from "../../src/stores/messages.store";
+import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -40,6 +44,9 @@ import {
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
+import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
+import { createPresenceLimiter } from "../../src/lib/rate-limiter";
+import { loadCustomStatus, saveCustomStatus } from "../../src/lib/userStatus";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 
@@ -56,6 +63,8 @@ vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
   cleanupAll: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
+  isAutoReconnecting: vi.fn(() => false),
+  failPendingRejoin: vi.fn(),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   disableCamera: vi.fn(async () => {}),
@@ -91,6 +100,8 @@ import {
   disableScreenshare as mockDisableScreenshare,
   isVoiceSessionActive as mockIsVoiceSessionActive,
   handleParticipantLeft as mockHandleParticipantLeft,
+  isAutoReconnecting as mockIsAutoReconnecting,
+  failPendingRejoin as mockFailPendingRejoin,
 } from "@lib/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
 
@@ -132,6 +143,7 @@ function createMockWs() {
     },
     startCertListener: vi.fn(async () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
+    onServerBusy: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "disconnected" as const),
@@ -231,6 +243,16 @@ describe("WS Dispatcher", () => {
     expect(state.isAuthenticated).toBe(true);
     expect(state.user?.username).toBe("alex");
     expect(state.serverName).toBe("TestServer");
+  });
+
+  it("stores auth_ok's upload_policy, and null from an older server that omits it", () => {
+    const user = { id: 1, username: "alex", avatar: null, role: "admin" };
+    const upload_policy = { max_upload_bytes: 10485760 };
+    mock.dispatch("auth_ok", { user, server_name: "S", motd: "", upload_policy });
+    expect(authStore.getState().uploadPolicy).toEqual(upload_policy);
+
+    mock.dispatch("auth_ok", { user, server_name: "S", motd: "" });
+    expect(authStore.getState().uploadPolicy).toBeNull();
   });
 
   it("re-sends channel_focus for the active channel on auth_ok", () => {
@@ -1031,6 +1053,67 @@ describe("WS Dispatcher", () => {
     expect(membersStore.getState().members.get(1)?.customStatus).toBeNull();
   });
 
+  describe("presence_batch", () => {
+    const seed = (): void => {
+      membersStore.setState((prev) => {
+        const m = new Map(prev.members);
+        m.set(1, {
+          id: 1,
+          username: "alex",
+          avatar: null,
+          role: "admin",
+          status: "offline" as const,
+        });
+        m.set(2, {
+          id: 2,
+          username: "bea",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+          customStatus: "coding",
+        });
+        m.set(3, { id: 3, username: "cy", avatar: null, role: "member", status: "idle" as const });
+        return { ...prev, members: m };
+      });
+    };
+
+    it("applies every entry of a window batch, custom status included", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        updates: [
+          { user_id: 1, status: "online", custom_status: "back" },
+          { user_id: 2, status: "dnd", custom_status: null },
+          { user_id: 999, status: "online", custom_status: null },
+        ],
+      });
+      const members = membersStore.getState().members;
+      expect(members.get(1)?.status).toBe("online");
+      expect(members.get(1)?.customStatus).toBe("back");
+      expect(members.get(2)?.status).toBe("dnd");
+      expect(members.get(2)?.customStatus).toBeNull();
+      expect(members.get(3)?.status).toBe("idle");
+      // An entry for someone the list lacks, with no member data, is ignored.
+      expect(members.has(999)).toBe(false);
+    });
+
+    it("applies a full snapshot: anyone it leaves out is offline, listed text is replaced", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [
+          { user_id: 1, status: "online", custom_status: null },
+          { user_id: 2, status: "online", custom_status: "lunch" },
+        ],
+      });
+      const members = membersStore.getState().members;
+      expect(members.get(1)?.status).toBe("online");
+      expect(members.get(2)?.status).toBe("online");
+      expect(members.get(2)?.customStatus).toBe("lunch");
+      expect(members.get(3)?.status).toBe("offline");
+      expect(members.get(3)?.customStatus).toBeNull();
+    });
+  });
+
   it("wires user_update display_name into the member store", () => {
     membersStore.setState((prev) => {
       const m = new Map(prev.members);
@@ -1114,6 +1197,27 @@ describe("WS Dispatcher", () => {
       const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
       expect(dm?.recipient.status).toBe("dnd");
       expect(dm?.participants[0]?.status).toBe("dnd");
+    });
+
+    it("updates the DM partner's status from a presence_batch", () => {
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 10, status: "idle", custom_status: null }],
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("idle");
+      expect(dm?.participants[0]?.status).toBe("idle");
+    });
+
+    it("marks a DM partner a full snapshot leaves out as offline", () => {
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [{ user_id: 1, status: "online", custom_status: null }],
+      });
+
+      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      expect(dm?.recipient.status).toBe("offline");
+      expect(dm?.participants[0]?.status).toBe("offline");
     });
 
     it("leaves an unrelated DM partner's status alone", () => {
@@ -1987,9 +2091,10 @@ describe("WS Dispatcher", () => {
         dm_channels: [],
       });
 
-      // The inactive channel is invalidated but not eagerly refetched.
+      // The inactive channel is invalidated but not eagerly refetched; its
+      // rows stay for an instant render on the next visit (P2-T4).
       expect(isChannelLoaded(2)).toBe(false);
-      expect(getChannelMessages(2)).toEqual([]);
+      expect(getChannelMessages(2).map((m) => m.id)).toEqual([20]);
 
       // The active channel is refetched from the server.
       expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
@@ -2039,11 +2144,11 @@ describe("WS Dispatcher", () => {
         dm_channels: [],
       });
 
-      // The window was dropped...
+      // The rows stay on screen (P2-T4); the load state is "loading", not
+      // idle (null), so a channel that had no rows shows the spinner rather
+      // than reading as a channel with no history.
       expect(isChannelLoaded(1)).toBe(false);
-      expect(getChannelMessages(1)).toEqual([]);
-      // ...but the load state must be "loading", not idle (null) — idle+empty
-      // is exactly the shape MessageList reads as "channel has no history".
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual([10]);
       expect(getHistoryLoadState(1)).toBe("loading");
     });
 
@@ -2109,7 +2214,7 @@ describe("WS Dispatcher", () => {
       // would re-add it to loadedChannels, permanently hiding every message
       // posted to it while the user was looking at channel 2.
       expect(isChannelLoaded(1)).toBe(false);
-      expect(getChannelMessages(1)).toEqual([]);
+      expect(getChannelMessages(1).map((m) => m.id)).toEqual([10]);
     });
 
     // BUG: invalidateLoadedMessageWindows() ran unconditionally, but the
@@ -2315,6 +2420,213 @@ describe("WS Dispatcher", () => {
 
       expect(getHistoryLoadState(1)).not.toBe("error");
       expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
+    });
+
+    // P2-T4: a server restart (or any other full resync) keeps the history
+    // the reader loaded and splices the refetch into it.
+    describe("keeps loaded history (P2-T4)", () => {
+      const readyPayload = {
+        channels: [{ id: 1, name: "general", type: "text" as const, category: null, position: 0 }],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      };
+      /** Newest-first page of ids [from, to], as the REST API returns it. */
+      function page(from: number, to: number): MessageResponse[] {
+        const out: MessageResponse[] = [];
+        for (let id = to; id >= from; id--) out.push(storedMessage(id));
+        return out;
+      }
+      const ids = (from: number, to: number): number[] =>
+        Array.from({ length: to - from + 1 }, (_, i) => from + i);
+      function load200(): void {
+        setMessages(1, page(151, 200), true);
+        prependMessages(1, page(101, 150), true);
+        prependMessages(1, page(51, 100), true);
+        prependMessages(1, page(1, 50), false);
+      }
+      async function settle(): Promise<void> {
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+      }
+
+      it("keeps 200 loaded rows synchronously and splices an overlapping tail", async () => {
+        cleanup();
+        const fresh = page(151, 200).map((m) =>
+          m.id === 180 ? { ...m, content: "edited while down" } : m,
+        );
+        const getMessages = vi.fn().mockResolvedValue({ messages: fresh, has_more: true });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        load200();
+        const cached = getChannelMessages(1);
+
+        mock.dispatch("ready", readyPayload);
+        mock.dispatch("ready", readyPayload);
+
+        expect(getChannelMessages(1)).toBe(cached);
+        expect(getHistoryLoadState(1)).toBe("loading");
+        expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
+
+        await settle();
+        const msgs = getChannelMessages(1);
+        expect(msgs.map((m) => m.id)).toEqual(ids(1, 200));
+        expect(msgs[0]).toBe(cached[0]);
+        expect(msgs.find((m) => m.id === 180)!.content).toBe("edited while down");
+        expect(isChannelLoaded(1)).toBe(true);
+        expect(getHistoryLoadState(1)).toBeNull();
+      });
+
+      it("replaces the window when the tail is disjoint from it", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockResolvedValue({ messages: page(301, 350), has_more: true });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        load200();
+
+        mock.dispatch("ready", readyPayload);
+        mock.dispatch("ready", readyPayload);
+        await settle();
+
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(301, 350));
+      });
+
+      it("refetches a detached window around the reader's top visible message", async () => {
+        cleanup();
+        const getMessages = vi.fn();
+        const getMessagesAround = vi.fn().mockResolvedValue({
+          messages: page(110, 150)
+            .reverse()
+            .map((m) => (m.id === 130 ? { ...m, content: "edited while down" } : m)),
+          has_more_before: true,
+          has_more_after: true,
+        });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+          getMessagesAround,
+        });
+        const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 130 : null));
+        try {
+          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setAroundMessages(1, page(100, 160).reverse(), true, true);
+
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("ready", readyPayload);
+          await settle();
+
+          expect(getMessages).not.toHaveBeenCalled();
+          expect(getMessagesAround).toHaveBeenCalledWith(1, 130, { limit: 50 });
+          const msgs = getChannelMessages(1);
+          expect(msgs.map((m) => m.id)).toEqual(ids(100, 160));
+          expect(msgs.find((m) => m.id === 130)!.content).toBe("edited while down");
+          expect(isWindowDetached(1)).toBe(true);
+          expect(isChannelLoaded(1)).toBe(true);
+        } finally {
+          unregister();
+        }
+      });
+
+      it("detaches the kept rows when the refetch fails, so no live row lands across the gap", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockRejectedValue(new Error("503"));
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        load200();
+
+        mock.dispatch("ready", readyPayload);
+        mock.dispatch("ready", readyPayload);
+        await settle();
+
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 200));
+        expect(isWindowDetached(1)).toBe(true);
+        mock.dispatch("chat_message", {
+          ...storedMessage(261),
+          user: { id: 2, username: "bob", avatar: null },
+        });
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 200));
+        expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
+      });
+
+      it("keeps the reader's anchor when a splice overflows the row cap", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockResolvedValue({ messages: page(481, 530), has_more: true });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 10 : null));
+        try {
+          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setMessages(1, page(451, 500), true);
+          for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
+          expect(isWindowDetached(1)).toBe(false);
+
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("ready", readyPayload);
+          await settle();
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 500));
+          expect(isWindowDetached(1)).toBe(true);
+          expect(isChannelLoaded(1)).toBe(true);
+        } finally {
+          unregister();
+        }
+      });
+
+      it("trims the oldest rows when a splice overflows below the reader's anchor", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockResolvedValue({ messages: page(481, 530), has_more: true });
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+        });
+        const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 490 : null));
+        try {
+          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setMessages(1, page(451, 500), true);
+          for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
+
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("ready", readyPayload);
+          await settle();
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(31, 530));
+          expect(isWindowDetached(1)).toBe(false);
+        } finally {
+          unregister();
+        }
+      });
+
+      it("falls back to the tail for a detached window no list is showing", async () => {
+        cleanup();
+        const getMessages = vi.fn().mockResolvedValue({ messages: page(451, 500), has_more: true });
+        const getMessagesAround = vi.fn();
+        cleanup = wireDispatcher(mock.ws, {
+          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+          getMessages,
+          getMessagesAround,
+        });
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        setAroundMessages(1, page(100, 160).reverse(), true, true);
+
+        mock.dispatch("ready", readyPayload);
+        mock.dispatch("ready", readyPayload);
+        await settle();
+
+        expect(getMessagesAround).not.toHaveBeenCalled();
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(451, 500));
+        expect(isWindowDetached(1)).toBe(false);
+      });
     });
   });
 
@@ -2962,6 +3274,58 @@ describe("WS Dispatcher", () => {
     expect(mockLeaveVoice).toHaveBeenCalledWith(false);
   });
 
+  // P2-T5: while voice is reconnecting, a self voice_leave is the server
+  // releasing the membership the reconnect loop is resuming — the loop
+  // rejoins or gives up with its toast, so this frame must not end the call.
+  it("leaves the session to the reconnect loop on a self voice_leave while reconnecting", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    vi.mocked(mockIsAutoReconnecting).mockReturnValueOnce(true);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceStatus: "reconnecting",
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(3);
+    expect(voiceStore.getState().voiceUsers.get(3)?.has(5) ?? false).toBe(false);
+  });
+
+  // The badge also reads "reconnecting" while livekit-client retries on its
+  // own inside a connected session (OC-0015); no reconnect loop owns that
+  // session, so a server eviction must still tear it down.
+  it("tears down on a self voice_leave while the SDK reconnects inside a connected session", async () => {
+    vi.mocked(mockLeaveVoice).mockClear();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 3,
+      voiceStatus: "reconnecting",
+    }));
+
+    mock.dispatch("voice_leave", {
+      channel_id: 3,
+      user_id: 5,
+    });
+    await vi.runAllTimersAsync();
+
+    expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
   // A stale voice_leave for a channel we've already left (and rejoined
   // elsewhere) must not kill the newer join's live session.
   it("does not tear down the session for a stale voice_leave from a channel already left", async () => {
@@ -3203,6 +3567,7 @@ describe("WS Dispatcher", () => {
         ...prev,
         localMuted: true,
         localDeafened: true,
+        moderatorDeafened: true,
         localServerMuted: true,
         localServerDeafened: true,
       }));
@@ -3624,9 +3989,25 @@ describe("WS Dispatcher", () => {
       );
     });
 
-    it("does not rejoin after a shutdown from outside the server", async () => {
+    it("rejoins after a shutdown restart from outside the server within its shorter window (D-2)", async () => {
       announceRestartAndDrop("shutdown");
       await vi.runAllTimersAsync();
+      // D-2: a systemctl/docker restart that is back quickly looks like a blip.
+      vi.setSystemTime(Date.now() + 60_000);
+
+      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+
+      const joins = vi
+        .mocked(mock.ws.send)
+        .mock.calls.filter(([msg]) => (msg as { type?: string }).type === "voice_join");
+      expect(joins).toHaveLength(1);
+      expect(voiceStore.getState().currentChannelId).toBe(42);
+    });
+
+    it("does not rejoin when ready arrives after a shutdown notice's 2-minute window (D-2)", async () => {
+      announceRestartAndDrop("shutdown");
+      await vi.runAllTimersAsync();
+      vi.setSystemTime(Date.now() + 3 * 60_000);
 
       readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
 
@@ -3758,6 +4139,52 @@ describe("WS Dispatcher", () => {
     mock.dispatch("error", { code: "INTERNAL", message: "db: sqlite busy" });
     expectConsole("error", /\[dispatcher\] Server error/);
     expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+  });
+
+  // A timeout refuses a custom status without writing or broadcasting
+  // anything, so the PresenceSender's optimistic apply would leave the user
+  // seeing and saving a status nobody else has. The dispatcher is the one
+  // writer for server events, so its error chain routes the rollback to the
+  // active sender.
+  it("rolls back the optimistic presence status on a TIMED_OUT refusal (PR #2067 follow-up)", () => {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    try {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "member" },
+      }));
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online",
+              customStatus: "old text",
+            } as never,
+          ],
+        ]),
+      }));
+      saveCustomStatus("old text");
+      saveCustomStatus("new text");
+      presenceSender.send("dnd", "new text");
+      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+
+      mock.dispatch("error", { code: "TIMED_OUT", message: "you are timed out" }, id);
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(membersStore.getState().members.get(1)?.status).toBe("online");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
+    }
   });
 
   it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
@@ -5130,6 +5557,24 @@ describe("WS Dispatcher", () => {
       mock.dispatch("error", { code: "VOICE_ERROR", message: "voice is not configured" });
       expectConsole("error", /\[dispatcher\] Server error/);
 
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceStatus).toBe("idle");
+    });
+
+    // P2-T5: a refused rejoin (a moderator removal the reconnect loop tried to
+    // undo) ends the call through the session, which owns the voice-lost toast.
+    it("hands a voice_join refusal to the session's pending reconnect rejoin", async () => {
+      vi.mocked(mockFailPendingRejoin).mockClear();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+
+      mock.dispatch("error", {
+        code: "FORBIDDEN",
+        message: "You were removed from this voice channel",
+      });
+      expectConsole("error", /\[dispatcher\] Server error/);
+      await vi.runAllTimersAsync();
+
+      expect(mockFailPendingRejoin).toHaveBeenCalledTimes(1);
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceStatus).toBe("idle");
     });

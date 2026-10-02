@@ -13,6 +13,7 @@ func init() {
 		"backup archive build failed":                             "backup_archive_build_failed",
 		"backup archive downloaded":                               "backup_archive_downloaded",
 		"backup archive download interrupted":                     "backup_archive_download_interrupted",
+		"backup download interrupted":                             "backup_download_interrupted",
 		"setup: failed to generate the recovery kit":              "setup_recovery_kit_generate_failed",
 		"setup: failed to hash the recovery kit":                  "setup_recovery_kit_hash_failed",
 		"setup: failed to store the recovery kit":                 "setup_recovery_kit_store_failed",

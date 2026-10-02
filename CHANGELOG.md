@@ -47,6 +47,188 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.1.0-beta.1
+
+**OwnCord 2.1 beta 1** is the third public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It is the largest release since the beta began: the full Unicode emoji set with remembered skin tones, whole-server search that pages through older results, an unread count on the taskbar and tray, notifications for incoming calls, a message list that updates in place instead of redrawing, and a server that carries a thousand or more people through a restart. Existing `2.0.1-beta.1` servers and clients upgrade in place.
+
+It is still a **beta and a hobby project** — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive.
+
+### Highlights
+
+- **The full Unicode emoji set**, with skin tones you pick and the app remembers, loaded only when you open the picker.
+- **Search the whole server**, page through older results, and keep the panel open while you jump between hits.
+- **Your unread count on the taskbar and tray**, so a mention or direct message is visible even when the window is not.
+- **Incoming calls are noticed when the app is hidden**, and an unanswered ring reports a missed call.
+- **A faster, steadier message list**: sending, reacting, editing, deleting, reconnecting or scrolling no longer redraws the whole channel.
+- **A server built for a crowd**: 1,000–2,000 people online reconnect after a restart without thrashing the database.
+- **Hardened by default**: the desktop can no longer read its own credential and pin files from the web page, and login bursts queue instead of failing.
+
+### Added
+
+**Messages and search**
+
+- Search covers the whole server by default and keeps its panel open when you jump to a hit, with **Load more** for older results and an "in #channel" chip to narrow it.
+- Search finds a half-typed last word of three or more characters; the search API can sort newest-first and page past the first 100 results.
+- The search and Ctrl+K result lists keep the highlighted row on screen.
+- The `@`-mention list ranks recent channel speakers first and matches display names as well as usernames.
+- Large images are served as a cached 800-pixel preview; the full file loads only when you open it.
+- A file upload shows a determinate progress bar instead of an indefinite spinner.
+
+**Emoji**
+
+- The picker and `:` autocomplete carry the full Unicode 15.1 set (about 1,900 emoji), including Travel, Activities and Flags groups.
+- A skin-tone selector is remembered and applies to `:` autocomplete and reactions; Discord-style names such as `:thumbsup` work.
+- The emoji list loads lazily the first time you use it, so it does not slow down starting the app.
+- The picker is keyboard-friendly: Enter inserts the first match, the arrow keys move through the grid, and a category bar jumps to a group.
+
+**Notifications and calls**
+
+- The taskbar and tray show your unread count (mentions plus unread direct messages); KDE and Ubuntu use the launcher count.
+- An incoming DM call raises a notification, flashes the taskbar and rings; after 30 seconds it reports **Missed call from …**, with a new **Incoming Call Sound** switch.
+- Desktop notifications strip markdown and hide spoilered text, and clicking one opens that message — including from a Windows Action Center toast.
+- Notifications for other channels are suppressed while the window is focused, and an attachment-only message reads "sent an attachment".
+
+**Voice and calls**
+
+- DM calls have their own call panel, with who is in the call, the call controls, and "Calling…", declined and unanswered states; a DM call's camera or screen share can be watched from the DM.
+- Watching a stream is more like Discord: click a tile to watch it large, with a speaker ring, a per-stream volume slider and right-click options, and a tile can go full screen or pop out.
+- The voice connection and transport-stats panels were redesigned to read at a glance, with upload/download tiles and loss- and jitter-aware quality.
+- Voice can run on a single UDP port (`voice.udp_port`) instead of the 10,000-port range, for a restrictive firewall.
+- Push-to-talk keeps sending briefly after you release the key (a configurable 0–2000 ms delay) so the end of a word is not clipped.
+- On Linux, sharing your screen asks what to share first, with Screens and Applications tabs, thumbnails, a quality choice and a **Go Live** button.
+- Settings › Voice & Audio is grouped into microphone, speakers, camera & screen share, and voice processing cards.
+
+**Accounts, privacy and admin**
+
+- The server owner chooses which file types may be uploaded (`upload.blocked_extensions` / `upload.allowed_extensions`); executables are always refused by content.
+- The admin panel can issue a temporary ban (1 hour to 30 days) and pages through the whole pending-registration queue.
+- Backups can be downloaded from the admin panel, owner-only, through a single-use link.
+- The Dashboard has a **Connectivity check** card that runs the voice and connection report and shows the result.
+- "Sign out everywhere", account recovery, a password change, a two-factor change and removing a session now revoke the account's API tokens and disconnect the affected device at once.
+- A refused sign-up now says why in the server log (at WARN, tied to the request id); the public response is unchanged.
+
+**Desktop app**
+
+- Auto-idle follows keyboard and mouse input anywhere on the computer on Windows, GNOME (X11 and Wayland) and KDE on X11.
+- Alt+↑/↓ steps between channels and Alt+Shift+↑/↓ between unread channels.
+- Incoming DM calls notify and report missed calls (see Notifications), and Settings shows your uploaded avatar and fetches its data only when you open it.
+
+**Server and platform**
+
+- The server raises its open-file limit at boot and warns when it is too low for the configured online count.
+- IPv6 clients share per-address limits across their /64.
+- The read-only database connection pool defaults to `max(8, 2× CPU)`.
+
+### Changed
+
+- The app hands off to the server about 0.8 s sooner after signing in; the fixed "Connected!" hold is gone.
+- Repeat REST calls and server image fetches reuse one idle connection, and requests leave immediately instead of waiting for the OS to batch them.
+- Server refusals read as plain sentences ("Incorrect username or password.") instead of raw lower-case codes.
+- A registration held for approval is a neutral notice, not a red error, and an unreachable server shows plain copy instead of a raw transport string.
+- "Reconnecting…" clears as soon as the network or the screen comes back, rather than waiting out the retry timer.
+- A crowd signing in together now queues for up to 10 seconds (answering `AUTH_BUSY` with `Retry-After`) instead of most being refused; the login form retries by itself.
+- The Invite Manager names each invite's creator and hides expired or revoked codes.
+- Duplicate channel names are refused with a clear message.
+- Message times roll over to "Yesterday at" at midnight, and system notices use the same 12-hour clock.
+- Slow mode no longer locks the composer; you can keep typing and only Send is held back.
+- Unread badges read "99+" from 100 upward, and the server counts large unread channels faster.
+- Status dots use the design tokens, so the offline grey is the same everywhere.
+- The DM list is in recency order and shows each conversation's last message and time; leaving a group DM asks first.
+- Messages in other channels no longer pop up while the window is focused; the chime still plays and unread badges are unchanged.
+- Settings › Logs is now **Diagnostics & logs**, opening with one summary line and the checks as a row of steps.
+- The connection-quality readout counts packet loss and jitter, and the detailed stats pane opens only when you ask.
+
+### Fixed
+
+**Connection and session**
+
+- **A server update, backup restore or restart no longer signs everyone out**: the client counts down, reconnects and returns to the channel it was in, and a voice call comes back within ten minutes.
+- **A dead connection no longer stays open for up to two minutes** leaving the user showing online; the server pings every 25 seconds and closes a silent peer within about 50 seconds.
+- **A half-open connection no longer stays "connected" forever**: the client treats a minute without any server frame as a dead link and redials.
+- **Waking a sleeping laptop now probes at once and redials within about 15 seconds**, instead of showing Connected while nothing arrives.
+- **A short network blip no longer ends a voice call** — the server holds your place for 15 seconds — and waking a laptop no longer silently takes over another computer's call.
+- **An auto-login to a server that is down no longer sits on "Auto-connecting…" forever**; the first connection has a 20-second deadline, then returns to login with a "Waiting for <server>… Cancel" option and keeps checking.
+- **A rejected two-factor code now shows the error inside the code card**, where the opaque overlay no longer hides it.
+- **Saved servers, logins and trusted certificates survive a crash mid-save**, with atomic writes and a `.corrupt-<time>` copy that fails closed for pins.
+- **A locked-out username can still be signed in from an address that recently signed in**, so a flood from elsewhere cannot lock you out of your own account.
+
+**Messages and files**
+
+- **A reconnect after a server restart no longer drops messages** posted in the channel you were reading, and it keeps your loaded history and scroll position.
+- **The app opens on the channel you were last reading** and no longer clears another channel's unread badge on launch.
+- **Fast scrolling never leaves the message list blank**, and older history loads about two screens before the top without moving your position.
+- **Returning to a channel is instant and quiet**, and only the changed rows are redrawn for a reaction, edit, delete, sent message, timeout or role change.
+- **A pin or unpin now reaches everyone**, and the pinned list is newest-pinned first; a pin, profile delete or invite action no longer leaves stale data behind.
+- **An edit no longer discards a draft or reply**, a failed attachment or download now says so, and removing an attachment cancels its upload.
+- **Link previews no longer make a message jump**, and a failed preview names the host once.
+- **Clearing or shortening a search no longer repopulates old results**, and **Enter no longer sends a half-finished word** in Japanese, Chinese or Korean input.
+- **Deleting a message asks first** (Shift-click deletes at once), and Pin is offered only where it will work.
+- **Editing or deleting a message no longer claims success while offline**; success is confirmed by the server's echo.
+- Error toasts stay until dismissed and coalesce duplicates, and Message Requests show the right time for everyone.
+- **A "X is typing…" indicator clears the moment their message arrives**, and the typing strip no longer shifts the chat.
+- **Attachments follow the server's real upload limit**, and a failed upload shows one error.
+- Pin/profile/invite stale data (above), and a DM mention badge no longer disappears when the client reloads its DM list over REST.
+
+**Voice and calls**
+
+- **A long voice drop resumes** instead of ejecting you; the client keeps retrying for up to five minutes, and a quick service restart rejoins the call.
+- **A voice call survives a LiveKit restart**, and the once-a-minute voice check now covers every room the media server has open.
+- **Your microphone never goes out unprocessed**: sensitivity, volume and noise suppression live inside the mic track, so a reconnect or device change cannot leak raw audio, and mouse clicks no longer come through after a reconnect.
+- **Push-to-talk no longer reopens the microphone on every press**, and on Linux it stays open; the mic button now reflects your own mute rather than the PTT gate.
+- **Changing echo cancellation, noise suppression or gain no longer moves you to the default microphone**, and an unplugged device is remembered and switched back to on replug.
+- **On Linux, a call recovers from a suspend or a sound-server restart**, and a screen share that never produces a frame gives up with an error instead of hanging.
+- **Enhanced Noise Suppression now actually runs** the modern audio-worklet path, uses the current model against clicks and keyboard noise, and no longer drops you to listen-only when it fails to start.
+- The sensitivity meter runs the call's own processing, the gate no longer eats the first syllable, and undeafening a member restores their audio.
+- **A voice join is refused instead of minting a dead token when the media server is unreachable**, and joining a non-DM voice channel now also requires Read Messages.
+- **The "Secured" badge recovers** after a brief key-delivery stall, and a changed participant key is accepted automatically with a dismissible notice.
+- **The "Call" action in a member's profile now works**, an unanswered DM call no longer shows the absent callee's tile, and watching a stream is no longer a dead end.
+- **The mic button, deafen and screen-share states read correctly**: a deafened member shows one icon, a cancelled screen-share picker is silent, and the Linux connection readout no longer shows a false "excellent".
+- Linux desktop voice works again against a server on the same Docker host and against servers older than v2.0.0-beta.1.
+- Camera-heavy calls use less bandwidth while the grid is closed or a tile is a thumbnail.
+
+**Accounts and admin**
+
+- **An invite code is accepted however it is pasted** — trimmed, lower-cased, or pulled out of an `owncord://invite/…` link.
+- **Settings refuse values the setup wizard would refuse**, and duplicate channel names are refused with a clear message.
+- **Overturning an appeal now needs the authority the reversal itself needs**, and a moderator's timeout request can no longer be silently shortened.
+- **A timeout now also covers new DMs, group DMs, call rings, DM pins and custom status.**
+- **Setting a custom status while timed out no longer leaves you showing a status nobody else sees.** The app applied and saved the new text straight away, but a timeout refuses it and the server broadcasts nothing, so only you saw it until a reconnect. The previous status and text are now restored in the app, and the usual timeout notice appears.
+- **The admin panel no longer discards unsaved edits silently**; dialogs, the Settings form and the channel-access drawer ask first, and the update and restore dialogs stay open while their work runs.
+- **The admin Dashboard no longer slows as the audit log grows**, and its nav badges refresh when you return to the tab.
+- **Two manual backups in the same second no longer collide**, taking a backup no longer freezes the server's writes, and the full archive streams through a short-lived link.
+- The audit log's Export CSV and Copy page no longer hand a spreadsheet a formula.
+- Behind a reverse proxy, the log and audit trail now name the real client, and proxies that append their own `X-Forwarded-For` line are read correctly.
+- The server warns whenever `trusted_proxies` is empty and the admin allowlist is on, and several server responses now tell the truth (negative invite limits refused, a truncated pin list reported, "already deleted" matching over WebSocket and REST).
+- The admin panel's ban, pending, backup and settings paths were completed (see Added), and LiveKit's health and logs are now reported (below).
+
+**Desktop and install**
+
+- **The desktop webview can no longer read the app's credential and pin files**; its file access is limited to the log folder, and credential and identity commands refuse a host other than the active session's.
+- **An avatar can no longer point at an arbitrary path on the server**, closing a token-leak vector.
+- **A Windows server started from a console now restarts in that same window**, and the desktop client installs only an update built for the running system and signed for the offered version.
+- The tray's status menu and the app now use the same word for "Invisible".
+- Every channel is visible on a first login to a server with a long member list, and the member list section can be collapsed and the member picker driven from the keyboard.
+
+### Known issues
+
+- **Mentions in channels you are not viewing do not update the taskbar or tray badge live yet.** The count catches up when you open the channel or the app receives a fresh unread update.
+- **Incoming-call notification clicks on Windows, and Linux voice device selection, still await a real-machine check.** Both are covered by automated tests but want a hands-on pass before they are called settled.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway". Code signing stays declined for the beta.
+- **A certificate change that is not a public-CA renewal still prompts every member.** A rotated self-signed or private-CA certificate, or any certificate on an IP-address server, shows "Certificate Changed"; compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client; the browser adapter is post-beta work.
+- **ARM64 server upgrades are not rehearsed.** ARM64 assets are lifecycle-checked, but there is no published ARM64 beta to upgrade _from_ yet.
+- **An owner locked out without a recovery kit still has no self-service fix.** The setup wizard offers to generate one at first run, and one can be enrolled any time from the desktop client; without one, restore `data/` from your archive and re-run setup.
+
+### Under the hood
+
+- **A restart with thousands online no longer thrashes the server.** Presence is coalesced into one update per 0.3 s, session keep-alives and connect/disconnect stamps are batched, reconnects are spread over up to 30 s, and concurrent clients share one member-list read, so a reconnect herd no longer overflows queues or blocks message sends. `GET /api/v1/metrics` gains `backpressure_presence_drops`.
+- **A burst of mentions no longer spawns a goroutine and a write per message.** One bounded worker collects a short window and writes them per channel in one transaction.
+- **The hourly replay-event cleanup now deletes in 5,000-row chunks**, the read pool defaults to `max(8, 2× CPU)`, and a 1,000–2,000 online scale load profile was added to the capacity harness.
+- **WebSocket upgrades are limited per address before sign-in**, and pre-auth frames are capped at 8 KiB.
+- **The desktop REST tunnel reuses connections and sets `TCP_NODELAY`**, and a voice session no longer waits behind the previous call's teardown or holds a closed Settings copy in memory.
+- The desktop writes its JSON stores atomically and keeps two previous log files; the app's own log and OS/webview info ride in the support bundle.
+- Release notes are written for users; `release.yml` copies this section verbatim onto the GitHub release page.
+
 ## v2.0.1-beta.1
 
 **OwnCord 2.0.1 beta 1** is the second public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It hardens the rough edges of the first beta: a server update, backup restore or restart no longer signs everyone out, voice survives a network blip or a media-server restart, a laptop waking no longer takes over your desktop call, routine certificate renewals stop prompting, and the admin panel now answers before you dig. Existing `2.0.0-beta.1` servers and clients upgrade in place. It is still a beta and a hobby project — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive.
@@ -184,6 +366,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Under the hood
 
+- **CI now runs on every push to `dev`, not only on pull requests.** A squash merge combines two PRs into a tree no single PR head ever built, so a break that only appears in the combination — each PR green alone — used to land silently until something else went red. The `dev` push trigger runs the full suite (every capability, since the change selector only narrows a PR into `dev`), so a broken integration commit is now a red run on the commit itself. Cost: while a `dev` → `main` release PR is open, one push to `dev` runs the suite twice, because the push and the PR's synchronize event are separate runs.
 - **The desktop no longer polls the signed-in-devices list on every window focus, and no longer logs a TOFU line per request.** A 12-minute test call made 46 `GET /users/me/sessions` calls — each a fresh REST call and TLS handshake through the tunnel — and wrote 63 "TOFU cert event" lines, so owners' access logs and every support bundle carried the churn. The session notice now lists at most once every 30 seconds after a successful listing (focus and visibility firing together collapse into one request), and the "trusted" certificate event is emitted and logged once per host until that host's status changes, instead of once per request. Trust decisions are unchanged: first-use and changed-certificate prompts are not throttled. No user-visible change.
 - **The remote-server REST tunnel's per-request TLS cost is now measured and published.** `docs/plans/http-tofu-proxy.md` records that a cold open against a remote server makes 14 REST calls, each on its own tunnel connection (`Connection: close` per request), and that each new connection adds a TCP handshake plus a TLS 1.3 handshake: two network round trips plus ~3-5 ms per call (measured 22.6 ms at 10 ms RTT up to 202 ms at 100 ms RTT; ~5 ms with no added delay). An uncached image fetch pays the same overhead once. `Client/tests/e2e/scripts/measure-tunnel-tls.mjs` reproduces the numbers. Connection reuse is deferred to a separate security review, not rejected as not worth it: summed over a cold open at 100 ms RTT the handshakes cost ~2.8 s against ~1.4 s of request time (three round trips per call instead of one), but a pooled keep-alive tunnel would change the invariants the `Host` rewrite and per-request TOFU rest on. No behaviour change.
 - **The capacity load baseline now runs weekly on its own.** The published 250-user / 100-connection / 25-voice profile had only ever been produced by manual dispatch on measurement branches, so a server or harness regression was invisible until someone re-ran it. `load-baseline.yml` now also carries a weekly `schedule:` that, once the workflow reaches `main`, measures the workflow's own commit and uploads the artifacts, and is never part of the blocking CI matrix. RE-05's `dev` re-measurement published current figures for the capacity and operational profiles and refuted the once-observed operational upload-phase acknowledgement tail; the latency budgets are unchanged.
@@ -198,6 +381,7 @@ and only when it changes something a contributor or fork holder must do
 - **The pinned LiveKit SFU moves from 1.13.5 to 1.13.7**, as one bump in all three places that named the old release: the compose image an operator runs (`Server/docker-compose.yml`), the release the server auto-downloads (`ws.DefaultLiveKitVersion`) and the e2e/load harness that mirrors it. Patch release — no configuration change.
 - Release notes are now written for users. The tag's `CHANGELOG.md` section opens with a one-paragraph intro, then Highlights / Added / Changed / Fixed / Known issues, with internal changes in a short Under-the-hood list. The release workflow copies it to the GitHub release page as-is, so a release no longer first publishes a wall of internal text.
 - Server log lines for voice gained triage detail: a `voice join` line now carries the joining frame's `req_id`, and every `voice leave` line carries the reason it ran (`client`, `switch`, `disconnect`, `handshake`, `moderator`, `dm_leave`, `blocked`, `token_refresh`, `revoked`), so a "voice won't connect" report can be traced to the path that tore the session down.
+- **Turning on `server.pprof_enabled` now also profiles blocking and mutex contention.** It was a CPU/heap profiler only, so seeing contention on the single SQLite writer needed a scratch build with `runtime.SetBlockProfileRate` and `runtime.SetMutexProfileFraction` called by hand. Enabling pprof now switches both samplers on at sensible rates — 100 µs between block samples and one in five mutex events — and `/debug/pprof/block` and `/debug/pprof/mutex` return real data. Either rate is overridable in the config or through `OWNCORD_SERVER_PPROF_BLOCK_PROFILE_RATE` / `OWNCORD_SERVER_PPROF_MUTEX_PROFILE_FRACTION`, and `0` disables it. A disabled profiler still adds nothing: the samplers are only touched when it is enabled.
 
 ## v2.0.0-beta.1
 

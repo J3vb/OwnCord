@@ -122,6 +122,11 @@ describe("MessageList — new-messages divider", () => {
     msgList.mount(container);
   }
 
+  /** The rendered row node for each message id, to check node identity. */
+  function rowNodes(ids: readonly number[]): (Element | null)[] {
+    return ids.map((id) => container.querySelector(`[data-testid="message-${id}"]`));
+  }
+
   function dividerIndex(): number {
     const rows = [...container.querySelectorAll(".virtual-content > *")];
     return rows.findIndex((el) => el.classList.contains("msg-new-divider"));
@@ -302,6 +307,94 @@ describe("MessageList — new-messages divider", () => {
     expect(divider).not.toBeNull();
     const next = divider?.nextElementSibling as HTMLElement;
     expect(next.dataset.testid).toBe("message-999");
+  });
+
+  // The server caps unread_count at 100, so a channel with 137 unread arrives
+  // as 100. Pinning the divider "100 back from the newest" once 100 rows had
+  // loaded would leave the 37 oldest unread messages above the line, rendered
+  // as read, when the next page of history is prepended.
+  it("keeps every unread message below the divider when the count is capped", async () => {
+    const TOTAL = 200;
+    const firstUnreadId = TOTAL - 137 + 1;
+    const range = (from: number): Message[] =>
+      Array.from({ length: TOTAL - from + 1 }, (_, i) => makeMessage(from + i));
+
+    setMessages(range(TOTAL - 49));
+    openChannelWithUnread(100);
+    mount();
+
+    for (const oldest of [TOTAL - 49, TOTAL - 99, TOTAL - 149]) {
+      setMessages(range(oldest));
+      messagesStore.flush();
+      // Scroll to the top of the loaded window so the virtual list renders
+      // the oldest rows, where the divider must sit.
+      const root = container.querySelector(".messages-container") as HTMLDivElement;
+      root.scrollTop = 0;
+      root.dispatchEvent(new Event("scroll"));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const rows = [...container.querySelectorAll(".virtual-content > *")] as HTMLElement[];
+      const divider = dividerIndex();
+      expect(divider).toBeGreaterThanOrEqual(0);
+      const unreadAbove = rows
+        .slice(0, divider)
+        .filter((el) => Number(el.dataset.testid?.replace("message-", "")) >= firstUnreadId);
+      expect(unreadAbove).toEqual([]);
+      expect(rows[divider + 1]?.dataset.testid).toBe(`message-${oldest}`);
+    }
+  });
+
+  // DP-10: a revisit mounts on the cached window while the refetch is in
+  // flight. Those rows predate what arrived while away, so counting the unread
+  // messages back from their end would mark rows the reader already saw.
+  it("places the divider on a revisit only once the refetched tail lands", () => {
+    setMessages([1, 2, 3, 4, 5].map(makeMessage));
+    messagesStore.setState((prev) => ({
+      ...prev,
+      historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+    }));
+    openChannelWithUnread(1);
+    mount();
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    const cachedRows = rowNodes([1, 2, 3, 4, 5]);
+
+    // The refetch lands: the cached rows unchanged plus the one posted while away.
+    messagesStore.setState((prev) => {
+      const updated = new Map(prev.messagesByChannel);
+      updated.set(CHANNEL_ID, [...prev.messagesByChannel.get(CHANNEL_ID)!, makeMessage(6)]);
+      return { ...prev, messagesByChannel: updated, historyLoadState: new Map() };
+    });
+    messagesStore.flush();
+
+    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
+      "message-6",
+    );
+    // R2: the divider is inserted on its own; the rows already shown stay.
+    cachedRows.forEach((el, i) => expect(rowNodes([i + 1])[0]).toBe(el));
+  });
+
+  // A DM's messages reach the cached window live while it is not open, so the
+  // refetch can land with nothing to change; the divider must still appear.
+  it("places a deferred divider when the revisit refetch lands unchanged", () => {
+    setMessages([1, 2, 3, 4, 5].map(makeMessage));
+    messagesStore.setState((prev) => ({
+      ...prev,
+      historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+    }));
+    openChannelWithUnread(1);
+    mount();
+    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    const cachedRows = rowNodes([1, 2, 3, 4, 5]);
+
+    messagesStore.setState((prev) => ({ ...prev, historyLoadState: new Map() }));
+    messagesStore.flush();
+
+    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
+      "message-5",
+    );
+    cachedRows.forEach((el, i) => expect(rowNodes([i + 1])[0]).toBe(el));
   });
 
   // The line marks a boundary; the message under it must not be rendered as a

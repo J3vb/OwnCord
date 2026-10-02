@@ -37,5 +37,16 @@ keys:
   # Must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in your .env file
   YOUR_API_KEY: YOUR_API_SECRET
 
+# Optional: have LiveKit post room events to OwnCord so a stale or unexpected
+# participant is removed the moment it joins, rather than at OwnCord's next
+# once-a-minute check. Uncomment only if LiveKit can reach OwnCord at a URL
+# whose TLS certificate it trusts (a self-signed certificate fails every
+# delivery), and the sender's address is inside
+# server.livekit_webhook_allowed_cidrs. api_key must be the key above.
+# webhook:
+#   api_key: YOUR_API_KEY
+#   urls:
+#     - https://chat.example.com/api/v1/livekit/webhook
+
 logging:
   level: info

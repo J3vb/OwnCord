@@ -63,14 +63,14 @@ it that can see your data.
 The server sees text and files in the clear. Each reason maps to a feature that
 would not work otherwise.
 
-| Data                       | Stored as                                                                                                                                           | Why the server needs it in the clear                                                                                           |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Channel messages           | plain `content` column — `Server/migrations/001_initial_schema.sql:76`; written by `Server/db/queries/sqlite/messages.sql:2`                        | **Delivery** to members who were offline (replay), **edit** history, **search**                                                |
-| Direct messages            | the same table — a DM is a `channels` row of type `dm` (`Server/migrations/009_dm_tables.sql:6`, body read at `Server/db/queries/sqlite/dm.sql:50`) | Same as channels. There is no separate, more private DM store                                                                  |
-| Uploaded files             | the bytes you sent, unchanged, under `upload.storage_dir` — `Server/storage/storage.go:136`, `:157`; served by `Server/api/upload_handler.go:281`   | **Delivery** with permission checks (`upload_handler.go:293`), size caps                                                       |
-| Search index               | SQLite FTS5 over message text — `Server/migrations/001_initial_schema.sql:87-91`; queried at `Server/db/message_queries.go:385`                     | **Search** (`GET /api/v1/search`, `Server/api/channel_handler.go:79`). Test: `TestSearchMessages_FindsMatch`                   |
-| Names, times, who-is-where | `users`, `messages`, `sessions` rows (`001_initial_schema.sql:37-46`)                                                                               | **Everything** — routing, permissions, unread counts                                                                           |
-| Backups                    | a full plain copy of the database via `VACUUM INTO` — `Server/db/backup_queries.go:101`; written to `backup.dir` (`Server/config/config.go:275`)    | **Backup and restore** (`Server/admin/api.go:163-172`). There is no download endpoint; the backup lives on the operator's disk |
+| Data                       | Stored as                                                                                                                                                                                                                                  | Why the server needs it in the clear                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Channel messages           | plain `content` column — `Server/migrations/001_initial_schema.sql:76`; written by `Server/db/queries/sqlite/messages.sql:2`                                                                                                               | **Delivery** to members who were offline (replay), **edit** history, **search**                                                |
+| Direct messages            | the same table — a DM is a `channels` row of type `dm` (`Server/migrations/009_dm_tables.sql:6`, body read at `Server/db/queries/sqlite/dm.sql:50`)                                                                                        | Same as channels. There is no separate, more private DM store                                                                  |
+| Uploaded files             | the bytes you sent, unchanged, under `upload.storage_dir` — `Server/storage/storage.go:136`, `:157` — plus a scaled preview of a large image in its `thumbs/` subdirectory, removed with the file; served by `Server/api/file_serve.go:22` | **Delivery** with permission checks (`file_serve.go:144`), size caps                                                           |
+| Search index               | SQLite FTS5 over message text — `Server/migrations/001_initial_schema.sql:87-91`; queried at `Server/db/message_queries.go:385`                                                                                                            | **Search** (`GET /api/v1/search`, `Server/api/channel_handler.go:79`). Test: `TestSearchMessages_FindsMatch`                   |
+| Names, times, who-is-where | `users`, `messages`, `sessions` rows (`001_initial_schema.sql:37-46`)                                                                                                                                                                      | **Everything** — routing, permissions, unread counts                                                                           |
+| Backups                    | a full plain copy of the database via `VACUUM INTO` — `Server/db/backup_queries.go:101`; written to `backup.dir` (`Server/config/config.go:275`)                                                                                           | **Backup and restore** (`Server/admin/api.go:163-172`). There is no download endpoint; the backup lives on the operator's disk |
 
 What the server does **not** keep in the clear:
 
@@ -424,7 +424,7 @@ does not claim").
   too, stores only the verifier and returns the secret once on the finish
   step — so a fresh install starts with a way back in.
 - Redemption (`POST /api/v1/auth/recover`) replaces the password, revokes
-  every session, spends the kit and writes the audit row in one transaction
+  every session and API token, spends the kit and writes the audit row in one transaction
   (`DB.RedeemRecoveryKit`), then issues a session **without** the second
   factor — by owner decision, since the kit exists for lost devices. Two
   concurrent redemptions admit at most one; a spent kit never works again.
@@ -458,8 +458,8 @@ does not claim").
   (`Server/api/profile_handler.go:92-93`); revocation is scoped to the calling
   user (`Server/service/user.go:366`).
 - Sign-out-everywhere: `DELETE /api/v1/users/me/sessions` revokes every
-  session of the calling account, the current one included, and never
-  another account's (`UserService.RevokeAllSessions`, audit
+  session and API token of the calling account, the current one included,
+  and never another account's (`UserService.RevokeAllSessions`, audit
   `session_revoke_all`; test `TestRevokeAllSessions_OnlyTheCallersAccount`).
 - A password change revokes every other session (`Server/service/user.go:336`).
 - Admin force-logout revokes all of a user's sessions

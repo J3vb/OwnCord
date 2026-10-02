@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -586,7 +587,7 @@ func TestSearchMessages_FindsMatch(t *testing.T) {
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world fts test", nil)
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "unrelated content here", nil)
 
-	results, err := database.SearchMessages(context.Background(), "hello", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "hello", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -607,7 +608,7 @@ func TestSearchMessages_FilterByChannel(t *testing.T) {
 	_, _ = database.CreateMessage(context.Background(), ch1, userID, "needle in channel 1", nil)
 	_, _ = database.CreateMessage(context.Background(), ch2, userID, "needle in channel 2", nil)
 
-	results, _ := database.SearchMessages(context.Background(), "needle", &ch1, 10)
+	results, _ := database.SearchMessages(context.Background(), "needle", &ch1, db.SearchPage{Limit: 10})
 	if len(results) != 1 {
 		t.Errorf("expected 1 result in ch1, got %d", len(results))
 	}
@@ -622,7 +623,7 @@ func TestSearchMessages_NoResults(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello there", nil)
 
-	results, _ := database.SearchMessages(context.Background(), "xyzzy", nil, 10)
+	results, _ := database.SearchMessages(context.Background(), "xyzzy", nil, db.SearchPage{Limit: 10})
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
 	}
@@ -637,7 +638,7 @@ func TestSearchMessages_LimitRespected(t *testing.T) {
 		_, _ = database.CreateMessage(context.Background(), chID, userID, "searchable keyword content", nil)
 	}
 
-	results, _ := database.SearchMessages(context.Background(), "keyword", nil, 3)
+	results, _ := database.SearchMessages(context.Background(), "keyword", nil, db.SearchPage{Limit: 3})
 	if len(results) != 3 {
 		t.Errorf("expected 3 results (limit), got %d", len(results))
 	}
@@ -651,7 +652,7 @@ func TestSearchMessages_DeletedNotReturned(t *testing.T) {
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "vanishing keyword message", nil)
 	_ = database.DeleteMessage(context.Background(), id, userID, false)
 
-	results, _ := database.SearchMessages(context.Background(), "vanishing", nil, 10)
+	results, _ := database.SearchMessages(context.Background(), "vanishing", nil, db.SearchPage{Limit: 10})
 	if len(results) != 0 {
 		t.Errorf("expected 0 results (deleted excluded), got %d", len(results))
 	}
@@ -669,11 +670,11 @@ func TestSearchMessages_EditReindexes(t *testing.T) {
 		t.Fatalf("EditMessage: %v", err)
 	}
 
-	stale, _ := database.SearchMessages(context.Background(), "obsolete", nil, 10)
+	stale, _ := database.SearchMessages(context.Background(), "obsolete", nil, db.SearchPage{Limit: 10})
 	if len(stale) != 0 {
 		t.Errorf("expected 0 results for pre-edit content, got %d", len(stale))
 	}
-	updated, _ := database.SearchMessages(context.Background(), "fresh", nil, 10)
+	updated, _ := database.SearchMessages(context.Background(), "fresh", nil, db.SearchPage{Limit: 10})
 	if len(updated) != 1 {
 		t.Errorf("expected 1 result for post-edit content, got %d", len(updated))
 	}
@@ -691,7 +692,7 @@ func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 
-	results, err := database.SearchMessages(context.Background(), "pinworthy", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "pinworthy", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -711,7 +712,7 @@ func TestSearchMessages_HyphenatedQuery(t *testing.T) {
 
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "a well-known fact", nil)
 
-	results, err := database.SearchMessages(context.Background(), "well-known", nil, 10)
+	results, err := database.SearchMessages(context.Background(), "well-known", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessages(%q): %v", "well-known", err)
 	}
@@ -733,7 +734,7 @@ func TestSearchMessages_BooleanKeywordQuery(t *testing.T) {
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
 
 	for _, q := range []string{"AND", "OR", "NOT", "AND world", "hello AND"} {
-		if _, err := database.SearchMessages(context.Background(), q, nil, 10); err != nil {
+		if _, err := database.SearchMessages(context.Background(), q, nil, db.SearchPage{Limit: 10}); err != nil {
 			t.Errorf("SearchMessages(%q): unexpected error: %v", q, err)
 		}
 	}
@@ -750,10 +751,101 @@ func TestSearchMessagesInChannels_BooleanKeywordQuery(t *testing.T) {
 	_, _ = database.CreateMessage(context.Background(), chID, userID, "hello world", nil)
 
 	for _, q := range []string{"AND", "OR", "NOT", "AND world", "hello AND"} {
-		if _, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, 10); err != nil {
+		if _, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10}); err != nil {
 			t.Errorf("SearchMessagesInChannels(%q): unexpected error: %v", q, err)
 		}
 	}
+}
+
+// DP-20: the last term of a query is a prefix, so a half-typed word still
+// finds the message ("deplo" finds "deploy"). Only the last term: earlier
+// ones were finished words when the user typed past them.
+func TestSearchMessages_LastTermIsAPrefix(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "prefixuser")
+	chID := seedChannel(t, database, "prefixch")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "please deploy the app", nil)
+
+	for _, q := range []string{"deplo", "app deplo", "please-dep"} {
+		results, err := database.SearchMessages(context.Background(), q, nil, db.SearchPage{Limit: 10})
+		if err != nil {
+			t.Fatalf("SearchMessages(%q): %v", q, err)
+		}
+		if len(results) != 1 {
+			t.Errorf("SearchMessages(%q) = %d results, want 1", q, len(results))
+		}
+		results, err = database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10})
+		if err != nil {
+			t.Fatalf("SearchMessagesInChannels(%q): %v", q, err)
+		}
+		if len(results) != 1 {
+			t.Errorf("SearchMessagesInChannels(%q) = %d results, want 1", q, len(results))
+		}
+	}
+
+	results, err := database.SearchMessages(context.Background(), "deplo app", nil, db.SearchPage{Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages(%q): %v", "deplo app", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("SearchMessages(%q) = %d results, want 0: only the last term is a prefix", "deplo app", len(results))
+	}
+}
+
+// DP-20: a last term shorter than three runes matches only that exact word,
+// so "de" does not find "deploy" but still finds the word "de"; three runes
+// are enough to prefix.
+func TestSearchMessages_ShortLastTermIsExact(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "shortuser")
+	chID := seedChannel(t, database, "shortch")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "please deploy the app", nil)
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "ciao de mi amigo", nil)
+
+	for q, want := range map[string]int{"de": 1, "please de": 0, "dep": 1} {
+		results, err := database.SearchMessagesInChannels(context.Background(), q, []int64{chID}, db.SearchPage{Limit: 10})
+		if err != nil {
+			t.Fatalf("SearchMessagesInChannels(%q): %v", q, err)
+		}
+		if len(results) != want {
+			t.Errorf("SearchMessagesInChannels(%q) = %d results, want %d", q, len(results), want)
+		}
+	}
+}
+
+// DP-20: a Recent page is newest first, and Before keeps only ids strictly
+// below the cursor.
+func TestSearchMessages_RecentBeforeCursor(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "cursoruser")
+	chID := seedChannel(t, database, "cursorch")
+
+	ids := make([]int64, 5)
+	for i := range ids {
+		ids[i], _ = database.CreateMessage(context.Background(), chID, userID, "cursorword message", nil)
+	}
+	want := []int64{ids[2], ids[1], ids[0]}
+
+	check := func(name string, got []db.MessageSearchResult, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		gotIDs := make([]int64, len(got))
+		for i, r := range got {
+			gotIDs[i] = r.MessageID
+		}
+		if !slices.Equal(gotIDs, want) {
+			t.Errorf("%s ids = %v, want %v", name, gotIDs, want)
+		}
+	}
+	page := db.SearchPage{Limit: 10, Recent: true, Before: ids[3]}
+	got, err := database.SearchMessages(context.Background(), "cursorword", &chID, page)
+	check("SearchMessages", got, err)
+	got, err = database.SearchMessagesInChannels(context.Background(), "cursorword", []int64{chID}, page)
+	check("SearchMessagesInChannels", got, err)
 }
 
 // ─── UpdateReadState ──────────────────────────────────────────────────────────
@@ -1065,6 +1157,39 @@ func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
 	}
 }
 
+// A channel with more than 100 unread messages reports a capped count: the
+// ready payload only needs "99+" to render, and bounding the subquery keeps a
+// huge never-read channel from scanning every message row on every connect.
+// A small channel is unaffected.
+func TestGetChannelUnreadCounts_CapsAt100(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "unreadcap")
+	bigChID := seedChannel(t, database, "bigchan")
+	smallChID := seedChannel(t, database, "smallchan")
+
+	for range 150 {
+		if _, err := database.CreateMessage(context.Background(), bigChID, userID, "msg", nil); err != nil {
+			t.Fatalf("CreateMessage(big): %v", err)
+		}
+	}
+	for range 3 {
+		if _, err := database.CreateMessage(context.Background(), smallChID, userID, "msg", nil); err != nil {
+			t.Fatalf("CreateMessage(small): %v", err)
+		}
+	}
+
+	counts, err := database.GetChannelUnreadCounts(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	if got := counts[bigChID].UnreadCount; got != 100 {
+		t.Errorf("big channel UnreadCount = %d, want 100 (capped)", got)
+	}
+	if got := counts[smallChID].UnreadCount; got != 3 {
+		t.Errorf("small channel UnreadCount = %d, want 3 (uncapped)", got)
+	}
+}
+
 // A channel with no messages must still yield a 0,0 entry — the correlated
 // subquery rewrite must not silently drop empty channels from the ready
 // payload's unread map.
@@ -1365,8 +1490,52 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPinnedMessages: %v", err)
 	}
-	if len(msgs) > db.MaxPinnedMessages {
-		t.Errorf("GetPinnedMessages returned %d pins, want <= MaxPinnedMessages (%d)", len(msgs), db.MaxPinnedMessages)
+	// One row past the cap is returned so the caller can report truncation.
+	if len(msgs) != db.MaxPinnedMessages+1 {
+		t.Errorf("GetPinnedMessages returned %d pins, want MaxPinnedMessages+1 (%d)", len(msgs), db.MaxPinnedMessages+1)
+	}
+}
+
+// TestGetPinnedMessages_OrdersByPinRecency pins an older message AFTER a newer
+// one and checks the newer pin sorts first (F5). Ordering by message id put the
+// newer pin at the bottom.
+func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "pinorder")
+	chID := seedChannel(t, database, "pinsorder")
+
+	first, err := database.CreateMessage(context.Background(), chID, userID, "older message", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(first): %v", err)
+	}
+	second, err := database.CreateMessage(context.Background(), chID, userID, "newer message", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(second): %v", err)
+	}
+
+	// Pin the NEWER message first, then the OLDER one, so message-id order and
+	// pin-recency order disagree.
+	if err := database.SetMessagePinned(context.Background(), second, true); err != nil {
+		t.Fatalf("pin second: %v", err)
+	}
+	// Windows' wall clock ticks coarsely, so two back-to-back pins can share a
+	// stamp and tie. Wait for the clock to advance so the pins are ordered.
+	for start := time.Now().UnixNano(); time.Now().UnixNano() == start; {
+		time.Sleep(time.Millisecond)
+	}
+	if err := database.SetMessagePinned(context.Background(), first, true); err != nil {
+		t.Fatalf("pin first: %v", err)
+	}
+
+	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
+	if err != nil {
+		t.Fatalf("GetPinnedMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("got %d pins, want 2", len(msgs))
+	}
+	if msgs[0].ID != first {
+		t.Errorf("most-recently-pinned should sort first: got id %d, want %d", msgs[0].ID, first)
 	}
 }
 

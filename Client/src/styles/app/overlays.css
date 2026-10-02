@@ -405,10 +405,61 @@
 .search-overlay-input::placeholder {
   color: var(--text-muted);
 }
+/* Scope: a whole-server / this-channel toggle, shown only when the overlay
+   opened on a channel. */
+.search-overlay-scope {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 20px 12px;
+}
+.search-scope-option {
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.search-scope-option:hover {
+  border-color: var(--border-strong);
+}
+.search-scope-option.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.search-scope-option:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .search-overlay-results {
   max-height: 400px;
   overflow-y: auto;
   border-top: 1px solid var(--border);
+}
+.search-overlay-load-more {
+  display: block;
+  width: 100%;
+  padding: 10px 20px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.search-overlay-load-more:hover {
+  background: var(--bg-secondary);
+}
+.search-overlay-load-more:disabled {
+  color: var(--text-micro);
+  cursor: default;
+}
+.search-overlay-load-more:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
 }
 .search-overlay-status {
   padding: 12px 20px;

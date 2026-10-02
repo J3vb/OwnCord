@@ -1,6 +1,6 @@
 // jsdom ships no type declarations and @types/jsdom is not a dependency of
 // this project. Declare the surface the tests/contract/ admin-SPA test
-// actually uses, following the same pattern as src/types/jitsi-rnnoise.d.ts.
+// actually uses.
 // (jsdom itself stays a required dependency regardless: vitest.config.ts
 // sets environment: "jsdom" for the whole suite.)
 declare module "jsdom" {

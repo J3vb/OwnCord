@@ -13,7 +13,8 @@ type ActiveTimeoutExpiry struct {
 }
 
 // ListActiveTimeoutExpiries lists every active timeout's target and expiry,
-// for the hub to re-arm its expiry refreshes at startup.
+// for the hub to re-arm its expiry refreshes at startup and for
+// service.PermissionService to load its active-timeout mirror (P5-O02).
 func (d *DB) ListActiveTimeoutExpiries(ctx context.Context) ([]ActiveTimeoutExpiry, error) {
 	rows, err := d.q.ListActiveTimeoutExpiries(ctx)
 	if err != nil {

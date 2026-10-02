@@ -24,7 +24,7 @@ import { createRoomEventHandlers } from "@lib/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
 import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, setEncryptionDegraded } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import type { AudioElements } from "@lib/audioElements";
 import { expectConsole } from "../helpers/console";
@@ -61,6 +61,7 @@ interface Harness {
   };
   spies: {
     applyMicMuteState: ReturnType<typeof vi.fn>;
+    setupAudioPipeline: ReturnType<typeof vi.fn>;
     attemptAutoReconnect: ReturnType<typeof vi.fn>;
     teardownForReconnect: ReturnType<typeof vi.fn>;
     leaveVoice: ReturnType<typeof vi.fn>;
@@ -84,6 +85,7 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
   };
   const spies = {
     applyMicMuteState: vi.fn().mockResolvedValue(undefined),
+    setupAudioPipeline: vi.fn(),
     attemptAutoReconnect: vi.fn().mockResolvedValue(undefined),
     teardownForReconnect: vi.fn(),
     leaveVoice: vi.fn(),
@@ -113,6 +115,8 @@ function build(over: Partial<RoomEventDeps> = {}): Harness {
     teardownForReconnect: spies.teardownForReconnect,
     leaveVoice: spies.leaveVoice,
     applyMicMuteState: spies.applyMicMuteState,
+    setupAudioPipeline: spies.setupAudioPipeline,
+    isNativeRoom: () => false,
     attemptAutoReconnect: spies.attemptAutoReconnect,
     ...over,
   };
@@ -224,6 +228,31 @@ describe("handleLocalTrackPublished", () => {
       expect(applyMicMuteState).toHaveBeenCalled();
     });
     expectConsole("warn", /\[roomEventHandlers\] applyMicMuteState failed/);
+  });
+
+  // livekit-client republishes every local track after a full reconnect, and
+  // restarts the mic track itself when its device ends. Both put the raw
+  // capture track on the sender, past the input-volume and sensitivity chain.
+  it("rebuilds the audio pipeline when the microphone is (re)published", () => {
+    const h = build();
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.Microphone,
+    } as LocalTrackPublication);
+
+    expect(h.spies.setupAudioPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  // Deleted "rebuilds on TrackEvent.Restarted": the processor now survives SDK restarts, so the handler no longer subscribes.
+
+  it("leaves the pipeline alone for a published camera or screen share", () => {
+    const h = build();
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.ScreenShare,
+    } as LocalTrackPublication);
+
+    expect(h.spies.setupAudioPipeline).not.toHaveBeenCalled();
   });
 });
 
@@ -642,6 +671,120 @@ describe("handleEncryptionError", () => {
       h.handlers.handleEncryptionError(decryptFailed(), bob);
 
       expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("clears the degraded badge again once a stalled peer's decrypts resume", () => {
+      const h = build();
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+      // The key finally lands: the worker stops reporting, so a quiet gap
+      // longer than livekit's 60 s error-rate window clears the latch instead
+      // of leaving "Unsecured" for the rest of the call.
+      vi.advanceTimersByTime(30_000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+      vi.advanceTimersByTime(40_000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("clears a native room's stall as soon as its unthrottled reports stop", () => {
+      // The native room re-reports every second until the peer decrypts
+      // again, so a gap past the streak reset already means recovery.
+      const h = build({ isNativeRoom: () => true });
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("stays degraded while a failing peer's reports are held back by livekit's rate limiter", () => {
+      const h = build();
+      // livekit-client's ErrorRateLimiter: one report a second, at most 5 per
+      // window, and a new window only once 60 s have passed since the last
+      // report, so a peer that never decrypts again reports in bursts about
+      // 66 s apart with just over 60 s of silence between them.
+      const reportFor = (seconds: number): void => {
+        for (let s = 0; s < seconds; s++) {
+          if (s % 66 <= 5) h.handlers.handleEncryptionError(decryptFailed(), bob);
+          vi.advanceTimersByTime(1000);
+          expect(voiceStore.getState().encryptionDegraded).toBe(s >= 3);
+        }
+      };
+
+      reportFor(180);
+      // Three bursts: each restarts a streak (3 tolerated, 3 past the grace).
+      for (let i = 0; i < 9; i++) {
+        expectConsole("warn", /receive-side decrypt failure/);
+        expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      }
+    });
+
+    it("keeps the badge degraded when the worker dies while a decrypt recovery is pending", () => {
+      const h = build();
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      // The worker dies: no more decrypt reports arrive, and the quiet gap
+      // that follows must not read as the peer's decrypts resuming.
+      h.handlers.handleEncryptionError(new Error("E2EE worker crashed"));
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+      // A later decrypt streak and its quiet gap do not clear it either.
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("does not let a pending recovery from a left call touch the next one", () => {
+      const h = build();
+
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      // Leave; the next call starts clean and is degraded by its own cause,
+      // which the left call's quiet-gap timer must not clear.
+      h.handlers.resetEncryptionRecovery();
+      setEncryptionDegraded(false);
+      setEncryptionDegraded(true);
+      vi.advanceTimersByTime(5000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
     });
 

@@ -23,10 +23,12 @@ export const ServerMessageType = {
   CHAT_SEND_OK: "chat_send_ok",
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
+  CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
   CHAT_BULK_DELETED: "chat_bulk_deleted",
   REACTION_UPDATE: "reaction_update",
   TYPING: "typing",
   PRESENCE: "presence",
+  PRESENCE_BATCH: "presence_batch", // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
   CHANNEL_CREATE: "channel_create",
   CHANNEL_UPDATE: "channel_update",
   CHANNEL_DELETE: "channel_delete",

@@ -7,15 +7,15 @@
  * other.
  *
  * Two sources in one list: the server's custom emoji, which insert their
- * `:shortcode:` text, and the built-in unicode set, which inserts the character
- * itself. Custom emoji come first — they are the ones a shortcode is really
- * for, and there are far fewer of them.
+ * `:shortcode:` text, and the Unicode set, which inserts the character itself
+ * in the remembered skin tone. Custom emoji come first — they are the ones a
+ * shortcode is really for, and there are far fewer of them. The Unicode set is
+ * a lazy chunk: until the composer has loaded it, only custom emoji match.
  *
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
 import { createElement, setText } from "@lib/dom";
-import { EMOJI_NAMES } from "@components/emoji-keywords";
 import { buildCustomEmojiImage } from "@components/message-list/custom-emoji";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
 import { messagingText } from "../i18n/messaging";
@@ -23,6 +23,13 @@ import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
 } from "@components/inline-autocomplete";
+import {
+  emojiCatalog,
+  emojiMatches,
+  skinTone,
+  withSkinTone,
+  type UnicodeEmoji,
+} from "../features/messaging/emojiCatalog";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the picker. */
 export const MAX_EMOJI_SUGGESTIONS = 10;
@@ -74,9 +81,24 @@ function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
 }
 
 /**
+ * 0 when `q` is the emoji's name, 1 another of its names, 2 another whole
+ * keyword (underscores optional, so `thumbsup` is `thumbs_up`), 3 the start of
+ * a keyword, 4 otherwise.
+ */
+function unicodeRank(e: UnicodeEmoji, words: readonly string[], q: string): number {
+  const is = (w: string): boolean => w === q || w.replaceAll("_", "") === q;
+  const name = e.names.findIndex(is);
+  if (name !== -1) return name === 0 ? 0 : 1;
+  if (words.some(is)) return 2;
+  return words.some((w) => w.startsWith(q)) ? 3 : 4;
+}
+
+/**
  * Suggestions for `query`, in the order the popup lists them: custom emoji
  * first (prefix matches before substring), then unicode, alphabetical within
- * each group.
+ * each group. Unicode emoji rank by how well the query matches: the emoji's own
+ * name (`:heart` is ❤️, `:star` is ⭐), then a curated word (🤩 "star struck"),
+ * then the start of a keyword, then anywhere in one.
  *
  * A query shorter than MIN_EMOJI_QUERY yields nothing at all, so the composer
  * never opens a popup over a lone colon.
@@ -102,36 +124,31 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
     else customSubstring.push(entry);
   }
 
-  const unicodePrefix: EmojiSuggestion[] = [];
-  const unicodeSubstring: EmojiSuggestion[] = [];
-  for (const [char, keywords] of Object.entries(EMOJI_NAMES)) {
-    if (!keywords.includes(q)) continue;
-    const words = keywords.split(" ");
-    const primary = words[0] ?? keywords;
-    const entry: EmojiSuggestion = {
-      label: primary,
-      insert: char,
-      detail: words.slice(1).join(" "),
-      kind: "unicode",
-      char,
-      emoji: null,
-    };
-    // "Prefix" means some whole keyword starts with the query, not just the
-    // primary one — typing ":fire" should rank 🔥 ("fire hot flame lit") above
-    // an emoji that merely contains "fire" mid-word.
-    if (words.some((w) => w.startsWith(q))) unicodePrefix.push(entry);
-    else unicodeSubstring.push(entry);
+  const unicode: EmojiSuggestion[][] = [[], [], [], [], []];
+  const tone = skinTone();
+  for (const group of emojiCatalog()?.groups ?? []) {
+    for (const e of group.emoji) {
+      if (!emojiMatches(e, q)) continue;
+      const words = e.keywords.split(" ");
+      const label = e.names[0] ?? "";
+      const char = withSkinTone(e, tone);
+      const entry: EmojiSuggestion = {
+        label,
+        insert: char,
+        detail: [...new Set(words)].filter((w) => w !== label).join(" "),
+        kind: "unicode",
+        char,
+        emoji: null,
+      };
+      unicode[unicodeRank(e, words, q)]?.push(entry);
+    }
   }
 
   customPrefix.sort(byLabel);
   customSubstring.sort(byLabel);
-  unicodePrefix.sort(byLabel);
-  unicodeSubstring.sort(byLabel);
+  for (const tier of unicode) tier.sort(byLabel);
 
-  return [...customPrefix, ...customSubstring, ...unicodePrefix, ...unicodeSubstring].slice(
-    0,
-    MAX_EMOJI_SUGGESTIONS,
-  );
+  return [...customPrefix, ...customSubstring, ...unicode.flat()].slice(0, MAX_EMOJI_SUGGESTIONS);
 }
 
 /** One emoji row: preview cell, `:label:`/name, and a keyword detail line. */

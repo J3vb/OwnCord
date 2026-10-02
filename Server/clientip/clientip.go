@@ -77,8 +77,10 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	// Taking the leftmost entry (BUG-112) would trust a client-supplied value:
 	// a client can prepend a spoofed IP (`X-Forwarded-For: <spoofed>, <real>`)
 	// that the proxy then appends to, letting it forge per-IP rate-limit and
-	// lockout keys.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+	// lockout keys. Every header line is joined first: a proxy that adds its
+	// own X-Forwarded-For line instead of extending the client's (HAProxy's
+	// `option forwardfor`) leaves the client-supplied line first.
+	if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
 		parts := strings.Split(xff, ",")
 		leftmostValid := ""
 		for _, part := range slices.Backward(parts) {
@@ -115,4 +117,20 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	}
 
 	return remoteHost
+}
+
+// RateKey returns the per-IP rate-limit and lockout key for a resolved client
+// IP. An IPv6 address is aggregated to its /64, since a single subscriber is
+// normally handed a whole /64 and could otherwise rotate through addresses for
+// an unlimited budget; IPv4 (including IPv4-mapped IPv6) stays whole. A value
+// that does not parse is returned unchanged.
+func RateKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return ip
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return v4.String()
+	}
+	return (&net.IPNet{IP: parsed.Mask(net.CIDRMask(64, 128)), Mask: net.CIDRMask(64, 128)}).String()
 }

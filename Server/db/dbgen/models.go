@@ -168,6 +168,11 @@ type LoginAttempt struct {
 	Timestamp string  `json:"timestamp"`
 }
 
+type MemberGeneration struct {
+	ID         int64 `json:"id"`
+	Generation int64 `json:"generation"`
+}
+
 type Message struct {
 	ID               int64   `json:"id"`
 	ChannelID        int64   `json:"channelId"`
@@ -179,6 +184,7 @@ type Message struct {
 	Pinned           int64   `json:"pinned"`
 	Timestamp        string  `json:"timestamp"`
 	MentionsEveryone int64   `json:"mentionsEveryone"`
+	PinnedAt         *string `json:"pinnedAt"`
 }
 
 type MessageDeliveryReceipt struct {

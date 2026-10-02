@@ -47,9 +47,34 @@ pub fn active_captures() -> usize {
     CAPTURES.load(Ordering::Relaxed)
 }
 
-/// The error a cancelled portal dialog (or any capturer that fails before
-/// its first frame) reports; the webview maps it to a permission refusal.
-pub const CANCELLED: &str = "screen capture was cancelled or refused";
+/// The error a portal capture reports when it ends before its first frame.
+/// libwebrtc's `CaptureError` has only `Temporary` and `Permanent`, so the
+/// portal's response (the user dismissed the dialog, a policy refused it, the
+/// PipeWire stream failed) never reaches this layer: the webview shows a soft
+/// notice that covers both a cancel and a refusal.
+pub const PORTAL_NOT_STARTED: &str = "screen capture portal did not start";
+
+/// The error a picked screen or window reports when its capturer fails
+/// before the first frame; the webview shows it.
+pub const FAILED: &str = "screen capture failed to start";
+
+/// The error a capture reports when no first frame arrives in time; the
+/// webview shows it.
+pub const TIMED_OUT: &str = "screen capture produced no frame in time";
+
+/// How long a picked screen or window may take to produce its first frame.
+const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The first-frame bound for `target`, and what a failure before the first
+/// frame reports. A portal capture has no bound: its dialog opens once the
+/// capture starts, so the wait is the user choosing what to share, and a
+/// stop or leave ends it.
+fn first_frame(target: Target) -> (Option<Duration>, &'static str) {
+    match target {
+        Target::Portal => (None, PORTAL_NOT_STARTED),
+        _ => (Some(FIRST_FRAME_TIMEOUT), FAILED),
+    }
+}
 
 /// What to capture.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -440,6 +465,7 @@ fn run(
     on_end: impl FnOnce(),
 ) {
     let mut ready = Some(ready);
+    let (first_frame_timeout, failed) = first_frame(target);
     let mut producer = match Producer::new(target) {
         Ok(p) => p,
         Err(e) => {
@@ -449,11 +475,47 @@ fn run(
             return;
         }
     };
+    run_loop(
+        &mut || producer.grab(),
+        options,
+        shared,
+        stopped,
+        &mut ready,
+        first_frame_timeout,
+        failed,
+        on_end,
+    );
+}
+
+/// The capture loop, over any grab source. Split from `run` so a test can
+/// drive a source that never yields a first frame and pin the timeout.
+#[allow(clippy::too_many_arguments)]
+fn run_loop(
+    grab: &mut dyn FnMut() -> Grab,
+    options: CaptureOptions,
+    shared: &Shared,
+    stopped: &mpsc::Receiver<()>,
+    ready: &mut Option<oneshot::Sender<Result<(u32, u32), String>>>,
+    first_frame_timeout: Option<Duration>,
+    failed: &str,
+    on_end: impl FnOnce(),
+) {
     let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
     let started = Instant::now();
     loop {
         let tick = Instant::now();
-        match producer.grab() {
+        // Bound the pre-first-frame phase (voice #9): a picked source whose
+        // capturer never produces a first frame (a transient error that
+        // loops) used to spin here forever while the shared
+        // enableScreenshare awaited `ready`, leaving the UI stuck "starting
+        // share" with the picker closed and no cancel.
+        if ready.is_some() && first_frame_timeout.is_some_and(|t| started.elapsed() > t) {
+            if let Some(r) = ready.take() {
+                let _ = r.send(Err(TIMED_OUT.into()));
+            }
+            return;
+        }
+        match grab() {
             Grab::Frame(mut buffer) => {
                 if let Some((w, h)) = fit(
                     buffer.width(),
@@ -472,7 +534,7 @@ fn run(
             Grab::Failed => {
                 match ready.take() {
                     Some(r) => {
-                        let _ = r.send(Err(CANCELLED.into()));
+                        let _ = r.send(Err(failed.into()));
                     }
                     None => on_end(),
                 }
@@ -515,6 +577,84 @@ mod tests {
     /// The capture count is process-wide: tests that start captures take
     /// turns.
     static SERIAL: Mutex<()> = Mutex::new(());
+
+    /// What the start loop reports for a grab source, driven until it
+    /// returns or a stop 300 ms in; `None` when it sent nothing.
+    fn start_result(
+        mut grab: fn() -> Grab,
+        first_frame_timeout: Option<Duration>,
+        failed: &str,
+    ) -> Option<Result<(u32, u32), String>> {
+        let shared = Shared {
+            source: Mutex::new(None),
+            preview: Arc::new(watch::channel(None).0),
+        };
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let stopper = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = stop_tx.send(());
+        });
+        let (ready_tx, mut ready_rx) = oneshot::channel();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        run_loop(
+            &mut grab,
+            CaptureOptions {
+                fps: 30.0,
+                max_width: 0,
+                max_height: 0,
+            },
+            &shared,
+            &stop_rx,
+            &mut Some(ready_tx),
+            first_frame_timeout,
+            failed,
+            || {},
+        );
+        stopper.join().unwrap();
+        rt.block_on(&mut ready_rx).ok()
+    }
+
+    /// voice #9: a picked source that never yields a first frame must not
+    /// spin the start loop forever — the shared enableScreenshare awaits
+    /// `ready`. The timeout is a failure the user is told about.
+    #[test]
+    fn a_capture_that_never_produces_a_first_frame_times_out_as_a_failure() {
+        assert_eq!(
+            start_result(|| Grab::Pending, Some(Duration::from_millis(20)), FAILED),
+            Some(Err(TIMED_OUT.to_string()))
+        );
+    }
+
+    /// A portal capture is not bounded: the user may take as long as they
+    /// like in the portal's dialog, and only a stop ends the wait.
+    #[test]
+    fn a_portal_capture_waits_on_its_dialog_until_stopped() {
+        let (timeout, failed) = first_frame(Target::Portal);
+        assert_eq!(timeout, None);
+        assert_eq!(start_result(|| Grab::Pending, timeout, failed), None);
+    }
+
+    /// A picked screen or window whose capturer fails before its first frame
+    /// is a failure; a portal capture that ends before its first frame
+    /// reports that the portal did not start.
+    #[test]
+    fn a_failure_before_the_first_frame_reports_the_targets_reason() {
+        for target in [Target::Portal, Target::Screen(0), Target::Window(1)] {
+            let (timeout, failed) = first_frame(target);
+            let expected = if target == Target::Portal {
+                PORTAL_NOT_STARTED
+            } else {
+                FAILED
+            };
+            assert_eq!(
+                start_result(|| Grab::Failed, timeout, failed),
+                Some(Err(expected.to_string())),
+                "{target:?}"
+            );
+        }
+    }
 
     #[test]
     fn picker_ids_parse_and_synthetic_is_unreachable() {

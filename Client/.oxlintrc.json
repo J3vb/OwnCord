@@ -11,14 +11,7 @@
       "warn",
       {
         "allowAfterThis": true,
-        "allow": [
-          "_rnnoise_create",
-          "_rnnoise_process_frame",
-          "_rnnoise_destroy",
-          "_malloc",
-          "_free",
-          "__owncord"
-        ]
+        "allow": ["__owncord"]
       }
     ]
   },

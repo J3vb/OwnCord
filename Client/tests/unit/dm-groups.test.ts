@@ -326,6 +326,9 @@ describe("DmSidebar — muted rows", () => {
     const leave = document.querySelector('[data-testid="dm-close-7"]') as HTMLElement;
     expect(leave.textContent).toBe("Leave Group");
     leave.click();
+    // The menu path confirms the destructive leave too (DP-34).
+    expect(onCloseDm).not.toHaveBeenCalled();
+    (document.querySelector("[data-testid='dm-leave-confirm']") as HTMLElement).click();
     expect(onCloseDm).toHaveBeenCalledWith(7);
 
     sidebar.destroy?.();

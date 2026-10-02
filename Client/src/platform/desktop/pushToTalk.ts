@@ -15,4 +15,5 @@ export const pushToTalk: PushToTalk = {
   stop: async () => (await service()).stop(),
   updateKey: async (vk) => (await service()).updateKey(vk),
   captureKeyPress: async () => (await service()).captureKeyPress(),
+  supported: async () => (await service()).supported(),
 };

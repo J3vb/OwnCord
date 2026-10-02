@@ -13,8 +13,9 @@ VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: HasActiveTimeout :one
--- The one indexed lookup permissions.Checker / service.PermissionService.Subject
--- run, uncached, to fill Subject.TimedOut.
+-- The indexed lookup permissions.Checker.Subject runs, uncached, to fill
+-- Subject.TimedOut (service.PermissionService.Subject reads its active-timeout
+-- mirror instead, P5-O02).
 SELECT EXISTS (
     SELECT 1 FROM moderation_actions
      WHERE target_id = ? AND kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now')
@@ -67,7 +68,8 @@ SELECT id FROM moderation_actions
 
 -- name: ListActiveTimeoutExpiries :many
 -- Every currently-active timeout's target and expiry, across all users, so
--- the hub can re-arm its in-memory expiry refresh after a restart.
+-- the hub can re-arm its in-memory expiry refresh after a restart and
+-- service.PermissionService can load its active-timeout mirror (P5-O02).
 SELECT target_id, expires_at FROM moderation_actions
  WHERE kind = 'timeout' AND lifted_at IS NULL AND expires_at > datetime('now');
 

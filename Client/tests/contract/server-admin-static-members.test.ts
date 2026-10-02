@@ -25,6 +25,7 @@ const MANAGE_ROLES = 0x1000000;
 const BAN_MEMBERS = 0x80000;
 
 type Responder = (path: string, method: string) => unknown;
+type Sent = { call: string; body: unknown };
 
 interface Bridge {
   state: any;
@@ -34,7 +35,7 @@ interface Bridge {
 
 let dom: JSDOM | undefined;
 
-async function boot(calls: string[], respond: Responder) {
+async function boot(calls: string[], respond: Responder, sent: Sent[] = []) {
   dom = new JSDOM(ADMIN_HTML, {
     url: "http://localhost:8080/admin",
     runScripts: "dangerously",
@@ -44,6 +45,8 @@ async function boot(calls: string[], respond: Responder) {
         const method = String((opts.method as string) || "GET").toUpperCase();
         const p = String(input).replace(/^\/admin\/api/, "");
         calls.push(`${method} ${p}`);
+        if (typeof opts.body === "string")
+          sent.push({ call: `${method} ${p}`, body: JSON.parse(opts.body) });
         const json =
           p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
         return { ok: true, status: 200, json: async () => json } as Response;
@@ -81,7 +84,7 @@ describe("Server/admin/static — Members (AO-4)", () => {
   it("searches, filters by role and lists bans on the server, keeping focus in the search box", async () => {
     const calls: string[] = [];
     const { doc, settle, show, key } = await boot(calls, (p) => {
-      if (p === "/registrations")
+      if (p.startsWith("/registrations"))
         return [{ id: 9, username: "applicant", created_at: "2026-09-01 10:00:00" }];
       if (p === "/roles") return ROLES;
       if (p.startsWith("/users?"))
@@ -151,7 +154,7 @@ describe("Server/admin/static — Members (AO-4)", () => {
   it("asks for confirmation before denying an application, and can cancel", async () => {
     const calls: string[] = [];
     const { doc, settle, show } = await boot(calls, (p) => {
-      if (p === "/registrations")
+      if (p.startsWith("/registrations"))
         return [{ id: 9, username: "applicant", created_at: "2026-09-01 10:00:00" }];
       if (p === "/roles") return ROLES;
       if (p.startsWith("/users?")) return [];
@@ -369,5 +372,91 @@ describe("Server/admin/static — Members (AO-4)", () => {
     await settle();
     expect(doc.getElementById("membersList")!.textContent).toContain("tempbanned");
     expect(menuOpensFor(7)).toBe(true);
+  });
+
+  it("bans for the chosen duration, or permanently by default", async () => {
+    const sent: Sent[] = [];
+    const { doc, settle, show } = await boot(
+      [],
+      (p) => {
+        if (p === "/roles") return ROLES;
+        if (p.startsWith("/users?"))
+          return [{ id: 4, username: "member", role_id: 4, role_position: 40 }];
+        return {};
+      },
+      sent,
+    );
+    await show({ id: 1, permissions: ADMINISTRATOR, role_position: 100, is_owner: true });
+    const ban = async (duration?: string) => {
+      (doc.querySelector('[data-action="toggleMemberMenu"]') as HTMLElement).click();
+      (doc.querySelector('#memberMenu [data-action="openBanUser"]') as HTMLElement).click();
+      await settle();
+      const select = doc.getElementById("banDuration") as HTMLSelectElement;
+      expect(select.value).toBe("0");
+      expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
+        ["0", "Permanent"],
+        ["1", "1 hour"],
+        ["24", "1 day"],
+        ["168", "7 days"],
+        ["720", "30 days"],
+      ]);
+      expect(doc.querySelector('label[for="banDuration"]')).not.toBeNull();
+      if (duration) select.value = duration;
+      (doc.getElementById("banReason") as HTMLTextAreaElement).value = "spam";
+      (doc.querySelector('#modalInner [data-action="confirmBan"]') as HTMLElement).click();
+      await settle();
+      return sent.filter((c) => c.call === "PATCH /users/4").at(-1)?.body;
+    };
+
+    expect(await ban()).toEqual({ banned: true, ban_reason: "spam" });
+    expect(await ban("168")).toEqual({ banned: true, ban_reason: "spam", ban_duration_hours: 168 });
+    expect(await ban("1")).toEqual({ banned: true, ban_reason: "spam", ban_duration_hours: 1 });
+  });
+
+  it("pages through more than one page of pending registrations", async () => {
+    const calls: string[] = [];
+    const applicants = Array.from({ length: 57 }, (_, i) => ({
+      id: 100 + i,
+      username: "applicant" + i,
+      created_at: "2026-09-01 10:00:00",
+    }));
+    const { doc, settle, show } = await boot(calls, (p) => {
+      const m = /^\/registrations\?limit=(\d+)&offset=(\d+)$/.exec(p);
+      if (m) return applicants.slice(Number(m[2]), Number(m[2]) + Number(m[1]));
+      if (p === "/registrations") return applicants.slice(0, 50);
+      if (p === "/roles") return ROLES;
+      if (p.startsWith("/users?")) return [];
+      return {};
+    });
+    await show({ id: 1, permissions: ADMINISTRATOR, role_position: 100, is_owner: true });
+    (doc.getElementById("membersTab-pending") as HTMLElement).click();
+    await settle();
+
+    const rows = () => doc.querySelectorAll("#membersPanel tbody tr");
+    const next = () =>
+      doc.querySelector('[data-action="turnPendingPage"][data-args="[1]"]') as HTMLButtonElement;
+    const prev = () =>
+      doc.querySelector('[data-action="turnPendingPage"][data-args="[-1]"]') as HTMLButtonElement;
+    expect(calls).toContain("GET /registrations?limit=51&offset=0");
+    expect(rows()).toHaveLength(50);
+    expect(doc.getElementById("membersTab-pending")!.textContent).toBe("Pending50+");
+    expect(prev().disabled).toBe(true);
+    expect(next().disabled).toBe(false);
+
+    next().click();
+    await settle();
+    expect(calls).toContain("GET /registrations?limit=51&offset=50");
+    expect(rows()).toHaveLength(7);
+    expect(doc.getElementById("membersPanel")!.textContent).toContain("applicant56");
+    expect(doc.getElementById("membersPanel")!.textContent).not.toContain("applicant49");
+    expect(doc.querySelector("#membersPanel .pagination-info")!.textContent).toBe("Page 2");
+    expect(next().disabled).toBe(true);
+    // The tab keeps the queue's size, not the size of the page on screen.
+    expect(doc.getElementById("membersTab-pending")!.textContent).toBe("Pending50+");
+
+    prev().click();
+    await settle();
+    expect(rows()).toHaveLength(50);
+    expect(prev().disabled).toBe(true);
   });
 });

@@ -41,13 +41,22 @@ RestartSec=3
 # restart backstop (RestartBackstopDelay).
 TimeoutStopSec=60
 
+# Open-file limit. Each WebSocket holds a descriptor. The Go runtime already
+# lifts the SOFT limit to just under the HARD one at init, and the server
+# raises it the rest of the way, so this hard limit is the real ceiling. The
+# risk is a low hard limit (an old systemd default of 1,024, say), which a few
+# hundred online will reach. 65,536 is well above what 2,000 online need (the
+# server's 2×cap+256 boot budget for 2,000 is 4,256); raise it (or use
+# `infinity`) only past roughly 30,000 connections.
+LimitNOFILE=65536
+
 # ── Hardening ───────────────────────────────────────────────────────────────
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 # The install directory must stay WRITABLE: the admin panel's self-update
-# renames the new binary into place (chatserver -> chatserver.old swap), and
+# renames the new binary into place (chatserver -> chatserver.old-* swap), and
 # the data dir (SQLite, uploads, certs, backups) lives beneath it by default.
 # If you disable self-update and move data_dir elsewhere, narrow this.
 #

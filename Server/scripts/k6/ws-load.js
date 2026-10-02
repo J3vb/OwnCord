@@ -1,7 +1,7 @@
 // k6 WebSocket load test for OwnCord server — the BPR-030 capacity profile
 // (B6-9) plus the B6-10 operational profiles: reconnect storm + per-phase
 // observer (`operational`), the connection-ceiling search (`ceiling-search`),
-// and the restart drill (`restart`).
+// and the restart drill (`restart`); and the P5-S01 `scale` profile.
 //
 // The wire protocol is the envelope format from docs/protocol.md: every
 // client->server frame is {type, id?, payload:{...}} and the first frame MUST
@@ -51,6 +51,14 @@
 //     tagged step=<n> (delivery and acknowledgement only during the hold —
 //     the ramp-in is tagged step=<n>-ramp and folds into the aggregate); the
 //     steps are informational and no threshold gates any of them.
+//   scale — what 1,000-2,000 people online do (owner decision D2): N held
+//     connections starting from session tokens minted at seeding, each VU on
+//     its own X-Forwarded-For address; a small active fraction typing then
+//     sending, presence only on a status flip; then a burst minute, a login
+//     burst of fresh password logins, and a herd in which every socket drops
+//     and redials a full `ready`. Every sample is tagged with its window
+//     (scalePhaseAt); see the "scale (P5-S01)" block and docs/capacity.md,
+//     "Scale profile".
 //
 // Logins are paced everywhere, never burst. POST /api/v1/auth/login sits
 // behind a process-wide bcrypt admission budget of max(2*NumCPU, 4) — four
@@ -75,13 +83,14 @@
 //
 // Environment variables:
 //   K6_PROFILE          - capacity (default) | operational | restart |
-//                         ceiling-search
+//                         ceiling-search | scale
 //   K6_WS_URL           - WebSocket URL (default: wss://localhost:8443/api/v1/ws)
 //   K6_HTTP_URL         - HTTP base URL (default: https://localhost:8443)
 //   K6_USERNAME         - Test user prefix (default: loadtest)
 //   K6_PASSWORD         - Test user password (default: LoadTest123!)
 //   K6_CHANNEL_ID       - Text channel to send messages in (default: 1)
-//   K6_PEAK_VUS         - Peak simultaneous connections (default: 100)
+//   K6_PEAK_VUS         - Peak simultaneous connections (default: 100; 2000
+//                         under scale)
 //   K6_RAMP             - Ramp-up duration (default: 60s)
 //   K6_SUSTAIN          - Duration at peak (default: 180s)
 //   K6_SEND_INTERVAL_MS - Per-connection send interval (default: 2000).
@@ -115,6 +124,20 @@
 //   K6_UPLOAD_BYTES     - operational: per-upload payload size (default: 262144)
 //   K6_CEILING_MAX      - ceiling-search: highest connection count probed (default: 500)
 //   K6_CEILING_STEP     - ceiling-search: connection increment per step (default: 100)
+//   K6_SCALE_CHANNELS   - scale: comma-separated pre-seeded text channel ids;
+//                         too few for the active fraction's topic headroom
+//                         fails at init
+//   K6_SCALE_TOKENS     - scale: file of session tokens, line n-1 for
+//                         loadtest<n>; unset, every VU logs in instead
+//   K6_SCALE_ACTIVE     - scale: fraction of connections that send (default 0.1)
+//   K6_SCALE_SEND_MS    - scale: active user's send interval (default 8000)
+//   K6_SCALE_BURST_SEND_MS - scale: the same in the burst window (default 2000);
+//                         both >= 100 (10 sends/second per user)
+//   K6_SCALE_RAMP_S, K6_SCALE_STEADY_S, K6_SCALE_BURST_S, K6_SCALE_LOGIN_S,
+//   K6_SCALE_HERD_S     - scale: window lengths in seconds (180, 180, 60, 90, 90)
+//   K6_SCALE_HERD_SPREAD_S - scale: seconds the herd's drops spread over (15)
+//   K6_SCALE_LOGINS     - scale: fresh logins in the login burst (500)
+//   K6_SCALE_LOGIN_SPREAD_S - scale: seconds they spread over (10)
 //
 // Self-signed TLS (the default server cert): run k6 with --insecure-skip-tls-verify.
 
@@ -122,18 +145,20 @@ import ws from "k6/ws";
 import http from "k6/http";
 import { check, sleep } from "k6";
 import exec from "k6/execution";
+import { SharedArray } from "k6/data";
 import { Counter, Gauge, Rate, Trend } from "k6/metrics";
 
 // Configuration
 const PROFILE = __ENV.K6_PROFILE || "capacity";
-if (!["capacity", "operational", "restart", "ceiling-search"].includes(PROFILE)) {
+if (!["capacity", "operational", "restart", "ceiling-search", "scale"].includes(PROFILE)) {
   throw new Error(
-    `K6_PROFILE must be "capacity", "operational", "restart" or "ceiling-search" (got: ${PROFILE})`,
+    `K6_PROFILE must be "capacity", "operational", "restart", "ceiling-search" or "scale" (got: ${PROFILE})`,
   );
 }
 const IS_OPERATIONAL = PROFILE === "operational";
 const IS_RESTART = PROFILE === "restart";
 const IS_CEILING = PROFILE === "ceiling-search";
+const IS_SCALE = PROFILE === "scale";
 // The B6-10 profiles. A metric registered under this flag must not exist on a
 // capacity run: that summary's metric key set is B6-9's, byte for byte.
 const IS_B6_10 = PROFILE !== "capacity";
@@ -141,7 +166,8 @@ const IS_B6_10 = PROFILE !== "capacity";
 // ceiling-search and restart — one measures per phase, the other per step,
 // and the restart drill needs the per-phase writer-wait delta to exist on
 // BOTH sides of the stop (OC-0446) or it cannot say what the stop cost.
-const OBS_ON = IS_OPERATIONAL || IS_CEILING || IS_RESTART;
+// The scale profile runs it too: its phases are published per window.
+const OBS_ON = IS_OPERATIONAL || IS_CEILING || IS_RESTART || IS_SCALE;
 // k6 hands out VU ids test-wide from a pool filled in VU-init completion
 // order, so which id the observer holds is NOT deterministic: a dispatch on
 // 77fdce30 gave a WebSocket VU id 1, and the old `__VU - OBS_VUS` username
@@ -214,12 +240,14 @@ const downloads = IS_OPERATIONAL ? new Counter("downloads") : null;
 // the server made on purpose is never counted as a WebSocket error.
 //
 // They are different gates and only one is about the server. The per-IP sliding
-// window (api/middleware.go:251) sets Retry-After and fires because every
+// window (api/middleware.go:251) answers RATE_LIMITED and fires because every
 // generator shares one address — an artifact of this topology, which is what
 // OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER is for. The process-wide bcrypt
-// admission budget (auth/admission.go:60) sets no Retry-After and is sized
-// max(2*NumCPU, 4), i.e. 4 concurrent compares on the constrained leg — a real
-// operational signal, and the one that binds a simultaneous login burst.
+// admission budget (auth/admission.go) answers AUTH_BUSY once its bounded
+// queue is full or a login has waited 10 s in it. It is sized max(2*NumCPU, 4),
+// i.e. 4 concurrent compares on the constrained leg — a real operational
+// signal, and the one that binds a simultaneous login burst. Both set
+// Retry-After, so the error code is what tells them apart.
 //
 // Neither is a defect: both refuse before any bcrypt runs and charge no lockout
 // attempt. Both cost the VU its token, so both have to be visible.
@@ -259,7 +287,8 @@ const obsDbWriterWaitSeconds = OBS_ON ? new Counter("obs_db_writer_wait_seconds"
 const obsDbReaderWaitCount = OBS_ON ? new Counter("obs_db_reader_wait_count") : null;
 const obsDbReaderWaitSeconds = OBS_ON ? new Counter("obs_db_reader_wait_seconds") : null;
 const obsReconnectTier = IS_OPERATIONAL ? new Counter("obs_reconnect_tier") : null;
-const obsBackpressure = IS_OPERATIONAL ? new Counter("obs_backpressure") : null;
+// Scale reads queue disconnects per phase: the herd's zero-kick gate.
+const obsBackpressure = IS_OPERATIONAL || IS_SCALE ? new Counter("obs_backpressure") : null;
 const obsConnRejects = OBS_ON ? new Counter("obs_ws_conn_rejects") : null;
 // The ceiling search's per-step population, read from the server's own
 // connected_users (api/metrics_handler.go). ws_connections cannot answer it:
@@ -268,6 +297,31 @@ const obsConnRejects = OBS_ON ? new Counter("obs_ws_conn_rejects") : null;
 const obsConnectedUsers = IS_CEILING ? new Gauge("obs_connected_users") : null;
 const obsUploadStorage = IS_OPERATIONAL ? new Gauge("obs_upload_storage_used_mb") : null;
 
+// Scale-profile metrics (P5-S01), registered on that profile only.
+//
+// ws_ready_time is dial -> `ready` (the client's own clock: TCP, TLS, auth and
+// the full ready payload), which is what a user waits for after a restart.
+// The herd's two figures are herd_ready_at_ms — from the herd's start to this
+// VU's first `ready` after its drop, so its max is "time until all N are
+// ready" — and ws_ready_time{phase:herd}, the per-connection p50/p95.
+// herd_readies counts VUs, not connections: max over a partial population
+// would pass, so the count gate says the whole herd got there.
+const wsReadyTime = IS_SCALE ? new Trend("ws_ready_time", true) : null;
+const herdDrops = IS_SCALE ? new Counter("herd_drops") : null;
+const herdReadies = IS_SCALE ? new Counter("herd_readies") : null;
+const herdReadyAt = IS_SCALE ? new Trend("herd_ready_at_ms", true) : null;
+// The login burst: time from a VU's first attempt to its token, retries
+// included, and the burst's own give-up count — kept apart from
+// login_giveups, which says whether the connected population is complete.
+const loginBurstTime = IS_SCALE ? new Trend("login_burst_time", true) : null;
+const loginBurstOk = IS_SCALE ? new Counter("login_burst_ok") : null;
+const loginBurstGiveUps = IS_SCALE ? new Counter("login_burst_giveups") : null;
+// The server's connected_users on every poll. A Trend, not a Gauge: a Gauge
+// thresholds only on its last value, and "held N for the whole window" needs
+// the minimum.
+const obsPopulation = IS_SCALE ? new Trend("obs_population") : null;
+const obsTopicSheds = IS_SCALE ? new Counter("obs_topic_sheds") : null;
+
 // --- configuration ---------------------------------------------------------
 
 const WS_URL = __ENV.K6_WS_URL || "wss://localhost:8443/api/v1/ws";
@@ -275,7 +329,7 @@ const HTTP_URL = __ENV.K6_HTTP_URL || "https://localhost:8443";
 const USERNAME_PREFIX = __ENV.K6_USERNAME || "loadtest";
 const PASSWORD = __ENV.K6_PASSWORD || "LoadTest123!";
 const CHANNEL_ID = parseInt(__ENV.K6_CHANNEL_ID || "1");
-const PEAK_VUS = parseInt(__ENV.K6_PEAK_VUS || "100");
+const PEAK_VUS = parseInt(__ENV.K6_PEAK_VUS || (IS_SCALE ? "2000" : "100"));
 const RAMP = __ENV.K6_RAMP || "60s";
 const SUSTAIN = __ENV.K6_SUSTAIN || "180s";
 const RAMP_DOWN = "20s";
@@ -380,6 +434,14 @@ const CEILING_TOPIC_BUDGET = TOPIC_LIMIT_PER_SECOND / 2;
 const SEND_LIMIT_PER_SECOND = 10;
 const MIN_SEND_INTERVAL_MS = 1000 / SEND_LIMIT_PER_SECOND;
 let CHANNEL_IDS = [CHANNEL_ID];
+// A comma-separated list of distinct, positive channel ids, or init fails.
+function channelList(name) {
+  const ids = (__ENV[name] || String(CHANNEL_ID)).split(",").map((v) => Number(v.trim()));
+  if (ids.some((v) => !Number.isSafeInteger(v) || v <= 0) || new Set(ids).size !== ids.length) {
+    throw new Error(`${name} must contain distinct positive integer channel ids`);
+  }
+  return ids;
+}
 let ceilingMaxVUsPerChannel = 0;
 let ceilingBurstPerVU = 0;
 if (IS_CEILING) {
@@ -395,15 +457,7 @@ if (IS_CEILING) {
       `ceiling-search requires K6_CEILING_MAX >= 100, K6_CEILING_STEP > 0 and K6_SEND_INTERVAL_MS >= ${MIN_SEND_INTERVAL_MS} (each user is capped at ${SEND_LIMIT_PER_SECOND} sends/second)`,
     );
   }
-  CHANNEL_IDS = (__ENV.K6_CEILING_CHANNELS || String(CHANNEL_ID))
-    .split(",")
-    .map((v) => Number(v.trim()));
-  if (
-    CHANNEL_IDS.some((v) => !Number.isSafeInteger(v) || v <= 0) ||
-    new Set(CHANNEL_IDS).size !== CHANNEL_IDS.length
-  ) {
-    throw new Error("K6_CEILING_CHANNELS must contain distinct positive integer channel ids");
-  }
+  CHANNEL_IDS = channelList("K6_CEILING_CHANNELS");
   ceilingBurstPerVU = Math.ceil(1000 / SEND_INTERVAL_MS);
   const slotsPerChannel = Math.floor(CEILING_TOPIC_BUDGET / ceilingBurstPerVU);
   // The observer can own ANY id in the pool. Bound all max+1 ids, rather
@@ -416,9 +470,159 @@ if (IS_CEILING) {
   }
   ceilingMaxVUsPerChannel = Math.ceil((CEILING_MAX + OBS_VUS) / CHANNEL_IDS.length);
 }
+
+// --- scale (P5-S01) ---------------------------------------------------------
+//
+// What 1,000-2,000 people online actually do, as owner decision D2 defines it:
+// N connected, a small active fraction sending now and then, typing only just
+// before a send, presence only on a status flip. One run, five windows on the
+// scenario clock, each published on its own:
+//
+//   ramp       [0, R)          N connect (fresh, full `ready`), paced
+//   steady     [R, +S)         the population holds; ~25 msg/s at the defaults
+//   burst      [.., +B)        the active users send at the burst interval
+//   login      [.., +L)        K fresh password logins over the login spread,
+//                              on top of the steady traffic
+//   herd       [.., +H)        every socket drops on its own slot inside the
+//                              herd spread and redials a full `ready`
+//   ramp-down  [RUN, end)      draining
+//
+// The herd comes last because it may not settle: nothing measured after it
+// would be attributable. Samples are assigned to a window at receipt.
+const SCALE_RAMP_S = Number(__ENV.K6_SCALE_RAMP_S || "180");
+const SCALE_STEADY_S = Number(__ENV.K6_SCALE_STEADY_S || "180");
+const SCALE_BURST_S = Number(__ENV.K6_SCALE_BURST_S || "60");
+const SCALE_LOGIN_S = Number(__ENV.K6_SCALE_LOGIN_S || "90");
+const SCALE_HERD_S = Number(__ENV.K6_SCALE_HERD_S || "90");
+const SCALE_HERD_SPREAD_S = Number(__ENV.K6_SCALE_HERD_SPREAD_S || "15");
+const SCALE_LOGINS = Number(__ENV.K6_SCALE_LOGINS || "500");
+const SCALE_LOGIN_SPREAD_S = Number(__ENV.K6_SCALE_LOGIN_SPREAD_S || "10");
+const SCALE_ACTIVE = Number(__ENV.K6_SCALE_ACTIVE || "0.1");
+const SCALE_SEND_MS = Number(__ENV.K6_SCALE_SEND_MS || "8000");
+const SCALE_BURST_SEND_MS = Number(__ENV.K6_SCALE_BURST_SEND_MS || "2000");
+// The last connection is scheduled this long before steady opens, so the
+// steady window starts with the whole population connected.
+const SCALE_RAMP_SETTLE_S = 10;
+// One status flip per user per 10 minutes (C/lib/presence.ts sends
+// presence_update only on a change), and typing at most once per 3 s
+// (C/components/MessageInput.ts), as the desktop client does.
+const SCALE_PRESENCE_MS = 600000;
+const SCALE_TYPING_MS = 3000;
+const SCALE_PHASES = ["ramp", "steady", "burst", "login", "herd", "ramp-down"];
+const SCALE_BOUNDS = [0, SCALE_RAMP_S, SCALE_STEADY_S, SCALE_BURST_S, SCALE_LOGIN_S, SCALE_HERD_S];
+for (let i = 1; i < SCALE_BOUNDS.length; i++) SCALE_BOUNDS[i] += SCALE_BOUNDS[i - 1];
+const SCALE_RUN_S = SCALE_BOUNDS[SCALE_BOUNDS.length - 1];
+const SCALE_LOGIN_AT_S = SCALE_BOUNDS[3];
+const SCALE_HERD_AT_S = SCALE_BOUNDS[4];
+// Every VU logs in as loadtest<__VU> and k6 hands ids out test-wide, so the
+// id pool is the WebSocket cohort, the observer and the login-burst VUs.
+const SCALE_VUS_MAX = PEAK_VUS + (IS_SCALE ? 1 : 0) + SCALE_LOGINS;
+const SCALE_ACTIVE_PERMILLE = Math.round(SCALE_ACTIVE * 1000);
+
+// Activity is spread WITHIN each channel: VU n is on channel n % C, and it is
+// active when it is one of the evenly spaced ids of that channel's members
+// (k = floor(n / C)) that the active fraction picks. Spreading it globally
+// instead would collide with the channel stride and park every active user
+// on a few channels.
+function scaleActiveIn(vu, channelCount) {
+  const k = Math.floor(vu / channelCount);
+  return (
+    Math.floor(((k + 1) * SCALE_ACTIVE_PERMILLE) / 1000) >
+    Math.floor((k * SCALE_ACTIVE_PERMILLE) / 1000)
+  );
+}
+
+// The most active users any one channel can get across the whole id pool.
+function scaleMaxActivePerChannel(channelCount) {
+  const perChannel = new Array(channelCount).fill(0);
+  for (let vu = 1; vu <= SCALE_VUS_MAX; vu++) {
+    if (scaleActiveIn(vu, channelCount)) perChannel[vu % channelCount]++;
+  }
+  return Math.max(...perChannel);
+}
+
+if (IS_SCALE) {
+  // service/message_crud.go admits at most 10 sends/second per user; a faster
+  // interval would publish the admitted subset's latency (OC-0447, one layer
+  // up — the same bound ceiling-search enforces).
+  if (
+    !Number.isInteger(SCALE_SEND_MS) ||
+    SCALE_SEND_MS < MIN_SEND_INTERVAL_MS ||
+    !Number.isInteger(SCALE_BURST_SEND_MS) ||
+    SCALE_BURST_SEND_MS < MIN_SEND_INTERVAL_MS
+  ) {
+    throw new Error(
+      `scale requires K6_SCALE_SEND_MS and K6_SCALE_BURST_SEND_MS >= ${MIN_SEND_INTERVAL_MS} (each user is capped at ${SEND_LIMIT_PER_SECOND} sends/second)`,
+    );
+  }
+  if (!(SCALE_ACTIVE > 0 && SCALE_ACTIVE <= 1)) {
+    throw new Error(`K6_SCALE_ACTIVE must be a fraction in (0, 1] (got: ${__ENV.K6_SCALE_ACTIVE})`);
+  }
+  const positive = [
+    SCALE_STEADY_S,
+    SCALE_BURST_S,
+    SCALE_LOGIN_S,
+    SCALE_HERD_S,
+    SCALE_HERD_SPREAD_S,
+  ];
+  if (
+    !positive.every((v) => Number.isInteger(v) && v > 0) ||
+    !Number.isInteger(SCALE_RAMP_S) ||
+    SCALE_RAMP_S <= SCALE_RAMP_SETTLE_S ||
+    SCALE_HERD_SPREAD_S >= SCALE_HERD_S ||
+    !Number.isInteger(SCALE_LOGIN_SPREAD_S) ||
+    SCALE_LOGIN_SPREAD_S < 0 ||
+    SCALE_LOGIN_SPREAD_S >= SCALE_LOGIN_S ||
+    !Number.isInteger(SCALE_LOGINS) ||
+    SCALE_LOGINS < 1 ||
+    !Number.isInteger(PEAK_VUS) ||
+    PEAK_VUS < 2 ||
+    SCALE_VUS_MAX >= 1 << 24
+  ) {
+    throw new Error(
+      `scale requires whole-second windows (a ramp over ${SCALE_RAMP_SETTLE_S} s; steady, burst, login and herd over 0), a herd spread shorter than the herd window, a login spread shorter than the login window, at least one login and at least two connections`,
+    );
+  }
+  // OC-0447: the same half-of-the-topic-limit headroom ceiling-search keeps,
+  // at the faster of the two send intervals, bounded over every id in the
+  // pool (activation order is arbitrary). Typing and presence do not draw on
+  // the sequenced topic budget.
+  CHANNEL_IDS = channelList("K6_SCALE_CHANNELS");
+  const slots = Math.floor(
+    CEILING_TOPIC_BUDGET / Math.ceil(1000 / Math.min(SCALE_SEND_MS, SCALE_BURST_SEND_MS)),
+  );
+  if (!slots || scaleMaxActivePerChannel(CHANNEL_IDS.length) > slots) {
+    let required = CHANNEL_IDS.length + 1;
+    while (slots && required < SCALE_VUS_MAX && scaleMaxActivePerChannel(required) > slots) {
+      required++;
+    }
+    throw new Error(
+      `K6_SCALE_CHANNELS needs at least ${required} pre-seeded channels at this connection count, active fraction and burst interval (50% topic-limit headroom)`,
+    );
+  }
+}
+
+// The minted session tokens, one per line, line n-1 for loadtest<n>: a VU
+// starts from its token as a returning desktop client does, so the measured
+// windows hold no bcrypt except the login burst's. One copy for every VU.
+const SCALE_TOKENS =
+  IS_SCALE && __ENV.K6_SCALE_TOKENS
+    ? new SharedArray("scale-tokens", () => open(__ENV.K6_SCALE_TOKENS).split("\n"))
+    : null;
+
+// One forwarded address per VU id (10.0.0.0/8, so no allowlist ever treats it
+// as public), so the per-IP limits see distinct people rather than one host.
+// The workflow seeds user n from this same address (scale_address there).
+function scaleAddress(vu) {
+  return `10.${(vu >> 16) & 255}.${(vu >> 8) & 255}.${vu & 255}`;
+}
+function scaleHeaders(vu) {
+  return IS_SCALE ? { "X-Forwarded-For": scaleAddress(vu) } : undefined;
+}
+
 // Posting, focus, typing and resume all use the same channel. __VU is stable
 // across reconnects; arbitrary activation order cannot exceed the pool bound.
-const VU_CHANNEL_ID = IS_CEILING ? CHANNEL_IDS[__VU % CHANNEL_IDS.length] : CHANNEL_ID;
+const VU_CHANNEL_ID = IS_CEILING || IS_SCALE ? CHANNEL_IDS[__VU % CHANNEL_IDS.length] : CHANNEL_ID;
 
 // Restart-drill phase boundaries (OC-0446). The drill's before and after
 // windows are only comparable if they hold the same population for the same
@@ -505,7 +709,16 @@ const CEILING_STAGES = CEILING_STEPS.flatMap((v) => [
   { duration: `${CEILING_RAMP_S}s`, target: v },
   { duration: `${CEILING_HOLD_S}s`, target: v },
 ]).concat([{ duration: RAMP_DOWN, target: 0 }]);
-const TOTAL_S = IS_CEILING ? CEILING_TOTAL_S : RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN);
+const TOTAL_S = IS_CEILING
+  ? CEILING_TOTAL_S
+  : IS_SCALE
+    ? SCALE_RUN_S + seconds(RAMP_DOWN)
+    : RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN);
+const SCALE_STAGES = [
+  { duration: `${SCALE_RAMP_S - SCALE_RAMP_SETTLE_S}s`, target: PEAK_VUS },
+  { duration: `${SCALE_RUN_S - SCALE_RAMP_S + SCALE_RAMP_SETTLE_S}s`, target: PEAK_VUS },
+  { duration: RAMP_DOWN, target: 0 },
+];
 
 // A connection is held for the WHOLE run, not for a fixed 25 seconds.
 // "100 simultaneous connections" is the claim under test: if each VU closed
@@ -532,11 +745,13 @@ export const options = {
       // drain (CEILING_STAGES).
       stages: IS_CEILING
         ? CEILING_STAGES
-        : [
-            { duration: RAMP, target: PEAK_VUS },
-            { duration: SUSTAIN, target: PEAK_VUS },
-            { duration: RAMP_DOWN, target: 0 },
-          ],
+        : IS_SCALE
+          ? SCALE_STAGES
+          : [
+              { duration: RAMP, target: PEAK_VUS },
+              { duration: SUSTAIN, target: PEAK_VUS },
+              { duration: RAMP_DOWN, target: 0 },
+            ],
     },
     // The observer runs under operational and ceiling-search, from t=0 so its
     // clock aligns with the run's phases and steps; the uploads scenario only
@@ -568,6 +783,22 @@ export const options = {
           },
         }
       : {}),
+    ...(IS_SCALE
+      ? {
+          // K fresh password logins, one per VU so each comes from its own
+          // address, staggered over K6_SCALE_LOGIN_SPREAD_S inside the VU (see
+          // loginBurstScenario). One iteration each: a VU that gives up is
+          // counted and done, never a retry loop (B6-10).
+          login_burst: {
+            executor: "per-vu-iterations",
+            vus: SCALE_LOGINS,
+            iterations: 1,
+            startTime: `${SCALE_LOGIN_AT_S}s`,
+            maxDuration: `${SCALE_RUN_S - SCALE_LOGIN_AT_S}s`,
+            exec: "loginBurstScenario",
+          },
+        }
+      : {}),
   },
   thresholds: {
     // The B6-9 capacity budgets. Under ceiling-search they do not gate the
@@ -576,7 +807,10 @@ export const options = {
     // the moment it works. The document, not the threshold engine, reads the
     // per-step percentiles; the ceiling run still asserts the run was sane
     // (authed/ready/deliveries below).
-    ...(IS_CEILING
+    // Nor under scale: its herd is expected to break a run-wide percentile
+    // today, so each window is gated on its own (scaleThresholds) and a herd
+    // miss can neither fail nor hide the steady result.
+    ...(IS_CEILING || IS_SCALE
       ? {}
       : {
           ws_connect_time: ["p(95)<2000"], // 95% connect under 2s
@@ -725,7 +959,7 @@ export const options = {
     // which is what makes "the search found the server's ceiling" a claim with
     // evidence behind it rather than an assumption. The workflow sets the cap
     // at twice the probe maximum for exactly this check.
-    ...(IS_CEILING ? { obs_ws_conn_rejects: ["count==0"] } : {}),
+    ...(IS_CEILING || IS_SCALE ? { obs_ws_conn_rejects: ["count==0"] } : {}),
     // B6-10 ceiling-search. The steps are informational — no threshold gates
     // any of them, and the capacity budgets (above) are not re-gated here: the
     // document, not the threshold engine, reads the per-step percentiles. The
@@ -735,6 +969,7 @@ export const options = {
     // first-class series in the summary — k6 collapses tagged samples into the
     // aggregate in handleSummary unless a threshold names the sub-metric.
     ...(IS_CEILING ? ceilingStepThresholds() : {}),
+    ...(IS_SCALE ? scaleThresholds() : {}),
   },
 }; // envelope wraps a client->server frame in the protocol's outer shape.
 
@@ -798,6 +1033,123 @@ function restartPhase() {
 // server holding the same load.
 function restartTags() {
   return IS_RESTART ? { phase: restartPhase() } : undefined;
+}
+
+// --- scale clock ------------------------------------------------------------
+
+// The window a sample landed in, [start, end) seconds on the scenario clock.
+function scalePhaseAt(t) {
+  for (let i = SCALE_PHASES.length - 1; i > 0; i--) {
+    if (t >= SCALE_BOUNDS[i]) return SCALE_PHASES[i];
+  }
+  return SCALE_PHASES[0];
+}
+
+// A scenario with a startTime reports its OWN start as exec.scenario.startTime,
+// so the login-burst VUs add their offset to share the run clock.
+let vuScaleOffsetS = 0;
+function scaleTags() {
+  return IS_SCALE ? { phase: scalePhaseAt(runElapsedS() + vuScaleOffsetS) } : undefined;
+}
+
+// Each VU's slot inside the herd spread, and inside the presence period:
+// (vu - 1) % N spreads the WebSocket cohort evenly whichever ids it holds.
+function herdOffsetMs(vu) {
+  return Math.round((((vu - 1) % PEAK_VUS) * SCALE_HERD_SPREAD_S * 1000) / PEAK_VUS);
+}
+function presencePhaseMs(vu) {
+  return Math.round((((vu - 1) % PEAK_VUS) * SCALE_PRESENCE_MS) / PEAK_VUS);
+}
+function herdStartMs() {
+  return exec.scenario.startTime + SCALE_HERD_AT_S * 1000;
+}
+
+// The scale gates: the existing budgets on the windows they describe, and the
+// herd and login-burst budgets of owner decision D3 (2026-09-30). The
+// pass-through keys (see ceilingStepThresholds) come first so a real gate on
+// the same key replaces them; every window's p50/p95/p99 and counts reach
+// k6-summary.json either way.
+function scaleThresholds() {
+  const out = {};
+  const stats = ["med>=0", "p(95)>=0", "p(99)>=0"];
+  const trends = [
+    "ws_broadcast_latency_ms",
+    "ws_delivery_latency_ms",
+    "ws_connect_time",
+    "ws_auth_ok_time",
+    "ws_ready_time",
+    "auth_time",
+  ];
+  const counters = [
+    "obs_db_writer_wait_count",
+    "obs_db_writer_wait_seconds",
+    "obs_db_reader_wait_count",
+    "obs_db_reader_wait_seconds",
+    "obs_ws_conn_rejects",
+    "obs_topic_sheds",
+    "ws_messages_sent",
+    "ws_deliveries",
+    "ws_connections",
+    "herd_drops",
+    "auth_rate_limited",
+    "auth_admission_refused",
+  ];
+  for (const p of SCALE_PHASES) {
+    for (const t of trends) out[`${t}{phase:${p}}`] = stats;
+    for (const c of counters) out[`${c}{phase:${p}}`] = ["count>=0"];
+    for (const k of ["queue_disconnects", "high_fallbacks", "low_drops"]) {
+      out[`obs_backpressure{phase:${p},kind:${k}}`] = ["count>=0"];
+    }
+    out[`obs_population{phase:${p}}`] = ["min>=0"];
+    out[`ws_message_success{phase:${p}}`] = ["rate>=0"];
+  }
+  const steady = scaleMinSamples(SCALE_STEADY_S, SCALE_SEND_MS);
+  const burst = scaleMinSamples(SCALE_BURST_S, SCALE_BURST_SEND_MS);
+  return {
+    ...out,
+    // (a) steady: the published budgets. Its connections open during the
+    // ramp, so auth_ok is read there; the population must hold all window.
+    "ws_broadcast_latency_ms{phase:steady}": ["p(95)<150", "p(99)<300", "med>=0"],
+    "ws_delivery_latency_ms{phase:steady}": ["p(95)<200", "p(99)<400", "med>=0"],
+    "ws_auth_ok_time{phase:ramp}": ["p(95)<200", "p(99)<500", "med>=0"],
+    "ws_connect_time{phase:ramp}": ["p(95)<2000", "med>=0", "p(99)>=0"],
+    "obs_population{phase:steady}": [`min>=${PEAK_VUS}`],
+    "ws_message_success{phase:steady}": ["rate>0.95"],
+    // Validity, not a budget (OC-0446): a window that did not carry its
+    // planned load publishes a percentile over whatever few samples arrived.
+    "ws_messages_sent{phase:steady}": [`count>=${steady.sends}`],
+    "ws_deliveries{phase:steady}": [`count>=${steady.deliveries}`],
+    // (b) burst minute: the same p95 budgets at the raised rate.
+    "ws_broadcast_latency_ms{phase:burst}": ["p(95)<150", "med>=0", "p(99)>=0"],
+    "ws_delivery_latency_ms{phase:burst}": ["p(95)<200", "med>=0", "p(99)>=0"],
+    "ws_message_success{phase:burst}": ["rate>0.95"],
+    "ws_messages_sent{phase:burst}": [`count>=${burst.sends}`],
+    "ws_deliveries{phase:burst}": [`count>=${burst.deliveries}`],
+    // (c) herd (D3): every VU ready within 30 s of the herd's start, the
+    // per-connection ready p95 within 5 s, and no backpressure kick.
+    herd_ready_at_ms: ["max<=30000"],
+    herd_readies: [`count>=${PEAK_VUS}`],
+    "ws_ready_time{phase:herd}": ["p(95)<=5000", "med>=0", "p(99)>=0"],
+    "ws_connect_time{phase:herd}": ["p(95)<2000", "med>=0", "p(99)>=0"],
+    "obs_backpressure{phase:herd,kind:queue_disconnects}": ["count==0"],
+    // (d) login burst (D3): no user-visible failure, everyone in within 70 s.
+    login_burst_giveups: ["count==0"],
+    login_burst_ok: [`count>=${SCALE_LOGINS}`],
+    login_burst_time: ["max<=70000"],
+    "auth_time{phase:login}": ["p(95)<600", "p(99)<1000", "med>=0"],
+  };
+}
+
+// A deliberately loose floor on a send window's samples, as restartMinSamples:
+// 30% of the planned sends, and of their deliveries to the smallest channel's
+// other members.
+function scaleMinSamples(durationS, sendMs) {
+  const sends = ((PEAK_VUS * SCALE_ACTIVE_PERMILLE) / 1000) * (1000 / sendMs) * durationS;
+  const recipients = Math.floor(PEAK_VUS / CHANNEL_IDS.length) - 1;
+  return {
+    sends: Math.max(1, Math.floor(sends * 0.3)),
+    deliveries: Math.max(1, Math.floor(sends * recipients * 0.3)),
+  };
 }
 
 // The pass-through thresholds, one per (metric, step) pair.
@@ -889,6 +1241,13 @@ function passThroughThresholds() {
   return out;
 }
 
+// A chat_send client_message_id: exactly "<13-digit ms>:<lowercase UUID v4>"
+// (docs/protocol.md, chat_send). Uniqueness is all the server needs of it;
+// crypto is k6's global WebCrypto.
+function clientMessageId() {
+  return `${Date.now()}:${crypto.randomUUID()}`;
+}
+
 // envelope wraps a client->server frame in the protocol's outer shape.
 function envelope(type, payload) {
   return JSON.stringify({ type: type, payload: payload });
@@ -943,13 +1302,13 @@ const LOGIN_ATTEMPTS = 12;
 // minority of the 100 uploads VUs. In the ceiling run they came from the
 // majority: 173 sockets opened against a vus_max of 501, and the run passed
 // anyway, because nothing asserted that the VUs had got on the wire.
-function authenticate(username) {
+function authenticate(username, extraHeaders) {
   for (let attempt = 0; attempt < LOGIN_ATTEMPTS; attempt++) {
     const start = Date.now();
     const res = http.post(
       `${HTTP_URL}/api/v1/auth/login`,
       JSON.stringify({ username, password: PASSWORD }),
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { "Content-Type": "application/json", ...extraHeaders } },
     );
 
     // Capacity is B6-9's login verbatim: one attempt, timed whatever the
@@ -965,18 +1324,21 @@ function authenticate(username) {
     }
 
     // A 429 is the server shedding load on purpose, and it is retryable — the
-    // admission budget frees its slots every ~250 ms. It is NOT a ws_error:
+    // admission queue drains a slot every ~250 ms. It is NOT a ws_error:
     // that counter backs the published "0 WebSocket errors" claim, and a run
     // that counted refusals there published a defect that did not exist while
     // hiding the one that did (VUs that never connected).
     if (res.status === 429) {
-      // k6 exposes headers under their canonical names, so Retry-After is the
-      // one to look for; the lowercase spelling is here only so a k6 that
-      // stops canonicalising cannot silently reclassify every per-IP refusal
-      // as an admission refusal — which is the distinction this split exists
-      // to draw.
-      if (res.headers["Retry-After"] ?? res.headers["retry-after"]) authRateLimited.add(1);
-      else authAdmissionRefused.add(1);
+      // The body's code draws the distinction this split exists for; a body
+      // that is not the JSON error shape counts as the per-IP refusal.
+      let code = null;
+      try {
+        code = res.json("error");
+      } catch {
+        code = null;
+      }
+      if (code === "AUTH_BUSY") authAdmissionRefused.add(1, scaleTags());
+      else authRateLimited.add(1, scaleTags());
       // Backoff, so the retries of many stuck VUs de-synchronise instead of
       // arriving in lockstep and re-colliding on the same slots.
       if (attempt < LOGIN_ATTEMPTS - 1) sleep(1 + attempt * 0.5);
@@ -1002,7 +1364,7 @@ function authenticate(username) {
     // Timed on success only. A refusal returns in ~0 ms, so timing every
     // attempt would drag the auth_time percentiles down and flatter the budget
     // — and "REST login" means a login, not an attempt.
-    authTime.add(Date.now() - start, stepTags());
+    authTime.add(Date.now() - start, stepTags() ?? scaleTags());
 
     return JSON.parse(res.body).token;
   }
@@ -1014,6 +1376,12 @@ let vuToken = null; // stored session token (a resume does not re-login)
 let vuLastSeq = 0; // highest seq this VU has seen on any connection
 let vuHoldEnd = 0; // wall-clock ms when this VU's first connection ends
 let vuStormDone = false; // the storm already fired for this VU
+// Scale herd: this VU's socket has been dropped for the herd, and it has
+// since reached `ready` again.
+let vuHerdDropped = false;
+let vuHerdReady = false;
+let vuLastTypingAt = 0; // scale: typing is throttled like the client's
+let vuPresence = "online"; // scale: the status the next flip leaves
 // The phase (ms offset within the period) each periodic client timer took on
 // this VU's FIRST connection — see phasedInterval.
 const vuTimerPhase = {};
@@ -1102,10 +1470,11 @@ export default function () {
   // every storm reconnect. Capacity never resumes: vuLastSeq stays 0.
   const resumed = RESUMES_ON && vuLastSeq > 0;
 
-  // Resume iterations reuse the stored token (no re-login on resume).
-  let token = vuToken;
+  // Resume iterations reuse the stored token (no re-login on resume). Under
+  // scale the first one is the token minted at seeding, when there is one.
+  let token = vuToken || (SCALE_TOKENS && SCALE_TOKENS[vuId - 1]) || null;
   if (!token) {
-    token = authenticate(username);
+    token = authenticate(username, scaleHeaders(vuId));
     if (!token) {
       // Give up loudly, then sit the run out. The threshold on login_giveups
       // fails the run, because every number in it was measured over a
@@ -1124,10 +1493,18 @@ export default function () {
     accountForDrainSends(token);
   }
 
+  // Scale herd: a VU that is dialling when its slot passes (kicked, or late)
+  // joins the herd with this dial. Until it is ready again, every dial is a
+  // herd redial.
+  const herdDropAt = herdStartMs() + herdOffsetMs(vuId);
+  if (IS_SCALE && !vuHerdDropped && Date.now() >= herdDropAt) vuHerdDropped = true;
+  const herdConn = IS_SCALE && vuHerdDropped && !vuHerdReady;
+
   const connectStart = Date.now();
-  const res = ws.connect(WS_URL, null, function (socket) {
+  const connectParams = IS_SCALE ? { headers: scaleHeaders(vuId) } : null;
+  const res = ws.connect(WS_URL, connectParams, function (socket) {
     const openAt = Date.now();
-    wsConnectTime.add(openAt - connectStart, stepTags());
+    wsConnectTime.add(openAt - connectStart, stepTags() ?? scaleTags());
     // One ARRIVAL, tagged with the step whose ramp opened it — not the
     // population the step held: a socket opened at step 100 is still up at
     // step 300 and is counted by neither. Arrivals are what says whether a
@@ -1136,7 +1513,7 @@ export default function () {
     // how a contaminated ceiling run passed); the population each step held
     // is obs_connected_users, read from the server. Untagged on capacity
     // (stepTags() is undefined there, and k6 leaves an undefined tag off).
-    wsConnections.add(1, stepTags());
+    wsConnections.add(1, stepTags() ?? scaleTags());
 
     let authed = false;
     let ready = false;
@@ -1233,7 +1610,7 @@ export default function () {
                 restartResumeTime.add(Date.now() - resumeStartedAt);
               }
             } else {
-              wsAuthOkTime.add(Date.now() - authSentAt, stepTags());
+              wsAuthOkTime.add(Date.now() - authSentAt, stepTags() ?? scaleTags());
             }
             break;
           case "auth_error":
@@ -1243,6 +1620,14 @@ export default function () {
           case "ready":
             ready = true;
             wsReady.add(1);
+            if (IS_SCALE) {
+              wsReadyTime.add(Date.now() - connectStart, scaleTags());
+              if (herdConn) {
+                herdReadies.add(1);
+                herdReadyAt.add(Date.now() - herdStartMs());
+                vuHerdReady = true;
+              }
+            }
             // The channel subscription comes from this round trip: before it
             // completes, nothing broadcast to the channel reaches this
             // connection at all (docs/protocol.md, active_channel_id).
@@ -1257,11 +1642,11 @@ export default function () {
             break;
           case "chat_send_ok":
             wsAcks.add(1);
-            wsMessageRate.add(true);
+            wsMessageRate.add(true, scaleTags());
             if (data.id && pendingSends[data.id]) {
               broadcastLatency.add(
                 Date.now() - pendingSends[data.id],
-                stepTags(true) ?? restartTags() ?? operationalTags(),
+                stepTags(true) ?? restartTags() ?? operationalTags() ?? scaleTags(),
               );
               delete pendingSends[data.id];
             }
@@ -1284,9 +1669,9 @@ export default function () {
             if (at && from && from !== vuId && Date.now() - at < 30 * 1000) {
               deliveryLatency.add(
                 Date.now() - at,
-                stepTags(true) ?? restartTags() ?? operationalTags(),
+                stepTags(true) ?? restartTags() ?? operationalTags() ?? scaleTags(),
               );
-              deliveries.add(1, restartTags());
+              deliveries.add(1, restartTags() ?? scaleTags());
             }
             break;
           }
@@ -1340,7 +1725,7 @@ export default function () {
             break;
           case "error":
             wsErrors.add(1);
-            wsMessageRate.add(false);
+            wsMessageRate.add(false, scaleTags());
             // A drain send the server refused classifies as errored: error
             // envelopes echo the request id (protocol.md:1837).
             if (IS_RESTART && data.id && drainPending[data.id]) {
@@ -1412,6 +1797,23 @@ export default function () {
       }
     }
 
+    // Scale herd: at its slot inside the herd spread the VU drops its own
+    // socket (deliberately, as the storm does; not a ws_error), and the next
+    // iteration redials with the token alone: no last_seq, so a full `ready`,
+    // which is what every client gets after a server restart.
+    if (IS_SCALE && !vuHerdDropped) {
+      socket.setTimeout(
+        function () {
+          vuHerdDropped = true;
+          herdDrops.add(1, scaleTags());
+          socket.close();
+        },
+        // A dial that opened after its slot drops on the next tick: k6
+        // refuses a timer that is not in the future.
+        Math.max(1, herdDropAt - openAt),
+      );
+    }
+
     // B6-10 voice churn: every K6_VOICE_CHURN_MS the VU leaves and rejoins,
     // so the voice control plane (voice_join -> voice_token, voice_state
     // broadcasts, voice_leave) is exercised continuously instead of 25 VUs
@@ -1452,7 +1854,7 @@ export default function () {
     // resume (a replay resume sends no ready frame, protocol.md:305-315).
     // The interval keeps running for the whole hold — there is no message
     // cap, because the sustained fan-out IS the load being measured.
-    phasedInterval(socket, "send", SEND_INTERVAL_MS, function () {
+    const sendChat = function () {
       // A resumed socket's first phased tick can land before auth_ok; a
       // frame sent before that is refused, so wait for the session.
       if (!ready && !(resumedConn && authed)) {
@@ -1468,34 +1870,68 @@ export default function () {
       if (IS_RESTART && restartReceivedAt) {
         drainPending[id] = content;
       }
-      socket.send(
-        JSON.stringify({
-          type: "chat_send",
-          id: id,
-          payload: { channel_id: VU_CHANNEL_ID, content: content },
-        }),
-      );
+      // Scale sends as the desktop client does, with a client_message_id,
+      // so the delivery-receipt write every real send makes is under load.
+      const payload = { channel_id: VU_CHANNEL_ID, content: content };
+      if (IS_SCALE) payload.client_message_id = clientMessageId();
+      socket.send(JSON.stringify({ type: "chat_send", id: id, payload: payload }));
       wsMessages.add(
         1,
-        IS_CEILING ? { ...stepTags(true), channel: String(VU_CHANNEL_ID) } : undefined,
+        IS_CEILING ? { ...stepTags(true), channel: String(VU_CHANNEL_ID) } : scaleTags(),
       );
       msgCount++;
-    }); // chat_send is 10/sec; 1 per SEND_INTERVAL_MS (2 s) is well under it
+    }; // chat_send is 10/sec; 1 per SEND_INTERVAL_MS (2 s) is well under it
 
-    // Typing indicators (client->server type is typing_start, not "typing").
-    phasedInterval(socket, "typing", 4000, function () {
-      if (ready || (resumedConn && authed)) {
-        socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
+    if (IS_SCALE) {
+      // Only the active fraction sends: typing first (at most once per 3 s),
+      // then the message. Two timers on their own phases, each silent in the
+      // other's window, so the burst raises the rate without re-aligning
+      // anyone (OC-0445: phasedInterval keeps both phases across the herd).
+      const scaleSend = function () {
+        if (!ready) return;
+        const now = Date.now();
+        if (now - vuLastTypingAt >= SCALE_TYPING_MS) {
+          vuLastTypingAt = now;
+          socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
+        }
+        sendChat();
+      };
+      if (scaleActiveIn(vuId, CHANNEL_IDS.length)) {
+        phasedInterval(socket, "send", SCALE_SEND_MS, function () {
+          if (scaleTags().phase !== "burst") scaleSend();
+        });
+        phasedInterval(socket, "burst", SCALE_BURST_SEND_MS, function () {
+          if (scaleTags().phase === "burst") scaleSend();
+        });
       }
-    });
+      // Presence only on a status flip, once per 10 min, each VU on its own
+      // slot of that period so the population flips at N / 600 s inside the
+      // run instead of all at connect + 10 min.
+      if (!("presence" in vuTimerPhase)) vuTimerPhase.presence = presencePhaseMs(vuId);
+      phasedInterval(socket, "presence", SCALE_PRESENCE_MS, function () {
+        if (authed) {
+          vuPresence = vuPresence === "idle" ? "online" : "idle";
+          socket.send(envelope("presence_update", { status: vuPresence }));
+        }
+      });
+    } else {
+      phasedInterval(socket, "send", SEND_INTERVAL_MS, sendChat);
 
-    // Presence updates (client->server type is presence_update; bare
-    // "presence" is the server->client broadcast).
-    phasedInterval(socket, "presence", 15000, function () {
-      if (authed) {
-        socket.send(envelope("presence_update", { status: "online" }));
-      }
-    });
+      // Typing indicators (client->server type is typing_start, not "typing").
+      phasedInterval(socket, "typing", 4000, function () {
+        if (ready || (resumedConn && authed)) {
+          socket.send(envelope("typing_start", { channel_id: VU_CHANNEL_ID }));
+        }
+      });
+
+      // Presence updates (client->server type is presence_update; bare
+      // "presence" is the server->client broadcast).
+      phasedInterval(socket, "presence", 15000, function () {
+        if (authed) {
+          socket.send(envelope("presence_update", { status: "online" }));
+        }
+      });
+    }
 
     // Leave voice before the socket goes, so the run exercises the leave path
     // rather than relying on disconnect cleanup to tidy up 25 voice states.
@@ -1522,7 +1958,7 @@ export default function () {
     // Under the drill, a refused connect during the outage is the drill
     // working; it must not drag down the send-success rate that still gates
     // the run (ws_errors is already exempt there for the same reason).
-    if (!IS_RESTART) wsMessageRate.add(false);
+    if (!IS_RESTART) wsMessageRate.add(false, scaleTags());
   }
 
   sleep(1);
@@ -1566,6 +2002,7 @@ function obsPhaseAt(nowMs, startMs) {
   // names below would tag everything from UPLOADS_START_S onward as "upload"
   // on a run with no upload leg, leaving no pre/post-restart split at all.
   if (IS_RESTART) return restartPhaseAt(t);
+  if (IS_SCALE) return scalePhaseAt(t);
   if (t < RAMP_S) return "ramp";
   if (IS_OPERATIONAL && nowMs >= stormFireAt(startMs) && nowMs <= stormFireAt(startMs) + 30000) {
     return "storm";
@@ -1651,6 +2088,10 @@ export function observerScenario() {
       obsBackpressure.add(d("backpressure_low_drops"), { phase, kind: "low_drops" });
     }
     obsConnRejects.add(d("ws_conn_rejects"), { phase });
+    if (obsPopulation) {
+      obsPopulation.add(body.connected_users || 0, { phase });
+      obsTopicSheds.add(d("topic_sheds_total"), { phase });
+    }
     if (obsUploadStorage && body.upload_storage_used_mb !== undefined) {
       obsUploadStorage.add(body.upload_storage_used_mb, { phase });
     }
@@ -1750,6 +2191,24 @@ export function uploadsScenario() {
   sleep(UPLOAD_INTERVAL_S);
 }
 
+// The login burst (scale): each VU is one person logging in with a password
+// from its own address, the K of them spread evenly over the login spread.
+// authenticate() retries a refusal a bounded number of times, as a client
+// that retries would; login_burst_time is first attempt to token, retries
+// included, which is what the user waits.
+export function loginBurstScenario() {
+  vuScaleOffsetS = SCALE_LOGIN_AT_S;
+  sleep((exec.scenario.iterationInTest * SCALE_LOGIN_SPREAD_S) / SCALE_LOGINS);
+  const start = Date.now();
+  const token = authenticate(`${USERNAME_PREFIX}${__VU}`, scaleHeaders(__VU));
+  if (!token) {
+    loginBurstGiveUps.add(1);
+    return;
+  }
+  loginBurstTime.add(Date.now() - start);
+  loginBurstOk.add(1);
+}
+
 // k6's own text summary is not importable from a script without jslib, so an
 // overridden handleSummary can only emit JSON. The file is the artifact the
 // workflow uploads; stdout carries the same bytes for a local run.
@@ -1758,6 +2217,7 @@ export function uploadsScenario() {
 // The workflow's log gate and population evidence still decide run validity.
 function measurementSummary(data) {
   const metrics = data.metrics || {};
+  if (IS_SCALE) return scaleSummary(data, metrics);
   if (IS_CEILING) {
     return {
       profile: PROFILE,
@@ -1810,11 +2270,78 @@ function measurementSummary(data) {
   };
 }
 
+// The scale profile's per-window numbers, in the shape docs/capacity.md
+// publishes. run_start_epoch_ms anchors the windows on the wall clock, so the
+// workflow can slice its 5 s CPU samples (server and generator) by window.
+function scaleSummary(data, metrics) {
+  const values = (key) => metrics[key]?.values || {};
+  const trend = (metric, phase) => {
+    const v = values(`${metric}{phase:${phase}}`);
+    const n = v.count || 0;
+    return {
+      p50_ms: n ? v.med : null,
+      p95_ms: n ? v["p(95)"] : null,
+      p99_ms: n ? v["p(99)"] : null,
+      sample_count: n,
+    };
+  };
+  const count = (key) => values(key).count || 0;
+  const activeUsers = (PEAK_VUS * SCALE_ACTIVE_PERMILLE) / 1000;
+  return {
+    profile: PROFILE,
+    boundary_clock: "seconds since scenario start; [start_s, end_s); samples assigned at receipt",
+    run_start_epoch_ms: Date.now() - (data.state?.testRunDurationMs || 0),
+    connections: PEAK_VUS,
+    active_fraction: SCALE_ACTIVE_PERMILLE / 1000,
+    send_interval_ms: SCALE_SEND_MS,
+    burst_send_interval_ms: SCALE_BURST_SEND_MS,
+    planned_steady_messages_per_second: (activeUsers * 1000) / SCALE_SEND_MS,
+    planned_burst_messages_per_second: (activeUsers * 1000) / SCALE_BURST_SEND_MS,
+    presence_flip_interval_ms: SCALE_PRESENCE_MS,
+    herd_spread_s: SCALE_HERD_SPREAD_S,
+    logins: SCALE_LOGINS,
+    login_spread_s: SCALE_LOGIN_SPREAD_S,
+    channel_ids: CHANNEL_IDS,
+    windows: SCALE_PHASES.map((phase, i) => {
+      const last = i === SCALE_PHASES.length - 1;
+      return {
+        phase,
+        start_s: SCALE_BOUNDS[i],
+        end_s: last ? null : SCALE_BOUNDS[i + 1],
+        acknowledgement: trend("ws_broadcast_latency_ms", phase),
+        delivery: trend("ws_delivery_latency_ms", phase),
+        auth_ok: trend("ws_auth_ok_time", phase),
+        ready: trend("ws_ready_time", phase),
+        login: trend("auth_time", phase),
+        sent_count: count(`ws_messages_sent{phase:${phase}}`),
+        queue_disconnects: count(`obs_backpressure{phase:${phase},kind:queue_disconnects}`),
+        population_min: values(`obs_population{phase:${phase}}`).min ?? null,
+        writer_wait_seconds: count(`obs_db_writer_wait_seconds{phase:${phase}}`),
+      };
+    }),
+    herd: {
+      drops: count("herd_drops"),
+      readies: count("herd_readies"),
+      all_ready_ms: values("herd_ready_at_ms").max ?? null,
+      ready_at_p95_ms: values("herd_ready_at_ms")["p(95)"] ?? null,
+    },
+    login_burst: {
+      ok: count("login_burst_ok"),
+      giveups: count("login_burst_giveups"),
+      p50_ms: values("login_burst_time").med ?? null,
+      p95_ms: values("login_burst_time")["p(95)"] ?? null,
+      max_ms: values("login_burst_time").max ?? null,
+    },
+  };
+}
+
 export function handleSummary(data) {
   // Capacity's metric keys and summary shape stay unchanged; existing tagged
   // metrics also remain intact for consumers of earlier restart/ceiling runs.
   const summary =
-    IS_CEILING || IS_RESTART ? { ...data, load_measurement: measurementSummary(data) } : data;
+    IS_CEILING || IS_RESTART || IS_SCALE
+      ? { ...data, load_measurement: measurementSummary(data) }
+      : data;
   const json = JSON.stringify(summary, null, 2);
   return { stdout: json, "reports/k6-summary.json": json };
 }

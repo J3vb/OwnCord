@@ -102,22 +102,33 @@ describe("ConnectedOverlay", () => {
     overlay.destroy();
   });
 
-  it("markReady() calls onReady after delay", () => {
+  it("markReady() hands off on the next task, not the old 800ms delay", () => {
     const onReady = vi.fn();
     const overlay = makeOverlay(onReady);
     overlay.markReady();
+    // Not synchronous: the mount starts the MainPage import, which must not
+    // race the prewarm import in the same task (see ConnectedOverlay.markReady).
     expect(onReady).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(800);
+    // ...but it is one task, far short of the removed 800ms countdown.
+    vi.advanceTimersByTime(0);
     expect(onReady).toHaveBeenCalledOnce();
     overlay.destroy();
   });
 
-  it("destroy() prevents onReady callback", () => {
+  it("destroy() cancels a hand-off markReady() already armed", () => {
     const onReady = vi.fn();
     const overlay = makeOverlay(onReady);
     overlay.markReady();
     overlay.destroy();
-    vi.advanceTimersByTime(800);
+    vi.advanceTimersByTime(0);
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
+  it("markReady() after destroy() does not call onReady", () => {
+    const onReady = vi.fn();
+    const overlay = makeOverlay(onReady);
+    overlay.destroy();
+    overlay.markReady();
     expect(onReady).not.toHaveBeenCalled();
   });
 

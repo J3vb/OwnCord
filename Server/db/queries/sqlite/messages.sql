@@ -1,11 +1,11 @@
 -- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone;
+          mentions_everyone, pinned_at;
 
 -- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone
+       mentions_everyone, pinned_at
 FROM messages WHERE id = ?;
 
 -- name: GetMessagesForAPI :many
@@ -22,13 +22,15 @@ ORDER BY m.id DESC LIMIT ?;
 -- ErrNotFound rather than a silent success (OC-0358).
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone;
+          mentions_everyone, pinned_at;
 
 -- name: SoftDeleteMessage :execresult
 UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;
 
 -- name: SetMessagePinned :execresult
-UPDATE messages SET pinned = ? WHERE id = ? AND deleted = 0;
+-- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
+-- pinning and NULL when unpinning (a re-pin stamps freshly).
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0;
 
 -- name: GetLatestMessageID :one
 SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0;
@@ -68,10 +70,11 @@ SELECT last_message_id, mention_count FROM read_states
 SELECT c.id,
        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
-       (SELECT COUNT(*) FROM messages m
+       (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
          WHERE m.channel_id = c.id AND m.deleted = 0
            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
-                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)) AS unread,
+                                 WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
+         LIMIT 100)) AS unread,
        COALESCE((SELECT rs.mention_count FROM read_states rs
                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
 FROM channels c

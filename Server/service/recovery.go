@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -17,8 +18,8 @@ import (
 // The recovery kit (B4-5, BPR-044; owner decision 2): a secret the account
 // holder keeps offline. The server stores only an argon2id verifier; using
 // the kit means "I lost my devices", so it signs the user in without the
-// second factor, replaces the password, revokes every other session and
-// spends the kit in one transaction. Five failed attempts lock recovery for
+// second factor, replaces the password, revokes every session and API token
+// and spends the kit in one transaction. Five failed attempts lock recovery for
 // 15 minutes per account and per address, audited.
 const (
 	recoveryKitFailureThreshold = 5
@@ -167,8 +168,8 @@ func (s *AuthService) RecoveryKitStatus(ctx context.Context, p Principal) (*Reco
 }
 
 // RecoverWithKit redeems a kit: on success the password is replaced, every
-// existing session revoked, the kit spent and the audit row written in one
-// transaction, and a fresh session is issued without the second factor
+// session and API token revoked, the kit spent and the audit row written in
+// one transaction, and a fresh session is issued without the second factor
 // (owner decision 2). Every failure — unknown account, no kit, spent kit,
 // wrong secret — is the same refusal, costs the same argon2id compare, and
 // counts towards the per-address and per-account lockouts.
@@ -181,9 +182,9 @@ type recoveryAttempt struct {
 func newRecoveryAttempt(in RecoverInput) recoveryAttempt {
 	unameKey := db.LowerASCII(in.Username)
 	return recoveryAttempt{
-		ipLock:   "recover_lock:" + in.IP,
+		ipLock:   "recover_lock:" + clientip.RateKey(in.IP),
 		userLock: "recover_user_lock:" + unameKey,
-		ipFail:   "recover_fail:" + in.IP,
+		ipFail:   "recover_fail:" + clientip.RateKey(in.IP),
 		userFail: "recover_user_fail:" + unameKey,
 	}
 }
@@ -327,10 +328,10 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 		// Consume exactly the credential the compare verified: one issued
 		// meanwhile is a different row and stays.
 		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, target.assist.Verifier, newHash, "recovery_assist_used",
-			"account recovered with an owner-issued credential; every session revoked")
+			"account recovered with an owner-issued credential")
 	} else {
 		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
-			"account recovered with the recovery kit; every session revoked")
+			"account recovered with the recovery kit")
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrRecoveryKitSpent) || errors.Is(err, db.ErrRecoveryAssistSpent) {

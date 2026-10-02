@@ -131,7 +131,7 @@ func TestRegisterNow_ResumeRestoresVoiceTopicAndE2EEKey(t *testing.T) {
 
 // The voice-topic subscription must not depend on READ_MESSAGES: it carries
 // only E2EE frames for a channel the user already joined through the
-// CONNECT_VOICE-gated voice_join. Only the message-stream ChannelTopic is
+// voice_join gate (permissions.CanJoinVoice). Only the message-stream ChannelTopic is
 // READ-gated.
 func TestRegisterNow_ResumeVoiceTopicIgnoresReadGate(t *testing.T) {
 	h, _, _ := setupVoiceRoom(t)

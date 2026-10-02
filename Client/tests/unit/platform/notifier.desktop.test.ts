@@ -62,12 +62,14 @@ describeNotifierSuite(async () => {
               body: string;
               host: string;
               channelId: number;
-              messageId: number;
+              messageId?: number;
             };
+            const { host, channelId, messageId } = args;
             return {
               title: args.title,
               body: args.body,
-              target: { host: args.host, channelId: args.channelId, messageId: args.messageId },
+              target:
+                messageId === undefined ? { host, channelId } : { host, channelId, messageId },
             };
           }),
       async emitsActivation(target) {
@@ -78,6 +80,13 @@ describeNotifierSuite(async () => {
           (handler as ActivationHandler)({ payload: target });
       },
       attentionRequests: () => requestUserAttention.mock.calls.length,
+      // Tauri's UserAttentionType: 1 is Critical, 2 Informational.
+      urgentAttentionRequests: () =>
+        requestUserAttention.mock.calls.filter((call) => call[0] === 1).length,
+      badgeCounts: () =>
+        invoke.mock.calls
+          .filter((call) => call[0] === "set_unread_badge")
+          .map((call) => (call[1] as { count: number }).count),
     },
   };
 });

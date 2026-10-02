@@ -36,6 +36,12 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	if expiresInHours > maxInviteExpiryHoursVal {
 		expiresInHours = maxInviteExpiryHoursVal
 	}
+	// A negative count or expiry silently meant "unlimited"/"never expires";
+	// reject it instead, so the caller cannot create a state they did not ask
+	// for (F23).
+	if maxUses < 0 || expiresInHours < 0 {
+		return nil, fmt.Errorf("%w: max_uses and expires_in_hours must not be negative", ErrBadRequest)
+	}
 
 	var expiresAt *time.Time
 	if expiresInHours > 0 {

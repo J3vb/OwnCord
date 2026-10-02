@@ -19,6 +19,7 @@ import {
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { isChannelMuted } from "@lib/channel-mutes";
+import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,17 @@ export async function handleCreateGroupDm(
 // ---------------------------------------------------------------------------
 
 /**
+ * The last-message line a DM row shows, for both DM lists: the message's
+ * visible words with an unclicked spoiler replaced by its label, or "No
+ * messages yet" for a DM that was never messaged. An attachment-only message
+ * has no words, so its line is empty.
+ */
+export function dmPreviewText(dm: DmChannel): string {
+  if (dm.lastMessageAt === "") return connectText("app.dmNoMessages");
+  return markdownToPlainText(dm.lastMessage, connectText("notifications.spoiler"));
+}
+
+/**
  * Build a readonly DmConversation array from DM store state.
  *
  * Keyed on the channel, not on the recipient user: a group DM has no single
@@ -164,7 +176,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
       username: (p.displayName ?? "") || p.username,
       avatar: p.avatar || null,
     })),
-    lastMessage: dm.lastMessage || connectText("app.dmNoMessages"),
+    lastMessage: dmPreviewText(dm),
     timestamp: dm.lastMessageAt,
     unread: dm.unreadCount > 0 || dm.mentionCount > 0,
     unreadCount: dm.unreadCount,

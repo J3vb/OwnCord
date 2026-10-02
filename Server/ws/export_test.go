@@ -3,8 +3,10 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"sync/atomic"
@@ -14,6 +16,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/livekit/protocol/livekit"
 )
+
+// SetVoiceRejoinBlockWindowForTest shrinks the moderator-removal rejoin block
+// for the test's duration.
+func SetVoiceRejoinBlockWindowForTest(t interface{ Cleanup(func()) }, d time.Duration) {
+	prev := voiceRejoinBlockWindow
+	voiceRejoinBlockWindow = d
+	t.Cleanup(func() { voiceRejoinBlockWindow = prev })
+}
 
 // ─── hub sweep helpers ─────────────────────────────────────────────────────
 
@@ -273,12 +283,70 @@ func (h *Hub) RunMentionCountsInlineForTest() {
 // BuildReadyForTest exposes Hub.buildReady for external tests.
 // Passes nil role so no channels are visible (fail-closed, BUG-094).
 func (h *Hub) BuildReadyForTest(database *db.DB, userID int64) ([]byte, error) {
-	return h.buildReady(context.Background(), database, userID, nil)
+	return h.readyBytes(database, userID, nil)
 }
 
 // BuildReadyWithRoleForTest exposes Hub.buildReady with a role for external tests.
 func (h *Hub) BuildReadyWithRoleForTest(database *db.DB, userID int64, role *db.Role) ([]byte, error) {
-	return h.buildReady(context.Background(), database, userID, role)
+	return h.readyBytes(database, userID, role)
+}
+
+// BuildReadyWithReaderForTest exposes Hub.buildReady over any snapshot reader,
+// so a test can count or stall its reads.
+func (h *Hub) BuildReadyWithReaderForTest(database ReadySnapshotReader, userID int64) ([]byte, error) {
+	return h.readyBytes(database, userID, nil)
+}
+
+func (h *Hub) readyBytes(database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := h.WriteReadyForTest(database, userID, role, &buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// WriteReadyForTest emits userID's ready payload to w as the handshake
+// emits it to the socket, so a test can measure the whole emit.
+func (h *Hub) WriteReadyForTest(database ReadySnapshotReader, userID int64, role *db.Role, w io.Writer) error {
+	ready, err := h.buildReady(context.Background(), database, userID, role)
+	if err != nil {
+		return err
+	}
+	_, err = h.writeReady(w, ready)
+	return err
+}
+
+// LegacyReadyForTest encodes userID's ready as it was before P5-O01: one
+// json.Marshal of a map, members included, so a golden test can hold the
+// streamed frame to it byte for byte.
+func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, role *db.Role) ([]byte, error) {
+	f, err := h.readReady(context.Background(), database, userID, role)
+	if err != nil {
+		return nil, err
+	}
+	members := make([]db.MemberSummary, 0, len(f.roster.members))
+	for _, m := range h.presentableMembers(f.roster.members, userID) {
+		members = append(members, m)
+	}
+	return buildJSON(map[string]any{
+		"type": MsgTypeReady,
+		"payload": map[string]any{
+			"capabilities": f.head.Capabilities,
+			"channels":     f.head.Channels,
+			"members":      members,
+			"voice_states": f.tail.VoiceStates,
+			"roles":        f.tail.Roles,
+			"dm_channels":  f.head.DMChannels,
+			"server_name":  f.tail.ServerName,
+			"motd":         f.tail.MOTD,
+			"notices":      f.tail.Notices,
+		},
+	}), nil
+}
+
+// ApplyConnectStatusForTest runs the handshake's connect-status stamp for c.
+func (h *Hub) ApplyConnectStatusForTest(c *Client) {
+	h.applyConnectStatus(context.Background(), c)
 }
 
 // ComputeAllowedChannelsForTest exposes Hub.computeAllowedChannels for external
@@ -379,14 +447,10 @@ func QualityBitrateForTest(quality string) int {
 	return qualityBitrate(quality)
 }
 
-// BuildDMChannelOpenForTest exposes buildDMChannelOpenFor for external tests.
+// BuildDMChannelOpenForTest exposes buildDMChannelOpenFor for external tests,
+// with every participant connected and online.
 func BuildDMChannelOpenForTest(channelID int64, recipient *db.User) []byte {
-	return buildDMChannelOpenFor(channelID, recipient, 0)
-}
-
-// BuildDMChannelOpenInfoForTest exposes the group-aware buildDMChannelOpen.
-func BuildDMChannelOpenInfoForTest(info db.DMChannelInfo) []byte {
-	return buildDMChannelOpen(info)
+	return buildDMChannelOpenFor(channelID, recipient, 0, func(int64) string { return db.StatusOnline })
 }
 
 // BuildCallSignalForTest exposes buildCallSignal for external tests.

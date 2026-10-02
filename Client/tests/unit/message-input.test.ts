@@ -36,6 +36,7 @@ import {
   type MessageInputOptions,
 } from "@components/MessageInput";
 import type { GifApi } from "@lib/gifProvider";
+import { authStore } from "@stores/auth.store";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
 const stubGifApi: GifApi = {
@@ -118,6 +119,25 @@ describe("MessageInput", () => {
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
     expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, []);
+
+    comp.destroy?.();
+  });
+
+  it("Enter during an IME composition does not send the half-composed text (F3)", () => {
+    // CJK IMEs commit a candidate on Enter, firing keydown with isComposing
+    // true. Sending there would ship the raw kana/composition string.
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "\u3042"; // composing kana
+
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }),
+    );
+
+    expect(opts.onSend).not.toHaveBeenCalled();
 
     comp.destroy?.();
   });
@@ -311,6 +331,122 @@ describe("MessageInput", () => {
     const editBar = bars[1] as HTMLDivElement;
     expect(editBar.classList.contains("visible")).toBe(false);
 
+    comp.destroy?.();
+  });
+
+  // ── P1-08: an edit keeps what you were typing ──
+
+  it("cancelEdit restores the draft and reply the edit displaced", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+    expect(textarea.value).toBe("original body");
+    const bars = container.querySelectorAll(".reply-bar");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(false);
+
+    comp.cancelEdit();
+
+    expect(textarea.value).toBe("draft");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
+    expect(bars[0]!.textContent).toContain("alice");
+    comp.destroy?.();
+  });
+
+  it("sending an edit restores the draft and reply the edit displaced", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+
+    textarea.value = "edited body";
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+    expect(opts.onEditMessage).toHaveBeenCalledWith(88, "edited body");
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("draft");
+    const bars = container.querySelectorAll(".reply-bar");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
+    comp.destroy?.();
+  });
+
+  it("getDraft during an edit returns the stashed pre-edit draft", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+
+    const draft = comp.getDraft();
+    expect(draft.content).toBe("draft");
+    expect(draft.replyTo).toEqual({ messageId: 7, username: "alice" });
+    comp.destroy?.();
+  });
+
+  it("a channel switch mid-edit restores the pre-edit draft on return (P1-08)", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+
+    textarea.value = "draft";
+    comp.setReplyTo(7, "alice");
+    comp.startEdit(88, "original body");
+
+    // What ChannelController stashes before tearing the composer down.
+    const stashed = comp.getDraft();
+    comp.destroy?.();
+
+    const next = createMessageInput(opts);
+    next.mount(container);
+    next.restoreDraft(stashed);
+
+    const restored = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    expect(restored.value).toBe("draft");
+    const bars = container.querySelectorAll(".reply-bar");
+    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
+    expect(bars[0]!.textContent).toContain("alice");
+    next.destroy?.();
+  });
+
+  it("staged attachments survive an edit and return with the pre-edit draft", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "srv-1", url: "/f/1", filename: "a.png" }));
+    const opts = makeOptions({ onUploadFile });
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    Object.defineProperty(fileInput, "files", {
+      value: [new File(["x"], "a.png", { type: "image/png" })],
+      writable: true,
+    });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "draft";
+    comp.startEdit(88, "original body");
+
+    // The edit never touches the staged chip...
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+    comp.cancelEdit();
+
+    // ...and it rides the restored draft.
+    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
+    expect(textarea.value).toBe("draft");
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    expect(opts.onSend).toHaveBeenCalledWith("draft", null, ["srv-1"]);
     comp.destroy?.();
   });
 
@@ -637,12 +773,13 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
-    it("drops an in-progress edit instead of stashing it as a new-message draft", () => {
+    it("never stashes the in-progress edit text as a new-message draft", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);
       comp.mount(container);
       comp.startEdit(5, "original text");
 
+      // The pre-edit draft (empty here) is stashed, never the edit text.
       const draft = comp.getDraft();
       expect(draft).toEqual({ content: "", replyTo: null, attachments: [] });
 
@@ -778,6 +915,64 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
+    it("keeps the composer editable under a send gate, only refusing Send (#12)", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.focus();
+      textarea.value = "typing through the cooldown";
+
+      comp.setSendGate("Slow mode — 5s");
+
+      // The composer is NOT frozen: it stays editable and focused, unlike
+      // setDisabled.
+      expect(textarea.readOnly).toBe(false);
+      expect(textarea.getAttribute("aria-disabled")).toBe("false");
+      expect(document.activeElement).toBe(textarea);
+      expect(
+        (container.querySelector(".send-btn") as HTMLButtonElement).classList.contains(
+          "send-gated",
+        ),
+      ).toBe(true);
+
+      // Send is refused with the reason shown.
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).not.toHaveBeenCalled();
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 5s",
+      );
+
+      // Lifting the gate allows the send.
+      comp.setSendGate(null);
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).toHaveBeenCalledWith("typing through the cooldown", null, []);
+      comp.destroy?.();
+    });
+
+    it("keeps the send-gate refusal line in step with the countdown and clears it at the end", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "next message";
+      comp.setSendGate("Slow mode — 7s");
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 7s",
+      );
+
+      comp.setSendGate("Slow mode — 6s");
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Slow mode — 6s",
+      );
+
+      comp.setSendGate(null);
+      expect(container.querySelector(".attachment-upload-error")).toBeNull();
+      expect(textarea.value).toBe("next message");
+      comp.destroy?.();
+    });
+
     it("shows the reason when Enter is pressed mid-sentence during reconnect", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);
@@ -861,7 +1056,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("file picker accept attribute only advertises extensions the MIME allowlist accepts", () => {
+  it("file picker does not restrict file types (the server decides)", () => {
     const opts = makeOptions({
       onUploadFile: vi.fn(async () => ({ id: "a1", url: "http://x.png", filename: "x.png" })),
     });
@@ -869,10 +1064,7 @@ describe("MessageInput", () => {
     comp.mount(container);
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    // .rar/.7z were advertised here but rejected by ALLOWED_TYPES on pick —
-    // an always-rejected picker option.
-    expect(fileInput.accept).not.toContain(".rar");
-    expect(fileInput.accept).not.toContain(".7z");
+    expect(fileInput.accept).toBe("");
 
     comp.destroy?.();
   });
@@ -1003,25 +1195,185 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("rejects unsupported file types", async () => {
-    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
+  it("refuses a file over the server's advertised limit before uploading, naming the limit", async () => {
+    authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
+    try {
+      const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+
+      const file = new File(["x"], "clip.mp4", { type: "video/mp4" });
+      Object.defineProperty(file, "size", { value: 11 * 1024 * 1024 });
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(onUploadFile).not.toHaveBeenCalled();
+      const error = container.querySelector(".attachment-upload-error");
+      expect(error!.textContent).toContain("clip.mp4 exceeds 10 MB limit");
+
+      comp.destroy?.();
+    } finally {
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+    }
+  });
+
+  describe("server file-type policy", () => {
+    async function pick(name: string) {
+      const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: name }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["x"], name, { type: "" })],
+        writable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 10));
+      const error = container.querySelector(".attachment-upload-error")?.textContent ?? null;
+      comp.destroy?.();
+      return { onUploadFile, error };
+    }
+
+    afterEach(() => authStore.setState((s) => ({ ...s, uploadPolicy: null })));
+
+    it("refuses a blocked final extension before uploading, however it is spelled", async () => {
+      authStore.setState((s) => ({
+        ...s,
+        uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024, blocked_extensions: ["bat", "ps1"] },
+      }));
+      for (const name of ["cleanup.BAT", "report.pdf.bat", "photo.jpg.ps1", "run.bat. "]) {
+        const { onUploadFile, error } = await pick(name);
+        expect(onUploadFile, name).not.toHaveBeenCalled();
+        expect(error, name).toMatch(/this server doesn't allow \.(bat|ps1) files$/);
+        expect(error, name).toContain(name);
+      }
+      for (const name of ["notes.txt", "invoice.ps1.txt", "www.amazon.bat.png"]) {
+        expect((await pick(name)).onUploadFile, name).toHaveBeenCalled();
+      }
+    });
+
+    it("in allow-only mode refuses anything not listed, including no extension", async () => {
+      authStore.setState((s) => ({
+        ...s,
+        uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024, allowed_extensions: ["png", "pdf"] },
+      }));
+      expect((await pick("clip.mp4")).error).toBe(
+        "clip.mp4 can't be uploaded: this server doesn't allow .mp4 files",
+      );
+      expect((await pick("README")).error).toBe(
+        "README can't be uploaded: this server only accepts certain file types",
+      );
+      expect((await pick("Photo.PNG")).onUploadFile).toHaveBeenCalled();
+    });
+
+    it("uploads any type when the server sends no lists (an older server)", async () => {
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
+      expect((await pick("cleanup.bat")).onUploadFile).toHaveBeenCalled();
+    });
+  });
+
+  it("uploads a file above 100 MB when the server advertises a larger limit", async () => {
+    authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 150 * 1024 * 1024 } }));
+    try {
+      const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "big.bin" }));
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+
+      const file = new File(["x"], "big.bin", { type: "application/octet-stream" });
+      Object.defineProperty(file, "size", { value: 120 * 1024 * 1024 });
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+      await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+      comp.destroy?.();
+    } finally {
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+    }
+  });
+
+  it("disables attaching when the server advertises uploads disabled (0), even after mount", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "p.png" }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
+    comp.mount(container);
+    const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
+    expect(attachBtn.disabled).toBe(false);
+    try {
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 0 } }));
+      authStore.flush();
+
+      expect(attachBtn.disabled).toBe(true);
+      expect(attachBtn.title).toBe("Uploads are disabled on this server");
+
+      comp.openFilePicker();
+      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+      Object.defineProperty(fileInput, "files", {
+        value: [new File(["x"], "a.bin", { type: "application/octet-stream" })],
+        writable: true,
+      });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      const pasteEvent = new Event("paste", { bubbles: true });
+      Object.defineProperty(pasteEvent, "clipboardData", {
+        value: {
+          items: [
+            {
+              kind: "file",
+              type: "image/png",
+              getAsFile: () => new File(["img"], "p.png", { type: "image/png" }),
+            },
+          ],
+        },
+      });
+      textarea.dispatchEvent(pasteEvent);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(onUploadFile).not.toHaveBeenCalled();
+      expect(container.querySelectorAll(".attachment-preview-item").length).toBe(0);
+      expect(container.querySelector(".attachment-upload-error")!.textContent).toBe(
+        "Uploads are disabled on this server",
+      );
+
+      // A later auth_ok that re-enables uploads re-enables the control.
+      authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
+      authStore.flush();
+      expect(attachBtn.disabled).toBe(false);
+      expect(attachBtn.title).toBe("");
+    } finally {
+      authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+      comp.destroy?.();
+    }
+  });
+
+  it("keeps the attach button disabled while gated even if uploads are enabled", () => {
+    const comp = createMessageInput(
+      makeOptions({ onUploadFile: vi.fn(async () => ({ id: "x", url: "x", filename: "x" })) }),
+    );
+    comp.mount(container);
+    comp.setDisabled("Not connected");
+    const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
+    expect(attachBtn.disabled).toBe(true);
+    comp.setDisabled(null);
+    expect(attachBtn.disabled).toBe(false);
+    comp.destroy?.();
+  });
+
+  // D1 (a): any type the server accepts can be attached; the server stays
+  // authoritative and refuses its own blocked types.
+  it("uploads a file of a type outside the old allowlist", async () => {
+    const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "a.7z" }));
+    const comp = createMessageInput(makeOptions({ onUploadFile }));
     comp.mount(container);
 
-    const badFile = new File(["exe data"], "bad.exe", { type: "application/x-msdownload" });
-
+    const file = new File(["7z"], "a.7z", { type: "application/x-7z-compressed" });
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [badFile], writable: true });
+    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(onUploadFile).not.toHaveBeenCalled();
-    const error = container.querySelector(".attachment-upload-error");
-    expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("is not a supported file type");
-
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
     comp.destroy?.();
   });
 
@@ -1522,6 +1874,22 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("selecting a GIF under a slow-mode send gate is refused with the reason", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setSendGate("Slow mode — 5s");
+    (container.querySelector(".gif-btn") as HTMLElement).click();
+    expect(lastGifPickerOptions).not.toBeNull();
+    lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
+
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(container.querySelector(".attachment-upload-error")!.textContent).toBe("Slow mode — 5s");
+
+    comp.destroy?.();
+  });
+
   it("selecting a GIF sends it without discarding a typed draft", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
@@ -1670,9 +2038,9 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  // ── Files with empty MIME type are rejected (security hardening) ──
+  // ── Files with an empty MIME type are uploaded; the server sniffs them (D1 a) ──
 
-  it("files with empty MIME type are rejected", async () => {
+  it("files with empty MIME type are uploaded", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "unk-1", url: "http://x", filename: "data" }));
     const opts = makeOptions({ onUploadFile });
     const comp = createMessageInput(opts);
@@ -1683,12 +2051,8 @@ describe("MessageInput", () => {
     Object.defineProperty(fileInput, "files", { value: [noTypeFile], writable: true });
     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(onUploadFile).not.toHaveBeenCalled();
-    const error = container.querySelector(".attachment-upload-error");
-    expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("is not a supported file type");
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
 
     comp.destroy?.();
   });

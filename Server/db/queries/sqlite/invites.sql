@@ -15,8 +15,10 @@ WHERE code = ? AND revoked = 0
 UPDATE invites SET revoked = 1 WHERE code = ?;
 
 -- name: ListInvites :many
-SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
-FROM invites ORDER BY created_at DESC LIMIT 200;
+SELECT i.id, i.code, i.created_by, COALESCE(u.username, '') AS creator_username,
+       i.max_uses, i.use_count, i.expires_at, i.revoked, i.created_at
+FROM invites i LEFT JOIN users u ON u.id = i.created_by
+ORDER BY i.created_at DESC LIMIT 200;
 
 -- name: CreateInviteRedemption :exec
 INSERT INTO invite_redemptions (invite_id, user_id)

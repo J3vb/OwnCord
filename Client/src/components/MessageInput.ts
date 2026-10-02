@@ -20,6 +20,8 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
+import { authStore } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi } from "@lib/gifProvider";
 
@@ -80,6 +82,12 @@ export type MessageInputComponent = MountableComponent & {
    * the server would refuse is prevented here, not attempted and rejected.
    */
   setDisabled(reason: string | null): void;
+  /**
+   * Gate sending only, leaving the composer editable (slow mode). The reason
+   * shows on a refused send and greys the send control; the user can keep
+   * editing the draft. Pass null to lift.
+   */
+  setSendGate(reason: string | null): void;
   /**
    * Open the attachment file picker, as the "+" button does. Backs the
    * Ctrl+U shortcut. No-op while the composer is disabled or when the host
@@ -179,7 +187,32 @@ export function wrapWithMarker(
 const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
 const SEND_DEBOUNCE_MS = 200;
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matches server limit
+// The server's per-file cap arrives on auth_ok (upload_policy); an older
+// server that omits it falls back to its 100 MiB request cap, and an
+// advertised 0 means uploads are disabled on that server.
+// The server stays authoritative: this only refuses a doomed upload early.
+const FALLBACK_MAX_FILE_SIZE = 100 * 1024 * 1024;
+
+/** True when this server advertised max_upload_bytes 0 (uploads disabled). */
+function uploadsDisabledByServer(): boolean {
+  return authStore.getState().uploadPolicy?.max_upload_bytes === 0;
+}
+
+/**
+ * The extension this server's file-type policy refuses `name` for ("" for a
+ * name with none in allow-only mode), or null when it is allowed. Mirrors the
+ * server's check: case-insensitive, the final extension only, trailing dots
+ * and spaces ignored.
+ */
+function refusedExtension(name: string): string | null {
+  const policy = authStore.getState().uploadPolicy;
+  const trimmed = name.toLowerCase().replace(/[. ]+$/, "");
+  const dot = trimmed.lastIndexOf(".");
+  const ext = dot < 0 ? "" : trimmed.slice(dot + 1).trim();
+  if (policy?.blocked_extensions?.includes(ext) === true) return ext;
+  const allowed = policy?.allowed_extensions ?? [];
+  return allowed.length === 0 || allowed.includes(ext) ? null : ext;
+}
 // Server/ws/command.go rejects the whole chat_send frame (as a generic parse
 // error, not an attachment-specific one) once len(Attachments) > 10 -- cap
 // the queue client-side so we never upload an attachment doomed to be
@@ -197,16 +230,6 @@ const MAX_MESSAGE_LEN = 4000;
 const DRAFT_ATTACHMENT_TTL_MS = 50 * 60 * 1000;
 /** Makes each composer's refusal-line id unique for aria-describedby. */
 let nextComposerId = 0;
-const ALLOWED_TYPES = [
-  "image/",
-  "video/",
-  "audio/",
-  "application/pdf",
-  "text/",
-  "application/zip",
-  "application/x-zip-compressed",
-  "application/json",
-];
 
 /**
  * Keys that move the caret without an open autocomplete popup claiming them,
@@ -247,6 +270,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyTo: null as { messageId: number; username: string } | null,
     editing: null as { messageId: number } | null,
   };
+  /** The ordinary draft (text + reply) displaced by an edit, so cancelling or
+   *  saving the edit gives the user back what they were typing (P1-08). Staged
+   *  attachments are untouched by an edit and read live from the composer. */
+  let preEditDraft: {
+    text: string;
+    replyTo: { messageId: number; username: string } | null;
+  } | null = null;
   let lastTypingTime = 0;
   let lastSendTime = 0;
 
@@ -255,6 +285,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   let replyText: HTMLSpanElement | null = null;
   let editBar: HTMLDivElement | null = null;
   let disabledReason: string | null = options.disabledReason ?? null;
+  /** Slow-mode-style gate: refuses the send without freezing the composer. */
+  let sendGateReason: string | null = null;
   /** True once the server has told us GIFs are off, or if no GIF api was wired. */
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
@@ -392,6 +424,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       closeEmojiPopup();
       return;
     }
+    // The Unicode set is a lazy chunk: the first `:token` loads it, and the
+    // popup re-syncs once it lands, so a Unicode-only match still opens. A
+    // failed load leaves custom emoji only until the next keystroke retries.
+    if (emojiCatalog() === null) {
+      void loadEmojiCatalog().then(
+        () => {
+          if (!signal.aborted) syncEmojiPopup();
+        },
+        () => undefined,
+      );
+    }
     if (emojiPopup === null) {
       emojiPopup = createEmojiAutocomplete({
         onSelect: insertEmoji,
@@ -435,6 +478,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       mentionPopup = createMentionAutocomplete({
         onSelect: insertMention,
         onClose: closeMentionPopup,
+        channelId: options.channelId,
         // The popup manages combobox/aria-activedescendant state on the
         // textarea for as long as it is open.
         comboboxInput: textarea ?? undefined,
@@ -553,12 +597,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.placeholder = disabled
       ? disabledReason!
       : messagingText("composer.placeholder", { channel: options.channelName });
+    const uploadsOff = uploadsDisabledByServer();
     for (const btn of controlButtons) {
-      if (disabled) {
+      const isAttach = btn.classList.contains("attach-btn");
+      if (isAttach) btn.title = uploadsOff ? messagingText("attach.serverDisabled") : "";
+      if (disabled || (isAttach && uploadsOff)) {
         btn.setAttribute("disabled", "true");
       } else {
-        // Don't re-enable the attach button when uploads aren't wired.
-        if (btn.classList.contains("attach-btn") && options.onUploadFile === undefined) continue;
         // Likewise for GIFs when this server has no GIF provider configured.
         if (btn.classList.contains("gif-btn") && gifUnavailable) continue;
         btn.removeAttribute("disabled");
@@ -566,6 +611,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     if (root !== null) {
       root.classList.toggle("composer-disabled", disabled);
+    }
+    // A slow-mode send gate does not freeze the composer, but the send control
+    // must read as unavailable, and the reason becomes its title.
+    const sendBtn = controlButtons[0];
+    if (sendBtn !== undefined && !disabled) {
+      const gated = sendGateReason !== null;
+      sendBtn.classList.toggle("send-gated", gated);
+      sendBtn.title = gated ? sendGateReason! : "";
     }
   }
 
@@ -578,9 +631,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     applyDisabledState();
   }
 
+  function setSendGate(reason: string | null): void {
+    if (uploadErrorEl?.textContent === sendGateReason) {
+      if (reason === null) clearUploadError();
+      else showUploadError(reason);
+    }
+    sendGateReason = reason;
+    applyDisabledState();
+  }
+
   function handleSend(): void {
-    if (disabledReason !== null) {
-      showUploadError(disabledReason);
+    // A send gate (slow mode) refuses the send but, unlike `disabledReason`,
+    // leaves the draft editable — the user can keep typing and retry.
+    const refusal = disabledReason ?? sendGateReason;
+    if (refusal !== null) {
+      showUploadError(refusal);
       return;
     }
     if (textarea === null) return;
@@ -613,16 +678,21 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     if (state.editing !== null) {
       options.onEditMessage(state.editing.messageId, content);
-      cancelEdit();
-    } else {
-      // Only include attachments that have finished uploading (have a real server ID)
-      const attachmentIds = pendingAttachments
-        .filter((a) => !a.id.startsWith("pending-"))
-        .map((a) => a.id);
-      options.onSend(content, state.replyTo?.messageId ?? null, attachmentIds);
-      clearReply();
-      clearPendingAttachments();
+      // P1-08: sending the edit returns the composer to the ordinary draft the
+      // edit displaced, instead of clearing everything.
+      restorePreEditDraft();
+      clearUploadError();
+      textarea.focus();
+      return;
     }
+
+    // Only include attachments that have finished uploading (have a real server ID)
+    const attachmentIds = pendingAttachments
+      .filter((a) => !a.id.startsWith("pending-"))
+      .map((a) => a.id);
+    options.onSend(content, state.replyTo?.messageId ?? null, attachmentIds);
+    clearReply();
+    clearPendingAttachments();
 
     textarea.value = "";
     autoResize();
@@ -687,6 +757,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
+    if (uploadsDisabledByServer()) {
+      showUploadError(messagingText("attach.serverDisabled"));
+      return;
+    }
 
     // Attachments queued during an edit are neither sent (the edit branch
     // never reads pendingAttachments) nor cleared -- they'd silently ride
@@ -696,15 +770,26 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
 
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      showUploadError(messagingText("error.fileTooLarge", { filename: file.name }));
+    // Any file type the server's file-type policy allows may be attached:
+    // the server also sniffs the content, refuses its blocked types and
+    // serves unsafe ones as downloads.
+    const refused = refusedExtension(file.name);
+    if (refused !== null) {
+      showUploadError(
+        refused === ""
+          ? messagingText("error.fileTypeNoExtension", { filename: file.name })
+          : messagingText("error.fileTypeBlocked", { filename: file.name, ext: refused }),
+      );
       return;
     }
-
-    // Validate file type — reject files with unknown/empty MIME type
-    if (file.type === "" || !ALLOWED_TYPES.some((t) => file.type.startsWith(t))) {
-      showUploadError(messagingText("error.unsupportedType", { filename: file.name }));
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
+    if (file.size > maxBytes) {
+      showUploadError(
+        messagingText("error.fileTooLarge", {
+          filename: file.name,
+          limit: String(Math.floor(maxBytes / (1024 * 1024))),
+        }),
+      );
       return;
     }
 
@@ -792,7 +877,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function setReplyTo(messageId: number, username: string): void {
-    // cancelEdit also clears the textarea -- without it the stale edit text
+    // Leaving edit mode for reply mode discards the edit and gives back the
+    // ordinary draft the edit displaced. Without this the stale edit text
     // survives into reply mode and Enter reposts it as a duplicate.
     if (state.editing !== null) cancelEdit();
     state = { replyTo: { messageId, username }, editing: null };
@@ -806,6 +892,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function startEdit(messageId: number, content: string): void {
+    // P1-08: stash what the user was typing (text + reply) before the edit
+    // takes over the composer, so cancelling or saving gives it back. Staged
+    // attachments are left in place and read live, not part of the stash.
+    if (preEditDraft === null) {
+      preEditDraft = { text: textarea?.value ?? "", replyTo: state.replyTo };
+    }
     if (state.replyTo !== null) hideReplyBar();
     state = { replyTo: null, editing: { messageId } };
     showEditBar();
@@ -816,13 +908,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
-  function cancelEdit(): void {
-    state = { ...state, editing: null };
+  /** Return the composer to the ordinary draft an edit displaced. Falls back to
+   *  an empty composer when an edit was opened without one. */
+  function restorePreEditDraft(): void {
+    const stashed = preEditDraft ?? { text: "", replyTo: null };
+    preEditDraft = null;
+    state = { replyTo: stashed.replyTo, editing: null };
     hideEditBar();
     if (textarea !== null) {
-      textarea.value = "";
+      textarea.value = stashed.text;
       autoResize();
     }
+    if (stashed.replyTo !== null) showReplyBar(stashed.replyTo.username);
+    else hideReplyBar();
+  }
+
+  function cancelEdit(): void {
+    restorePreEditDraft();
   }
 
   function isIdle(): boolean {
@@ -877,7 +979,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const fileInput = createElement("input", {
         type: "file",
         style: "display: none;",
-        accept: "image/*,video/*,audio/*,.pdf,.txt,.zip",
       });
       fileInput.addEventListener(
         "change",
@@ -892,7 +993,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       );
       attachBtn.addEventListener("click", () => fileInput.click(), { signal });
       openPicker = () => {
-        if (disabledReason !== null) return;
+        if (disabledReason !== null || uploadsDisabledByServer()) return;
         fileInput.click();
       };
       root?.appendChild(fileInput);
@@ -930,6 +1031,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     controlButtons.push(sendBtn, emojiBtn, gifBtn);
     if (options.onUploadFile !== undefined) {
       controlButtons.push(attachBtn);
+      disposable.onStoreChange(
+        authStore,
+        (s) => s.uploadPolicy?.max_upload_bytes,
+        () => applyDisabledState(),
+      );
     }
 
     textarea.addEventListener(
@@ -966,6 +1072,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         }
 
         if (e.key === "Enter" && !e.shiftKey) {
+          // A CJK IME commits the current candidate on Enter, firing keydown
+          // with isComposing true (or the legacy keyCode 229). Sending here
+          // would ship the raw composition text instead of the committed word.
+          if (e.isComposing || e.keyCode === 229) return;
           e.preventDefault();
           handleSend();
         }
@@ -1144,9 +1254,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           // discarded — whatever draft the user had typed, and on slow
           // mode / mid-upload / debounced sends left the raw GIF URL sitting
           // in the composer instead of the draft. Guarded by the same
-          // disabledReason/debounce checks as a normal send; an in-progress
+          // refusal/debounce checks as a normal send; an in-progress
           // edit and any typed draft are left untouched.
-          if (disabledReason === null) {
+          const refusal = disabledReason ?? sendGateReason;
+          if (refusal !== null) {
+            showUploadError(refusal);
+          } else {
             const now = Date.now();
             if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
               lastSendTime = now;
@@ -1212,6 +1325,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyBar = null;
     replyText = null;
     editBar = null;
+    preEditDraft = null;
     attachmentPreviewBar = null;
     uploadErrorEl = null;
     openPicker = null;
@@ -1223,14 +1337,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
   /** Capture the unsent state for a channel switch. Only settled attachments
    *  carry their server id; an in-flight upload is not carried (SRV-05 aborts
-   *  it on unmount). */
+   *  it on unmount). Mid-edit this is the draft the edit displaced: the edit
+   *  text itself is never stashed, since restored outside edit mode it would
+   *  send as a duplicate new message. */
   function getDraft(): ComposerDraft {
-    // An in-progress edit is dropped, not stashed: restored into a composer
-    // outside edit mode, its text would send as a duplicate new message.
-    if (state.editing !== null) return { content: "", replyTo: null, attachments: [] };
+    const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
     return {
-      content: textarea?.value ?? "",
-      replyTo: state.replyTo,
+      content: stashed.text,
+      replyTo: stashed.replyTo,
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
@@ -1273,6 +1387,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     cancelEdit,
     isIdle,
     setDisabled,
+    setSendGate,
     openFilePicker,
     getDraft,
     restoreDraft,

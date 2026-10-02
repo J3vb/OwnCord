@@ -38,6 +38,7 @@ func isInvalidSearchQueryError(err error) bool {
 // WebSocket from a REST handler. Satisfied by *ws.Hub.
 type PurgeBroadcaster interface {
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
+	BroadcastMessagePinned(channelID, messageID int64, pinned bool)
 }
 
 // MountChannelRoutes registers all channel-related routes onto r.
@@ -53,8 +54,8 @@ func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, li
 		r.Post("/{id}/messages/purge", handlePurgeMessages(svc, broadcaster))
 		r.Get("/{id}/messages/{messageId}/reactions/{emoji}/users", handleGetReactionUsers(svc))
 		r.Get("/{id}/pins", handleGetPins(svc))
-		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, true))
-		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, false))
+		r.Post("/{id}/pins/{messageId}", handleSetPinned(svc, broadcaster, true))
+		r.Delete("/{id}/pins/{messageId}", handleSetPinned(svc, broadcaster, false))
 	})
 	r.With(
 		AuthMiddleware(svc.Sessions),
@@ -276,8 +277,31 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		if !ok {
 			return
 		}
+		page := db.SearchPage{Limit: limit}
 
-		results, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, limit)
+		switch r.URL.Query().Get("sort") {
+		case "", "relevance":
+		case "recent":
+			page.Recent = true
+		default:
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "sort must be 'relevance' or 'recent'")
+			return
+		}
+		if raw := r.URL.Query().Get("before"); raw != "" {
+			v, parseErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || v <= 0 {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before must be a positive integer")
+				return
+			}
+			// A message-id cursor only walks a newest-first list.
+			if !page.Recent {
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before requires sort=recent")
+				return
+			}
+			page.Before = v
+		}
+
+		results, nextBefore, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, page)
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
 				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid search query")
@@ -292,8 +316,15 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 
 		type response struct {
 			Results []db.MessageSearchResult `json:"results"`
+			// NextBefore is the before= cursor for the next sort=recent page;
+			// null when there is none.
+			NextBefore *int64 `json:"next_before"`
 		}
-		writeJSON(w, http.StatusOK, response{Results: results})
+		resp := response{Results: results}
+		if nextBefore > 0 {
+			resp.NextBefore = &nextBefore
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -320,12 +351,24 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 			Messages []db.MessageAPIResponse `json:"messages"`
 			HasMore  bool                    `json:"has_more"`
 		}
-		writeJSON(w, http.StatusOK, response{Messages: msgs, HasMore: false})
+		// Report the real cap state rather than a hardcoded false: with more
+		// than MaxPinnedMessages pins the rest are truncated, and the caller
+		// must be able to tell (F23).
+		hasMore := len(msgs) > db.MaxPinnedMessages
+		if hasMore {
+			msgs = msgs[:db.MaxPinnedMessages]
+		}
+		writeJSON(w, http.StatusOK, response{
+			Messages: msgs,
+			HasMore:  hasMore,
+		})
 	}
 }
 
-// handleSetPinned pins or unpins a message in a channel.
-func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
+// handleSetPinned pins or unpins a message in a channel. The change is
+// broadcast to every reader so other clients (and the pinner's own other
+// devices) do not show stale pins (F5).
+func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
 		if !ok {
@@ -344,6 +387,9 @@ func handleSetPinned(svc *service.Services, pinned bool) http.HandlerFunc {
 		if err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned); err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
+		}
+		if broadcaster != nil {
+			broadcaster.BroadcastMessagePinned(channelID, messageID, pinned)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}

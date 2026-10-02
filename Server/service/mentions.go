@@ -146,10 +146,12 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 	return set
 }
 
-// applyMentionCounts increments read_states.mention_count for every user the
-// message mentions who can see the channel, except the author and except users
-// who have blocked the author. @everyone reaches every reader; @here reaches
-// only readers who are not offline.
+// mentionEntries resolves a message's fan-out to the recipients whose mention
+// badge it raises, as one batch entry (or none). It is the resolution half of
+// the old per-send applyMentionCounts, split out so the mention worker can
+// resolve at flush time — after the coalesce window — and write many messages'
+// entries in one transaction. The read-state guard still runs inside the
+// increment, so a read that lands during the window still no-ops.
 //
 // Edits deliberately never call this: a mention that was already counted must
 // not be counted twice, and the simplest rule that guarantees it is that only
@@ -157,15 +159,15 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 //
 // The message is already committed by the time this runs, so failures are
 // logged rather than surfaced — a lost badge must not fail a delivered send.
-func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) {
+func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) []db.MentionBatchEntry {
 	if len(set.UserIDs) == 0 && !set.Everyone {
-		return
+		return nil
 	}
 
 	readers, err := s.mentionReaders(ctx, channelID, isDM, participantIDs)
 	if err != nil {
 		slog.Error("MessageService.applyMentionCounts readers", "err", err, "channel_id", channelID)
-		return
+		return nil
 	}
 
 	recipients := make(map[int64]struct{}, len(readers))
@@ -177,16 +179,20 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgI
 			// thing "appear offline" is meant to stop. Collapsing first makes
 			// @here agree with what everyone else can see of that reader.
 			//
-			// That column check alone is not enough: users.status keeps a
-			// *chosen* idle/dnd across a disconnect by design
-			// (MarkUserDisconnected only ever rewrites "online" -> "offline"),
-			// so a signed-out reader whose last status was idle/dnd would still
-			// read as non-offline here. s.online (nil-safe) applies the read
-			// path's "no live connection is offline, whatever the row says"
-			// rule (ws/serve_ready.go presentableMembers) to close that gap.
-			if set.HereOnly && (db.BroadcastStatus(r.Status) == db.StatusOffline ||
-				(s.online != nil && !s.online(r.UserID))) {
-				continue
+			// The live status, when wired, stands in for the column: the row
+			// keeps a *chosen* idle/dnd across a disconnect by design
+			// (StampDisconnect only ever rewrites "online" -> "offline") and
+			// lags a connect by up to one batched stamp flush. A reader with
+			// no live connection ("") is offline whatever the row says, the
+			// read path's rule (ws/serve_ready.go presentableMembers).
+			if set.HereOnly {
+				status := r.Status
+				if s.liveStatus != nil {
+					status = s.liveStatus(r.UserID)
+				}
+				if status == "" || db.BroadcastStatus(status) == db.StatusOffline {
+					continue
+				}
 			}
 			recipients[r.UserID] = struct{}{}
 		}
@@ -207,28 +213,26 @@ func (s *MessageService) applyMentionCounts(ctx context.Context, channelID, msgI
 	}
 	delete(recipients, authorID)
 	if len(recipients) == 0 {
-		return
+		return nil
 	}
 
 	blockers, err := s.st.ListBlockersOf(ctx, authorID)
 	if err != nil {
 		slog.Error("MessageService.applyMentionCounts ListBlockersOf", "err", err, "user_id", authorID)
-		return // Fail closed: a badge from a blocked user is worse than no badge.
+		return nil // Fail closed: a badge from a blocked user is worse than no badge.
 	}
 	for _, b := range blockers {
 		delete(recipients, b)
 	}
 	if len(recipients) == 0 {
-		return
+		return nil
 	}
 
 	ids := make([]int64, 0, len(recipients))
 	for id := range recipients {
 		ids = append(ids, id)
 	}
-	if err := s.st.IncrementMentionCounts(ctx, channelID, msgID, ids); err != nil {
-		slog.Error("MessageService.applyMentionCounts IncrementMentionCounts", "err", err, "channel_id", channelID)
-	}
+	return []db.MentionBatchEntry{{MsgID: msgID, UserIDs: ids}}
 }
 
 // mentionReaders lists the users who can read the channel, with the presence

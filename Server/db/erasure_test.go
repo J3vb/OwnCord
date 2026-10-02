@@ -670,6 +670,8 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		{fmt.Sprintf(`{"seq":7,"type":"chat_message","payload":{"user":{"id":%d},"mentions":[%d]}}`, other, other), false},
 		{fmt.Sprintf(`{"seq":8,"type":"typing","user_id":%d}`, uid), false}, // flattened: not a persisted shape
 		{`{"seq":9,"type":"roles_update","payload":{"roles":[]}}`, false},
+		{fmt.Sprintf(`{"seq":10,"type":"presence_batch","payload":{"updates":[{"user_id":%d,"status":"online"},{"user_id":%d,"status":"idle"}]}}`, other, uid), true},
+		{fmt.Sprintf(`{"seq":11,"type":"presence_batch","payload":{"updates":[{"user_id":%d,"status":"online"}]}}`, other), false},
 	}
 	for i, r := range rows {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
@@ -680,19 +682,19 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if before != 5 {
-		t.Errorf("predicate matched %d rows, want 5", before)
+	if before != 6 {
+		t.Errorf("predicate matched %d rows, want 6", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
 	if err != nil {
 		t.Fatalf("DeleteEventsForUser: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("deleted %d rows, want 5", n)
+	if n != 6 {
+		t.Errorf("deleted %d rows, want 6", n)
 	}
 	var left int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 4 {
-		t.Errorf("rows left = %d (%v), want the 4 naming nobody or someone else", left, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 5 {
+		t.Errorf("rows left = %d (%v), want the 5 naming nobody or someone else", left, err)
 	}
 }
 

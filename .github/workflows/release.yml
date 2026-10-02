@@ -291,8 +291,10 @@ jobs:
           # makes the CLI abort: "the argument '--private-key-path' cannot be
           # used with '--private-key'". Keeping the key in the env instead of a
           # temp file also keeps it off the runner's disk.
-          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
-          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$TARBALL"
+          # --app-version binds each signature to this release: clients set
+          # `requireSignedVersion` and refuse an updater artifact signed without it.
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$APPIMAGE"
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$TARBALL"
 
       - name: Stage Linux release assets
         shell: bash
@@ -534,8 +536,10 @@ jobs:
           # makes the CLI abort: "the argument '--private-key-path' cannot be
           # used with '--private-key'". Keeping the key in the env instead of a
           # temp file also keeps it off the runner's disk.
-          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
-          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$TARBALL"
+          # --app-version binds each signature to this release: clients set
+          # `requireSignedVersion` and refuse an updater artifact signed without it.
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$APPIMAGE"
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$TARBALL"
 
       # The script inserts _aarch64 into every arch-less AppImage filename:
       # FindClientAssets matches on that suffix, and the x86_64 assets land in

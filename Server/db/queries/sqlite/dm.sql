@@ -13,6 +13,25 @@ SELECT user_id FROM dm_participants WHERE channel_id = ?;
 -- name: CountDMParticipants :one
 SELECT COUNT(*) FROM dm_participants WHERE channel_id = ?;
 
+-- name: GetDMDeliveryTargets :many
+-- One read for a DM send's whole fan-out decision: every participant, the
+-- channel's group flag, whether the participant's DM row is already open, and
+-- whether the participant trusts sender_id (message requests).
+SELECT
+    dp.user_id AS user_id,
+    c.is_group AS is_group,
+    CAST(EXISTS (
+        SELECT 1 FROM dm_open_state o
+        WHERE o.user_id = dp.user_id AND o.channel_id = dp.channel_id
+    ) AS INTEGER) AS is_open,
+    CAST(EXISTS (
+        SELECT 1 FROM trusted_senders t
+        WHERE t.recipient_id = dp.user_id AND t.sender_id = sqlc.arg(sender_id)
+    ) AS INTEGER) AS trusts_sender
+FROM dm_participants dp
+JOIN channels c ON c.id = dp.channel_id AND c.type = 'dm'
+WHERE dp.channel_id = sqlc.arg(channel_id);
+
 -- name: IsGroupDM :one
 SELECT is_group FROM channels WHERE id = ? AND type = 'dm';
 
@@ -46,11 +65,14 @@ SELECT
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
-    (SELECT COUNT(*) FROM messages mu
+    (SELECT COUNT(*) FROM (SELECT 1 FROM messages mu
       WHERE mu.channel_id = c.id AND mu.deleted = 0
         AND mu.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
                                WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0)
-    ) AS unread_count
+      LIMIT 100)
+    ) AS unread_count,
+    CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (

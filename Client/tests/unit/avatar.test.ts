@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const fetchImageAsDataUrl = vi.hoisted(() => vi.fn());
+const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // The real module reaches for the Tauri HTTP plugin and IndexedDB; only the
 // fetch entry point matters here, so it is stubbed and the URL helpers are
 // kept honest by reimplementing exactly what they do.
 vi.mock("@components/message-list/attachments", () => ({
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
@@ -62,11 +62,11 @@ describe("isRenderableAvatar", () => {
 
 describe("createAvatarElement", () => {
   beforeEach(() => {
-    fetchImageAsDataUrl.mockReset();
+    fetchImageAsObjectUrl.mockReset();
   });
 
   it("renders the letter fallback synchronously", () => {
-    fetchImageAsDataUrl.mockResolvedValue(null);
+    fetchImageAsObjectUrl.mockResolvedValue(null);
     const el = createAvatarElement(
       { username: "ada", avatar: null },
       { className: "msg-avatar", background: "red" },
@@ -74,7 +74,7 @@ describe("createAvatarElement", () => {
     expect(el.className).toBe("msg-avatar");
     expect(el.textContent).toBe("A");
     expect(el.style.background).toBe("red");
-    expect(fetchImageAsDataUrl).not.toHaveBeenCalled();
+    expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
   });
 
   it("never fetches for a deleted account", () => {
@@ -84,11 +84,11 @@ describe("createAvatarElement", () => {
         className: "msg-avatar",
       },
     );
-    expect(fetchImageAsDataUrl).not.toHaveBeenCalled();
+    expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
   });
 
   it("swaps in the fetched image once the bytes arrive", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
     const el = createAvatarElement(
       { username: "ada", displayName: "Ada L.", avatar: "/api/v1/files/abc" },
       { className: "mi-avatar" },
@@ -101,7 +101,7 @@ describe("createAvatarElement", () => {
 
     // The authenticated file route is resolved against the server host — the
     // helper must not hand a relative URL to the fetcher.
-    expect(fetchImageAsDataUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/abc");
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/abc");
 
     await vi.waitFor(() => {
       const img = el.querySelector("img");
@@ -116,7 +116,7 @@ describe("createAvatarElement", () => {
   });
 
   it("keeps the letter when the fetch fails", async () => {
-    fetchImageAsDataUrl.mockResolvedValue(null);
+    fetchImageAsObjectUrl.mockResolvedValue(null);
     const el = createAvatarElement(
       { username: "ada", avatar: "/api/v1/files/abc" },
       { className: "mi-avatar" },
@@ -130,7 +130,7 @@ describe("createAvatarElement", () => {
   });
 
   it("does not swap into a detached element", async () => {
-    fetchImageAsDataUrl.mockResolvedValue("data:image/png;base64,AAA");
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
     const el = createAvatarElement(
       { username: "ada", avatar: "/api/v1/files/abc" },
       { className: "mi-avatar" },

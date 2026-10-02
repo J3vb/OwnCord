@@ -6,6 +6,7 @@ const mockSetVoiceSensitivity = vi.fn();
 const mockSetInputVolume = vi.fn();
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
+const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
@@ -14,15 +15,19 @@ vi.mock("@lib/livekitSession", () => ({
   setInputVolume: (...args: unknown[]) => mockSetInputVolume(...args),
   setOutputVolume: (...args: unknown[]) => mockSetOutputVolume(...args),
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
+  reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
+    mockReapplyEnhancedNoiseSuppression(...args),
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { vadThreshold } from "@lib/audioPipeline";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,
 // so the singleton stays one.
 import * as appLogger from "@lib/logger";
 import { expectConsole } from "../helpers/console";
+import { FakeAudioWorkletNode, installFakeAudio } from "../helpers/fakeAudioContext";
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -30,37 +35,19 @@ describe("VoiceAudioTab camera preview", () => {
     document.body.innerHTML = "";
     localStorage.setItem("owncord:settings:videoInputDevice", '"camera-1"');
 
-    vi.stubGlobal(
-      "AudioContext",
-      class {
-        createAnalyser() {
-          return {
-            fftSize: 0,
-            smoothingTimeConstant: 0,
-            frequencyBinCount: 32,
-            getByteFrequencyData: vi.fn(),
-          };
-        }
-
-        createMediaStreamSource() {
-          return { connect: vi.fn() };
-        }
-
-        close() {
-          return Promise.resolve();
-        }
-      },
-    );
+    installFakeAudio({ worklets: true });
   });
 
   it("does not restore a stale camera stream after the tab is aborted", async () => {
     let resolveVideo: ((stream: MediaStream) => void) | null = null;
     const stopVideoTrack = vi.fn();
     const videoStream = {
-      getTracks: () => [{ stop: stopVideoTrack }],
+      getTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
+      getAudioTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
     } as unknown as MediaStream;
     const audioStream = {
       getTracks: () => [],
+      getAudioTracks: () => [],
     } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
@@ -98,10 +85,12 @@ describe("VoiceAudioTab camera preview", () => {
     let resolveVideo: ((stream: MediaStream) => void) | null = null;
     const stopVideoTrack = vi.fn();
     const videoStream = {
-      getTracks: () => [{ stop: stopVideoTrack }],
+      getTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
+      getAudioTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
     } as unknown as MediaStream;
     const audioStream = {
       getTracks: () => [],
+      getAudioTracks: () => [],
     } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
@@ -140,7 +129,8 @@ describe("VoiceAudioTab mic meter", () => {
   let resolveAudio: ((stream: MediaStream) => void) | null = null;
   const stopAudioTrack = vi.fn();
   const audioStream = {
-    getTracks: () => [{ stop: stopAudioTrack }],
+    getTracks: () => [{ stop: stopAudioTrack, kind: "audio" }],
+    getAudioTracks: () => [{ stop: stopAudioTrack, kind: "audio" }],
   } as unknown as MediaStream;
 
   beforeEach(() => {
@@ -149,27 +139,7 @@ describe("VoiceAudioTab mic meter", () => {
     resolveAudio = null;
     stopAudioTrack.mockClear();
 
-    vi.stubGlobal(
-      "AudioContext",
-      class {
-        createAnalyser() {
-          return {
-            fftSize: 0,
-            smoothingTimeConstant: 0,
-            frequencyBinCount: 32,
-            getByteFrequencyData: vi.fn(),
-          };
-        }
-
-        createMediaStreamSource() {
-          return { connect: vi.fn() };
-        }
-
-        close() {
-          return Promise.resolve();
-        }
-      },
-    );
+    installFakeAudio({ worklets: true });
 
     // No videoInputDevice pref, so only the mic meter requests media.
     vi.stubGlobal("navigator", {
@@ -226,7 +196,8 @@ describe("VoiceAudioTab UI structure", () => {
     setDevices(next: Array<{ kind: string; deviceId: string; label: string }>): void;
   } {
     const audioStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
 
     let current = devices;
@@ -259,25 +230,7 @@ describe("VoiceAudioTab UI structure", () => {
     vi.clearAllMocks();
     localStorage.clear();
     document.body.innerHTML = "";
-    vi.stubGlobal(
-      "AudioContext",
-      class {
-        createAnalyser() {
-          return {
-            fftSize: 0,
-            smoothingTimeConstant: 0,
-            frequencyBinCount: 32,
-            getByteFrequencyData: vi.fn(),
-          };
-        }
-        createMediaStreamSource() {
-          return { connect: vi.fn() };
-        }
-        close() {
-          return Promise.resolve();
-        }
-      },
-    );
+    installFakeAudio({ worklets: true });
   });
 
   afterEach(() => {
@@ -403,13 +356,66 @@ describe("VoiceAudioTab UI structure", () => {
     ]);
     emitDeviceChange();
 
+    // The saved device is gone: it stays the selection, marked disconnected
+    // and not pickable, rather than silently reading as Default (DP-31).
     await vi.waitFor(() => {
       const values = Array.from(inputSelect.querySelectorAll("option")).map((o) => o.value);
-      expect(values).toEqual(["", "mic-2"]);
+      expect(values).toEqual(["", "mic-2", "mic-1"]);
     });
-    // The saved device is gone — fall back to Default rather than a dead entry.
-    expect(inputSelect.value).toBe("");
+    expect(inputSelect.value).toBe("mic-1");
+    expect(inputSelect.selectedOptions[0]!.textContent).toBe("Mic 1 (disconnected)");
+    expect(inputSelect.selectedOptions[0]!.disabled).toBe(true);
 
+    // Plugged back in: the entry is an ordinary one again.
+    nav.setDevices([
+      { kind: "audioinput", deviceId: "mic-1", label: "Mic 1" },
+      { kind: "audioinput", deviceId: "mic-2", label: "Mic 2" },
+      { kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" },
+    ]);
+    emitDeviceChange();
+    await vi.waitFor(() => expect(inputSelect.selectedOptions[0]!.textContent).toBe("Mic 1"));
+    expect(inputSelect.value).toBe("mic-1");
+    expect(inputSelect.selectedOptions[0]!.disabled).toBe(false);
+
+    ac.abort();
+  });
+
+  it("names a saved device unplugged before the tab opened by its id", async () => {
+    stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("abcdef0123456789"));
+
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.value).toBe("abcdef0123456789"));
+    expect(inputSelect.selectedOptions[0]!.textContent).toBe(
+      "Microphone (abcdef01) (disconnected)",
+    );
+    ac.abort();
+  });
+
+  it("meters the system default while the saved microphone is unplugged", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", '"mic-gone"');
+    stubNavigator();
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(
+      Object.assign(new Error("gone"), { name: "OverconstrainedError" }),
+    );
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    await vi.waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenLastCalledWith({
+        audio: expect.objectContaining({ deviceId: "default" }),
+        video: false,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(el.querySelector<HTMLElement>("[data-testid='mic-status']")!.textContent).not.toBe(
+      "No microphone access",
+    );
     ac.abort();
   });
 
@@ -622,83 +628,134 @@ describe("VoiceAudioTab UI structure", () => {
     it("shows the microphone's state as a pill: no input while the meter hears nothing", async () => {
       const { el, ac } = build();
       const pill = el.querySelector<HTMLElement>("[data-testid='mic-status']")!;
-      await vi.waitFor(() => expect(pill.textContent).toBe("No input"));
+      expect(pill.hidden).toBe(true);
+      await vi.waitFor(() =>
+        expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+      );
+      FakeAudioWorkletNode.instances
+        .find((w) => w.name === "vad-processor")!
+        .emit({
+          type: "rms",
+          value: 0,
+        });
+      expect(pill.textContent).toBe("No input");
       expect(pill.querySelector(".st-ic.st-pending")).not.toBeNull();
       ac.abort();
     });
 
-    describe("mic pill against a fixed noise floor", () => {
-      /** Every frequency bin reads this byte, so the meter's RMS is level / 255. */
-      let level = 0;
-      let frames: FrameRequestCallback[] = [];
-
+    describe("meter and pill against the detector's reports", () => {
+      // The meter's detector is the gate's own worklet (vad-worklet.js, whose
+      // attack and hold tests/unit/vad-worklet-click.test.ts covers); here
+      // its port is driven directly.
       beforeEach(() => {
-        level = 0;
-        frames = [];
-        vi.stubGlobal(
-          "AudioContext",
-          class {
-            createAnalyser() {
-              return {
-                fftSize: 0,
-                smoothingTimeConstant: 0,
-                frequencyBinCount: 32,
-                getByteFrequencyData: (arr: Uint8Array) => arr.fill(level),
-              };
-            }
-            createMediaStreamSource() {
-              return { connect: vi.fn() };
-            }
-            close() {
-              return Promise.resolve();
-            }
-          },
-        );
-        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
-        vi.stubGlobal("cancelAnimationFrame", vi.fn());
+        vi.useFakeTimers({ toFake: ["performance"] });
+      });
+      afterEach(() => {
+        vi.useRealTimers();
       });
 
-      async function frameAt(now: number, byte: number): Promise<void> {
-        await vi.waitFor(() => expect(frames.length).toBeGreaterThan(0));
-        level = byte;
-        const pending = frames;
-        frames = [];
-        for (const cb of pending) cb(now);
+      /** Build the tab and wait for its detector worklet. */
+      async function meter(): Promise<{
+        el: HTMLDivElement;
+        ac: AbortController;
+        worklet: FakeAudioWorkletNode;
+      }> {
+        const built = build();
+        await vi.waitFor(() =>
+          expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+        );
+        const worklet = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+        return { ...built, worklet };
       }
-
       const pillOf = (el: HTMLElement): HTMLElement =>
         el.querySelector<HTMLElement>("[data-testid='mic-status']")!;
+      const meterOf = (el: HTMLElement): HTMLElement =>
+        el.querySelector<HTMLElement>(".mic-meter-level")!;
+
+      it("configures the detector with the live gate's threshold for the saved sensitivity", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "30");
+        const { worklet, ac } = await meter();
+        expect(worklet.port.postMessage).toHaveBeenCalledWith({
+          type: "config",
+          threshold: vadThreshold(30),
+        });
+        ac.abort();
+      });
 
       it("says No input for a silent mic even at sensitivity 100", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "100");
-        const { el, ac } = build();
-        await frameAt(0, 0);
-        await frameAt(2000, 0);
+        const { el, worklet, ac } = await meter();
+        worklet.emit({ type: "rms", value: 0 });
         expect(pillOf(el).textContent).toBe("No input");
         ac.abort();
       });
 
-      it("says Hearing you for speech below a low sensitivity's gate, while the meter stays yellow", async () => {
+      it("says Hearing you for speech the gate rejects, while the meter stays yellow", async () => {
         localStorage.setItem("owncord:settings:voiceSensitivity", "0");
-        const { el, ac } = build();
-        // RMS 0.1: above the noise floor, below the 0.15 gate at sensitivity 0.
-        await frameAt(0, 26);
+        const { el, worklet, ac } = await meter();
+        // RMS 0.05: above the noise floor, below the 0.1 gate at sensitivity 0.
+        worklet.emit({ type: "gate", gated: true });
+        worklet.emit({ type: "rms", value: 0.05 });
         expect(pillOf(el).textContent).toBe("Hearing you");
         expect(pillOf(el).querySelector(".st-ic.st-ok")).not.toBeNull();
-        expect(el.querySelector<HTMLElement>(".mic-meter-level")!.style.background).toBe(
-          "var(--yellow)",
-        );
+        expect(meterOf(el).style.background).toBe("var(--yellow)");
+        ac.abort();
+      });
+
+      // DP-38: the meter used a frequency-domain level against a x0.15
+      // threshold while the live gate compares a time-domain RMS against
+      // x0.1, and turned green on one loud frame while the gate needs a
+      // sustained level. Now the gate's own verdict colours it.
+      it("is green exactly while the gate is open", async () => {
+        const { el, worklet, ac } = await meter();
+        expect(meterOf(el).style.background).toBe("");
+        worklet.emit({ type: "gate", gated: true });
+        expect(meterOf(el).style.background).toBe("var(--yellow)");
+        worklet.emit({ type: "gate", gated: false });
+        expect(meterOf(el).style.background).toBe("var(--green)");
+        ac.abort();
+      });
+
+      it("draws the level on the threshold handle's own axis", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, worklet, ac } = await meter();
+        const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
+        expect(handle.style.left).toBe("50%");
+        // A level equal to the threshold reaches the handle, no further.
+        worklet.emit({ type: "rms", value: 0.05 });
+        expect(meterOf(el).style.width).toBe("50%");
+        worklet.emit({ type: "rms", value: 0.025 });
+        expect(meterOf(el).style.width).toBe("25%");
+        worklet.emit({ type: "rms", value: 0.4 });
+        expect(meterOf(el).style.width).toBe("100%");
+        ac.abort();
+      });
+
+      it("moves the detector's threshold as the handle is dragged, without reopening the mic", async () => {
+        localStorage.setItem("owncord:settings:voiceSensitivity", "50");
+        const { el, worklet, ac } = await meter();
+        const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
+
+        handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+
+        expect(el.querySelector("[data-testid='sensitivity-value']")!.textContent).toBe("45%");
+        expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
+          type: "config",
+          threshold: vadThreshold(45),
+        });
+        expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
         ac.abort();
       });
 
       it("holds Hearing you through a short pause, then says No input", async () => {
-        const { el, ac } = build();
-        await frameAt(0, 60);
-        await frameAt(500, 0);
+        const { el, worklet, ac } = await meter();
+        worklet.emit({ type: "rms", value: 0.2 });
         expect(pillOf(el).textContent).toBe("Hearing you");
-        await frameAt(999, 0);
+        vi.advanceTimersByTime(900);
+        worklet.emit({ type: "rms", value: 0 });
         expect(pillOf(el).textContent).toBe("Hearing you");
-        await frameAt(1000, 0);
+        vi.advanceTimersByTime(200);
+        worklet.emit({ type: "rms", value: 0 });
         expect(pillOf(el).textContent).toBe("No input");
         ac.abort();
       });
@@ -731,6 +788,105 @@ describe("VoiceAudioTab UI structure", () => {
     toggleDiv.click();
 
     expect(mockReapplyAudioProcessing).toHaveBeenCalled();
+    ac.abort();
+  });
+
+  // The meter has to hear what the call captures: the browser's gain control
+  // and noise suppression change the level the gate sees, and a second stream
+  // on the same device with other settings can override the call's own.
+  it("opens the meter's microphone with the call's processing settings and device", async () => {
+    localStorage.setItem("owncord:settings:echoCancellation", "false");
+    localStorage.setItem("owncord:settings:noiseSuppression", "false");
+    localStorage.setItem("owncord:settings:audioInputDevice", '"mic-2"');
+    stubNavigator();
+    const ac = new AbortController();
+    document.body.appendChild(createVoiceAudioTab(ac.signal).build());
+
+    await vi.waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: true,
+          deviceId: { exact: "mic-2" },
+        },
+        video: false,
+      }),
+    );
+    ac.abort();
+  });
+
+  it("reopens the meter's microphone when a processing toggle changes", async () => {
+    const stop = vi.fn();
+    stubNavigator();
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockResolvedValue({
+      getTracks: () => [{ stop, kind: "audio" }],
+      getAudioTracks: () => [{ stop, kind: "audio" }],
+    } as unknown as MediaStream);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    const audioRequests = () =>
+      vi
+        .mocked(navigator.mediaDevices.getUserMedia)
+        .mock.calls.map(([c]) => c?.audio)
+        .filter((audio) => audio !== false && audio !== undefined);
+    await vi.waitFor(() => expect(audioRequests()).toHaveLength(1));
+
+    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise Suppression']")!.click();
+
+    await vi.waitFor(() => expect(audioRequests()).toHaveLength(2));
+    expect(audioRequests()[1]).toMatchObject({ noiseSuppression: false });
+    // The first stream is released; the second is the one now metering.
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+    ac.abort();
+  });
+
+  it("re-routes the call and the meter through RNNoise on the Enhanced NS toggle, reopening no microphone", async () => {
+    stubNavigator();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+    );
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    await vi.waitFor(() =>
+      expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
+    );
+    const requests = vi.mocked(navigator.mediaDevices.getUserMedia).mock.calls.length;
+
+    el.querySelector<HTMLElement>(
+      "[role='switch'][aria-label='Enhanced Noise Suppression']",
+    )!.click();
+
+    await vi.waitFor(() =>
+      expect(FakeAudioWorkletNode.instances.some((w) => w.name === "rnnoise-processor")).toBe(true),
+    );
+    expect(mockReapplyEnhancedNoiseSuppression).toHaveBeenCalledTimes(1);
+    expect(mockReapplyAudioProcessing).not.toHaveBeenCalled();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(requests);
+    ac.abort();
+  });
+
+  it("moves the meter to a newly chosen input device", async () => {
+    stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    const inputSelect = el.querySelector<HTMLSelectElement>('select[aria-label="Input Device"]')!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+
+    inputSelect.value = "mic-2";
+    inputSelect.dispatchEvent(new Event("change"));
+
+    await vi.waitFor(() =>
+      expect(navigator.mediaDevices.getUserMedia).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          audio: expect.objectContaining({ deviceId: { exact: "mic-2" } }),
+        }),
+      ),
+    );
     ac.abort();
   });
 
@@ -776,10 +932,12 @@ describe("VoiceAudioTab UI structure", () => {
   it("starts camera preview when a video device is saved", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     const cameraStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
     const audioStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
@@ -810,10 +968,12 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("video select change starts camera preview", async () => {
     const cameraStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
     const audioStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
@@ -858,7 +1018,8 @@ describe("VoiceAudioTab UI structure", () => {
   it("camera preview shows error when getUserMedia fails", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     const audioStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
@@ -891,7 +1052,8 @@ describe("VoiceAudioTab UI structure", () => {
     // An unplugged saved camera rejects with OverconstrainedError, whose message is "".
     localStorage.setItem("owncord:settings:videoInputDevice", '"gone-camera-id"');
     const audioStream = {
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
+      getAudioTracks: () => [{ stop: vi.fn(), kind: "audio" }],
     } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
@@ -1120,8 +1282,14 @@ describe("VoiceAudioTab UI structure", () => {
 
     const stopMicTrack = vi.fn();
     const stopCamTrack = vi.fn();
-    const micStream = { getTracks: () => [{ stop: stopMicTrack }] } as unknown as MediaStream;
-    const camStream = { getTracks: () => [{ stop: stopCamTrack }] } as unknown as MediaStream;
+    const micStream = {
+      getTracks: () => [{ stop: stopMicTrack, kind: "audio" }],
+      getAudioTracks: () => [{ stop: stopMicTrack, kind: "audio" }],
+    } as unknown as MediaStream;
+    const camStream = {
+      getTracks: () => [{ stop: stopCamTrack, kind: "audio" }],
+      getAudioTracks: () => [{ stop: stopCamTrack, kind: "audio" }],
+    } as unknown as MediaStream;
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
@@ -1152,6 +1320,46 @@ describe("VoiceAudioTab UI structure", () => {
     expect(stopMicTrack).toHaveBeenCalled();
     expect(stopCamTrack).toHaveBeenCalled();
 
+    ac.abort();
+  });
+
+  // Chrome keeps a detached media element that still has a source among its
+  // pending activities, and the element keeps its whole pane alive: the
+  // long-session soak caught a torn-down pane (~530 DOM nodes) held that way
+  // for the rest of the page. Stopping the tracks alone does not release it.
+  type Teardown = (tab: ReturnType<typeof createVoiceAudioTab>, ac: AbortController) => void;
+  it.each<[string, Teardown]>([
+    ["cleanup (tab switch or overlay close)", (tab) => tab.cleanup()],
+    ["overlay abort", (_tab, ac) => ac.abort()],
+  ])("detaches the camera preview from its stream on %s", async (_label, teardown) => {
+    localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
+    const camStream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const micStream = { getTracks: () => [], getAudioTracks: () => [] } as unknown as MediaStream;
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([]),
+        getUserMedia: vi
+          .fn()
+          .mockImplementation((constraints: MediaStreamConstraints) =>
+            Promise.resolve(
+              constraints.video && constraints.audio === false ? camStream : micStream,
+            ),
+          ),
+      },
+    });
+
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+    const preview = el.querySelector("video") as HTMLVideoElement;
+    await vi.waitFor(() => {
+      expect(preview.srcObject).toBe(camStream);
+    });
+
+    teardown(tab, ac);
+
+    expect(preview.srcObject).toBeNull();
     ac.abort();
   });
 
@@ -1278,7 +1486,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
     expect(note?.textContent).toContain("system mixer");
     expect(tab.element.querySelector(".mic-meter-wrap")).toBeNull();
-    expect(getUserMedia).not.toHaveBeenCalled();
+    // The native engine acquires no audio through the webview. The camera
+    // preview may still call getUserMedia (video only) since voice #22 starts
+    // it on the default device; no audio request may occur.
+    for (const call of getUserMedia.mock.calls) {
+      expect((call[0] as MediaStreamConstraints).audio).toBe(false);
+    }
   });
 
   it("tells the user the processing toggles apply on the next join", async () => {

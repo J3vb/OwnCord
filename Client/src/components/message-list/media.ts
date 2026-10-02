@@ -37,7 +37,7 @@ import {
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
-import { clearEmbedCaches, renderGenericLinkPreview } from "./embeds";
+import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
@@ -506,7 +506,9 @@ function refreshExternalItems(): void {
       continue;
     }
     el.replaceWith(next);
-    if (hadFocus) {
+    if (hadFocus && next.hidden) {
+      focusMessageLink(next, url);
+    } else if (hadFocus) {
       const target = next.querySelector<HTMLElement>("a, button") ?? next;
       if (target === next) next.tabIndex = -1;
       target.focus();

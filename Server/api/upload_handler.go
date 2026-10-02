@@ -10,7 +10,6 @@ import (
 	_ "image/png"
 	"io"
 	"log/slog"
-	"mime"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
@@ -20,8 +19,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/go-chi/chi/v5"
@@ -165,13 +162,13 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	if uploads == nil {
 		panic("api: MountUploadRoutes requires a non-nil UploadService")
 	}
-	// Upload requires authentication and a higher body size limit (100 MB).
-	r.With(
-		AuthMiddleware(sessions),
-		MaxBodySize(uploadMaxBodySize),
-	).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
+	// Upload requires authentication; handleUpload applies its own body cap
+	// (uploadBodyCap), which follows upload.max_size_mb.
+	r.With(AuthMiddleware(sessions)).Post("/api/v1/uploads", handleUpload(uploads, store, limiter))
 	// File serving requires authentication for channel-level access control.
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+	// A bounded preview of an image file, under the same access rule (P4-08).
+	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
 }
 
 func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth.RateLimiter) http.HandlerFunc {
@@ -206,7 +203,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		deadlines.touch()
 
 		// Limit request body size to prevent abuse.
-		r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, uploadMaxBodySize), d: deadlines}
+		fileCap := uploads.MaxUploadBytes()
+		r.Body = progressReader{r: http.MaxBytesReader(w, r.Body, uploadBodyCap(fileCap)), d: deadlines}
 
 		// Stream the multipart body instead of buffering or spooling it: no
 		// part is read until the bytes it could cost are admitted below.
@@ -223,14 +221,14 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// sane, otherwise the worst case a single file can ever cost — the
 		// configured per-file cap (upload.max_size_mb, already enforced by
 		// storage.Storage.Save) when one is set, else the full request cap.
-		// A chunked upload otherwise reserves the entire 100 MiB request cap
+		// A chunked upload otherwise reserves the entire request cap
 		// for every user regardless of how small the body turns out to be,
 		// which starves anyone whose quota or headroom is smaller than that.
 		// The deferred Settle returns the charge on every path that does not
 		// reach Record, a panic included.
-		worstCase := int64(uploadMaxBodySize)
-		if fileCap := uploads.MaxUploadBytes(); fileCap > 0 && fileCap < worstCase {
-			worstCase = fileCap
+		worstCase := fileCap
+		if worstCase <= 0 {
+			worstCase = uploadMaxBodySize
 		}
 		envelope := r.ContentLength
 		if envelope <= 0 || envelope > worstCase {
@@ -250,6 +248,12 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer part.Close() //nolint:errcheck
 
+		// The owner's file-type policy judges the name the file will carry;
+		// storage.Save's content blocks still apply to whatever it allows.
+		safeFilename := sanitizeUploadFilename(part.FileName())
+		if !checkUploadFileType(r.Context(), w, uploads, safeFilename) {
+			return
+		}
 		stored, ok := uploadStoreFile(r.Context(), w, part, res, store)
 		if !ok {
 			return
@@ -257,7 +261,6 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 
 		// Record the attachment (unlinked — message_id is NULL) and commit
 		// the reservation under the same lock.
-		safeFilename := sanitizeUploadFilename(part.FileName())
 		if err := uploads.Record(r.Context(), service.AttachmentRecord{
 			ID:         stored.id,
 			UploaderID: user.ID,
@@ -319,84 +322,6 @@ func writeUploadPartError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
-}
-
-func handleServeFile(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		fileID := chi.URLParam(r, "id")
-		if fileID == "" {
-			http.NotFound(w, r)
-			return
-		}
-
-		aa, err := uploads.Resolve(r.Context(), fileID)
-		if err != nil {
-			writeFileAccessError(w, r, fileID, err)
-			return
-		}
-
-		user, _ := r.Context().Value(UserKey).(*db.User)
-		role, _ := r.Context().Value(RoleKey).(*db.Role)
-		if authErr := uploads.Authorize(r.Context(), aa, user, role); authErr != nil {
-			writeFileAccessError(w, r, fileID, authErr)
-			return
-		}
-
-		// SRV-05: a download longer than the server's global 30 s WriteTimeout
-		// is truncated with no error (the client sees a short body). Wrap the
-		// writer so every chunk that lands pushes the connection write deadline
-		// out; a stalled peer is abandoned after transferProgressTimeout, and
-		// any download is closed after transferMaxLifetime.
-		deadlines := newTransferDeadline(w, r)
-		defer deadlines.release()
-		deadlines.touch()
-		w = progressWriter{ResponseWriter: w, d: deadlines}
-
-		// Open file from storage.
-		f, err := store.Open(aa.StoredAs)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		defer f.Close() //nolint:errcheck
-
-		// Set headers before ServeContent to ensure correct MIME type.
-		w.Header().Set("Content-Type", aa.MimeType)
-		// BUG-118: Force download for MIME types that could execute content
-		// under the OwnCord origin (HTML, SVG, XML, PDF).
-		disposition := "inline"
-		if isUnsafeInlineMIME(aa.MimeType) {
-			disposition = "attachment"
-		}
-		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": aa.Filename}))
-		// These downloads are access-controlled, so they must never be stored by
-		// shared/proxy caches (info-leak). Mark private and force revalidation.
-		// W3-4: no-cache forces revalidation on every use, so a max-age is dead
-		// weight alongside it — private + no-cache expresses the intent exactly.
-		w.Header().Set("Cache-Control", "private, no-cache")
-		// The Access-Control-Allow-Origin header below reflects the request
-		// Origin, so responses vary by Origin and must not be cross-served.
-		w.Header().Set("Vary", "Origin")
-		// CORS: allow webview to read the response body using configured origins.
-		if origin := r.Header.Get("Origin"); origin != "" {
-			for _, allowed := range allowedOrigins {
-				if allowed == "*" || strings.EqualFold(allowed, origin) {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Access-Control-Expose-Headers", "Content-Type, Content-Length")
-					break
-				}
-			}
-		}
-
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-
-		// Use the actual file modification time so If-Modified-Since works correctly.
-		var modTime time.Time
-		if info, statErr := f.Stat(); statErr == nil {
-			modTime = info.ModTime()
-		}
-		http.ServeContent(w, r, aa.Filename, modTime, f)
-	}
 }
 
 // storedUpload is what the bytes stage of an upload produces: the id the file
@@ -463,24 +388,4 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 	}
 
 	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
-}
-
-// writeFileAccessError maps an UploadService refusal onto the response the
-// file routes have always given: a missing or tombstoned attachment and one the
-// caller may not read are both plain 404/403 bodies that say nothing about
-// which rule answered, and anything else is a 500 whose detail stays in the log.
-func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string, err error) {
-	switch {
-	case errors.Is(err, service.ErrNotFound):
-		http.NotFound(w, r)
-	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
-		// B5-7: the response carries the code and nothing else — no detail
-		// that could distinguish it from any other refusal on this route.
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
-	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "you do not have access to this file")
-	default:
-		slog.Error("failed to resolve attachment", "id", fileID, "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
-	}
 }

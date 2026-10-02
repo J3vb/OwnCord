@@ -44,52 +44,6 @@ const httpDrainBudget = 30 * time.Second
 // installed unit file keeps even after an update raises it.
 const teardownBudget = 50 * time.Second
 
-// stage is one start step, in start order. The name is what a failure is
-// reported as, so an operator reading `starting audit-writer: ...` knows
-// exactly how far the boot got — and it is the key the failure-injection
-// test selects on.
-type stage struct {
-	name  string
-	start func() error
-}
-
-// stages is the start sequence. Close walks the steps these register in
-// reverse, so this list IS the shutdown order read backwards. Three orderings
-// here are load-bearing rather than incidental:
-//
-//   - the database opens before the audit writer and event persistence start,
-//     so both stop before the handle closes;
-//   - ACME and the HTTP server start AFTER the maintenance loop, so the
-//     reverse walk drains in-flight HTTP handlers (whose broadcasts must
-//     still reach a live hub) before anything else is stopped — which is the
-//     order run()'s explicit shutdown call used to impose by hand;
-//   - signals are armed BEFORE the http stage, whose bind retries for about
-//     ten seconds while the port is in use: a SIGINT/SIGTERM in that window
-//     must drain through Close, not kill the process with the LiveKit child
-//     and the audit and event queues already running.
-func (a *App) stages() []stage {
-	return []stage{
-		{"data-dir", a.startDataDir},
-		{"tls", a.startTLS},
-		{"database", a.startDatabase},
-		{"boot-marker", a.startBootMarker},
-		{"migrate", a.startMigrate},
-		{"erasure-markers", a.startErasureMarkers},
-		{"push-vapid-key", a.startPushVAPIDKey},
-		{"telemetry", a.startTelemetry},
-		{"plugins", a.startPlugins},
-		{"hub", a.startHub},
-		{"router", a.startRouter},
-		{"event-persistence", a.startEventPersistence},
-		{"audit-writer", a.startAuditWriter},
-		{"maintenance", a.startMaintenance},
-		{"pprof", a.startPprof},
-		{"acme", a.startACME},
-		{"signals", a.startSignals},
-		{"http", a.startHTTP},
-	}
-}
-
 // Run starts every stage in order, serves until the listener fails or a
 // shutdown or restart signal arrives, and then closes every started stage in
 // the reverse order. Close runs on EVERY return path — a failed start, a
@@ -151,7 +105,7 @@ func (a *App) start() error {
 	// Only once every stage is up is the previous binary safe to remove. It
 	// used to be the FIRST act of start(), before the data-dir, TLS, database,
 	// migrate and later stages — so a migration error (or any other start
-	// failure) left an operator with no chatserver.old to roll back to, and
+	// failure) left an operator with no chatserver.old-* to roll back to, and
 	// under systemd Restart=always the unit has nothing local to fall back on
 	// (REL-01). Deferring it past the stages preserves the documented rollback
 	// copy through every start-up refusal; the schema-ahead check in
@@ -331,6 +285,23 @@ func (a *App) startHub() error {
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
+	// Mention badges' single bounded worker (P5-O05). Its close step flushes
+	// every queued job and joins the loop, and the reverse walk runs it before
+	// the database closes because it registers here, after "database" but
+	// before the later stages — so a coalesced window is never lost at shutdown.
+	// The loop context is deliberately NOT bgCtx: the event-persistence close
+	// step cancels bgCtx, and the reverse walk reaches that step first, so a
+	// drain under bgCtx would be cancelled before it wrote. The close step's own
+	// bounded ctx is the live one the drain runs on.
+	if rt.Services != nil && rt.Services.Messages != nil {
+		loopCtx, cancel := context.WithCancel(context.WithoutCancel(a.bgCtx))
+		stop := rt.Services.Messages.StartMentionWorker(loopCtx)
+		a.onClose("mention-worker", func(ctx context.Context) error {
+			stop(ctx)
+			cancel()
+			return nil
+		})
+	}
 	return nil
 }
 

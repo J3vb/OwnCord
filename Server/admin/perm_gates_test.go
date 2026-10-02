@@ -243,6 +243,7 @@ var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
 	{Method: http.MethodGet, Pattern: "/backups"},
 	{Method: http.MethodDelete, Pattern: "/backups/{name}"},
 	{Method: http.MethodPost, Pattern: "/backups/{name}/restore"},
+	{Method: http.MethodPost, Pattern: "/backups/{name}/link"},
 	{Method: http.MethodGet, Pattern: "/archive"},
 	{Method: http.MethodPost, Pattern: "/archive/link"},
 	{Method: http.MethodGet, Pattern: "/updates"},

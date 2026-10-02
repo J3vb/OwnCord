@@ -62,12 +62,20 @@ vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
   getRemoteVideoStats: vi.fn().mockResolvedValue(null),
+  setRemoteVideoView: vi.fn(),
 }));
 
 vi.mock("@lib/notificationSound", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
+}));
+
+// DP-24: the OS-level call alerts are a lazy chunk the page loads on a ring;
+// their own behaviour is call-alerts.test.ts's.
+vi.mock("../../src/features/direct-messages/callAlerts", () => ({
+  alertIncomingCall: vi.fn(),
+  alertMissedCall: vi.fn(),
 }));
 
 const { mockSetAudioVolumeHost } = vi.hoisted(() => ({
@@ -139,6 +147,7 @@ const {
         setSpeaking: ReturnType<typeof vi.fn>;
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
+        setExitVisible: ReturnType<typeof vi.fn>;
       };
     },
   },
@@ -222,6 +231,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setSpeaking: vi.fn(),
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
+      setExitVisible: vi.fn(),
       mount: vi.fn(),
       destroy: vi.fn(),
     };
@@ -260,7 +270,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
 }));
 
 import { createMainPage } from "../../src/pages/MainPage";
-import { channelsStore, setChannels, setActiveChannel } from "../../src/stores/channels.store";
+import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { wireConnectionStatus } from "../../src/lib/dispatcher";
@@ -283,6 +293,7 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime } from "../../src/lib/notificationSound";
+import { alertIncomingCall, alertMissedCall } from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
   channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
@@ -338,6 +349,7 @@ function fakeWs(): FakeWsClient {
     onSendFailure: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     onCertFirstUse: vi.fn(() => () => {}),
+    onServerBusy: vi.fn(() => () => {}),
     startCertListener: vi.fn(async () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
     getState: vi.fn(() => "connected" as ConnectionState),
@@ -1055,7 +1067,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect([...last]).toEqual([10]);
   });
 
-  it("wires full screen, the full-screen call controls and stream stats into the video grid", async () => {
+  it("wires full screen, the full-screen call controls, stream stats and video views into the video grid", async () => {
     const lk = await import("@lib/livekitSession");
     const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
     const ws = fakeWs();
@@ -1067,6 +1079,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       setWindowFullscreen: (on: boolean) => Promise<void>;
       callControls: { onMuteToggle: () => void; onDeafenToggle: () => void; onLeave: () => void };
       getStreamStats: (tileId: number) => Promise<unknown>;
+      setStreamView: (tileId: number, view: { enabled: boolean }) => void;
     };
 
     await cbs.setWindowFullscreen(true);
@@ -1077,6 +1090,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "screenshare");
     await cbs.getStreamStats(10);
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
+    // A tile's view goes to that user's screen share or camera the same way.
+    cbs.setStreamView(10 + SCREENSHARE_TILE_ID_OFFSET, { enabled: false });
+    expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "screenshare", { enabled: false });
+    cbs.setStreamView(10, { enabled: true });
+    expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "camera", { enabled: true });
 
     // Leave from a full-screen tile leaves the call.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
@@ -1086,7 +1104,19 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // The full-screen controls show your mute state.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: true }));
     voiceStore.flush();
-    expect(grid.setCallState).toHaveBeenLastCalledWith({ muted: true, deafened: false });
+    expect(grid.setCallState).toHaveBeenLastCalledWith({
+      muted: true,
+      deafened: false,
+      listenOnly: false,
+    });
+    // Joined without a microphone: the controls read listen-only.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: false, listenOnly: true }));
+    voiceStore.flush();
+    expect(grid.setCallState).toHaveBeenLastCalledWith({
+      muted: false,
+      deafened: false,
+      listenOnly: true,
+    });
     setFullscreen.mockRestore();
   });
 
@@ -1449,6 +1479,77 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(banner.style.display).toBe("none");
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
+  });
+
+  it("a ring raises one call alert, and a redial of the same ring none", async () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertIncomingCall).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject({
+      channelId: 50,
+      fromUserId: 10,
+    });
+  });
+
+  it("a ring that times out reports one missed call; one the ringer cancelled reports none", async () => {
+    const ws = fakeWs();
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertMissedCall).mockClear();
+    vi.mocked(alertIncomingCall).mockClear();
+
+    // The ringer hangs up first: not a missed call.
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
+    ws.emit("call_declined", { channel_id: 50, from_user: 10 });
+    // Catch the ring's 30s timer and run it by hand: fake timers would also
+    // stall the dynamic import that loads the alert chunk.
+    const realSetTimeout = globalThis.setTimeout;
+    let ringTimeout: (() => void) | null = null;
+    const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      if (ms !== 30_000) return realSetTimeout(fn, ms);
+      ringTimeout = fn;
+      return 0;
+    }) as unknown as typeof setTimeout);
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    timers.mockRestore();
+    expect(ringTimeout).not.toBeNull();
+    // Let this ring's own alert land first: a mocked module imported again
+    // while that import is still in flight resolves to the real one here.
+    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(2));
+    ringTimeout!();
+
+    await vi.waitFor(() => expect(alertMissedCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertMissedCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+    expect(banner.style.display).toBe("none");
+  });
+
+  // OC-0037 / OC-0204: DND silences the tone and the popup (call-alerts.test.ts),
+  // never the banner — it is the one way left to answer.
+  it("DND keeps the banner", () => {
+    saveUserStatus("dnd");
+    try {
+      const ws = fakeWs();
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+
+      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+
+      const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+      expect(banner.style.display).not.toBe("none");
+    } finally {
+      saveUserStatus("online");
+    }
   });
 
   it("does not ring for the channel this client is already in", () => {
@@ -2250,6 +2351,10 @@ describe("MainPage — account deletion", () => {
   async function deleteAccount(api: ApiClient): Promise<void> {
     page = createMainPage({ ws: fakeWs(), api });
     page.mount(container);
+    // The Account tab (and its delete control) is only built once Settings is
+    // open (DP-52), so open it before driving the delete flow.
+    uiStore.setState((prev) => ({ ...prev, settingsOpen: true }));
+    uiStore.flush();
     (document.querySelector("[data-testid='delete-account-trigger']") as HTMLElement).click();
     (document.querySelector("[data-testid='delete-account-password']") as HTMLInputElement).value =
       "pw";
@@ -2318,6 +2423,50 @@ describe("MainPage — B9-4 content view wiring", () => {
   afterEach(() => {
     page.destroy?.();
     container.remove();
+  });
+
+  it("saves the server channel for Back before Alt+ArrowDown steps into a DM", () => {
+    dmStore.setState(() => ({
+      channels: [
+        {
+          channelId: 60,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ],
+    }));
+    const activeWhenRemembered: Array<number | null> = [];
+    mockRememberChannel.mockImplementation(() =>
+      activeWhenRemembered.push(channelsStore.getState().activeChannelId),
+    );
+    // jsdom loads no CSS, so the closed Settings panel would read as an open
+    // dialog and block every global shortcut.
+    (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+    const altDown = (): void => {
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", altKey: true, bubbles: true }),
+      );
+    };
+
+    // Channels mode: a step stays among server channels; nothing to remember.
+    altDown();
+    expect(mockRememberChannel).not.toHaveBeenCalled();
+
+    // "View all" opens the DM view with #general still active.
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+    altDown();
+    expect(activeWhenRemembered).toEqual([1]);
+    expect(channelsStore.getState().activeChannelId).toBe(60);
+
+    mockRememberChannel.mockReset();
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels" }));
   });
 
   it("places the view column between the chat column and the DM profile slot", () => {

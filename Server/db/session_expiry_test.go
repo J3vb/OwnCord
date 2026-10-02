@@ -2,9 +2,11 @@ package db_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/migrations"
 )
@@ -129,5 +131,140 @@ func TestMigration031_NormalizesLegacyFormats(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: expires_at = %q, want %q", tc.token, got, tc.want)
 		}
+	}
+}
+
+// seedAgedSession inserts a session created `age` ago that expires at
+// expiresAt, the shape a real row has after `age` of use (DP-05).
+func seedAgedSession(t *testing.T, database *db.DB, token string, age time.Duration, expiresAt time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx,
+		`INSERT OR IGNORE INTO users (id, username, password, role_id) VALUES (1, 'u', 'x', 1)`); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO sessions (user_id, token, created_at, expires_at) VALUES (1, ?, ?, ?)`,
+		token,
+		time.Now().UTC().Add(-age).Format("2006-01-02 15:04:05"),
+		expiresAt.UTC().Format("2006-01-02T15:04:05Z")); err != nil {
+		t.Fatalf("seed session %s: %v", token, err)
+	}
+}
+
+func sessionExpiresAt(t *testing.T, database *db.DB, token string) string {
+	t.Helper()
+	sess, err := database.GetSessionByTokenHash(context.Background(), token)
+	if err != nil || sess == nil {
+		t.Fatalf("GetSessionByTokenHash(%s): %v (sess=%v)", token, err, sess)
+	}
+	return sess.ExpiresAt
+}
+
+func parseExpiry(t *testing.T, s string) time.Time {
+	t.Helper()
+	ts, err := time.Parse("2006-01-02T15:04:05Z", s)
+	if err != nil {
+		t.Fatalf("parse expires_at %q: %v", s, err)
+	}
+	return ts
+}
+
+// TestTouchSession_SlidesIdleExpiry pins DP-05: using a session pushes its
+// expiry to a full idle window from now, so a user who keeps opening the app
+// is not signed out by age alone.
+func TestTouchSession_SlidesIdleExpiry(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedAgedSession(t, database, "active", 29*24*time.Hour, time.Now().Add(24*time.Hour))
+
+	if err := database.TouchSessions(context.Background(), []string{"active"}); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
+	}
+
+	got := parseExpiry(t, sessionExpiresAt(t, database, "active"))
+	want := time.Now().UTC().Add(30 * 24 * time.Hour)
+	if d := want.Sub(got); d < -time.Minute || d > time.Minute {
+		t.Fatalf("expires_at = %v, want about %v (now + 30 days)", got, want)
+	}
+}
+
+// TestTouchSession_NeverRevivesExpired pins the revocation-race guard: a
+// touch landing after a session lapsed must leave it lapsed, and the auth
+// check must still refuse it.
+func TestTouchSession_NeverRevivesExpired(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedAgedSession(t, database, "lapsed", 31*24*time.Hour, time.Now().Add(-time.Hour))
+	before := sessionExpiresAt(t, database, "lapsed")
+
+	if err := database.TouchSessions(context.Background(), []string{"lapsed"}); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
+	}
+
+	after := sessionExpiresAt(t, database, "lapsed")
+	if after != before {
+		t.Fatalf("expires_at moved from %q to %q; an expired session must never be revived", before, after)
+	}
+	if !auth.IsSessionExpired(after) {
+		t.Fatalf("IsSessionExpired(%q) = false after touching an expired session", after)
+	}
+}
+
+// TestTouchSession_AbsoluteCap pins D-1's one-year cap from sign-in: a touch
+// never extends a session past created_at + 365 days, however active it is.
+func TestTouchSession_AbsoluteCap(t *testing.T) {
+	database := openMigratedMemory(t)
+	const capAge = 365 * 24 * time.Hour
+
+	// Created 364 days ago: sliding would give now+30d, the cap allows one more day.
+	seedAgedSession(t, database, "near_cap", capAge-24*time.Hour, time.Now().Add(24*time.Hour))
+	// Created 366 days ago with an expiry still ahead: must not be extended.
+	seedAgedSession(t, database, "past_cap", capAge+24*time.Hour, time.Now().Add(time.Hour))
+	pastBefore := parseExpiry(t, sessionExpiresAt(t, database, "past_cap"))
+
+	ctx := context.Background()
+	for _, tok := range []string{"near_cap", "past_cap"} {
+		if err := database.TouchSessions(ctx, []string{tok}); err != nil {
+			t.Fatalf("TouchSessions(%s): %v", tok, err)
+		}
+	}
+
+	near := parseExpiry(t, sessionExpiresAt(t, database, "near_cap"))
+	wantNear := time.Now().UTC().Add(24 * time.Hour)
+	if d := wantNear.Sub(near); d < -time.Minute || d > time.Minute {
+		t.Errorf("near_cap expires_at = %v, want about %v (created_at + 365 days)", near, wantNear)
+	}
+	if past := parseExpiry(t, sessionExpiresAt(t, database, "past_cap")); past.After(pastBefore) {
+		t.Errorf("past_cap expires_at extended from %v to %v; a session older than the cap must not be", pastBefore, past)
+	}
+}
+
+// TestTouchSessions_OneBatchSlidesEveryLiveSession pins P5-S07's batched
+// touch: one call slides every live session it names, more than one
+// statement's worth of them included, and still never revives a lapsed one.
+func TestTouchSessions_OneBatchSlidesEveryLiveSession(t *testing.T) {
+	database := openMigratedMemory(t)
+	tokens := make([]string, 0, 1201)
+	for i := range 1200 {
+		tok := fmt.Sprintf("live-%d", i)
+		seedAgedSession(t, database, tok, 2*24*time.Hour, time.Now().Add(24*time.Hour))
+		tokens = append(tokens, tok)
+	}
+	seedAgedSession(t, database, "lapsed", 31*24*time.Hour, time.Now().Add(-time.Hour))
+	before := sessionExpiresAt(t, database, "lapsed")
+	tokens = append(tokens, "lapsed", "no-such-token")
+
+	if err := database.TouchSessions(context.Background(), tokens); err != nil {
+		t.Fatalf("TouchSessions: %v", err)
+	}
+
+	want := time.Now().UTC().Add(30 * 24 * time.Hour)
+	for _, tok := range []string{"live-0", "live-999", "live-1000", "live-1199"} {
+		got := parseExpiry(t, sessionExpiresAt(t, database, tok))
+		if d := want.Sub(got); d < -time.Minute || d > time.Minute {
+			t.Errorf("%s expires_at = %v, want about %v", tok, got, want)
+		}
+	}
+	if after := sessionExpiresAt(t, database, "lapsed"); after != before {
+		t.Fatalf("lapsed expires_at moved from %q to %q; a batch must never revive a session", before, after)
 	}
 }

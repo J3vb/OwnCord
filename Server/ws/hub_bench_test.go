@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -68,6 +69,36 @@ func BenchmarkReconnectStorm(b *testing.B) {
 			hub.UnregisterNowForTest(conns[i])
 			conns[i] = nc
 		}
+	}
+}
+
+// BenchmarkReadyHerd is the ready side of a restart herd (DP-37): one op
+// builds 50 ready payloads at once over a 500-member roster, as 50 sockets
+// reconnecting together after a restart do. Each ready is streamed to
+// io.Discard as the handshake streams it to the socket (P5-O01); a tree from
+// before that streaming measured the same work with BuildReadyForTest.
+//
+//	go test -run '^$' -bench ReadyHerd -benchmem ./ws/
+func BenchmarkReadyHerd(b *testing.B) {
+	quietLogs(b)
+	hub, database := newTestHub(b)
+	const members, herd = 500, 50
+	users := make([]*db.User, members)
+	for i := range members {
+		users[i] = seedOwnerUser(b, database, fmt.Sprintf("herd-%d", i))
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		var wg sync.WaitGroup
+		for i := range herd {
+			wg.Go(func() {
+				if err := hub.WriteReadyForTest(database, users[i].ID, nil, io.Discard); err != nil {
+					b.Errorf("buildReady: %v", err)
+				}
+			})
+		}
+		wg.Wait()
 	}
 }
 

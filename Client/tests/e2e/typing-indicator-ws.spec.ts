@@ -73,4 +73,39 @@ test.describe("Typing Indicator — WebSocket", () => {
     await expect(typingBar).not.toContainText("elsewhere", { timeout: 1_000 });
     await expect(typingBar).toContainText("otheruser");
   });
+
+  test("typing indicator clears the moment the sender's message lands (DP-15)", async ({
+    page,
+  }) => {
+    const typingBar = page.locator(".typing-bar");
+
+    // Positive control: the sender's typing renders first.
+    await emitWsMessage(page, {
+      type: "typing",
+      payload: { channel_id: 1, user_id: 2, username: "otheruser" },
+    });
+    await expect(typingBar).toContainText("otheruser", { timeout: 5_000 });
+
+    // Their message frame arrives — the indicator must be gone straight away,
+    // not linger for the 5 s timeout. Wait for the message row first: the same
+    // handler clears typing before it appends the row, so the row is the proof
+    // the frame was processed and this assertion tests the clear, not frame
+    // delivery timing.
+    await emitWsMessage(page, {
+      type: "chat_message",
+      payload: {
+        id: 9001,
+        channel_id: 1,
+        user: { id: 2, username: "otheruser", avatar: "" },
+        content: "dp15-unique-message",
+        timestamp: new Date().toISOString(),
+        attachments: [],
+        reply_to: null,
+      },
+    });
+    await expect(page.locator(".msg-text", { hasText: "dp15-unique-message" })).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(typingBar).toBeEmpty({ timeout: 1_000 });
+  });
 });

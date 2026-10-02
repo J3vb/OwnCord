@@ -25,6 +25,7 @@ function makeHandlers(): {
   onToggleDeafen: Mock<() => void>;
   onToggleCamera: Mock<() => void>;
   onUploadFile: Mock<() => void>;
+  onStepChannel: Mock<(direction: 1 | -1, unreadOnly: boolean) => void>;
 } {
   return {
     onSearch: vi.fn<() => void>(),
@@ -32,6 +33,7 @@ function makeHandlers(): {
     onToggleDeafen: vi.fn<() => void>(),
     onToggleCamera: vi.fn<() => void>(),
     onUploadFile: vi.fn<() => void>(),
+    onStepChannel: vi.fn<(direction: 1 | -1, unreadOnly: boolean) => void>(),
   };
 }
 
@@ -75,6 +77,56 @@ describe("global keybinds", () => {
     press("u");
 
     expect(h.onUploadFile).toHaveBeenCalledOnce();
+  });
+
+  it("does not fire while a dialog/modal owns focus (#17)", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    // A modal (Create Channel, report dialog, confirm) is open. Ctrl+F must
+    // not fire behind it and swallow the key from the field.
+    const dialog = document.createElement("div");
+    dialog.className = "modal-overlay visible";
+    document.body.appendChild(dialog);
+
+    press("f");
+    expect(h.onSearch).not.toHaveBeenCalled();
+
+    dialog.remove();
+  });
+
+  it("still fires while a hidden aria-modal panel stays mounted (the closed Settings overlay)", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const overlay = document.createElement("div");
+    overlay.style.display = "none";
+    const panel = document.createElement("div");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    press("f");
+    expect(h.onSearch).toHaveBeenCalledOnce();
+
+    overlay.remove();
+  });
+
+  it("fires from the focused message composer", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }),
+    );
+
+    expect(h.onSearch).toHaveBeenCalledOnce();
+
+    composer.remove();
   });
 
   it("ignores voice shortcuts outside a voice channel", () => {
@@ -128,6 +180,50 @@ describe("global keybinds", () => {
     press("f", { altKey: true });
 
     expect(h.onSearch).not.toHaveBeenCalled();
+  });
+
+  // DP-35: Alt+↑/↓ steps to the previous/next channel, Alt+Shift+↑/↓ to the
+  // previous/next unread channel (Discord's shortcuts).
+  it("steps channels on Alt+ArrowDown / Alt+ArrowUp", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    press("ArrowDown", { ctrlKey: false, altKey: true });
+    press("ArrowUp", { ctrlKey: false, altKey: true });
+
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(1, 1, false);
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(2, -1, false);
+  });
+
+  it("steps to unread channels on Alt+Shift+ArrowDown / Alt+Shift+ArrowUp", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    press("ArrowDown", { ctrlKey: false, altKey: true, shiftKey: true });
+    press("ArrowUp", { ctrlKey: false, altKey: true, shiftKey: true });
+
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(1, 1, true);
+    expect(h.onStepChannel).toHaveBeenNthCalledWith(2, -1, true);
+  });
+
+  it("does not step while typing in the composer", () => {
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        altKey: true,
+        bubbles: true,
+      }),
+    );
+
+    expect(h.onStepChannel).not.toHaveBeenCalled();
+
+    composer.remove();
   });
 
   it("keeps a handler error from escaping to the document", () => {

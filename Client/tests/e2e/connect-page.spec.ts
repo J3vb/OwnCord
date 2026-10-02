@@ -280,14 +280,13 @@ test.describe("Connect Page — TOTP", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("Connect Page — Login Success", () => {
-  test("after login, connected overlay appears then main page renders", async ({ page }) => {
+  test("after login, the main page renders once the server data is ready", async ({ page }) => {
     await mockTauriFullSession(page);
     await page.goto("/");
     await submitLogin(page);
 
-    const overlay = page.locator(".connected-overlay");
-    await expect(overlay).toBeVisible({ timeout: 10_000 });
-
+    // The connected overlay hands off as soon as `ready` arrives, so it is
+    // transient by design; assert the destination it lands on.
     const appLayout = page.locator(".app");
     await expect(appLayout).toBeVisible({ timeout: 15_000 });
   });

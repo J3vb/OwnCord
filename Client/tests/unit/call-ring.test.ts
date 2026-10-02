@@ -12,6 +12,8 @@ function harness() {
   const chimes: boolean[] = [];
   const accepted: number[] = [];
   const declined: number[] = [];
+  const started: RingState[] = [];
+  const missed: RingState[] = [];
   let pending: (() => void) | null = null;
   let pendingMs = 0;
   let cleared = 0;
@@ -21,6 +23,8 @@ function harness() {
     onChime: (playing) => chimes.push(playing),
     onAccept: (id) => accepted.push(id),
     onDecline: (id) => declined.push(id),
+    onRingStart: (s) => started.push(s),
+    onMissed: (s) => missed.push(s),
     setTimer: (fn, ms) => {
       pending = fn;
       pendingMs = ms;
@@ -38,6 +42,8 @@ function harness() {
     chimes,
     accepted,
     declined,
+    started,
+    missed,
     fireTimeout: () => pending?.(),
     timerMs: () => pendingMs,
     clearedCount: () => cleared,
@@ -152,6 +158,77 @@ describe("ring controller — timeout", () => {
     h.ctrl.incoming(ring(5));
     h.fireTimeout();
     expect(h.declined).toEqual([]);
+  });
+});
+
+// DP-24: the callee who was away when the ring ran out learns about it. Only
+// the timeout is a missed call: every other exit is the user (or the ringer)
+// acting on the call, and a redial or a newer call is still a live ring.
+describe("ring controller — missed call", () => {
+  it("a ring that times out reports a missed call once, and an accepted, declined or ringer-left ring does not", () => {
+    const timedOut = harness();
+    timedOut.ctrl.incoming(ring(5));
+    timedOut.fireTimeout();
+    timedOut.fireTimeout();
+    expect(timedOut.missed).toEqual([ring(5)]);
+
+    const accepted = harness();
+    accepted.ctrl.incoming(ring(5));
+    accepted.ctrl.accept();
+    accepted.fireTimeout();
+    expect(accepted.missed).toEqual([]);
+
+    const declined = harness();
+    declined.ctrl.incoming(ring(5));
+    declined.ctrl.decline();
+    declined.fireTimeout();
+    expect(declined.missed).toEqual([]);
+
+    const ringerLeft = harness();
+    ringerLeft.ctrl.incoming(ring(5));
+    ringerLeft.ctrl.cancel(5, "ringer-left");
+    ringerLeft.fireTimeout();
+    expect(ringerLeft.missed).toEqual([]);
+  });
+
+  it("a redial or a newer call is not a missed call", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    // A redial re-arms the window; only the last one running out is missed.
+    h.ctrl.incoming(ring(5));
+    // A call from another DM supersedes the first ring.
+    h.ctrl.incoming(ring(6, 4));
+    expect(h.missed).toEqual([]);
+    h.fireTimeout();
+    expect(h.missed).toEqual([ring(6, 4)]);
+  });
+
+  it("destroy is not a missed call", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    h.ctrl.destroy();
+    h.fireTimeout();
+    expect(h.missed).toEqual([]);
+  });
+});
+
+// The OS notification and the attention request fire once per ring, not once
+// per call_incoming: a redial of a ring still on screen is the same call.
+describe("ring controller — ring start", () => {
+  it("reports a new ring once, not a redial of the same one", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    h.ctrl.incoming(ring(5));
+    expect(h.started).toEqual([ring(5)]);
+  });
+
+  it("reports a ring that supersedes another, and a ring after the last one ended", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    h.ctrl.incoming(ring(6, 4));
+    h.ctrl.decline();
+    h.ctrl.incoming(ring(6, 4));
+    expect(h.started).toEqual([ring(5), ring(6, 4), ring(6, 4)]);
   });
 });
 

@@ -120,10 +120,15 @@ func TestIncrementMentionCounts_AndReadStateClear(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if err := database.IncrementMentionCounts(ctx, 1, 100, []int64{2, 3}); err != nil {
+	msgID, err := database.CreateMessage(ctx, 1, 1, "hi @bob @carol", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2, 3}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
-	if err := database.IncrementMentionCounts(ctx, 1, 100, []int64{2}); err != nil {
+	if err := database.IncrementMentionCounts(ctx, 1, msgID, []int64{2}); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
@@ -169,7 +174,16 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 		ids = append(ids, uid)
 	}
 
-	if err := database.IncrementMentionCounts(ctx, 1, 1, ids); err != nil {
+	msg1, err := database.CreateMessage(ctx, 1, ids[0], "first", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(msg1): %v", err)
+	}
+	msg2, err := database.CreateMessage(ctx, 1, ids[0], "second", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(msg2): %v", err)
+	}
+
+	if err := database.IncrementMentionCounts(ctx, 1, msg1, ids); err != nil {
 		t.Fatalf("IncrementMentionCounts: %v", err)
 	}
 
@@ -182,7 +196,7 @@ func TestIncrementMentionCounts_BatchesAcrossChunkBoundary(t *testing.T) {
 	// A second pass bumps every one of them again, chunk boundary included.
 	// msgID is higher than the first pass's so the read-state guard does not
 	// treat this as the same already-seen message.
-	if err := database.IncrementMentionCounts(ctx, 1, 2, ids); err != nil {
+	if err := database.IncrementMentionCounts(ctx, 1, msg2, ids); err != nil {
 		t.Fatalf("IncrementMentionCounts (second pass): %v", err)
 	}
 	for _, uid := range []int64{ids[0], ids[499], ids[500], ids[n-1]} {
@@ -583,7 +597,7 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, false); err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	results, err := database.SearchMessages(ctx, "deployment", nil, 10)
+	results, err := database.SearchMessages(ctx, "deployment", nil, db.SearchPage{Limit: 10})
 	if err != nil {
 		t.Fatalf("SearchMessages: %v", err)
 	}
@@ -595,5 +609,91 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 	}
 	if results[0].MentionsEveryone {
 		t.Error("mentions_everyone = true, want false")
+	}
+}
+
+// TestIncrementMentionCountsBatch_AppliesEveryEntry locks the coalesced-window
+// writer (P5-O05): several messages' fan-outs land in one transaction, each
+// with its own read-state guard. A reader behind every message gets one bump
+// per message; a reader whose read state already covers one message is skipped
+// for that message only.
+func TestIncrementMentionCountsBatch_AppliesEveryEntry(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	m1, err := database.CreateMessage(ctx, 1, 1, "first @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(m1): %v", err)
+	}
+	m2, err := database.CreateMessage(ctx, 1, 1, "second @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(m2): %v", err)
+	}
+
+	// Bob (2) has read up to m1; Carol (3) has read nothing.
+	if err := database.UpdateReadState(ctx, 2, 1, m1); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+		{MsgID: m1, UserIDs: []int64{2, 3}},
+		{MsgID: m2, UserIDs: []int64{2, 3}},
+	}); err != nil {
+		t.Fatalf("IncrementMentionCountsBatch: %v", err)
+	}
+
+	// Bob is past m1 but behind m2: only m2's bump lands.
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 1 {
+		t.Errorf("bob mention_count = %d, want 1 (m1 already read)", n)
+	}
+	// Carol is behind both, so both bumps land.
+	if n, _ := database.GetMentionCount(ctx, 3, 1); n != 2 {
+		t.Errorf("carol mention_count = %d, want 2", n)
+	}
+}
+
+// TestIncrementMentionCountsBatch_SkipsRemovedMessages locks the liveness
+// guard: a deferred batch entry for a message that has since been soft-deleted
+// (delete/purge during the coalesce window) or hard-deleted (account erasure)
+// must not raise a badge. Those reversal paths run synchronously and cannot
+// take back an increment that lands afterward.
+func TestIncrementMentionCountsBatch_SkipsRemovedMessages(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	deleted, err := database.CreateMessage(ctx, 1, 1, "deleted @bob", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage(deleted): %v", err)
+	}
+	if err := database.DeleteMessage(ctx, deleted, 1, false); err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+		{MsgID: deleted, UserIDs: []int64{2}},
+	}); err != nil {
+		t.Fatalf("IncrementMentionCountsBatch(deleted): %v", err)
+	}
+	if n, _ := database.GetMentionCount(ctx, 2, 1); n != 0 {
+		t.Errorf("mention_count = %d for a soft-deleted message, want 0", n)
+	}
+
+	// A message id that does not exist (erased) is likewise not live.
+	if err := database.IncrementMentionCountsBatch(ctx, 1, []db.MentionBatchEntry{
+		{MsgID: 999999, UserIDs: []int64{3}},
+	}); err != nil {
+		t.Fatalf("IncrementMentionCountsBatch(missing): %v", err)
+	}
+	if n, _ := database.GetMentionCount(ctx, 3, 1); n != 0 {
+		t.Errorf("mention_count = %d for a missing message, want 0", n)
+	}
+}
+
+func TestIncrementMentionCountsBatch_EmptyIsNoop(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	if err := database.IncrementMentionCountsBatch(context.Background(), 1, nil); err != nil {
+		t.Fatalf("IncrementMentionCountsBatch(nil): %v", err)
 	}
 }

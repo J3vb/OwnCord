@@ -12,7 +12,7 @@ import (
 
 // FileStore is the consumer-side seam over blob storage, following the repo's
 // interface-at-the-consumer pattern (see service.Store, D3): the api package
-// declares exactly the three operations its handlers use, and the concrete
+// declares exactly the operations its handlers use, and the concrete
 // *storage.Storage satisfies it. This is deliberately an interface carve-out,
 // NOT an alternative-backend implementation — multi-backend storage (S3 and
 // friends) is out of scope today. What the seam buys now is that the
@@ -29,6 +29,11 @@ type FileStore interface {
 	Delete(uuid string) error
 	// Open opens the stored file named uuid for seekable reading.
 	Open(uuid string) (storage.File, error)
+	// OpenThumb and SaveThumb read and keep the thumbnail of the original
+	// named uuid; Delete removes it with the original. An empty thumbnail
+	// records that the original is served instead.
+	OpenThumb(uuid string) (storage.File, error)
+	SaveThumb(uuid string, data []byte) error
 }
 
 // compile-time proof the disk implementation satisfies the seam.

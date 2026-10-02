@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -10,6 +11,8 @@ const mockSetUserVolume = vi.fn();
 const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
 const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
+const mockGetRemoteVideoStream = vi.fn((..._args: unknown[]): MediaStream | null => null);
+const mockSetRemoteVideoView = vi.fn();
 
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
@@ -18,6 +21,8 @@ vi.mock("@lib/livekitSession", () => ({
   getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
   getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
   getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
+  getRemoteVideoStream: (...args: unknown[]) => mockGetRemoteVideoStream(...args),
+  setRemoteVideoView: (...args: unknown[]) => mockSetRemoteVideoView(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -30,6 +35,9 @@ import {
   type VideoGridComponent,
   type TileConfig,
 } from "../../src/components/VideoGrid";
+import { RemoteTracks, type VideoView } from "../../src/features/voice/remoteTracks";
+import { attachStreamPreview } from "../../src/lib/streamPreview";
+import { VideoQuality, type Room } from "livekit-client";
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
@@ -1008,6 +1016,26 @@ describe("VideoGrid", () => {
       expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
     });
 
+    it("exposes a header control that leaves focus/grid mode and is keyboard reachable", () => {
+      // Focus mode pinned a watched peer with no way back once the focused
+      // tile's own nav was scrolled off (and an empty grid could cover chat
+      // with no control at all). A header button always offers the exit.
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+      grid.addStream(3, "Sam", fakeStream(), camera());
+
+      const exit = container.querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']");
+      expect(exit).not.toBeNull();
+      expect(exit!.tagName).toBe("BUTTON");
+      expect(exit!.getAttribute("aria-label")).toBe("Show chat");
+
+      select(SCREEN).click();
+      expect(container.querySelector(".video-grid.focus-mode")).not.toBeNull();
+
+      exit!.click();
+      expect(grid.getFocusedTileId()).toBeNull();
+      expect(container.querySelector(".video-grid.focus-mode")).toBeNull();
+    });
+
     it("marks screen shares LIVE, and cameras not", () => {
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
@@ -1025,6 +1053,21 @@ describe("VideoGrid", () => {
 
       grid.setSpeaking(new Set());
       expect(cell(2).classList.contains("video-cell--speaking")).toBe(false);
+    });
+
+    it("marks a muted/deafened peer on their camera tile, and clears it", () => {
+      grid.addStream(2, "Otto", fakeStream(), camera({ audioUserId: 2, name: "Otto" }));
+
+      grid.setUserAudioState(new Map([[2, { muted: true, deafened: false }]]));
+      const badge = cell(2).querySelector<HTMLElement>("[data-testid='tile-audio-state']")!;
+      expect(badge).not.toBeNull();
+      expect(badge.classList.contains("video-cell__audio--muted")).toBe(true);
+
+      grid.setUserAudioState(new Map([[2, { muted: true, deafened: true }]]));
+      expect(badge.classList.contains("video-cell__audio--deafened")).toBe(true);
+
+      grid.setUserAudioState(new Map());
+      expect(cell(2).querySelector("[data-testid='tile-audio-state']")).toBeNull();
     });
 
     it("names the volume slider for whose stream or voice it is, and shows its value", () => {
@@ -1459,8 +1502,17 @@ describe("VideoGrid", () => {
       const mute = calls.querySelector<HTMLButtonElement>("[data-call-control='mute']")!;
       mute.click();
       expect(onMuteToggle).toHaveBeenCalledTimes(1);
-      grid.setCallState({ muted: true, deafened: false });
+      grid.setCallState({ muted: true, deafened: false, listenOnly: false });
       expect(mute.getAttribute("aria-pressed")).toBe("true");
+      // Listen-only: no mic to mute, so the control reads mic-off and is inert.
+      grid.setCallState({ muted: false, deafened: false, listenOnly: true });
+      expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(mute.disabled).toBe(true);
+      expect(mute.title).toBe("Listening only — no microphone access");
+      expect(keyword(cascadedDeclaration(".video-fs-btn:disabled", "opacity"))).toBe("0.5");
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false });
+      expect(mute.disabled).toBe(false);
+      expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
       calls.querySelector<HTMLButtonElement>("[data-call-control='leave']")!.click();
       expect(onLeave).toHaveBeenCalledTimes(1);
 
@@ -1661,6 +1713,254 @@ describe("VideoGrid", () => {
       await vi.advanceTimersByTimeAsync(6000);
       expect(getStreamStats.mock.calls.length).toBe(calls);
       container.remove();
+    });
+  });
+
+  describe("video layers follow what each tile shows (P3-07)", () => {
+    const SCREEN = 3 + 1_000_000;
+    /** Rendered tile sizes by data-user-id; an absent tile renders 0 × 0. */
+    let sizes: Map<string, { width: number; height: number }>;
+    let observers: Array<() => void>;
+    let hidden: boolean;
+    let pubs: Map<string, ReturnType<typeof publication>>;
+
+    function publication() {
+      return {
+        track: {},
+        setEnabled: vi.fn(),
+        setVideoQuality: vi.fn(),
+        setVideoDimensions: vi.fn(),
+      };
+    }
+    /** The room the grid's views land on, through the real RemoteTracks. */
+    function room(): Room {
+      const participants = new Map<string, unknown>();
+      for (const uid of [2, 3]) {
+        participants.set(`user-${uid}`, {
+          identity: `user-${uid}`,
+          getTrackPublication: (source: string) => pubs.get(`${uid}:${source}`),
+        });
+      }
+      return { remoteParticipants: participants } as unknown as Room;
+    }
+    const pub = (uid: number, source = "camera") => pubs.get(`${uid}:${source}`)!;
+    /** The last enabled state asked of a publication. */
+    const enabled = (uid: number, source = "camera") =>
+      pub(uid, source).setEnabled.mock.lastCall?.[0] as boolean | undefined;
+    /** Resize tiles and let the sizes settle (views follow a resize after 150 ms). */
+    function resize(entries: Record<number, [number, number]>): void {
+      for (const [id, [width, height]] of Object.entries(entries)) sizes.set(id, { width, height });
+      for (const fire of observers) fire();
+      vi.advanceTimersByTime(150);
+    }
+    const cellOf = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+
+    beforeEach(() => {
+      grid.destroy?.();
+      vi.useFakeTimers();
+      sizes = new Map();
+      observers = [];
+      hidden = false;
+      pubs = new Map([
+        ["2:camera", publication()],
+        ["3:camera", publication()],
+        ["3:screen_share", publication()],
+      ]);
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: () => void) {
+            observers.push(cb);
+          }
+          observe(): void {}
+          unobserve(): void {}
+          disconnect(): void {}
+        },
+      );
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const size = sizes.get(this.dataset["userId"] ?? "") ?? { width: 0, height: 0 };
+        return { ...size, top: 0, left: 0, right: size.width, bottom: size.height } as DOMRect;
+      });
+      Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+
+      const tracks = new RemoteTracks(room);
+      // The sidebar hover preview reports through the session to the same tracks.
+      mockSetRemoteVideoView.mockImplementation(
+        (uid: number, type: "camera" | "screenshare", view: VideoView, preview?: boolean) =>
+          tracks.setRemoteVideoView(uid, type, view, preview),
+      );
+      grid = createVideoGrid();
+      grid.mount(container);
+      grid.setCallbacks({
+        setStreamView: (tileId, view) =>
+          tileId >= 1_000_000
+            ? tracks.setRemoteVideoView(tileId - 1_000_000, "screenshare", view)
+            : tracks.setRemoteVideoView(tileId, "camera", view),
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+      delete (document as { hidden?: unknown }).hidden;
+      delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
+    });
+
+    function addCameras(): void {
+      grid.addStream(1, "me (You)", fakeStream(), makeTileConfig({ isSelf: true, audioUserId: 1 }));
+      grid.addStream(2, "Otto", fakeStream(), makeTileConfig({ audioUserId: 2 }));
+      grid.addStream(3, "Ada", fakeStream(), makeTileConfig({ audioUserId: 3 }));
+      resize({ 1: [320, 180], 2: [320, 180], 3: [320, 180] });
+    }
+
+    it("hiding the grid calls setEnabled(false) on every remote camera publication, and showing it re-enables them", () => {
+      addCameras();
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+
+      // The grid slot goes display:none (back to chat): every tile renders 0 × 0.
+      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
+      expect(enabled(2)).toBe(false);
+      expect(enabled(3)).toBe(false);
+
+      resize({ 1: [320, 180], 2: [320, 180], 3: [320, 180] });
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+    });
+
+    it("sends one view per tile once a burst of resizes settles (a window drag)", () => {
+      addCameras();
+      pub(2).setVideoDimensions.mockClear();
+      for (const width of [400, 480, 560, 640]) {
+        sizes.set("2", { width, height: (width * 9) / 16 });
+        for (const fire of observers) fire();
+        vi.advanceTimersByTime(16);
+      }
+      expect(pub(2).setVideoDimensions).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(150);
+      expect(pub(2).setVideoDimensions).toHaveBeenCalledTimes(1);
+      expect(pub(2).setVideoDimensions).toHaveBeenLastCalledWith({ width: 640, height: 360 });
+    });
+
+    it("stops the video while the app is hidden (minimised), and resumes it when shown", () => {
+      addCameras();
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(false);
+      expect(enabled(3)).toBe(false);
+
+      hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+    });
+
+    it("an open hover preview stops its video too while the app is hidden, and resumes at its size when shown", () => {
+      addCameras();
+      const { stream } = fakeStreamWithTrack();
+      mockGetRemoteVideoStream.mockReturnValue(stream);
+      vi.spyOn(HTMLVideoElement.prototype, "play").mockResolvedValue(undefined);
+      const row = document.createElement("div");
+      row.dataset["userId"] = "voice-row";
+      sizes.set("voice-row", { width: 240, height: 40 });
+      document.body.appendChild(row);
+      const previews = new AbortController();
+      attachStreamPreview(row, 2, "Otto", false, true, previews.signal);
+      row.dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(300);
+      const width = Math.round(240 * devicePixelRatio);
+      const previewSize = { width, height: Math.round((width * 9) / 16) };
+
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(false);
+
+      hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(true);
+
+      // The grid closes while the preview stays open: the preview's layer.
+      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(false);
+      hidden = false;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(true);
+      expect(pub(2).setVideoDimensions).toHaveBeenLastCalledWith(previewSize);
+      previews.abort();
+      row.remove();
+    });
+
+    it("a 160-px tile requests a lower quality than a focused tile", () => {
+      addCameras();
+      pub(2).setVideoDimensions.mockClear();
+      grid.setFocusedTile(2);
+      resize({ 2: [1280, 720], 3: [160, 90] });
+
+      expect(pub(3).setVideoDimensions).toHaveBeenLastCalledWith({ width: 160, height: 90 });
+      expect(pub(2).setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+      expect(pub(2).setVideoDimensions).not.toHaveBeenCalled();
+      expect(enabled(2)).toBe(true);
+      expect(enabled(3)).toBe(true);
+
+      // Back to the grid: tile 2 is sized like any other again.
+      grid.setFocusedTile(null);
+      resize({ 2: [320, 180], 3: [320, 180] });
+      expect(pub(2).setVideoDimensions).toHaveBeenLastCalledWith({ width: 320, height: 180 });
+    });
+
+    it("a focused screen share keeps its top layer however small its tile renders", () => {
+      grid.addStream(
+        SCREEN,
+        "Ada (Screen)",
+        fakeStream(),
+        makeTileConfig({ audioUserId: 3, isScreenshare: true }),
+      );
+      grid.setFocusedTile(SCREEN);
+      resize({ [SCREEN]: [200, 112] });
+      expect(pub(3, "screen_share").setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+      expect(pub(3, "screen_share").setVideoDimensions).not.toHaveBeenCalled();
+      expect(enabled(3, "screen_share")).toBe(true);
+    });
+
+    it("a stopped tile stops its video, and Watch brings it back", () => {
+      addCameras();
+      cellOf(2).querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+      expect(enabled(2)).toBe(false);
+      expect(enabled(3)).toBe(true);
+      cellOf(2).querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
+      expect(enabled(2)).toBe(true);
+    });
+
+    it("a popped-out tile keeps its video at the top layer while the grid is hidden", () => {
+      addCameras();
+      const video = cellOf(2).querySelector("video")!;
+      Object.defineProperty(document, "pictureInPictureElement", {
+        configurable: true,
+        get: () => video,
+      });
+      video.dispatchEvent(new Event("enterpictureinpicture"));
+      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
+      hidden = true;
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(enabled(2)).toBe(true);
+      expect(pub(2).setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
+      expect(enabled(3)).toBe(false);
+    });
+
+    it("asks a replacement publication (after a reconnect) for the tile's view again", () => {
+      addCameras();
+      resize({ 2: [0, 0] });
+      expect(enabled(2)).toBe(false);
+      pubs.set("2:camera", publication());
+      const { stream } = fakeStreamWithTrack();
+      grid.addStream(2, "Otto", stream, makeTileConfig({ audioUserId: 2 }));
+      expect(enabled(2)).toBe(false);
     });
   });
 });

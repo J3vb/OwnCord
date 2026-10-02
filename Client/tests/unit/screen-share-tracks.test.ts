@@ -18,6 +18,8 @@ import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
+import { initToast, teardownToast } from "@lib/toast";
+import type { ToastContainer } from "@components/Toast";
 
 const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
@@ -619,6 +621,75 @@ describe("enableScreenshare", () => {
 
     expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
     expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
+  });
+
+  it("stays silent when the user cancels the picker (polish #10)", async () => {
+    // A cancel is not a denial. Chromium (WebView2) rejects a dismissed
+    // picker with this NotAllowedError, and the Linux native path raises the
+    // same; announcing "permission denied" for closing the dialog is wrong.
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("Permission denied by user", "NotAllowedError"),
+    );
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).not.toHaveBeenCalled();
+  });
+
+  it("answers a desktop portal that never started with a soft notice", async () => {
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("screen capture portal did not start", "NotAllowedError"),
+    );
+    const deps = fakeDeps(rig.room);
+    const toasts = { show: vi.fn() };
+    initToast(toasts as unknown as ToastContainer);
+
+    try {
+      await enableScreenshare({ manualScreenTracks: [] }, deps);
+    } finally {
+      teardownToast();
+    }
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    // A notice, not the error channel the refusals and failures use.
+    expect(deps.onError).not.toHaveBeenCalled();
+    expect(toasts.show).toHaveBeenCalledWith(
+      "Screen share didn't start. If you didn't cancel it, check your desktop's screen-sharing permission.",
+      "info",
+      undefined,
+    );
+  });
+
+  it("still reports a refusal the OS made rather than the user", async () => {
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("Permission denied by system", "NotAllowedError"),
+    );
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
+  });
+
+  it("reports an aborted capture as a failure, not a cancel", async () => {
+    // Chromium raises AbortError for a capture that could not start (a start
+    // timeout, an invalid state), never for the user closing the picker.
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockRejectedValue(
+      new DOMException("Timeout starting video source", "AbortError"),
+    );
+    const deps = fakeDeps(rig.room);
+
+    await enableScreenshare({ manualScreenTracks: [] }, deps);
+
+    expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
+    expect(deps.onError).toHaveBeenCalledWith("Failed to start screen sharing");
   });
 
   it("tolerates a capture with no video track", async () => {

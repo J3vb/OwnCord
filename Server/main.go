@@ -106,27 +106,33 @@ func main() {
 	// internal/app/restart.go. main owns it and hands it in; the handoff
 	// below is the last thing this process does. The backstop closure fires
 	// only if a requested restart's drain wedges past RestartBackstopDelay:
-	// it performs the handoff and force-exits, mirroring what the code below
-	// does on the healthy path.
+	// it performs the handoff without staying behind for the replacement and
+	// force-exits, releasing whatever the wedged teardown still holds.
 	var rc *app.RestartCoordinator
 	rc = app.NewRestartCoordinator(app.RestartBackstopDelay, func() {
 		slog.Error("restart backstop fired — teardown exceeded its budget, exiting for handoff")
-		rc.PerformHandoff(slog.Default())
-		os.Exit(0)
+		code, _ := rc.PerformBackstopHandoff(slog.Default())
+		os.Exit(code)
 	})
 
 	err := runServer(log, logBuf, levelVar, rc)
 	rc.Disarm()
 
-	// Perform the handoff even when the lifecycle returned an error: a
-	// restart is only ever requested after a committed binary swap or a
-	// restore that closed the database, so not restarting is strictly worse
-	// than restarting into whatever the error was.
-	rc.PerformHandoff(log)
-
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "\n  [ERROR] %v\n\n", err)
 		log.Error("server exited with error", "error", err)
+	}
+
+	// Perform the handoff even when the lifecycle returned an error: a
+	// restart is only ever requested after a committed binary swap or a
+	// restore that closed the database, so not restarting is strictly worse
+	// than restarting into whatever the error was. A process that stayed
+	// behind for its replacement exits with the replacement's code.
+	if code, waited := rc.PerformHandoff(log); waited {
+		os.Exit(code)
+	}
+
+	if err != nil {
 		os.Exit(1)
 	}
 }

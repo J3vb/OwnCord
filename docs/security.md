@@ -69,9 +69,10 @@ OwnCord supports TOTP-based 2FA:
   recognise, and erase again, an account the backup resurrects.
 - Admins can enforce server-wide 2FA via the `require_2fa` setting in the admin panel
 - `require_2fa` requires all users to have 2FA enabled and `registration_mode` to be `closed`; while it is on, the mode cannot be reopened
+- A session expires 30 days after its last use: an authenticated REST request, the WebSocket handshake and the WebSocket heartbeat each slide `expires_at`, at most once a minute per session; the slide is written in a batch up to a minute later ([schema.md](schema.md#sessions) owns the bound and its edge). It never outlives 365 days from sign-in, and a touch never revives a session that has already expired or been revoked
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
-- Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); an over-budget attempt is refused with `429 RATE_LIMITED`, runs no bcrypt and counts as no failed attempt
+- Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); login, registration and recovery-code checks over it wait in a bounded FIFO queue (up to 10 s), and an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no bcrypt and counts as no failed attempt
 - TOTP code verification uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing side-channel attacks
 
 ## Account Recovery
@@ -81,7 +82,7 @@ server stores only an argon2id verifier of it. The setup wizard offers to
 generate the owner's kit at first run — shown once on the finish step, with
 only its verifier stored — and any account can enrol or rotate one from the
 desktop client while signed in. Redeeming the kit replaces the
-password, revokes every session, spends the kit and writes a content-free
+password, revokes every session and API token, spends the kit and writes a content-free
 audit row in one transaction, then signs the holder in without the second
 factor — it exists for the case where the devices are gone. A spent or lost
 kit cannot be recovered by the server; the holder issues a new one while
@@ -94,7 +95,7 @@ as one of four fixed wordings (`in_person`, `voice_call`, `video_call`,
 `trusted_contact`); no free text is accepted. The credential is single-use,
 expires in 15 minutes, is stored only as an argon2id verifier, and redeems
 through the same route with the same consequences (new password, every
-session revoked, no second factor). No administrator below the owner can
+session and API token revoked, no second factor). No administrator below the owner can
 reset anyone's credentials. Issuance and use are audited
 (`recovery_assist_issued`, `recovery_assist_used`).
 
@@ -122,7 +123,10 @@ minute, and never written to a log or audit row. Like the log-stream ticket it
 stores the hash of the credential that asked for it and re-resolves it on
 redemption, so a revoked session, a ban or a lost Owner role voids an
 outstanding link; redeeming an unknown, expired, spent or voided token is a
-uniform `403`.
+uniform `403`. Downloading a single backup from the panel uses the same
+pattern (`POST /admin/api/backups/{name}/link`), with the token additionally
+bound to that one file and kept in a separate store, so an archive token opens
+no backup and a backup token opens neither the archive nor another backup.
 
 `POST /admin/api/setup` is unauthenticated: it is how the first Owner account
 comes to exist, and until B4-10 the only thing standing in front of it was
@@ -272,7 +276,7 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`,
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_download`,
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
   `update_failed`, `ws_connect`
 
@@ -310,10 +314,11 @@ The Tauri desktop client implements the following security measures:
 - Credentials are stored in the OS keyring (Windows Credential Manager / macOS Keychain / Secret Service) via the `keyring` crate, with every write read back and verified; if no keyring is available they fall back to an encrypted file (Windows DPAPI with `CRYPTPROTECT_UI_FORBIDDEN`, ChaCha20-Poly1305 elsewhere) — see [credential-storage.md](credential-storage.md)
 - Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript. The field is `#[serde(skip)]` on `CredentialData` and the claim is test-locked (`credential_data_never_serializes_the_password`). A remembered password is shown in the login form as a placeholder and submitted by the `login_with_saved_password` command, which reads the password in Rust and logs in through the same pinned loopback proxy a normal request uses
 - Auto-login uses stored tokens for reconnection, not passwords
+- Credential and identity commands are scoped to the active session host held in Rust state, which guards against accidental cross-host use. That host is set by `ws_connect` and cleared by `ws_disconnect`, both callable from the renderer, so this does not stop a compromised renderer; sourcing the active host from a native-side authenticated event is a follow-up
 
 ### Tauri Capabilities (Least Privilege)
 
-- Filesystem write access is scoped to `$APPDATA/**` and `$APPLOG/**` only
+- Filesystem access is scoped to `$APPLOG` only. The renderer reads and writes its own logs there; every other frontend save goes through the native save dialog, whose chosen path the dialog plugin grants dynamically. `$APPDATA` is deliberately out of scope: it holds `credential_fallback.json`/`.key`, `certs.json` and `identity_pins.json`, so a renderer compromise would otherwise read the fallback credential store or the TLS/identity pins. `fs:default` (whose recursive read covers `$APPDATA`) and the old `$APPDATA/**` write scope were removed for this reason.
 - DevTools command is gated behind the `devtools` feature flag (excluded from release builds)
 - HTTP fetch is restricted to `http://127.0.0.1:*` (the Rust TOFU proxies' loopback tunnels) — no `https://` destination at all. It still **denies** `https://localhost[:*]` and `https://127.0.0.1[:*]` as defence in depth should a wildcard ever return
 - `http:allow-fetch` is the **only** URL-scoped HTTP identifier. `tauri-plugin-http` validates the URL exactly once, in the `fetch` command; `fetch_send` and `fetch_read_body` operate on an already-validated `ResourceId` and never consult a scope, so `allow`/`deny` blocks on those identifiers are inert and were removed rather than left in place advertising a control that does not exist
@@ -348,7 +353,7 @@ The Tauri desktop client implements the following security measures:
 - PTT virtual key codes are validated to the Win32 range (1–254)
 - LiveKit proxy `remote_host` is validated against CRLF injection
 - API client validates host format before constructing URLs
-- File uploads enforce a MIME type allowlist (images, video, audio, PDF, text)
+- File uploads accept any type the server's file-type policy allows; the composer pre-checks the size and the policy, and the server sniffs the type, refuses executables by content and refuses blocked final extensions by name — by default Windows scripts, installers and disk images, owner-configurable in config.yaml and the admin panel (see [SECURITY.md](../SECURITY.md))
 - Error messages from server responses are capped at 200 characters
 - Notification titles are sanitized (control chars stripped, length capped)
 
@@ -358,7 +363,7 @@ The Tauri desktop client implements the following security measures:
 - The single `innerHTML` usage (SVG icons) operates on compile-time constants with a runtime guard
 - URLs are validated via `isSafeUrl` (rejects `javascript:`, `data:`, `vbscript:`)
 - YouTube embeds use `sandbox` attribute on iframes
-- `image/svg+xml` is excluded from safe MIME types for data URIs
+- `image/svg+xml` is excluded from the safe MIME types a fetched server image or clip may carry as its Blob type
 - GIF media URLs are validated against the trusted Klipy CDN origins
 - Linkified URLs strip trailing punctuation to prevent misleading destinations
 

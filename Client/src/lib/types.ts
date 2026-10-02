@@ -65,13 +65,17 @@ export type WsErrorCode =
   | "INVALID_JSON"
   | "UNKNOWN_TYPE"
   | "SLOW_MODE"
-  // A send, reaction or voice join refused by an active moderator timeout.
+  // A write refused by an active moderator timeout: a send or edit, a
+  // reaction, a voice join, a call ring, or a custom status.
   | "TIMED_OUT"
   | "CONFLICT"
   | "BAD_PAYLOAD"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
   | "SESSION_REPLACED"
+  // A fresh connect refused while the server's ready builds are saturated;
+  // carries retry_after_ms and is handled inside ws.ts (P5-S04).
+  | "SERVER_BUSY"
   // A wake reconnect (auth frame `wake: true`) refused because another device
   // currently holds the account's one live socket. The client stays signed in
   // and does not reconnect until the user chooses "Use here" (U4).
@@ -86,6 +90,8 @@ export type ApiErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "RATE_LIMITED"
+  /** The server's queue for password checks is full; retry after Retry-After. */
+  | "AUTH_BUSY"
   | "INVALID_INPUT"
   | "CONFLICT"
   | "TOO_LARGE"
@@ -178,7 +184,8 @@ export interface ReadyChannel {
   readonly slow_mode?: number;
   /**
    * Unread messages in this channel that mention the current user (directly or
-   * via @everyone/@here). Always ≤ unread_count. Absent from older servers.
+   * via @everyone/@here). Not capped, so it can exceed the capped unread_count.
+   * Absent from older servers.
    */
   readonly mention_count?: number;
   /**
@@ -303,6 +310,20 @@ export interface AuthOkPayload {
    * counter may have restarted below the client's stale watermark.
    */
   readonly replay_source?: "none" | "buffer" | "db";
+  /** What the composer checks before an upload; absent on older servers. */
+  readonly upload_policy?: UploadPolicy;
+}
+
+/** auth_ok's upload_policy. The server's upload route stays authoritative. */
+export interface UploadPolicy {
+  /** upload.max_size_mb in bytes; 0 means uploads are disabled; absent falls back to 100 MiB. */
+  readonly max_upload_bytes?: number;
+  /** Extensions refused as a file name's final extension. */
+  readonly blocked_extensions?: readonly string[];
+  /** Non-empty: allow-only mode, the final extension must be listed. */
+  readonly allowed_extensions?: readonly string[];
+  /** The server serves an image's bounded preview at /api/v1/files/{id}/thumb. */
+  readonly thumbnails?: boolean;
 }
 
 export interface AuthErrorPayload {
@@ -434,6 +455,12 @@ export interface ChatDeletedPayload {
 export interface ChatBulkDeletedPayload {
   readonly channel_id: number;
   readonly ids: readonly number[];
+}
+
+export interface ChatPinnedPayload {
+  readonly message_id: number;
+  readonly channel_id: number;
+  readonly pinned: boolean;
 }
 
 export interface ReactionUpdatePayload {
@@ -596,6 +623,21 @@ export interface VoiceE2EEOfferPayload {
   readonly iv: string;
 }
 
+/** One user's presence in a presence_batch. */
+export interface PresenceBatchEntry {
+  readonly user_id: number;
+  readonly status: UserStatus;
+  /** Always present (null = none). */
+  readonly custom_status: string | null;
+}
+
+/** Many users' presence in one frame: a coalescing window's changes, or with
+ *  `full` a snapshot of everyone online — anyone it leaves out is offline. */
+export interface PresenceBatchPayload {
+  readonly updates: readonly PresenceBatchEntry[];
+  readonly full?: boolean;
+}
+
 export interface MemberJoinPayload {
   readonly user: UserWithRole;
   /** Viewer-safe presence the connecting user comes online as (broadcast
@@ -746,11 +788,15 @@ export interface DmRequestPayload extends DmRequestListItem {
 export interface ServerRestartPayload {
   readonly reason: ServerRestartReasonValue;
   readonly delay_seconds: number;
+  /** P5-S04: window after delay_seconds to spread the redial over (absent from older servers). */
+  readonly reconnect_spread_ms?: number;
 }
 
 export interface ErrorPayload {
   readonly code: WsErrorCode;
   readonly message: string;
+  /** SERVER_BUSY only: the least wait before redialling. */
+  readonly retry_after_ms?: number;
 }
 
 // -----------------------------------------------------------------------------
@@ -886,9 +932,11 @@ export type ServerMessage =
   | (WsEnvelope<ChatEditedPayload> & { readonly type: "chat_edited" })
   | (WsEnvelope<ChatDeletedPayload> & { readonly type: "chat_deleted" })
   | (WsEnvelope<ChatBulkDeletedPayload> & { readonly type: "chat_bulk_deleted" })
+  | (WsEnvelope<ChatPinnedPayload> & { readonly type: "chat_pinned" })
   | (WsEnvelope<ReactionUpdatePayload> & { readonly type: "reaction_update" })
   | (WsEnvelope<TypingPayload> & { readonly type: "typing" })
   | (WsEnvelope<PresencePayload> & { readonly type: "presence" })
+  | (WsEnvelope<PresenceBatchPayload> & { readonly type: "presence_batch" })
   | (WsEnvelope<ChannelCreatePayload> & { readonly type: "channel_create" })
   | (WsEnvelope<ChannelUpdatePayload> & { readonly type: "channel_update" })
   | (WsEnvelope<ChannelDeletePayload> & { readonly type: "channel_delete" })
@@ -1172,6 +1220,11 @@ export interface SearchResultItem {
 /** GET /api/search response. */
 export interface SearchResponse {
   readonly results: readonly SearchResultItem[];
+  /**
+   * Cursor for the next page of a newest-first (`sort=recent`) search, or null
+   * or absent when there is none. Only `recent` paging sets it.
+   */
+  readonly next_before?: number | null;
 }
 
 /** REST API error response body. */
@@ -1201,6 +1254,9 @@ export interface InviteResponse {
   readonly max_uses: number | null;
   readonly use_count?: number;
   readonly expires_at: string | null;
+  readonly revoked?: boolean;
+  readonly created_at?: string;
+  readonly creator_username?: string;
 }
 
 /** Upload response from POST /api/uploads. */

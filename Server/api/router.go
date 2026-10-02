@@ -221,7 +221,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	if storeErr == nil {
 		profileStore = store
 	}
-	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
+	MountProfileRoutes(r, database, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
 
 	// DM (direct message) REST routes, and the message request inbox (B5-6)
 	// beside them — mounted after hub creation so real-time
@@ -254,7 +254,8 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 		Get("/api/v1/diagnostics/connectivity",
 			handleDiagnosticsConnectivity(cfg, ver, hub))
 
-	r.Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
+	r.With(RateLimitMiddleware(limiter, "ws_upgrade:", scaledAuthLimit(wsUpgradeRateLimitPerMinute), time.Minute, cfg.Server.TrustedProxies)).
+		Get("/api/v1/ws", ws.ServeWS(hub, cfg.Server.AllowedOrigins, cfg.Server.MaxWSConnections))
 
 	routerMetricsRoutes(r, cfg, database, svc, hub)
 
@@ -460,33 +461,16 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 // shared file storage (and its construction error) for the profile-avatar and
 // emoji mounts, which reuse the same store.
 func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, uploads *service.UploadService) (*storage.Storage, error) {
-	// L12: verify config upload size fits within the HTTP body limit.
-	if int64(cfg.Upload.MaxSizeMB)<<20 > uploadMaxBodySize {
-		slog.Warn("upload.max_size_mb exceeds HTTP body limit, capping",
-			"configured_mb", cfg.Upload.MaxSizeMB,
-			"http_limit_bytes", uploadMaxBodySize)
+	if cfg.Upload.MaxSizeMB == 0 {
+		slog.Warn("upload.max_size_mb is 0, uploads are disabled")
 	}
 	store, storeErr := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
 	if storeErr != nil {
 		slog.Error("failed to create file storage", "error", storeErr)
 	} else {
-		configureStorageLimits(uploads, cfg)
 		MountUploadRoutes(r, sessions, store, limiter, cfg.Server.AllowedOrigins, uploads)
 	}
 	return store, storeErr
-}
-
-// configureStorageLimits installs B5-2's two bounds on the upload service:
-// the per-user quota (upload.user_quota_mb, 0 = unlimited) and the headroom
-// floor (server.min_free_disk_mb) probed on the upload volume, which may not
-// be the data volume /health watches.
-func configureStorageLimits(uploads *service.UploadService, cfg *config.Config) {
-	uploads.SetStorageLimits(service.StorageLimits{
-		UserQuotaBytes: cfg.Upload.UserQuotaBytes(),
-		MinFreeBytes:   cfg.Server.MinFreeDiskBytes(),
-		Dir:            cfg.Upload.StorageDir,
-		MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20,
-	})
 }
 
 // routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
@@ -578,6 +562,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 			LiveKitHealth:       hub.LiveKitHealthCheck,
 			ReconnectTiers:      hub.ReconnectTierStats,
 			Backpressure:        hub.BackpressureStats,
+			PresenceDrops:       hub.PresenceDropCount,
 			ConnRejects:         hub.ConnRejectCount,
 			PersisterStats:      hub.EventPersisterStats,
 			DBStats:             func() sql.DBStats { return database.SQLDb().Stats() },

@@ -181,20 +181,48 @@ func (d *DB) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	return maxSeq.Int64, nil
 }
 
-// PruneEventsOlderThan deletes events older than cutoff. Returns rows deleted.
+// pruneBatchSize bounds each DELETE's work. The pruner deletes in chunks of
+// this many rows instead of one unbounded statement, so at 2,000 online —
+// where a day's presence and content frames are 10^5–10^6 rows — no single
+// statement holds the sole writer connection for a noticeable stretch.
+const pruneBatchSize = 5000
+
+// eventPruneStatementHookForTest, when non-nil, runs once per DELETE the
+// prune loop issues. Test-only (nil in production, no exported setter beyond
+// export_test.go): it lets the batching test count statements without a
+// driver-level trace.
+var eventPruneStatementHookForTest func()
+
+// PruneEventsOlderThan deletes events older than cutoff in bounded chunks of
+// pruneBatchSize rows, yielding the writer connection between statements.
+// Returns the total rows deleted.
 func (d *DB) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := d.writer.ExecContext(ctx,
-		`DELETE FROM events WHERE created_at < ?`,
-		cutoff.UTC().Format("2006-01-02 15:04:05"),
-	)
-	if err != nil {
-		return 0, fmt.Errorf("PruneEventsOlderThan: %w", err)
+	cutoffStr := cutoff.UTC().Format(sqliteTimeLayout)
+	var total int64
+	for {
+		if eventPruneStatementHookForTest != nil {
+			eventPruneStatementHookForTest()
+		}
+		// seq is the INTEGER PRIMARY KEY (the rowid), so the subquery bounds
+		// each statement to pruneBatchSize rows via idx_events_created_at.
+		res, err := d.writer.ExecContext(ctx,
+			`DELETE FROM events WHERE seq IN (
+			     SELECT seq FROM events WHERE created_at < ? LIMIT ?
+			 )`,
+			cutoffStr, pruneBatchSize,
+		)
+		if err != nil {
+			return total, fmt.Errorf("PruneEventsOlderThan: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("PruneEventsOlderThan RowsAffected: %w", err)
+		}
+		total += n
+		if n < pruneBatchSize {
+			return total, nil
+		}
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("PruneEventsOlderThan RowsAffected: %w", err)
-	}
-	return n, nil
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinSet;
 use tokio_tungstenite::tungstenite::Message;
@@ -130,6 +130,7 @@ pub(crate) fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json
 pub async fn ws_connect<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, WsState>,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     url: String,
 ) -> Result<(), String> {
     info!("[ws_proxy] connecting to {}", url);
@@ -252,6 +253,9 @@ pub async fn ws_connect<R: Runtime>(
 
     info!("[ws_proxy] connected to {}", host);
     emit_ws_state(&app, "open");
+    // Record the host this session is on, so the credential and identity
+    // commands can refuse any other host while it is live.
+    session.set(&host);
 
     let app_read = app.clone();
     let app_state = app.clone();
@@ -417,7 +421,10 @@ pub async fn ws_send(state: tauri::State<'_, WsState>, message: String) -> Resul
 
 /// Disconnect the proxy WebSocket.
 #[tauri::command]
-pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), String> {
+pub async fn ws_disconnect(
+    state: tauri::State<'_, WsState>,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+) -> Result<(), String> {
     // begin_connection() both clears the sender slot (dropping it closes the
     // channel so the write task ends) AND bumps the generation counter, so a
     // handshake still pending from before this disconnect fails install_sender
@@ -425,6 +432,9 @@ pub async fn ws_disconnect(state: tauri::State<'_, WsState>) -> Result<(), Strin
     // path a superseding connect() already has. The returned generation is
     // unused: nothing will ever install under it.
     state.begin_connection().await;
+    // Logout / server switch: no session is live, so the credential and
+    // identity commands fall back to their pre-session rule.
+    session.clear();
     Ok(())
 }
 
@@ -488,6 +498,11 @@ pub fn accept_cert_fingerprint<R: Runtime>(
         }
         log::warn!("[ws_proxy] accept_cert_fingerprint: failed to persist pin for {host}: {e}");
         return Err(format!("failed to persist cert fingerprint: {e}"));
+    }
+    // The REST tunnel's idle connections were verified against the old pin (or
+    // none): drop them so the next request re-runs the TOFU check.
+    if let Some(http) = app.try_state::<crate::http_proxy::HttpProxyState>() {
+        http.pool.invalidate(&crate::tofu::cert_store_key(&host));
     }
     // Fingerprints are public cert hashes — safe to log; this is the TOFU audit trail.
     if changed {

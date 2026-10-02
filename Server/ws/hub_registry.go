@@ -182,10 +182,10 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 	if voiceChID := c.getVoiceChID(); voiceChID != 0 {
 		// VoiceTopic is the only transport for voice_e2ee_announce relays and
 		// carries nothing else, for a channel the user already joined via the
-		// CONNECT_VOICE-gated voice_join — so no READ gate.
+		// voice_join gate (permissions.CanJoinVoice) — so no separate READ gate.
 		h.pubsub.Subscribe(c, VoiceTopic(voiceChID))
-		// Voice membership is gated on CONNECT_VOICE alone, so it must not by
-		// itself grant a channel's message stream: subscribe only when the
+		// Voice membership can outlive READ_MESSAGES (a mid-call revocation,
+		// or a closed DM), so it must not by itself grant a channel's message stream: subscribe only when the
 		// handshake confirmed READ_MESSAGES on that channel.
 		if readableChannelIDs[voiceChID] {
 			h.pubsub.Subscribe(c, ChannelTopic(voiceChID))
@@ -268,6 +268,8 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool) bool {
 // DisconnectRevokedUser call finds c in h.clients and kicks it normally.
 // There is no ordering left in which neither catches it.
 //
+// On a live session it also slides the session's expiry (touchSession).
+//
 // It returns true when the caller must abort the handshake instead of
 // continuing to send auth_ok/ready: c has already been torn back out of the
 // hub (mirroring unregisterFailedHandshake's post-registerNow teardown) and
@@ -297,6 +299,9 @@ func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) bool {
 		h.unregisterFailedHandshake(ctx, c)
 		return true
 	}
+	// The session just proved live on a registered socket: slide its expiry
+	// (DP-05). Both handshake paths come through here.
+	h.touchSession(ctx, c)
 	return false
 }
 
@@ -320,7 +325,7 @@ func (h *Hub) unregisterNow(c *Client) bool {
 }
 
 // shouldMarkOffline reports whether a disconnect teardown should run
-// MarkUserDisconnected and broadcast an offline presence for c's user.
+// StampDisconnect and broadcast an offline presence for c's user.
 //
 // `replaced` (unregisterNow's return, sampled once at the start of teardown)
 // is necessary but not sufficient: both readPump's defer and

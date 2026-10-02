@@ -8,6 +8,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
+import { membersStore } from "@stores/members.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import type { UserStatus } from "@lib/types";
@@ -21,7 +22,7 @@ import {
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
-  fetchImageAsDataUrl,
+  fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
@@ -103,13 +104,13 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       avatarEl.style.background = "var(--accent)";
       return;
     }
-    void fetchImageAsDataUrl(url).then((dataUrl) => {
+    void fetchImageAsObjectUrl(url).then((objectUrl) => {
       // The URL may have changed again (or the bar been torn down) while the
       // bytes were in flight.
-      if (dataUrl === null || avatarEl === null || renderedAvatarUrl !== url) return;
+      if (objectUrl === null || avatarEl === null || renderedAvatarUrl !== url) return;
       const img = createElement("img", {
         class: "avatar-img",
-        src: dataUrl,
+        src: objectUrl,
         alt: subject.username,
       });
       recoverEvictedImage(img, { url });
@@ -233,9 +234,13 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       ),
     );
 
-    // Disable picker (with a reason) when the connection is down
+    // Disable picker (with a reason) when the connection is down. Truly inert
+    // (no Tab stop, no open, no selection): a custom status set while the
+    // socket is down is saved locally, never sent, and overwritten on the next
+    // reconnect (F16).
     const updatePickerDisabled = (): void => {
       const enabled = canSetStatus();
+      statusPicker?.setEnabled(enabled);
       statusPickerWrap.classList.toggle("ub-status-picker--disabled", !enabled);
       if (!enabled) {
         statusPickerWrap.title = shellText("status.offline");
@@ -298,6 +303,19 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         updateFromState();
         statusPicker?.setCustomStatus(serverCustomStatus() ?? "");
       },
+    );
+
+    // A presence rollback (a TIMED_OUT refusal) puts the previous custom status
+    // back in the members store, which can leave authStore unchanged and so
+    // never fire the subscription above — the picker would keep the refused
+    // text and ignore a retype of it. Follow our own member entry as well.
+    disposable.onStoreChange(
+      membersStore,
+      (s) => {
+        const id = authStore.getState().user?.id;
+        return id === undefined ? "" : (s.members.get(id)?.customStatus ?? "");
+      },
+      (text: string) => statusPicker?.setCustomStatus(text),
     );
 
     container.appendChild(root);

@@ -3,7 +3,7 @@
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { ApiClientError, errorText } from "@lib/api";
+import { ApiClientError, TransportError, errorText } from "@lib/api";
 import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -111,7 +111,16 @@ export interface LoginFormApi {
   showTotp(): void;
   showConnecting(): void;
   showAutoConnecting(serverName: string): void;
+  /** "Waiting for <server>… Cancel" while a down server is re-probed; the form stays usable. */
+  showServerWait(serverName: string, host: string): void;
+  /** Report a cancel when waiting on a server other than `host`. */
+  cancelServerWaitUnless(host: string): void;
+  /** Hide the waiting line without reporting a cancel. */
+  hideServerWait(): void;
   showError(message: string): void;
+  /** A non-error, informational message (e.g. pending approval) shown as a
+   *  notice rather than the red error banner. */
+  showNotice(message: string): void;
   resetToIdle(): void;
   getRememberPassword(): boolean;
   /** Whether the auto-connect checkbox is ticked. */
@@ -142,6 +151,23 @@ export interface LoginFormApi {
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
+
+/** How long a login keeps retrying a busy server before it gives up (P5-S02). */
+const AUTH_BUSY_RETRY_BUDGET_MS = 70_000;
+/** The shortest wait before a retry, whatever Retry-After says (the
+ *  saved-password relay sends none). The login route allows 5 attempts per IP
+ *  per minute and refused ones count, so attempts at least 15 s apart keep
+ *  one client to 4 in any minute. */
+const AUTH_BUSY_MIN_RETRY_MS = 15_000;
+/** Up to this much is added to each wait, so a burst of refused clients
+ *  does not come back in lockstep. */
+const AUTH_BUSY_JITTER_MS = 1_000;
+
+/** The server's password-check queue was full: a refusal worth retrying. A
+ *  per-IP RATE_LIMITED is not — retrying only spends the window again. */
+function isAuthBusy(err: unknown): err is ApiClientError {
+  return err instanceof ApiClientError && err.code === "AUTH_BUSY";
+}
 
 function isBusy(state: FormState): boolean {
   return state === "loading" || state === "connecting" || state === "auto-connecting";
@@ -183,6 +209,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let formState: FormState = "idle";
   let formMode: FormMode = "login";
   let errorMessage = "";
+  // A non-error notice (pending approval). Shown until the form next goes busy
+  // or an error replaces it.
+  let noticeMessage = "";
   /**
    * The field the current banner error belongs to (B9-23), so the error is
    * linked to its input with aria-describedby/aria-invalid and focus moves
@@ -209,12 +238,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let submitBtnText: HTMLSpanElement;
   let toggleModeBtn: HTMLButtonElement;
   let errorBanner: HTMLDivElement;
+  let infoNotice: HTMLDivElement;
   let totpInput: HTMLInputElement;
   let totpError: HTMLDivElement;
   let totpSubmitBtn: HTMLButtonElement;
   let rememberPasswordCheckbox: HTMLInputElement;
   let autoConnectCheckbox: HTMLInputElement;
   let autoConnectServerName: HTMLSpanElement;
+  let serverWait: HTMLDivElement;
+  let serverWaitText: HTMLSpanElement;
+  let serverWaitHost = "";
+  let authBusyRetry: HTMLDivElement;
+  /** The busy line's Cancel: ends the wait and stops the AUTH_BUSY retries. */
+  let cancelAuthBusyRetry: (() => void) | null = null;
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -310,6 +346,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       role: "alert",
       id: "connect-error-banner",
     });
+
+    // Informational notice (P4-18): a green/neutral status line for a fact the
+    // user needs (pending approval), never the red error banner.
+    infoNotice = createElement("div", { class: "info-notice", role: "status" });
+
+    serverWait = buildServerWait();
+    authBusyRetry = buildAuthBusyRetry();
 
     // Form
     const form = createElement("form", { class: "connect-form" });
@@ -462,9 +505,21 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal });
+    // Typing means the user is taking over from the automatic retry.
+    for (const input of [hostInput, usernameInput, passwordInput]) {
+      input.addEventListener("input", cancelServerWait, { signal });
+    }
     toggleModeBtn.addEventListener("click", handleToggleMode, { signal });
 
-    appendChildren(formContainer, formLogo, errorBanner, form);
+    appendChildren(
+      formContainer,
+      formLogo,
+      errorBanner,
+      infoNotice,
+      serverWait,
+      authBusyRetry,
+      form,
+    );
     appendChildren(panel, settingsBtn, formContainer);
     return panel;
   }
@@ -633,6 +688,46 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     return overlay;
   }
 
+  function buildServerWait(): HTMLDivElement {
+    // A live status line, not a modal: the form beneath stays usable.
+    const wait = createElement("div", { class: "server-wait", role: "status" });
+    wait.hidden = true;
+    serverWaitText = createElement("span", { class: "server-wait-text" });
+    const cancelBtn = createElement(
+      "button",
+      { class: "btn-ghost server-wait-cancel", type: "button" },
+      connectText("common.cancel"),
+    );
+    cancelBtn.addEventListener("click", cancelServerWait, { signal });
+    appendChildren(wait, serverWaitText, cancelBtn);
+    return wait;
+  }
+
+  function buildAuthBusyRetry(): HTMLDivElement {
+    // The server-wait line's look: a live status while a busy login retries.
+    const line = createElement("div", { class: "server-wait auth-busy-retry", role: "status" });
+    line.hidden = true;
+    const text = createElement(
+      "span",
+      { class: "server-wait-text" },
+      connectText("login.serverBusyRetrying"),
+    );
+    const cancelBtn = createElement(
+      "button",
+      { class: "btn-ghost server-wait-cancel", type: "button" },
+      connectText("common.cancel"),
+    );
+    cancelBtn.addEventListener("click", () => cancelAuthBusyRetry?.(), { signal });
+    appendChildren(line, text, cancelBtn);
+    return line;
+  }
+
+  function cancelServerWait(): void {
+    if (serverWait.hidden) return;
+    serverWait.hidden = true;
+    onAutoLoginCancel?.();
+  }
+
   // ---------------------------------------------------------------------------
   // Build elements (before state transition functions that reference them)
   // ---------------------------------------------------------------------------
@@ -663,6 +758,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // the instance so the input keeps aria-invalid/aria-describedby while the
     // banner is up, through unrelated store updates.
     errorField = state === "error" ? field : null;
+    // Any state change supersedes an informational notice: the user is trying
+    // again (busy), a real error replaced it, or the form reset.
+    noticeMessage = "";
+    updateInfoNotice();
 
     // Update UI based on state
     updateSubmitButton();
@@ -761,6 +860,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
   }
 
+  function updateInfoNotice(): void {
+    if (noticeMessage) {
+      setText(infoNotice, noticeMessage);
+      infoNotice.classList.add("visible");
+    } else {
+      setText(infoNotice, "");
+      infoNotice.classList.remove("visible");
+    }
+  }
+
   function updateStatusBar(): void {
     switch (formState) {
       case "idle":
@@ -787,8 +896,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } else if (formState === "error" && totpPending) {
       // A rejected verify lands here — keep the overlay up (and the
       // already-entered code in place) instead of dropping the user back on
-      // the login form with no way to retry.
+      // the login form with no way to retry. The banner is inside the form
+      // panel, which the opaque overlay covers, so the rejection must also be
+      // written to the in-overlay error node or the user sees nothing (F2).
       totpOverlay.classList.remove("totp-overlay--hidden");
+      if (errorMessage) {
+        setText(totpError, errorMessage);
+        totpInput.classList.add("error");
+        totpInput.setAttribute("aria-invalid", "true");
+      }
     } else {
       totpOverlay.classList.add("totp-overlay--hidden");
     }
@@ -867,7 +983,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // Event handlers
   // ---------------------------------------------------------------------------
 
+  /** Every write of the host goes through here: a new host ends a busy retry for the old one. */
+  function writeHost(host: string): void {
+    if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
+    hostInput.value = host;
+  }
+
   function handleToggleMode(): void {
+    cancelAuthBusyRetry?.();
     formMode = formMode === "login" ? "register" : "login";
 
     // A remembered password belongs to an EXISTING account. Carrying the
@@ -947,6 +1070,60 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     return null;
   }
 
+  /**
+   * Run a login, retrying an AUTH_BUSY refusal after the larger of its
+   * Retry-After and AUTH_BUSY_MIN_RETRY_MS (plus jitter) until it succeeds,
+   * fails any other way, or that wait (before jitter) would overrun the retry budget —
+   * that refusal is the one shown. The busy line shows while it retries; its
+   * Cancel, or picking another host, sends no further attempt, reports
+   * `onAutoLoginCancel` (which ends the attempt in flight) and returns the
+   * form to idle.
+   */
+  async function loginRetryingWhileBusy(login: () => Promise<void>): Promise<void> {
+    const deadline = Date.now() + AUTH_BUSY_RETRY_BUDGET_MS;
+    let cancelled = false;
+    let wake: (() => void) | null = null;
+    cancelAuthBusyRetry = () => {
+      cancelled = true;
+      authBusyRetry.hidden = true;
+      wake?.();
+      onAutoLoginCancel?.();
+    };
+    try {
+      for (;;) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- a retry is sequential by definition
+          await login();
+          return;
+        } catch (err) {
+          if (cancelled) {
+            transitionTo("idle");
+            return;
+          }
+          if (!isAuthBusy(err)) throw err;
+          const minWait = Math.max(err.retryAfterMs ?? 0, AUTH_BUSY_MIN_RETRY_MS);
+          const left = deadline - Date.now();
+          if (minWait > left) throw err;
+          // Jitter never costs the last retry: it is clipped to the budget.
+          const wait = Math.min(minWait + Math.random() * AUTH_BUSY_JITTER_MS, left);
+          authBusyRetry.hidden = false;
+          // oxlint-disable-next-line no-await-in-loop -- the wait between retries
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            setOwnedTimeout(signal, resolve, wait);
+          });
+          if (cancelled) {
+            transitionTo("idle");
+            return;
+          }
+        }
+      }
+    } finally {
+      cancelAuthBusyRetry = null;
+      authBusyRetry.hidden = true;
+    }
+  }
+
   async function handleFormSubmit(e: Event): Promise<void> {
     e.preventDefault();
 
@@ -968,11 +1145,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     try {
       if (formMode === "login") {
-        if (usingSavedPassword) {
-          await onLoginWithSavedPassword(host, username);
-        } else {
-          await onLogin(host, username, password);
-        }
+        const savedPassword = usingSavedPassword;
+        await loginRetryingWhileBusy(() =>
+          savedPassword
+            ? onLoginWithSavedPassword(host, username)
+            : onLogin(host, username, password),
+        );
       } else {
         const inviteCode = normaliseInviteCode(inviteInput.value);
         await onRegister(host, username, password, inviteCode);
@@ -981,9 +1159,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // The caller may also call showTotp() or showError() on this page.
     } catch (err: unknown) {
       let message: string;
-      if (err instanceof ApiClientError) {
-        // A server refusal: plain catalog copy for a known code, the
-        // capitalised server message otherwise.
+      if (err instanceof TransportError || err instanceof ApiClientError) {
+        // A transport failure or server refusal: plain catalog copy for an
+        // unreachable server or a known code, the capitalised server message
+        // otherwise.
         message = errorText(err, connectText("error.serverFallback"));
       } else if (err instanceof Error) {
         message = err.message;
@@ -1108,8 +1287,29 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       transitionTo("auto-connecting");
     },
 
+    showServerWait(serverName: string, host: string): void {
+      setText(serverWaitText, connectText("login.waitingForServer", { server: serverName }));
+      serverWaitHost = host;
+      serverWait.hidden = false;
+    },
+
+    cancelServerWaitUnless(host: string): void {
+      if (host !== serverWaitHost) cancelServerWait();
+    },
+
+    hideServerWait(): void {
+      serverWait.hidden = true;
+    },
+
     showError(message: string): void {
       transitionTo("error", message);
+    },
+
+    showNotice(message: string): void {
+      // A notice supersedes any error banner, and the form stays usable.
+      transitionTo("idle");
+      noticeMessage = message;
+      updateInfoNotice();
     },
 
     resetToIdle(): void {
@@ -1140,7 +1340,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setHost(host: string): void {
-      hostInput.value = host;
+      writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
     },
@@ -1182,7 +1382,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
      * which case the user still needs to enter the server address.
      */
     applyInviteLink(code: string, host?: string): void {
-      if (host) hostInput.value = host;
+      if (host) writeHost(host);
       if (formMode !== "register") handleToggleMode();
       inviteInput.value = code;
       updateRegistrationUi();

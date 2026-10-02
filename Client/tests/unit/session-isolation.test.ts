@@ -105,6 +105,8 @@ vi.mock("@lib/notificationSound", async (importOriginal) => ({
 // `api.getConfig().host` read (main.ts:776) after a login sets it via
 // `api.setConfig({ host })` (main.ts:515).
 const mockLogin = vi.fn();
+const HEALTHY = { version: null, online_users: null };
+const mockGetHealth = vi.fn();
 const mockApiLogout = vi.fn().mockResolvedValue(undefined);
 // UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
@@ -133,7 +135,7 @@ vi.mock("@lib/api", async (importOriginal) => {
         }),
         login: (...args: unknown[]) => mockLogin(...args),
         logout: mockApiLogout,
-        getHealth: vi.fn().mockResolvedValue({ version: null, online_users: null }),
+        getHealth: (...args: unknown[]) => mockGetHealth(...args),
       };
     }),
   };
@@ -144,6 +146,8 @@ vi.mock("@lib/api", async (importOriginal) => {
 // building the actual login form DOM.
 const capturedConnectCallbacks: {
   onLogin?: (host: string, username: string, password: string) => Promise<void>;
+  onDeleteProfile?: (profileId: string) => void;
+  onAutoLoginCancel?: () => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -154,6 +158,8 @@ vi.mock("@pages/ConnectPage", () => ({
       showTotp: vi.fn(),
       showConnecting: vi.fn(),
       showAutoConnecting: vi.fn(),
+      showServerWait: vi.fn(),
+      hideServerWait: vi.fn(),
       showError: vi.fn(),
       resetToIdle: vi.fn(),
       updateHealthStatus: vi.fn(),
@@ -198,7 +204,9 @@ vi.mock("@lib/dispatcher", async () => {
 });
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
+import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
+import { uiStore } from "@stores/ui.store";
 import { messagesStore } from "@stores/messages.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
@@ -207,6 +215,8 @@ import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
 import { leaveVoice } from "@lib/livekitSession";
 import { deleteCredential, loadCredential } from "@lib/credentials";
+import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
+import { createProfileManager } from "@lib/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
 
 const A = "a.example:8443";
@@ -223,6 +233,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   mockInvoke.mockReset().mockResolvedValue(undefined);
   mockLogin.mockReset();
+  mockGetHealth.mockReset().mockResolvedValue(HEALTHY);
   mockApiLogout.mockClear();
   vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
   vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
@@ -260,6 +271,8 @@ function latestConnectPage() {
   return vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
     selectServer: ReturnType<typeof vi.fn>;
     showAutoConnecting: ReturnType<typeof vi.fn>;
+    showServerWait: ReturnType<typeof vi.fn>;
+    hideServerWait: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -378,6 +391,28 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
     expect(peakLiveTransports()).toBe(1);
   });
 
+  it("times out a resume to an offline server, returning to the form with an error", async () => {
+    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
+      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
+    );
+    await loginWithPassword(A, 1);
+
+    await quickSwitchTo(A);
+    await vi.advanceTimersByTimeAsync(10);
+    const page = latestConnectPage();
+    // The resume reached the transport with the stored token...
+    expect(page.showAutoConnecting).toHaveBeenCalledWith("Server A");
+
+    // ...but the offline server never answers, so the pre-auth deadline must
+    // end the infinite "Auto-connecting…" screen rather than retry forever.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+
+    expectConsole("warn", /Pre-auth connection timed out/);
+    // The connect page reads this store and paints it over the overlay.
+    expect(uiStore.getState().transientError).toContain("offline");
+    expect(transportLog().at(-1)).toBe("ws_disconnect");
+  });
+
   it("keeps A's sign-in through Add server, so switching back skips the password", async () => {
     vi.mocked(loadCredential).mockImplementation(async (host: string) =>
       host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
@@ -401,6 +436,35 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
     expect(peakLiveTransports()).toBe(1);
   });
 
+  it("keeps a host's credential until its last saved profile is deleted", () => {
+    const shared = "shared.example:8443";
+    const saved = PROFILES.length;
+    PROFILES.push(
+      { ...PROFILES[0]!, id: "p-main", host: shared },
+      { ...PROFILES[0]!, id: "p-alt", host: shared },
+    );
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      removeProfile: ReturnType<typeof vi.fn>;
+    };
+    manager.removeProfile.mockImplementation((id: string) => {
+      PROFILES.splice(
+        PROFILES.findIndex((p) => p.id === id),
+        1,
+      );
+      return true;
+    });
+    try {
+      capturedConnectCallbacks.onDeleteProfile!("p-main");
+      expect(deleteCredential).not.toHaveBeenCalled();
+
+      capturedConnectCallbacks.onDeleteProfile!("p-alt");
+      expect(deleteCredential).toHaveBeenCalledWith(shared);
+    } finally {
+      PROFILES.splice(saved);
+      manager.removeProfile.mockImplementation(() => true);
+    }
+  });
+
   it("still deletes the credential on an explicit logout", async () => {
     await loginWithPassword(A, 1);
 
@@ -408,5 +472,289 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(deleteCredential).toHaveBeenCalledWith(A);
+  });
+});
+
+describe("keeps retrying a server that was down at launch (P2-T7)", () => {
+  const storedA = async (host: string) =>
+    host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null;
+
+  /** Stored-token connects to A so far. */
+  const connectsToA = (): number =>
+    transportLog().filter((e) => e.startsWith("connect") && e.includes("a.example")).length;
+
+  /** Health probes of `host` so far. */
+  const probesOf = (host: string): number =>
+    mockGetHealth.mock.calls.filter(([probed]) => probed === host).length;
+
+  /** A down server fails every probe, and each failure logs; claim them all. */
+  function claimHealthWarnings(): void {
+    for (;;) {
+      try {
+        expectConsole("warn", /health check failed/);
+      } catch {
+        return;
+      }
+    }
+  }
+
+  /** Resume A's stored token while A is down, and let the pre-auth deadline lapse. */
+  async function resumeAgainstDownServer(): Promise<void> {
+    vi.mocked(loadCredential).mockImplementation(storedA);
+    await loginWithPassword(A, 1);
+    mockGetHealth.mockImplementation(async (host: string) => {
+      if (host === A) throw new Error("connection refused");
+      return HEALTHY;
+    });
+    await quickSwitchTo(A);
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expect(latestConnectPage().showServerWait).toHaveBeenCalledWith("Server A", A);
+  }
+
+  afterEach(() => {
+    claimHealthWarnings();
+  });
+
+  it("resumes the stored token exactly once when the server comes back", async () => {
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+
+    // Still down at the first probe (5 s): nothing is resumed.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(connectsToA()).toBe(before);
+
+    // Back up by the next probe (backoff: 10 s later).
+    mockGetHealth.mockResolvedValue(HEALTHY);
+    await vi.advanceTimersByTimeAsync(10_000 + 100);
+    expect(connectsToA()).toBe(before + 1);
+    expect(latestConnectPage().showAutoConnecting).toHaveBeenLastCalledWith("Server A");
+
+    await completeHandshake(1, A);
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(authStore.getState().token).toBe("stored-token-a");
+
+    // Signed in: the wait is over, and nothing resumes a second time. (Past
+    // the 30 s probe cap, short of ws.ts's 60 s liveness redial of a quiet
+    // session, which would add a reconnect of its own.)
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(connectsToA()).toBe(before + 1);
+    expect(peakLiveTransports()).toBe(1);
+  });
+
+  it("gives up after one resume when the server answers but never signs in", async () => {
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+
+    // Healthy, but the socket never authenticates.
+    mockGetHealth.mockResolvedValue(HEALTHY);
+    await vi.advanceTimersByTimeAsync(5_000 + 100);
+    expect(connectsToA()).toBe(before + 1);
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expect(latestConnectPage().showServerWait).toHaveBeenCalledTimes(1);
+    expect(uiStore.getState().transientError).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(connectsToA()).toBe(before + 1);
+    expect(latestConnectPage().showServerWait).toHaveBeenCalledTimes(1);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it("resumes with the profile's auto-login as it is when the server comes back", async () => {
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      setAutoLogin: ReturnType<typeof vi.fn>;
+    };
+    const original = PROFILES[0]!;
+    await resumeAgainstDownServer();
+    // The user turns auto-login on for A while waiting.
+    PROFILES[0] = { ...original, autoConnect: true };
+    try {
+      manager.setAutoLogin.mockClear();
+      mockGetHealth.mockResolvedValue(HEALTHY);
+      await vi.advanceTimersByTimeAsync(5_000 + 100);
+
+      expect(latestConnectPage().showAutoConnecting).toHaveBeenLastCalledWith("Server A");
+      expect(manager.setAutoLogin).not.toHaveBeenCalledWith(null);
+      expect(manager.setAutoLogin).toHaveBeenCalledWith("p-a");
+    } finally {
+      PROFILES[0] = original;
+    }
+  });
+
+  it("ends the wait without resuming once the profile is deleted", async () => {
+    const original = PROFILES[0]!;
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+    PROFILES.splice(0, 1);
+    try {
+      mockGetHealth.mockResolvedValue(HEALTHY);
+      await vi.advanceTimersByTimeAsync(40_000);
+
+      expect(latestConnectPage().hideServerWait).toHaveBeenCalled();
+      expect(connectsToA()).toBe(before);
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    } finally {
+      PROFILES.unshift(original);
+    }
+  });
+
+  it("ends the wait at once when the waited-on profile is deleted", async () => {
+    const original = PROFILES[0]!;
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      removeProfile: ReturnType<typeof vi.fn>;
+    };
+    manager.removeProfile.mockImplementation((id: string) => {
+      PROFILES.splice(
+        PROFILES.findIndex((p) => p.id === id),
+        1,
+      );
+      return true;
+    });
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+    try {
+      latestConnectPage().hideServerWait.mockClear();
+      capturedConnectCallbacks.onDeleteProfile!(original.id);
+      expect(latestConnectPage().hideServerWait).toHaveBeenCalled();
+
+      mockGetHealth.mockResolvedValue(HEALTHY);
+      const [probesA, probesB] = [probesOf(A), probesOf(B)];
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(probesOf(A) - probesA).toBe(0);
+      expect(probesOf(B) - probesB).toBeGreaterThan(0);
+      expect(connectsToA()).toBe(before);
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    } finally {
+      PROFILES.unshift(original);
+      manager.removeProfile.mockImplementation(() => true);
+    }
+  });
+
+  it("backs off from 5 s to 30 s between probes", async () => {
+    await resumeAgainstDownServer();
+    // Only the wait probes A more often than B: the page's own 15 s check
+    // probes both, so the difference is the wait's probes alone.
+    const waitProbes = (): number => probesOf(A) - probesOf(B);
+    const start = waitProbes();
+    const probeTimes: number[] = [];
+    for (let s = 1; s <= 130; s++) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      if (waitProbes() > start + probeTimes.length) probeTimes.push(s);
+    }
+    expect(probeTimes).toEqual([5, 15, 35, 65, 95, 125]);
+  });
+
+  it("stops probing and never resumes once the user cancels the wait", async () => {
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+
+    capturedConnectCallbacks.onAutoLoginCancel!();
+    expect(latestConnectPage().hideServerWait).toHaveBeenCalled();
+    mockGetHealth.mockResolvedValue(HEALTHY);
+    const [probesA, probesB] = [probesOf(A), probesOf(B)];
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(connectsToA()).toBe(before);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    // Only the page's own health check still runs, and it probes both alike.
+    expect(probesOf(A) - probesA).toBe(probesOf(B) - probesB);
+  });
+
+  it("is superseded by a manual login started during the wait", async () => {
+    await resumeAgainstDownServer();
+    const before = connectsToA();
+
+    await loginWithPassword(B, 2);
+    expect(latestConnectPage().hideServerWait).toHaveBeenCalled();
+    mockGetHealth.mockResolvedValue(HEALTHY);
+    await vi.advanceTimersByTimeAsync(40_000);
+
+    expect(connectsToA()).toBe(before);
+    expect(authStore.getState().token).toBe(`password-token-${B}`);
+    expect(peakLiveTransports()).toBe(1);
+  });
+
+  it("still never resumes after an explicit logout (skip-auto-login)", async () => {
+    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+      getAutoConnectProfile: ReturnType<typeof vi.fn>;
+    };
+    manager.getAutoConnectProfile.mockReturnValue({ ...PROFILES[0]!, autoConnect: true });
+    try {
+      // The logout's credential delete loses the race: the read still finds it.
+      vi.mocked(loadCredential).mockImplementation(storedA);
+      await loginWithPassword(A, 1);
+      const before = connectsToA();
+
+      clearAuth("user");
+      await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 60_000);
+
+      expect(connectsToA()).toBe(before);
+      expect(latestConnectPage().showAutoConnecting).not.toHaveBeenCalled();
+      expect(latestConnectPage().showServerWait).not.toHaveBeenCalled();
+      expect(authStore.getState().isAuthenticated).toBe(false);
+    } finally {
+      manager.getAutoConnectProfile.mockReturnValue(null);
+    }
+  });
+});
+
+describe("a stored-token resume refused SERVER_BUSY keeps connecting (P5-S04)", () => {
+  /** The server holds the connect for its 10 s admission wait, then refuses it. */
+  async function busyRefusal(): Promise<void> {
+    emitTauriEvent("ws-state", "open");
+    await vi.advanceTimersByTimeAsync(10_000);
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "error",
+        payload: {
+          code: "SERVER_BUSY",
+          message: "server busy, retrying shortly",
+          retry_after_ms: 5_000,
+        },
+      }),
+    );
+    emitTauriEvent("ws-state", "closed");
+    // The redial waits out retry_after_ms.
+    await vi.advanceTimersByTimeAsync(5_000 + 100);
+  }
+
+  async function resumeA(): Promise<number> {
+    vi.mocked(loadCredential).mockImplementation(async (host: string) =>
+      host === A ? { username: "alex", token: "stored-token-a", hasPassword: true } : null,
+    );
+    await loginWithPassword(A, 1);
+    await quickSwitchTo(A);
+    await vi.advanceTimersByTimeAsync(10);
+    uiStore.setState((prev) => ({ ...prev, transientError: null }));
+    return Date.now();
+  }
+
+  it("signs in after two refusals without saying the server is offline", async () => {
+    const startedAt = await resumeA();
+
+    await busyRefusal();
+    await busyRefusal();
+    expect(Date.now() - startedAt).toBeGreaterThan(PREAUTH_CONNECT_TIMEOUT_MS);
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+    expect(latestConnectPage().showServerWait).not.toHaveBeenCalled();
+
+    await completeHandshake(1, A);
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(authStore.getState().token).toBe("stored-token-a");
+  });
+
+  it("still gives up on a server that stays saturated past the overall cap", async () => {
+    const startedAt = await resumeA();
+
+    while (Date.now() - startedAt < PREAUTH_BUSY_CAP_MS - 15_200) await busyRefusal();
+    expect(uiStore.getState().transientError ?? "").not.toContain("offline");
+
+    await vi.advanceTimersByTimeAsync(PREAUTH_BUSY_CAP_MS - (Date.now() - startedAt) + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expect(uiStore.getState().transientError).toContain("offline");
   });
 });

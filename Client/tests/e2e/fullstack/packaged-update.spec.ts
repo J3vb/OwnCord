@@ -169,10 +169,11 @@ for (const media of [false, true]) {
         // ARCH-13 (i): the hub's own teardown notice reached the client after
         // the admin's announcement, and names the update rather than a stop
         // (CLI-02); (v): the drain ran on a live budget, so no audit row was
-        // dropped.
+        // dropped. The redial spread is 10 ms per connected client (P5-S04):
+        // alice and bob.
         expect(notices).toEqual([
-          { reason: "update", delay_seconds: 5 },
-          { reason: "update", delay_seconds: 5 },
+          { reason: "update", delay_seconds: 5, reconnect_spread_ms: 20 },
+          { reason: "update", delay_seconds: 5, reconnect_spread_ms: 20 },
         ]);
         expect(server.log()).not.toContain("audit log dropped");
         expect(server.log()).not.toContain("flush lost audit entries");

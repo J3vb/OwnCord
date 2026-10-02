@@ -17,12 +17,25 @@ pub const TRAY_STATUS: &str = "Status";
 pub const TRAY_STATUS_ONLINE: &str = "Online";
 pub const TRAY_STATUS_IDLE: &str = "Idle";
 pub const TRAY_STATUS_DND: &str = "Do Not Disturb";
-pub const TRAY_STATUS_OFFLINE: &str = "Offline";
+// The app's status picker calls this "Invisible"; the tray must not say
+// "Offline" for the same state (F24).
+pub const TRAY_STATUS_OFFLINE: &str = "Invisible";
 pub const TRAY_OPEN_LOGS: &str = "Open Log Folder";
 pub const TRAY_MUTE: &str = "Mute / Unmute";
 pub const TRAY_DEAFEN: &str = "Deafen / Undeafen";
 pub const TRAY_QUIT: &str = "Quit";
 pub const TRAY_TOOLTIP: &str = "OwnCord";
+pub const TRAY_TOOLTIP_UNREAD_ONE: &str = "OwnCord — 1 unread mention";
+pub const TRAY_TOOLTIP_UNREAD: &str = "OwnCord — {count} unread mentions";
+
+/// The tray tooltip with the unread badge count (DP-27); plain at 0.
+pub fn tray_tooltip(count: u32) -> String {
+    match count {
+        0 => TRAY_TOOLTIP.to_string(),
+        1 => TRAY_TOOLTIP_UNREAD_ONE.to_string(),
+        n => TRAY_TOOLTIP_UNREAD.replace("{count}", &n.to_string()),
+    }
+}
 
 // --- Startup failure dialog (not Linux) ------------------------------------
 
@@ -74,6 +87,15 @@ mod tests {
             startup_dialog_body("boom"),
             "The application encountered a startup error and cannot continue.\n\nboom"
         );
+    }
+
+    #[test]
+    fn tray_tooltip_counts_unread_mentions() {
+        assert_eq!(tray_tooltip(0), "OwnCord");
+        assert_eq!(tray_tooltip(1), "OwnCord — 1 unread mention");
+        assert_eq!(tray_tooltip(5), "OwnCord — 5 unread mentions");
+        // The tooltip has room for the real number; only the overlay caps at 9+.
+        assert_eq!(tray_tooltip(12), "OwnCord — 12 unread mentions");
     }
 
     #[test]

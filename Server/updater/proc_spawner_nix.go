@@ -8,7 +8,13 @@ import (
 	"syscall"
 )
 
-// SpawnDetached starts a new process that is not attached to the current one.
+// SpawnReplacement starts the replacement server in a session of its own.
+// It never needs this process to stay behind, so wait is always nil.
+func SpawnReplacement(exePath string, args []string) (wait func() int, err error) {
+	return nil, SpawnDetached(exePath, args)
+}
+
+// SpawnDetached starts the replacement server in a session of its own.
 func SpawnDetached(exePath string, args []string) error {
 	cmd := exec.Command(exePath, args...) //nolint:gosec // G204: exePath is the server's own binary path, validated by the caller
 	cmd.Stdout = os.Stdout

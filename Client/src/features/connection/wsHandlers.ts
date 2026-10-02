@@ -26,7 +26,13 @@ export function handleAuthOk(
     clock.lastReconnectHandshakeAt = Date.now();
   }
   clock.hasAuthenticatedBefore = true;
-  setAuth(authStore.getState().token ?? "", payload.user, payload.server_name, payload.motd);
+  setAuth(
+    authStore.getState().token ?? "",
+    payload.user,
+    payload.server_name,
+    payload.motd,
+    payload.upload_policy ?? null,
+  );
 
   // The resume path can land with no ChannelTopic subscription: the hub
   // only transfers a focused channel from an old connection entry, but
@@ -64,14 +70,16 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
-const REJOIN_REASONS: ReadonlySet<ServerRestartReasonValue> = new Set([
-  ServerRestartReason.UPDATE,
-  ServerRestartReason.BACKUP_RESTORE,
-  ServerRestartReason.SETUP,
+// RT-12: a restart that may put us back in our call after it drops. The
+// shutdown reason is a stop or restart from outside the server (SIGTERM, a
+// supervisor), and D-2 gives it its own shorter window: a quick systemctl/
+// docker restart is a blip, while a long maintenance stop still ends the call.
+const REJOIN_WINDOWS_MS: ReadonlyMap<ServerRestartReasonValue, number> = new Map([
+  [ServerRestartReason.UPDATE, 10 * 60_000],
+  [ServerRestartReason.BACKUP_RESTORE, 10 * 60_000],
+  [ServerRestartReason.SETUP, 10 * 60_000],
+  [ServerRestartReason.SHUTDOWN, 2 * 60_000],
 ]);
-
-/** A ready later than this after the notice does not rejoin: the call is over. */
-const REJOIN_WINDOW_MS = 10 * 60_000;
 
 export function handleServerRestart(
   clock: ReconnectClock,
@@ -89,10 +97,11 @@ export function handleServerRestart(
   // RT-12: mark whether the coming drop may put us back in our call. The hub
   // wipes voice_states on boot, so the resume cannot restore the membership
   // the way it restores chat; the drop records the channel and a later ready
-  // sends one voice_join. A shutdown (a stop from outside the server) may last
-  // hours, so it never allows a rejoin.
-  clock.voiceRejoinNoticeAt =
-    clock.restartAnnounced && REJOIN_REASONS.has(payload.reason) ? Date.now() : null;
+  // sends one voice_join. The notice carries the reason's own window (D-2): a
+  // planned restart gets 10 minutes, an outside shutdown a shorter 2 minutes.
+  const windowMs = REJOIN_WINDOWS_MS.get(payload.reason);
+  clock.voiceRejoinExpiresAt =
+    clock.restartAnnounced && windowMs !== undefined ? Date.now() + windowMs : null;
 }
 
 /**
@@ -108,7 +117,7 @@ export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState)
   // RT-12: record the call we are in now, before leaveVoiceChannel clears it,
   // so a switch, join, kick or leave during the countdown is already settled.
   const channelId = voiceStore.getState().currentChannelId;
-  clock.voiceRejoinChannelId = clock.voiceRejoinNoticeAt === null ? null : channelId;
+  clock.voiceRejoinChannelId = clock.voiceRejoinExpiresAt === null ? null : channelId;
   if (channelId !== null) {
     void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
     leaveVoiceChannel();
@@ -129,10 +138,10 @@ export function rejoinVoiceAfterRestart(
   payload: Payload<"ready">,
 ): void {
   const channelId = clock.voiceRejoinChannelId;
-  const noticeAt = clock.voiceRejoinNoticeAt;
+  const expiresAt = clock.voiceRejoinExpiresAt;
   clock.voiceRejoinChannelId = null;
-  if (channelId === null || noticeAt === null) return;
-  if (Date.now() - noticeAt > REJOIN_WINDOW_MS) {
+  if (channelId === null || expiresAt === null) return;
+  if (Date.now() > expiresAt) {
     log.info("Not rejoining voice after restart — the server was down too long", { channelId });
     return;
   }

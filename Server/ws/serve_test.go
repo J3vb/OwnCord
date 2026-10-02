@@ -3,12 +3,14 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -189,6 +191,67 @@ func TestBuildAuthOK_ValidJSON(t *testing.T) {
 	msg := hub.BuildAuthOKForTest(user, "member")
 	if !json.Valid(msg) {
 		t.Errorf("buildAuthOK output is not valid JSON: %s", msg)
+	}
+}
+
+// P1-09: auth_ok's upload_policy advertises upload.max_size_mb in bytes so
+// the composer can refuse an oversize file before uploading it.
+func TestBuildAuthOK_UploadPolicy(t *testing.T) {
+	database := openServeTestDB(t)
+	hub := newTestHubWith(t, ws.HubOptions{DB: database, UploadPolicy: ws.UploadPolicy{MaxUploadBytes: 150 << 20}})
+	go hub.Run()
+	t.Cleanup(func() { hub.Stop() })
+	user := seedServeUser(t, database, "authok-maxupload")
+
+	var env struct {
+		Payload struct {
+			UploadPolicy struct {
+				MaxUploadBytes int64 `json:"max_upload_bytes"`
+			} `json:"upload_policy"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(hub.BuildAuthOKForTest(user, "member"), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := env.Payload.UploadPolicy.MaxUploadBytes; got != 150<<20 {
+		t.Errorf("payload.upload_policy.max_upload_bytes = %d, want %d", got, 150<<20)
+	}
+}
+
+type fixedFileTypes storage.FileTypePolicy
+
+func (f fixedFileTypes) FileTypePolicy(context.Context) (storage.FileTypePolicy, error) {
+	return storage.FileTypePolicy(f), nil
+}
+
+// auth_ok carries the upload file-type policy in force, so the composer can
+// refuse a blocked file before uploading it.
+func TestBuildAuthOK_UploadPolicyFileTypes(t *testing.T) {
+	database := openServeTestDB(t)
+	hub := newTestHubWith(t, ws.HubOptions{
+		DB:              database,
+		UploadPolicy:    ws.UploadPolicy{MaxUploadBytes: 10 << 20},
+		UploadFileTypes: fixedFileTypes{Blocked: []string{"bat", "ps1"}, Allowed: []string{"txt"}},
+	})
+	go hub.Run()
+	t.Cleanup(func() { hub.Stop() })
+	user := seedServeUser(t, database, "authok-filetypes")
+
+	var env struct {
+		Payload struct {
+			UploadPolicy struct {
+				MaxUploadBytes    int64    `json:"max_upload_bytes"`
+				BlockedExtensions []string `json:"blocked_extensions"`
+				AllowedExtensions []string `json:"allowed_extensions"`
+			} `json:"upload_policy"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(hub.BuildAuthOKForTest(user, "member"), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := env.Payload.UploadPolicy
+	if got.MaxUploadBytes != 10<<20 || !slices.Equal(got.BlockedExtensions, []string{"bat", "ps1"}) || !slices.Equal(got.AllowedExtensions, []string{"txt"}) {
+		t.Errorf("payload.upload_policy = %+v, want the size cap and both lists", got)
 	}
 }
 

@@ -4,7 +4,7 @@
  * how it shares the composer with the @-mention popup).
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi, type Mock } from "vitest";
 
 vi.mock("@lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
@@ -16,13 +16,13 @@ vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
 
-const { fetchImageAsDataUrlMock } = vi.hoisted(() => ({
-  fetchImageAsDataUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
+const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
+  fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
 vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/components/message-list/attachments")>();
-  return { ...actual, fetchImageAsDataUrl: fetchImageAsDataUrlMock };
+  return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
 import {
@@ -35,6 +35,7 @@ import { createMessageInput } from "../../src/components/MessageInput";
 import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
+import { loadEmojiCatalog, setSkinTone } from "../../src/features/messaging/emojiCatalog";
 
 const EMOJI = [
   { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
@@ -42,7 +43,13 @@ const EMOJI = [
   { id: 3, shortcode: "blob_wave", url: "/api/v1/emoji/3/image" },
 ];
 
+// The unicode set is a lazy chunk; load it once so the filter sees it.
+beforeAll(async () => {
+  await loadEmojiCatalog();
+});
+
 beforeEach(() => {
+  localStorage.clear();
   clearCustomEmoji();
   emojiStore.flush();
   setCustomEmoji(EMOJI);
@@ -94,6 +101,50 @@ describe("filterEmojiSuggestions", () => {
   it("searches the unicode keyword list, not just primary names", () => {
     const out = filterEmojiSuggestions("flame");
     expect(out.some((s) => s.insert === "🔥")).toBe(true);
+  });
+
+  it("finds the full Unicode set by its underscore-free shortcode", () => {
+    const thumbs = filterEmojiSuggestions("thumbsup").find((s) => s.kind === "unicode");
+    expect(thumbs?.insert).toBe("👍");
+    expect(filterEmojiSuggestions("astronaut").some((s) => s.insert === "🧑‍🚀")).toBe(true);
+  });
+
+  it("puts the emoji named exactly by the query first", () => {
+    const first = (q: string): string | undefined =>
+      filterEmojiSuggestions(q).find((s) => s.kind === "unicode")?.insert;
+    // Each also starts a curated phrase on another emoji: 😍 "heart eyes",
+    // 🤩 "star struck", 🥰 "love hearts", 🙄 "eye roll", 💏 the Unicode "kiss".
+    expect(first("heart")).toBe("❤️");
+    expect(first("star")).toBe("⭐");
+    expect(first("love")).toBe("❤️");
+    expect(first("eye")).toBe("👁️");
+    expect(first("kiss")).toBe("💋");
+    expect(first("eyes")).toBe("👀");
+    expect(first("winking_face")).toBe("😉");
+    expect(first("fire")).toBe("🔥");
+    expect(first("mango")).toBe("🥭");
+    expect(first("thumbsup")).toBe("👍");
+    expect(first("thumbs")).toBe("👍");
+    // Discord's names: the face is the animal, the full body is its "2".
+    for (const [name, face, body] of [
+      ["dog", "🐶", "🐕"],
+      ["cat", "🐱", "🐈"],
+      ["mouse", "🐭", "🐁"],
+      ["rabbit", "🐰", "🐇"],
+      ["tiger", "🐯", "🐅"],
+      ["cow", "🐮", "🐄"],
+      ["pig", "🐷", "🐖"],
+    ] as const) {
+      expect(first(name)).toBe(face);
+      expect(first(`${name}2`)).toBe(body);
+    }
+  });
+
+  it("inserts the remembered skin tone", () => {
+    setSkinTone(3);
+    const thumbs = filterEmojiSuggestions("thumbsup").find((s) => s.kind === "unicode");
+    expect(thumbs?.insert).toBe("👍🏽");
+    expect(thumbs?.char).toBe("👍🏽");
   });
 
   it("is case-insensitive", () => {

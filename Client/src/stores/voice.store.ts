@@ -83,13 +83,18 @@ export interface VoiceState {
    *  the store; optional for the same fixture reason as peerVerifications. */
   readonly localServerMuted?: boolean;
   readonly localServerDeafened?: boolean;
+  /** The local deafen in effect is the one a moderator's deafen applied, not
+   *  the member's own: the moderator's lift releases it, while a deafen the
+   *  member chose survives the lift. Follows localDeafened, so it outlives a
+   *  leave (a moderator move) and clears on any undeafen. */
+  readonly moderatorDeafened?: boolean;
   /** True while push-to-talk is bound and the key is NOT currently held —
-   *  i.e. the mic should be gated (silenced) for PTT reasons. This is
-   *  deliberately a separate flag from localMuted: PTT must never write the
-   *  flag that represents the user's own explicit mute (see ptt.ts and
-   *  livekitSession.setMuted), so a hot-mic press can't undo a self-mute and
-   *  a PTT release can't corrupt the mute toggle's state. Always written by
-   *  the store; optional only for the same fixture reason as localServerMuted. */
+   *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
+   *  separate flag from localMuted: PTT never writes the flag that represents
+   *  the user's own explicit mute (livekitSession.setPttGated only closes and
+   *  opens the gate), so a press can't undo a self-mute and a release can't
+   *  corrupt the mute toggle's state. Always written by the store; optional
+   *  only for the same fixture reason as localServerMuted. */
   readonly pttGated?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
@@ -128,6 +133,7 @@ const INITIAL_STATE: VoiceState = {
   localDeafened: false,
   localServerMuted: false,
   localServerDeafened: false,
+  moderatorDeafened: false,
   pttGated: false,
   localCamera: false,
   localScreenshare: false,
@@ -150,6 +156,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localServerMuted: false,
     localServerDeafened: false,
+    moderatorDeafened: false,
     pttGated: false,
     localCamera: false,
     localScreenshare: false,
@@ -232,13 +239,21 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
     const nextChannels = new Map(prev.voiceUsers);
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     const nextUsers = new Map(existingChannel ?? []);
+    // Preserve the LiveKit-authoritative speaking flag on an existing user:
+    // setSpeakers is the only writer (LiveKit's ActiveSpeakersChanged). The
+    // server's voice_state always ships speaking:false, so writing
+    // payload.speaking verbatim here cleared the speaking ring on any
+    // unrelated toggle that arrived between ActiveSpeakersChanged ticks. A
+    // brand-new user has no prior value, so the payload seeds it.
+    const existingUser = existingChannel?.get(payload.user_id);
+    const speaking = existingUser !== undefined ? existingUser.speaking : payload.speaking;
 
     nextUsers.set(payload.user_id, {
       userId: payload.user_id,
       username: payload.username,
       muted: payload.muted,
       deafened: payload.deafened,
-      speaking: payload.speaking,
+      speaking,
       camera: payload.camera,
       screenshare: payload.screenshare,
       serverMuted,
@@ -371,6 +386,14 @@ export function setEncryptionDegraded(degraded: boolean): void {
   );
 }
 
+/** Record that the local deafen is the one a moderator's deafen applied
+ *  (see VoiceState.moderatorDeafened). */
+export function setModeratorDeafened(applied: boolean): void {
+  voiceStore.setState((prev) =>
+    prev.moderatorDeafened === applied ? prev : { ...prev, moderatorDeafened: applied },
+  );
+}
+
 /** Toggle local mute state. */
 export function setLocalMuted(muted: boolean): void {
   voiceStore.setState((prev) => ({
@@ -384,15 +407,24 @@ export function setLocalDeafened(deafened: boolean): void {
   voiceStore.setState((prev) => ({
     ...prev,
     localDeafened: deafened,
+    moderatorDeafened: deafened && prev.moderatorDeafened === true,
   }));
 }
 
 /** Record whether push-to-talk is currently gating (silencing) the mic —
- *  i.e. the bound key is not held. Written only from ptt.ts. Deliberately
- *  separate from localMuted so PTT can never write the flag that represents
- *  the user's own explicit mute (see the VoiceState.pttGated doc comment). */
+ *  i.e. the bound key is not held. Written through livekitSession.setPttGated,
+ *  which also closes or opens the mic processor's gate. Deliberately separate
+ *  from localMuted so PTT can never write the flag that represents the user's
+ *  own explicit mute (see the VoiceState.pttGated doc comment). */
 export function setPttGated(gated: boolean): void {
   voiceStore.setState((prev) => (prev.pttGated === gated ? prev : { ...prev, pttGated: gated }));
+}
+
+/** Whether the user's own mute is in effect. Push-to-talk never writes
+ *  localMuted (its gate closes inside the mic processor), so this is the
+ *  mute the user asked for: what the mic controls show. */
+export function isSelfMuted(state: VoiceState): boolean {
+  return state.localMuted;
 }
 
 /** Whether the Rust-side PTT key poller is actually able to report key state

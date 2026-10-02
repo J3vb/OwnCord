@@ -1,4 +1,5 @@
 import { voiceText } from "../i18n/voice";
+import { loadPref } from "@lib/preferences";
 
 /**
  * Push-to-Talk display helpers. The PTT service itself — Rust-side
@@ -77,4 +78,14 @@ export function vkName(vk: number): string {
   // Numpad 0-9
   if (vk >= 0x60 && vk <= 0x69) return voiceText("key.numpad", { digit: vk - 0x60 });
   return voiceText("key.unknown", { code: vk.toString(16).toUpperCase() });
+}
+
+/** How long push-to-talk keeps transmitting after the key is released
+ *  (DP-30): 0–2000 ms, 20 ms by default, as Discord's. */
+export const PTT_RELEASE_DELAY_DEFAULT_MS = 20;
+export const PTT_RELEASE_DELAY_MAX_MS = 2000;
+
+export function pttReleaseDelayMs(): number {
+  const ms = loadPref<number>("pttReleaseDelayMs", PTT_RELEASE_DELAY_DEFAULT_MS);
+  return Math.min(Math.max(ms, 0), PTT_RELEASE_DELAY_MAX_MS);
 }

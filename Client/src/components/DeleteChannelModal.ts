@@ -52,7 +52,7 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
 
     // Error display
     const errorEl = createElement("div", {
-      style: "color: var(--red); font-size: 13px; display: none; margin-top: 8px;",
+      style: "color: var(--text-danger); font-size: 13px; display: none; margin-top: 8px;",
       "data-testid": "delete-channel-error",
     });
     body.appendChild(errorEl);

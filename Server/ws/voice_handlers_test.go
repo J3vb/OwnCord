@@ -3,6 +3,8 @@ package ws_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -52,26 +54,42 @@ func openVoiceTestDB(t *testing.T) *db.DB {
 }
 
 // newVoiceHub creates a hub+db suitable for voice handler tests.
-// It injects a test LiveKit client so voice_join passes the livekit!=nil guard.
+// It injects a test LiveKit client pointed at a stub SFU so voice_join clears
+// the "voice not configured" guard AND the externally-managed reachability
+// probe (voice_join.go), which the token mint now precedes.
 func newVoiceHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
 	database := openVoiceTestDB(t)
 	limiter := auth.NewRateLimiter()
 
-	// A test LiveKit client with non-default credentials.
-	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
-		LiveKitAPIKey:    "test-api-key-12345",
-		LiveKitAPISecret: "test-api-secret-67890abcdef",
-		LiveKitURL:       "ws://localhost:7880",
-	})
-	if err != nil {
-		t.Fatalf("NewLiveKitClient: %v", err)
-	}
+	lk := healthyLiveKitClient(t)
 	hub := newTestHubWith(t, ws.HubOptions{DB: database, Limiter: limiter, LiveKit: lk})
 
 	go hub.Run()
 	t.Cleanup(func() { hub.Stop() })
 	return hub, database
+}
+
+// healthyLiveKitClient returns a LiveKit client pointed at an httptest server
+// that answers every Twirp RPC with an empty protobuf success — enough for the
+// ListRooms reachability probe voice_join runs when no companion process is
+// managed, and for the participant RPCs the eviction paths call.
+func healthyLiveKitClient(t *testing.T) *ws.LiveKitClient {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/protobuf")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	lk, err := ws.NewLiveKitClient(&config.VoiceConfig{
+		LiveKitAPIKey:    "test-api-key-12345",
+		LiveKitAPISecret: "test-api-secret-67890abcdef",
+		LiveKitURL:       "ws://" + srv.Listener.Addr().String(),
+	})
+	if err != nil {
+		t.Fatalf("NewLiveKitClient: %v", err)
+	}
+	return lk
 }
 
 // seedVoiceOwner inserts an Owner-role user for permission-passing tests.
@@ -342,6 +360,37 @@ func TestVoice_Join_NoPermission_SendsError(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected FORBIDDEN error for client without CONNECT_VOICE permission")
+	}
+}
+
+// TestVoice_Join_ReadDeniedByOverride_Refused: a voice channel hidden from a
+// role by a READ_MESSAGES-only override is not joinable, even though the role
+// still carries CONNECT_VOICE — joining would put the member in a room they
+// cannot see.
+func TestVoice_Join_ReadDeniedByOverride_Refused(t *testing.T) {
+	hub, database := newVoiceHub(t)
+	user := seedVoiceUserWithRole(t, database, "hidden-vc", 4)
+	chanID := seedVoiceChan(t, database, "vc-hidden")
+	if err := database.UpsertChannelOverride(context.Background(), chanID, 4, 0, permissions.ReadMessages); err != nil {
+		t.Fatalf("UpsertChannelOverride: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, user, 0, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, voiceJoinMsg(chanID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != ws.ErrCodeForbidden {
+		t.Fatalf("error code = %q, want %q", code, ws.ErrCodeForbidden)
+	}
+	state, err := database.GetVoiceState(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	if state != nil {
+		t.Error("voice_states row persisted for a voice_join into a channel the member cannot see")
 	}
 }
 

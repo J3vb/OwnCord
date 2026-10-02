@@ -30,6 +30,12 @@ WHERE id = ? AND revoked_at IS NULL;
 UPDATE api_tokens SET revoked_at = datetime('now')
 WHERE label = ? AND revoked_at IS NULL;
 
+-- name: RevokeUserAPITokens :execresult
+-- Sign-out-everywhere and account recovery revoke every live token of the
+-- account along with its sessions.
+UPDATE api_tokens SET revoked_at = datetime('now')
+WHERE user_id = ? AND revoked_at IS NULL;
+
 -- name: TouchAPIToken :exec
 UPDATE api_tokens SET last_used_at = datetime('now') WHERE token_hash = ?;
 

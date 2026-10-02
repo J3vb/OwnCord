@@ -730,3 +730,47 @@ func TestDM_MultipleChannels_IsolatedDelivery(t *testing.T) {
 		t.Error("Charlie received message from Alice-Bob DM")
 	}
 }
+
+// The dm_channel_open a send fans out carries the sender's live status, not
+// the users.status row, whose connect stamp may still be pending.
+func TestDM_ChatSend_ReopenCarriesSenderLiveStatus(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	ctx := context.Background()
+	alice := seedOwnerUser(t, database, "dm-live-alice")
+	bob := seedMemberUser(t, database, "dm-live-bob")
+	dmChID := seedDMChannel(t, database, alice.ID, bob.ID)
+	if err := database.CloseDM(ctx, bob.ID, dmChID); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+
+	sendAlice := make(chan []byte, 64)
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, dmChID, sendAlice)
+	cBob := ws.NewTestClientWithUser(hub, bob, 0, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cAlice)
+	waitRegistered(t, hub, cBob)
+	hub.ApplyConnectStatusForTest(cAlice)
+	if err := database.UpdateUserStatus(ctx, alice.ID, db.StatusOffline); err != nil {
+		t.Fatalf("UpdateUserStatus: %v", err)
+	}
+
+	hub.HandleMessageForTest(cAlice, dmChatSendMsg(dmChID, "back online"))
+
+	env := dmWaitMsgType(sendBob, "dm_channel_open", waitTimeout)
+	if env == nil {
+		t.Fatal("Bob did not receive dm_channel_open")
+	}
+	payload, _ := env["payload"].(map[string]any)
+	recipient, _ := payload["recipient"].(map[string]any)
+	if got := recipient["status"]; got != db.StatusOnline {
+		t.Errorf("dm_channel_open recipient.status = %v, want %q", got, db.StatusOnline)
+	}
+	recipients, _ := payload["recipients"].([]any)
+	for _, r := range recipients {
+		if got := r.(map[string]any)["status"]; got != db.StatusOnline {
+			t.Errorf("dm_channel_open recipients[].status = %v, want %q", got, db.StatusOnline)
+		}
+	}
+}

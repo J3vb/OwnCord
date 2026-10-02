@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
@@ -27,11 +27,14 @@ type AuthBroadcaster interface {
 
 // SessionDisconnector is the hub's half of dropping a live socket once its
 // session is gone — the service layer's counterpart to api.SessionDisconnector,
-// satisfied by *ws.Hub. It is exported so the admin package can pin *ws.Hub to
-// it (service cannot import ws). A broadcaster that does not implement it
-// (tests, a nil hub) simply skips the disconnect.
+// satisfied by *ws.Hub. DisconnectRevokedUser drops the account's socket
+// outright; DisconnectIfSessionRevoked drops it only if the session it rode
+// is gone. It is exported so the admin package can pin *ws.Hub to it (service
+// cannot import ws). A broadcaster that does not implement it (tests, a nil
+// hub) simply skips the disconnect.
 type SessionDisconnector interface {
 	DisconnectRevokedUser(userID int64)
+	DisconnectIfSessionRevoked(userID int64)
 }
 
 // Principal is the authenticated caller api.AuthMiddleware resolved for a
@@ -243,8 +246,8 @@ var (
 	// ErrAuthBusy is the B4-4 admission refusal: the process-wide budget for
 	// expensive authentication work is exhausted, so this attempt ran no
 	// bcrypt and consumed no lockout attempt. Same category as the lockouts
-	// (429 RATE_LIMITED); a message of its own so an operator can tell load
-	// from abuse.
+	// (429), but its own code, AUTH_BUSY, tells load from abuse; the queued
+	// sites wrap it with a retry hint (authBusyError, P5-S02).
 	ErrAuthBusy                   = &authError{ErrRateLimited, "too many authentication attempts in progress, try again later"}
 	ErrPasswordRequired           = &authError{ErrInvalidInput, "password is required"}
 	ErrIncorrectPassword          = &authError{ErrInvalidInput, "incorrect password"}
@@ -300,6 +303,8 @@ type AuthService struct {
 	// private one over st; the composition root swaps in the shared
 	// Services.Erasure (UseErasure) so the file storage is installed once.
 	erasure *ErasureService
+	// admissionWait bounds acquireAdmission's queue wait (P5-S02).
+	admissionWait time.Duration
 }
 
 // NewAuthService wires the auth slice. limiter is the shared auth rate
@@ -312,14 +317,15 @@ type AuthService struct {
 // enrolment and the replay window, and a store fault fails closed.
 func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
 	return &AuthService{
-		st:          st,
-		limiter:     limiter,
-		partial:     auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
-		pending:     auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
-		usedCodes:   auth.NewUsedTOTPCodeStore().WithPersister(st),
-		totpKey:     totpKey,
-		broadcaster: broadcaster,
-		erasure:     NewErasureService(st),
+		st:            st,
+		limiter:       limiter,
+		partial:       auth.NewPartialAuthStore(partialAuthStoreTTL).WithPersister(st),
+		pending:       auth.NewPendingTOTPStore(pendingTOTPStoreTTL).WithPersister(st, totpKey),
+		usedCodes:     auth.NewUsedTOTPCodeStore().WithPersister(st),
+		totpKey:       totpKey,
+		broadcaster:   broadcaster,
+		erasure:       NewErasureService(st),
+		admissionWait: auth.AdmissionWait,
 	}
 }
 
@@ -388,7 +394,7 @@ func (s *AuthService) admitRegistration(ctx context.Context, in RegisterInput) (
 		// Gated below.
 	}
 	// Without an invite to spend, the address is the only budget.
-	if !s.limiter.Allow("register_ip:"+in.IP, inviteFreeRegistrationsPerIPPerDay, 24*time.Hour) {
+	if !s.limiter.Allow("register_ip:"+clientip.RateKey(in.IP), inviteFreeRegistrationsPerIPPerDay, 24*time.Hour) {
 		return "", ErrRegistrationRateLimited
 	}
 	if mode == RegistrationApproval {
@@ -447,11 +453,13 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	// does not burn a valid invite code.
 	// The hash is bcrypt at full cost, so it takes an admission slot like a
 	// compare does (B4-4): a burst of registrations cannot grow the CPU
-	// backlog past the budget, and a refusal burns nothing.
-	hash, admitted, err := s.limiter.Admission().HashPassword(in.Password)
-	if !admitted {
-		return nil, ErrAuthBusy
+	// backlog past the budget, and a refusal burns nothing (queued, P5-S02).
+	release, err := s.acquireAdmission(ctx)
+	if err != nil {
+		return nil, err
 	}
+	hash, err := auth.HashPassword(in.Password)
+	release()
 	if err != nil {
 		return nil, ErrPasswordHash
 	}
@@ -590,7 +598,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 // user or the refusal.
 func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User, error) {
 	// Check per-IP lockout first.
-	lockKey := "login_lock:" + in.IP
+	lockKey := "login_lock:" + clientip.RateKey(in.IP)
 	if s.limiter.IsLockedOut(lockKey) {
 		return nil, ErrLockedOut
 	}
@@ -604,10 +612,24 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// two rows, and must never share a bucket (OC-0324).
 	unameKey := db.LowerASCII(in.Username)
 	userLockKey := "login_user_lock:" + unameKey
-	if s.limiter.IsLockedOut(userLockKey) {
+	// An address that signed in to this account recently is exempt from the
+	// per-username lockout and budget (see loginVouchWindow).
+	successKey := loginVouchKey(unameKey, in.IP)
+	successVouched := s.loginVouched(successKey)
+	if s.limiter.IsLockedOut(userLockKey) && !successVouched {
 		return nil, ErrLockedOut
 	}
 
+	// B4-4: take an admission slot before the attempt is reserved, so an
+	// over-budget request is refused without charging the failure budgets
+	// and without a bcrypt compare; the slot goes back right after the
+	// compare. A burst queues (P5-S02), so the account is read once
+	// admitted: a change made during the wait is what the compare sees.
+	release, err := s.acquireAdmission(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	// Constant-time lookup: always attempt bcrypt compare even when user
 	// does not exist to prevent timing-based username enumeration.
 	user, err := s.st.GetUserByUsername(ctx, in.Username)
@@ -623,7 +645,7 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrLoginUnavailable
 	}
 
-	failKey := "login_fail:" + in.IP
+	failKey := "login_fail:" + clientip.RateKey(in.IP)
 	userFailKey := "login_user_fail:" + unameKey
 	// F3: atomically reserve this attempt BEFORE the bcrypt compare. The
 	// read-only IsLockedOut gates above are check-then-act: N concurrent
@@ -641,17 +663,12 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// is keyed per USER and is the only cross-IP brute-force defence, so
 	// scaling it with the shared-NAT multiplier would hand a distributed
 	// attacker more guesses (api/constants_test.go pins this call site).
-	// B4-4: take an admission slot before the attempt is reserved, so an
-	// over-budget request is refused without charging the failure budgets
-	// and without a bcrypt compare; the slot goes back right after the
-	// compare, the only expensive step.
-	release, admitted := s.limiter.Admission().TryAcquire()
-	if !admitted {
-		return nil, ErrAuthBusy
+	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
+		return nil, ErrLockedOut
 	}
-	defer release()
-	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) ||
-		!s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
+	// A vouched address skips the per-username reservation; the per-IP budget
+	// above still bounds it.
+	if !successVouched && !s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
 	}
 	// Always run the password check — with an empty hash when the user does
@@ -682,9 +699,10 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrInvalidCredentials
 	}
 
-	// Reset failure counters on success.
+	// Reset failure counters on success, and vouch for this address.
 	s.limiter.Reset(ctx, failKey)
 	s.limiter.Reset(ctx, userFailKey)
+	s.recordLoginVouch(ctx, successKey)
 	return user, nil
 }
 
@@ -729,13 +747,13 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// the code compare, the check-then-act the up-front record closes.
 	// An emergency recovery code is matched against up to ten bcrypt hashes,
 	// so it takes an admission slot before the attempt is reserved (B4-4): a
-	// refusal charges nothing. A TOTP code is an HMAC and needs no slot.
+	// refusal charges nothing, and it queues for the slot like login does
+	// (P5-S02). A TOTP code is an HMAC and needs no slot.
 	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
 	release := func() {}
 	if isRecovery {
-		var admitted bool
-		if release, admitted = s.limiter.Admission().TryAcquire(); !admitted {
-			return nil, ErrAuthBusy
+		if release, err = s.acquireAdmission(ctx); err != nil {
+			return nil, err
 		}
 		defer release()
 	}
@@ -1191,40 +1209,6 @@ func (s *AuthService) confirmPassword(ctx context.Context, user *db.User, passwo
 	return nil
 }
 
-// keepSessionID is the session a 2FA state change keeps alive. BUG-108: an
-// API-token principal has a nil session; keep=0 matches no row, so every
-// login session is revoked — same semantics as change-password.
-func keepSessionID(p Principal) int64 {
-	if p.Session != nil {
-		return p.Session.ID
-	}
-	return 0
-}
-
-// revokeOtherSessionsAfterAuthChange revokes every session for userID except
-// keepSessionID as the security tail of a committed 2FA state change. It
-// mirrors UserService.ChangePassword (service/user.go:262-274): a failure is
-// logged and retried once (bounded compensating retry for transient write
-// contention); if the retry also fails, revoked reports what did succeed and
-// failed is true so the caller can report a partial success instead of
-// silently claiming the other sessions were revoked when they were not.
-func (s *AuthService) revokeOtherSessionsAfterAuthChange(ctx context.Context, userID, keepSessionID int64, action string) (revoked int64, failed bool) {
-	revoked, err := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
-	if err != nil {
-		slog.Error("DeleteOtherSessions after "+action, "err", err, "user_id", userID)
-		revokedRetry, retryErr := s.st.DeleteOtherSessions(ctx, userID, keepSessionID)
-		if retryErr != nil {
-			slog.Error("DeleteOtherSessions retry after "+action, "err", retryErr, "user_id", userID)
-			return revoked, true
-		}
-		revoked += revokedRetry
-	}
-	if revoked > 0 {
-		slog.Info("revoked other sessions after "+action, "user_id", userID, "revoked", revoked)
-	}
-	return revoked, false
-}
-
 // ─── Helpers moved from api/auth_handler.go ──────────────────────────────────
 
 // newSessionToken generates a bearer token and hands its hash to persist,
@@ -1251,28 +1235,6 @@ func issueSession(ctx context.Context, st Store, userID int64, device, ip string
 
 func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
 	return getBooleanSetting(ctx, s.st, "require_2fa", false)
-}
-
-func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {
-	value, err := st.GetSetting(ctx, key)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return defaultValue, nil
-		}
-		return false, err
-	}
-	return parseBooleanSettingValue(value)
-}
-
-func parseBooleanSettingValue(value string) (bool, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "true":
-		return true, nil
-	case "0", "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid boolean setting value %q", value)
-	}
 }
 
 // requirePasswordConfirmation checks the confirming password inside one

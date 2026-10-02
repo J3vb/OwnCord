@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/migrations"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -317,8 +318,8 @@ func TestHub_BroadcastToChannel_SkipsUnfocusedClient(t *testing.T) {
 	assertNotReceived(t, s2, "unfocused client must NOT receive channel broadcast")
 }
 
-// Voice membership is gated on CONNECT_VOICE only, so it must never on its own
-// subscribe a client to a channel's message stream — that route requires
+// Voice membership can outlive READ_MESSAGES (a mid-call revocation, or a
+// closed DM), so it must never on its own subscribe a client to a channel's message stream — that route requires
 // READ_MESSAGES (channel_focus). Registration without a READ_MESSAGES set must
 // therefore deliver nothing.
 func TestHub_BroadcastToChannel_NotDeliveredOnVoiceMembershipAlone(t *testing.T) {
@@ -1597,7 +1598,10 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 }
 
 // hubTestSchema is the minimal schema needed for hub tests.
-var hubTestSchema = []byte(`
+// hubTestSchema ends with the real member-generation migration, so the ready
+// path's shared member read (serve_ready_members_cache.go) runs against the
+// same triggers production does.
+var hubTestSchema = append([]byte(`
 CREATE TABLE IF NOT EXISTS roles (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL UNIQUE,
@@ -1704,7 +1708,8 @@ CREATE TABLE IF NOT EXISTS messages (
     deleted    INTEGER NOT NULL DEFAULT 0,
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
-    mentions_everyone INTEGER NOT NULL DEFAULT 0
+    mentions_everyone INTEGER NOT NULL DEFAULT 0,
+    pinned_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -1829,4 +1834,13 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     lifted_by       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-`)
+`), mustMigration("057_member_generation.sql")...)
+
+// mustMigration returns a shipped migration file's SQL.
+func mustMigration(name string) []byte {
+	raw, err := migrations.FS.ReadFile(name)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}

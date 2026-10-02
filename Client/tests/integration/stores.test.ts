@@ -83,6 +83,10 @@ function createMockWsClient(): MockWsClient {
       return () => {};
     },
 
+    onServerBusy(): () => void {
+      return () => {};
+    },
+
     onCertMismatch(): () => void {
       return () => {};
     },

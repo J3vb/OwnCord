@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.0.1-beta.1"
+version = "2.1.0-beta.1"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -55,14 +55,18 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 # Minor-pinned per the plugin's own guidance: configure_client hands it a
 # preconfigured rustls ClientConfig, and a 2.x minor bump can change the
-# plugin's bundled reqwest/rustls and break that seam at runtime.
-tauri-plugin-updater = "2.10"
+# plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
+# floor: older releases ignore tauri.conf.json's `requireSignedVersion`.
+tauri-plugin-updater = "2.13"
 tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3.32"
 tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros"] }
 tokio-rustls = { version = "0.26", default-features = false }
+# TCP keepalive on the REST tunnel's pooled upstream sockets (http_pool.rs);
+# tokio exposes none. Already in the dependency tree through tokio.
+socket2 = { version = "0.6", features = ["all"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # Mozilla root bundle for the updater's HostScopedVerifier: non-pinned hosts
 # (the GitHub installer download) get web-PKI validation. Already in the
@@ -127,7 +131,9 @@ tauri-plugin-deep-link = "2"
 notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
-# Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs).
+# Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,
+# with Win32_System_SystemInformation's GetTickCount, the last-input time
+# auto-idle reads (idle.rs).
 # Data_Xml_Dom + UI_Notifications: the protocol-activation message toast
 # (message_notification.rs), whose click must survive a banner timeout by
 # launching the owncord:// handler. These are features on the existing 0.58
@@ -135,6 +141,7 @@ notify-rust = "4"
 # its own separate windows 0.61 copy, so nothing here is shared with it.
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_SystemInformation",
     "Data_Xml_Dom",
     "UI_Notifications",
 ] }
@@ -151,6 +158,10 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
+# IdleMonitor and the freedesktop ScreenSaver interface. Already in the tree
+# as keyring's sync-secret-service transport, same libdbus, no new build.
+dbus = "0.9"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
 # WebRTC (the system webview's RTCPeerConnection is undefined on every distro),
 # so on Linux the LiveKit SDK runs in this Rust backend instead of the webview
@@ -196,3 +207,6 @@ webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
 # Paused virtual time for tests of real-time deadlines (the ws_proxy liveness
 # timeout), so they run instantly and cannot flake on a slow runner.
 tokio = { version = "1", features = ["test-util"] }
+# Mock runtime, so the updater plugin runs against the shipped tauri.conf.json
+# in update_commands tests without a window.
+tauri = { version = "2.12", features = ["test"] }

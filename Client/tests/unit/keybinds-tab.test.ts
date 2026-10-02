@@ -2,15 +2,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mockCaptureKeyPress = vi.fn();
 const mockUpdatePttKey = vi.fn();
+const mockPttSupported = vi.fn(async () => true);
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
-vi.mock("@lib/ptt", () => ({
+vi.mock("@lib/ptt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/ptt")>()),
   vkName: (vk: number) => mockVkName(vk),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: {
     captureKeyPress: (...args: unknown[]) => mockCaptureKeyPress(...args),
     updateKey: (...args: unknown[]) => mockUpdatePttKey(...args),
+    supported: () => mockPttSupported(),
   },
 }));
 // U6: the tab discloses whether global (unfocused) shortcuts are available.
@@ -47,6 +50,30 @@ describe("KeybindsTab", () => {
   function capture(element: EventTarget, code: string, init: KeyboardEventInit = {}): void {
     element.dispatchEvent(new KeyboardEvent("keydown", { code, bubbles: true, ...init }));
   }
+
+  it("saves the push-to-talk release delay from its slider, 20 ms by default", () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const slider = el.querySelector("[data-testid='ptt-release-delay']") as HTMLInputElement;
+    const value = el.querySelector("[data-testid='ptt-release-delay-value']")!;
+    expect(slider.type).toBe("range");
+    expect([slider.min, slider.max, slider.value]).toEqual(["0", "2000", "20"]);
+    expect(slider.getAttribute("aria-label")).toBe("Push to Talk release delay");
+    expect(value.textContent).toBe("20 ms");
+
+    slider.value = "250";
+    slider.dispatchEvent(new Event("input"));
+
+    expect(localStorage.getItem("owncord:settings:pttReleaseDelayMs")).toBe("250");
+    expect(value.textContent).toBe("250 ms");
+    expect(slider.getAttribute("aria-valuetext")).toBe("250 ms");
+  });
+
+  it("disables the release delay where push-to-talk cannot gate the mic", async () => {
+    mockPttSupported.mockResolvedValueOnce(false);
+    const el = buildKeybindsTab(new AbortController().signal);
+    const slider = el.querySelector("[data-testid='ptt-release-delay']") as HTMLInputElement;
+    await vi.waitFor(() => expect(slider.disabled).toBe(true));
+  });
 
   it("shows the shipped defaults for the global shortcuts and lets each be rebound", async () => {
     const el = buildKeybindsTab(new AbortController().signal);
@@ -171,8 +198,8 @@ describe("KeybindsTab", () => {
   it("renders Push to Talk keybind row", () => {
     const el = buildKeybindsTab(new AbortController().signal);
     const rows = el.querySelectorAll(".keybind-row");
-    // 1 PTT + 3 Navigation + 3 Communication + 2 Global + 5 Messages = 14
-    expect(rows.length).toBe(14);
+    // 1 PTT + 5 Navigation + 3 Communication + 2 Global + 5 Messages = 16
+    expect(rows.length).toBe(16);
     const pttLabel = rows[0]!.querySelector(".setting-label");
     expect(pttLabel!.textContent).toBe("Push to Talk");
   });
@@ -502,5 +529,21 @@ describe("KeybindsTab", () => {
         "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
       );
     });
+  });
+
+  it("disables PTT and discloses the gap where key polling is unsupported (voice #12)", async () => {
+    mockPttSupported.mockResolvedValue(false);
+    const el = buildKeybindsTab(new AbortController().signal);
+    const pttBtn = el.querySelector(
+      '[aria-label="Push to Talk keybind — click to capture"]',
+    ) as HTMLButtonElement;
+    await vi.waitFor(() => {
+      expect(pttBtn.disabled).toBe(true);
+    });
+    // The hint says why, in the same region the capture button lives.
+    expect(el.textContent).toContain("Push to Talk needs global key observation");
+    // A key bound before (another session) can still be cleared.
+    const clear = [...el.querySelectorAll("button")].find((b) => b.textContent === "Clear")!;
+    expect(clear.disabled).toBe(false);
   });
 });

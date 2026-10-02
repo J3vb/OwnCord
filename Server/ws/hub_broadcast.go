@@ -26,6 +26,10 @@ type broadcastMsg struct {
 	// send, and the two racing would let the async global broadcast overwrite
 	// it. Ignored outside the channelID == 0 branch of deliverBroadcast.
 	excludeUserID int64
+	// senderID, when non-zero, is the user whose request produced this
+	// channel frame; the topic limiter then counts it against that sender
+	// alone (allowTopicFrame). Zero for server-originated frames.
+	senderID int64
 	// barrier, when non-nil, makes this entry a dispatch barrier rather than
 	// a broadcast: deliverBroadcast closes it and sequences nothing. Because
 	// h.broadcast is FIFO on one dispatch goroutine, whoever waits on it
@@ -54,17 +58,25 @@ type broadcastMsg struct {
 	// not, because the enqueue happens on a request handler that can be
 	// arbitrarily far ahead of the dispatch loop (P2-4/P2-5).
 	nsfwChannelID int64
+	// presence, droppable and presenceSnapshot carry presence_batch and the
+	// presence drop policy; see hub_presence.go.
+	presence         map[int64]pendingPresence
+	droppable        bool
+	presenceSnapshot bool
 }
 
 // enqueue hands bm to the single hub dispatch loop, stamping it for the
 // enqueue→fanout latency metric. Non-blocking: if the broadcast channel is
-// full the message is dropped and counted, with kind naming the dropped frame.
-func (h *Hub) enqueue(bm broadcastMsg, kind string) {
+// full the message is dropped and counted, with kind naming the dropped frame,
+// and enqueue reports false.
+func (h *Hub) enqueue(bm broadcastMsg, kind string) bool {
 	bm.enqueuedAt = time.Now()
 	select {
 	case h.broadcast <- bm:
+		return true
 	default:
 		h.recordQueueDrop(bm, kind)
+		return false
 	}
 }
 
@@ -122,9 +134,10 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 
 // BroadcastServerRestart sends a server_restart message to all connected clients.
 // reason says why the server is restarting; delaySeconds tells clients how
-// long until the socket drops, and 0 cancels an earlier announcement.
+// long until the socket drops, and 0 cancels an earlier announcement. The
+// redial spread scales with who is connected now (P5-S04).
 func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
-	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds))
+	h.BroadcastToAll(buildServerRestartMsg(reason, delaySeconds, restartSpreadMS(h.ClientCount())))
 }
 
 // BroadcastChannelCreate sends a channel_create message to the connected
@@ -240,11 +253,14 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 		roleName = role.Name
 	}
 	// A lapsed temporary ban lets the user reconnect while users.banned is
-	// still 1, so they can be online at unban time. With no live connection,
-	// report offline regardless of the stale status the row carries
-	// (serve_ready's "no live connection is offline, whatever the row says"
-	// rule); with one, the row holds the status their connect stamped.
-	if h.GetClient(userID) == nil {
+	// still 1, so they can be online at unban time. Report the live status
+	// their connection stamped or chose, never the row: with no stamped
+	// connection it is offline whatever the row says, and with one the row
+	// can still lag the batched connect stamp (serve_ready's
+	// presentableMembers rules). buildMemberJoin hides invisible.
+	if live := h.LiveStatus(userID); live != "" {
+		user.Status = live
+	} else {
 		user.Status = db.StatusOffline
 	}
 	h.BroadcastToAll(buildMemberJoin(user, roleName))
@@ -355,6 +371,10 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		close(bm.barrier)
 		return
 	}
+	if bm.presenceSnapshot {
+		h.deliverPresenceSnapshots()
+		return
+	}
 
 	// Dispatch lag: enqueue→dispatch start, how long this frame waited for the
 	// single dispatch goroutine (SRV-04).
@@ -382,6 +402,16 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		// owns the shed handling (count + watermark, SRV-03).
 		if !h.allowTopicFrame(bm) {
 			return 0, 0, false
+		}
+
+		// A window's presence_batch names many users: an erased one loses
+		// only its own entry.
+		var private map[int64][]byte
+		if bm.presence != nil {
+			bm.msg, private = h.buildPresenceBatch(bm.presence)
+			if bm.msg == nil {
+				return 0, 0, false
+			}
 		}
 
 		// A frame naming an erased user, produced by a request that read
@@ -428,10 +458,7 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		case bm.channelID == 0:
 			// Global broadcast — deliver to every connected client, minus
 			// excludeUserID when the caller set one (see BroadcastToAllExcept).
-			// Publish(TopicGlobal, msg, 0) is exactly PublishGlobal(msg) when
-			// excludeUserID is the zero value, so ordinary BroadcastToAll
-			// callers are unaffected.
-			h.pubsub.Publish(TopicGlobal, msg, bm.excludeUserID)
+			h.publishGlobal(bm, msg, seq, private)
 		default:
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq

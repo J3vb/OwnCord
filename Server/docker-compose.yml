@@ -61,6 +61,20 @@ services:
     # only SURFACES unhealthy (docker ps, events); pair with an external
     # watchdog (or an autoheal container) if you want automatic restarts on hang.
     #
+    # Open-file limit. Each WebSocket holds a descriptor. The Go runtime already
+    # lifts the SOFT limit to just under the HARD one at init, and the server
+    # raises it the rest of the way, so the hard limit here is the real
+    # ceiling. Without this, the hard limit is whatever the host daemon passes
+    # down, and an old or tuned-down daemon can pass 1,024, which a few hundred
+    # online will reach. Pinning it makes the ceiling explicit. 65,536 is well
+    # above what 2,000 online need (the boot budget for 2,000 is 4,256); only
+    # past roughly 30,000 connections raise it to a bigger number (up to the
+    # host's fs.nr_open, usually 1048576). Not -1: the kernel refuses an
+    # unlimited nofile limit and the container fails to start.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     # Minimal privilege. The image already runs as uid 65532 on distroless (no
     # shell, no package manager); these two drop what is left. The server binds
     # 8443, above the privileged-port range, so it needs no capability at all.

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NativeVoiceEnvelope } from "../../../platform/contracts/nativeVoice";
+import type { Participant } from "livekit-client";
 
 vi.mock("livekit-client", () => ({
   RoomEvent: {
@@ -37,6 +38,8 @@ const host = vi.hoisted(() => ({
     frames: "ws://127.0.0.1:9/tok",
   }),
   publishCamera: (): Promise<string> => Promise.resolve("TR_cam"),
+  setDevice: (): Promise<void> => Promise.resolve(),
+  setVideoView: (): Promise<void> => Promise.resolve(),
   pick: (): Promise<unknown> =>
     Promise.resolve({
       source: "screen:7",
@@ -103,9 +106,17 @@ vi.mock("../../../platform/desktop", () => ({
         host.calls.push(["setMicrophone", args]);
         return Promise.resolve();
       },
+      setPttGated: (...args: unknown[]) => {
+        host.calls.push(["setPttGated", args]);
+        return Promise.resolve();
+      },
       setSubscribed: (...args: unknown[]) => {
         host.calls.push(["setSubscribed", args]);
         return Promise.resolve();
+      },
+      setVideoView: (...args: unknown[]) => {
+        host.calls.push(["setVideoView", args]);
+        return host.setVideoView();
       },
       setVolume: (...args: unknown[]) => {
         host.calls.push(["setVolume", args]);
@@ -117,7 +128,7 @@ vi.mock("../../../platform/desktop", () => ({
       },
       setDevice: (...args: unknown[]) => {
         host.calls.push(["setDevice", args]);
-        return Promise.resolve();
+        return host.setDevice();
       },
       publishCamera: (...args: unknown[]) => {
         host.calls.push(["publishCamera", args]);
@@ -152,7 +163,8 @@ vi.mock("../../../platform/desktop", () => ({
 
 import { createNativeRoom } from "./nativeRoom";
 import { nativeCounters } from "./counters";
-import { setLocalDeafened } from "../../../stores/voice.store";
+import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
+import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/roomEventHandlers";
 
 const audio = {
   echoCancellation: true,
@@ -180,6 +192,7 @@ beforeEach(() => {
     frames: "ws://127.0.0.1:9/tok",
   });
   host.publishCamera = () => Promise.resolve("TR_cam");
+  host.setVideoView = () => Promise.resolve();
   host.pick = () =>
     Promise.resolve({
       source: "screen:7",
@@ -290,7 +303,21 @@ describe("NativeRoom device switching", () => {
       ["setDevice", [1, "audiooutput", ""]],
     ]);
   });
+
+  it("treats the host's fallback-to-default as a successful switch (voice #19)", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    host.setDevice = () => Promise.reject("capture device gone; switched to the default");
+    await expect(room.switchActiveDevice("audioinput", "gone")).resolves.toBe(true);
+
+    // A real failure still rejects.
+    host.setDevice = () => Promise.reject("no capture device");
+    await expect(room.switchActiveDevice("audioinput", "gone")).rejects.toThrow();
+  });
 });
+
+const micCalls = () => host.calls.filter(([name]) => name === "setMicrophone");
+const gateCalls = () => host.calls.filter(([name]) => name === "setPttGated");
 
 describe("NativeRoom room surface", () => {
   it("routes the microphone toggle to the native session", async () => {
@@ -301,6 +328,54 @@ describe("NativeRoom room surface", () => {
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, true]]);
     await room.localParticipant.setMicrophoneEnabled(false);
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, false]]);
+  });
+
+  describe("push-to-talk gate", () => {
+    // DP-30 / D5: while push-to-talk is armed the capture stays open and the
+    // session's gate sends silence, so a press never reopens the device.
+    it("a PTT cycle leaves the capture open: the key only flips the session's gate", async () => {
+      const room = createNativeRoom(audio);
+      room.setPttGated(true);
+      await room.connect("u", "t");
+      host.calls.length = 0;
+
+      // The join, with the key up: the gate is closed before capture opens.
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(host.calls).toEqual([
+        ["setPttGated", [1, true]],
+        ["setMicrophone", [1, true]],
+      ]);
+
+      room.setPttGated(false);
+      room.setPttGated(true);
+      room.setPttGated(false);
+      expect(micCalls()).toEqual([["setMicrophone", [1, true]]]);
+      expect(gateCalls().slice(1)).toEqual([
+        ["setPttGated", [1, false]],
+        ["setPttGated", [1, true]],
+        ["setPttGated", [1, false]],
+      ]);
+    });
+
+    it("an explicit mute still stops the capture, and a press never reopens it", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      room.setPttGated(true);
+      await room.localParticipant.setMicrophoneEnabled(false);
+      expect(micCalls().at(-1)).toEqual(["setMicrophone", [1, false]]);
+      host.calls.length = 0;
+
+      room.setPttGated(false);
+      expect(host.calls).toEqual([["setPttGated", [1, false]]]);
+      host.calls.length = 0;
+
+      // Unmuted while the key is held: live at once.
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(host.calls).toEqual([
+        ["setPttGated", [1, false]],
+        ["setMicrophone", [1, true]],
+      ]);
+    });
   });
 
   it("deafen unsubscribes remote audio publications through the session", async () => {
@@ -432,7 +507,7 @@ describe("NativeRoom room surface", () => {
     expect(disconnected).toHaveBeenCalledTimes(1);
   });
 
-  it("OC-0473: degrades on a remote decrypt failure that outlasts the grace window", async () => {
+  it("OC-0473: re-reports a remote decrypt failure the way the web worker does until it clears", async () => {
     vi.useFakeTimers();
     try {
       const room = createNativeRoom(audio);
@@ -444,37 +519,71 @@ describe("NativeRoom room surface", () => {
       emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
       emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
 
-      // A rotation race: the peer's frames decrypt again inside the window.
+      // The backend reports the transition once; the room re-reports it as
+      // the web worker's once-a-second InvalidKey, attributed to the peer.
       status("user-2", false);
-      vi.advanceTimersByTime(2000);
-      status("user-2", true);
-      vi.advanceTimersByTime(5000);
-      expect(encryptionError).not.toHaveBeenCalled();
-
-      // A peer who leaves while failing is not reported.
-      status("user-3", false);
-      emit({ session: 1, event: { type: "participantDisconnected", identity: "user-3" } });
-      vi.advanceTimersByTime(5000);
-      expect(encryptionError).not.toHaveBeenCalled();
-
-      // The backend reports a transition once; a failure that persists degrades.
-      status("user-2", false);
-      vi.advanceTimersByTime(2999);
-      expect(encryptionError).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1);
       expect(encryptionError).toHaveBeenCalledTimes(1);
       const [err, participant] = encryptionError.mock.calls[0]!;
       expect(participant).toBe(room.remoteParticipants.get("user-2"));
-      // Not "InvalidKey:" — handleEncryptionError's own streak logic would
-      // swallow a single event as the start of a new streak.
-      expect((err as Error).message.startsWith("InvalidKey:")).toBe(false);
+      expect((err as Error).message.startsWith("InvalidKey:")).toBe(true);
+      vi.advanceTimersByTime(2000);
+      expect(encryptionError).toHaveBeenCalledTimes(3);
+      // Decrypting again stops the reports.
+      status("user-2", true);
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).toHaveBeenCalledTimes(3);
 
-      // Leaving the room drops a pending timer.
+      // A peer who leaves while failing is no longer reported.
+      status("user-3", false);
+      emit({ session: 1, event: { type: "participantDisconnected", identity: "user-3" } });
+      vi.advanceTimersByTime(5000);
+      expect(encryptionError).toHaveBeenCalledTimes(4);
+
+      // Leaving the room stops a running report.
       status("user-2", false);
       await room.disconnect();
       vi.advanceTimersByTime(5000);
-      expect(encryptionError).toHaveBeenCalledTimes(1);
+      expect(encryptionError).toHaveBeenCalledTimes(5);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("OC-0473: a native decrypt degradation clears once the peer decrypts again", async () => {
+    vi.useFakeTimers();
+    try {
+      const room = createNativeRoom(audio);
+      const handlers = createRoomEventHandlers({ isNativeRoom: () => true } as RoomEventDeps);
+      room.on("encryptionError", (err, p) =>
+        handlers.handleEncryptionError(err as Error, p as Participant),
+      );
+      await room.connect("u", "t");
+      emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+      const status = (encrypted: boolean): void =>
+        emit({ session: 1, event: { type: "encryptionStatus", identity: "user-2", encrypted } });
+
+      // A failure past the grace window reads "Unsecured"...
+      status(false);
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+      // ...and the peer's frames decrypting again clears it.
+      status(true);
+      vi.advanceTimersByTime(3000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+
+      // The local E2EE not running is not the peer's to clear.
+      status(false);
+      vi.advanceTimersByTime(3000);
+      emit({
+        session: 1,
+        event: { type: "encryptionStatus", identity: "user-1", encrypted: false },
+      });
+      status(true);
+      vi.advanceTimersByTime(5000);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+      await room.disconnect();
+    } finally {
+      setEncryptionDegraded(false);
       vi.useRealTimers();
     }
   });
@@ -499,6 +608,9 @@ const video = (sid: string, source: "camera" | "screen_share" = "camera") => ({
   source,
   muted: false,
 });
+
+const views = () => host.calls.filter(([n]) => n === "setVideoView").map(([, a]) => a);
+const settle = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe("NativeRoom remote video", () => {
   it("raises a subscribed video track backed by a renderer on the frame socket", async () => {
@@ -572,6 +684,75 @@ describe("NativeRoom remote video", () => {
     });
     expect(host.renderers.map((r) => r.disposed)).toEqual([true, false]);
     expect(unsubscribed).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards the layer controls RemoteTracks drives to the native session (P3-07)", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    expect(pub.isEnabled).toBe(true);
+
+    // Hidden: the stream stops.
+    pub.setEnabled(false);
+    expect(pub.isEnabled).toBe(false);
+    // Shown in a 160-px tile: the layer waits for the enable, one update.
+    pub.setVideoDimensions({ width: 160, height: 90 });
+    pub.setEnabled(true);
+    expect(pub.isEnabled).toBe(true);
+    // Resized to 480 px, then focused (the top layer); a repeat sends nothing.
+    pub.setVideoDimensions({ width: 480, height: 270 });
+    pub.setEnabled(true);
+    pub.setVideoQuality(2);
+    pub.setEnabled(true);
+    await settle();
+    expect(views()).toEqual([
+      [1, "user-2", "TR_v", false, "high"],
+      [1, "user-2", "TR_v", true, "low"],
+      [1, "user-2", "TR_v", true, "medium"],
+      [1, "user-2", "TR_v", true, "high"],
+    ]);
+
+    // A resubscribe comes enabled at the top layer, so hiding it is sent again.
+    pub.setEnabled(false);
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    expect(pub.isEnabled).toBe(true);
+    pub.setEnabled(false);
+    await settle();
+    expect(views().slice(-2)).toEqual([
+      [1, "user-2", "TR_v", false, "high"],
+      [1, "user-2", "TR_v", false, "high"],
+    ]);
+  });
+
+  it("sends a publication's next view only once the host has applied the previous one", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    let applied!: () => void;
+    host.setVideoView = () => new Promise<void>((r) => (applied = r));
+
+    // Hidden, then shown again before the host finished hiding it.
+    pub.setEnabled(false);
+    pub.setEnabled(true);
+    await settle();
+    expect(views()).toEqual([[1, "user-2", "TR_v", false, "high"]]);
+    applied();
+    await settle();
+    expect(views()).toEqual([
+      [1, "user-2", "TR_v", false, "high"],
+      [1, "user-2", "TR_v", true, "high"],
+    ]);
   });
 
   it("raises the unsubscriptions before the participant leaves", async () => {
@@ -809,11 +990,12 @@ describe("NativeRoom screen share", () => {
     expect(nativeCounters.screenTracks).toBe(0);
   });
 
-  it("maps a closed picker and a cancelled portal dialog to NotAllowedError", async () => {
+  it("maps a closed picker to a dismissed picker and a portal that never started to its own outcome", async () => {
+    const dismissed = { name: "NotAllowedError", message: "Permission denied by user" };
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     host.pick = () => Promise.resolve(null);
-    await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
+    await expect(share(room)).rejects.toMatchObject(dismissed);
     expect(host.calls.filter(([n]) => n === "startScreen")).toHaveLength(0);
     host.pick = () =>
       Promise.resolve({
@@ -822,10 +1004,24 @@ describe("NativeRoom screen share", () => {
         maxBitrate: 6_000_000,
         maxFramerate: 30,
       });
-    host.startScreen = () => Promise.reject("screen capture was cancelled or refused");
-    await expect(share(room)).rejects.toMatchObject({ name: "NotAllowedError" });
-    host.startScreen = () => Promise.reject("that screen or window is no longer available");
-    await expect(share(room)).rejects.toBe("that screen or window is no longer available");
+    // The portal cannot say whether the user cancelled, so it is not the
+    // silent dismissal but its own outcome.
+    host.startScreen = () => Promise.reject("screen capture portal did not start");
+    await expect(share(room)).rejects.toMatchObject({
+      name: "NotAllowedError",
+      message: "screen capture portal did not start",
+    });
+    // A failure before the first frame and the first-frame timeout are
+    // errors the user is told about, not cancels.
+    for (const failure of [
+      "that screen or window is no longer available",
+      "screen capture failed to start",
+      "screen capture produced no frame in time",
+    ]) {
+      host.startScreen = () => Promise.reject(failure);
+      // oxlint-disable-next-line no-await-in-loop -- each start must settle before the next
+      await expect(share(room)).rejects.toBe(failure);
+    }
     expect(host.renderers).toHaveLength(0);
   });
 

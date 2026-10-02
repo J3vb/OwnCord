@@ -7,7 +7,7 @@ import (
 
 // Resolve at process startup, before an update can rename the running image.
 // On Linux os.Executable follows /proc/self/exe: after the swap it returns
-// the backup's .old path, which would restart the previous version.
+// the backup's .old-* path, which would restart the previous version.
 var startupExecutablePath, startupExecutableErr = resolveExecutablePath()
 
 // ExecutablePath returns the canonical installation path captured at startup.

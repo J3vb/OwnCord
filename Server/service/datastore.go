@@ -41,8 +41,8 @@ type Store interface {
 	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
-	SearchMessages(ctx context.Context, query string, channelID *int64, limit int) ([]db.MessageSearchResult, error)
-	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, limit int) ([]db.MessageSearchResult, error)
+	SearchMessages(ctx context.Context, query string, channelID *int64, page db.SearchPage) ([]db.MessageSearchResult, error)
+	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, page db.SearchPage) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	SetMessagePinned(ctx context.Context, id int64, pinned bool) error
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
@@ -58,6 +58,9 @@ type Store interface {
 	// ── Mentions ──
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
 	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
+	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in
+	// one writer transaction — the mention worker's flush path (P5-O05).
+	IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) error
 	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error
 	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
 	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
@@ -130,9 +133,10 @@ type Store interface {
 	DenyPendingUser(ctx context.Context, userID int64) error
 	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
+	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
-	MarkUserDisconnected(ctx context.Context, userID int64) error
+	StampConnections(ctx context.Context, connected, disconnected []int64) error
 	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
@@ -188,10 +192,10 @@ type Store interface {
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	DeleteSession(ctx context.Context, tokenHash string) error
 	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
-	DeleteUserSessions(ctx context.Context, userID int64) (int64, error)
+	SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error)
 	DeleteExpiredSessions(ctx context.Context) error
 	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
-	TouchSession(ctx context.Context, tokenHash string) error
+	TouchSessions(ctx context.Context, tokenHashes []string) error
 	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
 
@@ -265,6 +269,7 @@ type Store interface {
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
 	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
 	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
@@ -362,9 +367,12 @@ type Store interface {
 	// of them — ownership lives on the session now, not this ledger
 	// (round 4, replacing round 3's voiceMuted bool).
 	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
-	// HasActiveTimeout is the one indexed, uncached lookup the predicates'
-	// Subject.TimedOut is filled from.
+	// HasActiveTimeout is the indexed per-user timeout lookup
+	// (FinalizeTimeoutLift; PermissionService.Subject reads its mirror).
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
+	// ListActiveTimeoutExpiries loads PermissionService's in-memory mirror
+	// of every active timeout (P5-O02).
+	ListActiveTimeoutExpiries(ctx context.Context) ([]db.ActiveTimeoutExpiry, error)
 	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)

@@ -3,15 +3,20 @@
 /* ═══ Settings ═══ */
 /* The keys this page edits. Config-file values (upload limit, voice quality)
    are read-only facts from GET /config, and the owner-only backup policy
-   lives on Backups & restore. */
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa'];
-function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):(v||'')}
+   lives on Backups & restore. The owner-only upload file-type lists show
+   config.yaml's value until the owner saves one here, which replaces it. */
+const EXT_KEYS=['upload_blocked_extensions','upload_allowed_extensions'];
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa',...EXT_KEYS];
+/* An extension list as the server stores it: lower case, no dots, deduped,
+   comma-separated; so a respelled but equal list is not a change. */
+function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
+function settingNorm(k,v){return k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
     const el=document.getElementById('s-'+k);if(!el)return;
     if(el instanceof HTMLFieldSetElement){const r=el.querySelector('input:checked');out[k]=r instanceof HTMLInputElement?r.value:'';return}
-    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):/** @type {HTMLInputElement} */(el).value;
+    out[k]=el.classList.contains('toggle')?(el.classList.contains('on')?'true':'false'):settingNorm(k,/** @type {HTMLInputElement} */(el).value);
   });
   return out;
 }
@@ -35,6 +40,7 @@ async function renderSettings(){
   let settings,facts=null;
   try{settings=await api('GET','/settings')}catch(e){return'<div class="page-title">Settings</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
   try{facts=await api('GET','/config')}catch(e){}
+  EXT_KEYS.forEach(k=>{if(!(k in settings)&&facts&&Array.isArray(facts[k]))settings[k]=facts[k].join(',')});
   state._settings={...settings};
   setSettingsChanged(false);
   const v=k=>settings[k]||'';
@@ -46,6 +52,12 @@ async function renderSettings(){
   html+=settingsCard('Access & registration',regModeCards(v('registration_mode')||'invite'));
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
+  const owner=isOwner();
+  const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
+  html+=settingsCard('Upload file types',
+    '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by their last extension, however it is capitalised, so <code>report.pdf.bat</code> is refused for <code>bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'
+    +settingsRow('upload_blocked_extensions','Blocked file types','Never accepted',extInput('upload_blocked_extensions'))
+    +settingsRow('upload_allowed_extensions','Allow only these file types','Leave empty to accept any file type that is not blocked',extInput('upload_allowed_extensions')));
   /* Facts, not inputs: these take effect from config.yaml at start-up, so
      an editable-looking field here would change nothing. The running-config
      card shows the effective values an operator would otherwise read
@@ -129,7 +141,7 @@ async function saveSettings(){
   const body=settingsDiff(settingsFormValues(SETTINGS_KEYS));
   if(!Object.keys(body).length){setSettingsChanged(false);showToast('Settings saved');return}
   try{
-    state._settings=await api('PATCH','/settings',body);
+    state._settings={...state._settings,...await api('PATCH','/settings',body)};
     if('server_name' in body&&state.me){state.me.server_name=body.server_name;renderTopbar()}
     setSettingsChanged(false);showToast('Settings saved');
   }catch(e){
@@ -380,7 +392,7 @@ async function renderBackups(){
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
   });
   html+='</tbody></table></div></section>';
   return html;
@@ -458,6 +470,15 @@ async function downloadArchive(){
     if(state.token===token)showToast(e.message,'error')
   }
   finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}
+}
+
+/* One backup, on the archive's pattern: a single-use link for that file,
+   opened as a plain navigation so the browser streams it to disk. */
+async function downloadBackup(name){
+  try{
+    const r=await api('POST','/backups/'+encodeURIComponent(name)+'/link',{});
+    const a=document.createElement('a');a.href=r.path;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  }catch(e){showToast(e.message,'error')}
 }
 
 /* Restore overwrites the live database and restarts the server, so it asks
@@ -598,7 +619,7 @@ async function confirmApplyUpdate(){
 }
 
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
-  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,discardSettings,markBackupPolicyChanged,markSettingsChanged,
+  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,syncUpdateConfirm,
   reloadPage(){location.reload()},
