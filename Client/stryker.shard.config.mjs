@@ -35,6 +35,7 @@ export const shards = {
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/releaseRoom.ts",
+    "src/features/voice/uiSounds.ts",
   ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",
@@ -119,6 +120,7 @@ export const shards = {
     "src/lib/toast.ts",
     "src/lib/updater.ts",
     "src/lib/userStatus.ts",
+    "src/lib/voiceDeafened.ts",
     "src/lib/voiceJoinTrace.ts",
     "src/lib/voiceShortcuts.ts",
     "src/lib/window-state.ts",
