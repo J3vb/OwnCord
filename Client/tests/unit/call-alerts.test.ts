@@ -26,7 +26,7 @@ vi.mock("../../src/lib/toast", () => ({ showToast }));
 
 const { alertIncomingCall, alertMissedCall } =
   await import("../../src/features/direct-messages/callAlerts");
-const { startRingChime, stopRingChime, playNotificationSound } =
+const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
   await import("../../src/lib/notificationSound");
 const { setChannelMutesHost } = await import("../../src/lib/channel-mutes");
 
@@ -69,6 +69,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stopRingChime();
+  stopRingback();
   setChannelMutesHost(null);
   vi.restoreAllMocks();
 });
@@ -181,5 +182,68 @@ describe("the ringtone", () => {
     testPrefs.set("callSounds", false);
     startRingChime();
     expect(frequencies).toEqual([]);
+  });
+});
+
+// DP-25: the caller's ringback.
+describe("the ringback", () => {
+  it("is its own pattern, distinct from the incoming ringtone and the message chime", () => {
+    startRingback();
+    const ringback = [...frequencies];
+    frequencies.length = 0;
+
+    startRingChime();
+
+    expect(ringback.length).toBeGreaterThan(0);
+    expect(frequencies.length).toBeGreaterThan(0);
+    for (const hz of ringback) expect(frequencies).not.toContain(hz);
+  });
+
+  it("is silenced by DND and by the call-sound toggle", () => {
+    testPrefs.set("userStatus", "dnd");
+    startRingback();
+    expect(frequencies).toEqual([]);
+
+    testPrefs.set("userStatus", "online");
+    testPrefs.set("callSounds", false);
+    startRingback();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("repeats until stopped", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      const first = frequencies.length;
+      vi.advanceTimersByTime(3_000);
+      expect(frequencies.length).toBe(first * 2);
+      stopRingback();
+      vi.advanceTimersByTime(10_000);
+      expect(frequencies.length).toBe(first * 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A client either calls or is called; an incoming ring replaces the
+  // outgoing ringback rather than playing both (DP-25 acceptance).
+  it("never plays at the same time as the incoming chime", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      startRingChime();
+      vi.advanceTimersByTime(10_000);
+      const ringtoneFreqs = frequencies.filter((hz) => hz === 660 || hz === 880);
+      const ringbackFreqs = frequencies.filter((hz) => hz === 440);
+      expect(ringbackFreqs.length).toBeGreaterThan(0);
+      expect(ringtoneFreqs.length).toBeGreaterThan(0);
+      // The ringback stopped when the chime started: its 3s interval is gone.
+      const atRingtoneStart = frequencies.indexOf(660);
+      expect(frequencies.slice(atRingtoneStart)).not.toContain(440);
+    } finally {
+      stopRingback();
+      stopRingChime();
+      vi.useRealTimers();
+    }
   });
 });
