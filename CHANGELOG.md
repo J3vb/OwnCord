@@ -63,6 +63,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **A caller hears ringback and always learns the outcome.** Placing a DM call was silent on your side while the other person's phone rang, and if you moved to another channel you never saw whether they declined or never answered. You now hear a soft ringback while the call is ringing — it stops the moment someone joins, every callee declines, the 30 seconds run out or you leave — and if you are looking at another channel a toast tells you "<name> declined" or "No answer". Do Not Disturb and the "Incoming Call Sound" switch silence it, and ringing again restarts it.
 
+### Voice
+
+- **Join, leave, mute and deafen now make a short sound, on the speaker you chose.** A call was silent apart from the ring: you could not hear someone join or leave your channel, and toggling mute or deafen gave no feedback. These now play a short chime, on the output device picked in Settings › Voice & Audio (on Linux the system default, where the desktop webview cannot route it). Everything stays silent while you are deafened in a call — except an incoming ring, which still plays for a call. Turn the voice sounds off under Settings › Notifications.
+
 ### Changed
 
 - **Linux desktop:** a native crash (voice/video or the window system) now ends the client log with a line naming the signal and thread, instead of the log just stopping.

@@ -71,6 +71,7 @@ vi.mock("@lib/notificationSound", () => ({
   startRingback: vi.fn(),
   stopRingback: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
+  playVoiceSound: vi.fn(),
 }));
 
 // DP-24: the OS-level call alerts are a lazy chunk the page loads on a ring;

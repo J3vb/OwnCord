@@ -144,6 +144,7 @@ const SETTINGS_ALLOWLIST = [
   "suppressEveryone",
   "notificationSounds",
   "callSounds",
+  "voiceSounds",
   "echoCancellation",
   "noiseSuppression",
   "autoGainControl",

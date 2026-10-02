@@ -86,6 +86,7 @@ import { createRingController, createOutgoingCall } from "@lib/call-ring";
 import type { RingController, OutgoingCall } from "@lib/call-ring";
 import type { DmCallPanelComponent } from "@components/DmCallPanel";
 import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib/notificationSound";
+import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
@@ -978,6 +979,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     void import("../features/unread-badge/unreadBadge").then((badge) => {
       if (!tornDown) unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
     });
+
+    // DP-40: short voice UI sounds on join/leave and mute/deafen. This module
+    // statically imports stores the page already pulls in, so it rides the
+    // MainPage chunk rather than splitting a new shared one off the entry.
+    if (!tornDown) unsubscribers.push(startVoiceUiSounds());
 
     // Toast container
     toast = createToastContainer();

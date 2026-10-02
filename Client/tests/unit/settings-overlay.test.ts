@@ -294,9 +294,10 @@ describe("SettingsOverlay", () => {
     overlay.mount(container);
     getTab(container, 2).click();
 
-    // Desktop, flash, @everyone, message sounds, and the call sound (D2).
+    // Desktop, flash, @everyone, message sounds, the call sound (D2) and the
+    // voice UI sounds (DP-40).
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(5);
+    expect(toggles.length).toBe(6);
 
     overlay.destroy?.();
   });

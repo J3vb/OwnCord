@@ -78,6 +78,14 @@ Each item links to the guidance that owns it.
   Code signing stays declined for the beta.
 - **The browser client does not exist yet.** The desktop client is the only
   supported client; the browser adapter is post-beta work.
+- **On Linux, in-app sounds ignore the chosen output device.** The message
+  chime, the call ringtone, the caller's ringback and the voice
+  join/leave/mute/deafen sounds play on the system default output there, because
+  the Linux webview (WebKitGTK) cannot route an `AudioContext` to a chosen
+  device (`setSinkId` is unavailable);
+  Windows follows Settings › Voice & Audio, and voice media itself is routed by
+  the native engine and unaffected — see
+  [Voice, Video & E2EE](architecture/ux/voice-and-e2ee.md#10-app-sounds-dp-40).
 
 ## Voice and video
 
