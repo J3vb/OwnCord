@@ -381,6 +381,92 @@ would avoid it but would leave a frozen tile on remote clients where the web
 path closes it. The #1408 fix (a vendored `webrtc-sys`, above) is the
 follow-up.
 
+**Simulcast camera, interop (CI).** The app publishes its camera simulcast at
+every quality but "source", at 1280×720 for the default "high" preset; the
+case above covers a single-layer 640×360 camera. A third case publishes the
+example's camera with `--video 1280x720 --simulcast` and requires the browser
+to decode more than 10 frames in every one of 8 consecutive seconds, so a
+camera that sends one frame and then stalls fails it. Measured 2026-10-02: 18
+to 19 fps at 1280×720 with a debug build, 0 encryption errors.
+
+#### Known defect: the camera stalls while the window is hidden
+
+Reported on v2.1.0-beta.2 (Ubuntu, WebKitGTK): peers see one camera frame and
+then a stalled tile. The track stays published and unmuted, the uplink and its
+socket stay open (`cameraUplinks: 1`, `videoSockets` counts it), and nothing
+is logged.
+
+- **Trigger:** the OwnCord window stops being visible: minimized, unmapped,
+  or fully covered on X11. Sharing your screen or switching to another app
+  does exactly that.
+- **Mechanism:** WebKit suspends rendering updates for a hidden page. The
+  pump is driven by `requestVideoFrameCallback`, which runs only in those
+  updates, so it stops. The `<video>` it reads from also stops advancing: a
+  `VideoFrame` built from it keeps the same timestamp, and timers are
+  throttled to about one per second. No pump that reads a `<video>` element
+  can keep a hidden camera live.
+- **Symptom:** the native source receives no more frames. Peers keep the
+  last one, or a black tile once their side treats the stream as stalled.
+  Frames resume when the window is shown again.
+- **Not the cause:** the "camera pump did not start: The operation was
+  aborted" warning. That is `dispose()` clearing `srcObject` while `play()`
+  is still pending, which is a camera turned off before playback began (a
+  quick double toggle).
+
+**Reproduced (2026-10-02).** WebKitGTK 2.52.3, the same `Version/60.5` user
+agent as the report, in a python-gi window configured like
+`linux_media.rs`. It ran the app's own `CameraUplink` (bundled) against a
+counting socket, with WebKit's mock 1280×720 camera.
+
+- Window visible: about 18 fps.
+- Window hidden from t = 7 s to t = 14 s: 0 frames.
+- Window shown again: about 18 fps.
+
+The same pump fed into a native session, simulcast and E2EE, decodes
+continuously in Chromium while the window is visible.
+
+Ruled out by experiment:
+
+- `bufferedAmount` drain.
+- The canvas fallback (it carries real pixels).
+- `play()` on a detached element. WebKit's GStreamer player suspends a
+  muted, invisible video only if its pipeline is already running when the
+  check happens, which a fresh element's is not.
+
+Not reproduced here: a physical camera. WebKit's device lookup did not
+complete against a PipeWire virtual camera in the test container.
+
+**What would disprove it:** the stall appears while the OwnCord window stays
+visible and in front the whole time.
+
+**Options.**
+
+- **A. Keep capture in the webview.** Enable WebKitGTK's off-by-default
+  `MediaStreamTrackProcessing` feature on the app's webview. Read a clone of
+  the camera track in a Worker through `MediaStreamTrackProcessor`, and send
+  on the same socket and wire format.
+  - Prototyped: about 20 fps while the window was hidden, with the
+    original track and the self-view unaffected.
+  - The crate binds WebKitGTK only to 2.40, so the 2.42+ feature API would
+    have to be looked up at runtime.
+  - The fix depends on a WebKit feature flag WebKit does not ship enabled.
+- **B. Capture the camera natively (chosen; follow-up).**
+  - GStreamer through `gstreamer-rs`: a `GstDeviceMonitor` lists
+    `Video/Source` devices (V4L2 and PipeWire), and `v4l2src` or
+    `pipewiresrc`, then `decodebin` and `videoconvert`, feed an I420
+    `appsink`. Frames go straight to the camera's `NativeVideoSource`, so
+    there is no webview hop.
+  - Camera device ids come from the backend, as audio's do
+    (`native/devices.ts`).
+  - The self-view and the settings preview read the capture back over a
+    frame-socket route, as the screen-share preview does.
+  - The runtime libraries already ship with WebKitGTK. The build gains
+    GStreamer `-dev` packages, and the crate tree gets a cargo-deny/osv
+    review.
+  - Capture no longer depends on the window being visible, and the camera
+    frames' second trip through WebKit's network process (about 10% of a
+    core per direction, above) goes away.
+
 ### Phase 3: screen share
 
 **Capture is native.** The webview has no `getDisplayMedia` worth using, so

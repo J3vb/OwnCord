@@ -24,6 +24,8 @@
 //! reads every subscribed remote video track back through that socket and
 //! reports decoded frames per second, and it checks the socket itself: a
 //! wrong token is refused, and after close the listener is gone.
+//! `--simulcast` (with `--video`) publishes that camera simulcast, as the app
+//! does for every camera quality but "source".
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, publish), printing the thread
 //! count before and after: each publish is a new frame cryptor.
@@ -312,6 +314,7 @@ mod linux {
             .transpose()?;
         let video = size_arg("--video")?;
         let screen_size = size_arg("--screen")?;
+        let simulcast = std::env::args().any(|a| a == "--simulcast");
 
         if cycles > 0 {
             emit(
@@ -363,7 +366,7 @@ mod linux {
                     height,
                     max_bitrate: 1_700_000,
                     max_framerate: 30.0,
-                    simulcast: false,
+                    simulcast,
                 })
                 .await?;
             let camera_cycles: u32 = arg("--camera-cycles")
@@ -377,7 +380,7 @@ mod linux {
                     height,
                     max_bitrate: 1_700_000,
                     max_framerate: 30.0,
-                    simulcast: false,
+                    simulcast,
                 };
                 // Settle as for the after sample, so the first camera's
                 // sender threads are counted in the baseline too.

@@ -66,6 +66,7 @@ and only when it changes something a contributor or fork holder must do
 ### Known issues
 
 - **Linux desktop:** the app can close without warning when the camera and screen share are both on; the new crash line is there to pin it down.
+- **Linux desktop:** your camera freezes for others while the OwnCord window is minimized or covered (for example while you share your screen); it resumes when the window is shown. Native camera capture is planned.
 
 ## v2.1.0-beta.2
 
