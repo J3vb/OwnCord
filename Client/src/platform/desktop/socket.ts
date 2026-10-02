@@ -38,25 +38,6 @@ function unsubscribeAll(unsubs: ReadonlyArray<() => void>): void {
 }
 
 /**
- * The native socket connection: the four proxy commands (`ws_connect`,
- * `ws_send`, `ws_disconnect`, `accept_cert_fingerprint`) and the four event
- * registrations (`ws-message`, `ws-state`, `ws-error`, `cert-tofu`) that reach
- * the Rust proxy.
- *
- * Lifted verbatim from `lib/ws.ts`, which is where the app-side layers on top
- * of it stay: the state machine, the reconnect policy, frame parsing and the
- * send-failure codes. In particular `onMessage` hands out the raw frame text
- * and `onStateChange` reports the proxy's own lifecycle; neither parses a
- * protocol frame.
- *
- * The concrete type is wider than `SocketTransport` in exactly one way: the
- * three commands this module awaits resolve as promises (`connect` also
- * rejects when there is no native host at all, which is today's early return
- * in `connect()`), and `startCertListener()` is the bootstrap registration
- * `main.ts` makes before any connection exists. All three are assignable to
- * the contract's `void` members.
- */
-/**
  * The distinct error code a rejected `ws_connect` carries, when it carries one.
  * The Rust proxy rejects a certificate failure with a JSON `{error, message}`
  * body (`tofu::cert_connect_error`); every other dial failure is a plain text
@@ -77,6 +58,25 @@ function connectErrorCode(err: unknown): string | null {
   return null;
 }
 
+/**
+ * The native socket connection: the four proxy commands (`ws_connect`,
+ * `ws_send`, `ws_disconnect`, `accept_cert_fingerprint`) and the four event
+ * registrations (`ws-message`, `ws-state`, `ws-error`, `cert-tofu`) that reach
+ * the Rust proxy.
+ *
+ * Lifted verbatim from `lib/ws.ts`, which is where the app-side layers on top
+ * of it stay: the state machine, the reconnect policy, frame parsing and the
+ * send-failure codes. In particular `onMessage` hands out the raw frame text
+ * and `onStateChange` reports the proxy's own lifecycle; neither parses a
+ * protocol frame.
+ *
+ * The concrete type is wider than `SocketTransport` in exactly one way: the
+ * three commands this module awaits resolve as promises (`connect` also
+ * rejects when there is no native host at all, which is today's early return
+ * in `connect()`), and `startCertListener()` is the bootstrap registration
+ * `main.ts` makes before any connection exists. All three are assignable to
+ * the contract's `void` members.
+ */
 function createSocketConnection(): SocketConnection {
   // Native IPC handles — resolved at runtime in the native context.
   let tauriInvoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null =
