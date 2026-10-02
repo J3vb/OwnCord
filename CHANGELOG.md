@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 ### Messages
 
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
+
 ### Mentions
 
 - **A mention in a channel you are not viewing now updates the taskbar and tray badge at once.** The badge only caught up on your next reconnect; it is now live, alongside the channel's own red badge.
@@ -63,18 +64,6 @@ and only when it changes something a contributor or fork holder must do
 - **A caller hears ringback and always learns the outcome.** Placing a DM call was silent on your side while the other person's phone rang, and if you moved to another channel you never saw whether they declined or never answered. You now hear a soft ringback while the call is ringing — it stops the moment someone joins, every callee declines, the 30 seconds run out or you leave — and if you are looking at another channel a toast tells you "<name> declined" or "No answer". Do Not Disturb and the "Incoming Call Sound" switch silence it, and ringing again restarts it.
 
 ## v2.1.0-beta.2
-- **Working in another app no longer turns you Idle.** Auto-idle counted only input inside the OwnCord window, so ten minutes in a browser or editor set you Idle. It now follows keyboard and mouse input anywhere on the computer on Windows, GNOME (X11 and Wayland) and KDE on X11, and keeps the in-window rule elsewhere, such as KDE on Wayland and macOS.
-- **Messages in other channels no longer pop up while you are using the app.** With the window focused, a message in a channel other than the one on screen still raised a notification and flashed the taskbar, pulling you away for something you could read the moment you switched. The popup and the flash are now suppressed while the app is focused and the message is in another channel; the chime still plays, and unread badges are unchanged. A jump to an old message (which leaves the channel detached from the live tail) still notifies, because the new message is not on screen at all.
-- **An attachment with no message text says "sent an attachment" instead of showing an empty popup.** A message that was only a file or image produced a notification with a blank body; it now reads "sent an attachment" or "sent N attachments".
-- **The taskbar and tray now show your unread count.** Nothing outside the window said a mention or direct message was waiting. The taskbar button now shows a red badge (up to "9+" on Windows, the launcher count on KDE and Ubuntu; stock GNOME shows none) and, on Windows and macOS, the tray tooltip reads "OwnCord — N unread mentions" (Linux tray icons have no tooltip, so there the launcher count is the only indicator). It counts mentions plus unread direct messages, skips a muted conversation's plain messages, and clears as you read.
-- **A mention in a channel you are not viewing now updates that badge at once.** The badge only caught up on your next reconnect, because a channel's messages are delivered only while you have it open; until then the mention was counted on the server but not shown. The server now tells the client directly when a mention raises your count, so the taskbar/tray badge and the channel's red badge update live wherever you are.
-- **The tray's status menu and the app now use the same word for "Invisible".** The tray said "Offline" for the status the app calls Invisible.
-- **Alt+↑/↓ now steps between channels, and Alt+Shift+↑/↓ between unread channels.** Discord's navigation shortcuts had no equivalent here, so the channel list could only be walked with Tab. Alt with the arrow keys moves to the previous or next channel, Shift adds the unread filter, and a bare Alt+Arrow typed into the message box is left to the field.
-- **Settings now shows your uploaded avatar** beside your name, not just its initial letter, and a group DM's header no longer shows a pointer cursor that did nothing when clicked.
-- **Signing in no longer fetches settings data before you open Settings.** The overlay read your sessions, two-factor status and recovery-kit status on every page load even while it was closed — three wasted requests on sign-in and on each reconnect, felt most on a slow link. They now go out the first time you open Settings, which shows the same live data as before.
-- **Every channel is visible on a first login to a server with a long member list.** The Members section claimed its full content height and squeezed the channel list above it down to about three rows, so a fresh profile on a busy server could not see its channels without collapsing Members or scrolling. The channel list now sizes to its rows and the Members section takes the rest and scrolls inside itself, keeping about three member rows (a channel list too long for that scrolls instead); a member height you previously dragged still restores.
-- **Status dots use the design tokens instead of their own hex colours.** The online, idle, do-not-disturb and offline dots in the user-profile popup, DM profile panel and status picker resolved from hard-coded values; these dots now use the same tokens the member list and DM sidebar already did, so the offline grey no longer differs between surfaces.
-- **Unread badges read "99+" instead of a four-digit number.** A channel or DM with hundreds of unread messages showed the raw count, and the server counted every one of those messages on each connect. Counts are now capped at 100 on the server, so connecting to a server with big never-read channels is faster, and the badge shows "99+" from 100 upward. Mention badges stay uncapped. Opening a channel with 100 or more unread messages keeps the "NEW" line at the top of the loaded history, even as older messages load, so no unread message ever sits above it.
 
 `v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.
 
@@ -112,7 +101,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 **Notifications and calls**
 
-- The taskbar and tray show your unread count (mentions plus unread direct messages), updated live as mentions arrive; KDE and Ubuntu use the launcher count.
+- The taskbar and tray show your unread count (mentions plus unread direct messages); KDE and Ubuntu use the launcher count.
 - An incoming DM call raises a notification, flashes the taskbar and rings; after 30 seconds it reports **Missed call from …**, with a new **Incoming Call Sound** switch.
 - Desktop notifications strip markdown and hide spoilered text, and clicking one opens that message — including from a Windows Action Center toast.
 - Notifications for other channels are suppressed while the window is focused, and an attachment-only message reads "sent an attachment".
@@ -240,6 +229,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 ### Known issues
 
+- **Mentions in channels you are not viewing do not update the taskbar or tray badge live yet.** The count catches up when you open the channel or the app receives a fresh unread update.
 - **Incoming-call notification clicks on Windows, and Linux voice device selection, still await a real-machine check.** Both are covered by automated tests but want a hands-on pass before they are called settled.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway". Code signing stays declined for the beta.
 - **A certificate change that is not a public-CA renewal still prompts every member.** A rotated self-signed or private-CA certificate, or any certificate on an IP-address server, shows "Certificate Changed"; compare the new fingerprint with the server owner out of band before accepting.
