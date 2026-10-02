@@ -81,24 +81,30 @@ function buildPreview(s: EmojiSuggestion): HTMLSpanElement {
 }
 
 /**
- * 0 when `q` is the emoji's name, 1 another of its names, 2 another whole
- * keyword (underscores optional, so `thumbsup` is `thumbs_up`), 3 the start of
- * a keyword, 4 otherwise.
+ * The rank of `e` for `q` (lower is better): 0 when `q` is exactly the emoji's
+ * first name, 1 another of its names, 2 a name equal once underscores drop
+ * (`thumbsup` is `thumbs_up`), 3 an exact keyword, 4 a keyword equal once
+ * underscores drop, 5 the start of a keyword, 6 otherwise.
  */
 function unicodeRank(e: UnicodeEmoji, words: readonly string[], q: string): number {
-  const is = (w: string): boolean => w === q || w.replaceAll("_", "") === q;
-  const name = e.names.findIndex(is);
+  const exact = (w: string): boolean => w === q;
+  const loose = (w: string): boolean => w.replaceAll("_", "") === q;
+  const name = e.names.findIndex(exact);
   if (name !== -1) return name === 0 ? 0 : 1;
-  if (words.some(is)) return 2;
-  return words.some((w) => w.startsWith(q)) ? 3 : 4;
+  if (e.names.some(loose)) return 2;
+  if (words.some(exact)) return 3;
+  if (words.some(loose)) return 4;
+  return words.some((w) => w.startsWith(q)) ? 5 : 6;
 }
 
 /**
  * Suggestions for `query`, in the order the popup lists them: custom emoji
  * first (prefix matches before substring), then unicode, alphabetical within
  * each group. Unicode emoji rank by how well the query matches: the emoji's own
- * name (`:heart` is ❤️, `:star` is ⭐), then a curated word (🤩 "star struck"),
- * then the start of a keyword, then anywhere in one.
+ * name (`:heart` is ❤️, `:star` is ⭐), then a name equal once underscores drop
+ * (`:thumbsup` is `thumbs_up`, but an exact short name wins over it — `:icecream`
+ * is 🍦), then an exact keyword (🤩 "star struck"), its underscore-free form,
+ * the start of a keyword, and anywhere in one.
  *
  * A query shorter than MIN_EMOJI_QUERY yields nothing at all, so the composer
  * never opens a popup over a lone colon.
@@ -124,7 +130,7 @@ export function filterEmojiSuggestions(query: string): EmojiSuggestion[] {
     else customSubstring.push(entry);
   }
 
-  const unicode: EmojiSuggestion[][] = [[], [], [], [], []];
+  const unicode: EmojiSuggestion[][] = [[], [], [], [], [], [], []];
   const tone = skinTone();
   for (const group of emojiCatalog()?.groups ?? []) {
     for (const e of group.emoji) {
