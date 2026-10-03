@@ -114,21 +114,23 @@ pub fn list_devices() -> Vec<CameraDevice> {
         .collect()
 }
 
-/// What to capture: a device id from [`list_devices`], or moving bars for the
-/// interop test (CI has no camera). `Synthetic` is not reachable from the
-/// webview.
+/// What to capture: `Default` (the first listed device), a device id from
+/// [`list_devices`], or moving bars for the interop test (CI has no camera).
+/// `Synthetic` is not reachable from the webview.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Target {
     Device(String),
+    Default,
     Synthetic { width: u32, height: u32 },
 }
 
 impl Target {
-    /// A picker id from the webview. A non-empty string is a device id; the
-    /// synthetic target is not parseable.
+    /// A picker id from the webview. A non-empty string is a device id; an
+    /// empty one is the default (the first camera listed); the synthetic
+    /// target is not parseable.
     pub fn parse(id: &str) -> Result<Self, String> {
         if id.is_empty() {
-            return Err("empty camera device".into());
+            return Ok(Self::Default);
         }
         Ok(Self::Device(id.to_string()))
     }
@@ -252,15 +254,25 @@ impl Producer {
                 height: *height,
                 n: 0,
             }),
-            Target::Device(id) => {
-                let source = device_source(id)?;
-                let (pipeline, sink) = build_pipeline(source)?;
-                pipeline
-                    .set_state(gst::State::Playing)
-                    .map_err(|e| format!("camera pipeline: {e}"))?;
-                Ok(Self::Device { pipeline, sink })
+            Target::Device(id) => Self::device(id),
+            Target::Default => {
+                let id = list_devices()
+                    .into_iter()
+                    .next()
+                    .map(|d| d.id)
+                    .ok_or_else(|| NO_DEVICE.to_string())?;
+                Self::device(&id)
             }
         }
+    }
+
+    fn device(id: &str) -> Result<Self, String> {
+        let source = device_source(id)?;
+        let (pipeline, sink) = build_pipeline(source)?;
+        pipeline
+            .set_state(gst::State::Playing)
+            .map_err(|e| format!("camera pipeline: {e}"))?;
+        Ok(Self::Device { pipeline, sink })
     }
 
     fn grab(&mut self) -> Grab {
@@ -628,13 +640,13 @@ mod tests {
     }
 
     #[test]
-    fn device_ids_parse_but_empty_ones_do_not() {
+    fn device_ids_parse_and_an_empty_one_is_the_default() {
         assert_eq!(
             Target::parse("/dev/video0"),
             Ok(Target::Device("/dev/video0".into()))
         );
         assert_eq!(Target::parse("42"), Ok(Target::Device("42".into())));
-        assert!(Target::parse("").is_err());
+        assert_eq!(Target::parse(""), Ok(Target::Default));
     }
 
     /// A synthetic camera drives the capture loop, previews, publishes to a

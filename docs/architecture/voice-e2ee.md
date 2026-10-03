@@ -488,9 +488,12 @@ visible and in front the whole time.
   - The self-view and the settings preview read the capture back over a
     frame-socket route, as the screen-share preview does (the frame socket's
     `camera` route, now server to webview).
-  - The runtime libraries already ship with WebKitGTK. The build gains
-    GStreamer `-dev` packages (CI and the local `linux-webrtc-toolchain`
-    legs install them), and the crate tree got a cargo-deny/osv review.
+  - The runtime libraries already ship with WebKitGTK. The build gains the
+    GStreamer `-dev` packages (`libgstreamer1.0-dev` and
+    `libgstreamer-plugins-base1.0-dev`): the CI and release jobs install them
+    in their Linux system-dependency step, and a local Linux build installs
+    them by hand (`linux-webrtc-toolchain.sh` fetches only clang and
+    libwebrtc). The crate tree got a cargo-deny/osv review.
   - Capture no longer depends on the window being visible, and the camera
     frames' second trip through WebKit's network process (about 10% of a
     core per direction, above) goes away.
