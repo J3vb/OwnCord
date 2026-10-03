@@ -52,10 +52,12 @@ export function createMessageController(opts: MessageControllerOptions): Message
     const cached = isWindowDetached(channelId)
       ? []
       : getChannelMessages(channelId).filter((m) => m.status === "sent");
-    const limit = Math.min(
-      MAX_PAGE_SIZE,
-      Math.max(PAGE_SIZE, cached.length + getUnreadOnOpen(channelId)),
-    );
+    // Only a revisit has a cached window to reach back to; a first visit asks
+    // for a single page regardless of how many messages await it.
+    const limit =
+      cached.length > 0
+        ? Math.min(MAX_PAGE_SIZE, Math.max(PAGE_SIZE, cached.length + getUnreadOnOpen(channelId)))
+        : PAGE_SIZE;
     // Runs synchronously before the first await, so an empty message region
     // shows its in-region loading placeholder from the very first render. A
     // revisit's cached rows stay on screen instead, and setMessages below

@@ -175,7 +175,7 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
   });
 
   it("asks a first visit for one 50-row page", async () => {
-    openWithUnread(3);
+    openWithUnread(100);
 
     await controller().loadMessages(CH, new AbortController().signal);
 
