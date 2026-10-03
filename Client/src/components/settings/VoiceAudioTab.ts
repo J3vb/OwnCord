@@ -684,6 +684,13 @@ function buildVoiceAudioTabInner(
         previewLabel.hidden = false;
         return;
       }
+      const cameras = await nativeCameraDevices();
+      if (signal.aborted) return;
+      if (cameras !== null && cameras.length === 0) {
+        setText(previewLabel, t("voiceAudio.noCamera"));
+        previewLabel.hidden = false;
+        return;
+      }
       await startNativeCameraPreview(device);
       return;
     }

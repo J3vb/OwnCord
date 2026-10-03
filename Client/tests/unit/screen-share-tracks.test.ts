@@ -338,6 +338,37 @@ describe("enableCamera", () => {
     expect(voiceStore.getState().localCamera).toBe(false);
   });
 
+  it("marks the camera on before the support check so a second toggle disables it", async () => {
+    const rig = fakeNativeRoom();
+    const deps = fakeDeps(rig.room);
+    let resolveSupport!: (s: { available: boolean; missing: string[] }) => void;
+    nativeCameraSupport.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSupport = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(nativeCameraSupport).toHaveBeenCalled();
+    });
+
+    // A second click during the round-trip reads the camera as on, so
+    // onCameraToggle routes it to disableCamera rather than re-entering here.
+    expect(voiceStore.getState().localCamera).toBe(true);
+    await disableCamera(state, deps);
+    resolveSupport({ available: true, missing: [] });
+    await enabling;
+
+    expect(rig.createCameraTracks).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localCamera).toBe(false);
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+  });
+
   it("releases the created track when publishing fails (BUG-100)", async () => {
     const rig = fakeRoom();
     const track = fakeVideoTrack();

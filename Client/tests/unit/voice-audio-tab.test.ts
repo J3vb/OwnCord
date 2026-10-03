@@ -1671,16 +1671,15 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(startCameraPreview).not.toHaveBeenCalled();
   });
 
-  it("keeps the no-camera wording when support is available but none is plugged in", async () => {
+  it("shows the no-camera wording when support is available but none is plugged in", async () => {
     nativeCameraDevices.mockResolvedValue([]);
     nativeCameraSupport.mockResolvedValue({ available: true, missing: [] });
-    // The backend rejects a start with no device, as it does on a real host.
-    startCameraPreview.mockRejectedValue(new Error("no camera"));
     const tab = await mount();
     const label = tab.element.querySelector(".camera-preview-label");
     await vi.waitFor(() => {
-      expect(startCameraPreview).toHaveBeenCalled();
+      expect(label?.textContent).toBe("No camera found");
     });
-    expect(label?.textContent).not.toContain("Camera support is missing");
+    // No capture is attempted when there is no device to capture.
+    expect(startCameraPreview).not.toHaveBeenCalled();
   });
 });

@@ -274,24 +274,25 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     return;
   }
   const generation = state.generation ?? 0;
-  // Linux captures in the backend, which needs GStreamer's camera elements:
-  // without them no capture can ever start, so name the missing support rather
-  // than failing later with a generic "no camera".
-  if (hasCameraTracks(room.localParticipant)) {
-    const support = await nativeCameraSupport();
-    if ((state.generation ?? 0) !== generation) {
-      return;
-    }
-    if (support !== null && !support.available) {
-      log.warn("Cannot enable camera: native camera support is missing", support.missing);
-      deps.onError(voiceText("share.gstreamerMissing"));
-      return;
-    }
-  }
   setLocalCamera(true);
   const quality = getStreamQuality();
   let cameraEndedCleanup: (() => void) | undefined;
   try {
+    // Linux captures in the backend, which needs GStreamer's camera elements:
+    // without them no capture can ever start, so name the missing support
+    // rather than failing later with a generic "no camera".
+    if (hasCameraTracks(room.localParticipant)) {
+      const support = await nativeCameraSupport();
+      if ((state.generation ?? 0) !== generation) {
+        return;
+      }
+      if (support !== null && !support.available) {
+        log.warn("Cannot enable camera: native camera support is missing", support.missing);
+        deps.onError(voiceText("share.gstreamerMissing"));
+        setLocalCamera(false);
+        return;
+      }
+    }
     const savedVideoDevice = loadPref<string>("videoInputDevice", "");
     stopManualCameraTrack(state, room);
     // Linux captures in the native backend (WebKitGTK freezes a hidden page's
