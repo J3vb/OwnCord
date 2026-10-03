@@ -35,9 +35,8 @@ describe("handleAuthOk", () => {
     expect(clock.lastReconnectHandshakeAt).not.toBeNull();
   });
 
-  it("still re-focuses the active channel on auth_ok while the window is focused", () => {
+  it("re-focuses the active channel on auth_ok", () => {
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
-    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const ws = socketStub();
 
     handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
