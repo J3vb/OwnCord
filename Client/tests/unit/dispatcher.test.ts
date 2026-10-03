@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
@@ -4756,6 +4756,9 @@ describe("WS Dispatcher", () => {
     });
 
     it("updates DM preview (no unread) when DM channel is active", () => {
+      // P4-03: an active DM only skips the badge while the window has focus.
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
       authStore.setState((prev) => ({
         ...prev,
@@ -4833,6 +4836,9 @@ describe("WS Dispatcher", () => {
     });
 
     it("does not badge a DM mention in the focused DM", () => {
+      // P4-03: an active DM only skips the badge while the window has focus.
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
       authStore.setState((prev) => ({
         ...prev,
