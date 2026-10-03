@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -150,7 +151,7 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 }
 
 func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
-	if samePath(g.next.TLS.CertFile, g.next.TLS.KeyFile) {
+	if sameFile(g.next.TLS.CertFile, g.next.TLS.KeyFile) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file and tls.key_file must be different paths")
 		return false
 	}
@@ -339,6 +340,22 @@ func dirWritable(dir string) bool {
 	_ = f.Close()
 	_ = os.Remove(name)
 	return true
+}
+
+// sameFile reports whether two paths name the same file. Existing paths compare
+// by identity, so a symlink or hardlink alias is caught; a pair that does not
+// exist yet compares case-insensitively on Windows, where the filesystem would
+// treat a case-variant spelling as the same file.
+func sameFile(a, b string) bool {
+	ai, aerr := os.Stat(a)
+	bi, berr := os.Stat(b)
+	if aerr == nil && berr == nil {
+		return os.SameFile(ai, bi)
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return samePath(a, b)
 }
 
 func samePath(a, b string) bool {
