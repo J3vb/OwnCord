@@ -4033,6 +4033,7 @@ dependencies = [
  "libc",
  "livekit",
  "log",
+ "minisign-verify",
  "nnnoiseless",
  "notify-rust",
  "png 0.18.1",
