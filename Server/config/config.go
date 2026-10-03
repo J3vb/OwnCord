@@ -796,12 +796,21 @@ func Load(cfgPath string) (*Config, error) {
 // the file it is about to write must survive the load path the server boots
 // with, and that path now has an environment layer in it.
 func loadBytes(raw []byte, cfgPath string) (*Config, error) {
-	return loadBytesWith(raw, cfgPath, nil)
+	cfg, err := loadBytesWith(raw, cfgPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
+		return nil, fmt.Errorf("applying voice defaults: %w", err)
+	}
+	return cfg, nil
 }
 
-// loadBytesWith is loadBytes with the overrides layer injected. A nil overrides
-// map reads the overrides file (Load and Save's verifyLoadable gate); Preview
-// passes the current file merged with the pending changes instead.
+// loadBytesWith builds a Config with the overrides layer injected and no
+// generation side effects. A nil overrides map reads the overrides file (Load
+// and Save's verifyLoadable gate); Preview passes the current file merged with
+// the pending changes instead. loadBytes calls this and then generates the
+// runtime LiveKit credentials.
 func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Config, error) {
 	cfg := defaults()
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
@@ -834,9 +843,6 @@ func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Confi
 	applyBounds(&cfg)
 	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
 		return nil, err
-	}
-	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
-		return nil, fmt.Errorf("applying voice defaults: %w", err)
 	}
 	return &cfg, nil
 }

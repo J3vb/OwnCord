@@ -235,3 +235,27 @@ func TestPreview_ReflectsNextBoot(t *testing.T) {
 		t.Errorf("Preview created %s", missing)
 	}
 }
+
+// Preview is a read path: it must not run the boot's LiveKit credential
+// generation, which would burn a fresh random pair and log the restart
+// warnings on every panel load. Load still generates them.
+func TestPreview_DoesNotGenerateVoiceCredentials(t *testing.T) {
+	dataDir := t.TempDir()
+	cfgPath := writeYAML(t, dataDir, "")
+
+	next, err := config.Preview(cfgPath, config.OverridesPath(dataDir), nil)
+	if err != nil {
+		t.Fatalf("Preview: %v", err)
+	}
+	if next.Voice.LiveKitAPIKey != "" || next.Voice.LiveKitAPISecret != "" {
+		t.Error("Preview generated LiveKit credentials; a preview must be side-effect free")
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Voice.LiveKitAPIKey == "" || cfg.Voice.LiveKitAPISecret == "" {
+		t.Error("Load must still generate LiveKit credentials")
+	}
+}

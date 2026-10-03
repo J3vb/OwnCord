@@ -217,7 +217,9 @@ func handleGetConfigOverrides(opts SetupOptions, pending *atomic.Bool) http.Hand
 func fallbackConfig(cfgPath, overridesPath string, overrides map[string]any) *config.Config {
 	stripped := make(map[string]any, len(overrides))
 	for key := range overrides {
-		stripped[key] = nil
+		if config.IsEditable(key) {
+			stripped[key] = nil
+		}
 	}
 	fallback, err := config.Preview(cfgPath, overridesPath, stripped)
 	if err != nil {
