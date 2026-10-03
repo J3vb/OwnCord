@@ -125,17 +125,25 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
     (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame));
   const isDetached = isWindowDetached(payload.channel_id);
+  // P4-03: "active" only means "the reader is watching" while the window is
+  // focused. A minimised or unfocused window shows nothing, so a message
+  // landing in the active channel then must count like one in any other
+  // channel (badge, taskbar, divider). document.hasFocus() is the same source
+  // lib/notifications.ts uses, and the platform contracts say this focus check
+  // needs no adapter; don't import isWindowFocused from lib/notifications,
+  // which tests mock out.
+  const isAway = isDetached || !document.hasFocus();
 
-  if ((payload.channel_id !== activeId || isDetached) && !isOwnMessage) {
+  if ((payload.channel_id !== activeId || isAway) && !isOwnMessage) {
     // noteChannelMessage skips the active channel by default —
-    // evenIfActive (isDetached here) is a no-op for a genuinely
+    // evenIfActive (isAway here) is a no-op for a genuinely
     // non-active channel, since its internal guard only fires when
     // channelId IS the active one. It also guards both counters behind
     // payload.id vs. the channel's lastMessageId watermark (OC-0328), so
     // a message already reflected in a `ready` snapshot (delivered
     // between the server's registerNow and buildReady, then redelivered
     // as a queued chat_message) does not double-count.
-    noteChannelMessage(payload.channel_id, payload.id, isMention, isDetached);
+    noteChannelMessage(payload.channel_id, payload.id, isMention, isAway);
   }
 
   // Update DM store last message if this message belongs to a DM channel.
@@ -143,7 +151,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // — unless that DM's window is detached from the live tail (OC-0204),
   // the same exception the channel-level increment above makes.
   if (isDm) {
-    const isDmActive = payload.channel_id === activeId && !isDetached;
+    const isDmActive = payload.channel_id === activeId && !isAway;
     if (isOwnMessage || isDmActive) {
       // Update last message preview but don't increment unread count.
       updateDmLastMessagePreview(
