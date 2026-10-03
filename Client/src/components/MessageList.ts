@@ -50,7 +50,7 @@ import {
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
-import { markChannelRead, hasUnread } from "@lib/read-state";
+import { markChannelRead, hasUnread, isChannelAway } from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -500,13 +500,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * the window focused. Fires on every scroll and on window focus; the
    * hasUnread gate keeps a plain scroll from spending the server's 5/s
    * mark_read budget, and the bottom of a detached window is not the present
-   * (OC-0204), so that case is excluded too. The bottom-in-view check alone
-   * also covers focus returning while the reader is scrolled up.
+   * (OC-0204), so that case is excluded too (isChannelAway, lib/read-state.ts).
+   * The bottom-in-view check alone also covers focus returning while the reader
+   * is scrolled up.
    */
   function markReadIfSeen(): void {
     if (root === null) return;
-    if (!isNearBottom() || !document.hasFocus()) return;
-    if (isWindowDetached(options.channelId)) return;
+    if (!isNearBottom()) return;
+    if (isChannelAway(options.channelId)) return;
     if (!hasUnread(options.channelId)) return;
     markChannelRead(options.channelId);
   }

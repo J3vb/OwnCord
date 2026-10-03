@@ -10,6 +10,18 @@
 
 import { channelsStore, clearUnread } from "@stores/channels.store";
 import { dmStore, clearDmUnread } from "@stores/dm.store";
+import { isWindowDetached } from "@stores/messages.store";
+
+/**
+ * Whether the reader is away from a channel: its loaded window is detached from
+ * the live tail, or the app window is not focused (P4-03). "Active" only means
+ * "the reader is watching" when this is false, so a message landing while away
+ * counts as unread and a `ready` resync must not mark the channel read. The
+ * focus source is `document.hasFocus()`, as in `lib/notifications.ts`.
+ */
+export function isChannelAway(channelId: number): boolean {
+  return !document.hasFocus() || isWindowDetached(channelId);
+}
 
 /** Sends one `mark_read` over the socket. */
 export type MarkReadSender = (channelId: number) => void;

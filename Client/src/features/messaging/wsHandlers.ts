@@ -40,6 +40,7 @@ import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
+import { isChannelAway } from "@lib/read-state";
 import {
   activatePendingMessages,
   acknowledgePendingMessage,
@@ -124,15 +125,12 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   const isMention =
     mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
     (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame));
-  const isDetached = isWindowDetached(payload.channel_id);
   // P4-03: "active" only means "the reader is watching" while the window is
-  // focused. A minimised or unfocused window shows nothing, so a message
-  // landing in the active channel then must count like one in any other
-  // channel (badge, taskbar, divider). document.hasFocus() is the same source
-  // lib/notifications.ts uses, and the platform contracts say this focus check
-  // needs no adapter; don't import isWindowFocused from lib/notifications,
-  // which tests mock out.
-  const isAway = isDetached || !document.hasFocus();
+  // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window
+  // shows nothing, so a message landing in the active channel then must count
+  // like one in any other channel (badge, taskbar, divider) — the same
+  // predicate the ready-time mark-read and the mention-count skip use.
+  const isAway = isChannelAway(payload.channel_id);
 
   if ((payload.channel_id !== activeId || isAway) && !isOwnMessage) {
     // noteChannelMessage skips the active channel by default —
