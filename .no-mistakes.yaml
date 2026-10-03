@@ -1,0 +1,29 @@
+# no-mistakes repository configuration.
+#
+# test.instructions and ci.rerun_transient are trusted-default-branch fields:
+# the daemon reads them only from origin/main, so they take effect once this
+# file reaches main with the next release, not from this branch.
+#
+# No commands.* or agent set on purpose: those execute shell / pick the agent
+# process, and are left to the operator's machine config.
+
+test:
+  instructions: |
+    Run only targeted tests for the files this change touches, using the
+    repository's own commands. CI runs the full suites; never mirror them here.
+
+    - Go (Server/): `go test -p 2 ./<changed package>/...` for each package a
+      changed .go file belongs to. Add `-run '^TestName$'` to narrow to the
+      tests covering the change, and `-race` for concurrency changes. Do not
+      run `go test ./...` or the deadlock/wazero/otel build-tag passes.
+    - Client (Client/): `npx vitest run <test file>` for each unit/integration
+      test covering the changed source (colocated src/**/*.test.ts, or
+      tests/unit/ or tests/integration/). Do not run the full `npm test` suite.
+    - Rust (Client/src-tauri/): `cargo test -j 4` scoped to the changed module.
+      At most `cargo test --lib`. Do not do a full cargo build of unrelated
+      crates.
+
+    Never run Playwright/e2e suites, k6, Stryker, or a whole-repo build locally.
+
+ci:
+  rerun_transient: 1
