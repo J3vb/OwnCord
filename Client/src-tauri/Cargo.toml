@@ -58,6 +58,9 @@ tauri-plugin-fs = "2"
 # plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
 # floor: older releases ignore tauri.conf.json's `requireSignedVersion`.
 tauri-plugin-updater = "2.13"
+# Read authenticated artifact metadata with the same verifier as the updater.
+# Already present transitively through tauri-plugin-updater.
+minisign-verify = "0.2"
 tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
