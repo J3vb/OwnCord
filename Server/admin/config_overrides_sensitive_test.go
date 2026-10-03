@@ -460,6 +460,21 @@ func TestConfigOverridesSensitive_AcmeCacheDirMustBeWritable(t *testing.T) {
 	}
 }
 
+// An existing tls.acme_cache_dir that is a regular file must be rejected: the
+// path is not a directory, so autocert cannot write its cache there.
+func TestConfigOverridesSensitive_AcmeCacheDirIsFile(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	file := filepath.Join(f.dataDir, "acme-file")
+	if err := os.WriteFile(file, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key := []string{"tls.acme_cache_dir"}
+	if w := patchConfig(t, f.handler, token, map[string]any{"tls.acme_cache_dir": file}, key, ""); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH a tls.acme_cache_dir naming an existing file = %d %s, want 400", w.Code, w.Body.String())
+	}
+}
+
 // voice.livekit_binary is executed. The panel accepts only a binary the
 // server process could not have written itself, so a stolen owner session
 // cannot plant one (an upload, a plugin dir) and then run it.

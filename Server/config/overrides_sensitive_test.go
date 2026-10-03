@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -124,7 +125,7 @@ func TestSaveOverrides_ValidatesSensitiveValues(t *testing.T) {
 		"tls.cert_file":                       "data/cert2.pem",
 		"tls.key_file":                        "data/key2.pem",
 		"tls.acme_cache_dir":                  "data/acme2",
-		"voice.livekit_binary":                "/opt/livekit/livekit-server",
+		"voice.livekit_binary":                filepath.Join(t.TempDir(), "livekit-server"),
 		"server.pprof_enabled":                true,
 		"server.pprof_block_profile_rate":     float64(0),
 		"server.pprof_mutex_profile_fraction": float64(10),

@@ -238,7 +238,11 @@ func guardAcmeCacheDir(w http.ResponseWriter, g guardContext) bool {
 	if containerOutsideDataDir(g, dir, "tls.acme_cache_dir", w) {
 		return false
 	}
-	if dirExists(dir) {
+	if info, err := os.Stat(dir); err == nil {
+		if !info.IsDir() {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.acme_cache_dir exists but is not a directory")
+			return false
+		}
 		if dirWritable(dir) {
 			return true
 		}
