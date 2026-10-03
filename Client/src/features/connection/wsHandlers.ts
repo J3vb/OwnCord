@@ -8,6 +8,7 @@ import {
   setSessionReplaced,
 } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
+import { isChannelAway } from "../../lib/read-state";
 import { voiceStore, leaveVoiceChannel, joinVoiceChannel } from "../../stores/voice.store";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
@@ -40,8 +41,16 @@ export function handleAuthOk(
   // observes the socket close — which happens well before the client's
   // first reconnect attempt. Re-asserting focus here (idempotent on the
   // server) covers that gap on every connect, resume included.
+  //
+  // P4-03: but channel_focus also advances the server's read state to the
+  // latest message, so re-sending it on a reconnect while the reader is away
+  // would silently mark the messages missed while away as read — the badge
+  // the ready resync just restated would vanish on the next resync. Skip it
+  // when the channel is away (unfocused or detached); the resume's auth frame
+  // carries active_channel_id, which the server honours to restore the
+  // ChannelTopic subscription without touching read state.
   const activeChannelId = channelsStore.select((s) => s.activeChannelId);
-  if (activeChannelId !== null) {
+  if (activeChannelId !== null && !isChannelAway(activeChannelId)) {
     ws.send({ type: "channel_focus", payload: { channel_id: activeChannelId } });
   }
 }
