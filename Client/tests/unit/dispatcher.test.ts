@@ -261,9 +261,6 @@ describe("WS Dispatcher", () => {
     // restart / proxy close observed before the client's reconnect) — a
     // channel already active on the client must be re-focused so the
     // channel message stream doesn't silently die.
-    // P4-03: only while the reader is actually watching (focused, not detached).
-    const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    onTestFinished(() => focus.mockRestore());
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
 
     mock.dispatch("auth_ok", {

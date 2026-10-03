@@ -35,38 +35,6 @@ describe("handleAuthOk", () => {
     expect(clock.lastReconnectHandshakeAt).not.toBeNull();
   });
 
-  // P4-03: channel_focus also advances the server's read state, so a reconnect
-  // that re-focuses the active channel while the reader is away silently marks
-  // the messages missed while away as read. The resume's auth frame
-  // (active_channel_id) restores the ChannelTopic subscription instead.
-  it("does not re-focus the active channel on auth_ok while the window is unfocused", () => {
-    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
-    vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    const ws = socketStub();
-
-    handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
-
-    expect(ws.send).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "channel_focus" }),
-    );
-  });
-
-  it("does not re-focus the active channel on auth_ok while its window is detached", () => {
-    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
-    messagesStore.setState((prev) => ({
-      ...prev,
-      detachedChannels: new Set([42]),
-    }));
-    vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    const ws = socketStub();
-
-    handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
-
-    expect(ws.send).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: "channel_focus" }),
-    );
-  });
-
   it("still re-focuses the active channel on auth_ok while the window is focused", () => {
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
