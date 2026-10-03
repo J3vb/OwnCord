@@ -112,7 +112,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"config: admin_allowed_cidrs is set but trusted_proxies is empty — behind a reverse proxy or Docker network the allowlist checks the proxy's private address, not the real client; set server.trusted_proxies to the proxy hop(s)": "config_admin_allowed_cidrs_without_trusted_proxies",
 	"config: admin_allowed_cidrs is empty — the /admin IP perimeter is disabled, so AdminIPRestrict admits every address; set server.admin_allowed_cidrs to the addresses that should reach the admin panel":                           "config_admin_allowed_cidrs_is_empty",
 	"config: ignoring invalid CIDR entry (use address/prefix notation, e.g. 10.0.0.1/32)": "config_invalid_cidr_entry",
-	"config: ignoring non-editable key in overrides file (typo, or a protected key)":      "config_overrides_non_editable_key",
 	"config: unknown key ignored — value has NO effect (typo?)":                           "config_unknown_key_ignored",
 	"config: value out of range": "config_value_out_of_range",
 	"could not write the boot marker; the next start cannot tell how this run ended": "could_not_write_the_boot_marker",
