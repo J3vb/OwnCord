@@ -38,7 +38,7 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
-import { getUnreadOnOpen } from "@stores/channels.store";
+import { channelsStore, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
@@ -50,6 +50,7 @@ import {
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
+import { markChannelRead, hasUnread, isChannelAway } from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -492,6 +493,24 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function updateJumpToPresentPill(): void {
     if (jumpToPresentPill === null) return;
     jumpToPresentPill.classList.toggle("visible", isWindowDetached(options.channelId));
+  }
+
+  /**
+   * P4-03 step A: the channel is read once the reader has seen its bottom with
+   * the window focused. Fires on every scroll and on window focus; the
+   * hasUnread gate keeps a plain scroll from spending the server's 5/s
+   * mark_read budget, and the bottom of a detached window is not the present
+   * (OC-0204), so that case is excluded too (isChannelAway, lib/read-state.ts).
+   * The bottom-in-view check alone also covers focus returning while the reader
+   * is scrolled up.
+   */
+  function markReadIfSeen(): void {
+    if (root === null) return;
+    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (!isNearBottom()) return;
+    if (isChannelAway(options.channelId)) return;
+    if (!hasUnread(options.channelId)) return;
+    markChannelRead(options.channelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -1099,6 +1118,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Update floating scroll-to-bottom button visibility
     updateScrollToBottomBtn();
+    // Reaching the bottom counts as seeing it (P4-03 step A).
+    markReadIfSeen();
 
     // Debounce virtual window updates to animation frames
     if (scrollRafId === 0) {
@@ -1163,6 +1184,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       signal: disposable.signal,
       passive: true,
     });
+
+    // Focus returning with the bottom already in view counts as seeing it
+    // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
+    window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
     // Batched via RAF with anchor-based scroll preservation.

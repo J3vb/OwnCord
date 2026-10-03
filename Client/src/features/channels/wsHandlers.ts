@@ -28,7 +28,7 @@ import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { isTextLikeChannel } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
-import { markChannelRead } from "../../lib/read-state";
+import { isChannelAway, markChannelRead } from "../../lib/read-state";
 import { showToast } from "../../lib/toast";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
@@ -92,17 +92,25 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
   return activeChannelCleared ? null : currentActive;
 }
 
-/** Mark the channel the user was already reading as read after `ready`. */
+/**
+ * Mark the channel the user was already reading as read after `ready`.
+ *
+ * The server's read_states go stale while a channel stays focused
+ * (channel_focus is sent once per mount, mark_read only from the context
+ * menu), so a full-ready resync restates non-zero unread/mention counts for
+ * the very channel the user is reading. Mark it read: this advances the
+ * server read state and clears the local badges, for server channels and DMs
+ * alike. Skipped on first connect (nothing was active yet) and when
+ * applyReadyActiveChannel just cleared a channel that's gone — it returns
+ * null for both.
+ *
+ * P4-03: only while the reader is actually watching — a focused window whose
+ * loaded window is not detached. An unfocused or background resync restates
+ * the messages missed while away, and clearing them here would silently mark
+ * those unseen messages read (isChannelAway, lib/read-state.ts).
+ */
 export function markReadyActiveChannelRead(currentActive: number | null): void {
-  // The server's read_states go stale while a channel stays focused
-  // (channel_focus is sent once per mount, mark_read only from the context
-  // menu), so a full-ready resync restates non-zero unread/mention counts
-  // for the very channel the user is reading. Mark it read: this advances
-  // the server read state and clears the local badges, for server channels
-  // and DMs alike. Skipped on first connect (nothing was active yet) and
-  // when applyReadyActiveChannel just cleared a channel that's gone — it
-  // returns null for both.
-  if (currentActive !== null) {
+  if (currentActive !== null && !isChannelAway(currentActive)) {
     markChannelRead(currentActive);
   }
 }
@@ -183,8 +191,11 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  * live tail, counted there with the evenIfActive escape hatch). Applying the
  * server total here would paint a red badge on the channel the user is reading —
  * the badge the active-channel skip in noteChannelMessage exists to prevent.
- * Ignored for a DM-channel id too: a DM's badge lives in dmStore and its
- * mention bump rides the DM's own chat_message.
+ * The frame carries an absolute total, not a delta, so a channel the reader
+ * watched focused and then left would over-count mentions already seen; while
+ * away, its own chat_message keeps counting live mentions. Ignored for a
+ * DM-channel id too: a DM's badge lives in dmStore and its mention bump rides
+ * the DM's own chat_message.
  */
 export function handleMentionCount(payload: Payload<"mention_count">): void {
   if (payload.channel_id === channelsStore.getState().activeChannelId) return;

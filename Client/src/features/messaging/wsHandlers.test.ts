@@ -17,6 +17,8 @@ import {
   resetMessagesStore,
 } from "../../stores/messages.store";
 import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.store";
+import { channelsStore } from "../../stores/channels.store";
+import { authStore } from "../../stores/auth.store";
 import { setMembers, setTyping, getTypingUsers } from "../../stores/members.store";
 import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
@@ -461,5 +463,120 @@ describe("DM preview follows an edit or delete of its last message", () => {
 
     expect(getDmChannels).not.toHaveBeenCalled();
     expect(dm().lastMessage).toBe("latest");
+  });
+});
+
+// P4-03: "active" used to mean "the reader is watching", but a minimised or
+// unfocused window shows nothing, so a message landing in the active channel
+// then must count like one in any other channel (badge, taskbar, divider).
+// The focus source is document.hasFocus(), as in lib/notifications.ts.
+function seedActiveChannel(lastMessageId: number | null = null): void {
+  channelsStore.setState(() => ({
+    channels: new Map([
+      [
+        1,
+        {
+          id: 1,
+          name: "general",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        },
+      ],
+    ]),
+    activeChannelId: 1,
+    roles: [],
+  }));
+}
+const channel = () => channelsStore.getState().channels.get(1)!;
+const live = (id: number) => chat(id, new Date().toISOString());
+
+describe("handleChatMessage counts the active channel while the window is unfocused (P4-03)", () => {
+  beforeEach(() => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "me", avatar: null, role: "member" },
+    }));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setDmChannels([]);
+    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  });
+
+  it("counts a message in the active, attached channel while the window is unfocused", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    seedActiveChannel();
+
+    handleChatMessage(createReconnectClock(), live(10));
+
+    expect(channel().unreadCount).toBe(1);
+  });
+
+  it("counts a mention in the active channel while the window is unfocused", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    seedActiveChannel();
+
+    handleChatMessage(createReconnectClock(), { ...live(10), content: "hey @me", mentions: [1] });
+
+    expect(channel().unreadCount).toBe(1);
+    expect(channel().mentionCount).toBe(1);
+  });
+
+  it("still skips the active channel while the window is focused", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    seedActiveChannel();
+
+    handleChatMessage(createReconnectClock(), live(10));
+
+    expect(channel().unreadCount).toBe(0);
+  });
+
+  it("never counts the reader's own message, focused or not", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    seedActiveChannel();
+
+    handleChatMessage(createReconnectClock(), { ...live(10), user: me });
+
+    expect(channel().unreadCount).toBe(0);
+  });
+
+  // OC-0328: a frame already reflected in ready's lastMessageId must not count twice.
+  it("does not double-count a redelivered frame behind the watermark", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    seedActiveChannel(10);
+
+    handleChatMessage(createReconnectClock(), live(10));
+
+    expect(channel().unreadCount).toBe(0);
+  });
+
+  it("counts a message in the open DM while the window is unfocused", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    seedDm(5, "earlier", "2026-03-15T09:00:00Z");
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+    handleChatMessage(createReconnectClock(), live(10));
+
+    expect(dm().unreadCount).toBe(1);
+  });
+
+  it("does not count a message in the open DM while the window is focused", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    seedDm(5, "earlier", "2026-03-15T09:00:00Z");
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+    handleChatMessage(createReconnectClock(), live(10));
+
+    expect(dm().unreadCount).toBe(0);
   });
 });

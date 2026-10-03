@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   applyReadyActiveChannel,
   handleChannelDelete,
@@ -12,12 +12,16 @@ import {
   setActiveChannel,
   setChannels,
 } from "../../stores/channels.store";
+import { messagesStore } from "../../stores/messages.store";
 import { dmStore } from "../../stores/dm.store";
 import { authStore } from "../../stores/auth.store";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
 
-vi.mock("../../lib/read-state", () => ({ markChannelRead: vi.fn() }));
+vi.mock("../../lib/read-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/read-state")>();
+  return { ...actual, markChannelRead: vi.fn() };
+});
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 let lastChannel: number | null = null;
 vi.mock("../../lib/last-channel", () => ({
@@ -41,10 +45,18 @@ function ready(channels: ReadyChannel[], dmIds: number[] = []): Payload<"ready">
   } as unknown as Payload<"ready">;
 }
 
+let hasFocus: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   resetChannelsStore();
+  messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
   lastChannel = null;
   vi.clearAllMocks();
+  hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+});
+
+afterEach(() => {
+  hasFocus.mockRestore();
 });
 
 describe("applyReadyActiveChannel", () => {
@@ -116,6 +128,26 @@ describe("markReadyActiveChannelRead", () => {
     markReadyActiveChannelRead(null);
     expect(markChannelRead).not.toHaveBeenCalled();
   });
+
+  it("keeps the restated unread count and sends no mark_read on an unfocused ready", () => {
+    hasFocus.mockReturnValue(false);
+    setChannels([{ ...channel(5, "text", 0), unread_count: 5 }]);
+    setActiveChannel(5, { clearUnread: false });
+
+    const seen = applyReadyActiveChannel(ready([channel(5, "text", 0)]));
+    markReadyActiveChannelRead(seen);
+
+    expect(markChannelRead).not.toHaveBeenCalled();
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(5);
+  });
+
+  it("does not mark a detached active channel read even while focused", () => {
+    messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
+
+    markReadyActiveChannelRead(5);
+
+    expect(markChannelRead).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleChannelDelete", () => {
@@ -153,6 +185,16 @@ describe("handleMentionCount", () => {
   });
 
   it("ignores a frame for the channel on screen, whose chat_message handles it", () => {
+    setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
+    setActiveChannel(2);
+
+    handleMentionCount({ channel_id: 2, count: 3 });
+
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
+  });
+
+  it("ignores a frame for the active channel while the window is unfocused", () => {
+    hasFocus.mockReturnValue(false);
     setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
     setActiveChannel(2);
 

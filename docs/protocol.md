@@ -985,8 +985,9 @@ Targeted, unsequenced and never replayed; a disconnected reader recovers the
 authoritative total on their next `ready`.
 
 The client ignores the frame for the channel currently on screen (its own
-`chat_message` handles that badge) and for a DM-channel id (a DM's badge lives
-in the DM store and its mention bump rides the DM's `chat_message`).
+`chat_message` handles that badge, counting a mention that lands while the
+window is unfocused too) and for a DM-channel id (a DM's badge lives in the DM
+store and its mention bump rides the DM's `chat_message`).
 
 ---
 
