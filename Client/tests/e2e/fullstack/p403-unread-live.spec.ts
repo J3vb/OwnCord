@@ -107,10 +107,7 @@ test("unfocused message in the active channel counts unread, then refocus at the
   aliceSocket.close();
 });
 
-test("focused message in the active channel does not count as unread", async ({
-  bob,
-  server,
-}) => {
+test("focused message in the active channel does not count as unread", async ({ bob, server }) => {
   const general = await channelIdByName(server, "general");
   await expect(channelItem(bob, "general")).toHaveClass(/active/);
   await setFocused(bob, true);
