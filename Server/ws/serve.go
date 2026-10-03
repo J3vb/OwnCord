@@ -130,8 +130,9 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 }
 
 // serveWSAdmissionRaceHook, when non-nil, runs once per ServeWS upgrade request
-// between the capacity check and pending.Add(1), widening that window so a test
-// can prove the check-then-add is not atomic. Test-only (nil in production),
+// at handler entry, before admissionMu is acquired and the atomic capacity
+// check-and-reserve runs, so a test can park every concurrent upgrade at the
+// admission boundary and release them together. Test-only (nil in production),
 // same pattern as handleReconnectPreRegisterRaceHook.
 var serveWSAdmissionRaceHook func()
 
