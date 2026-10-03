@@ -398,6 +398,40 @@ func TestConfigOverridesSensitive_SelfSignedKeyDirMustBeWritable(t *testing.T) {
 	}
 }
 
+// A self-signed pair the boot cannot load or generate is a lock-out:
+// GenerateSelfSigned writes the cert and key without creating parents, so a
+// cert_file/key_file that name the same path (the key overwrites the cert) or
+// a path that is not a regular file (writePEM fails) leaves startTLS unable to
+// load a pair after restart.
+func TestConfigOverridesSensitive_SelfSignedPairMustBeLoadable(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	tlsKeys := []string{"tls.mode", "tls.cert_file", "tls.key_file"}
+
+	same := filepath.Join(f.dataDir, "same.pem")
+	sameBody := map[string]any{"tls.mode": "self_signed", "tls.cert_file": same, "tls.key_file": same}
+	if w := patchConfig(t, f.handler, token, sameBody, tlsKeys, ""); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH self_signed with one path for both = %d %s, want 400", w.Code, w.Body.String())
+	}
+
+	dir := filepath.Join(f.dataDir, "cert-is-dir")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dirBody := map[string]any{
+		"tls.mode":      "self_signed",
+		"tls.cert_file": dir,
+		"tls.key_file":  filepath.Join(f.dataDir, "key.pem"),
+	}
+	if w := patchConfig(t, f.handler, token, dirBody, tlsKeys, ""); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "tls.cert_file") {
+		t.Errorf("PATCH self_signed with a directory cert_file = %d %s, want 400 naming tls.cert_file", w.Code, w.Body.String())
+	}
+	if len(savedOverrides(t, f.dataDir)) != 0 {
+		t.Fatal("a refused self-signed PATCH wrote overrides")
+	}
+}
+
 func TestConfigOverridesSensitive_DataPathGuards(t *testing.T) {
 	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
 	token := createAdminUser(t, f.database)

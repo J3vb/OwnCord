@@ -222,4 +222,70 @@ describe("Server/admin/static — sensitive server configuration", () => {
     expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
     expect((doc.getElementById("saveConfigBtn") as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("does not send a null reset when a numeric field without an override is cleared", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const doc = await render(dom, booted.bridge);
+
+    control(doc, "server.port").value = "";
+    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
+    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    expect(patches(calls)).toHaveLength(0);
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
+  });
+
+  it("lets a confirmed save be retried after the server refuses it", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const doc = await render(dom, booted.bridge);
+
+    control(doc, "server.port").value = "9443";
+    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
+    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    const typed = doc.getElementById("typedConfirm") as HTMLInputElement;
+    typed.value = "CONFIRM";
+
+    const win = dom.window as unknown as { fetch: typeof fetch };
+    let refuse = true;
+    win.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
+      const method = String((opts.method as string) || "GET").toUpperCase();
+      const path = String(input).replace(/^\/admin\/api/, "");
+      calls.push({
+        method,
+        path,
+        body: typeof opts.body === "string" ? JSON.parse(opts.body) : undefined,
+        headers: { ...(opts.headers as Record<string, string>) },
+      });
+      const json = path === "/config/settings" ? SETTINGS : {};
+      if (refuse) {
+        return {
+          ok: false,
+          status: 400,
+          headers: new Headers(),
+          json: async () => ({ message: "server.port is not available on this host" }),
+          text: async () => "",
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: async () => json,
+        text: async () => JSON.stringify(json),
+      } as Response;
+    }) as typeof fetch;
+
+    await fn(booted.bridge.confirmServerConfig, "confirmServerConfig")();
+    expect(patches(calls)).toHaveLength(1);
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(true);
+
+    refuse = false;
+    await fn(booted.bridge.confirmServerConfig, "confirmServerConfig")();
+    expect(patches(calls)).toHaveLength(2);
+    expect(patches(calls)[1]!.headers["X-OwnCord-Confirm"]).toBe("server.port");
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
+  });
 });

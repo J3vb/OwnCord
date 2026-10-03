@@ -150,7 +150,21 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 }
 
 func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
-	if fileExists(g.next.TLS.CertFile) && fileExists(g.next.TLS.KeyFile) {
+	if samePath(g.next.TLS.CertFile, g.next.TLS.KeyFile) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file and tls.key_file must be different paths")
+		return false
+	}
+	certInfo, certErr := os.Stat(g.next.TLS.CertFile)
+	keyInfo, keyErr := os.Stat(g.next.TLS.KeyFile)
+	if certErr == nil && !certInfo.Mode().IsRegular() {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file exists but is not a regular file")
+		return false
+	}
+	if keyErr == nil && !keyInfo.Mode().IsRegular() {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.key_file exists but is not a regular file")
+		return false
+	}
+	if certErr == nil && keyErr == nil {
 		if _, err := tls.LoadX509KeyPair(g.next.TLS.CertFile, g.next.TLS.KeyFile); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file/tls.key_file: the existing pair does not load")
 			return false
@@ -302,11 +316,6 @@ func containerOutsideDataDir(g guardContext, path, key string, w http.ResponseWr
 		return true
 	}
 	return false
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func dirExists(path string) bool {

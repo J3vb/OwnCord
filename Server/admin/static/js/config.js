@@ -153,6 +153,7 @@ function configDiff(){
     const el=document.querySelector('[data-config-key="'+row.key+'"]');
     if(!el)return;
     const typed=configTypedValue(row,el);
+    if(typed===null&&row.override==null)return;
     if(!configEqual(typed,initial[row.key]))body[row.key]=typed;
   });
   return body;
@@ -187,6 +188,7 @@ function configNeedsConfirmation(key){
 async function sendConfigPatch(body,headers){
   try{
     const data=await api('PATCH','/config/settings',body,headers);
+    state._configPending=null;
     closeModal();
     applyConfigResponse(data);
     showToast('Configuration saved — restart to apply');
@@ -246,7 +248,6 @@ async function confirmServerConfig(){
   if(!typedConfirmed('CONFIRM'))return;
   const body=state._configPending;
   if(!body)return;
-  state._configPending=null;
   const keys=Object.keys(body).filter(configNeedsConfirmation);
   await sendConfigPatch(body,{'X-OwnCord-Confirm':keys.join(',')});
 }
