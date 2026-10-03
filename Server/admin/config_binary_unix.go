@@ -16,7 +16,7 @@ func binarySafeFromServerUser(path string, info os.FileInfo) bool {
 	if !ok {
 		return false
 	}
-	if st.Uid == uint32(os.Geteuid()) {
+	if int64(st.Uid) == int64(os.Geteuid()) {
 		return false
 	}
 	return unix.Access(path, unix.W_OK) != nil

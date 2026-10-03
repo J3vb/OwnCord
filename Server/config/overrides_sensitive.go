@@ -152,7 +152,7 @@ func isHostname(s string) bool {
 	if strings.ContainsAny(s, ":/") {
 		return false
 	}
-	for _, label := range strings.Split(s, ".") {
+	for label := range strings.SplitSeq(s, ".") {
 		if !isHostLabel(label) {
 			return false
 		}

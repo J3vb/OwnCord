@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"net"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,12 +35,7 @@ func (g guardContext) has(key string) bool {
 }
 
 func (g guardContext) anyOf(keys ...string) bool {
-	for _, key := range keys {
-		if g.has(key) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(keys, g.has)
 }
 
 // runConfigGuards checks the keys a PATCH names against host state that the
@@ -47,12 +44,12 @@ func (g guardContext) anyOf(keys ...string) bool {
 // 409 LOCKOUT; every other refusal is 400 and names the offending key. All
 // guards judge next (the configuration the next boot would run with), so a
 // null reset that falls back to a narrower config.yaml value is caught too.
-func runConfigGuards(w http.ResponseWriter, r *http.Request, opts SetupOptions, next *config.Config, changes map[string]any) bool {
+func runConfigGuards(ctx context.Context, w http.ResponseWriter, r *http.Request, opts SetupOptions, next *config.Config, changes map[string]any) bool {
 	g := guardContext{r: r, opts: opts, next: next, changes: changes}
 	return guardPerimeter(w, g) &&
 		guardPort(w, g) &&
 		guardTLS(w, g) &&
-		guardDataPaths(w, g) &&
+		guardDataPaths(ctx, w, g) &&
 		guardLiveKitBinary(w, g)
 }
 
@@ -146,7 +143,7 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 	if g.opts.RunningCfg.TLS.Mode == "acme" {
 		return true
 	}
-	ln, err := net.Listen("tcp", ":80")
+	ln, err := net.Listen("tcp", ":80") //nolint:gosec // G102: probes whether the ACME challenge port is free; the listener is closed immediately
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.mode acme needs port 80 free for the ACME challenge")
 		return false
@@ -201,8 +198,8 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 // guardDataPaths checks the host paths a PATCH moves: the database must be an
 // intact OwnCord database, the directories must exist and be writable, and in
 // a container every path the server writes must live under data_dir.
-func guardDataPaths(w http.ResponseWriter, g guardContext) bool {
-	return guardDatabasePath(w, g) &&
+func guardDataPaths(ctx context.Context, w http.ResponseWriter, g guardContext) bool {
+	return guardDatabasePath(ctx, w, g) &&
 		guardBackupDir(w, g) &&
 		guardStorageDir(w, g) &&
 		guardPluginsDir(w, g) &&

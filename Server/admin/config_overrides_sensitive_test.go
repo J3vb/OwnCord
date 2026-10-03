@@ -261,8 +261,9 @@ func TestConfigOverridesSensitive_ConfirmationRequired(t *testing.T) {
 func TestConfigOverridesSensitive_PerimeterLockoutGuard(t *testing.T) {
 	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
 	token := createAdminUser(t, f.database)
-	adminKey := []string{"server.admin_allowed_cidrs"}
 	proxyKey := []string{"server.trusted_proxies"}
+	adminKey := make([]string, 1, 1+len(proxyKey))
+	adminKey[0] = "server.admin_allowed_cidrs"
 
 	// An allowlist that excludes the caller (192.0.2.1) is refused.
 	w := patchConfig(t, f.handler, token, map[string]any{"server.admin_allowed_cidrs": []string{"10.0.0.0/8"}}, adminKey, "")

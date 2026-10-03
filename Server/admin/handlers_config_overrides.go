@@ -99,7 +99,7 @@ func secretConfigured(cfg *config.Config, key string) bool {
 // comma-separated confirmation header does not name, sorted.
 func unconfirmedKeys(changes map[string]any, header string) []string {
 	confirmed := make(map[string]bool)
-	for _, key := range strings.Split(header, ",") {
+	for key := range strings.SplitSeq(header, ",") {
 		if key = strings.TrimSpace(key); key != "" {
 			confirmed[key] = true
 		}
@@ -126,7 +126,7 @@ func configAuditDetail(key string, value any) string {
 	return key + " updated"
 }
 
-func guardDatabasePath(w http.ResponseWriter, g guardContext) bool {
+func guardDatabasePath(ctx context.Context, w http.ResponseWriter, g guardContext) bool {
 	if !g.has("database.path") || samePath(g.next.Database.Path, g.opts.RunningCfg.Database.Path) {
 		return true
 	}
@@ -138,7 +138,6 @@ func guardDatabasePath(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path must name an existing database file")
 		return false
 	}
-	ctx := context.WithoutCancel(g.r.Context())
 	if err := db.CheckBackupIntegrity(ctx, g.next.Database.Path); err != nil {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path is not a readable OwnCord database")
 		return false
@@ -238,7 +237,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
-		if !runConfigGuards(w, r, opts, next, changes) {
+		if !runConfigGuards(context.WithoutCancel(r.Context()), w, r, opts, next, changes) {
 			return
 		}
 		if err := config.SaveOverrides(path, changes); err != nil {
