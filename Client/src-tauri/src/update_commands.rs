@@ -348,6 +348,20 @@ pub async fn check_client_update(
     }
 }
 
+/// Download using the plugin's signature and version checks.
+async fn download_for_target<C: FnMut(usize, Option<u64>)>(
+    update: &tauri_plugin_updater::Update,
+    _pubkey: &str,
+    _target: &str,
+    _bundle: &BundleType,
+    on_chunk: C,
+) -> Result<Vec<u8>, String> {
+    update
+        .download(on_chunk, || {})
+        .await
+        .map_err(|e| format!("download/install failed: {e}"))
+}
+
 /// Download and install a pending update. Windows exits through its installer;
 /// on Linux/macOS the frontend must call `relaunch()` after this completes.
 #[tauri::command]
@@ -603,11 +617,20 @@ mod tests {
     /// server's offer and downloads it. Only the trust anchor is swapped for
     /// the fixture key, and plain http allowed for the loopback stub.
     async fn download_offer(version: &str, signature: &str) -> Result<(), String> {
+        download_offer_for_target(version, signature, FIXTURE_PUBKEY, None).await
+    }
+
+    async fn download_offer_for_target(
+        version: &str,
+        signature: &str,
+        pubkey: &str,
+        target: Option<(&str, &BundleType)>,
+    ) -> Result<(), String> {
         let base = serve_update_offer(version, signature);
         let shipped: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
         let mut updater_config = shipped["plugins"]["updater"].clone();
-        updater_config["pubkey"] = FIXTURE_PUBKEY.into();
+        updater_config["pubkey"] = pubkey.into();
         updater_config["dangerousInsecureTransportProtocol"] = true.into();
 
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
@@ -631,11 +654,111 @@ mod tests {
             .await
             .map_err(|e| e.to_string())?
             .ok_or("no update offered")?;
+        if let Some((target, bundle)) = target {
+            return download_for_target(&update, pubkey, target, bundle, |_, _| {})
+                .await
+                .map(|_| ());
+        }
         update
             .download(|_, _| {}, || {})
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
+    }
+
+    // Prehashed minisign fixtures over FIXTURE_PAYLOAD, generated with an
+    // ephemeral Ed25519 key. Its private half was discarded. Every fixture
+    // binds version 99.0.0; only the authenticated file field varies.
+    fn target_fixtures() -> serde_json::Value {
+        serde_json::from_str(include_str!("update_commands/target-fixtures.json"))
+            .expect("signed target fixtures")
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_for_another_architecture_is_refused() {
+        let fixtures = target_fixtures();
+        for (name, target, bundle) in [
+            ("linux_arm64", "linux-x86_64", BundleType::AppImage),
+            ("linux_x64", "linux-aarch64", BundleType::AppImage),
+            ("windows_arm64", "windows-x86_64", BundleType::Nsis),
+            ("windows_x64", "windows-aarch64", BundleType::Nsis),
+        ] {
+            let result = download_offer_for_target(
+                "99.0.0",
+                fixtures[name].as_str().unwrap(),
+                fixtures["pubkey"].as_str().unwrap(),
+                Some((target, &bundle)),
+            )
+            .await;
+            assert!(result.is_err(), "{name} must be refused on {target}");
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_for_the_running_target_is_accepted() {
+        let fixtures = target_fixtures();
+        for (name, target, bundle) in [
+            ("linux_x64", "linux-x86_64", BundleType::AppImage),
+            ("linux_arm64", "linux-aarch64", BundleType::AppImage),
+            ("windows_x64", "windows-x86_64", BundleType::Nsis),
+            ("windows_arm64", "windows-aarch64", BundleType::Nsis),
+        ] {
+            assert_eq!(
+                download_offer_for_target(
+                    "99.0.0",
+                    fixtures[name].as_str().unwrap(),
+                    fixtures["pubkey"].as_str().unwrap(),
+                    Some((target, &bundle)),
+                )
+                .await,
+                Ok(()),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_requires_one_parseable_file_field() {
+        let fixtures = target_fixtures();
+        for name in [
+            "missing",
+            "empty",
+            "unparseable",
+            "duplicate",
+            "path",
+            "query",
+        ] {
+            assert!(
+                download_offer_for_target(
+                    "99.0.0",
+                    fixtures[name].as_str().unwrap(),
+                    fixtures["pubkey"].as_str().unwrap(),
+                    Some(("linux-x86_64", &BundleType::AppImage)),
+                )
+                .await
+                .is_err(),
+                "{name} must be refused"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_requires_the_running_os_and_bundle() {
+        let fixtures = target_fixtures();
+        for (target, bundle) in [
+            ("windows-x86_64", BundleType::Nsis),
+            ("linux-x86_64", BundleType::Deb),
+            ("linux-x86_64", BundleType::Rpm),
+        ] {
+            assert!(download_offer_for_target(
+                "99.0.0",
+                fixtures["linux_x64"].as_str().unwrap(),
+                fixtures["pubkey"].as_str().unwrap(),
+                Some((target, &bundle)),
+            )
+            .await
+            .is_err());
+        }
     }
 
     #[tokio::test]
