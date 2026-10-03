@@ -219,6 +219,7 @@ export function rollbackPendingVideo(id: string): "camera" | "screen" | undefine
 /** Mutable state for the manually published camera track. */
 export interface CameraTrackState extends GenerationGuarded {
   manualCameraTrack: LocalVideoTrack | NativeCameraTrack | null;
+  cameraTrackEndedCleanup?: () => void;
 }
 
 /** The native camera publication surface `NativeRoom` adds to
@@ -257,6 +258,7 @@ function unpublishManualTrack(
 }
 
 export function stopManualCameraTrack(state: CameraTrackState, room: Room | null): void {
+  state.cameraTrackEndedCleanup?.();
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
@@ -275,6 +277,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
   setLocalCamera(true);
   const quality = getStreamQuality();
   const generation = state.generation ?? 0;
+  let cameraEndedCleanup: (() => void) | undefined;
   try {
     const savedVideoDevice = loadPref<string>("videoInputDevice", "");
     stopManualCameraTrack(state, room);
@@ -309,6 +312,31 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     state.manualCameraTrack = videoTrack;
+    const onEnded = (): void => {
+      if (
+        (state.generation ?? 0) !== generation ||
+        state.manualCameraTrack !== videoTrack ||
+        deps.getRoom() !== room ||
+        deps.getWs() !== ws
+      ) {
+        return;
+      }
+      log.info("Camera track ended externally (device unplugged)");
+      void disableCamera(state, deps);
+    };
+    const cleanup = (): void => {
+      videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
+      if (state.cameraTrackEndedCleanup === cleanup) {
+        state.cameraTrackEndedCleanup = undefined;
+      }
+    };
+    cameraEndedCleanup = cleanup;
+    state.cameraTrackEndedCleanup = cleanup;
+    videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
+    if (videoTrack.mediaStreamTrack.readyState === "ended") {
+      await disableCamera(state, deps);
+      return;
+    }
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
       simulcast: quality !== "source",
@@ -333,6 +361,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
   } catch (err) {
+    cameraEndedCleanup?.();
     if ((state.generation ?? 0) !== generation) {
       // A disableCamera (and possibly a newer enableCamera) already ran to
       // completion while this attempt's device acquisition/publish was in

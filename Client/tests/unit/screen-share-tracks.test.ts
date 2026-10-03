@@ -410,6 +410,47 @@ describe("enableCamera", () => {
     expect(state.manualCameraTrack).toBe(trackB);
     expect(voiceStore.getState().localCamera).toBe(true);
   });
+
+  it("turns the camera off when the device track ends externally", async () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(video);
+    const deps = fakeDeps(rig.room);
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    await enableCamera(state, deps);
+    deps.wsSend.mockClear();
+
+    (video.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
+
+    await vi.waitFor(() => {
+      expect(deps.wsSend).toHaveBeenCalledWith({
+        type: "voice_camera",
+        payload: { enabled: false },
+      });
+    });
+    expect(voiceStore.getState().localCamera).toBe(false);
+    expect(state.manualCameraTrack).toBeNull();
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
+  });
+
+  it("turns the camera off when the track had already ended before it was observed", async () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    Object.defineProperty(video.mediaStreamTrack, "readyState", { value: "ended" });
+    createLocalVideoTrack.mockResolvedValue(video);
+    const deps = fakeDeps(rig.room);
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    await enableCamera(state, deps);
+
+    expect(deps.wsSend).toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: false },
+    });
+    expect(voiceStore.getState().localCamera).toBe(false);
+    expect(state.manualCameraTrack).toBeNull();
+  });
 });
 
 // ── disableCamera ──────────────────────────────────────────────────────────

@@ -696,8 +696,11 @@ function buildVoiceAudioTabInner(
         maxWidth: 320,
         maxHeight: 180,
       });
-      if (signal.aborted || thisRequest !== cameraRequestId) {
+      if (signal.aborted) {
         void desktop.nativeVoice.stopCameraPreview();
+        return;
+      }
+      if (thisRequest !== cameraRequestId) {
         return;
       }
       const renderer = new NativeVideoRenderer(`${started.frames}/camera`);

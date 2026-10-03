@@ -134,6 +134,22 @@ impl Target {
         }
         Ok(Self::Device(id.to_string()))
     }
+
+    /// The concrete device id to open: the requested one when it is listed,
+    /// otherwise the first listed camera — what `Default`, and a saved id that
+    /// no longer matches any device, both mean. `None` when no camera is
+    /// listed; `Synthetic` opens no device.
+    fn resolve_id(&self, listed: &[CameraDevice]) -> Option<String> {
+        match self {
+            Target::Synthetic { .. } => None,
+            Target::Device(id) => listed
+                .iter()
+                .find(|d| d.id == *id)
+                .or_else(|| listed.first())
+                .map(|d| d.id.clone()),
+            Target::Default => listed.first().map(|d| d.id.clone()),
+        }
+    }
 }
 
 /// Capture pacing and size cap, from the web path's camera presets.
@@ -254,12 +270,9 @@ impl Producer {
                 height: *height,
                 n: 0,
             }),
-            Target::Device(id) => Self::device(id),
-            Target::Default => {
-                let id = list_devices()
-                    .into_iter()
-                    .next()
-                    .map(|d| d.id)
+            Target::Device(_) | Target::Default => {
+                let id = target
+                    .resolve_id(&list_devices())
                     .ok_or_else(|| NO_DEVICE.to_string())?;
                 Self::device(&id)
             }
@@ -647,6 +660,40 @@ mod tests {
         );
         assert_eq!(Target::parse("42"), Ok(Target::Device("42".into())));
         assert_eq!(Target::parse(""), Ok(Target::Default));
+    }
+
+    #[test]
+    fn a_listed_device_wins_and_a_stale_or_empty_one_falls_back_to_the_first() {
+        let listed = vec![
+            CameraDevice {
+                id: "/dev/video0".into(),
+                name: "Cam A".into(),
+                index: 0,
+            },
+            CameraDevice {
+                id: "/dev/video2".into(),
+                name: "Cam B".into(),
+                index: 1,
+            },
+        ];
+        assert_eq!(
+            Target::Device("/dev/video2".into())
+                .resolve_id(&listed)
+                .as_deref(),
+            Some("/dev/video2")
+        );
+        assert_eq!(
+            Target::Device("/dev/video9".into())
+                .resolve_id(&listed)
+                .as_deref(),
+            Some("/dev/video0")
+        );
+        assert_eq!(
+            Target::Default.resolve_id(&listed).as_deref(),
+            Some("/dev/video0")
+        );
+        assert_eq!(Target::Device("/dev/video9".into()).resolve_id(&[]), None);
+        assert_eq!(Target::Default.resolve_id(&[]), None);
     }
 
     /// A synthetic camera drives the capture loop, previews, publishes to a
