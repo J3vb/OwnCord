@@ -36,11 +36,10 @@ export async function startNativeApp(
     .filter((root): root is string => !!root)
     .map((root) => join(root, options.identifier ?? "com.owncord.e2e"));
   if (profiles.length === 0) throw new Error("Windows application data paths are missing");
-  const clearProfiles = async () => {
-    for (const profile of profiles)
-      await rm(profile, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
-  };
-  if (!options.preserveProfile) await clearProfiles();
+  const clearProfiles = () => clearNativeProfiles(profiles);
+  // Timed and named: a profile still locked by a process that outlived the
+  // previous test spends rm's retries here, before any launch timing starts.
+  const profileCleared = options.preserveProfile ? "kept" : `${await clearProfiles()}ms`;
   // Seed after the clear so the oversized active log is what the plugin opens.
   // The log plugin's LogDir target is `{LOCALAPPDATA}/<identifier>/logs`, so
   // seed there explicitly rather than at profiles[0] (which may be APPDATA).
@@ -64,6 +63,9 @@ export async function startNativeApp(
   // the old 60 s budget, so the page-ready/title wait gets 90 s.
   const startupDeadline = Date.now() + 90_000;
   const started = Date.now();
+  // A test that times out before the ready line still shows, in its stdout,
+  // whether it got this far: a stall before here is server, gate or profile.
+  console.log(`native app launching: profile cleared ${profileCleared}`);
   const running = startProcess(exe, [], directory);
   const firstOutput = () => {
     const at = running.firstOutputAt();
@@ -104,7 +106,7 @@ export async function startNativeApp(
       timeout: Math.max(1, startupDeadline - Date.now()),
     });
     console.log(
-      `native app ready: first output after ${firstOutput()}, CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`,
+      `native app ready: profile cleared ${profileCleared}, first output after ${firstOutput()}, CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`,
     );
     return {
       cdpURL: `http://127.0.0.1:${port}`,
@@ -129,7 +131,7 @@ export async function startNativeApp(
       running,
       options.identifier ?? "com.owncord.e2e",
       port,
-      `first output after ${firstOutput()}, CDP ${cdpReady === undefined ? "never ready" : `after ${cdpReady}ms`}, failed after ${Date.now() - started}ms`,
+      `profile cleared ${profileCleared}, first output after ${firstOutput()}, CDP ${cdpReady === undefined ? "never ready" : `after ${cdpReady}ms`}, failed after ${Date.now() - started}ms`,
     );
     // Profile removal retries on locked files for up to ~46 s per folder; an
     // unbounded wait here outlived the test timeout and hid this error.
@@ -148,6 +150,29 @@ export async function startNativeApp(
     ]);
     throw new Error(`${String(error)}\n${evidence}${cleanupNote}\n${running.log()}`);
   }
+}
+
+/** Remove the native profiles and return the time it took. A profile that is
+ *  still locked once rm's retries run out (~46 s) fails naming itself and the
+ *  time spent, instead of a bare EBUSY or, worse, a test timeout that never
+ *  says the launch had not started. */
+export async function clearNativeProfiles(
+  profiles: string[],
+  remove = (path: string) =>
+    rm(path, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 }),
+): Promise<number> {
+  const started = Date.now();
+  for (const profile of profiles) {
+    try {
+      await remove(profile);
+    } catch (error) {
+      throw new Error(
+        `native profile ${profile} still locked after ${Date.now() - started}ms: ${String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+  return Date.now() - started;
 }
 
 /** What the machine looked like when a launch failed, for a cause beyond "timed out". */
