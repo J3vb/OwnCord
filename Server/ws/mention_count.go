@@ -36,6 +36,9 @@ func buildMentionCount(channelID, count int64) []byte {
 // a badge update for a channel their sidebar no longer lists. The stored count
 // is still corrected; only the live frame is withheld.
 func (h *Hub) NotifyMentionCount(userID, channelID, count int64) {
+	if h.GetClient(userID) == nil {
+		return
+	}
 	if !h.canSeeChannelForMentionCount(userID, channelID) {
 		return
 	}
