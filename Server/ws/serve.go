@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 const (
@@ -45,40 +46,55 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
 	// pending counts this handler's admitted sockets that have not yet started
 	// their pumps (authenticating, waiting for a ready-build permit, or
-	// handshaking). Reserving a slot is a CAS loop: the capacity comparison and
-	// the increment are one atomic step, so concurrent upgrades near the
-	// ceiling cannot all pass the check. A slot is held across registration
-	// (registerNow runs before startPumps' release), so hub.ClientCount() +
-	// pending never dips below the true reserved count. Reserving before the
-	// upgrade means a refused connection costs one HTTP request, not a socket
-	// plus goroutines.
+	// handshaking). admissionMu serializes the capacity decision with the
+	// release, so the check reads the hub's active count and pending as one
+	// consistent pair: registerNow (under h.mu) runs before startPumps'
+	// release, and that release's unlock publishes the registration to the next
+	// admission's lock acquisition, so a stale reader cannot reserve a slot a
+	// just-registered connection has taken. A slot is held across registration,
+	// so hub.ClientCount() + pending never dips below the true reserved count.
+	// Reserving before the upgrade means a refused connection costs one HTTP
+	// request, not a socket plus goroutines.
+	//
+	// pending is atomic only so the unlocked fast-path read below is race-free;
+	// the authoritative check-and-reserve and the release are serialized by
+	// admissionMu.
+	var admissionMu syncutil.Mutex
 	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
-		var hooked bool
-		for {
-			cur := pending.Load()
-			if maxConns > 0 && hub.ClientCount()+int(cur) >= maxConns {
-				hub.connRejects.Add(1)
-				w.Header().Set("Retry-After", "30")
-				http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
-				return
-			}
-			if serveWSAdmissionRaceHook != nil && !hooked {
-				hooked = true
-				serveWSAdmissionRaceHook()
-			}
-			// Re-check under CAS: a concurrent admit that wins the race moves
-			// cur forward, so the loser re-evaluates the ceiling and refuses.
-			if pending.CompareAndSwap(cur, cur+1) {
-				break
-			}
+		reject := func() {
+			hub.connRejects.Add(1)
+			w.Header().Set("Retry-After", "30")
+			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
 		}
+		// Fast-path refusal. It only ever refuses — never admits — so a stale
+		// unlocked read cannot let a connection past the ceiling; the
+		// authoritative check-and-reserve below re-reads under admissionMu.
+		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
+			reject()
+			return
+		}
+		// Runs after the capacity comparison and before the reservation, the
+		// window this fix closes. Test-only (nil in production).
+		if serveWSAdmissionRaceHook != nil {
+			serveWSAdmissionRaceHook()
+		}
+		admissionMu.Lock()
+		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
+			admissionMu.Unlock()
+			reject()
+			return
+		}
+		pending.Add(1)
+		admissionMu.Unlock()
 
 		var ended bool
 		endPending := func() {
 			if !ended {
 				ended = true
+				admissionMu.Lock()
 				pending.Add(-1)
+				admissionMu.Unlock()
 			}
 		}
 		defer endPending()
@@ -134,10 +150,10 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 }
 
 // serveWSAdmissionRaceHook, when non-nil, runs once per ServeWS upgrade request
-// after the capacity comparison and before the CAS that reserves the slot, so a
-// test can park every concurrent upgrade inside that check-then-reserve window
-// and release them together, proving the reservation is atomic. Test-only (nil
-// in production), same pattern as handleReconnectPreRegisterRaceHook.
+// after the capacity comparison and before the reservation, so a test can park
+// every concurrent upgrade inside that check-then-reserve window and release
+// them together. Test-only (nil in production), same pattern as
+// handleReconnectPreRegisterRaceHook.
 var serveWSAdmissionRaceHook func()
 
 // handleReconnectPreRegisterRaceHook, when non-nil, runs once inside

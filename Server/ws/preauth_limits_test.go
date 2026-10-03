@@ -115,7 +115,7 @@ func TestServeWS_PendingHandshakesCountTowardCap(t *testing.T) {
 // window and releases them together, so all attempts race the reservation at
 // once rather than relying on lucky timing. Against the pre-fix check followed
 // by a separate increment every parked attempt is admitted, so this test fails
-// there and passes only once the reservation is atomic.
+// there (admitted 8 at cap 1) and passes only once the reservation is atomic.
 func TestServeWS_ConcurrentUpgradesAdmitOnlyToCap(t *testing.T) {
 	_, url, _ := newPreauthTestServer(t, 1)
 
