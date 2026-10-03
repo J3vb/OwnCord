@@ -800,6 +800,10 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
 	}
+	// The admin panel's overrides sit between the file and the environment.
+	if err := applyOverrideLayer(&cfg); err != nil {
+		return nil, err
+	}
 	env, err := envOverrides()
 	if err != nil {
 		// The failing layer is known at this call, so attribute the error
