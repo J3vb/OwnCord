@@ -21,10 +21,9 @@ const maxUploadSizeMB = 10240
 // editableRules is the single registry of panel-editable keys. Each entry
 // validates one JSON-decoded value and returns the normalised Go value to
 // store. Adding a key is one row here plus a rule; the exact-inventory test
-// pins the set at 49. The 28 excluded keys (secrets, host paths, the
-// listener/TLS identity, the panel perimeter, the update source, pprof, the
-// live upload lists, and server.name, which the Settings page owns) are
-// deliberately absent for now; the remaining surface arrives in a follow-up.
+// pins the set. Only three keys stay out: server.data_dir (the overrides file
+// and the TOTP/erasure/VAPID keys live inside it) and the two upload-type
+// lists, which the Settings page already owns live.
 var editableRules = map[string]func(any) (any, error){
 	// Integers.
 	"attention.delivery_drops_per_min":          intRule(1, 1_000_000),
@@ -47,6 +46,9 @@ var editableRules = map[string]func(any) (any, error){
 	"server.max_ws_connections":                 intRule(0, 1_000_000),
 	"server.min_free_disk_mb":                   intRule(0, maxMiB),
 	"server.waf_paranoia_level":                 intRule(1, 4),
+	"server.port":                               portRule,
+	"server.pprof_block_profile_rate":           intRule(0, 1_000_000_000),
+	"server.pprof_mutex_profile_fraction":       intRule(0, 1_000_000),
 	"upload.max_size_mb":                        intRule(1, maxUploadSizeMB),
 	"upload.user_quota_mb":                      intRule(0, maxMiB),
 	"voice.udp_port":                            udpPortRule,
@@ -86,6 +88,30 @@ var editableRules = map[string]func(any) (any, error){
 	"server.metrics_allowed_cidrs":         listRule(checkCIDR),
 	"server.livekit_webhook_allowed_cidrs": listRule(checkCIDR),
 	"plugins.http_allowlist":               listRule(checkHostname),
+
+	// Sensitive keys: secrets (write-only), the update source, TLS identity,
+	// host paths, the panel perimeter and pprof.
+	"server.pprof_enabled":       boolRule,
+	"database.type":              enumRule("sqlite"),
+	"server.restart_mode":        enumRule("auto", "supervised", "spawn"),
+	"tls.mode":                   enumRule("off", "self_signed", "manual", "acme"),
+	"gif.api_key":                secretRule(0, 512),
+	"github.token":               secretRule(0, 512),
+	"voice.livekit_api_key":      liveKitKeyRule,
+	"voice.livekit_api_secret":   liveKitSecretRule,
+	"github.owner":               githubOwnerRule,
+	"github.repo":                githubRepoRule,
+	"tls.domain":                 tlsDomainRule,
+	"backup.dir":                 pathRule,
+	"database.path":              pathRule,
+	"plugins.directory":          pathRule,
+	"tls.acme_cache_dir":         pathRule,
+	"tls.cert_file":              pathRule,
+	"tls.key_file":               pathRule,
+	"upload.storage_dir":         pathRule,
+	"voice.livekit_binary":       liveKitBinaryRule,
+	"server.admin_allowed_cidrs": listRule(checkCIDR),
+	"server.trusted_proxies":     listRule(checkTrustedProxy),
 }
 
 // boolRule accepts a JSON boolean only.

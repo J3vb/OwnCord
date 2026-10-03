@@ -12,16 +12,19 @@ import (
 )
 
 // panelEditableKeys is the exact set of config.yaml keys the owner may change
-// from the admin panel. Grown deliberately: a key joins only after deciding it
-// is neither a secret, a host path, the listener/TLS identity, the panel's own
-// network perimeter, the update source, a host-only diagnostic, nor already
-// owned by a live settings row (see panelExcludedKeys).
+// from the admin panel through the overrides file. The sensitive ones carry
+// extra rules: secrets are write-only (panelSecretKeys) and lock-out-capable
+// keys need a typed confirmation and pass server-side guards
+// (panelConfirmKeys). Only panelExcludedKeys stay out.
 var panelEditableKeys = []string{
 	"attention.delivery_drops_per_min",
 	"attention.disk_warn_free_mb",
 	"attention.reconnects_per_min",
 	"attention.writer_wait_ms_per_min",
+	"backup.dir",
 	"database.max_readers",
+	"database.path",
+	"database.type",
 	"event_persistence.batch_flush_ms",
 	"event_persistence.batch_size",
 	"event_persistence.enabled",
@@ -29,10 +32,15 @@ var panelEditableKeys = []string{
 	"event_persistence.replay_cold_limit",
 	"event_persistence.replay_ring_size",
 	"event_persistence.retention_hours",
+	"gif.api_key",
+	"github.owner",
+	"github.repo",
+	"github.token",
 	"logging.level",
 	"moderation.action_retention_days",
 	"moderation.report_retention_days",
 	"plugins.cpu_budget_ms",
+	"plugins.directory",
 	"plugins.enabled",
 	"plugins.http_allowlist",
 	"plugins.max_memory_mb",
@@ -42,13 +50,20 @@ var panelEditableKeys = []string{
 	"push.subscription_ttl_days",
 	"security.auth_rate_limit_multiplier",
 	"security.expensive_auth_concurrency",
+	"server.admin_allowed_cidrs",
 	"server.allowed_origins",
 	"server.browser_client_enabled",
 	"server.livekit_webhook_allowed_cidrs",
 	"server.max_ws_connections",
 	"server.metrics_allowed_cidrs",
 	"server.min_free_disk_mb",
+	"server.port",
+	"server.pprof_block_profile_rate",
+	"server.pprof_enabled",
+	"server.pprof_mutex_profile_fraction",
 	"server.reachability_report_enabled",
+	"server.restart_mode",
+	"server.trusted_proxies",
 	"server.waf_crs_mode",
 	"server.waf_enabled",
 	"server.waf_paranoia_level",
@@ -57,10 +72,19 @@ var panelEditableKeys = []string{
 	"telemetry.otlp_endpoint",
 	"telemetry.otlp_insecure",
 	"telemetry.service_name",
+	"tls.acme_cache_dir",
+	"tls.cert_file",
+	"tls.domain",
+	"tls.key_file",
+	"tls.mode",
 	"upload.max_size_mb",
+	"upload.storage_dir",
 	"upload.user_quota_mb",
 	"voice.advertise_internal_ip",
 	"voice.auto_download_livekit",
+	"voice.livekit_api_key",
+	"voice.livekit_api_secret",
+	"voice.livekit_binary",
 	"voice.livekit_url",
 	"voice.livekit_version",
 	"voice.node_ip",
@@ -68,25 +92,12 @@ var panelEditableKeys = []string{
 	"voice.udp_port",
 }
 
-// panelExcludedKeys stay config.yaml/environment only. Each group is a
-// security or recoverability decision, not an omission.
+// panelExcludedKeys never go through the overrides file.
 var panelExcludedKeys = []string{
-	// Secrets: never round-trip through the browser.
-	"gif.api_key", "github.token", "voice.livekit_api_key", "voice.livekit_api_secret",
-	// Host paths: the panel must not point the server at, or make it execute,
-	// an arbitrary host file, nor strand the data it already wrote.
-	"server.data_dir", "database.path", "backup.dir", "upload.storage_dir",
-	"plugins.directory", "tls.cert_file", "tls.key_file", "tls.acme_cache_dir",
-	"voice.livekit_binary",
-	// Listener, TLS and storage identity: a wrong value locks the owner out of
-	// the very panel that would undo it.
-	"database.type", "server.port", "tls.mode", "tls.domain", "server.restart_mode",
-	// The admin panel's own network perimeter.
-	"server.admin_allowed_cidrs", "server.trusted_proxies",
-	// The update source.
-	"github.owner", "github.repo",
-	// Host-only diagnostics (loopback listener).
-	"server.pprof_enabled", "server.pprof_block_profile_rate", "server.pprof_mutex_profile_fraction",
+	// The overrides file, totp.key, erasure and VAPID keys all live in
+	// data_dir: an override would move the server away from its own keys and
+	// from the file that holds the override. Shown read-only in the panel.
+	"server.data_dir",
 	// Already editable live on the Settings page through their own rows,
 	// which replace config.yaml; a second panel value would be a third source.
 	"upload.blocked_extensions", "upload.allowed_extensions", "server.name",
@@ -112,8 +123,7 @@ func TestEditableKeys_ExactInventory(t *testing.T) {
 func TestEditableKeys_ProtectedKeysStayOut(t *testing.T) {
 	for _, key := range panelExcludedKeys {
 		if config.IsEditable(key) {
-			t.Errorf("IsEditable(%q) = true; secrets, host paths, the listener, the admin perimeter, "+
-				"the update source and pprof must stay config.yaml-only", key)
+			t.Errorf("IsEditable(%q) = true; data_dir and the live upload-type lists must stay out of the overrides file", key)
 		}
 	}
 	for _, key := range []string{"", "server", "server.nope", "SERVER.NAME"} {
@@ -194,7 +204,7 @@ func TestSaveOverrides_RoundTripAndRemove(t *testing.T) {
 }
 
 func TestSaveOverrides_RejectsProtectedAndUnknownKeys(t *testing.T) {
-	for _, key := range []string{"database.path", "gif.api_key", "server.admin_allowed_cidrs", "server.nope"} {
+	for _, key := range []string{"server.data_dir", "upload.blocked_extensions", "server.nope"} {
 		path := config.OverridesPath(t.TempDir())
 		err := config.SaveOverrides(path, map[string]any{key: "x"})
 		if !errors.Is(err, config.ErrNotEditable) {
@@ -339,18 +349,19 @@ func TestLoad_NoOverridesFileKeepsYAML(t *testing.T) {
 	}
 }
 
-// A hand-edited overrides file cannot reach a protected key.
+// A hand-edited overrides file cannot reach a protected key. data_dir is the
+// anchor the overrides file is read from, so it can never move itself.
 func TestLoad_OverridesIgnoreProtectedKeys(t *testing.T) {
 	dataDir := t.TempDir()
-	cfgPath := writeYAML(t, dataDir, "database:\n  path: \"keep.db\"\n")
-	writeOverrides(t, dataDir, `{"database.path": "/elsewhere.db", "server.max_ws_connections": 20}`)
+	cfgPath := writeYAML(t, dataDir, "")
+	writeOverrides(t, dataDir, `{"server.data_dir": "/elsewhere", "server.max_ws_connections": 20}`)
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Database.Path != "keep.db" {
-		t.Errorf("database.path = %q, want config.yaml's keep.db (not panel-editable)", cfg.Database.Path)
+	if cfg.Server.DataDir != filepath.ToSlash(dataDir) && cfg.Server.DataDir != dataDir {
+		t.Errorf("server.data_dir = %q, want config.yaml's %q (not panel-editable)", cfg.Server.DataDir, dataDir)
 	}
 	if cfg.Server.MaxWSConnections != 20 {
 		t.Errorf("max_ws_connections = %d, want 20: an ignored key must not drop the valid ones", cfg.Server.MaxWSConnections)
