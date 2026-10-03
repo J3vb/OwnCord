@@ -18,12 +18,12 @@ function setConfigChanged(changed){
    "1" and 1 are the same and a list is compared element by element. */
 function configInitialValues(data){
   const out={};
-  ((data&&data.settings)||[]).forEach(s=>{out[s.key]=s.override!=null?s.override:s.value});
+  ((data&&data.settings)||[]).forEach(s=>{out[s.key]=s.env_locked?s.value:(s.override!=null?s.override:s.value)});
   return out;
 }
 
 function configRowValue(row){
-  return row.override!=null?row.override:row.value;
+  return row.env_locked?row.value:(row.override!=null?row.override:row.value);
 }
 
 function configControl(row){
@@ -39,8 +39,9 @@ function configControl(row){
     return'<input class="form-input" data-config-key="'+key+'" value="'+esc(v)+'" data-input-action="markConfigChanged"'+dis+'>';
   }
   if(row.options&&row.options.length){
+    const options=row.options.includes(value)?row.options:[value].concat(row.options);
     return'<select class="filter-select" data-config-key="'+key+'" data-change-action="markConfigChanged"'+dis+'>'
-      +row.options.map(o=>'<option value="'+esc(o)+'"'+(o===value?' selected':'')+'>'+esc(o)+'</option>').join('')+'</select>';
+      +options.map(o=>'<option value="'+esc(o)+'"'+(o===value?' selected':'')+'>'+esc(o)+'</option>').join('')+'</select>';
   }
   const type=row.type==='int'||row.type==='float'?'number':'text';
   return'<input class="form-input" type="'+type+'" data-config-key="'+key+'" value="'+esc(value==null?'':value)+'" data-input-action="markConfigChanged"'+dis+'>';

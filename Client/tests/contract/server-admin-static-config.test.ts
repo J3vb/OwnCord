@@ -208,6 +208,71 @@ describe("Server/admin/static — Server configuration page", () => {
     });
   });
 
+  it("shows the environment-pinned value on an env-locked row, not a stale override", async () => {
+    const calls: FetchCall[] = [];
+    const settings = {
+      restart_pending: false,
+      settings: [
+        {
+          key: "logging.level",
+          type: "string",
+          value: "warn",
+          override: "debug",
+          env_locked: true,
+          options: ["debug", "info", "warn", "error"],
+        },
+      ],
+    };
+    const booted = await boot(calls, (p) =>
+      p === "/config/settings" ? { json: settings } : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = await renderInto(dom, booted.bridge);
+
+    const level = control(doc, "logging.level") as HTMLSelectElement;
+    expect(level.disabled).toBe(true);
+    expect(level.value).toBe("warn");
+  });
+
+  it("does not write a spurious override for an enum value outside its options", async () => {
+    const calls: FetchCall[] = [];
+    const settings = {
+      restart_pending: false,
+      settings: [
+        {
+          key: "logging.level",
+          type: "string",
+          value: "verbose",
+          override: null,
+          env_locked: false,
+          options: ["debug", "info", "warn", "error"],
+        },
+        {
+          key: "server.max_ws_connections",
+          type: "int",
+          value: 100,
+          override: null,
+          env_locked: false,
+        },
+      ],
+    };
+    const booted = await boot(calls, (p) =>
+      p === "/config/settings" ? { json: settings } : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = await renderInto(dom, booted.bridge);
+
+    const level = control(doc, "logging.level") as HTMLSelectElement;
+    expect(level.value).toBe("verbose");
+
+    control(doc, "server.max_ws_connections").value = "250";
+    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
+    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+
+    const patch = calls.find((c) => c.method === "PATCH" && c.path === "/config/settings");
+    expect(patch?.body).toEqual({ "server.max_ws_connections": 250 });
+  });
+
   it("resets a key by sending null", async () => {
     const calls: FetchCall[] = [];
     const booted = await boot(calls, (p) =>
