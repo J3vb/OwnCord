@@ -161,6 +161,10 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file: the certificate directory is not writable")
 		return false
 	}
+	if !dirWritable(filepath.Dir(g.next.TLS.KeyFile)) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.key_file: the key directory is not writable")
+		return false
+	}
 	return true
 }
 

@@ -146,6 +146,8 @@ describe("Server/admin/static — sensitive server configuration", () => {
     expect(secret.getAttribute("autocomplete")).toBe("new-password");
     expect(doc.getElementById("content")!.innerHTML).not.toContain(GIF_SECRET);
     expect(doc.getElementById("content")!.textContent).toMatch(/configured/i);
+    // Configured in config.yaml but with no panel override: no no-op Remove.
+    expect(doc.querySelector('[data-action="clearConfigSecret"]')).toBeNull();
     // data_dir is shown read-only with where to change it, never as a control.
     expect(doc.querySelector('[data-config-key="server.data_dir"]')).toBeNull();
   });
@@ -200,5 +202,24 @@ describe("Server/admin/static — sensitive server configuration", () => {
     expect(patches(calls)).toHaveLength(1);
     expect(patches(calls)[0]!.body).toEqual({ "server.port": 9443 });
     expect(patches(calls)[0]!.headers["X-OwnCord-Confirm"]).toBe("server.port");
+    // A successful save dismisses the confirmation dialog.
+    expect(modal.classList.contains("visible")).toBe(false);
+  });
+
+  it("keeps Save usable after the confirmation is cancelled", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const doc = await render(dom, booted.bridge);
+
+    control(doc, "server.port").value = "9443";
+    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
+    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(true);
+    expect(patches(calls)).toHaveLength(0);
+
+    doc.querySelector<HTMLButtonElement>('#modal [data-action="closeModal"]')!.click();
+    expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
+    expect((doc.getElementById("saveConfigBtn") as HTMLButtonElement).disabled).toBe(false);
   });
 });

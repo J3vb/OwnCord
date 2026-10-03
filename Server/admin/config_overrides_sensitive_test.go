@@ -368,6 +368,36 @@ func TestConfigOverridesSensitive_TLSGuard(t *testing.T) {
 	}
 }
 
+// When self_signed may generate the pair, both the certificate and the key
+// directories must exist and be writable: GenerateSelfSigned writes both files
+// without creating their parents, so an unwritable key directory locks the
+// server out on restart.
+func TestConfigOverridesSensitive_SelfSignedKeyDirMustBeWritable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("writability semantics: needs a non-root Unix user")
+	}
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	tlsKeys := []string{"tls.mode", "tls.cert_file", "tls.key_file"}
+
+	certDir := filepath.Join(f.dataDir, "cert-dir")
+	if err := os.Mkdir(certDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"tls.mode":      "self_signed",
+		"tls.cert_file": filepath.Join(certDir, "cert.pem"),
+		"tls.key_file":  filepath.Join(f.dataDir, "missing-key-dir", "key.pem"),
+	}
+	if w := patchConfig(t, f.handler, token, body, tlsKeys, ""); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "tls.key_file") {
+		t.Errorf("PATCH self_signed TLS with a missing key directory = %d %s, want 400 naming tls.key_file", w.Code, w.Body.String())
+	}
+	if len(savedOverrides(t, f.dataDir)) != 0 {
+		t.Fatal("a refused self-signed PATCH wrote overrides")
+	}
+}
+
 func TestConfigOverridesSensitive_DataPathGuards(t *testing.T) {
 	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
 	token := createAdminUser(t, f.database)

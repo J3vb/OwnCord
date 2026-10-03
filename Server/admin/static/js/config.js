@@ -71,7 +71,7 @@ function configSecretRow(row){
   const set=!!(row.configured||row.override_set);
   const badge=set?'<span class="badge badge-success">Configured</span>':'<span class="badge">Not set</span>';
   const desc=row.env_locked?'Set by the environment':(row.override_set?'Overridden from the panel':'');
-  const clear=set&&!row.env_locked
+  const clear=row.override_set&&!row.env_locked
     ? '<button class="btn btn-ghost" data-action="clearConfigSecret" data-args="'+actArgs(row.key)+'" title="Removes the panel override; the value reverts to the value in config.yaml">Remove override</button>':'';
   return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+esc(row.key)+' '+badge+'</div>'
     +(desc?'<div class="setting-desc">'+esc(desc)+'</div>':'')+'</div>'
@@ -186,7 +186,9 @@ function configNeedsConfirmation(key){
 
 async function sendConfigPatch(body,headers){
   try{
-    applyConfigResponse(await api('PATCH','/config/settings',body,headers));
+    const data=await api('PATCH','/config/settings',body,headers);
+    closeModal();
+    applyConfigResponse(data);
     showToast('Configuration saved — restart to apply');
   }catch(e){
     showToast(e.message,'error');
@@ -197,7 +199,7 @@ async function sendConfigPatch(body,headers){
 
 async function saveServerConfig(){
   const btn=document.getElementById('saveConfigBtn');
-  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement&&btn.disabled)return;
   const body=configDiff();
   if(!Object.keys(body).length){setConfigChanged(false);showToast('Configuration saved');return}
   const confirmKeys=Object.keys(body).filter(configNeedsConfirmation);
@@ -206,6 +208,7 @@ async function saveServerConfig(){
     openConfigConfirmModal(confirmKeys);
     return;
   }
+  if(btn instanceof HTMLButtonElement)btn.disabled=true;
   await sendConfigPatch(body,{});
 }
 
