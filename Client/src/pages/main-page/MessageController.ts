@@ -77,6 +77,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
         // page's extra rows are history the failed-first-load retry fetched.
         const head = limit > PAGE_SIZE ? (cached[0]?.id ?? 0) : 0;
         const trimmed = resp.messages.filter((m) => m.id >= head);
+        // Never install an empty window: if everything from the cached head
+        // upward was deleted while away the trim would drop every row, so keep
+        // the fetched page and let setMessages absorb the stale cached rows.
         const messages = trimmed.length > 0 ? trimmed : resp.messages;
         const hasMore = resp.has_more || messages.length < resp.messages.length;
         log.info("Messages loaded", {
