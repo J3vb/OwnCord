@@ -49,7 +49,7 @@ const I={
 const PAGE_SIZE=50;
 const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   me:null,partialToken:'',
-  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditShowSignins:false,auditCache:[],settingsChanged:false,backupRunning:false,archiveRunning:false,updateApplying:false,
+  usersPage:1,auditPage:1,auditSearch:'',auditActionFilter:'all',auditShowSignins:false,auditCache:[],settingsChanged:false,configChanged:false,backupRunning:false,archiveRunning:false,updateApplying:false,
   modalDirty:false,
   supportPreview:null,supportBusy:false,badges:{pending:0,warnings:0,update:false},
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
@@ -144,6 +144,7 @@ const ACTION_LABEL={
   permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
+  config_override_change:'changed a server configuration override',server_restart_requested:'requested a server restart',
   backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_archive:'downloaded the full archive',backup_download:'downloaded a backup',
   log_level_debug_on:'turned on debug logging for 15 minutes',log_level_reverted:'turned debug logging off',
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
@@ -359,7 +360,7 @@ document.getElementById('modal').addEventListener('change',e=>{if(modalEditMarks
    form — asks the browser to confirm first. beforeunload is the only event
    that can, and the browser owns the prompt text. */
 window.addEventListener('beforeunload',e=>{
-  if(state.settingsChanged||state.modalDirty){e.preventDefault();e.returnValue=''}
+  if(state.settingsChanged||state.configChanged||state.modalDirty){e.preventDefault();e.returnValue=''}
 });
 /* Keep Tab inside the dialog while it is open. */
 document.getElementById('modal').addEventListener('keydown',e=>{
@@ -452,6 +453,7 @@ const NAV=[
   {id:'audit',label:'Audit log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
   {section:'Server'},
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'config',label:'Server configuration',icon:I.settings,unsaved:()=>state.configChanged,allowed:isOwner},
   {id:'retention',label:'Message retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
   {id:'backups',label:'Backups & restore',icon:I.backup,allowed:isOwner},
   {id:'updates',label:'Updates',icon:I.updates,badge:()=>state.badges.update,badgeText:'update available',allowed:isOwner},
@@ -555,7 +557,7 @@ function closeNav(restoreFocus=true){
 window.addEventListener('resize',()=>{if(window.innerWidth>900)closeNav(false)});
 /* Sign-out and session expiry: close the popups and forget the last
    principal's badge counts. */
-function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.modalDirty=false;state.connectivity=null}
+function resetShell(){closeNav(false);closeUserMenu(false);state.badges={pending:0,warnings:0,update:false};state.settingsChanged=false;state.configChanged=false;state.modalDirty=false;state.connectivity=null}
 
 /* ═══ Nav badges ═══ */
 /* Pending registrations (Members), active attention warnings (Dashboard) and
@@ -593,7 +595,7 @@ document.addEventListener('visibilitychange',()=>{
    discarding an edited Settings form. Declining stays put. */
 function leaveSection(){
   if(document.getElementById('modal').classList.contains('visible')&&!dismissModal())return false;
-  return !state.settingsChanged||confirm('Discard your unsaved changes?');
+  return !(state.settingsChanged||state.configChanged)||confirm('Discard your unsaved changes?');
 }
 function navigateTo(id){
   if(!sectionAllowed(id)){showToast('You do not have permission to open that section','error');return}
@@ -601,6 +603,7 @@ function navigateTo(id){
   try{
     if(state.section==='logs'&&id!=='logs'){state.logConnectSeq++;if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}clearLogLevelTimer();}
     state.settingsChanged=false;
+    state.configChanged=false;
     state.section=id;renderNav();renderContent();closeNav();syncHash(id);
   }catch(err){
     console.error('[Admin] Tab navigation failed for', id, err);
@@ -614,7 +617,7 @@ function doLogout(){state.logConnectSeq++;if(state.logEventSource){state.logEven
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,backups:renderBackups,updates:renderUpdates};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';return}
