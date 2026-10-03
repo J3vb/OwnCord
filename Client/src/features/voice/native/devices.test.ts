@@ -3,9 +3,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const linux = vi.hoisted(() => ({ value: true }));
 vi.mock("./platform", () => ({ isLinuxDesktop: () => linux.value }));
 const listDevices = vi.hoisted(() => vi.fn());
-vi.mock("../../../platform/desktop", () => ({ desktop: { nativeVoice: { listDevices } } }));
+const listCameras = vi.hoisted(() => vi.fn());
+vi.mock("../../../platform/desktop", () => ({
+  desktop: { nativeVoice: { listDevices, listCameras } },
+}));
 
-import { nativeAudioDevices } from "./devices";
+import { nativeAudioDevices, nativeCameraDevices } from "./devices";
 
 beforeEach(() => {
   listDevices.mockReset();
@@ -13,6 +16,8 @@ beforeEach(() => {
     inputs: [{ id: "guid-mic", name: "USB Mic" }],
     outputs: [{ id: "guid-spk", name: "Speakers" }],
   });
+  listCameras.mockReset();
+  listCameras.mockResolvedValue([{ id: "/dev/video0", name: "HD Webcam" }]);
 });
 
 describe("nativeAudioDevices", () => {
@@ -30,5 +35,20 @@ describe("nativeAudioDevices", () => {
     linux.value = false;
     await expect(nativeAudioDevices("audioinput")).resolves.toBeNull();
     expect(listDevices).not.toHaveBeenCalled();
+  });
+});
+
+describe("nativeCameraDevices", () => {
+  it("maps the GStreamer camera list onto the MediaDeviceInfo shape", async () => {
+    linux.value = true;
+    await expect(nativeCameraDevices()).resolves.toEqual([
+      { deviceId: "/dev/video0", label: "HD Webcam", kind: "videoinput" },
+    ]);
+  });
+
+  it("returns null off Linux so callers keep their web enumeration", async () => {
+    linux.value = false;
+    await expect(nativeCameraDevices()).resolves.toBeNull();
+    expect(listCameras).not.toHaveBeenCalled();
   });
 });

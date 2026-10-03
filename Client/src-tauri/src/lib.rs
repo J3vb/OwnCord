@@ -227,9 +227,19 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_device,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_list_cameras,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_camera,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_publish_camera,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_unpublish_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_camera,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_start_camera_preview,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_stop_camera_preview,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_screen_sources,
             #[cfg(target_os = "linux")]

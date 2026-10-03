@@ -34,6 +34,15 @@ ignore = [
   # GTK stack that pins glib, and ships no code into the client.
   { id = "RUSTSEC-2024-0370", reason = "unmaintained; Linux GTK build chain only" },
 ]
+# --- Rust: Linux native camera (gstreamer-rs) ---
+#
+# No new ignore is needed. gstreamer / gstreamer-app / gstreamer-video 0.24
+# and their glib 0.21 bindings are MIT, already allowed. 0.23 was rejected for
+# this reason: it depended on the unmaintained `paste` (RUSTSEC-2024-0436),
+# which `unmaintained = "all"` fails on; 0.24 uses the maintained `pastey`
+# fork instead. If a future gstreamer bump reintroduces an unmaintained
+# crate, fix the version rather than adding an ignore here.
+#
 # --- Linux native voice (livekit), added with the phase-0 build plumbing ---
 #
 # No new ignore is needed. The whole Linux-only tree — livekit 0.9.3 and its

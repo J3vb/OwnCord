@@ -18,21 +18,20 @@
 //! `--mute-cycles N` mutes and unmutes the published microphone N times the
 //! way the app does, printing the thread count before and after: an in-place
 //! mute creates no new cryptor, so the count must stay flat.
-//! `--video WxH` also publishes a camera the way the app does: moving bars
-//! (a synthetic source: CI has no camera) uploaded as RGBA over the
-//! session's frame socket, exactly the route the webview's camera takes. It
-//! reads every subscribed remote video track back through that socket and
-//! reports decoded frames per second, and it checks the socket itself: a
-//! wrong token is refused, and after close the listener is gone.
+//! `--video WxH` also publishes a camera the way the app does: a synthetic
+//! source (moving bars) captured through the native camera thread (CI has no
+//! camera) and published as the camera track; the same pipeline a V4L2 or
+//! PipeWire device drives. No webview uploads any more — the app captures
+//! natively. It reads every subscribed remote video track back through the
+//! frame socket and reports decoded frames per second, and it checks the
+//! socket itself: a wrong token is refused, and after close the listener is
+//! gone.
 //! `--simulcast` (with `--video`) publishes that camera simulcast, as the app
 //! does for every camera quality but "source".
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
-//! N times the way the app does (unpublish, publish), printing the thread
-//! count before and after: each publish is a new frame cryptor.
-//! `--external-camera` (with `--video`) publishes the camera but leaves its
-//! frames to someone else: it prints the frame socket's URL, token included,
-//! so a webview harness can run the app's own renderer and camera pump
-//! against this session (the CPU measurement in docs/architecture/voice-e2ee.md).
+//! N times the way the app does (unpublish, stop capture, start capture,
+//! publish), printing the thread count before and after: each publish is a
+//! new frame cryptor.
 //! `--screen WxH` also shares the screen the way the app does, through the
 //! same capture thread and publish, from a synthetic source (moving bars:
 //! CI has no display, so neither the X11 capturer nor the Wayland portal
@@ -57,6 +56,9 @@ mod linux {
     use livekit::webrtc::audio_source::native::NativeAudioSource;
     use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
     use livekit::webrtc::audio_stream::native::NativeAudioStream;
+    use owncord_client_lib::native_voice::camera::{
+        CaptureOptions as CameraCaptureOptions, Target as CameraTarget,
+    };
     use owncord_client_lib::native_voice::playout::{Mixer, SAMPLE_RATE as PLAYOUT_RATE};
     use owncord_client_lib::native_voice::screen::{self, CaptureOptions, Target};
     use owncord_client_lib::native_voice::session::{
@@ -163,39 +165,39 @@ mod linux {
         }
     }
 
-    /// Upload moving bars as the camera over the frame socket, the way
-    /// `cameraUplink.ts` uploads an RGBA `VideoFrame` (format 1), until the
-    /// socket closes or the task is aborted.
-    async fn play_bars(camera_url: String, width: u32, height: u32) {
-        let Ok((mut ws, _)) = tokio_tungstenite::connect_async(&camera_url).await else {
-            emit(
-                serde_json::json!({ "event": { "type": "error", "detail": "camera upload refused" } }),
-            );
-            return;
-        };
-        let (w, h) = (width as usize, height as usize);
-        let mut ticker = tokio::time::interval(Duration::from_millis(33));
-        let mut n = 0usize;
-        loop {
-            ticker.tick().await;
-            let mut frame = Vec::with_capacity(36 + w * h * 4);
-            for v in [1, width, height, 0, width * 4, 0, 0, 0, 0] {
-                frame.extend_from_slice(&v.to_le_bytes());
-            }
-            for y in 0..h {
-                let shade = (((y + n * 4) / 16) % 2 * 200 + 30) as u8;
-                for _ in 0..w {
-                    frame.extend_from_slice(&[shade, 255 - shade, 128, 255]);
-                }
-            }
-            n += 1;
-            if futures_util::SinkExt::send(&mut ws, Message::Binary(frame.into()))
-                .await
-                .is_err()
-            {
-                return;
-            }
-        }
+    /// Start a synthetic native camera capture and publish it, as the app's
+    /// `native_voice_start_camera` then `native_voice_publish_camera` do.
+    /// Returns the capture id and the publication sid.
+    async fn start_camera(
+        session: &mut NativeSession,
+        width: u32,
+        height: u32,
+        simulcast: bool,
+    ) -> Result<(u64, String), String> {
+        let (capture, started) = session
+            .start_camera(
+                CameraTarget::Synthetic { width, height },
+                CameraCaptureOptions {
+                    fps: 30.0,
+                    max_width: 0,
+                    max_height: 0,
+                },
+            )
+            .await?;
+        let (w, h) = started.await.map_err(|_| "camera capture dropped")??;
+        let sid = session
+            .publish_camera(
+                capture,
+                CameraOptions {
+                    width: w,
+                    height: h,
+                    max_bitrate: 1_700_000,
+                    max_framerate: 30.0,
+                    simulcast,
+                },
+            )
+            .await?;
+        Ok((capture, sid))
     }
 
     /// Read one remote video track back through the frame socket and report
@@ -358,30 +360,17 @@ mod linux {
         let sine = tokio::spawn(play_sine(source));
 
         let frames_url = session.frames_url().to_string();
-        let mut bars = None;
         if let Some((width, height)) = video {
-            let mut camera_sid = session
-                .publish_camera(CameraOptions {
-                    width,
-                    height,
-                    max_bitrate: 1_700_000,
-                    max_framerate: 30.0,
-                    simulcast,
-                })
-                .await?;
+            // A synthetic camera through the same capture thread and publish
+            // the app uses (CI has no camera).
+            let (mut capture, mut camera_sid) =
+                start_camera(&mut session, width, height, simulcast).await?;
             let camera_cycles: u32 = arg("--camera-cycles")
                 .as_deref()
                 .unwrap_or("0")
                 .parse()
                 .map_err(|_| "--camera-cycles")?;
             if camera_cycles > 0 {
-                let options = CameraOptions {
-                    width,
-                    height,
-                    max_bitrate: 1_700_000,
-                    max_framerate: 30.0,
-                    simulcast,
-                };
                 // Settle as for the after sample, so the first camera's
                 // sender threads are counted in the baseline too.
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -389,12 +378,14 @@ mod linux {
                     serde_json::json!({ "event": { "type": "threads", "phase": "camera-before", "count": process_threads() } }),
                 );
                 for _ in 0..camera_cycles {
+                    // Toggle as the app does: unpublish, stop the capture,
+                    // start a fresh capture and publish it. A late unpublish
+                    // of the replaced camera must leave the new one published.
                     session.unpublish_camera(&camera_sid).await;
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    let stale =
-                        std::mem::replace(&mut camera_sid, session.publish_camera(options).await?);
-                    // A late unpublish of the replaced camera must leave
-                    // the new one published (the spec's `localTracks`).
+                    session.stop_camera(capture).await;
+                    let stale = camera_sid;
+                    (capture, camera_sid) =
+                        start_camera(&mut session, width, height, simulcast).await?;
                     session.unpublish_camera(&stale).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
@@ -402,15 +393,6 @@ mod linux {
                 emit(
                     serde_json::json!({ "event": { "type": "threads", "phase": "camera-after", "cycles": camera_cycles, "count": process_threads() } }),
                 );
-            }
-            if std::env::args().any(|a| a == "--external-camera") {
-                emit(serde_json::json!({ "event": { "type": "frames", "url": frames_url } }));
-            } else {
-                bars = Some(tokio::spawn(play_bars(
-                    format!("{frames_url}/camera"),
-                    width,
-                    height,
-                )));
             }
             // The socket is loopback-only and refuses a path without the
             // session's token (the token is the last path segment of the base).
@@ -507,9 +489,6 @@ mod linux {
         for m in meters {
             m.abort();
         }
-        if let Some(bars) = bars {
-            bars.abort();
-        }
         if let Some(preview) = preview {
             preview.abort();
         }
@@ -518,6 +497,7 @@ mod linux {
             "type": "closed",
             "threads": process_threads(),
             "screenCaptures": screen::active_captures(),
+            "cameraCaptures": owncord_client_lib::native_voice::camera::active_captures(),
             "frameSocketGone": refused(&format!("{frames_url}/camera")).await,
         } }));
         Ok(())

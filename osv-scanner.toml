@@ -32,6 +32,14 @@ reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 id = "GHSA-x5fp-wj9c-mxmx"
 reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 
+# braces <= 3.0.3 (GHSA-vfj7-8cjw-p6xm / CVE-2026-93687): stack overflow on
+# deeply nested patterns. Dev-only via patch-package -> find-yarn-workspace-root
+# -> micromatch -> braces, and no patched release exists yet, so there is no
+# version to bump to. Remove this entry once braces publishes a fix.
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+reason = "braces dev-only via patch-package's micromatch; no fixed release published"
+
 # --- Rust: the accepted advisories cargo-deny carries in
 # Client/src-tauri/deny.toml (the authoritative list with the reachability
 # argument), kept in step with it, plus glib's unsound advisory, which

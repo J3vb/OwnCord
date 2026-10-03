@@ -205,6 +205,21 @@ nnnoiseless = { version = "0.5", default-features = false }
 # wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
 # enable-webrtc setting.
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# Native Linux camera capture (native_voice/camera.rs). WebKitGTK freezes a
+# hidden page's <video> element and stops requestVideoFrameCallback, so the
+# webview camera pump (features/voice/native/cameraUplink.ts) stalls whenever
+# the OwnCord window is hidden, minimized or covered — exactly what sharing
+# the screen or switching apps does (docs/architecture/voice-e2ee.md, "the
+# camera stalls while the window is hidden"). Capture runs here instead,
+# independent of window visibility. gstreamer-rs 0.24 targets the GStreamer
+# 1.24 runtime that ships with WebKitGTK on Ubuntu 24.04 (CI's ubuntu-latest);
+# its glib 0.21 is a separate Rust binding version from webkit2gtk's glib 0.18
+# and they never exchange GObject values, so both coexist. (0.23 was rejected:
+# it pulls the unmaintained `paste`, which cargo-deny fails closed on.) Build
+# system deps: libgstreamer1.0-dev and libgstreamer-plugins-base1.0-dev.
+gstreamer = "0.24"
+gstreamer-app = "0.24"
+gstreamer-video = "0.24"
 
 [dev-dependencies]
 # Paused virtual time for tests of real-time deadlines (the ws_proxy liveness

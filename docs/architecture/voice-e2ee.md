@@ -107,9 +107,11 @@ with no behaviour change.
 The dependency is Linux-only (`[target.'cfg(target_os = "linux")'.dependencies]`
 in `Client/src-tauri/Cargo.toml`); the backend lives in
 `Client/src-tauri/src/native_voice/` (`session.rs` is the room, `video.rs`
-the frame socket, `mod.rs` the Tauri commands and state). The build prerequisite — clang >= 21 and a prebuilt
-libwebrtc — is documented in [contributing.md](../contributing.md#client-tauri-v2)
-and installed by `Client/scripts/linux-webrtc-toolchain.sh`.
+the frame socket, `mod.rs` the Tauri commands and state). The Linux build
+prerequisites — clang >= 21, a prebuilt libwebrtc, and, for the camera, the
+GStreamer `-dev` headers — are documented in
+[contributing.md](../contributing.md#client-tauri-v2); `Client/scripts/linux-webrtc-toolchain.sh`
+installs clang and fetches libwebrtc.
 
 ### Phase 1: audio
 
@@ -257,9 +259,9 @@ the webview only as the `native_voice_connect` result
 path starts with the token (compared in constant time), so no other local
 process or web page can read or inject frames. Closing the session drops the
 server, which aborts the listener and every connection it accepted. A
-renderer or camera uplink whose socket closes while it is still in use reopens
-it after 1 s, so a dropped connection does not freeze the tile for the rest of
-the call. Two routes:
+renderer or preview whose socket closes while it is still in use reopens it
+after 1 s, so a dropped connection does not freeze the tile for the rest of
+the call. Three routes:
 
 - `/<token>/remote/<track sid>`: one subscribed remote video track's decoded
   frames, native to webview, as width, height and the three I420 planes
@@ -270,11 +272,10 @@ the call. Two routes:
   backpressure alone would not hold them back). The remote track table is updated
   from the room's events before they are forwarded, so the webview never asks
   for a track the socket does not know.
-- `/<token>/camera`: the local camera, webview to native: a header (format,
-  size, plane offsets and strides) and the `VideoFrame.copyTo` bytes. RGBA,
-  RGBX, BGRA, BGRX, I420 and NV12 are converted to I420 with libyuv, after a
-  bounds check (libyuv itself only checks `stride × rows`). A frame with no
-  CPU layout is read back through a 2D canvas as RGBA.
+- `/<token>/camera`: the local camera capture's preview, native to webview,
+  acknowledged like a remote track; it ends with the capture. The host
+  captures and publishes the pixels (`camera.rs`); the webview only reads them
+  back for the self-view and the settings preview.
 
 **Remote video.** On `trackSubscribed` for a video track, `NativeRoom` opens a
 `NativeVideoRenderer` (`features/voice/native/videoRenderer.ts`): it draws each
@@ -287,58 +288,79 @@ participant leaving dispose the renderer and raise `TrackUnsubscribed`
 (before `ParticipantDisconnected`, as livekit-client does); `disconnect()`
 disposes every renderer.
 
-**Camera.** `getUserMedia` works in WebKitGTK (only WebRTC is missing), so the
-shared `enableCamera` runs unchanged: livekit-client's `createLocalVideoTrack`
-captures in the webview (the saved device, permissions, and the self-view
-preview are that track), and `NativeRoom.localParticipant.publishTrack` calls
-`native_voice_publish_camera` with the track's size and the web path's bitrate,
-framerate and simulcast options. The backend publishes a `NativeVideoSource`
-(VP8, as livekit-client defaults to) and a `CameraUplink`
-(`features/voice/native/cameraUplink.ts`) pumps the webview track's frames up
-the camera route. It drops rather than queues: one copy in flight, nothing
-sent while the socket has unsent bytes, and no faster than the max
-framerate. `native_voice_publish_camera` returns the publication's sid, and
-camera off names that sid (`native_voice_unpublish_camera`), as the web path
-unpublishes its own track, so remote tiles close the same way; a late
-unpublish of a camera a newer publish already replaced is a no-op. The
-backend unpublishes the camera's live publication, which follows the SDK's
-republish (a new sid) after a full reconnect. A republish that continues no
-live camera (camera off, or a newer camera published, while the SDK was
-between its unpublish and republish) is unpublished rather than left
-published with no frames. Screen share is phase 3 (below).
+**Camera (Linux: native capture).** The camera is captured in the host
+(`camera.rs`), not the webview: WebKitGTK freezes a hidden page's `<video>`
+element and stops `requestVideoFrameCallback`, so the old webview pump stalled
+whenever the OwnCord window was hidden, minimized or covered (the defect
+below). `NativeRoom.localParticipant.createCameraTracks` is the stand-in for
+`createLocalVideoTrack`: `enableCamera` in `screenShare.ts` calls it only when
+the room exposes it, so Windows and macOS keep the web path. It starts a
+`GstDeviceMonitor`-listed `Video/Source` (V4L2 or PipeWire) through
+`v4l2src`/`pipewiresrc` (or the monitor's own element for the id) →
+`decodebin` → `videoconvert` → an I420 `appsink`, and returns a
+`NativeCameraTrack` whose `mediaStreamTrack` is the capture's local preview
+(the frame socket's `camera` route, drawn by the same WebGL renderer as remote
+video). The track is captured and independent of the window: the settings
+preview and the self-view read it back, and it keeps running while the window
+is hidden. Camera device ids come from the backend, as audio's do
+(`native/devices.ts`): `native_voice_list_cameras` is the device monitor.
+`native_voice_publish_camera(capture, options)` publishes the running capture
+(VP8, E2EE) and returns the publication's sid; camera off names that sid
+(`native_voice_unpublish_camera`), and a capture a newer one replaced is a
+no-op — the capture itself keeps running for the preview (the web path keeps
+its track until `stop()`). `native_voice_stop_camera(capture)` stops the
+capture and releases the pipeline and the device. The backend unpublishes the
+camera's live publication, which follows the SDK's republish (a new sid) after
+a full reconnect; a republish that continues no live camera (camera off, or a
+newer camera published, while the SDK was between its unpublish and republish)
+is unpublished rather than left published with no frames. A device unplugged
+mid-capture ends the stream; the backend sends `cameraCaptureEnded` and the
+track raises `ended`, which the shared code already handles by turning the
+camera off. The settings tab's own camera preview has no room: it starts a
+capture and its own frame socket (`native_voice_start_camera_preview`), read
+back over the same `camera` route. Screen share is phase 3 (below).
 
 **E2EE covers video exactly as audio.** The camera is published into the same
 room, whose single key provider and `KEY_INDEX` 0 already cover every sender
 and receiver cryptor; nothing video-specific touches keys. The interop test
 proves it both ways (below).
 
-**Lifecycle (B7-11).** The renderer and the uplink are owned by `NativeRoom`
-and disposed with their track or in `disconnect()`. `getSessionDebugInfo().native`
-also reports `videoRenderers` and `cameraUplinks` (TS) and the backend's
-`videoSockets` (open frame-socket connections), and the backend's
-`localTracks` counts the camera. No lifecycle-inventory entries were added:
-the socket and GL listeners live on objects the renderer owns, and the frame
-callback is cancelled in `dispose()`.
+**Lifecycle (B7-11).** The renderer, the screen track and the camera track are
+owned by `NativeRoom` and disposed with their track or in `disconnect()`
+(stopping the camera track stops its host capture). `getSessionDebugInfo().native`
+also reports `videoRenderers`, `cameraCaptures` and `screenTracks` (TS) and
+the backend's `videoSockets` (open frame-socket connections) and
+`cameraCaptures` (capture threads alive); the backend's `localTracks` counts
+the camera. No lifecycle-inventory entries were added: the socket and GL
+listeners live on objects the renderer owns, and the camera pipeline is
+released by dropping its capture thread in `dispose()`.
 
-**Interop test (CI), video.** Two more cases in `interop.spec.ts`. With
-`--video 640x360`, the example publishes moving bars as the camera through the
-frame socket's camera route, as RGBA, which is the path the webview's frames
-take, and reads every subscribed remote video track back through the remote
-route. Measured 2026-09-22: Chromium decodes the native camera at 640×360,
-about 28 fps (143 frames in 5 s), with 0 encryption errors; the native side
-reads Chromium's fake camera through the socket at about 20 fps (the fake
-device's rate); the socket is bound to 127.0.0.1, refuses a reversed or
-missing token, and is gone after close. **Negative control:** with a
-different key, Chromium decodes **0** video frames and counts decryption
-errors, and the native side, which subscribed and opened its socket, reads
-**0** frames of Chromium's camera.
+**Interop test (CI), video.** Three cases in `interop.spec.ts`. With
+`--video 640x360`, the example captures moving bars as the camera through the
+same native capture thread and pipeline a device drives (CI has no camera) and
+publishes it, and reads every subscribed remote video track back through the
+remote route. Measured 2026-09-22 (with the earlier webview pump; the native
+pipeline is equivalent): Chromium decodes the native camera at 640×360, about
+28 fps (143 frames in 5 s), with 0 encryption errors; the native side reads
+Chromium's fake camera through the socket at about 20 fps (the fake device's
+rate); the socket is bound to 127.0.0.1, refuses a reversed or missing token,
+and is gone after close. **Negative control:** with a different key, Chromium
+decodes **0** video frames and counts decryption errors, and the native side,
+which subscribed and opened its socket, reads **0** frames of Chromium's
+camera. The third case runs the camera and a screen share **together** with
+E2EE for the soak window and asserts both decode and the process closes
+cleanly — the regression guard for the silent camera-plus-screen crash
+(#2095), and where a crash-log line would surface as evidence.
 
-**CPU at 720p (measured 2026-09-22).** Harness: a release build of the
-interop example as the app's native session (`--video 1280x720
---external-camera`), a second native peer publishing 720p30 moving bars, and a
-WebKitGTK 2.52.6 view (python-gi, the system webview the app uses) running the
-app's own `NativeVideoRenderer` and `CameraUplink` (the TS modules, bundled)
-against that session's frame socket, with WebKit's mock 1280×720 camera. The
+**CPU at 720p (measured 2026-09-22, before native capture).** Harness: a
+release build of the interop example as the app's native session
+(`--video 1280x720 --external-camera`, since removed), a second native peer
+publishing 720p30 moving bars, and a WebKitGTK 2.52.6 view (python-gi, the
+system webview the app uses) running the app's own `NativeVideoRenderer` and
+`CameraUplink` (the TS modules, bundled) against that session's frame socket,
+with WebKit's mock 1280×720 camera. With native capture the webview's upload
+half of the last row disappears; the figures below bound the old path and
+remain representative of the receive/encode cost. The
 host was 16 vCPUs of a Ryzen 9 5900X, under Xvfb **with no GPU**: WebGL and
 compositing ran in software (llvmpipe). Figures are % of one core over 15 s:
 
@@ -363,14 +385,13 @@ adds about 58% in the webview, and the WebSocket relay through WebKit's
 network process adds about 10% per direction. Most of the webview figure is
 software GL, which a desktop GPU takes over.
 
-**Not exercised on real hardware:** a physical camera (WebKitGTK's GStreamer
-capture from V4L2 or PipeWire, whose `VideoFrame`s are likely I420 or NV12
-rather than the mock's RGBA; both conversions are unit-tested in `video.rs`),
-GPU-accelerated WebGL, a real Wayland or X11 session, and the packaged Tauri
-app driving the flow end to end (the unit tests cover `NativeRoom` and the
-contract, and the harness covers the renderer and uplink against a real
-session). CI exercises the native video path and E2EE with synthetic sources
-only; the CPU harness is not in CI.
+**Not exercised on real hardware:** a physical camera (the backend's GStreamer
+capture from V4L2 or PipeWire, whose samples `videoconvert` forces to I420;
+`camera.rs`'s unit tests cover that conversion), GPU-accelerated WebGL, a real
+Wayland or X11 session, and the packaged Tauri app driving the flow end to end
+(the unit tests cover `NativeRoom` and the contract, and the harness covers the
+renderer and the camera track against a real session). CI exercises the native
+video path and E2EE with synthetic sources only; the CPU harness is not in CI.
 
 **Known leak, measured.** Every camera off/on republishes, and each publish is
 a new sender: 5 cycles grew the process by **+3 idle threads per cycle**. That
@@ -390,6 +411,11 @@ camera that sends one frame and then stalls fails it. Measured 2026-10-02: 18
 to 19 fps at 1280×720 with a debug build, 0 encryption errors.
 
 #### Known defect: the camera stalls while the window is hidden
+
+**Fixed** by option B (native capture, above): Linux camera capture moved into
+the native backend, so it no longer reads a `<video>` element and no longer
+depends on the window being visible. The reproduction and evidence below are
+kept as the diagnosis that chose it.
 
 Reported on v2.1.0-beta.2 (Ubuntu, WebKitGTK): peers see one camera frame and
 then a stalled tile. The track stays published and unmuted, the uplink and its
@@ -450,22 +476,31 @@ visible and in front the whole time.
   - The crate binds WebKitGTK only to 2.40, so the 2.42+ feature API would
     have to be looked up at runtime.
   - The fix depends on a WebKit feature flag WebKit does not ship enabled.
-- **B. Capture the camera natively (chosen; follow-up).**
+- **B. Capture the camera natively (chosen; implemented).**
   - GStreamer through `gstreamer-rs`: a `GstDeviceMonitor` lists
-    `Video/Source` devices (V4L2 and PipeWire), and `v4l2src` or
-    `pipewiresrc`, then `decodebin` and `videoconvert`, feed an I420
-    `appsink`. Frames go straight to the camera's `NativeVideoSource`, so
-    there is no webview hop.
+    `Video/Source` devices (V4L2 and PipeWire), and the monitor's element
+    (`v4l2src` or `pipewiresrc`), then `decodebin` and `videoconvert`, feed
+    an I420 `appsink`. Frames go straight to the camera's `NativeVideoSource`
+    (`camera.rs`), so there is no webview hop.
   - Camera device ids come from the backend, as audio's do
-    (`native/devices.ts`).
+    (`native/devices.ts`): `native_voice_list_cameras` is the device monitor,
+    and `NativeRoom.createCameraTracks` starts the capture, the way
+    `createScreenTracks` starts the screen share.
   - The self-view and the settings preview read the capture back over a
-    frame-socket route, as the screen-share preview does.
-  - The runtime libraries already ship with WebKitGTK. The build gains
-    GStreamer `-dev` packages, and the crate tree gets a cargo-deny/osv
-    review.
+    frame-socket route, as the screen-share preview does (the frame socket's
+    `camera` route, now server to webview).
+  - The runtime libraries already ship with WebKitGTK. The build gains the
+    GStreamer `-dev` packages (`libgstreamer1.0-dev` and
+    `libgstreamer-plugins-base1.0-dev`): the CI and release jobs install them
+    in their Linux system-dependency step, and a local Linux build installs
+    them by hand (`linux-webrtc-toolchain.sh` fetches only clang and
+    libwebrtc). The crate tree got a cargo-deny/osv review.
   - Capture no longer depends on the window being visible, and the camera
     frames' second trip through WebKit's network process (about 10% of a
     core per direction, above) goes away.
+  - Windows and macOS keep the webview `getUserMedia` path; only
+    `NativeRoom` implements `createCameraTracks`, and `enableCamera` uses it
+    only when the room exposes it (Linux).
 
 ### Phase 3: screen share
 

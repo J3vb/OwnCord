@@ -16,8 +16,9 @@ export const nativeCounters = {
   listeners: 0,
   /** Remote video renderers (one frame socket and GL context each) alive. */
   videoRenderers: 0,
-  /** Camera frame pumps (one frame socket each) alive. */
-  cameraUplinks: 0,
+  /** Native camera captures (a host GStreamer pipeline and its preview
+   *  renderer) alive. */
+  cameraCaptures: 0,
   /** Screen-share tracks (a host capture and its preview renderer) alive. */
   screenTracks: 0,
   /** Last Rust-reported snapshot, null before the first report. */
