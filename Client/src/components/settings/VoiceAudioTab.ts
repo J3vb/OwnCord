@@ -23,7 +23,11 @@ import {
 } from "@lib/audioPipeline";
 import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
-import { nativeAudioDevices, nativeCameraDevices } from "../../features/voice/native/devices";
+import {
+  nativeAudioDevices,
+  nativeCameraDevices,
+  nativeCameraSupport,
+} from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
@@ -671,6 +675,15 @@ function buildVoiceAudioTabInner(
   void (async () => {
     const device = savedVideoDevice;
     if (isLinuxDesktop()) {
+      // GStreamer may be missing entirely: no capture can start, so explain why
+      // instead of leaving the preview box empty or showing a generic error.
+      const support = await nativeCameraSupport();
+      if (signal.aborted) return;
+      if (support !== null && !support.available) {
+        setText(previewLabel, t("voiceAudio.gstreamerMissing"));
+        previewLabel.hidden = false;
+        return;
+      }
       await startNativeCameraPreview(device);
       return;
     }

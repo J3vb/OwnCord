@@ -1424,12 +1424,18 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const getUserMedia = vi.fn();
   const startCameraPreview = vi.fn();
   const stopCameraPreview = vi.fn();
+  const nativeCameraDevices = vi.fn();
+  const nativeCameraSupport = vi.fn();
   beforeEach(async () => {
     vi.resetModules();
     startCameraPreview
       .mockReset()
       .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok" });
     stopCameraPreview.mockReset().mockResolvedValue(undefined);
+    nativeCameraDevices
+      .mockReset()
+      .mockResolvedValue([{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }]);
+    nativeCameraSupport.mockReset().mockResolvedValue({ available: true, missing: [] });
     vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
     vi.doMock("../../src/features/voice/native/devices", () => ({
@@ -1437,7 +1443,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         kind === "audioinput"
           ? [{ deviceId: "guid-mic", label: "USB Mic", kind }]
           : [{ deviceId: "guid-spk", label: "Speakers", kind }],
-      nativeCameraDevices: async () => [{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }],
+      nativeCameraDevices: (...args: unknown[]) => nativeCameraDevices(...args),
+      nativeCameraSupport: (...args: unknown[]) => nativeCameraSupport(...args),
     }));
     vi.doMock("../../src/platform/desktop", () => ({
       desktop: {
@@ -1650,5 +1657,30 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await vi.waitFor(() => {
       expect(stopCameraPreview).toHaveBeenCalled();
     });
+  });
+
+  it("explains missing camera support instead of showing an empty list", async () => {
+    nativeCameraDevices.mockResolvedValue([]);
+    nativeCameraSupport.mockResolvedValue({ available: false, missing: ["v4l2src"] });
+    const tab = await mount();
+    const label = tab.element.querySelector(".camera-preview-label");
+    await vi.waitFor(() => {
+      expect(label?.textContent).toContain("Camera support is missing");
+    });
+    // No capture is attempted when the backend can never start one.
+    expect(startCameraPreview).not.toHaveBeenCalled();
+  });
+
+  it("keeps the no-camera wording when support is available but none is plugged in", async () => {
+    nativeCameraDevices.mockResolvedValue([]);
+    nativeCameraSupport.mockResolvedValue({ available: true, missing: [] });
+    // The backend rejects a start with no device, as it does on a real host.
+    startCameraPreview.mockRejectedValue(new Error("no camera"));
+    const tab = await mount();
+    const label = tab.element.querySelector(".camera-preview-label");
+    await vi.waitFor(() => {
+      expect(startCameraPreview).toHaveBeenCalled();
+    });
+    expect(label?.textContent).not.toContain("Camera support is missing");
   });
 });

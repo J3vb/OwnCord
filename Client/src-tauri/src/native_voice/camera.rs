@@ -114,6 +114,60 @@ pub fn list_devices() -> Vec<CameraDevice> {
         .collect()
 }
 
+/// The elements the capture pipeline builds by name: a missing one fails the
+/// build before any device is opened. `pipewiresrc` is optional (V4L2 works
+/// without it), so it is not required.
+const REQUIRED_CAMERA_ELEMENTS: [&str; 4] = ["v4l2src", "decodebin", "videoconvert", "appsink"];
+
+/// Whether the host can capture cameras, in the shape the webview's support
+/// notice consumes.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraSupport {
+    /// GStreamer initialised and every required element exists.
+    pub available: bool,
+    /// The required elements GStreamer could not find, in pipeline order.
+    pub missing: Vec<String>,
+    /// Whether PipeWire's virtual-camera source is present. Optional: its
+    /// absence does not make camera support unavailable.
+    pub pipewire: bool,
+}
+
+/// A camera-support check with the live GStreamer state left out: `init`
+/// reports whether GStreamer initialised and `find` whether an element exists
+/// by name. Split out so a test can pin a missing element without touching the
+/// host's installed plugins.
+fn support_with(init: bool, find: &dyn Fn(&str) -> bool) -> CameraSupport {
+    if !init {
+        return CameraSupport {
+            available: false,
+            missing: Vec::new(),
+            pipewire: false,
+        };
+    }
+    let missing: Vec<String> = REQUIRED_CAMERA_ELEMENTS
+        .iter()
+        .filter(|name| !find(name))
+        .map(|name| (*name).to_string())
+        .collect();
+    CameraSupport {
+        available: missing.is_empty(),
+        missing,
+        pipewire: find("pipewiresrc"),
+    }
+}
+
+/// Whether the host can capture cameras: GStreamer initialises and the
+/// capture pipeline's required elements exist. A minimal or non-Debian Linux
+/// install without the GStreamer plugin packages has no `v4l2src`, lists no
+/// cameras and cannot capture; this tells the webview why instead of leaving
+/// an unexplained empty list.
+pub fn support() -> CameraSupport {
+    support_with(gst::init().is_ok(), &|name| {
+        gst::ElementFactory::find(name).is_some()
+    })
+}
+
 /// What to capture: `Default` (the first listed device), a device id from
 /// [`list_devices`], or moving bars for the interop test (CI has no camera).
 /// `Synthetic` is not reachable from the webview.
@@ -811,5 +865,50 @@ mod tests {
             assert!(!d.id.is_empty());
             assert_eq!(Target::parse(&d.id), Ok(Target::Device(d.id.clone())));
         }
+    }
+
+    /// A required element the host lacks (a minimal install without the
+    /// GStreamer plugin packages) makes support unavailable and is named, so
+    /// the client can explain why no camera appears instead of showing an
+    /// empty list.
+    #[test]
+    fn camera_support_names_a_missing_required_element() {
+        assert_eq!(
+            support_with(true, &|name| name != "v4l2src"),
+            CameraSupport {
+                available: false,
+                missing: vec!["v4l2src".to_string()],
+                pipewire: true,
+            }
+        );
+    }
+
+    /// Every required element present: support is available.
+    #[test]
+    fn camera_support_is_available_when_the_required_elements_exist() {
+        assert_eq!(
+            support_with(true, &|_| true),
+            CameraSupport {
+                available: true,
+                missing: Vec::new(),
+                pipewire: true,
+            }
+        );
+    }
+
+    /// GStreamer failing to initialise is also no camera support.
+    #[test]
+    fn camera_support_is_unavailable_without_gstreamer() {
+        assert!(!support_with(false, &|_| true).available);
+    }
+
+    /// PipeWire's source is optional: its absence is not a missing required
+    /// element and does not make support unavailable.
+    #[test]
+    fn a_missing_pipewiresrc_is_only_a_hint() {
+        let support = support_with(true, &|name| name != "pipewiresrc");
+        assert!(support.available);
+        assert!(support.missing.is_empty());
+        assert!(!support.pipewire);
     }
 }

@@ -320,6 +320,8 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.mic.noAccess": "No microphone access",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
+  "voiceAudio.gstreamerMissing":
+    "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian) or gst-plugins-good (Fedora/Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
   "voiceAudio.default": "Default",
   "voiceAudio.inputVolume": "Input Volume",

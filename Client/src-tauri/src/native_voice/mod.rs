@@ -336,6 +336,16 @@ pub async fn native_voice_list_cameras() -> Result<Vec<camera::CameraDevice>, St
         .map_err(|e| e.to_string())
 }
 
+/// Whether the host can capture cameras: GStreamer initialises and the capture
+/// pipeline's required elements exist. A minimal Linux install without the
+/// GStreamer plugin packages reports unavailable with the missing element
+/// names, so the webview can say why no camera appears instead of showing an
+/// empty list.
+#[tauri::command]
+pub fn native_voice_camera_support() -> Result<camera::CameraSupport, String> {
+    Ok(camera::support())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CameraStarted {

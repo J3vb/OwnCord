@@ -229,6 +229,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_list_cameras,
             #[cfg(target_os = "linux")]
+            native_voice::native_voice_camera_support,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_start_camera,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_publish_camera,

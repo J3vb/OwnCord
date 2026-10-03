@@ -143,6 +143,11 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
+    check("reports whether the host can capture cameras at all", async () => {
+      await expect(ctx.subject.cameraSupport()).resolves.toEqual({ available: true, missing: [] });
+      expect(ctx.native.commands()).toEqual([["native_voice_camera_support", undefined]]);
+    });
+
     check("starts and stops the out-of-call camera preview", async () => {
       const capture = { fps: 30, maxWidth: 320, maxHeight: 180 };
       ctx.native.hasCameras(

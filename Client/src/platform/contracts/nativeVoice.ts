@@ -121,6 +121,14 @@ export interface NativeVoiceCameraDevice {
   name: string;
 }
 
+/** Whether the host can capture cameras at all: GStreamer initialises and the
+ *  capture pipeline's required elements exist. `missing` names the required
+ *  elements that could not be found. */
+export interface NativeVoiceCameraSupport {
+  available: boolean;
+  missing: string[];
+}
+
 /** Capture pacing and size cap for the native camera; 0 for both sizes is the
  *  source size. */
 export interface NativeVoiceCameraCapture {
@@ -232,6 +240,11 @@ export interface NativeVoice {
   /** List the GStreamer `Video/Source` cameras (V4L2 and PipeWire), in or out
    *  of a call. */
   listCameras(): Promise<NativeVoiceCameraDevice[]>;
+  /** Whether the host can capture cameras: GStreamer initialises and the
+   *  capture pipeline's required elements exist. An empty list with this
+   *  available is "no camera plugged in"; this false is "camera support is
+   *  missing". */
+  cameraSupport(): Promise<NativeVoiceCameraSupport>;
   /** Start capturing native camera `source` (replacing any running capture)
    *  and resolve once its first frame arrives; a source that fails or yields
    *  no frame in time rejects. The preview then plays on the frame socket's
