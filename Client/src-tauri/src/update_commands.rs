@@ -358,6 +358,18 @@ pub async fn check_client_update(
     }
 }
 
+/// Whether a signed artifact name is one bare file name. Tauri's signer writes
+/// the artifact's `file_name()`, which keeps spaces and punctuation (an NSIS
+/// artifact is named after `productName` verbatim, e.g. `OwnCord E2E_...`), so
+/// this rejects only what would make the field ambiguous — a directory, URL or
+/// control character — not every non-alphanumeric byte.
+fn is_bare_artifact_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\' | '?' | '#'))
+}
+
 /// Authenticate the signed name before interpreting its target. The plugin
 /// exposes the encoded signature, but not its verified trusted comment, so
 /// use its verifier and trust anchor again, including the global signature.
@@ -387,12 +399,7 @@ fn verify_artifact_target(
         .ok_or_else(|| "signed update has no artifact name".to_string())?;
     // A file field is a single basename, never a URL or path. Reject ambiguous
     // fields instead of reinterpreting them with the URL preflight parser.
-    if files.next().is_some()
-        || filename.is_empty()
-        || !filename
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-    {
+    if files.next().is_some() || !is_bare_artifact_name(filename) {
         return Err("signed update has an invalid artifact name".into());
     }
     let lower = filename.to_ascii_lowercase();
@@ -844,6 +851,33 @@ mod tests {
                 .is_err(),
                 "{name} must be refused"
             );
+        }
+    }
+
+    #[test]
+    fn signed_artifact_name_keeps_a_spaced_product_name() {
+        // The packaged E2E app is `OwnCord E2E`, and Tauri names the NSIS
+        // artifact after productName verbatim, so the signed name carries a
+        // space. It is still one bare file name for the running target.
+        let name = "OwnCord E2E_1.2.0-alpha.5_x64-setup.nsis.zip";
+        assert!(is_bare_artifact_name(name));
+        assert!(artifact_matches_target(name, "windows-x86_64"));
+        assert!(is_bare_artifact_name(
+            "OwnCord_99.0.0_amd64.AppImage.tar.gz"
+        ));
+    }
+
+    #[test]
+    fn signed_artifact_name_refuses_an_ambiguous_field() {
+        for name in [
+            "",
+            "folder/OwnCord_1.0.0_amd64.AppImage.tar.gz",
+            r"folder\OwnCord_1.0.0_amd64.AppImage.tar.gz",
+            "OwnCord_1.0.0_amd64.AppImage.tar.gz?name=other",
+            "OwnCord_1.0.0_amd64.AppImage.tar.gz#frag",
+            "OwnCord\t1.0.0_amd64.AppImage.tar.gz",
+        ] {
+            assert!(!is_bare_artifact_name(name), "{name:?} must be refused");
         }
     }
 
