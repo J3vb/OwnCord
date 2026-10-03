@@ -136,6 +136,11 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.domain must be set for acme mode")
 		return false
 	}
+	if g.next.Server.Port == 80 {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+			"server.port must not be 80 in acme mode; the HTTPS listener would occupy the port the ACME challenge needs")
+		return false
+	}
 	// The ACME challenge answers on port 80; only probe when the server is not
 	// already in acme mode (it would be holding nothing on 80 between runs).
 	if g.opts.RunningCfg.TLS.Mode == "acme" {
@@ -166,8 +171,18 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 		return false
 	}
 	if certErr == nil && keyErr == nil {
-		if _, err := tls.LoadX509KeyPair(g.next.TLS.CertFile, g.next.TLS.KeyFile); err != nil {
+		cert, err := tls.LoadX509KeyPair(g.next.TLS.CertFile, g.next.TLS.KeyFile)
+		if err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file/tls.key_file: the existing pair does not load")
+			return false
+		}
+		if len(cert.Certificate) == 0 {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file does not hold a certificate")
+			return false
+		}
+		leaf, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil || time.Now().After(leaf.NotAfter) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file: the certificate is unreadable or expired")
 			return false
 		}
 		return true

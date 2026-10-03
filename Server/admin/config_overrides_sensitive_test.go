@@ -3,7 +3,14 @@ package admin_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -368,6 +376,25 @@ func TestConfigOverridesSensitive_TLSGuard(t *testing.T) {
 	}
 }
 
+// Switching to acme mode while the HTTPS listener stays on port 80 leaves no
+// port for the HTTP-01 challenge, so the certificate can never be obtained.
+// The running port is 80 here, so guardPort skips and only this guard can
+// refuse the combination.
+func TestConfigOverridesSensitive_AcmeRefusesPort80(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	f.cfg.Server.Port = 80
+	keys := []string{"server.port", "tls.mode", "tls.domain"}
+	body := map[string]any{"server.port": 80, "tls.mode": "acme", "tls.domain": "chat.example.com"}
+	if w := patchConfig(t, f.handler, token, body, keys, ""); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "server.port") {
+		t.Errorf("PATCH acme with server.port 80 = %d %s, want 400 naming server.port", w.Code, w.Body.String())
+	}
+	if len(savedOverrides(t, f.dataDir)) != 0 {
+		t.Fatal("a refused acme PATCH wrote overrides")
+	}
+}
+
 // When self_signed may generate the pair, both the certificate and the key
 // directories must exist and be writable: GenerateSelfSigned writes both files
 // without creating their parents, so an unwritable key directory locks the
@@ -426,6 +453,59 @@ func TestConfigOverridesSensitive_SelfSignedPairMustBeLoadable(t *testing.T) {
 	if w := patchConfig(t, f.handler, token, dirBody, tlsKeys, ""); w.Code != http.StatusBadRequest ||
 		!strings.Contains(w.Body.String(), "tls.cert_file") {
 		t.Errorf("PATCH self_signed with a directory cert_file = %d %s, want 400 naming tls.cert_file", w.Code, w.Body.String())
+	}
+	if len(savedOverrides(t, f.dataDir)) != 0 {
+		t.Fatal("a refused self-signed PATCH wrote overrides")
+	}
+}
+
+// writeExpiredSelfSigned writes a loadable self-signed pair whose validity
+// window is already in the past, the shape a stale data_dir pair has.
+func writeExpiredSelfSigned(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{Organization: []string{"OwnCord Server"}},
+		NotBefore:             time.Now().Add(-2 * time.Hour),
+		NotAfter:              time.Now().Add(-1 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &privKey.PublicKey, privKey)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	certFile := filepath.Join(dir, "expired-cert.pem")
+	keyFile := filepath.Join(dir, "expired-key.pem")
+	if err := os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certFile, keyFile
+}
+
+// An existing self-signed pair whose leaf has expired is a lock-out: browsers
+// refuse it, so the same check guardManualTLS makes must apply here.
+func TestConfigOverridesSensitive_SelfSignedExpiredPairRejected(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	cert, key := writeExpiredSelfSigned(t, f.dataDir)
+	tlsKeys := []string{"tls.mode", "tls.cert_file", "tls.key_file"}
+	body := map[string]any{"tls.mode": "self_signed", "tls.cert_file": cert, "tls.key_file": key}
+	if w := patchConfig(t, f.handler, token, body, tlsKeys, ""); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "expired") {
+		t.Errorf("PATCH self_signed with an expired pair = %d %s, want 400 naming expiry", w.Code, w.Body.String())
 	}
 	if len(savedOverrides(t, f.dataDir)) != 0 {
 		t.Fatal("a refused self-signed PATCH wrote overrides")
