@@ -1044,6 +1044,12 @@ jobs:
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
+          # ubuntu-22.04 ships LLVM's slotted libunwind-14-dev, which conflicts
+          # with the libunwind-dev that libgstreamer1.0-dev depends on; apt will
+          # not resolve it during install ("held broken packages"), so drop the
+          # LLVM copy first. The build uses the hermetic libc++ inside the
+          # libwebrtc archive, so losing the LLVM libc++ packages is safe.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
@@ -1393,6 +1399,12 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           sudo apt-get update
+          # ubuntu-22.04 ships LLVM's slotted libunwind-14-dev, which conflicts
+          # with the libunwind-dev that libgstreamer1.0-dev depends on; apt will
+          # not resolve it during install ("held broken packages"), so drop the
+          # LLVM copy first. The build uses the hermetic libc++ inside the
+          # libwebrtc archive, so losing the LLVM libc++ packages is safe.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
