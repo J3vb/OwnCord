@@ -45,6 +45,7 @@ func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending b
 	rows := make([]configSettingRow, 0, len(keys))
 	for _, key := range keys {
 		value, _ := config.Lookup(cfg, key)
+		value = normalizeSettingValue(value)
 		row := configSettingRow{
 			Key:       key,
 			Type:      configValueType(value),
@@ -60,6 +61,18 @@ func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending b
 		rows = append(rows, row)
 	}
 	return configSettingsResponse{RestartPending: pending, Settings: rows}
+}
+
+// normalizeSettingValue turns a nil slice into an empty one, so a list key
+// with no running value serialises as [] rather than null. The panel reads a
+// null list as an empty list and would otherwise write a spurious [] override
+// on any save.
+func normalizeSettingValue(value any) any {
+	rv := reflect.ValueOf(value)
+	if rv.Kind() == reflect.Slice && rv.IsNil() {
+		return reflect.MakeSlice(rv.Type(), 0, 0).Interface()
+	}
+	return value
 }
 
 func configValueType(value any) string {

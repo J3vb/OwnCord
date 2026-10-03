@@ -74,7 +74,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Accounts & admin
 
-- **Most server settings can now be changed from the admin panel, without editing `config.yaml`.** A new owner-only **Server configuration** page writes its values to a JSON file beside the database and applies them after a restart; the page offers **Restart now**. A value pinned by an `OWNCORD_*` environment variable stays locked, and a hand-edited overrides file cannot reach a protected key. The page covers 50 of the 77 keys: secrets, file paths, the listener/TLS identity, the admin network perimeter, the update source, pprof, and the upload file-type lists stay `config.yaml`/environment-only.
+- **Most server settings can now be changed from the admin panel, without editing `config.yaml`.** A new owner-only **Server configuration** page writes its values to a JSON file beside the database and applies them after a restart; the page offers **Restart now**. A value pinned by an `OWNCORD_*` environment variable stays locked, and a hand-edited overrides file cannot reach a protected key. This first step covers 49 of the 77 keys; the remaining sensitive keys — secrets, file paths, the listener/TLS identity, the admin network perimeter, the update source, pprof and the upload file-type lists — follow in a later change. The server name stays on the existing Settings page, and the config page links to it.
 
 ### Changed
 

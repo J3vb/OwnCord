@@ -14,20 +14,17 @@ import (
 // helpers shift by 20.
 const maxMiB = math.MaxInt64 >> 20
 
-// Service-owned limits redeclared here so config need not import service (an
-// import cycle): server.name's byte cap matches service (settings_values.go),
-// and upload.max_size_mb's cap matches service.MaxUploadSizeMB.
-const (
-	maxServerNameBytes = 100
-	maxUploadSizeMB    = 10240
-)
+// maxUploadSizeMB is service.MaxUploadSizeMB redeclared here so config need
+// not import service (an import cycle).
+const maxUploadSizeMB = 10240
 
 // editableRules is the single registry of panel-editable keys. Each entry
 // validates one JSON-decoded value and returns the normalised Go value to
 // store. Adding a key is one row here plus a rule; the exact-inventory test
-// pins the set at 50. The 27 excluded keys (secrets, host paths, the
-// listener/TLS identity, the panel perimeter, the update source, pprof, and
-// the live upload lists) are deliberately absent.
+// pins the set at 49. The 28 excluded keys (secrets, host paths, the
+// listener/TLS identity, the panel perimeter, the update source, pprof, the
+// live upload lists, and server.name, which the Settings page owns) are
+// deliberately absent for now; the remaining surface arrives in a follow-up.
 var editableRules = map[string]func(any) (any, error){
 	// Integers.
 	"attention.delivery_drops_per_min":          intRule(1, 1_000_000),
@@ -77,7 +74,6 @@ var editableRules = map[string]func(any) (any, error){
 	"voice.quality":       enumRule("low", "medium", "high"),
 
 	// Strings.
-	"server.name":             serverNameRule,
 	"push.contact":            contactRule,
 	"telemetry.otlp_endpoint": otlpEndpointRule,
 	"telemetry.service_name":  serviceNameRule,
@@ -182,21 +178,6 @@ func cleanString(v any) (string, error) {
 	}
 	if strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 }) {
 		return "", fmt.Errorf("must not contain control characters")
-	}
-	return s, nil
-}
-
-func serverNameRule(v any) (any, error) {
-	s, err := cleanString(v)
-	if err != nil {
-		return nil, err
-	}
-	s = strings.TrimSpace(s)
-	if len(s) > maxServerNameBytes {
-		return nil, fmt.Errorf("must be at most %d bytes", maxServerNameBytes)
-	}
-	if s == "" {
-		return nil, fmt.Errorf("must not be empty")
 	}
 	return s, nil
 }

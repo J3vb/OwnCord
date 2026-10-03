@@ -314,18 +314,20 @@ save to it is refused (the value would lose at the next boot). An override
 takes effect at the next server start; the page offers **Restart now** once
 something is pending. The boot log names each overridden key, never its value.
 
-Not every key is on the page. Secrets (`gif.api_key`, `github.token`, the
+Not every key is on the page yet. Secrets (`gif.api_key`, `github.token`, the
 LiveKit key and secret), host paths (`server.data_dir`, `database.path`,
 `backup.dir`, `upload.storage_dir`, `plugins.directory`, `tls.cert_file`,
 `tls.key_file`, `tls.acme_cache_dir`, `voice.livekit_binary`), the listener
 and TLS identity (`server.port`, `tls.mode`, `tls.domain`, `database.type`,
 `server.restart_mode`), the panel's own network perimeter
 (`server.admin_allowed_cidrs`, `server.trusted_proxies`), the update source
-(`github.owner`, `github.repo`), host-only diagnostics (`server.pprof_*`),
-and the upload file-type lists already owned by live settings rows stay
-`config.yaml`/environment only: a browser session must not be able to point
-the server at an arbitrary file, lock the owner out of the panel, or change
-where updates come from.
+(`github.owner`, `github.repo`), host-only diagnostics (`server.pprof_*`) and
+the upload file-type lists stay `config.yaml`/environment only for now and
+follow on the page in a later change; that is a security decision first, so a
+browser session cannot point the server at an arbitrary file, lock the owner
+out of the panel, or change where updates come from. `server.name` is not
+offered a second time here: the existing **Settings** page already owns it,
+and this page links there.
 
 A hand-edited `config-overrides.json` is tolerated: a key the panel does not
 own is ignored with a warning rather than preventing the server from starting.

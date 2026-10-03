@@ -26,7 +26,7 @@ const OverridesFileName = "config-overrides.json"
 // ErrNotEditable is the sentinel for a key the panel may not set: it is either
 // not a config leaf or one of the protected groups (secrets, host paths, the
 // listener/TLS identity, the panel's own perimeter, the update source,
-// pprof, or a list a live settings row already owns).
+// pprof, or a key a live settings row already owns).
 var ErrNotEditable = errors.New("config key is not editable from the admin panel")
 
 // ErrInvalidValue is the sentinel for a value that fails its key's rule
@@ -67,7 +67,9 @@ func EnvOverridden(key string) bool {
 // ReadOverrides reads the overrides file as a flat map of dotted key to value.
 // A missing file is an empty map, not an error. Values are normalised on read
 // (whole JSON numbers to int, JSON arrays to []string) so a round-trip through
-// a hand-edited file and the admin API carry the same Go types.
+// a hand-edited file and the admin API carry the same Go types. An editable
+// key whose stored value fails its rule is dropped with a warning, so a
+// hand-edited wrong-typed value cannot stop the server from starting.
 func ReadOverrides(path string) (map[string]any, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path comes from trusted wiring, not request input
 	if errors.Is(err, os.ErrNotExist) {
@@ -84,7 +86,19 @@ func ReadOverrides(path string) (map[string]any, error) {
 		return nil, fmt.Errorf("parsing %s: %w", OverridesFileName, err)
 	}
 	for key, value := range out {
-		out[key] = normalizeStored(value)
+		normalized := normalizeStored(value)
+		rule, editable := editableRules[key]
+		if !editable {
+			out[key] = normalized
+			continue
+		}
+		validated, err := rule(normalized)
+		if err != nil {
+			slog.Warn("config: ignoring invalid value in overrides file (wrong type or out of range)", "key", key)
+			delete(out, key)
+			continue
+		}
+		out[key] = validated
 	}
 	return out, nil
 }

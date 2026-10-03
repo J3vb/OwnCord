@@ -64,7 +64,7 @@ function configSectionCard(title,rows){
 function configPageHTML(data){
   const settings=(data&&data.settings)||[];
   let html='<div class="page-title">Server configuration</div>'
-    +'<div class="page-desc">Settings normally written in <code>config.yaml</code>. Changes apply after a server restart.</div>';
+    +'<div class="page-desc">Settings normally written in <code>config.yaml</code>. Changes apply after a server restart. The server name is on the <button class="link-btn" data-action="navigateTo" data-args="'+actArgs('settings')+'">Settings</button> page.</div>';
   if(data&&data.restart_pending){
     html+='<div class="card-note" role="status">Saved changes are waiting to apply. '
       +'<button class="btn btn-accent" data-action="restartForConfig">Restart now</button></div>';

@@ -48,7 +48,6 @@ var panelEditableKeys = []string{
 	"server.max_ws_connections",
 	"server.metrics_allowed_cidrs",
 	"server.min_free_disk_mb",
-	"server.name",
 	"server.reachability_report_enabled",
 	"server.waf_crs_mode",
 	"server.waf_enabled",
@@ -90,7 +89,7 @@ var panelExcludedKeys = []string{
 	"server.pprof_enabled", "server.pprof_block_profile_rate", "server.pprof_mutex_profile_fraction",
 	// Already editable live on the Settings page through their own rows,
 	// which replace config.yaml; a second panel value would be a third source.
-	"upload.blocked_extensions", "upload.allowed_extensions",
+	"upload.blocked_extensions", "upload.allowed_extensions", "server.name",
 }
 
 func TestEditableKeys_ExactInventory(t *testing.T) {
@@ -229,7 +228,6 @@ func TestSaveOverrides_ValidatesValues(t *testing.T) {
 		{"server.metrics_allowed_cidrs", []any{"10.0.0.1"}}, // bare IP, not CIDR
 		{"server.allowed_origins", []any{float64(1)}},
 		{"push.enabled", "yes"},
-		{"server.name", "   "},
 	}
 	for _, tc := range bad {
 		path := config.OverridesPath(t.TempDir())
@@ -256,7 +254,6 @@ func TestSaveOverrides_ValidatesValues(t *testing.T) {
 		"server.waf_crs_mode":                 "block",
 		"telemetry.exporter":                  "otlp",
 		"voice.quality":                       "high",
-		"server.name":                         "My Server",
 	}
 	if err := config.SaveOverrides(config.OverridesPath(t.TempDir()), good); err != nil {
 		t.Errorf("SaveOverrides(valid values) error = %v, want nil", err)
@@ -357,6 +354,29 @@ func TestLoad_OverridesIgnoreProtectedKeys(t *testing.T) {
 	}
 	if cfg.Server.MaxWSConnections != 20 {
 		t.Errorf("max_ws_connections = %d, want 20: an ignored key must not drop the valid ones", cfg.Server.MaxWSConnections)
+	}
+}
+
+// A hand-edited overrides file with an editable key holding the wrong type
+// used to reach the boot YAML unmarshal and refuse to start. The read boundary
+// now drops the bad value; the valid keys in the same file still apply.
+func TestLoad_OverridesIgnoreWrongTypedValue(t *testing.T) {
+	dataDir := t.TempDir()
+	cfgPath := writeYAML(t, dataDir, "")
+	writeOverrides(t, dataDir, `{"logging.level": 5, "server.max_ws_connections": "10", "push.enabled": true}`)
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load with a wrong-typed override: %v", err)
+	}
+	if cfg.Logging.Level != "info" {
+		t.Errorf("logging.level = %q, want the default info (wrong-typed override dropped)", cfg.Logging.Level)
+	}
+	if cfg.Server.MaxWSConnections != 10 {
+		t.Errorf("max_ws_connections = %d, want config.yaml's 10 (wrong-typed override dropped)", cfg.Server.MaxWSConnections)
+	}
+	if !cfg.Push.Enabled {
+		t.Error("push.enabled = false, want true: dropping a bad key must not drop the valid ones")
 	}
 }
 

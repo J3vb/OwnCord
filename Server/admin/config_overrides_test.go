@@ -125,6 +125,29 @@ func TestConfigOverrides_GetListsEditableKeysOnly(t *testing.T) {
 	}
 }
 
+// A list key with no running value must ship as [] rather than null: the panel
+// reads null as an empty list, so null would make every save resend a spurious
+// [] override for the key.
+func TestConfigOverrides_ListValueIsNeverNull(t *testing.T) {
+	f := newConfigOverridesFixture(t)
+	token := createAdminUser(t, f.database)
+
+	w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
+	resp := decodeConfigOverrides(t, w.Body.Bytes())
+	for _, key := range []string{"server.metrics_allowed_cidrs", "server.livekit_webhook_allowed_cidrs"} {
+		i, ok := resp.find(key)
+		if !ok {
+			t.Fatalf("GET /config/settings has no %s row", key)
+		}
+		v := resp.Settings[i].Value
+		if v == nil {
+			t.Errorf("%s value = null, want []", key)
+		} else if _, isList := v.([]any); !isList {
+			t.Errorf("%s value = %#v, want a JSON list", key, v)
+		}
+	}
+}
+
 func TestConfigOverrides_OwnerOnly(t *testing.T) {
 	f := newConfigOverridesFixture(t)
 	_, manageToken := createRoleUser(t, f.database, 20, "ServerAdmin", permissions.ManageServer, 50, "cfgovmanage")

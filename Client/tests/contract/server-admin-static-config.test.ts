@@ -111,9 +111,9 @@ const CONFIG_SETTINGS = {
     { key: "server.allowed_origins", type: "list", value: [], override: null, env_locked: false },
     { key: "server.max_ws_connections", type: "int", value: 100, override: 100, env_locked: false },
     {
-      key: "server.name",
+      key: "push.contact",
       type: "string",
-      value: "OwnCord Server",
+      value: "ops@example.com",
       override: null,
       env_locked: true,
     },
@@ -178,7 +178,7 @@ describe("Server/admin/static — Server configuration page", () => {
       "warn",
       "error",
     ]);
-    expect(control(doc, "server.name").disabled).toBe(true);
+    expect(control(doc, "push.contact").disabled).toBe(true);
     expect(doc.getElementById("content")!.textContent).toMatch(/environment/i);
     // Every change needs a restart, and the page says so.
     expect(doc.getElementById("content")!.textContent).toMatch(/restart/i);
@@ -219,6 +219,22 @@ describe("Server/admin/static — Server configuration page", () => {
     await fn(booted.bridge.resetConfigKey, "resetConfigKey")("server.max_ws_connections");
     const patch = calls.find((c) => c.method === "PATCH" && c.path === "/config/settings");
     expect(patch?.body).toEqual({ "server.max_ws_connections": null });
+  });
+
+  it("links to the Settings page for the server name", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, (p) =>
+      p === "/config/settings" ? { json: CONFIG_SETTINGS } : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = await renderInto(dom, booted.bridge);
+
+    const link = doc.querySelector<HTMLElement>(
+      '#content [data-action="navigateTo"][data-args*="settings"]',
+    );
+    expect(link).toBeTruthy();
+    link!.click();
+    expect(booted.bridge.state.section).toBe("settings");
   });
 
   it("offers Restart now once a change is pending, and it posts /restart", async () => {
