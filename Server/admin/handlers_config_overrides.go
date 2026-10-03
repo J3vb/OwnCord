@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"slices"
+	"strings"
 	"sync/atomic"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -22,14 +24,22 @@ var configEnumOptions = map[string][]string{
 	"voice.quality":       {"low", "medium", "high"},
 }
 
-// configSettingRow is one editable key in GET/PATCH /config/settings.
+// confirmHeader names the lock-out-capable keys a PATCH deliberately changes.
+// The panel sends it after the owner types the confirmation.
+const confirmHeader = "X-OwnCord-Confirm"
+
+// configSettingRow is one editable key in GET/PATCH /config/settings. A secret
+// row carries no value or override: only configured/override_set booleans.
 type configSettingRow struct {
-	Key       string   `json:"key"`
-	Type      string   `json:"type"`
-	Value     any      `json:"value"`
-	Override  any      `json:"override"`
-	EnvLocked bool     `json:"env_locked"`
-	Options   []string `json:"options,omitempty"`
+	Key                  string   `json:"key"`
+	Type                 string   `json:"type"`
+	Value                any      `json:"value"`
+	Override             any      `json:"override"`
+	EnvLocked            bool     `json:"env_locked"`
+	Options              []string `json:"options,omitempty"`
+	RequiresConfirmation bool     `json:"requires_confirmation"`
+	Configured           *bool    `json:"configured,omitempty"`
+	OverrideSet          *bool    `json:"override_set,omitempty"`
 }
 
 type configSettingsResponse struct {
@@ -44,17 +54,28 @@ func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending b
 	keys := config.EditableKeys()
 	rows := make([]configSettingRow, 0, len(keys))
 	for _, key := range keys {
-		value, _ := config.Lookup(cfg, key)
-		value = normalizeSettingValue(value)
 		envLocked := config.EnvOverridden(key)
 		row := configSettingRow{
-			Key:       key,
-			Type:      configValueType(value),
-			Value:     value,
-			EnvLocked: envLocked,
+			Key:                  key,
+			EnvLocked:            envLocked,
+			RequiresConfirmation: config.RequiresConfirmation(key),
 		}
-		if override, ok := overrides[key]; ok && !envLocked {
-			row.Override = override
+		if config.IsSecret(key) {
+			// Never place a secret value in the row: the panel only needs to
+			// know whether one is configured and whether an override is set.
+			configured := secretConfigured(cfg, key)
+			overrideSet := overrides[key] != nil
+			row.Type = "secret"
+			row.Configured = &configured
+			row.OverrideSet = &overrideSet
+		} else {
+			value, _ := config.Lookup(cfg, key)
+			value = normalizeSettingValue(value)
+			row.Type = configValueType(value)
+			row.Value = value
+			if override, ok := overrides[key]; ok && !envLocked {
+				row.Override = override
+			}
 		}
 		if options, ok := configEnumOptions[key]; ok {
 			row.Options = options
@@ -62,6 +83,45 @@ func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending b
 		rows = append(rows, row)
 	}
 	return configSettingsResponse{RestartPending: pending, Settings: rows}
+}
+
+// secretConfigured reports whether the running config holds a non-empty value
+// for a secret key, without ever returning the value itself.
+func secretConfigured(cfg *config.Config, key string) bool {
+	value, _ := config.Lookup(cfg, key)
+	s, _ := value.(string)
+	return s != ""
+}
+
+// unconfirmedKeys returns the lock-out-capable keys in a PATCH body that the
+// comma-separated confirmation header does not name, sorted.
+func unconfirmedKeys(changes map[string]any, header string) []string {
+	confirmed := make(map[string]bool)
+	for _, key := range strings.Split(header, ",") {
+		if key = strings.TrimSpace(key); key != "" {
+			confirmed[key] = true
+		}
+	}
+	var missing []string
+	for key := range changes {
+		if config.RequiresConfirmation(key) && !confirmed[key] {
+			missing = append(missing, key)
+		}
+	}
+	slices.Sort(missing)
+	return missing
+}
+
+// configAuditDetail names the key and the verb only, never the value: a secret
+// value or an operator's contact address must not reach the audit log.
+func configAuditDetail(key string, value any) string {
+	if value == nil {
+		return key + " reset"
+	}
+	if s, ok := value.(string); ok && s == "" && config.IsSecret(key) {
+		return key + " cleared"
+	}
+	return key + " updated"
 }
 
 // normalizeSettingValue turns a nil slice into an empty one, so a list key
@@ -131,8 +191,25 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 				return
 			}
 		}
+		if err := config.ValidateOverrides(changes); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return
+		}
+		if missing := unconfirmedKeys(changes, r.Header.Get(confirmHeader)); len(missing) > 0 {
+			writeErr(w, http.StatusPreconditionRequired, "CONFIRMATION_REQUIRED",
+				"these keys need a typed confirmation: "+strings.Join(missing, ","))
+			return
+		}
 
 		path := config.OverridesPath(cfg.Server.DataDir)
+		next, err := config.Preview(opts.ConfigPath, path, changes)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return
+		}
+		if !runConfigGuards(w, r, opts, next, changes) {
+			return
+		}
 		if err := config.SaveOverrides(path, changes); err != nil {
 			switch {
 			case errors.Is(err, config.ErrNotEditable), errors.Is(err, config.ErrInvalidValue):
@@ -146,11 +223,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 		pending.Store(true)
 		actor := actorFromContext(r)
 		for key, value := range changes {
-			detail := key + " updated"
-			if value == nil {
-				detail = key + " reset"
-			}
-			db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "config_override_change", "config", 0, detail)
+			db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "config_override_change", "config", 0, configAuditDetail(key, value))
 		}
 
 		overrides, err := config.ReadOverrides(path)
