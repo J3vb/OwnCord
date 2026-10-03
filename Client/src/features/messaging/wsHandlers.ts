@@ -129,7 +129,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
   // like one in any other channel (badge, taskbar, divider) — the same
-  // predicate the ready-time mark-read and the mention-count skip use.
+  // predicate the ready-time mark-read uses.
   const isAway = isChannelAway(payload.channel_id);
 
   if ((payload.channel_id !== activeId || isAway) && !isOwnMessage) {

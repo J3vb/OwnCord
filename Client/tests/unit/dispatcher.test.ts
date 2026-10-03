@@ -1036,7 +1036,9 @@ describe("WS Dispatcher", () => {
     });
 
     it("ignores a mention_count frame for the channel on screen", () => {
-      // P4-03: the skip only applies while the window is focused.
+      // P4-03: the frame carries an absolute total, not a delta, so applying
+      // it to the active channel would reintroduce mentions already seen while
+      // it was focused. Its own chat_message handles the badge either way.
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
       onTestFinished(() => focus.mockRestore());
       seedChannel();
@@ -1047,7 +1049,7 @@ describe("WS Dispatcher", () => {
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
     });
 
-    it("applies a mention_count frame for the active channel while the window is unfocused (P4-03)", () => {
+    it("ignores a mention_count frame for the active channel while the window is unfocused (P4-03)", () => {
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
       onTestFinished(() => focus.mockRestore());
       seedChannel();
@@ -1055,7 +1057,7 @@ describe("WS Dispatcher", () => {
 
       mock.dispatch("mention_count", { channel_id: 5, count: 3 });
 
-      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(3);
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
     });
   });
 

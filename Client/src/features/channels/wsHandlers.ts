@@ -186,24 +186,19 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  * client is not viewing, whose chat_message broadcast never arrives. The frame
  * is the only way such a change reaches the sidebar/taskbar badge live.
  *
- * Ignored for the active channel the reader is actually watching: a mention in
- * the channel on screen is already handled by its own chat_message (and, when
- * that window is detached from the live tail, counted there with the
- * evenIfActive escape hatch). Applying the server total there would paint a red
- * badge on the channel the user is reading — the badge the active-channel skip
- * in noteChannelMessage exists to prevent. P4-03: "watching" means a focused
- * window, so an unfocused (or detached) active channel does take the server's
- * authoritative total, the same away predicate handleChatMessage uses
- * (isChannelAway, lib/read-state.ts). Ignored for a DM-channel id too: a DM's
- * badge lives in dmStore and its mention bump rides the DM's own chat_message.
+ * Ignored for the active channel: a mention in the channel on screen is already
+ * handled by its own chat_message (and, when that window is detached from the
+ * live tail, counted there with the evenIfActive escape hatch). Applying the
+ * server total here would paint a red badge on the channel the user is reading —
+ * the badge the active-channel skip in noteChannelMessage exists to prevent.
+ * The frame carries an absolute total, not a delta, so a channel the reader
+ * watched focused and then left would over-count mentions already seen; while
+ * away, its own chat_message keeps counting live mentions. Ignored for a
+ * DM-channel id too: a DM's badge lives in dmStore and its mention bump rides
+ * the DM's own chat_message.
  */
 export function handleMentionCount(payload: Payload<"mention_count">): void {
-  if (
-    payload.channel_id === channelsStore.getState().activeChannelId &&
-    !isChannelAway(payload.channel_id)
-  ) {
-    return;
-  }
+  if (payload.channel_id === channelsStore.getState().activeChannelId) return;
   const ch = channelsStore.getState().channels.get(payload.channel_id);
   if (ch === undefined) return;
   if (ch.type !== "dm") {

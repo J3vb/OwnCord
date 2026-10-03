@@ -193,24 +193,14 @@ describe("handleMentionCount", () => {
     expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
   });
 
-  it("applies a frame for the active channel while the window is unfocused", () => {
+  it("ignores a frame for the active channel while the window is unfocused", () => {
     hasFocus.mockReturnValue(false);
     setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
     setActiveChannel(2);
 
     handleMentionCount({ channel_id: 2, count: 3 });
 
-    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(3);
-  });
-
-  it("applies a frame for a detached active channel even while focused", () => {
-    messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([2]) }));
-    setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
-    setActiveChannel(2);
-
-    handleMentionCount({ channel_id: 2, count: 3 });
-
-    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(3);
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
   });
 
   it("ignores a frame for a channel this client does not know", () => {

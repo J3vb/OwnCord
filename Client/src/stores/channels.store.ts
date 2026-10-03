@@ -493,10 +493,8 @@ export function noteChannelMessage(
  * Set a channel's mention count from the server's authoritative total (DP-27).
  * A mention that lands in a channel the user is not viewing never reaches this
  * client through the channel topic, so the server pushes a per-user
- * `mention_count` frame with the new total instead — and the client applies that
- * frame for the active channel too while the window is unfocused (P4-03;
- * `isChannelAway`, `lib/read-state.ts`). Replacing rather than incrementing
- * keeps the count convergent across a lost or duplicated frame.
+ * `mention_count` frame with the new total instead. Replacing rather than
+ * incrementing keeps the count convergent across a lost or duplicated frame.
  *
  * `unreadCount` is deliberately untouched: the frame says nothing about it, and
  * a guild channel's taskbar/tray badge counts only mentions anyway. A no-op for
