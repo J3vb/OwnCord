@@ -43,6 +43,7 @@ type configSettingRow struct {
 	RequiresConfirmation bool     `json:"requires_confirmation"`
 	Configured           *bool    `json:"configured,omitempty"`
 	OverrideSet          *bool    `json:"override_set,omitempty"`
+	AllowEmpty           bool     `json:"allow_empty,omitempty"`
 }
 
 type configSettingsResponse struct {
@@ -71,6 +72,7 @@ func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any,
 			row.Type = "secret"
 			row.Configured = &configured
 			row.OverrideSet = &overrideSet
+			row.AllowEmpty = config.SecretAllowsEmpty(key)
 		} else {
 			value, _ := config.Lookup(cfg, key)
 			value = normalizeSettingValue(value)

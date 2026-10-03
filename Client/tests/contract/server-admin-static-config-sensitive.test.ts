@@ -20,6 +20,7 @@ window.__test = {
   saveServerConfig: typeof saveServerConfig==='function'?saveServerConfig:undefined,
   confirmServerConfig: typeof confirmServerConfig==='function'?confirmServerConfig:undefined,
   clearConfigSecret: typeof clearConfigSecret==='function'?clearConfigSecret:undefined,
+  clearConfigSecretValue: typeof clearConfigSecretValue==='function'?clearConfigSecretValue:undefined,
   resetConfigKey: typeof resetConfigKey==='function'?resetConfigKey:undefined,
   configMovedAddress: typeof configMovedAddress==='function'?configMovedAddress:undefined
 };
@@ -41,6 +42,7 @@ interface Bridge {
   saveServerConfig?: () => Promise<void>;
   confirmServerConfig?: () => Promise<void>;
   clearConfigSecret?: (key: string) => Promise<void>;
+  clearConfigSecretValue?: (key: string) => Promise<void>;
   resetConfigKey?: (key: string) => Promise<void>;
   configMovedAddress?: () => string;
 }
@@ -59,6 +61,7 @@ const SETTINGS = {
       override_set: false,
       env_locked: false,
       requires_confirmation: false,
+      allow_empty: true,
     },
     {
       key: "server.port",
@@ -187,6 +190,45 @@ describe("Server/admin/static — sensitive server configuration", () => {
     calls.length = 0;
     await fn(booted.bridge.clearConfigSecret, "clearConfigSecret")("gif.api_key");
     expect(patches(calls)[0]?.body).toEqual({ "gif.api_key": null });
+  });
+
+  it("clears a secret whose rule allows an empty value by sending an empty string", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const doc = await render(dom, booted.bridge);
+
+    expect(
+      doc.querySelector('[data-action="clearConfigSecretValue"]'),
+    ).not.toBeNull();
+    calls.length = 0;
+    await fn(booted.bridge.clearConfigSecretValue, "clearConfigSecretValue")("gif.api_key");
+    expect(patches(calls)[0]?.body).toEqual({ "gif.api_key": "" });
+  });
+
+  it("offers no Clear value action for a secret whose rule requires a value", async () => {
+    const calls: FetchCall[] = [];
+    const settings = {
+      restart_pending: false,
+      settings: [
+        {
+          key: "voice.livekit_api_key",
+          type: "secret",
+          value: null,
+          override: null,
+          configured: true,
+          override_set: true,
+          env_locked: false,
+          requires_confirmation: false,
+        },
+      ],
+    };
+    const booted = await boot(calls, settings);
+    dom = booted.dom;
+    const doc = await render(dom, booted.bridge);
+
+    expect(doc.querySelector('[data-action="clearConfigSecretValue"]')).toBeNull();
+    expect(doc.querySelector('[data-action="clearConfigSecret"]')).not.toBeNull();
   });
 
   it("asks for a typed confirmation before saving a lock-out-capable key", async () => {

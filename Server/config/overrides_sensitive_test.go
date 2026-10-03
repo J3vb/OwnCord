@@ -42,6 +42,18 @@ func TestIsSecret_ExactSet(t *testing.T) {
 	}
 }
 
+// A secret may be cleared to the empty string only where its rule accepts one:
+// gif.api_key and github.token can be blanked, while the LiveKit credentials
+// must keep a value. The classification asks the rule, so it cannot drift.
+func TestSecretAllowsEmpty_ExactSet(t *testing.T) {
+	clearable := []string{"gif.api_key", "github.token"}
+	for _, key := range config.EditableKeys() {
+		if got, want := config.SecretAllowsEmpty(key), slices.Contains(clearable, key); got != want {
+			t.Errorf("SecretAllowsEmpty(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
 func TestRequiresConfirmation_ExactSet(t *testing.T) {
 	for _, key := range config.EditableKeys() {
 		if got, want := config.RequiresConfirmation(key), slices.Contains(panelConfirmKeys, key); got != want {

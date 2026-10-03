@@ -63,19 +63,23 @@ function configRow(row){
     +'<div class="setting-ctrl">'+configControl(row)+reset+'</div></div>';
 }
 
-/* A secret row renders a configured/not-set badge and a Remove override button;
-   the value itself is never sent by the server. Removing the override sends
-   null, so the value falls back to config.yaml (an empty string is refused for
-   a key whose rule requires a value, like the LiveKit credentials). */
+/* A secret row renders a configured/not-set badge, a Clear value button for a
+   key whose rule allows empty, and a Remove override button; the value itself
+   is never sent by the server. Clear value sends "", turning the feature off;
+   Remove override sends null, so the value falls back to config.yaml (an empty
+   string is refused for a key whose rule requires a value, like the LiveKit
+   credentials, and no Clear value is offered there). */
 function configSecretRow(row){
   const set=!!(row.configured||row.override_set);
   const badge=set?'<span class="badge badge-success">Configured</span>':'<span class="badge">Not set</span>';
   const desc=row.env_locked?'Set by the environment':(row.override_set?'Overridden from the panel':'');
+  const blank=row.allow_empty&&!row.env_locked&&set
+    ? '<button class="btn btn-ghost" data-action="clearConfigSecretValue" data-args="'+actArgs(row.key)+'" title="Sets the value to empty">Clear value</button>':'';
   const clear=row.override_set&&!row.env_locked
     ? '<button class="btn btn-ghost" data-action="clearConfigSecret" data-args="'+actArgs(row.key)+'" title="Removes the panel override; the value reverts to the value in config.yaml">Remove override</button>':'';
   return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+esc(row.key)+' '+badge+'</div>'
     +(desc?'<div class="setting-desc">'+esc(desc)+'</div>':'')+'</div>'
-    +'<div class="setting-ctrl">'+configControl(row)+clear+'</div></div>';
+    +'<div class="setting-ctrl">'+configControl(row)+blank+clear+'</div></div>';
 }
 
 /* server.data_dir stays read-only: the overrides file, TOTP, erasure and VAPID
@@ -263,6 +267,13 @@ async function clearConfigSecret(key){
   }catch(e){showToast(e.message,'error')}
 }
 
+async function clearConfigSecretValue(key){
+  try{
+    applyConfigResponse(await api('PATCH','/config/settings',{[key]:''}));
+    showToast('Secret cleared');
+  }catch(e){showToast(e.message,'error')}
+}
+
 async function resetConfigKey(key){
   // Resetting a lock-out-capable key is itself a change: route it through the
   // same typed confirmation and X-OwnCord-Confirm header the server requires.
@@ -321,5 +332,5 @@ async function restartForConfig(){
 
 Object.assign(ACTIONS,{
   markConfigChanged,saveServerConfig,resetConfigKey,restartForConfig,discardConfig,
-  confirmServerConfig,clearConfigSecret,
+  confirmServerConfig,clearConfigSecret,clearConfigSecretValue,
   toggleConfigKey(){toggleSwitch(this);markConfigChanged()}});

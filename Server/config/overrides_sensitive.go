@@ -42,6 +42,22 @@ var confirmKeys = map[string]bool{
 // IsSecret reports whether a panel-editable key is write-only.
 func IsSecret(key string) bool { return secretKeys[key] }
 
+// SecretAllowsEmpty reports whether a write-only secret key's rule accepts an
+// empty string, so the panel offers an explicit "Clear value" action only where
+// blanking the value is valid. It asks the key's own rule rather than keeping a
+// parallel list, so the classification cannot drift from validation.
+func SecretAllowsEmpty(key string) bool {
+	if !secretKeys[key] {
+		return false
+	}
+	rule, ok := editableRules[key]
+	if !ok {
+		return false
+	}
+	_, err := rule("")
+	return err == nil
+}
+
 // RequiresConfirmation reports whether a PATCH naming key must carry the
 // typed-confirmation header.
 func RequiresConfirmation(key string) bool { return confirmKeys[key] }

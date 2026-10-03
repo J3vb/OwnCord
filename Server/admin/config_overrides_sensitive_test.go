@@ -104,6 +104,7 @@ type sensitiveRow struct {
 	Configured           *bool  `json:"configured"`
 	OverrideSet          *bool  `json:"override_set"`
 	RequiresConfirmation bool   `json:"requires_confirmation"`
+	AllowEmpty           bool   `json:"allow_empty"`
 }
 
 func sensitiveRows(t *testing.T, body []byte) map[string]sensitiveRow {
@@ -152,6 +153,14 @@ func TestConfigOverridesSensitive_GetListsEverythingButDataDir(t *testing.T) {
 	if gif.Type != "secret" || gif.Value != nil || gif.Override != nil ||
 		gif.Configured == nil || !*gif.Configured || gif.OverrideSet == nil || *gif.OverrideSet {
 		t.Errorf("gif.api_key row = %+v, want type secret, null value/override, configured true, override_set false", gif)
+	}
+	if !gif.AllowEmpty {
+		t.Error("gif.api_key row reports allow_empty false; the panel cannot offer Clear value")
+	}
+	for _, key := range []string{"voice.livekit_api_key", "voice.livekit_api_secret"} {
+		if r := rows[key]; r.AllowEmpty {
+			t.Errorf("%s row reports allow_empty true; the LiveKit credentials must keep a value", key)
+		}
 	}
 	if r := rows["github.owner"]; r.Type != "string" || r.RequiresConfirmation {
 		t.Errorf("github.owner row = %+v, want a plain string row (signed updates make it safe)", r)
