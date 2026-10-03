@@ -273,11 +273,15 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     deps.onError(voiceText("share.joinVoiceFirst"));
     return;
   }
+  const generation = state.generation ?? 0;
   // Linux captures in the backend, which needs GStreamer's camera elements:
   // without them no capture can ever start, so name the missing support rather
   // than failing later with a generic "no camera".
   if (hasCameraTracks(room.localParticipant)) {
     const support = await nativeCameraSupport();
+    if ((state.generation ?? 0) !== generation) {
+      return;
+    }
     if (support !== null && !support.available) {
       log.warn("Cannot enable camera: native camera support is missing", support.missing);
       deps.onError(voiceText("share.gstreamerMissing"));
@@ -286,7 +290,6 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
   }
   setLocalCamera(true);
   const quality = getStreamQuality();
-  const generation = state.generation ?? 0;
   let cameraEndedCleanup: (() => void) | undefined;
   try {
     const savedVideoDevice = loadPref<string>("videoInputDevice", "");
