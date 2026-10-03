@@ -10,7 +10,7 @@ function setConfigChanged(changed){
   if(state.configChanged!==changed){state.configChanged=changed;renderNav()}
   const s=document.getElementById('configSaveState');if(s)s.textContent=changed?'Unsaved changes':'All changes saved';
   const bar=document.getElementById('configSaveBar');if(bar)bar.classList.toggle('dirty',changed);
-  ['saveConfigBtn','discardConfigBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=!changed});
+  ['saveConfigBtn','discardConfigBtn'].forEach(id=>{const b=document.getElementById(id);if(b instanceof HTMLButtonElement)b.disabled=!changed});
 }
 
 /* The initial, typed value of every row: the saved override when there is one,
@@ -139,7 +139,7 @@ async function renderServerConfig(){
 
 async function saveServerConfig(){
   const btn=document.getElementById('saveConfigBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const body=configDiff();
   if(!Object.keys(body).length){setConfigChanged(false);showToast('Configuration saved');return}
   try{
@@ -147,7 +147,7 @@ async function saveServerConfig(){
     showToast('Configuration saved — restart to apply');
   }catch(e){
     showToast(e.message,'error');
-    if(btn)btn.disabled=false;
+    if(btn instanceof HTMLButtonElement)btn.disabled=false;
   }
 }
 
