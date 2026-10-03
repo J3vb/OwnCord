@@ -1,0 +1,44 @@
+# no-mistakes repository configuration.
+#
+# test.instructions and ci.rerun_transient are trusted-default-branch fields:
+# the daemon reads them only from origin/main, so they take effect once this
+# file reaches main with the next release, not from this branch.
+#
+# No commands.* or agent set on purpose: those execute shell / pick the agent
+# process, and are left to the operator's machine config.
+
+test:
+  instructions: |
+    Drive the real product for the changed journey; do not spend a session
+    working out what to run.
+
+    - Server: `cd Server && go run .` (prints the admin setup token). Drive the
+      changed REST/WebSocket flow, or the changed admin-panel journey.
+    - Client: the Playwright harness boots the Vite dev server and a mocked
+      Tauri backend, so exercise the changed journey by running only its spec:
+      `cd Client && npx playwright test tests/e2e/<changed spec>.spec.ts
+      --workers=1`. For a UI journey also run the shared accessibility checks
+      in `tests/e2e/support/b9-accessibility.ts` against that same journey.
+
+    For changes with no drivable surface, run targeted tests for the files
+    touched, using the repository's own commands (CI runs the full suites):
+
+    - Go (Server/): `go test -p 2 ./<changed package>/...` for each package a
+      changed .go file belongs to; add `-run '^TestName$'` to narrow and
+      `-race` for concurrency changes. Not `go test ./...` or the
+      deadlock/wazero/otel build-tag passes.
+    - Client (Client/): `npx vitest run <test file>` for the covering
+      unit/integration test (colocated src/**/*.test.ts, tests/unit/,
+      tests/integration/). Not the full `npm test`.
+    - Rust (Client/src-tauri/): `cargo test -j 4` scoped to the changed module;
+      at most `cargo test --lib`.
+
+    Never run the full Playwright/e2e suites, k6, Stryker, or a whole-repo
+    build locally.
+
+# This reruns only a provider cancellation or a GitHub setup/action-resolution
+# failure before any job step runs. Ordinary job failures - including the known
+# Windows auth, update-smoke and Client Unit flakes - are never rerun here and
+# still enter the CI failure path; retry those in their workflows.
+ci:
+  rerun_transient: 1
