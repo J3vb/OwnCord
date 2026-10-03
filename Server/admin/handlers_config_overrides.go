@@ -46,13 +46,14 @@ func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending b
 	for _, key := range keys {
 		value, _ := config.Lookup(cfg, key)
 		value = normalizeSettingValue(value)
+		envLocked := config.EnvOverridden(key)
 		row := configSettingRow{
 			Key:       key,
 			Type:      configValueType(value),
 			Value:     value,
-			EnvLocked: config.EnvOverridden(key),
+			EnvLocked: envLocked,
 		}
-		if override, ok := overrides[key]; ok {
+		if override, ok := overrides[key]; ok && !envLocked {
 			row.Override = override
 		}
 		if options, ok := configEnumOptions[key]; ok {

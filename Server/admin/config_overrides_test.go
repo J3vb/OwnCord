@@ -279,6 +279,33 @@ func TestConfigOverrides_PatchRefusesEnvLockedKey(t *testing.T) {
 	}
 }
 
+// A key that becomes environment-pinned after an override was already saved:
+// the environment wins at boot, so the row must not present the stale stored
+// override as the running value (the panel renders the override when present).
+func TestConfigOverrides_EnvLockedRowDropsStaleOverride(t *testing.T) {
+	t.Setenv("OWNCORD_LOGGING_LEVEL", "warn")
+	f := newConfigOverridesFixture(t)
+	token := createAdminUser(t, f.database)
+
+	if err := config.SaveOverrides(config.OverridesPath(f.dataDir), map[string]any{"logging.level": "debug"}); err != nil {
+		t.Fatalf("SaveOverrides: %v", err)
+	}
+
+	w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
+	resp := decodeConfigOverrides(t, w.Body.Bytes())
+	i, ok := resp.find("logging.level")
+	if !ok {
+		t.Fatal("GET /config/settings has no logging.level row")
+	}
+	row := resp.Settings[i]
+	if !row.EnvLocked {
+		t.Errorf("logging.level env_locked = false with OWNCORD_LOGGING_LEVEL set")
+	}
+	if row.Override != nil {
+		t.Errorf("env-locked logging.level override = %v, want null (the environment wins)", row.Override)
+	}
+}
+
 func TestConfigOverrides_PatchIsAuditedWithoutValues(t *testing.T) {
 	f := newConfigOverridesFixture(t)
 	token := createAdminUser(t, f.database)
