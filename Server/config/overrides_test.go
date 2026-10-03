@@ -278,7 +278,7 @@ func TestSaveOverrides_AllOrNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read after: %v", err)
 	}
-	if string(before) != string(after) {
+	if !slices.Equal(before, after) {
 		t.Errorf("a refused batch changed the file:\nbefore %s\nafter  %s", before, after)
 	}
 }

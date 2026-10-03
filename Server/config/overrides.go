@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -136,9 +137,7 @@ func SaveOverrides(path string, changes map[string]any) error {
 	if err != nil {
 		return err
 	}
-	for key, value := range set {
-		current[key] = value
-	}
+	maps.Copy(current, set)
 	for _, key := range remove {
 		delete(current, key)
 	}

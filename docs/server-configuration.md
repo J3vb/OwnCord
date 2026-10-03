@@ -6,11 +6,12 @@ Complete reference for all OwnCord server configuration options.
 
 OwnCord server reads configuration from `config.yaml` in the working directory. On first run, if the file does not exist, a default `config.yaml` is created automatically.
 
-Configuration is loaded in three layers (later layers override earlier ones):
+Configuration is loaded in four layers (later layers override earlier ones):
 
 1. **Built-in defaults** (compiled into the binary)
 2. **YAML file** (`config.yaml`)
-3. **Environment variables** (prefix: `OWNCORD_`)
+3. **Admin-panel overrides** (`config-overrides.json`, see [Changing settings from the admin panel](#changing-settings-from-the-admin-panel))
+4. **Environment variables** (prefix: `OWNCORD_`)
 
 ### First-run setup wizard
 

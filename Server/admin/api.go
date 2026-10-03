@@ -311,11 +311,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
 		ownerOnly(r, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
 		ownerOnly(r, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
-		// Admin-panel config overrides — Owner-only. Changing a server-wide
-		// setting and restarting the process is gated like backups/updates.
-		ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, configPending))
-		ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, configPending))
-		ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts))
+		registerConfigOverrideRoutes(r, database, setupOpts, configPending)
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
@@ -334,4 +330,14 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	})
 
 	return r
+}
+
+// registerConfigOverrideRoutes mounts the Owner-only admin-panel config
+// overrides: reading and writing config-overrides.json and restarting the
+// process to apply them. Changing a server-wide setting and restarting is
+// gated like backups and updates.
+func registerConfigOverrideRoutes(r chi.Router, database *db.DB, setupOpts SetupOptions, pending *atomic.Bool) {
+	ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, pending))
+	ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, pending))
+	ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts))
 }

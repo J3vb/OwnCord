@@ -643,6 +643,10 @@ one out costs you:
   lose their pinned certificate only if the lost config said
   `tls.mode: acme` or `manual`, because the fallback to self-signed then
   serves a different one.
+- **`data/config-overrides.json`** — the settings saved from the admin panel's
+  Server configuration page are lost. The keys it held fall back to
+  `config.yaml` and `OWNCORD_*` at the next boot, so a restore silently reverts
+  them (see [Server Configuration](server-configuration.md#changing-settings-from-the-admin-panel)).
 
 None of these are in a database backup. `data/uploads/`, the three key files
 and `data/erasure/` all live under the data directory, so copying `data/`
