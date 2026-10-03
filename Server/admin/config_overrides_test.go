@@ -101,7 +101,7 @@ func TestConfigOverrides_GetListsEditableKeysOnly(t *testing.T) {
 	if got, want := len(resp.Settings), len(config.EditableKeys()); got != want {
 		t.Errorf("settings rows = %d, want one per editable key (%d)", got, want)
 	}
-	for _, key := range []string{"gif.api_key", "github.token", "voice.livekit_api_secret", "database.path", "server.admin_allowed_cidrs"} {
+	for _, key := range []string{"server.data_dir", "upload.blocked_extensions", "upload.allowed_extensions"} {
 		if _, ok := resp.find(key); ok {
 			t.Errorf("GET /config/settings lists protected key %q", key)
 		}
@@ -230,8 +230,8 @@ func TestConfigOverrides_PatchRejectsBadInput(t *testing.T) {
 
 	for _, body := range []map[string]any{
 		{},
-		{"database.path": "/elsewhere.db"},
-		{"gif.api_key": "x"},
+		{"server.data_dir": "/elsewhere"},
+		{"upload.blocked_extensions": []string{"exe"}},
 		{"server.nope": 1},
 		{"logging.level": "loud"},
 		{"voice.udp_port": 70000},

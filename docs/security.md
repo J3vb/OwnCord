@@ -40,6 +40,13 @@ how transport and at-rest data are protected, and what beta does not claim are
 stated in one place: [trust-model.md](trust-model.md). Every claim there cites
 the code line or test that makes it true.
 
+Configuration secrets set from the admin panel (`gif.api_key`, `github.token`
+and the LiveKit key and secret) are write-only and stored in
+`<data_dir>/config-overrides.json` (mode `0600`). The panel is told only
+whether a value is configured; the server never returns, logs or audits one.
+Treat that file like `config.yaml` in backups. See
+[server-configuration.md](server-configuration.md#changing-settings-from-the-admin-panel).
+
 ## Two-Factor Authentication
 
 OwnCord supports TOTP-based 2FA:

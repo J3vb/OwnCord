@@ -22,64 +22,14 @@ import (
 // 503 with a subsystem reason when the hub, database, or disk is unhealthy,
 // so a container orchestrator's healthcheck surfaces those too.
 func RunHealthcheckCLI() int {
-	// Deliberately NOT config.Load: that writes a default config.yaml when
-	// none exists, and a probe must have no side effects. Peek at the file
-	// (and the env overrides) for just the values that shape the URL and the
-	// certificate pin.
-	port := 8443
-	scheme := "https"
-	certFile := "data/cert.pem"
-	tlsMode := ""
-	acmeDomain := ""
-	if raw, err := os.ReadFile(config.DefaultPath); err == nil {
-		var partial struct {
-			Server struct {
-				Port int `yaml:"port"`
-			} `yaml:"server"`
-			TLS struct {
-				Mode     string `yaml:"mode"`
-				CertFile string `yaml:"cert_file"`
-				Domain   string `yaml:"domain"`
-			} `yaml:"tls"`
-		}
-		if yaml.Unmarshal(raw, &partial) == nil {
-			if partial.Server.Port > 0 {
-				port = partial.Server.Port
-			}
-			tlsMode = partial.TLS.Mode
-			if partial.TLS.Mode == "off" {
-				scheme = "http"
-			}
-			if partial.TLS.CertFile != "" {
-				certFile = partial.TLS.CertFile
-			}
-			acmeDomain = partial.TLS.Domain
-		}
-	}
-	if env := os.Getenv("OWNCORD_SERVER_PORT"); env != "" {
-		if p, err := strconv.Atoi(env); err == nil && p > 0 {
-			port = p
-		}
-	}
-	if env := os.Getenv("OWNCORD_TLS_MODE"); env != "" {
-		tlsMode = env
-		if env == "off" {
-			scheme = "http"
-		}
-	}
-	if env := os.Getenv("OWNCORD_TLS_DOMAIN"); env != "" {
-		acmeDomain = env
-	}
+	p := resolveHealthcheckProbe(config.DefaultPath)
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
-			TLSClientConfig: healthcheckTLSConfig(tlsMode, certFile, acmeDomain),
+			TLSClientConfig: healthcheckTLSConfig(p.tlsMode, p.certFile, p.acmeDomain),
 		},
 	}
-	if port < 1 || port > 65535 {
-		port = 8443
-	}
-	resp, err := client.Get(fmt.Sprintf("%s://127.0.0.1:%d/health", scheme, port)) //nolint:gosec // G704: host is hardcoded loopback; only the port comes from the operator's own config
+	resp, err := client.Get(fmt.Sprintf("%s://127.0.0.1:%d/health", p.scheme, p.port)) //nolint:gosec // G704: host is hardcoded loopback; only the port comes from the operator's own config
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck: unreachable:", err)
 		return 1
@@ -91,6 +41,96 @@ func RunHealthcheckCLI() int {
 		return 1
 	}
 	return 0
+}
+
+// healthcheckProbe is the address and TLS identity the probe dials.
+type healthcheckProbe struct {
+	port       int
+	scheme     string
+	certFile   string
+	tlsMode    string
+	acmeDomain string
+}
+
+// resolveHealthcheckProbe reads the values that shape the probe: config.yaml,
+// then the panel's overrides file (on the data dir from the file or the
+// environment), then the OWNCORD_* environment. It is deliberately NOT
+// config.Load, which writes a default config.yaml when none exists; a probe
+// must have no side effects, so it peeks at the file and reuses
+// config.ReadOverrides rather than building a whole config.
+func resolveHealthcheckProbe(cfgPath string) healthcheckProbe {
+	p := healthcheckProbe{port: 8443, scheme: "https", certFile: "data/cert.pem"}
+	dataDir := "data"
+	if raw, err := os.ReadFile(cfgPath); err == nil {
+		var partial struct {
+			Server struct {
+				Port    int    `yaml:"port"`
+				DataDir string `yaml:"data_dir"`
+			} `yaml:"server"`
+			TLS struct {
+				Mode     string `yaml:"mode"`
+				CertFile string `yaml:"cert_file"`
+				Domain   string `yaml:"domain"`
+			} `yaml:"tls"`
+		}
+		if yaml.Unmarshal(raw, &partial) == nil {
+			if partial.Server.Port > 0 {
+				p.port = partial.Server.Port
+			}
+			if partial.Server.DataDir != "" {
+				dataDir = partial.Server.DataDir
+			}
+			p.tlsMode = partial.TLS.Mode
+			if partial.TLS.CertFile != "" {
+				p.certFile = partial.TLS.CertFile
+			}
+			p.acmeDomain = partial.TLS.Domain
+		}
+	}
+	if env := os.Getenv("OWNCORD_SERVER_DATA_DIR"); env != "" {
+		dataDir = env
+	}
+	if overrides, err := config.ReadOverrides(config.OverridesPath(dataDir)); err == nil {
+		applyHealthcheckOverrides(&p, overrides)
+	}
+	if env := os.Getenv("OWNCORD_SERVER_PORT"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil && n > 0 {
+			p.port = n
+		}
+	}
+	if env := os.Getenv("OWNCORD_TLS_MODE"); env != "" {
+		p.tlsMode = env
+	}
+	if env := os.Getenv("OWNCORD_TLS_CERT_FILE"); env != "" {
+		p.certFile = env
+	}
+	if env := os.Getenv("OWNCORD_TLS_DOMAIN"); env != "" {
+		p.acmeDomain = env
+	}
+	if p.port < 1 || p.port > 65535 {
+		p.port = 8443
+	}
+	if p.tlsMode == "off" {
+		p.scheme = "http"
+	}
+	return p
+}
+
+// applyHealthcheckOverrides copies the four probe-shaping keys a panel override
+// may hold. config.ReadOverrides has already normalised and validated them.
+func applyHealthcheckOverrides(p *healthcheckProbe, overrides map[string]any) {
+	if v, ok := overrides["server.port"].(int); ok && v > 0 {
+		p.port = v
+	}
+	if v, ok := overrides["tls.mode"].(string); ok {
+		p.tlsMode = v
+	}
+	if v, ok := overrides["tls.cert_file"].(string); ok && v != "" {
+		p.certFile = v
+	}
+	if v, ok := overrides["tls.domain"].(string); ok {
+		p.acmeDomain = v
+	}
 }
 
 // healthcheckTLSConfig builds the probe's TLS config, per TLS mode:

@@ -113,21 +113,9 @@ func SaveOverrides(path string, changes map[string]any) error {
 	if len(changes) == 0 {
 		return nil
 	}
-	set := make(map[string]any, len(changes))
-	remove := make([]string, 0, len(changes))
-	for key, value := range changes {
-		if !IsEditable(key) {
-			return fmt.Errorf("config key %q: %w", key, ErrNotEditable)
-		}
-		if value == nil {
-			remove = append(remove, key)
-			continue
-		}
-		normalized, err := editableRules[key](value)
-		if err != nil {
-			return fmt.Errorf("config key %q: %w: %w", key, ErrInvalidValue, err)
-		}
-		set[key] = normalized
+	set, remove, err := validateOverrides(changes)
+	if err != nil {
+		return err
 	}
 
 	saveMu.Lock()
@@ -147,6 +135,66 @@ func SaveOverrides(path string, changes map[string]any) error {
 	}
 	encoded = append(encoded, '\n')
 	return atomicWrite(path, encoded)
+}
+
+// ValidateOverrides runs the same syntax pass SaveOverrides runs, without
+// writing anything, so the admin handler can reject a bad value before it
+// previews or saves it.
+func ValidateOverrides(changes map[string]any) error {
+	_, _, err := validateOverrides(changes)
+	return err
+}
+
+// validateOverrides checks every key and value in a batch and returns the
+// normalised values to set and the keys to remove (a nil value). Nothing is
+// written unless every key passes.
+func validateOverrides(changes map[string]any) (map[string]any, []string, error) {
+	set := make(map[string]any, len(changes))
+	remove := make([]string, 0, len(changes))
+	for key, value := range changes {
+		if !IsEditable(key) {
+			return nil, nil, fmt.Errorf("config key %q: %w", key, ErrNotEditable)
+		}
+		if value == nil {
+			remove = append(remove, key)
+			continue
+		}
+		normalized, err := editableRules[key](value)
+		if err != nil {
+			return nil, nil, fmt.Errorf("config key %q: %w: %w", key, ErrInvalidValue, err)
+		}
+		set[key] = normalized
+	}
+	return set, remove, nil
+}
+
+// Preview builds the configuration the NEXT boot would run with if changes
+// were saved: config.yaml, the current overrides file with changes merged in
+// (nil removes a key), then the environment, bounds and normalisation. It
+// writes nothing, so a missing config.yaml previews as defaults and is not
+// created.
+func Preview(cfgPath, overridesPath string, changes map[string]any) (*Config, error) {
+	raw, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path comes from trusted wiring, not request input
+	if errors.Is(err, os.ErrNotExist) {
+		raw = nil
+	} else if err != nil {
+		return nil, fmt.Errorf("reading config file %s: %w", cfgPath, err)
+	}
+	current, err := ReadOverrides(overridesPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(changes) > 0 {
+		set, remove, err := validateOverrides(changes)
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(current, set)
+		for _, key := range remove {
+			delete(current, key)
+		}
+	}
+	return loadBytesWith(raw, cfgPath, current)
 }
 
 // Lookup returns the running value of a dotted config key from cfg, and
@@ -187,12 +235,10 @@ func leafValue(cfg *Config, key string) reflect.Value {
 	return reflect.Value{}
 }
 
-// applyOverrideLayer applies the overrides file between config.yaml and the
-// OWNCORD_* environment. data_dir is resolved first (the environment's value
-// wins, since the env layer itself would apply it) so the file is found even
-// when the environment moves the data directory. Keys that are not editable
-// are warned about and skipped: a hand-edited file must not reach a protected
-// key, and one bad key must not drop the valid ones.
+// applyOverrideLayer reads the overrides file and applies it between
+// config.yaml and the OWNCORD_* environment. data_dir is resolved first (the
+// environment's value wins, since the env layer itself would apply it) so the
+// file is found even when the environment moves the data directory.
 func applyOverrideLayer(cfg *Config) error {
 	dataDir := cfg.Server.DataDir
 	if v := os.Getenv("OWNCORD_SERVER_DATA_DIR"); v != "" {
@@ -202,6 +248,14 @@ func applyOverrideLayer(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	return applyOverrides(cfg, overrides)
+}
+
+// applyOverrides applies a flat overrides map over cfg, between config.yaml and
+// the environment. Keys that are not editable are warned about and skipped: a
+// hand-edited file must not reach a protected key, and one bad key must not
+// drop the valid ones.
+func applyOverrides(cfg *Config, overrides map[string]any) error {
 	nested := make(map[string]map[string]any)
 	for key, value := range overrides {
 		if !IsEditable(key) {

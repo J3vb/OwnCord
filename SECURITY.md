@@ -260,6 +260,10 @@ disagreement is a doc bug.
   `TestUserSessionRedactedInLogs`, `TestSecretConfigsRedactedInLogs`). A raw
   token, key or message body passed to `slog` as a string is not scrubbed:
   never pass one.
+- Secrets set from the admin panel are write-only and live in
+  `<data_dir>/config-overrides.json` (mode `0600`). No response, error, log
+  line or audit row carries one; the panel sees only whether a value is
+  configured. Treat that file like `config.yaml` in backups.
 - The audit log (`audit_log` table), which records security-relevant actions
   (auth, 2FA, admin, content, voice moderation, ops events), is held to the
   same rule by tests, not a runtime filter. The `TestAuditCoverage_*` tables in

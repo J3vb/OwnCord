@@ -796,12 +796,32 @@ func Load(cfgPath string) (*Config, error) {
 // the file it is about to write must survive the load path the server boots
 // with, and that path now has an environment layer in it.
 func loadBytes(raw []byte, cfgPath string) (*Config, error) {
+	cfg, err := loadBytesWith(raw, cfgPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
+		return nil, fmt.Errorf("applying voice defaults: %w", err)
+	}
+	return cfg, nil
+}
+
+// loadBytesWith builds a Config with the overrides layer injected and no
+// generation side effects. A nil overrides map reads the overrides file (Load
+// and Save's verifyLoadable gate); Preview passes the current file merged with
+// the pending changes instead. loadBytes calls this and then generates the
+// runtime LiveKit credentials.
+func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Config, error) {
 	cfg := defaults()
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
 	}
 	// The admin panel's overrides sit between the file and the environment.
-	if err := applyOverrideLayer(&cfg); err != nil {
+	if overrides == nil {
+		if err := applyOverrideLayer(&cfg); err != nil {
+			return nil, err
+		}
+	} else if err := applyOverrides(&cfg, overrides); err != nil {
 		return nil, err
 	}
 	env, err := envOverrides()
@@ -823,9 +843,6 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 	applyBounds(&cfg)
 	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
 		return nil, err
-	}
-	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
-		return nil, fmt.Errorf("applying voice defaults: %w", err)
 	}
 	return &cfg, nil
 }

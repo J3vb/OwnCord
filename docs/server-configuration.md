@@ -315,23 +315,85 @@ save to it is refused (the value would lose at the next boot). An override
 takes effect at the next server start; the page offers **Restart now** once
 something is pending. The boot log names each overridden key, never its value.
 
-Not every key is on the page yet. Secrets (`gif.api_key`, `github.token`, the
-LiveKit key and secret), host paths (`server.data_dir`, `database.path`,
-`backup.dir`, `upload.storage_dir`, `plugins.directory`, `tls.cert_file`,
-`tls.key_file`, `tls.acme_cache_dir`, `voice.livekit_binary`), the listener
-and TLS identity (`server.port`, `tls.mode`, `tls.domain`, `database.type`,
-`server.restart_mode`), the panel's own network perimeter
-(`server.admin_allowed_cidrs`, `server.trusted_proxies`), the update source
-(`github.owner`, `github.repo`), host-only diagnostics (`server.pprof_*`) and
-the upload file-type lists stay `config.yaml`/environment only for now and
-follow on the page in a later change; that is a security decision first, so a
-browser session cannot point the server at an arbitrary file, lock the owner
-out of the panel, or change where updates come from. `server.name` is not
-offered a second time here: the existing **Settings** page already owns it,
-and this page links there.
+Almost every key is on the page. The four secrets (`gif.api_key`,
+`github.token`, `voice.livekit_api_key`, `voice.livekit_api_secret`) are
+write-only: the page shows whether one is configured and never sends the value
+back. A secret whose rule allows empty (`gif.api_key`, `github.token`) also
+offers a **Clear value** button, which sets it to the empty string and turns the
+feature off; the LiveKit credentials require a value and offer no such button.
+A key whose wrong value could lock you out or move the data the server
+runs on (`server.port`, `tls.mode`, `tls.domain`, `server.restart_mode`,
+`server.admin_allowed_cidrs`, `server.trusted_proxies`, the
+database/backup/uploads/plugins paths, the TLS cert/key/cache paths and the
+executed `voice.livekit_binary`) asks for a typed confirmation, and the server
+runs its own checks on the configuration the next boot would use before saving.
+The update source (`github.owner`, `github.repo`) and the host-only
+diagnostics (`server.pprof_*`) are changed here too.
+
+Only two groups stay off the overrides file:
+
+- `server.data_dir`, shown read-only: the overrides file, and the TOTP,
+  erasure and VAPID keys, live inside it. See [Moving
+  `server.data_dir`](#moving-serverdata_dir).
+- `upload.blocked_extensions` and `upload.allowed_extensions`, which already
+  have live rows on the **Settings** page; this page links there.
+
+`server.name` is likewise not offered a second time: the **Settings** page owns
+it and this page links there.
 
 A hand-edited `config-overrides.json` is tolerated: a key the panel does not
 own is ignored with a warning rather than preventing the server from starting.
+
+Secrets set from the panel live in the same `0600` `config-overrides.json`, so
+treat that file like `config.yaml` in backups; it is never returned, logged or
+written to the audit log. The full-archive export already ships it beside
+`config.yaml`.
+
+### If a panel change locks you out
+
+A wrong port, TLS mode, admin allowlist, trusted-proxies list, path or restart
+mode can put the panel out of reach. On the host:
+
+1. Stop the server.
+2. Edit `<data_dir>/config-overrides.json` and delete the offending key, or
+   delete the whole file to drop every panel override. The file is plain JSON
+   keyed by the dotted config key.
+3. Start the server. `config.yaml` values apply again.
+
+Without editing the file: set the matching `OWNCORD_*` variable (for example
+`OWNCORD_SERVER_PORT=8443` or
+`OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=127.0.0.0/8`). The environment always wins
+over the panel. Then reach the panel through an SSH tunnel
+(`ssh -L 8443:127.0.0.1:8443 host`) and reset the key there.
+
+In Docker the file is in the `owncord-data` volume:
+`docker compose exec owncord rm /app/data/config-overrides.json`, or run a
+shell on the volume while the server container is stopped.
+
+With `server.restart_mode: supervised` and no supervisor, the server exits at
+the next restart and nothing starts it again. Start it by hand, then fix the
+key.
+
+Moving the database or uploads from the panel only points the server at a copy
+you made. Make that copy from a backup (Backups → download, then restore at the
+new path) or with the server stopped. Anything written after the copy stays in
+the old location; resetting the key returns to it.
+
+### Moving `server.data_dir`
+
+`server.data_dir` cannot be changed from the panel. The overrides file lives
+inside it, so a panel override would move the server away from the file that
+holds the override, and the new directory would generate a fresh TOTP key, so
+every existing 2FA secret (the owner's included) could no longer be decrypted.
+In Docker it is the `owncord-data` volume, and a move needs a shell copy
+anyway, so the panel would add risk and save no work. To move it:
+
+1. Stop the server.
+2. Copy the whole directory, including `totp.key`, `erasure.key`,
+   `push_vapid.key` and `config-overrides.json`, to the new location.
+3. Set `server.data_dir` in `config.yaml`, or `OWNCORD_SERVER_DATA_DIR`.
+4. Start the server. If you moved the database, uploads, certificates,
+   backups or plugins too, point their separate keys at the moved files.
 
 ## Key index (generated)
 
