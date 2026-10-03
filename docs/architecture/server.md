@@ -43,7 +43,7 @@ flowchart TB
 
     subgraph support ["Support"]
         AUTH["auth<br/>bcrypt, tokens, TOTP,<br/>rate limiting, TLS"]
-        CFG["config<br/>defaults→YAML→env"]
+        CFG["config<br/>defaults→YAML→panel→env"]
         STORAGE["storage<br/>upload files on disk"]
         TEL["telemetry<br/>OTel (no-op default)"]
         UPD["updater<br/>minisign-verified self-update"]

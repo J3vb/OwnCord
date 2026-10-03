@@ -783,10 +783,10 @@ func Load(cfgPath string) (*Config, error) {
 }
 
 // loadBytes builds a Config from raw YAML: compiled defaults, then the file,
-// then the OWNCORD_* environment. Unmarshal overwrites only the keys a
-// document actually names, so a section that is present but empty — a bare
-// `voice:`, or one whose children are all commented out — leaves its defaults
-// in place and needs no refill pass.
+// then the admin-panel overrides file, then the OWNCORD_* environment.
+// Unmarshal overwrites only the keys a document actually names, so a section
+// that is present but empty — a bare `voice:`, or one whose children are all
+// commented out — leaves its defaults in place and needs no refill pass.
 //
 // The environment layer is marshalled to YAML and unmarshalled through the
 // same path as the file, never spliced into text, so a value containing YAML
@@ -799,6 +799,10 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 	cfg := defaults()
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
+	}
+	// The admin panel's overrides sit between the file and the environment.
+	if err := applyOverrideLayer(&cfg); err != nil {
+		return nil, err
 	}
 	env, err := envOverrides()
 	if err != nil {

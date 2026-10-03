@@ -6,11 +6,12 @@ Complete reference for all OwnCord server configuration options.
 
 OwnCord server reads configuration from `config.yaml` in the working directory. On first run, if the file does not exist, a default `config.yaml` is created automatically.
 
-Configuration is loaded in three layers (later layers override earlier ones):
+Configuration is loaded in four layers (later layers override earlier ones):
 
 1. **Built-in defaults** (compiled into the binary)
 2. **YAML file** (`config.yaml`)
-3. **Environment variables** (prefix: `OWNCORD_`)
+3. **Admin-panel overrides** (`config-overrides.json`, see [Changing settings from the admin panel](#changing-settings-from-the-admin-panel))
+4. **Environment variables** (prefix: `OWNCORD_`)
 
 ### First-run setup wizard
 
@@ -291,6 +292,46 @@ warning.
 | `attention.writer_wait_ms_per_min` | int  | `5000`  | Warn when requests spend more than this many ms per minute queueing for the single SQLite writer.                                                                                                                                        |
 | `attention.reconnects_per_min`     | int  | `30`    | Warn when clients resume sessions faster than this.                                                                                                                                                                                      |
 | `attention.delivery_drops_per_min` | int  | `1`     | Warn when hub broadcast drops, per-channel topic sheds and send-queue overflow disconnects together exceed this rate. Low-priority typing and presence drops are not counted.                                                            |
+
+## Changing settings from the admin panel
+
+The owner can change most settings from the **Server configuration** page in
+the admin panel, without editing `config.yaml` or opening a shell. The page
+writes its values to a JSON file beside the database,
+`<server.data_dir>/config-overrides.json`, owned and readable only by the
+server's user (mode `0600`).
+
+Precedence, lowest to highest:
+
+1. Compiled defaults.
+2. `config.yaml`.
+3. Admin-panel overrides (`config-overrides.json`).
+4. `OWNCORD_*` environment variables.
+
+The panel is newer, more specific intent than the file, so it wins. The
+environment still wins over the panel because it is how a deployment pins a
+value: a key set through the environment is shown as locked on the page, and a
+save to it is refused (the value would lose at the next boot). An override
+takes effect at the next server start; the page offers **Restart now** once
+something is pending. The boot log names each overridden key, never its value.
+
+Not every key is on the page yet. Secrets (`gif.api_key`, `github.token`, the
+LiveKit key and secret), host paths (`server.data_dir`, `database.path`,
+`backup.dir`, `upload.storage_dir`, `plugins.directory`, `tls.cert_file`,
+`tls.key_file`, `tls.acme_cache_dir`, `voice.livekit_binary`), the listener
+and TLS identity (`server.port`, `tls.mode`, `tls.domain`, `database.type`,
+`server.restart_mode`), the panel's own network perimeter
+(`server.admin_allowed_cidrs`, `server.trusted_proxies`), the update source
+(`github.owner`, `github.repo`), host-only diagnostics (`server.pprof_*`) and
+the upload file-type lists stay `config.yaml`/environment only for now and
+follow on the page in a later change; that is a security decision first, so a
+browser session cannot point the server at an arbitrary file, lock the owner
+out of the panel, or change where updates come from. `server.name` is not
+offered a second time here: the existing **Settings** page already owns it,
+and this page links there.
+
+A hand-edited `config-overrides.json` is tolerated: a key the panel does not
+own is ignored with a warning rather than preventing the server from starting.
 
 ## Key index (generated)
 

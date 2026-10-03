@@ -272,13 +272,13 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`, `account_erasure_replayed`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
-- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`, `retention_policy_change`, `channel_retention_change`, `permission_explain`, `permission_preview`
+- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `config_override_change`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`, `retention_policy_change`, `channel_retention_change`, `permission_explain`, `permission_preview`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_download`,
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
-  `update_failed`, `ws_connect`
+  `update_failed`, `server_restart_requested`, `ws_connect`
 
 Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,

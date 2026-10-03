@@ -248,6 +248,9 @@ var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
 	{Method: http.MethodPost, Pattern: "/archive/link"},
 	{Method: http.MethodGet, Pattern: "/updates"},
 	{Method: http.MethodPost, Pattern: "/updates/apply"},
+	{Method: http.MethodGet, Pattern: "/config/settings"},
+	{Method: http.MethodPatch, Pattern: "/config/settings"},
+	{Method: http.MethodPost, Pattern: "/restart"},
 }
 
 // sortedOwnerOnlyRoutes returns a copy of routes sorted by (Method, Pattern)
