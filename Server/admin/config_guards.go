@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"net"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
@@ -177,35 +175,6 @@ func guardDataPaths(w http.ResponseWriter, g guardContext) bool {
 		guardAcmeCacheDir(w, g)
 }
 
-func guardDatabasePath(w http.ResponseWriter, g guardContext) bool {
-	if !g.has("database.path") || samePath(g.next.Database.Path, g.opts.RunningCfg.Database.Path) {
-		return true
-	}
-	if containerOutsideDataDir(g, g.next.Database.Path, "database.path", w) {
-		return false
-	}
-	info, err := os.Stat(g.next.Database.Path)
-	if err != nil || info.IsDir() {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path must name an existing database file")
-		return false
-	}
-	ctx := context.WithoutCancel(g.r.Context())
-	if err := db.CheckBackupIntegrity(ctx, g.next.Database.Path); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path is not a readable OwnCord database")
-		return false
-	}
-	ahead, err := db.CheckBackupSchemaAhead(ctx, g.next.Database.Path)
-	if err != nil || len(ahead) > 0 {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path holds a database a newer server wrote")
-		return false
-	}
-	if !dirWritable(filepath.Dir(g.next.Database.Path)) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path: the directory is not writable (SQLite needs its WAL beside the file)")
-		return false
-	}
-	return true
-}
-
 func guardBackupDir(w http.ResponseWriter, g guardContext) bool {
 	if !g.has("backup.dir") {
 		return true
@@ -269,7 +238,14 @@ func guardAcmeCacheDir(w http.ResponseWriter, g guardContext) bool {
 	if containerOutsideDataDir(g, dir, "tls.acme_cache_dir", w) {
 		return false
 	}
-	if dirExists(dir) || dirWritable(filepath.Dir(dir)) {
+	if dirExists(dir) {
+		if dirWritable(dir) {
+			return true
+		}
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.acme_cache_dir is not writable")
+		return false
+	}
+	if dirWritable(filepath.Dir(dir)) {
 		return true
 	}
 	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.acme_cache_dir does not exist and its parent is not writable")

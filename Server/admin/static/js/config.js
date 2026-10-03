@@ -63,14 +63,16 @@ function configRow(row){
     +'<div class="setting-ctrl">'+configControl(row)+reset+'</div></div>';
 }
 
-/* A secret row renders a configured/not-set badge and a Clear button; the
-   value itself is never sent by the server. */
+/* A secret row renders a configured/not-set badge and a Remove override button;
+   the value itself is never sent by the server. Removing the override sends
+   null, so the value falls back to config.yaml (an empty string is refused for
+   a key whose rule requires a value, like the LiveKit credentials). */
 function configSecretRow(row){
   const set=!!(row.configured||row.override_set);
   const badge=set?'<span class="badge badge-success">Configured</span>':'<span class="badge">Not set</span>';
   const desc=row.env_locked?'Set by the environment':(row.override_set?'Overridden from the panel':'');
   const clear=set&&!row.env_locked
-    ? '<button class="btn btn-ghost" data-action="clearConfigSecret" data-args="'+actArgs(row.key)+'">Clear</button>':'';
+    ? '<button class="btn btn-ghost" data-action="clearConfigSecret" data-args="'+actArgs(row.key)+'" title="Removes the panel override; the value reverts to the value in config.yaml">Remove override</button>':'';
   return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+esc(row.key)+' '+badge+'</div>'
     +(desc?'<div class="setting-desc">'+esc(desc)+'</div>':'')+'</div>'
     +'<div class="setting-ctrl">'+configControl(row)+clear+'</div></div>';
@@ -248,8 +250,8 @@ async function confirmServerConfig(){
 
 async function clearConfigSecret(key){
   try{
-    applyConfigResponse(await api('PATCH','/config/settings',{[key]:''}));
-    showToast('Secret cleared');
+    applyConfigResponse(await api('PATCH','/config/settings',{[key]:null}));
+    showToast('Override removed');
   }catch(e){showToast(e.message,'error')}
 }
 

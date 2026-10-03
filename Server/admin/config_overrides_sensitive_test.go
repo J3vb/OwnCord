@@ -192,6 +192,25 @@ func TestConfigOverridesSensitive_SecretsAreWriteOnly(t *testing.T) {
 	audittest.AssertSafeDetails(t, rec.Entries(), newKey, token)
 }
 
+// The LiveKit credentials must have a value, so the panel drops their override
+// by sending null (back to config.yaml) rather than the empty string its rule
+// refuses.
+func TestConfigOverridesSensitive_RemoveLiveKitSecretOverride(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, `{"voice.livekit_api_secret": "`+cfgOvLKSecret+`"}`)
+	token := createAdminUser(t, f.database)
+
+	if _, ok := savedOverrides(t, f.dataDir)["voice.livekit_api_secret"]; !ok {
+		t.Fatal("fixture did not save the LiveKit secret override")
+	}
+	w := patchConfig(t, f.handler, token, map[string]any{"voice.livekit_api_secret": nil}, nil, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH null voice.livekit_api_secret = %d; body: %s", w.Code, w.Body.String())
+	}
+	if _, ok := savedOverrides(t, f.dataDir)["voice.livekit_api_secret"]; ok {
+		t.Error("voice.livekit_api_secret still in the overrides file after a null PATCH")
+	}
+}
+
 func TestConfigOverridesSensitive_SecretErrorDoesNotEchoValue(t *testing.T) {
 	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
 	token := createAdminUser(t, f.database)
@@ -404,6 +423,40 @@ func TestConfigOverridesSensitive_DataPathGuards(t *testing.T) {
 	}
 	if w := patchConfig(t, f.handler, token, map[string]any{"backup.dir": inside}, backupKey, ""); w.Code != http.StatusOK {
 		t.Errorf("PATCH backup.dir inside data_dir in a container = %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// An existing tls.acme_cache_dir must be writable: autocert writes and renews
+// the cache there, so a read-only directory passes the wrong test and then
+// fails to renew after a restart.
+func TestConfigOverridesSensitive_AcmeCacheDirMustBeWritable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("writability semantics: needs a non-root Unix user")
+	}
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	key := []string{"tls.acme_cache_dir"}
+
+	readOnly := filepath.Join(f.dataDir, "acme-readonly")
+	if err := os.Mkdir(readOnly, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o700) })
+	if w := patchConfig(t, f.handler, token, map[string]any{"tls.acme_cache_dir": readOnly}, key, ""); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH an existing read-only tls.acme_cache_dir = %d %s, want 400", w.Code, w.Body.String())
+	}
+
+	writable := filepath.Join(f.dataDir, "acme-writable")
+	if err := os.Mkdir(writable, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if w := patchConfig(t, f.handler, token, map[string]any{"tls.acme_cache_dir": writable}, key, ""); w.Code != http.StatusOK {
+		t.Errorf("PATCH a writable tls.acme_cache_dir = %d; body: %s", w.Code, w.Body.String())
+	}
+
+	missing := filepath.Join(f.dataDir, "acme-missing")
+	if w := patchConfig(t, f.handler, token, map[string]any{"tls.acme_cache_dir": missing}, key, ""); w.Code != http.StatusOK {
+		t.Errorf("PATCH a missing tls.acme_cache_dir with a writable parent = %d; body: %s", w.Code, w.Body.String())
 	}
 }
 

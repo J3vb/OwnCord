@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -122,6 +124,35 @@ func configAuditDetail(key string, value any) string {
 		return key + " cleared"
 	}
 	return key + " updated"
+}
+
+func guardDatabasePath(w http.ResponseWriter, g guardContext) bool {
+	if !g.has("database.path") || samePath(g.next.Database.Path, g.opts.RunningCfg.Database.Path) {
+		return true
+	}
+	if containerOutsideDataDir(g, g.next.Database.Path, "database.path", w) {
+		return false
+	}
+	info, err := os.Stat(g.next.Database.Path)
+	if err != nil || info.IsDir() {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path must name an existing database file")
+		return false
+	}
+	ctx := context.WithoutCancel(g.r.Context())
+	if err := db.CheckBackupIntegrity(ctx, g.next.Database.Path); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path is not a readable OwnCord database")
+		return false
+	}
+	ahead, err := db.CheckBackupSchemaAhead(ctx, g.next.Database.Path)
+	if err != nil || len(ahead) > 0 {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path holds a database a newer server wrote")
+		return false
+	}
+	if !dirWritable(filepath.Dir(g.next.Database.Path)) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path: the directory is not writable (SQLite needs its WAL beside the file)")
+		return false
+	}
+	return true
 }
 
 // normalizeSettingValue turns a nil slice into an empty one, so a list key

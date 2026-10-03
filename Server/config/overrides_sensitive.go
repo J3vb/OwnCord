@@ -196,7 +196,8 @@ func checkPath(s string) error {
 	if strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 }) {
 		return fmt.Errorf("must not contain control characters")
 	}
-	if filepath.Clean(s) != s {
+	clean := filepath.FromSlash(s)
+	if filepath.Clean(clean) != clean {
 		return fmt.Errorf("must be a clean path")
 	}
 	return nil

@@ -150,7 +150,7 @@ describe("Server/admin/static — sensitive server configuration", () => {
     expect(doc.querySelector('[data-config-key="server.data_dir"]')).toBeNull();
   });
 
-  it("sends a secret only when one is typed, and clears it with an empty string", async () => {
+  it("sends a secret only when one is typed, and removes the override with null", async () => {
     const calls: FetchCall[] = [];
     const booted = await boot(calls);
     dom = booted.dom;
@@ -171,7 +171,7 @@ describe("Server/admin/static — sensitive server configuration", () => {
 
     calls.length = 0;
     await fn(booted.bridge.clearConfigSecret, "clearConfigSecret")("gif.api_key");
-    expect(patches(calls)[0]?.body).toEqual({ "gif.api_key": "" });
+    expect(patches(calls)[0]?.body).toEqual({ "gif.api_key": null });
   });
 
   it("asks for a typed confirmation before saving a lock-out-capable key", async () => {
