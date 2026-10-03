@@ -978,9 +978,11 @@ commits, it pushes one `mention_count` frame per reader whose read-state guard
 actually admitted the bump — a reader who had already read the message, or whose
 message was removed before the flush, is not pushed. Deleting or purging a
 mentioning message pushes the same frame with the reader's lowered total, so a
-badge the event raised is also cleared live. Targeted, unsequenced and never
-replayed; a disconnected reader recovers the authoritative total on their next
-`ready`.
+badge the event raised is also cleared live — but only to a reader who can still
+see the channel; a reader whose access was revoked (removed override, role
+change, left the DM) is skipped, and the stored total is still corrected.
+Targeted, unsequenced and never replayed; a disconnected reader recovers the
+authoritative total on their next `ready`.
 
 The client ignores the frame for the channel currently on screen (its own
 `chat_message` handles that badge) and for a DM-channel id (a DM's badge lives

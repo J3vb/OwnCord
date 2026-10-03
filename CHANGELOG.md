@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 ### Mentions
 
 - **A mention in a channel you are not viewing now updates the taskbar and tray badge at once.** The badge only caught up on your next reconnect; it is now live, alongside the channel's own red badge.
+- **Deleting a mentioning message no longer updates the badge of someone who can no longer see the channel.** A member who lost read access to a channel (or left the direct message) after being mentioned could still receive the badge update for it. The update now checks current channel visibility first and is skipped for readers who cannot see the channel; the stored count is still corrected.
 
 ### Direct messages & members
 
