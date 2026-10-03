@@ -1052,7 +1052,9 @@ jobs:
             libdbus-1-dev \
             libasound2-dev \
             libssl-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
 
       # The Linux client links livekit, whose webrtc-sys crate needs clang >= 21
       # and the prebuilt libwebrtc (~148 MB download, ~800 MB extracted). The
@@ -1401,7 +1403,9 @@ jobs:
             libssl-dev \
             patchelf \
             librsvg2-dev \
-            xdg-utils
+            xdg-utils \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
 
       # Same clang + libwebrtc prerequisite as rust-tests, libwebrtc cached per arch.
       - name: Cache libwebrtc

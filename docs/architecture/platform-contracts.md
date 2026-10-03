@@ -18,7 +18,12 @@ added the two camera commands, and audio parity (branch
 `fm/linux-audio-parity`, 2026-09-23), which added the per-user and
 screen-share audio volume commands, and phase 3 (branch
 `fm/linux-screenshare-p3`, 2026-09-23), which added the four screen-share
-commands. The registration-based correction was measured at `0beee8e` (`dev`,
+commands, and the Linux native camera (branch `fm/camera-share-black`,
+2026-10-03), which added the five camera commands
+(`native_voice_list_cameras`, `native_voice_start_camera`,
+`native_voice_stop_camera` and the two out-of-call preview commands) and moved
+the camera path off the webview pump. The registration-based correction was
+measured at `0beee8e` (`dev`,
 2026-09-23) and re-measured after the audio-parity and screen-share merges at
 `2ced3de` (`dev`, 2026-09-23). P3-09 (branch `fm/dp-p309`, 2026-09-30) added
 the `SystemIdle` contract and its `system_idle_ms` command, and P3-04 (branch
@@ -73,18 +78,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 24    |
-| Distinct `invoke` command names called from `Client/src/`  | 57    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 60    |
+| Distinct `invoke` command names called from `Client/src/`  | 62    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 65    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 59 distinct registrations
+The handler count covers the 64 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the nineteen `native_voice_*` commands behind
-`#[cfg(target_os = "linux")]`, so a default build registers 58 on Linux and 39
-elsewhere. The one environment-detection helper is
+`#[cfg(feature = "devtools")]` and the twenty-four `native_voice_*` commands
+behind `#[cfg(target_os = "linux")]`, so a default build registers 63 on Linux
+and 39 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -124,6 +129,7 @@ native_voice_clear_key
 native_voice_connect
 native_voice_debug_info
 native_voice_disconnect
+native_voice_list_cameras
 native_voice_list_devices
 native_voice_publish_camera
 native_voice_publish_screen
@@ -136,7 +142,11 @@ native_voice_set_screenshare_volume
 native_voice_set_subscribed
 native_voice_set_video_view
 native_voice_set_volume
+native_voice_start_camera
+native_voice_start_camera_preview
 native_voice_start_screen
+native_voice_stop_camera
+native_voice_stop_camera_preview
 native_voice_stop_screen
 native_voice_unpublish_camera
 notify_message

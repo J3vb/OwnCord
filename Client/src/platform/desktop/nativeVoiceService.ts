@@ -6,6 +6,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   NativeVoice,
+  NativeVoiceCameraDevice,
+  NativeVoiceCameraPreview,
+  NativeVoiceCameraStarted,
   NativeVoiceConnected,
   NativeVoiceDevices,
   NativeVoiceEnvelope,
@@ -33,10 +36,17 @@ export const nativeVoice: NativeVoice = {
     invoke<void>("native_voice_set_volume", { session, identity, volume }),
   setScreenshareVolume: (session, identity, volume) =>
     invoke<void>("native_voice_set_screenshare_volume", { session, identity, volume }),
-  publishCamera: (session, options) =>
-    invoke<string>("native_voice_publish_camera", { session, options }),
+  publishCamera: (session, capture, options) =>
+    invoke<string>("native_voice_publish_camera", { session, capture, options }),
   unpublishCamera: (session, sid) =>
     invoke<void>("native_voice_unpublish_camera", { session, sid }),
+  listCameras: () => invoke<NativeVoiceCameraDevice[]>("native_voice_list_cameras"),
+  startCamera: (session, source, capture) =>
+    invoke<NativeVoiceCameraStarted>("native_voice_start_camera", { session, source, capture }),
+  stopCamera: (session, capture) => invoke<void>("native_voice_stop_camera", { session, capture }),
+  startCameraPreview: (source, capture) =>
+    invoke<NativeVoiceCameraPreview>("native_voice_start_camera_preview", { source, capture }),
+  stopCameraPreview: () => invoke<void>("native_voice_stop_camera_preview"),
   screenSources: () => invoke<NativeVoiceScreenSources>("native_voice_screen_sources"),
   startScreen: (session, source, capture) =>
     invoke<NativeVoiceScreenStarted>("native_voice_start_screen", { session, source, capture }),

@@ -30,7 +30,7 @@ export const shards = {
     "src/features/voice/native/nativeRoom.ts",
     "src/features/voice/native/devices.ts",
     "src/features/voice/native/videoRenderer.ts",
-    "src/features/voice/native/cameraUplink.ts",
+    "src/features/voice/native/nativeCameraTrack.ts",
     "src/features/voice/native/screenPicker.ts",
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",

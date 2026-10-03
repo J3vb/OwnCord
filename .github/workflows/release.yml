@@ -226,7 +226,9 @@ jobs:
             libssl-dev \
             patchelf \
             librsvg2-dev \
-            xdg-utils
+            xdg-utils \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
 
       # clang >= 21 plus the prebuilt libwebrtc the Linux client links against
       # (livekit -> webrtc-sys). Deliberately NO actions/cache restore here:
@@ -483,7 +485,9 @@ jobs:
             libssl-dev \
             patchelf \
             librsvg2-dev \
-            xdg-utils
+            xdg-utils \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
 
       # Same prerequisite and same no-cache rule as the x86_64 job — see the
       # comment there: clang-21 from the same GPG-signed apt.llvm.org channel,

@@ -10,6 +10,9 @@ const state = vi.hoisted(() => ({
   commands: [] as Array<[string, unknown]>,
   connected: { session: 1, identity: "user-1", frames: "" },
   devices: { inputs: [], outputs: [] } as unknown,
+  cameras: [] as unknown,
+  camera: { capture: 0, width: 0, height: 0 },
+  preview: { width: 0, height: 0, frames: "" },
   cameraSid: "",
   screen: { sources: null as unknown, started: null as unknown, sid: "" },
   handlers: new Map<string, Set<(e: { payload: unknown }) => void>>(),
@@ -20,6 +23,9 @@ vi.mock("@tauri-apps/api/core", () => ({
     state.commands.push([cmd, payload]);
     if (cmd === "native_voice_connect") return Promise.resolve(state.connected);
     if (cmd === "native_voice_list_devices") return Promise.resolve(state.devices);
+    if (cmd === "native_voice_list_cameras") return Promise.resolve(state.cameras);
+    if (cmd === "native_voice_start_camera") return Promise.resolve(state.camera);
+    if (cmd === "native_voice_start_camera_preview") return Promise.resolve(state.preview);
     if (cmd === "native_voice_publish_camera") return Promise.resolve(state.cameraSid);
     if (cmd === "native_voice_screen_sources") return Promise.resolve(state.screen.sources);
     if (cmd === "native_voice_start_screen") return Promise.resolve(state.screen.started);
@@ -49,6 +55,11 @@ describeNativeVoiceSuite(async () => {
       },
       publishesCameraAs(sid) {
         state.cameraSid = sid;
+      },
+      hasCameras(devices, started, preview) {
+        state.cameras = devices;
+        state.camera = started;
+        state.preview = preview;
       },
       hasDevices(devices) {
         state.devices = devices;

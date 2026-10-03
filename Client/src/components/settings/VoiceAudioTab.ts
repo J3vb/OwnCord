@@ -23,8 +23,10 @@ import {
 } from "@lib/audioPipeline";
 import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
-import { nativeAudioDevices } from "../../features/voice/native/devices";
+import { nativeAudioDevices, nativeCameraDevices } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { desktop } from "../../platform/desktop";
+import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
 
@@ -51,6 +53,7 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   let stopMeter: (() => void) | null = null;
   let cameraPreviewStream: MediaStream | null = null;
   let invalidateCameraPreviewRequest: (() => void) | null = null;
+  let stopNativePreview: (() => void) | null = null;
 
   function stopMic(): void {
     stopMeter?.();
@@ -65,6 +68,9 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
       for (const track of cameraPreviewStream.getTracks()) track.stop();
       cameraPreviewStream = null;
     }
+    // The native (Linux) preview releases the host capture and its socket.
+    stopNativePreview?.();
+    stopNativePreview = null;
   }
 
   function build(buildSignal: AbortSignal = signal): HTMLDivElement {
@@ -86,6 +92,9 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
       (invalidate) => {
         invalidateCameraPreviewRequest = invalidate;
       },
+      (stop) => {
+        stopNativePreview = stop;
+      },
     );
   }
 
@@ -102,6 +111,7 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
 type MicRegistrar = (stop: () => void) => void;
 type CameraRegistrar = (stream: MediaStream | null) => void;
 type CameraInvalidationRegistrar = (invalidate: () => void) => void;
+type NativePreviewRegistrar = (stop: () => void) => void;
 
 function buildVoiceAudioTabInner(
   signal: AbortSignal,
@@ -109,6 +119,7 @@ function buildVoiceAudioTabInner(
   stopMic: () => void,
   registerCamera: CameraRegistrar,
   registerCameraInvalidation: CameraInvalidationRegistrar,
+  registerNativePreview: NativePreviewRegistrar,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
@@ -500,17 +511,23 @@ function buildVoiceAudioTabInner(
       [videoSelect, "videoinput", "videoInputDevice", t("voiceAudio.kind.camera")],
     ];
     try {
-      // On Linux the audio lists come from the native backend (the ids the
-      // session can actually select); cameras are the webview's everywhere.
-      const [nativeInputs, nativeOutputs, all] = await Promise.all([
+      // On Linux the audio and camera lists come from the native backend (the
+      // ids the session can actually select); elsewhere cameras are the
+      // webview's, enumerated with the audio devices.
+      const [nativeInputs, nativeOutputs, nativeCameras, all] = await Promise.all([
         nativeAudioDevices("audioinput"),
         nativeAudioDevices("audiooutput"),
+        nativeCameraDevices(),
         navigator.mediaDevices.enumerateDevices(),
       ]);
       const devices =
         nativeInputs === null || nativeOutputs === null
           ? all
-          : [...nativeInputs, ...nativeOutputs, ...all.filter((d) => d.kind === "videoinput")];
+          : [
+              ...nativeInputs,
+              ...nativeOutputs,
+              ...(nativeCameras ?? all.filter((d) => d.kind === "videoinput")),
+            ];
       if (signal.aborted) return;
 
       for (const [select, kind, prefKey, label] of selects) {
@@ -636,7 +653,10 @@ function buildVoiceAudioTabInner(
     "change",
     () => {
       savePref("videoInputDevice", videoSelect.value);
-      startCameraPreview(videoSelect.value);
+      stopCameraPreview();
+      stopNativeCameraPreview();
+      if (isLinuxDesktop()) void startNativeCameraPreview(videoSelect.value);
+      else startCameraPreview(videoSelect.value);
     },
     { signal },
   );
@@ -644,9 +664,16 @@ function buildVoiceAudioTabInner(
   // Start the camera preview on the saved device, or on the default when
   // none was explicitly chosen: an unexplained empty 16:9 box reads as broken
   // (voice #22). The default device is only previewed when a camera exists.
+  // Linux previews through the native backend (the native camera list); its
+  // preview renderer is registered so teardown releases the host capture.
   const savedVideoDevice = loadPref<string>("videoInputDevice", "");
+  let activeNativePreview: (() => void) | null = null;
   void (async () => {
     const device = savedVideoDevice;
+    if (isLinuxDesktop()) {
+      await startNativeCameraPreview(device);
+      return;
+    }
     if (device === "" && navigator.mediaDevices?.enumerateDevices !== undefined) {
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       if (!devices.some((d) => d.kind === "videoinput")) {
@@ -656,6 +683,49 @@ function buildVoiceAudioTabInner(
     }
     startCameraPreview(device);
   })();
+
+  /** The Linux settings preview: capture natively (works while the window is
+   *  hidden and exposes the same device ids the call will select) and draw the
+   *  frame socket's `/camera` route onto the preview canvas. */
+  async function startNativeCameraPreview(deviceId: string): Promise<void> {
+    stopNativeCameraPreview();
+    const thisRequest = ++cameraRequestId;
+    try {
+      const started = await desktop.nativeVoice.startCameraPreview(deviceId, {
+        fps: 15,
+        maxWidth: 320,
+        maxHeight: 180,
+      });
+      if (signal.aborted || thisRequest !== cameraRequestId) {
+        void desktop.nativeVoice.stopCameraPreview();
+        return;
+      }
+      const renderer = new NativeVideoRenderer(`${started.frames}/camera`);
+      const stream = new MediaStream([renderer.mediaStreamTrack]);
+      registerCamera(stream);
+      previewVideo.srcObject = stream;
+      previewLabel.hidden = true;
+      const stop = (): void => {
+        renderer.dispose();
+        void desktop.nativeVoice.stopCameraPreview().catch(() => {});
+      };
+      activeNativePreview = stop;
+      registerNativePreview(stop);
+    } catch (err) {
+      if (signal.aborted || thisRequest !== cameraRequestId) return;
+      const msg =
+        err instanceof Error && err.message ? err.message : t("voiceAudio.cameraUnavailable");
+      setText(previewLabel, msg);
+    }
+  }
+
+  function stopNativeCameraPreview(): void {
+    if (activeNativePreview === null) return;
+    activeNativePreview();
+    activeNativePreview = null;
+    registerNativePreview(() => {});
+    previewVideo.srcObject = null;
+  }
 
   // Camera teardown on overlay close is already covered by the factory's
   // single signal.addEventListener("abort", cleanupMic), registered once

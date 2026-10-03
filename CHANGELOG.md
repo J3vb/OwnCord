@@ -70,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Voice
 
+- **Linux desktop: your camera now keeps working while the OwnCord window is hidden.** Sharing your screen, minimizing or covering the window froze the camera for everyone else — they saw one frame and then a stalled tile — because the desktop webview stops servicing a hidden page's video element. The camera is now captured in the app's native backend, independent of the window, so it stays live while you share your screen or switch apps. The camera list in Settings › Voice & Audio and the self-view preview now come from the same backend. Windows and macOS are unchanged.
 - **Join, leave, mute and deafen now make a short sound, on the speaker you chose.** A call was silent apart from the ring: you could not hear someone join or leave your channel, and toggling mute or deafen gave no feedback. These now play a short chime, on the output device picked in Settings › Voice & Audio (on Linux the system default, where the desktop webview cannot route it). Everything stays silent while you are deafened in a call — except an incoming ring, which still plays for a call. Turn the voice sounds off under Settings › Notifications.
 
 ### Changed
@@ -79,7 +80,6 @@ and only when it changes something a contributor or fork holder must do
 ### Known issues
 
 - **Linux desktop:** the app can close without warning when the camera and screen share are both on; the new crash line is there to pin it down.
-- **Linux desktop:** your camera freezes for others while the OwnCord window is minimized or covered (for example while you share your screen); it resumes when the window is shown. Native camera capture is planned.
 
 ## v2.1.0-beta.2
 

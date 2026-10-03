@@ -150,6 +150,10 @@ Two main components:
 - Node.js 26.x and npm 11.x (see `Client/.nvmrc` — a different major fails
   `npm ci`)
 - Rust stable (client builds)
+- Linux client builds additionally need clang >= 21, the prebuilt libwebrtc,
+  and the GStreamer `-dev` headers; see
+  [docs/contributing.md](docs/contributing.md) (Linux native voice and camera
+  build prerequisites).
 
 ### Build from source
 

@@ -5,6 +5,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type {
   NativeVoice,
+  NativeVoiceCameraDevice,
+  NativeVoiceCameraPreview,
+  NativeVoiceCameraStarted,
   NativeVoiceDevices,
   NativeVoiceEnvelope,
   NativeVoiceScreenSources,
@@ -17,6 +20,13 @@ export interface NativeControl {
   connectsAs(session: number, identity: string, frames: string): void;
   /** The host answers the next camera publish with this publication sid. */
   publishesCameraAs(sid: string): void;
+  /** The host reports these cameras on the next enumeration, then answers the
+   *  next camera start and the next camera preview with these. */
+  hasCameras(
+    devices: NativeVoiceCameraDevice[],
+    started: NativeVoiceCameraStarted,
+    preview: NativeVoiceCameraPreview,
+  ): void;
   /** The host reports these devices on the next enumeration. */
   hasDevices(devices: NativeVoiceDevices): void;
   /** The host reports these shareable sources, then answers the next
@@ -101,20 +111,54 @@ export function describeNativeVoiceSuite(
       ]);
     });
 
-    check("publishes the camera per session and unpublishes it by its sid", async () => {
-      const camera = {
+    check("lists the host's cameras and starts, publishes and stops one", async () => {
+      const cameras: NativeVoiceCameraDevice[] = [{ id: "/dev/video0", name: "HD Webcam" }];
+      const capture = { fps: 30, maxWidth: 0, maxHeight: 0 };
+      const publish = {
         width: 1280,
         height: 720,
         maxBitrate: 1_700_000,
         maxFramerate: 30,
         simulcast: true,
       };
+      ctx.native.hasCameras(
+        cameras,
+        { capture: 4, width: 1280, height: 720 },
+        { width: 640, height: 360, frames: "ws://127.0.0.1:9/tok" },
+      );
       ctx.native.publishesCameraAs("TR_cam");
-      await expect(ctx.subject.publishCamera(7, camera)).resolves.toBe("TR_cam");
-      await ctx.subject.unpublishCamera(7, "TR_cam");
+      await expect(ctx.subject.listCameras()).resolves.toEqual(cameras);
+      await expect(ctx.subject.startCamera(7, "/dev/video0", capture)).resolves.toEqual({
+        capture: 4,
+        width: 1280,
+        height: 720,
+      });
+      await expect(ctx.subject.publishCamera(7, 4, publish)).resolves.toBe("TR_cam");
+      await ctx.subject.stopCamera(7, 4);
       expect(ctx.native.commands()).toEqual([
-        ["native_voice_publish_camera", { session: 7, options: camera }],
-        ["native_voice_unpublish_camera", { session: 7, sid: "TR_cam" }],
+        ["native_voice_list_cameras", undefined],
+        ["native_voice_start_camera", { session: 7, source: "/dev/video0", capture }],
+        ["native_voice_publish_camera", { session: 7, capture: 4, options: publish }],
+        ["native_voice_stop_camera", { session: 7, capture: 4 }],
+      ]);
+    });
+
+    check("starts and stops the out-of-call camera preview", async () => {
+      const capture = { fps: 30, maxWidth: 320, maxHeight: 180 };
+      ctx.native.hasCameras(
+        [],
+        { capture: 0, width: 0, height: 0 },
+        { width: 640, height: 360, frames: "ws://127.0.0.1:9/tok" },
+      );
+      await expect(ctx.subject.startCameraPreview("/dev/video0", capture)).resolves.toEqual({
+        width: 640,
+        height: 360,
+        frames: "ws://127.0.0.1:9/tok",
+      });
+      await ctx.subject.stopCameraPreview();
+      expect(ctx.native.commands()).toEqual([
+        ["native_voice_start_camera_preview", { source: "/dev/video0", capture }],
+        ["native_voice_stop_camera_preview", undefined],
       ]);
     });
 

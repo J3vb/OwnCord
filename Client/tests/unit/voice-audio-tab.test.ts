@@ -1431,6 +1431,26 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         kind === "audioinput"
           ? [{ deviceId: "guid-mic", label: "USB Mic", kind }]
           : [{ deviceId: "guid-spk", label: "Speakers", kind }],
+      nativeCameraDevices: async () => [{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }],
+    }));
+    vi.doMock("../../src/platform/desktop", () => ({
+      desktop: {
+        nativeVoice: {
+          startCameraPreview: vi.fn().mockResolvedValue({
+            width: 320,
+            height: 180,
+            frames: "ws://127.0.0.1:9/tok",
+          }),
+          stopCameraPreview: vi.fn().mockResolvedValue(undefined),
+        },
+      },
+    }));
+    vi.doMock("../../src/features/voice/native/videoRenderer", () => ({
+      NativeVideoRenderer: class {
+        readonly mediaStreamTrack = { stop: vi.fn(), dispatchEvent: vi.fn() };
+        constructor(readonly url: string) {}
+        dispose() {}
+      },
     }));
     localStorage.clear();
     document.body.innerHTML = "";
@@ -1449,6 +1469,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   afterEach(() => {
     vi.doUnmock("../../src/features/voice/native/platform");
     vi.doUnmock("../../src/features/voice/native/devices");
+    vi.doUnmock("../../src/platform/desktop");
+    vi.doUnmock("../../src/features/voice/native/videoRenderer");
     vi.doUnmock("@lib/logger");
     vi.unstubAllGlobals();
   });
