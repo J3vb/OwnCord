@@ -111,9 +111,11 @@ func TestServeWS_PendingHandshakesCountTowardCap(t *testing.T) {
 // admitted only up to maxConns: the admission decision has to be atomic with
 // reserving the slot, not a check followed by a separate increment.
 //
-// serveWSAdmissionRaceHook parks every handler at the admission boundary and
-// releases them together, so all attempts are in the window at once rather
-// than relying on lucky timing.
+// serveWSAdmissionRaceHook parks every handler inside the check-then-reserve
+// window and releases them together, so all attempts race the reservation at
+// once rather than relying on lucky timing. Against the pre-fix check followed
+// by a separate increment every parked attempt is admitted, so this test fails
+// there and passes only once the reservation is atomic.
 func TestServeWS_ConcurrentUpgradesAdmitOnlyToCap(t *testing.T) {
 	_, url, _ := newPreauthTestServer(t, 1)
 
