@@ -181,7 +181,7 @@ export const voiceText = defineCatalog("voice", {
   "share.noCamera": "No camera found",
   "share.cameraFailed": "Failed to start camera",
   "share.gstreamerMissing":
-    "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian) or gst-plugins-good (Fedora/Arch), then restart OwnCord.",
+    "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "share.screenDenied": "Screen sharing permission denied",
   "share.screenFailed": "Failed to start screen sharing",
   "share.screenNotStarted":

@@ -114,10 +114,12 @@ pub fn list_devices() -> Vec<CameraDevice> {
         .collect()
 }
 
-/// The elements the capture pipeline builds by name: a missing one fails the
-/// build before any device is opened. `pipewiresrc` is optional (V4L2 works
-/// without it), so it is not required.
-const REQUIRED_CAMERA_ELEMENTS: [&str; 4] = ["v4l2src", "decodebin", "videoconvert", "appsink"];
+/// The elements every capture pipeline builds by name, plus the source
+/// elements it needs at least one of: `device_source` opens a device through
+/// `v4l2src` or `pipewiresrc` (or the monitor's own element), so either source
+/// alone suffices.
+const REQUIRED_CAMERA_ELEMENTS: [&str; 3] = ["decodebin", "videoconvert", "appsink"];
+const CAMERA_SOURCE_ELEMENTS: [&str; 2] = ["v4l2src", "pipewiresrc"];
 
 /// Whether the host can capture cameras, in the shape the webview's support
 /// notice consumes.
@@ -128,9 +130,6 @@ pub struct CameraSupport {
     pub available: bool,
     /// The required elements GStreamer could not find, in pipeline order.
     pub missing: Vec<String>,
-    /// Whether PipeWire's virtual-camera source is present. Optional: its
-    /// absence does not make camera support unavailable.
-    pub pipewire: bool,
 }
 
 /// A camera-support check with the live GStreamer state left out: `init`
@@ -142,26 +141,33 @@ fn support_with(init: bool, find: &dyn Fn(&str) -> bool) -> CameraSupport {
         return CameraSupport {
             available: false,
             missing: Vec::new(),
-            pipewire: false,
         };
     }
-    let missing: Vec<String> = REQUIRED_CAMERA_ELEMENTS
-        .iter()
-        .filter(|name| !find(name))
-        .map(|name| (*name).to_string())
-        .collect();
+    let mut missing: Vec<String> = Vec::new();
+    if !CAMERA_SOURCE_ELEMENTS.iter().any(|name| find(name)) {
+        missing.extend(
+            CAMERA_SOURCE_ELEMENTS
+                .iter()
+                .map(|name| (*name).to_string()),
+        );
+    }
+    missing.extend(
+        REQUIRED_CAMERA_ELEMENTS
+            .iter()
+            .filter(|name| !find(name))
+            .map(|name| (*name).to_string()),
+    );
     CameraSupport {
         available: missing.is_empty(),
         missing,
-        pipewire: find("pipewiresrc"),
     }
 }
 
 /// Whether the host can capture cameras: GStreamer initialises and the
 /// capture pipeline's required elements exist. A minimal or non-Debian Linux
-/// install without the GStreamer plugin packages has no `v4l2src`, lists no
-/// cameras and cannot capture; this tells the webview why instead of leaving
-/// an unexplained empty list.
+/// install without the GStreamer plugin packages has no `v4l2src` or
+/// `pipewiresrc`, lists no cameras and cannot capture; this tells the webview
+/// why instead of leaving an unexplained empty list.
 pub fn support() -> CameraSupport {
     support_with(gst::init().is_ok(), &|name| {
         gst::ElementFactory::find(name).is_some()
@@ -874,11 +880,50 @@ mod tests {
     #[test]
     fn camera_support_names_a_missing_required_element() {
         assert_eq!(
-            support_with(true, &|name| name != "v4l2src"),
+            support_with(true, &|name| name != "decodebin"),
             CameraSupport {
                 available: false,
-                missing: vec!["v4l2src".to_string()],
-                pipewire: true,
+                missing: vec!["decodebin".to_string()],
+            }
+        );
+    }
+
+    /// The capture picks `v4l2src` or `pipewiresrc` per device, so either
+    /// source alone suffices: a V4L2-only host without PipeWire still captures.
+    #[test]
+    fn camera_support_is_available_without_pipewiresrc() {
+        assert_eq!(
+            support_with(true, &|name| name != "pipewiresrc"),
+            CameraSupport {
+                available: true,
+                missing: Vec::new(),
+            }
+        );
+    }
+
+    /// A PipeWire-only host (Wayland, `gstreamer1.0-pipewire` but no V4L2) can
+    /// still capture its PipeWire cameras, so a missing `v4l2src` alone must
+    /// not report support as unavailable.
+    #[test]
+    fn camera_support_is_available_without_v4l2src() {
+        assert_eq!(
+            support_with(true, &|name| name != "v4l2src"),
+            CameraSupport {
+                available: true,
+                missing: Vec::new(),
+            }
+        );
+    }
+
+    /// Neither source element present: no device can be opened, and both names
+    /// are reported.
+    #[test]
+    fn camera_support_is_unavailable_without_a_source_element() {
+        assert_eq!(
+            support_with(true, &|name| name != "v4l2src" && name != "pipewiresrc"),
+            CameraSupport {
+                available: false,
+                missing: vec!["v4l2src".to_string(), "pipewiresrc".to_string()],
             }
         );
     }
@@ -891,7 +936,6 @@ mod tests {
             CameraSupport {
                 available: true,
                 missing: Vec::new(),
-                pipewire: true,
             }
         );
     }
@@ -900,15 +944,5 @@ mod tests {
     #[test]
     fn camera_support_is_unavailable_without_gstreamer() {
         assert!(!support_with(false, &|_| true).available);
-    }
-
-    /// PipeWire's source is optional: its absence is not a missing required
-    /// element and does not make support unavailable.
-    #[test]
-    fn a_missing_pipewiresrc_is_only_a_hint() {
-        let support = support_with(true, &|name| name != "pipewiresrc");
-        assert!(support.available);
-        assert!(support.missing.is_empty());
-        assert!(!support.pipewire);
     }
 }

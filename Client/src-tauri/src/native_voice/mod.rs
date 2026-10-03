@@ -342,8 +342,10 @@ pub async fn native_voice_list_cameras() -> Result<Vec<camera::CameraDevice>, St
 /// names, so the webview can say why no camera appears instead of showing an
 /// empty list.
 #[tauri::command]
-pub fn native_voice_camera_support() -> Result<camera::CameraSupport, String> {
-    Ok(camera::support())
+pub async fn native_voice_camera_support() -> Result<camera::CameraSupport, String> {
+    tokio::task::spawn_blocking(camera::support)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
