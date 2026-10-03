@@ -76,7 +76,8 @@ export function createMessageController(opts: MessageControllerOptions): Message
         // Only an extended page (limit > PAGE_SIZE) is trimmed — a default
         // page's extra rows are history the failed-first-load retry fetched.
         const head = limit > PAGE_SIZE ? (cached[0]?.id ?? 0) : 0;
-        const messages = resp.messages.filter((m) => m.id >= head);
+        const trimmed = resp.messages.filter((m) => m.id >= head);
+        const messages = trimmed.length > 0 ? trimmed : resp.messages;
         const hasMore = resp.has_more || messages.length < resp.messages.length;
         log.info("Messages loaded", {
           channelId,

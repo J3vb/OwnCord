@@ -182,6 +182,17 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
     expect(limitAsked()).toBe(50);
   });
 
+  it("keeps the fetched tail when the extended page is entirely below the cached head", async () => {
+    cacheWindow(101, 200); // 100 rows loaded
+    server = rows(1, 100); // a purge removed every row the reader had cached
+    openWithUnread(0);
+
+    await controller().loadMessages(CH, new AbortController().signal);
+
+    expect(limitAsked()).toBe(100);
+    expect(ids()).toEqual([...rows(1, 100)].map((m) => m.id));
+  });
+
   it("refetches a plain 50-row page when jumping back to present from a detached window", async () => {
     setAroundMessages(CH, rows(1, 80), false, true);
     reattachToPresent(CH);
