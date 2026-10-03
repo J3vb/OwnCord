@@ -198,9 +198,7 @@ describe("Server/admin/static — sensitive server configuration", () => {
     dom = booted.dom;
     const doc = await render(dom, booted.bridge);
 
-    expect(
-      doc.querySelector('[data-action="clearConfigSecretValue"]'),
-    ).not.toBeNull();
+    expect(doc.querySelector('[data-action="clearConfigSecretValue"]')).not.toBeNull();
     calls.length = 0;
     await fn(booted.bridge.clearConfigSecretValue, "clearConfigSecretValue")("gif.api_key");
     expect(patches(calls)[0]?.body).toEqual({ "gif.api_key": "" });
