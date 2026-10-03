@@ -2,6 +2,7 @@ package admin
 
 import (
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -198,6 +199,9 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	if len(opts) > 0 {
 		setupOpts = opts[0]
 	}
+	// Per-router so tests that build hundreds of routers never share restart
+	// state; a real restart replaces the process and clears it anyway.
+	configPending := new(atomic.Bool)
 	bundles := newSupportBundles(service.NewDiagnosticsService(database), version, setupOpts.RunningCfg, logBuf, hub)
 
 	// Setup endpoints — unauthenticated. The gate is the durable
@@ -307,6 +311,11 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		ownerOnly(r, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
 		ownerOnly(r, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
 		ownerOnly(r, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
+		// Admin-panel config overrides — Owner-only. Changing a server-wide
+		// setting and restarting the process is gated like backups/updates.
+		ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, configPending))
+		ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, configPending))
+		ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
