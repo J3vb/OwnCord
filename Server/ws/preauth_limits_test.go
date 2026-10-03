@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,5 +104,99 @@ func TestServeWS_PendingHandshakesCountTowardCap(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status with one pending handshake at cap 1 = %d, want 503", resp.StatusCode)
+	}
+}
+
+// Concurrent upgrades that all pass the capacity check together must still be
+// admitted only up to maxConns: the admission decision has to be atomic with
+// reserving the slot, not a check followed by a separate increment.
+//
+// serveWSAdmissionRaceHook parks every handler at the admission boundary and
+// releases them together, so all attempts are in the window at once rather
+// than relying on lucky timing.
+func TestServeWS_ConcurrentUpgradesAdmitOnlyToCap(t *testing.T) {
+	_, url, _ := newPreauthTestServer(t, 1)
+
+	const attempts = 8
+	var arrived sync.WaitGroup
+	arrived.Add(attempts)
+	release := make(chan struct{})
+	serveWSAdmissionRaceHook = func() {
+		arrived.Done()
+		<-release
+	}
+	t.Cleanup(func() { serveWSAdmissionRaceHook = nil })
+
+	wsURL := "ws" + strings.TrimPrefix(url, "http")
+	admitted := make(chan *websocket.Conn, attempts)
+	rejected := make(chan int, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			if err == nil {
+				admitted <- conn
+				return
+			}
+			status := 0
+			if resp != nil {
+				status = resp.StatusCode
+			}
+			rejected <- status
+		}()
+	}
+
+	arrived.Wait()
+	close(release)
+	wg.Wait()
+	close(admitted)
+	close(rejected)
+
+	gotAdmitted := 0
+	for conn := range admitted {
+		gotAdmitted++
+		_ = conn.CloseNow()
+	}
+	if gotAdmitted != 1 {
+		t.Fatalf("admitted %d concurrent upgrades at cap 1, want 1", gotAdmitted)
+	}
+	for status := range rejected {
+		if status != http.StatusServiceUnavailable {
+			t.Errorf("rejected upgrade status = %d, want 503", status)
+		}
+	}
+}
+
+// A handshake that fails after admission must return its slot, so a later
+// upgrade is admitted rather than being refused forever.
+func TestServeWS_FailedHandshakeReleasesCapacitySlot(t *testing.T) {
+	_, url, _ := newPreauthTestServer(t, 1)
+	conn := dialNoAuth(t, url) // occupies the only slot, never authenticates
+	_ = conn.CloseNow()        // fails the handshake and releases the slot
+
+	wsURL := "ws" + strings.TrimPrefix(url, "http")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		c, resp, err := websocket.Dial(ctx, wsURL, nil)
+		cancel()
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		if err == nil {
+			_ = c.CloseNow()
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slot not released after a failed handshake: last dial err %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

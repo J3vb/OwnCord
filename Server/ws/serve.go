@@ -6,13 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 const (
@@ -43,26 +43,38 @@ const (
 // connection costs one HTTP request, not a socket plus goroutines.
 func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
-	// pending counts this handler's upgraded sockets that have not yet
-	// started their pumps (authenticating, waiting for a ready-build permit,
-	// or handshaking).
-	var pending atomic.Int64
+	// admissionMu makes the capacity decision atomic with reserving the slot:
+	// pending counts this handler's admitted sockets that have not yet started
+	// their pumps (authenticating, waiting for a ready-build permit, or
+	// handshaking), and the check reads it together with the hub's active
+	// count. Reserving before the upgrade means a socket costs one HTTP
+	// request when refused, and a slot is held across registration (registerNow
+	// runs before startPumps' release), so active+pending never dips below the
+	// true reserved count.
+	var admissionMu syncutil.Mutex
+	pending := 0 // guarded by admissionMu
 	return func(w http.ResponseWriter, r *http.Request) {
-		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
+		if serveWSAdmissionRaceHook != nil {
+			serveWSAdmissionRaceHook()
+		}
+		admissionMu.Lock()
+		if maxConns > 0 && hub.ClientCount()+pending >= maxConns {
+			admissionMu.Unlock()
 			hub.connRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
 			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
 			return
 		}
-		// Pending until the pumps start: the handshake can wait up to
-		// readyAdmissionWait for a permit before it registers, and the brief
-		// overlap with ClientCount after registerNow errs toward refusing.
-		pending.Add(1)
+		pending++
+		admissionMu.Unlock()
+
 		var ended bool
 		endPending := func() {
 			if !ended {
 				ended = true
-				pending.Add(-1)
+				admissionMu.Lock()
+				pending--
+				admissionMu.Unlock()
 			}
 		}
 		defer endPending()
@@ -116,6 +128,12 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		startPumps()
 	}
 }
+
+// serveWSAdmissionRaceHook, when non-nil, runs once per ServeWS upgrade request
+// between the capacity check and pending.Add(1), widening that window so a test
+// can prove the check-then-add is not atomic. Test-only (nil in production),
+// same pattern as handleReconnectPreRegisterRaceHook.
+var serveWSAdmissionRaceHook func()
 
 // handleReconnectPreRegisterRaceHook, when non-nil, runs once inside
 // handleReconnect's h.seqMu critical section immediately before the
