@@ -696,11 +696,10 @@ function buildVoiceAudioTabInner(
         maxWidth: 320,
         maxHeight: 180,
       });
-      if (signal.aborted) {
-        void desktop.nativeVoice.stopCameraPreview();
-        return;
-      }
-      if (thisRequest !== cameraRequestId) {
+      if (signal.aborted || thisRequest !== cameraRequestId) {
+        // A newer request owns the single native preview slot: it has already
+        // replaced this capture, so this request disowns it and reclaims
+        // nothing (stopping here would release the newer preview's capture).
         return;
       }
       const renderer = new NativeVideoRenderer(`${started.frames}/camera`);
@@ -716,6 +715,11 @@ function buildVoiceAudioTabInner(
       registerNativePreview(stop);
     } catch (err) {
       if (signal.aborted || thisRequest !== cameraRequestId) return;
+      // This request is still the current one and owns the single native
+      // preview slot: a failed start may have left a superseded request's
+      // capture running there with no renderer, so release it now.
+      if (activeNativePreview === null)
+        void desktop.nativeVoice.stopCameraPreview().catch(() => {});
       const msg =
         err instanceof Error && err.message ? err.message : t("voiceAudio.cameraUnavailable");
       setText(previewLabel, msg);

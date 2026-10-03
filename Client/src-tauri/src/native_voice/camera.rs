@@ -135,19 +135,16 @@ impl Target {
         Ok(Self::Device(id.to_string()))
     }
 
-    /// The concrete device id to open: the requested one when it is listed,
-    /// otherwise the first listed camera — what `Default`, and a saved id that
-    /// no longer matches any device, both mean. `None` when no camera is
-    /// listed; `Synthetic` opens no device.
+    /// The concrete device id to open: the requested one only when it exactly
+    /// matches a listed device, otherwise the first listed camera — what
+    /// `Default`, and a saved id that no longer matches any device, both mean.
+    /// A requested id that no listed camera matches is never used as-is.
+    /// `None` when no camera is listed; `Synthetic` opens no device.
     fn resolve_id(&self, listed: &[CameraDevice]) -> Option<String> {
         match self {
             Target::Synthetic { .. } => None,
-            Target::Device(id) => listed
-                .iter()
-                .find(|d| d.id == *id)
-                .or_else(|| listed.first())
-                .map(|d| d.id.clone()),
-            Target::Default => listed.first().map(|d| d.id.clone()),
+            Target::Device(id) if listed.iter().any(|d| d.id == *id) => Some(id.clone()),
+            Target::Device(_) | Target::Default => listed.first().map(|d| d.id.clone()),
         }
     }
 }
@@ -683,17 +680,33 @@ mod tests {
             Some("/dev/video2")
         );
         assert_eq!(
-            Target::Device("/dev/video9".into())
-                .resolve_id(&listed)
-                .as_deref(),
-            Some("/dev/video0")
-        );
-        assert_eq!(
             Target::Default.resolve_id(&listed).as_deref(),
             Some("/dev/video0")
         );
         assert_eq!(Target::Device("/dev/video9".into()).resolve_id(&[]), None);
         assert_eq!(Target::Default.resolve_id(&[]), None);
+    }
+
+    /// An unlisted id must never reach a GStreamer property: only an id that
+    /// exactly matches a listed device resolves, otherwise the first listed
+    /// camera does; with nothing listed the caller is told there is no device.
+    #[test]
+    fn an_unlisted_or_hostile_id_resolves_to_a_listed_device_or_none() {
+        let listed = vec![CameraDevice {
+            id: "/dev/video0".into(),
+            name: "Cam A".into(),
+            index: 0,
+        }];
+        for id in ["evil;id", "-evil", "", "/dev/video9"] {
+            assert_eq!(
+                Target::Device(id.into()).resolve_id(&listed).as_deref(),
+                Some("/dev/video0"),
+                "{id:?} must not be used as-is"
+            );
+        }
+        for id in ["evil;id", "-evil", "/dev/video9"] {
+            assert_eq!(Target::Device(id.into()).resolve_id(&[]), None, "{id:?}");
+        }
     }
 
     /// A synthetic camera drives the capture loop, previews, publishes to a

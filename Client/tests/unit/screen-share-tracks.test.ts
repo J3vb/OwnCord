@@ -451,6 +451,73 @@ describe("enableCamera", () => {
     expect(voiceStore.getState().localCamera).toBe(false);
     expect(state.manualCameraTrack).toBeNull();
   });
+
+  it("unpublishes and stays silent when the device unplugs during the publish round-trip", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const video = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(video);
+    let resolvePublish!: () => void;
+    rig.publishTrack.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolvePublish = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(rig.publishTrack).toHaveBeenCalled();
+    });
+    // The unplug lands after enableCamera observed the track as live but
+    // before the publish resolves: it disables the camera, which stops the
+    // track and clears state.
+    (video.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
+    await vi.waitFor(() => {
+      expect(voiceStore.getState().localCamera).toBe(false);
+    });
+    resolvePublish();
+    await enabling;
+
+    // Undo the publish that landed after the disable's unpublish, and do not
+    // announce a camera that is off.
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
+    expect(video.stop).toHaveBeenCalled();
+    expect(state.manualCameraTrack).toBeNull();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+  });
+
+  it("still turns the camera off on unplug after an earlier enable/disable cycle", async () => {
+    const rig = fakeRoom();
+    const deps = fakeDeps(rig.room);
+    const first = fakeVideoTrack();
+    const second = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    // First cycle installs and then removes its ended listener.
+    await enableCamera(state, deps);
+    await disableCamera(state, deps);
+    // A second enable must observe a later unplug too; the per-track listener
+    // must not have been lost when the first track stopped.
+    await enableCamera(state, deps);
+    deps.wsSend.mockClear();
+
+    (second.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
+
+    await vi.waitFor(() => {
+      expect(deps.wsSend).toHaveBeenCalledWith({
+        type: "voice_camera",
+        payload: { enabled: false },
+      });
+    });
+    expect(voiceStore.getState().localCamera).toBe(false);
+    expect(state.manualCameraTrack).toBeNull();
+    expect(rig.unpublishTrack).toHaveBeenCalledWith(second.mediaStreamTrack);
+  });
 });
 
 // ── disableCamera ──────────────────────────────────────────────────────────

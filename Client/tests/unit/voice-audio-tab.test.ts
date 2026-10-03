@@ -1422,8 +1422,14 @@ describe("VoiceAudioTab UI structure", () => {
 
 describe("VoiceAudioTab on the Linux native audio engine", () => {
   const getUserMedia = vi.fn();
+  const startCameraPreview = vi.fn();
+  const stopCameraPreview = vi.fn();
   beforeEach(async () => {
     vi.resetModules();
+    startCameraPreview
+      .mockReset()
+      .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok" });
+    stopCameraPreview.mockReset().mockResolvedValue(undefined);
     vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
     vi.doMock("../../src/features/voice/native/devices", () => ({
@@ -1436,12 +1442,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     vi.doMock("../../src/platform/desktop", () => ({
       desktop: {
         nativeVoice: {
-          startCameraPreview: vi.fn().mockResolvedValue({
-            width: 320,
-            height: 180,
-            frames: "ws://127.0.0.1:9/tok",
-          }),
-          stopCameraPreview: vi.fn().mockResolvedValue(undefined),
+          startCameraPreview: (...args: unknown[]) => startCameraPreview(...args) as unknown,
+          stopCameraPreview: (...args: unknown[]) => stopCameraPreview(...args) as unknown,
         },
       },
     }));
@@ -1482,6 +1484,18 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     document.body.appendChild(element);
     await new Promise((r) => setTimeout(r, 0));
     return { element };
+  }
+
+  /** The camera select once its device options have been populated. */
+  async function cameraSelect(element: HTMLElement): Promise<HTMLSelectElement> {
+    let select: HTMLSelectElement | undefined;
+    await vi.waitFor(() => {
+      select = [...element.querySelectorAll("select")].find((sel) =>
+        [...sel.options].some((o) => o.value === "cam-1"),
+      );
+      expect(select).toBeDefined();
+    });
+    return select!;
   }
 
   it("hides the input volume and sensitivity controls and explains why", async () => {
@@ -1536,5 +1550,80 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       [...sel.options].some((o) => o.value === "cam-1"),
     );
     expect(videoSelect).toBeDefined();
+  });
+
+  it("does not let a superseded native preview stop the newer capture", async () => {
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[] = []) {}
+        getTracks(): unknown[] {
+          return this.tracks;
+        }
+      },
+    );
+    // First request starts and stays in flight; the user picks another camera
+    // before it resolves, so the newer request owns the single native slot.
+    let resolveFirst!: (v: { width: number; height: number; frames: string }) => void;
+    startCameraPreview
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok2" });
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    const videoSelect = await cameraSelect(element);
+    await vi.waitFor(() => {
+      expect(startCameraPreview).toHaveBeenCalledTimes(1);
+    });
+
+    videoSelect.value = "cam-1";
+    videoSelect.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => {
+      expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    });
+
+    // The newer request has resolved against the slot; now the first resolves
+    // stale. It must not stop the slot the newer preview owns.
+    resolveFirst({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok1" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(stopCameraPreview).not.toHaveBeenCalled();
+  });
+
+  it("releases the slot when the newer native preview fails to start", async () => {
+    // The first request stays in flight; the user picks another camera, and
+    // that newer request rejects before it can replace the backend slot. The
+    // newer request is still current and must reclaim the orphaned capture.
+    let resolveFirst!: (v: { width: number; height: number; frames: string }) => void;
+    startCameraPreview
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+      )
+      .mockRejectedValue(new Error("no camera"));
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    const videoSelect = await cameraSelect(element);
+    await vi.waitFor(() => {
+      expect(startCameraPreview).toHaveBeenCalledTimes(1);
+    });
+
+    videoSelect.value = "cam-1";
+    videoSelect.dispatchEvent(new Event("change"));
+
+    // The newer request failed while the first is still in flight; the failure
+    // path releases the standalone slot so its capture is not left running.
+    await vi.waitFor(() => {
+      expect(stopCameraPreview).toHaveBeenCalled();
+    });
+    void resolveFirst;
   });
 });

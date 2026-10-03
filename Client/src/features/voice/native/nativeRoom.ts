@@ -474,8 +474,8 @@ export class NativeRoom {
     return publication;
   }
 
-  /** A stopped camera track: stop its host capture (a no-op for a capture a
-   *  newer one replaced) and forget its publication. */
+  /** A stopped camera track: forget its publication, then stop its host
+   *  capture (a no-op for a capture a newer one replaced). */
   private stopCamera(session: number, track: NativeCameraTrack): void {
     if (this.camera === track) this.camera = null;
     const pubs = this.localParticipant.trackPublications;

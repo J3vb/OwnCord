@@ -219,7 +219,6 @@ export function rollbackPendingVideo(id: string): "camera" | "screen" | undefine
 /** Mutable state for the manually published camera track. */
 export interface CameraTrackState extends GenerationGuarded {
   manualCameraTrack: LocalVideoTrack | NativeCameraTrack | null;
-  cameraTrackEndedCleanup?: () => void;
 }
 
 /** The native camera publication surface `NativeRoom` adds to
@@ -258,7 +257,6 @@ function unpublishManualTrack(
 }
 
 export function stopManualCameraTrack(state: CameraTrackState, room: Room | null): void {
-  state.cameraTrackEndedCleanup?.();
   if (state.manualCameraTrack === null || room === null) return;
   const track = state.manualCameraTrack;
   state.manualCameraTrack = null;
@@ -312,6 +310,9 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     state.manualCameraTrack = videoTrack;
+    // The `ended` listener is per-track and self-scoped: it acts only while
+    // this track is still the reported camera, independent of any other stop
+    // path.
     const onEnded = (): void => {
       if (
         (state.generation ?? 0) !== generation ||
@@ -324,14 +325,10 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       log.info("Camera track ended externally (device unplugged)");
       void disableCamera(state, deps);
     };
-    const cleanup = (): void => {
+    const removeEndedListener = (): void => {
       videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
-      if (state.cameraTrackEndedCleanup === cleanup) {
-        state.cameraTrackEndedCleanup = undefined;
-      }
     };
-    cameraEndedCleanup = cleanup;
-    state.cameraTrackEndedCleanup = cleanup;
+    cameraEndedCleanup = removeEndedListener;
     videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
     if (videoTrack.mediaStreamTrack.readyState === "ended") {
       await disableCamera(state, deps);
@@ -345,12 +342,14 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
         maxFramerate: quality === "low" ? 15 : 30,
       },
     });
-    if ((state.generation ?? 0) !== generation) {
-      // A disableCamera ran to completion while publishTrack was in flight —
-      // it already reset localCamera and sent voice_camera(false). The publish
-      // may have landed after its unpublish, so undo it again, and stay silent:
-      // announcing voice_camera(true) now would override the disable's final
-      // word on the server.
+    if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
+      // A disableCamera (or the track unplugging) ran to completion while
+      // publishTrack was in flight — it already reset localCamera, stopped the
+      // track and sent voice_camera(false). The publish may have landed after
+      // its unpublish, so undo it again, and stay silent: announcing
+      // voice_camera(true) now would override the disable's final word on the
+      // server.
+      removeEndedListener();
       unpublishManualTrack(room, videoTrack);
       videoTrack.stop();
       if (state.manualCameraTrack === videoTrack) state.manualCameraTrack = null;
