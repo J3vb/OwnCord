@@ -23,7 +23,11 @@ import {
 } from "@lib/audioPipeline";
 import { createMicProcessor, type MicProcessor } from "@lib/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
-import { nativeAudioDevices, nativeCameraDevices } from "../../features/voice/native/devices";
+import {
+  nativeAudioDevices,
+  nativeCameraDevices,
+  nativeCameraSupport,
+} from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { desktop } from "../../platform/desktop";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
@@ -671,7 +675,34 @@ function buildVoiceAudioTabInner(
   void (async () => {
     const device = savedVideoDevice;
     if (isLinuxDesktop()) {
-      await startNativeCameraPreview(device);
+      // The discovery awaits must not outlive a newer request: if the user
+      // picks a camera while they are pending, that choice owns the preview.
+      const thisRequest = cameraRequestId;
+      try {
+        // GStreamer may be missing entirely: no capture can start, so explain why
+        // instead of leaving the preview box empty or showing a generic error.
+        const support = await nativeCameraSupport();
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
+        if (support !== null && !support.available) {
+          setText(previewLabel, t("voiceAudio.gstreamerMissing"));
+          previewLabel.hidden = false;
+          return;
+        }
+        const cameras = await nativeCameraDevices();
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
+        if (cameras !== null && cameras.length === 0) {
+          setText(previewLabel, t("voiceAudio.noCamera"));
+          previewLabel.hidden = false;
+          return;
+        }
+        await startNativeCameraPreview(device);
+      } catch {
+        // A failed support/device query must still explain itself, not leave
+        // the preview box in its default empty state.
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
+        setText(previewLabel, t("voiceAudio.cameraUnavailable"));
+        previewLabel.hidden = false;
+      }
       return;
     }
     if (device === "" && navigator.mediaDevices?.enumerateDevices !== undefined) {

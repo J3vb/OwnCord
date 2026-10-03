@@ -9,6 +9,7 @@ import type {
   NativeVoiceCameraDevice,
   NativeVoiceCameraPreview,
   NativeVoiceCameraStarted,
+  NativeVoiceCameraSupport,
   NativeVoiceConnected,
   NativeVoiceDevices,
   NativeVoiceEnvelope,
@@ -41,6 +42,7 @@ export const nativeVoice: NativeVoice = {
   unpublishCamera: (session, sid) =>
     invoke<void>("native_voice_unpublish_camera", { session, sid }),
   listCameras: () => invoke<NativeVoiceCameraDevice[]>("native_voice_list_cameras"),
+  cameraSupport: () => invoke<NativeVoiceCameraSupport>("native_voice_camera_support"),
   startCamera: (session, source, capture) =>
     invoke<NativeVoiceCameraStarted>("native_voice_start_camera", { session, source, capture }),
   stopCamera: (session, capture) => invoke<void>("native_voice_stop_camera", { session, capture }),

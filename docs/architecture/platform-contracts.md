@@ -26,8 +26,10 @@ the camera path off the webview pump. The registration-based correction was
 measured at `0beee8e` (`dev`,
 2026-09-23) and re-measured after the audio-parity and screen-share merges at
 `2ced3de` (`dev`, 2026-09-23). P3-09 (branch `fm/dp-p309`, 2026-09-30) added
-the `SystemIdle` contract and its `system_idle_ms` command, and P3-04 (branch
-`fm/dp-p304`, 2026-10-01) added the `set_unread_badge` command. The
+the `SystemIdle` contract and its `system_idle_ms` command, P3-04 (branch
+`fm/dp-p304`, 2026-10-01) added the `set_unread_badge` command, and the
+GStreamer support notice (branch `fm/linux-gstreamer-missing-msg`, 2026-10-03)
+added `native_voice_camera_support`. The
 three counts below are re-derived from the tree by
 `Client/tests/unit/platform-contracts-counts.test.ts`, and eslint rejects a
 static or dynamic native import anywhere else.
@@ -78,17 +80,17 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 24    |
-| Distinct `invoke` command names called from `Client/src/`  | 62    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 65    |
+| Distinct `invoke` command names called from `Client/src/`  | 63    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 66    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 65 distinct registrations
+The handler count covers the 66 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the twenty-five `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build registers 64 on Linux
+`#[cfg(feature = "devtools")]` and the twenty-six `native_voice_*` commands
+behind `#[cfg(target_os = "linux")]`, so a default build registers 65 on Linux
 and 39 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -125,6 +127,7 @@ load_identity_key
 load_pending_messages
 login_with_saved_password
 native_voice_build_info
+native_voice_camera_support
 native_voice_clear_key
 native_voice_connect
 native_voice_debug_info

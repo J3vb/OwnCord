@@ -39,6 +39,11 @@ vi.mock("@lib/preferences", () => ({
   savePref: vi.fn(),
 }));
 
+const nativeCameraSupport = vi.hoisted(() => vi.fn());
+vi.mock("../../src/features/voice/native/devices", () => ({
+  nativeCameraSupport: (...args: unknown[]) => nativeCameraSupport(...args),
+}));
+
 const {
   bumpGeneration,
   disableCamera,
@@ -113,6 +118,16 @@ function fakeRoom(): RoomRig {
   return { room, publishTrack, unpublishTrack, setCameraEnabled, setScreenShareEnabled };
 }
 
+/** A fake native (Linux) room: its local participant exposes
+ *  `createCameraTracks`, the method that marks the host-capture path. */
+function fakeNativeRoom(): RoomRig & { createCameraTracks: ReturnType<typeof vi.fn> } {
+  const rig = fakeRoom();
+  const createCameraTracks = vi.fn().mockResolvedValue([]);
+  (rig.room.localParticipant as unknown as { createCameraTracks: unknown }).createCameraTracks =
+    createCameraTracks;
+  return { ...rig, createCameraTracks };
+}
+
 /**
  * Builds a VideoTrackDeps with spies attached. `wsSend` is surfaced directly
  * rather than reached through `getWs()`, which narrows to `never` once a test
@@ -141,6 +156,7 @@ beforeEach(() => {
   createLocalVideoTrack.mockReset();
   createLocalScreenTracks.mockReset();
   loadPref.mockReset().mockReturnValue("");
+  nativeCameraSupport.mockReset().mockResolvedValue({ available: true, missing: [] });
   voiceStore.setState((prev) => ({ ...prev, localCamera: false, localScreenshare: false }));
   vi.stubGlobal(
     "MediaStream",
@@ -266,6 +282,91 @@ describe("enableCamera", () => {
 
     expectConsole("warn", /\[screenShare\] Cannot enable camera: no active voice session/);
     expect(deps.onError).toHaveBeenCalledWith("Join a voice channel first");
+  });
+
+  it("reports missing native camera support instead of starting a capture", async () => {
+    const rig = fakeNativeRoom();
+    nativeCameraSupport.mockResolvedValue({ available: false, missing: ["v4l2src"] });
+    const deps = fakeDeps(rig.room);
+
+    await enableCamera({ manualCameraTrack: null }, deps);
+
+    expectConsole("warn", /\[screenShare\] Cannot enable camera: native camera support is missing/);
+    expect(deps.onError).toHaveBeenCalledWith(expect.stringContaining("Camera support is missing"));
+    expect(rig.createCameraTracks).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
+
+  it("starts the native capture when support is available", async () => {
+    const rig = fakeNativeRoom();
+    const track = fakeVideoTrack();
+    rig.createCameraTracks.mockResolvedValue([track]);
+    const deps = fakeDeps(rig.room);
+
+    await enableCamera({ manualCameraTrack: null }, deps);
+
+    expect(nativeCameraSupport).toHaveBeenCalled();
+    expect(rig.createCameraTracks).toHaveBeenCalled();
+    expect(deps.onError).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localCamera).toBe(true);
+  });
+
+  it("does not re-enable the camera when a disable lands during the support check", async () => {
+    const rig = fakeNativeRoom();
+    const deps = fakeDeps(rig.room);
+    let resolveSupport!: (s: { available: boolean; missing: string[] }) => void;
+    nativeCameraSupport.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSupport = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(nativeCameraSupport).toHaveBeenCalled();
+    });
+    await disableCamera(state, deps);
+    resolveSupport({ available: true, missing: [] });
+    await enabling;
+
+    expect(rig.createCameraTracks).not.toHaveBeenCalled();
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
+    expect(voiceStore.getState().localCamera).toBe(false);
+  });
+
+  it("marks the camera on before the support check so a second toggle disables it", async () => {
+    const rig = fakeNativeRoom();
+    const deps = fakeDeps(rig.room);
+    let resolveSupport!: (s: { available: boolean; missing: string[] }) => void;
+    nativeCameraSupport.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSupport = resolve;
+      }),
+    );
+    const state = { manualCameraTrack: null as LocalVideoTrack | null };
+
+    const enabling = enableCamera(state, deps);
+    await vi.waitFor(() => {
+      expect(nativeCameraSupport).toHaveBeenCalled();
+    });
+
+    // A second click during the round-trip reads the camera as on, so
+    // onCameraToggle routes it to disableCamera rather than re-entering here.
+    expect(voiceStore.getState().localCamera).toBe(true);
+    await disableCamera(state, deps);
+    resolveSupport({ available: true, missing: [] });
+    await enabling;
+
+    expect(rig.createCameraTracks).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localCamera).toBe(false);
+    expect(deps.wsSend).not.toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: true },
+    });
   });
 
   it("releases the created track when publishing fails (BUG-100)", async () => {

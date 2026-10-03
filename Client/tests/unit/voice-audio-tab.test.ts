@@ -1424,12 +1424,18 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const getUserMedia = vi.fn();
   const startCameraPreview = vi.fn();
   const stopCameraPreview = vi.fn();
+  const nativeCameraDevices = vi.fn();
+  const nativeCameraSupport = vi.fn();
   beforeEach(async () => {
     vi.resetModules();
     startCameraPreview
       .mockReset()
       .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok" });
     stopCameraPreview.mockReset().mockResolvedValue(undefined);
+    nativeCameraDevices
+      .mockReset()
+      .mockResolvedValue([{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }]);
+    nativeCameraSupport.mockReset().mockResolvedValue({ available: true, missing: [] });
     vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
     vi.doMock("../../src/features/voice/native/devices", () => ({
@@ -1437,7 +1443,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         kind === "audioinput"
           ? [{ deviceId: "guid-mic", label: "USB Mic", kind }]
           : [{ deviceId: "guid-spk", label: "Speakers", kind }],
-      nativeCameraDevices: async () => [{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }],
+      nativeCameraDevices: (...args: unknown[]) => nativeCameraDevices(...args),
+      nativeCameraSupport: (...args: unknown[]) => nativeCameraSupport(...args),
     }));
     vi.doMock("../../src/platform/desktop", () => ({
       desktop: {
@@ -1650,5 +1657,78 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     await vi.waitFor(() => {
       expect(stopCameraPreview).toHaveBeenCalled();
     });
+  });
+
+  it("explains missing camera support instead of showing an empty list", async () => {
+    nativeCameraDevices.mockResolvedValue([]);
+    nativeCameraSupport.mockResolvedValue({ available: false, missing: ["v4l2src"] });
+    const tab = await mount();
+    const label = tab.element.querySelector(".camera-preview-label");
+    await vi.waitFor(() => {
+      expect(label?.textContent).toContain("Camera support is missing");
+    });
+    // No capture is attempted when the backend can never start one.
+    expect(startCameraPreview).not.toHaveBeenCalled();
+  });
+
+  it("shows the no-camera wording when support is available but none is plugged in", async () => {
+    nativeCameraDevices.mockResolvedValue([]);
+    nativeCameraSupport.mockResolvedValue({ available: true, missing: [] });
+    const tab = await mount();
+    const label = tab.element.querySelector(".camera-preview-label");
+    await vi.waitFor(() => {
+      expect(label?.textContent).toBe("No camera found");
+    });
+    // No capture is attempted when there is no device to capture.
+    expect(startCameraPreview).not.toHaveBeenCalled();
+  });
+
+  it("explains a failed support query instead of leaving the preview empty", async () => {
+    nativeCameraSupport.mockRejectedValue(new Error("ipc failed"));
+    const tab = await mount();
+    const label = tab.element.querySelector(".camera-preview-label");
+    await vi.waitFor(() => {
+      expect(label?.textContent).toBe("Camera unavailable");
+    });
+    expect(startCameraPreview).not.toHaveBeenCalled();
+  });
+
+  it("does not let initial discovery replace a preview the user picked", async () => {
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[] = []) {}
+        getTracks(): unknown[] {
+          return this.tracks;
+        }
+      },
+    );
+    nativeCameraSupport.mockResolvedValue({ available: true, missing: [] });
+    // Hold the initial discovery open while the user picks a camera.
+    let resolveDevices!: (v: unknown[]) => void;
+    nativeCameraDevices.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDevices = resolve;
+      }),
+    );
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    // Let the support query resolve and the IIFE reach the discovery await.
+    await new Promise((r) => setTimeout(r, 0));
+    const videoSelect = element.querySelector(
+      'select[aria-label="Video Device"]',
+    ) as HTMLSelectElement;
+    expect(videoSelect).toBeTruthy();
+    videoSelect.value = "cam-1";
+    videoSelect.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(startCameraPreview).toHaveBeenCalledTimes(1));
+    // Discovery now resolves with the startup preference; the stale
+    // continuation must not replace the preview the user already selected.
+    resolveDevices([{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(startCameraPreview).toHaveBeenCalledTimes(1);
+    expect(stopCameraPreview).not.toHaveBeenCalled();
   });
 });

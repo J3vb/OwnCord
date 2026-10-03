@@ -4,11 +4,12 @@ const linux = vi.hoisted(() => ({ value: true }));
 vi.mock("./platform", () => ({ isLinuxDesktop: () => linux.value }));
 const listDevices = vi.hoisted(() => vi.fn());
 const listCameras = vi.hoisted(() => vi.fn());
+const cameraSupport = vi.hoisted(() => vi.fn());
 vi.mock("../../../platform/desktop", () => ({
-  desktop: { nativeVoice: { listDevices, listCameras } },
+  desktop: { nativeVoice: { listDevices, listCameras, cameraSupport } },
 }));
 
-import { nativeAudioDevices, nativeCameraDevices } from "./devices";
+import { nativeAudioDevices, nativeCameraDevices, nativeCameraSupport } from "./devices";
 
 beforeEach(() => {
   listDevices.mockReset();
@@ -18,6 +19,8 @@ beforeEach(() => {
   });
   listCameras.mockReset();
   listCameras.mockResolvedValue([{ id: "/dev/video0", name: "HD Webcam" }]);
+  cameraSupport.mockReset();
+  cameraSupport.mockResolvedValue({ available: true, missing: [] });
 });
 
 describe("nativeAudioDevices", () => {
@@ -50,5 +53,22 @@ describe("nativeCameraDevices", () => {
     linux.value = false;
     await expect(nativeCameraDevices()).resolves.toBeNull();
     expect(listCameras).not.toHaveBeenCalled();
+  });
+});
+
+describe("nativeCameraSupport", () => {
+  it("reports the native backend's camera support", async () => {
+    linux.value = true;
+    cameraSupport.mockResolvedValue({ available: false, missing: ["v4l2src"] });
+    await expect(nativeCameraSupport()).resolves.toEqual({
+      available: false,
+      missing: ["v4l2src"],
+    });
+  });
+
+  it("returns null off Linux where the web path owns cameras", async () => {
+    linux.value = false;
+    await expect(nativeCameraSupport()).resolves.toBeNull();
+    expect(cameraSupport).not.toHaveBeenCalled();
   });
 });

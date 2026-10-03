@@ -26,6 +26,7 @@ export const nativeVoice: NativeVoice = {
     (await service()).publishCamera(session, capture, options),
   unpublishCamera: async (session, sid) => (await service()).unpublishCamera(session, sid),
   listCameras: async () => (await service()).listCameras(),
+  cameraSupport: async () => (await service()).cameraSupport(),
   startCamera: async (session, source, capture) =>
     (await service()).startCamera(session, source, capture),
   stopCamera: async (session, capture) => (await service()).stopCamera(session, capture),
