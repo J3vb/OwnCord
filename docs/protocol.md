@@ -984,9 +984,11 @@ change, left the DM) is skipped, and the stored total is still corrected.
 Targeted, unsequenced and never replayed; a disconnected reader recovers the
 authoritative total on their next `ready`.
 
-The client ignores the frame for the channel currently on screen (its own
-`chat_message` handles that badge) and for a DM-channel id (a DM's badge lives
-in the DM store and its mention bump rides the DM's `chat_message`).
+The client ignores the frame for the active channel only while the window is
+focused (its own `chat_message` handles that badge); an unfocused window applies
+it, so a mention landing on the channel on screen still badges while the reader
+is away (P4-03). It ignores a DM-channel id too (a DM's badge lives in the DM
+store and its mention bump rides the DM's `chat_message`).
 
 ---
 
