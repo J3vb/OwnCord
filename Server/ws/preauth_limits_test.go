@@ -131,10 +131,8 @@ func TestServeWS_ConcurrentUpgradesAdmitOnlyToCap(t *testing.T) {
 	admitted := make(chan *websocket.Conn, attempts)
 	rejected := make(chan int, attempts)
 	var wg sync.WaitGroup
-	for i := 0; i < attempts; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range attempts {
+		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			conn, resp, err := websocket.Dial(ctx, wsURL, nil)
@@ -150,7 +148,7 @@ func TestServeWS_ConcurrentUpgradesAdmitOnlyToCap(t *testing.T) {
 				status = resp.StatusCode
 			}
 			rejected <- status
-		}()
+		})
 	}
 
 	arrived.Wait()

@@ -954,8 +954,8 @@ export const options = {
         }
       : {}),
     // A cap in config must never be published as the hardware ceiling. Only
-    // the max_ws_connections guardrail increments this counter (ws/serve.go:43
-    // is its one increment site), so count==0 asserts the cap never bound —
+    // the max_ws_connections guardrail increments this counter (its one
+    // increment site is in ws/serve.go), so count==0 asserts the cap never bound —
     // which is what makes "the search found the server's ceiling" a claim with
     // evidence behind it rather than an assumption. The workflow sets the cap
     // at twice the probe maximum for exactly this check.
