@@ -107,9 +107,11 @@ with no behaviour change.
 The dependency is Linux-only (`[target.'cfg(target_os = "linux")'.dependencies]`
 in `Client/src-tauri/Cargo.toml`); the backend lives in
 `Client/src-tauri/src/native_voice/` (`session.rs` is the room, `video.rs`
-the frame socket, `mod.rs` the Tauri commands and state). The build prerequisite — clang >= 21 and a prebuilt
-libwebrtc — is documented in [contributing.md](../contributing.md#client-tauri-v2)
-and installed by `Client/scripts/linux-webrtc-toolchain.sh`.
+the frame socket, `mod.rs` the Tauri commands and state). The Linux build
+prerequisites — clang >= 21, a prebuilt libwebrtc, and, for the camera, the
+GStreamer `-dev` headers — are documented in
+[contributing.md](../contributing.md#client-tauri-v2); `Client/scripts/linux-webrtc-toolchain.sh`
+installs clang and fetches libwebrtc.
 
 ### Phase 1: audio
 
@@ -383,14 +385,13 @@ adds about 58% in the webview, and the WebSocket relay through WebKit's
 network process adds about 10% per direction. Most of the webview figure is
 software GL, which a desktop GPU takes over.
 
-**Not exercised on real hardware:** a physical camera (WebKitGTK's GStreamer
-capture from V4L2 or PipeWire, whose `VideoFrame`s are likely I420 or NV12
-rather than the mock's RGBA; both conversions are unit-tested in `video.rs`),
-GPU-accelerated WebGL, a real Wayland or X11 session, and the packaged Tauri
-app driving the flow end to end (the unit tests cover `NativeRoom` and the
-contract, and the harness covers the renderer and uplink against a real
-session). CI exercises the native video path and E2EE with synthetic sources
-only; the CPU harness is not in CI.
+**Not exercised on real hardware:** a physical camera (the backend's GStreamer
+capture from V4L2 or PipeWire, whose samples `videoconvert` forces to I420;
+`camera.rs`'s unit tests cover that conversion), GPU-accelerated WebGL, a real
+Wayland or X11 session, and the packaged Tauri app driving the flow end to end
+(the unit tests cover `NativeRoom` and the contract, and the harness covers the
+renderer and the camera track against a real session). CI exercises the native
+video path and E2EE with synthetic sources only; the CPU harness is not in CI.
 
 **Known leak, measured.** Every camera off/on republishes, and each publish is
 a new sender: 5 cycles grew the process by **+3 idle threads per cycle**. That

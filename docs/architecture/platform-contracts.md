@@ -85,10 +85,10 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 51    |
 
-The handler count covers the 64 distinct registrations
+The handler count covers the 65 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the twenty-four `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build registers 63 on Linux
+`#[cfg(feature = "devtools")]` and the twenty-five `native_voice_*` commands
+behind `#[cfg(target_os = "linux")]`, so a default build registers 64 on Linux
 and 39 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -217,12 +217,15 @@ native surface itself lives only in `platform/desktop/`.
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                          | `api/core` (`open_devtools`)                                                                                               | unsupported — the browser has its own devtools already      |
 | System idle       | `pages/MainPage.ts` (for `lib/autoIdle.ts`)                                   | `api/core` (`system_idle_ms`)                                                                                              | unsupported — answers `null`; in-page activity decides      |
 
-**Media devices are not on this map, deliberately.** No `@tauri-apps` surface
-exists for them: every media-device call site (`lib/deviceManager.ts`,
-`lib/connectionDiagnostics.ts`, `components/settings/VoiceAudioTab.ts`) is the
-Web API `navigator.mediaDevices`, and no Rust command touches devices. A
-contract would wrap a web API that already works unchanged in a browser, so
-B7-5 closed the PRD's "media and devices" clause with this finding instead.
+**Media devices are not on this map, deliberately.** No generic `@tauri-apps`
+surface exists for them: the cross-platform media-device call sites
+(`lib/deviceManager.ts`, `lib/connectionDiagnostics.ts`,
+`components/settings/VoiceAudioTab.ts`) use the Web API
+`navigator.mediaDevices`, while the Linux-native voice session lists its audio
+and camera devices through its own `native_voice_*` commands (the audio
+parity and Linux native camera work, above). A contract would wrap a web API
+that already works unchanged in a browser, so B7-5 closed the PRD's "media and
+devices" clause with this finding instead.
 
 Two files appear under more than one contract (`lib/profiles.ts` does HTTP and
 settings; `settings/AdvancedTab.ts` spans four). That is expected — the clusters

@@ -583,8 +583,8 @@ export class NativeRoom {
     if (screen.track instanceof NativeScreenTrack) screen.track.stop();
   }
 
-  /** Dispose every renderer and the camera pump without raising events: the
-   *  session teardown that calls this clears the tiles itself. */
+  /** Dispose every renderer and the local camera track without raising events:
+   *  the session teardown that calls this clears the tiles itself. */
   private releaseVideo(): void {
     for (const p of this.remoteParticipants.values())
       for (const pub of p.trackPublications.values()) {
