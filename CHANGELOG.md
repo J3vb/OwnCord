@@ -72,6 +72,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **Join, leave, mute and deafen now make a short sound, on the speaker you chose.** A call was silent apart from the ring: you could not hear someone join or leave your channel, and toggling mute or deafen gave no feedback. These now play a short chime, on the output device picked in Settings › Voice & Audio (on Linux the system default, where the desktop webview cannot route it). Everything stays silent while you are deafened in a call — except an incoming ring, which still plays for a call. Turn the voice sounds off under Settings › Notifications.
 
+### Accounts & admin
+
+- **Most server settings can now be changed from the admin panel, without editing `config.yaml`.** A new owner-only **Server configuration** page writes its values to a JSON file beside the database and applies them after a restart; the page offers **Restart now**. A value pinned by an `OWNCORD_*` environment variable stays locked, and a hand-edited overrides file cannot reach a protected key. The page covers 50 of the 77 keys: secrets, file paths, the listener/TLS identity, the admin network perimeter, the update source, pprof, and the upload file-type lists stay `config.yaml`/environment-only.
+
 ### Changed
 
 - **Linux desktop:** a native crash (voice/video or the window system) now ends the client log with a line naming the signal and thread, instead of the log just stopping.

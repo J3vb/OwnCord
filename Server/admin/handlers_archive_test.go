@@ -187,6 +187,26 @@ func TestHandleArchive_ConfigMissingStillArchives(t *testing.T) {
 	}
 }
 
+// TestHandleArchive_CarriesConfigOverrides: the panel's saved values live in
+// config-overrides.json inside the data directory, which the archive already
+// walks wholesale — so a migrated server keeps its panel settings. This pins
+// that the wholesale walk does not start excluding the file.
+func TestHandleArchive_CarriesConfigOverrides(t *testing.T) {
+	f := newArchiveFixture(t, func(_ string, cfg *config.Config) {
+		if err := config.SaveOverrides(config.OverridesPath(cfg.Server.DataDir), map[string]any{"logging.level": "debug"}); err != nil {
+			t.Fatalf("seed overrides: %v", err)
+		}
+	})
+	entries := archiveEntries(t, f)
+	data, ok := entries["data/config-overrides.json"]
+	if !ok {
+		t.Fatalf("archive is missing data/config-overrides.json; got %v", archiveNames(entries))
+	}
+	if !strings.Contains(string(data), "logging.level") {
+		t.Errorf("archived overrides = %s, want the saved key", data)
+	}
+}
+
 // TestHandleArchive_RequiresOwner: the archive holds password hashes and the
 // key files, so only the Owner may download it.
 func TestHandleArchive_RequiresOwner(t *testing.T) {
