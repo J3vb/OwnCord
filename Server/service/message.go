@@ -187,9 +187,9 @@ type MessageService struct {
 	mentionWorker atomic.Pointer[mentionWorker]
 	// mentionEmitMu serializes each mention_count write with the frame it emits,
 	// so frame order matches commit order across the coalesced worker flush and
-	// the removal paths (P5-O05 / DP-27 ordering). Held across the write and the
-	// notify, never across job resolution, so no DB read runs under it. See
-	// mentionWorker.emitMu and reverseMentionCounts.
+	// the removal paths (P5-O05 / DP-27 ordering). Held across the write, the
+	// notify and the visibility check inside it; job resolution stays outside.
+	// See mentionWorker.emitMu and reverseMentionCounts.
 	mentionEmitMu syncutil.Mutex
 	// liveStatus returns userID's live status, "" when they hold no live
 	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
