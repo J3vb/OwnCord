@@ -11,12 +11,16 @@ import {
   prependMessages,
   isChannelLoaded,
   getChannelMessages,
+  isWindowDetached,
   setChannelLoading,
   setChannelLoadError,
 } from "@stores/messages.store";
+import { getUnreadOnOpen } from "@stores/channels.store";
 
 const log = createLogger("message-ctrl");
 const PAGE_SIZE = 50;
+/** The server's largest history page (maxMessageLimit). */
+const MAX_PAGE_SIZE = 100;
 
 // ---------------------------------------------------------------------------
 // Message Controller
@@ -40,25 +44,44 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
+    // P4-01 R3: a revisit asks for enough rows to reach back to the oldest
+    // cached row (capped at the server's 100-row page), so the one refetch
+    // revalidates every row it keeps — an edit made while away shows, a delete
+    // made while away is gone. A detached around-window's rows are not the
+    // tail, so they are excluded: a jump back to present fetches a plain page.
+    const cached = isWindowDetached(channelId)
+      ? []
+      : getChannelMessages(channelId).filter((m) => m.status === "sent");
+    const limit = Math.min(
+      MAX_PAGE_SIZE,
+      Math.max(PAGE_SIZE, cached.length + getUnreadOnOpen(channelId)),
+    );
     // Runs synchronously before the first await, so an empty message region
     // shows its in-region loading placeholder from the very first render. A
     // revisit's cached rows stay on screen instead, and setMessages below
     // reconciles the refetched page into them.
     setChannelLoading(channelId);
     try {
-      const resp = await api.getMessages(channelId, { limit: PAGE_SIZE }, signal);
+      const resp = await api.getMessages(channelId, { limit }, signal);
       // Re-check "loaded" after the await: a same-channel jump can install an
       // around-window (setAroundMessages) while this mount-time tail fetch is
       // still in flight — nothing aborts this fetch's signal in that case.
       // Both landing marks the channel loaded, so a tail response that lost
       // the race is discarded instead of clobbering the jump's window.
       if (!signal.aborted && !isChannelLoaded(channelId)) {
+        // Rows the extended page brought from above the cached window would
+        // land as a prepend and rebuild the list; leave them for scrolling up.
+        // Only an extended page (limit > PAGE_SIZE) is trimmed — a default
+        // page's extra rows are history the failed-first-load retry fetched.
+        const head = limit > PAGE_SIZE ? (cached[0]?.id ?? 0) : 0;
+        const messages = resp.messages.filter((m) => m.id >= head);
+        const hasMore = resp.has_more || messages.length < resp.messages.length;
         log.info("Messages loaded", {
           channelId,
-          count: resp.messages.length,
-          hasMore: resp.has_more,
+          count: messages.length,
+          hasMore,
         });
-        setMessages(channelId, resp.messages, resp.has_more);
+        setMessages(channelId, messages, hasMore);
       }
     } catch (err) {
       // Same re-check as the success path above: a same-channel jump can

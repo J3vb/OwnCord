@@ -58,6 +58,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Messages
 
+- **Coming back to a channel keeps the older messages you had scrolled to.** Leaving a channel and returning dropped everything you had loaded beyond the newest 50, so you had to scroll up and wait for them again. The one reload now asks for enough rows to cover what you had loaded (up to 100), so those older messages stay put — and because they are checked in that same reload, an edit or delete made while you were away still shows.
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
 
 ### Mentions
