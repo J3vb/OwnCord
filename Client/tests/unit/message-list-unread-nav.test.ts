@@ -268,6 +268,20 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(unreadCount()).toBe(1);
     });
 
+    it("does not mark read from a scroll while its channel is not the active one", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      incrementUnread(CHANNEL_ID, true);
+      setActiveChannel(999);
+
+      scrollUp();
+      scrollToEnd();
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      expect(unreadCount()).toBe(1);
+    });
+
     it("stops listening for focus once destroyed", () => {
       hasFocus.mockReturnValue(false);
       setMessages(range(1, 50));

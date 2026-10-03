@@ -38,7 +38,7 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
-import { getUnreadOnOpen } from "@stores/channels.store";
+import { channelsStore, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
@@ -506,6 +506,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   function markReadIfSeen(): void {
     if (root === null) return;
+    if (channelsStore.getState().activeChannelId !== options.channelId) return;
     if (!isNearBottom()) return;
     if (isChannelAway(options.channelId)) return;
     if (!hasUnread(options.channelId)) return;
