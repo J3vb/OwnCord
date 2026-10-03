@@ -981,7 +981,12 @@ mentioning message pushes the same frame with the reader's lowered total, so a
 badge the event raised is also cleared live — but only to a reader who can still
 see the channel; a reader whose access was revoked (removed override, role
 change, left the DM) is skipped, and the stored total is still corrected.
-Targeted, unsequenced and never replayed; a disconnected reader recovers the
+
+Every write and the frame it pushes are one critical section, so a reader
+receives frames in the order the server changed its total: an increment flush
+coalesced on the mention worker and a deletion's decrement cannot invert, so a
+reader's last frame always carries the latest committed total. Targeted,
+unsequenced and never replayed; a disconnected reader recovers the
 authoritative total on their next `ready`.
 
 The client ignores the frame for the channel currently on screen (its own

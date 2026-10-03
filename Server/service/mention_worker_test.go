@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"runtime"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -77,6 +79,170 @@ func (f *fakeMentionNotifier) snapshot() []mentionNotifyCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]mentionNotifyCall(nil), f.calls...)
+}
+
+func (f *fakeMentionNotifier) reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = nil
+}
+
+// lastFor returns the total carried by the final mention_count frame for one
+// (user, channel), and whether any arrived.
+func (f *fakeMentionNotifier) lastFor(userID, channelID int64) (int64, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, call := range slices.Backward(f.calls) {
+		if call.userID == userID && call.channelID == channelID {
+			return call.count, true
+		}
+	}
+	return 0, false
+}
+
+// orderedRaceStore is a Store double that widens the write-to-emit gap the
+// mention ordering fix closes, so a test can prove the reverse write cannot
+// interleave with an increment flush's write. IncrementMentionCountsBatch
+// blocks after "committing" until released; DecrementMentionCounts reports
+// every entry attempt on decStarted. The embedded Store is nil: only these two
+// methods are called.
+type orderedRaceStore struct {
+	Store
+	incStarted chan struct{}
+	incRelease chan struct{}
+	decStarted chan struct{}
+	// count is the "authoritative" total the two writes act on, so the test can
+	// compare the final stored total with the last delivered frame.
+	count atomic.Int64
+}
+
+func (s *orderedRaceStore) IncrementMentionCountsBatch(_ context.Context, _ int64, _ []db.MentionBatchEntry) (map[int64]int64, error) {
+	s.count.Store(1)
+	close(s.incStarted)
+	<-s.incRelease
+	return map[int64]int64{2: 1}, nil
+}
+
+func (s *orderedRaceStore) DecrementMentionCounts(_ context.Context, _ int64, _ []int64) (map[int64]int64, error) {
+	s.count.Store(0)
+	select {
+	case s.decStarted <- struct{}{}:
+	default:
+	}
+	return map[int64]int64{2: 0}, nil
+}
+
+// TestMentionWorker_ReverseWaitsForIncrementEmit pins the ordering guarantee
+// DP-27 introduced: an increment flush's write and its frames are one critical
+// section, so a removal path's reverse cannot commit (and then emit an older
+// total) between them. The increment flush is held inside the store after its
+// commit; the reverse must block behind the shared lock rather than run its
+// write concurrently. Before the fix the two writes interleave and a reader can
+// be left with the reverse's older total as its last frame.
+func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
+	st := &orderedRaceStore{
+		incStarted: make(chan struct{}),
+		incRelease: make(chan struct{}),
+		decStarted: make(chan struct{}),
+	}
+	notifier := &fakeMentionNotifier{}
+	svc := NewMessageService(st, nil, nil)
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	svc.mentionWorkerForSend().enqueue(mentionJob{channelID: 10, msgID: 1, apply: func(context.Context) []db.MentionBatchEntry {
+		return []db.MentionBatchEntry{{MsgID: 1, UserIDs: []int64{2}}}
+	}})
+
+	flushDone := make(chan struct{})
+	go func() {
+		svc.mentionWorkerForSend().flushNow(context.Background())
+		close(flushDone)
+	}()
+	<-st.incStarted // the increment committed and now holds the shared emit lock
+
+	revDone := make(chan struct{})
+	go func() {
+		if err := svc.reverseMentionCounts(context.Background(), 10, []int64{1}); err != nil {
+			t.Errorf("reverseMentionCounts: %v", err)
+		}
+		close(revDone)
+	}()
+
+	// The reverse must not reach its own write while the increment's emit is
+	// still in flight. Release the increment before reporting failure so the
+	// worker goroutine (and the deferred stop) cannot deadlock on the way out.
+	select {
+	case <-st.decStarted:
+		close(st.incRelease)
+		<-flushDone
+		<-revDone
+		t.Fatal("reverse write ran while an increment flush was mid-emit: the two can invert, leaving the badge stale-low")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(st.incRelease)
+	select {
+	case <-st.decStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reverse never resumed after the increment released the shared emit lock")
+	}
+	<-flushDone
+	<-revDone
+
+	// With the increment and the reverse serialized, the reverse's {0} must be
+	// the last frame (it committed last), matching the final stored total. The
+	// point is the commit order and the frame order agree.
+	final := st.count.Load()
+	last, ok := notifier.lastFor(2, 10)
+	if !ok || last != final {
+		t.Fatalf("last delivered total = %d (present=%v), want the final stored total %d — frames and commits diverged", last, ok, final)
+	}
+}
+
+// TestMentionWorker_ConcurrentDeleteDeliversLatestTotal is the coalesce-window
+// race: two messages mention bob, and one is deleted while both are still
+// queued. Whichever order the increment flush and the reverse commit in, the
+// last mention_count frame bob receives must equal the server's final total —
+// the invariant the unsynchronized emitters broke.
+func TestMentionWorker_ConcurrentDeleteDeliversLatestTotal(t *testing.T) {
+	svc, _, database := newMentionFixture(t)
+	notifier := &fakeMentionNotifier{}
+	svc.SetMentionNotifier(notifier)
+	ctx := t.Context()
+	stop := svc.StartMentionWorker(ctx)
+	defer stop(context.Background())
+
+	for i := range 100 {
+		notifier.reset()
+		if _, err := database.ExecContext(ctx,
+			`DELETE FROM read_states WHERE user_id = 2 AND channel_id = 10`); err != nil {
+			t.Fatalf("reset read_states: %v", err)
+		}
+		first := sendAs(t, svc, 1, "@bob first")
+		sendAs(t, svc, 1, "@bob second")
+
+		var wg sync.WaitGroup
+		wg.Go(func() { svc.mentionWorkerForSend().flushNow(context.Background()) })
+		wg.Go(func() {
+			if _, err := svc.DeleteMessage(context.Background(), 1, first.MessageID); err != nil {
+				t.Errorf("DeleteMessage: %v", err)
+			}
+		})
+		wg.Wait()
+		svc.mentionWorkerForSend().flushNow(context.Background())
+
+		final := mentionCount(t, database, 2)
+		last, ok := notifier.lastFor(2, 10)
+		if !ok {
+			t.Fatalf("iteration %d: no mention_count frame for bob, want the final total %d", i, final)
+		}
+		if last != int64(final) {
+			t.Fatalf("iteration %d: last frame for bob = %d, want the server's final total %d — the badge was left stale", i, last, final)
+		}
+	}
 }
 
 // TestMentionWorker_NotifiesOnlyReadersGainingABadge locks the live-badge
