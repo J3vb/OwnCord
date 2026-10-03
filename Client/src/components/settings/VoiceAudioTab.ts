@@ -675,18 +675,21 @@ function buildVoiceAudioTabInner(
   void (async () => {
     const device = savedVideoDevice;
     if (isLinuxDesktop()) {
+      // The discovery awaits must not outlive a newer request: if the user
+      // picks a camera while they are pending, that choice owns the preview.
+      const thisRequest = cameraRequestId;
       try {
         // GStreamer may be missing entirely: no capture can start, so explain why
         // instead of leaving the preview box empty or showing a generic error.
         const support = await nativeCameraSupport();
-        if (signal.aborted) return;
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
         if (support !== null && !support.available) {
           setText(previewLabel, t("voiceAudio.gstreamerMissing"));
           previewLabel.hidden = false;
           return;
         }
         const cameras = await nativeCameraDevices();
-        if (signal.aborted) return;
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
         if (cameras !== null && cameras.length === 0) {
           setText(previewLabel, t("voiceAudio.noCamera"));
           previewLabel.hidden = false;
@@ -696,7 +699,7 @@ function buildVoiceAudioTabInner(
       } catch {
         // A failed support/device query must still explain itself, not leave
         // the preview box in its default empty state.
-        if (signal.aborted) return;
+        if (signal.aborted || thisRequest !== cameraRequestId) return;
         setText(previewLabel, t("voiceAudio.cameraUnavailable"));
         previewLabel.hidden = false;
       }

@@ -1692,4 +1692,43 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     });
     expect(startCameraPreview).not.toHaveBeenCalled();
   });
+
+  it("does not let initial discovery replace a preview the user picked", async () => {
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[] = []) {}
+        getTracks(): unknown[] {
+          return this.tracks;
+        }
+      },
+    );
+    nativeCameraSupport.mockResolvedValue({ available: true, missing: [] });
+    // Hold the initial discovery open while the user picks a camera.
+    let resolveDevices!: (v: unknown[]) => void;
+    nativeCameraDevices.mockReturnValue(
+      new Promise((resolve) => {
+        resolveDevices = resolve;
+      }),
+    );
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    // Let the support query resolve and the IIFE reach the discovery await.
+    await new Promise((r) => setTimeout(r, 0));
+    const videoSelect = element.querySelector(
+      'select[aria-label="Video Device"]',
+    ) as HTMLSelectElement;
+    expect(videoSelect).toBeTruthy();
+    videoSelect.value = "cam-1";
+    videoSelect.dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(startCameraPreview).toHaveBeenCalledTimes(1));
+    // Discovery now resolves with the startup preference; the stale
+    // continuation must not replace the preview the user already selected.
+    resolveDevices([{ deviceId: "cam-1", label: "Camera", kind: "videoinput" }]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(startCameraPreview).toHaveBeenCalledTimes(1);
+    expect(stopCameraPreview).not.toHaveBeenCalled();
+  });
 });
