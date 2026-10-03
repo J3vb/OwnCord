@@ -1682,4 +1682,14 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     // No capture is attempted when there is no device to capture.
     expect(startCameraPreview).not.toHaveBeenCalled();
   });
+
+  it("explains a failed support query instead of leaving the preview empty", async () => {
+    nativeCameraSupport.mockRejectedValue(new Error("ipc failed"));
+    const tab = await mount();
+    const label = tab.element.querySelector(".camera-preview-label");
+    await vi.waitFor(() => {
+      expect(label?.textContent).toBe("Camera unavailable");
+    });
+    expect(startCameraPreview).not.toHaveBeenCalled();
+  });
 });

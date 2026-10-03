@@ -675,23 +675,31 @@ function buildVoiceAudioTabInner(
   void (async () => {
     const device = savedVideoDevice;
     if (isLinuxDesktop()) {
-      // GStreamer may be missing entirely: no capture can start, so explain why
-      // instead of leaving the preview box empty or showing a generic error.
-      const support = await nativeCameraSupport();
-      if (signal.aborted) return;
-      if (support !== null && !support.available) {
-        setText(previewLabel, t("voiceAudio.gstreamerMissing"));
+      try {
+        // GStreamer may be missing entirely: no capture can start, so explain why
+        // instead of leaving the preview box empty or showing a generic error.
+        const support = await nativeCameraSupport();
+        if (signal.aborted) return;
+        if (support !== null && !support.available) {
+          setText(previewLabel, t("voiceAudio.gstreamerMissing"));
+          previewLabel.hidden = false;
+          return;
+        }
+        const cameras = await nativeCameraDevices();
+        if (signal.aborted) return;
+        if (cameras !== null && cameras.length === 0) {
+          setText(previewLabel, t("voiceAudio.noCamera"));
+          previewLabel.hidden = false;
+          return;
+        }
+        await startNativeCameraPreview(device);
+      } catch {
+        // A failed support/device query must still explain itself, not leave
+        // the preview box in its default empty state.
+        if (signal.aborted) return;
+        setText(previewLabel, t("voiceAudio.cameraUnavailable"));
         previewLabel.hidden = false;
-        return;
       }
-      const cameras = await nativeCameraDevices();
-      if (signal.aborted) return;
-      if (cameras !== null && cameras.length === 0) {
-        setText(previewLabel, t("voiceAudio.noCamera"));
-        previewLabel.hidden = false;
-        return;
-      }
-      await startNativeCameraPreview(device);
       return;
     }
     if (device === "" && navigator.mediaDevices?.enumerateDevices !== undefined) {
