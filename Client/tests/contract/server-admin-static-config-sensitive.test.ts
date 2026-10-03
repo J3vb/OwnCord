@@ -19,7 +19,9 @@ window.__test = {
   markConfigChanged: typeof markConfigChanged==='function'?markConfigChanged:undefined,
   saveServerConfig: typeof saveServerConfig==='function'?saveServerConfig:undefined,
   confirmServerConfig: typeof confirmServerConfig==='function'?confirmServerConfig:undefined,
-  clearConfigSecret: typeof clearConfigSecret==='function'?clearConfigSecret:undefined
+  clearConfigSecret: typeof clearConfigSecret==='function'?clearConfigSecret:undefined,
+  resetConfigKey: typeof resetConfigKey==='function'?resetConfigKey:undefined,
+  configMovedAddress: typeof configMovedAddress==='function'?configMovedAddress:undefined
 };
 </script>`;
 const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
@@ -39,6 +41,8 @@ interface Bridge {
   saveServerConfig?: () => Promise<void>;
   confirmServerConfig?: () => Promise<void>;
   clearConfigSecret?: (key: string) => Promise<void>;
+  resetConfigKey?: (key: string) => Promise<void>;
+  configMovedAddress?: () => string;
 }
 
 const GIF_SECRET = "klipy-secret-never-rendered";
@@ -75,7 +79,11 @@ const SETTINGS = {
   ],
 };
 
-async function boot(calls: FetchCall[]): Promise<{ dom: JSDOM; bridge: Bridge }> {
+async function boot(
+  calls: FetchCall[],
+  settings: unknown = SETTINGS,
+  patchSettings?: unknown,
+): Promise<{ dom: JSDOM; bridge: Bridge }> {
   const dom = new JSDOM(ADMIN_HTML, {
     url: "http://localhost:8080/admin",
     runScripts: "dangerously",
@@ -89,7 +97,12 @@ async function boot(calls: FetchCall[]): Promise<{ dom: JSDOM; bridge: Bridge }>
         if (typeof opts.body === "string") body = JSON.parse(opts.body);
         const headers = { ...(opts.headers as Record<string, string>) };
         calls.push({ method, path, body, headers });
-        const json = path === "/config/settings" ? SETTINGS : {};
+        const json =
+          path === "/config/settings"
+            ? method === "PATCH" && patchSettings
+              ? patchSettings
+              : settings
+            : {};
         return {
           ok: true,
           status: 200,
@@ -287,5 +300,83 @@ describe("Server/admin/static — sensitive server configuration", () => {
     expect(patches(calls)).toHaveLength(2);
     expect(patches(calls)[1]!.headers["X-OwnCord-Confirm"]).toBe("server.port");
     expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
+  });
+
+  it("routes Reset of a lock-out-capable key through the typed confirmation", async () => {
+    const calls: FetchCall[] = [];
+    const settings = {
+      restart_pending: false,
+      settings: [
+        {
+          key: "server.port",
+          type: "int",
+          value: 8443,
+          override: 9443,
+          fallback: 8443,
+          env_locked: false,
+          requires_confirmation: true,
+        },
+      ],
+    };
+    const booted = await boot(calls, settings);
+    dom = booted.dom;
+    await render(dom, booted.bridge);
+
+    await fn(booted.bridge.resetConfigKey, "resetConfigKey")("server.port");
+    // Nothing is sent until CONFIRM is typed.
+    expect(patches(calls)).toHaveLength(0);
+    const modal = dom.window.document.getElementById("modal")!;
+    expect(modal.classList.contains("visible")).toBe(true);
+    const typed = dom.window.document.getElementById("typedConfirm") as HTMLInputElement;
+    typed.value = "CONFIRM";
+    await fn(booted.bridge.confirmServerConfig, "confirmServerConfig")();
+
+    expect(patches(calls)).toHaveLength(1);
+    expect(patches(calls)[0]!.body).toEqual({ "server.port": null });
+    expect(patches(calls)[0]!.headers["X-OwnCord-Confirm"]).toBe("server.port");
+  });
+
+  it("uses the config.yaml fallback address after a reset moves the port", async () => {
+    const calls: FetchCall[] = [];
+    const initial = {
+      restart_pending: false,
+      settings: [
+        {
+          key: "server.port",
+          type: "int",
+          value: 9443,
+          override: 9443,
+          fallback: 8443,
+          env_locked: false,
+          requires_confirmation: true,
+        },
+      ],
+    };
+    const afterReset = {
+      restart_pending: true,
+      settings: [
+        {
+          key: "server.port",
+          type: "int",
+          value: 9443,
+          override: null,
+          fallback: 8443,
+          env_locked: false,
+          requires_confirmation: true,
+        },
+      ],
+    };
+    const booted = await boot(calls, initial, afterReset);
+    dom = booted.dom;
+    await render(dom, booted.bridge);
+
+    await fn(booted.bridge.resetConfigKey, "resetConfigKey")("server.port");
+    const typed = dom.window.document.getElementById("typedConfirm") as HTMLInputElement;
+    typed.value = "CONFIRM";
+    await fn(booted.bridge.confirmServerConfig, "confirmServerConfig")();
+
+    expect(fn(booted.bridge.configMovedAddress, "configMovedAddress")()).toBe(
+      "https://localhost:8443/admin",
+    );
   });
 });

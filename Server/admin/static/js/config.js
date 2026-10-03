@@ -189,6 +189,10 @@ async function sendConfigPatch(body,headers){
   try{
     const data=await api('PATCH','/config/settings',body,headers);
     state._configPending=null;
+    /* A null removes the override; remember it so a restart after a port or
+       scheme reset can show the config.yaml fallback address. */
+    state._configReset=state._configReset||{};
+    Object.keys(body).forEach(k=>{if(body[k]===null)state._configReset[k]=true;else delete state._configReset[k]});
     closeModal();
     applyConfigResponse(data);
     showToast('Configuration saved — restart to apply');
@@ -260,29 +264,43 @@ async function clearConfigSecret(key){
 }
 
 async function resetConfigKey(key){
+  // Resetting a lock-out-capable key is itself a change: route it through the
+  // same typed confirmation and X-OwnCord-Confirm header the server requires.
+  if(configNeedsConfirmation(key)){
+    state._configPending={[key]:null};
+    openConfigConfirmModal([key]);
+    return;
+  }
   try{
-    applyConfigResponse(await api('PATCH','/config/settings',{[key]:null}));
+    const data=await api('PATCH','/config/settings',{[key]:null});
+    state._configReset=state._configReset||{};
+    state._configReset[key]=true;
+    applyConfigResponse(data);
     showToast('Setting reset');
   }catch(e){showToast(e.message,'error')}
 }
 
-function discardConfig(){state._configPending=null;renderContent()}
+function discardConfig(){state._configPending=null;state._configReset=null;renderContent()}
 
 /* A port or scheme change moves the panel: the old origin will not answer the
    reload poll, so show the new address instead of waitForRestart. */
 function configMovedAddress(){
   const data=state._configData||{};
-  let moved=false,port=null,mode=null;
-  (data.settings||[]).forEach(s=>{
-    if(s.override==null||s.override===s.value)return;
-    if(s.key==='server.port'){moved=true;port=s.override}
-    if(s.key==='tls.mode'){moved=true;mode=s.override}
-  });
-  if(!moved)return'';
   const row=k=>(data.settings||[]).find(s=>s.key===k)||{};
-  const p=port!=null?port:row('server.port').value;
-  const m=mode!=null?mode:row('tls.mode').value;
-  return (m==='off'?'http':'https')+'://'+location.hostname+':'+p+'/admin';
+  const reset=state._configReset||{};
+  /* The value after the next restart: a saved override, else the config.yaml
+     fallback when this session removed the override, else the running value. */
+  const post=key=>{
+    const r=row(key);
+    if(r.override!=null)return r.override;
+    if(reset[key]&&r.fallback!=null)return r.fallback;
+    return r.value;
+  };
+  const port=post('server.port'),mode=post('tls.mode');
+  const moved=(row('server.port').value!=null&&port!==row('server.port').value)||
+    (row('tls.mode').value!=null&&mode!==row('tls.mode').value);
+  if(!moved)return'';
+  return (mode==='off'?'http':'https')+'://'+location.hostname+':'+port+'/admin';
 }
 
 function configNewAddressHTML(addr){

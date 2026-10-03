@@ -142,7 +142,7 @@ func tlsDomainRule(v any) (any, error) {
 	if s == "" {
 		return s, nil
 	}
-	if len(s) > 253 || !isHostname(s) {
+	if len(s) > 253 || !isHostname(s) || net.ParseIP(s) != nil {
 		return nil, fmt.Errorf("must be empty or a hostname with no scheme or port")
 	}
 	return s, nil

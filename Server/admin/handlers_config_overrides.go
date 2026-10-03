@@ -37,6 +37,7 @@ type configSettingRow struct {
 	Type                 string   `json:"type"`
 	Value                any      `json:"value"`
 	Override             any      `json:"override"`
+	Fallback             any      `json:"fallback,omitempty"`
 	EnvLocked            bool     `json:"env_locked"`
 	Options              []string `json:"options,omitempty"`
 	RequiresConfirmation bool     `json:"requires_confirmation"`
@@ -52,7 +53,7 @@ type configSettingsResponse struct {
 // buildConfigSettings renders one row per editable key, in EditableKeys order.
 // It iterates EditableKeys only — never the whole config — so secrets and the
 // other excluded keys can never reach this response.
-func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending bool) configSettingsResponse {
+func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any, pending bool) configSettingsResponse {
 	keys := config.EditableKeys()
 	rows := make([]configSettingRow, 0, len(keys))
 	for _, key := range keys {
@@ -77,6 +78,13 @@ func buildConfigSettings(cfg *config.Config, overrides map[string]any, pending b
 			row.Value = value
 			if override, ok := overrides[key]; ok && !envLocked {
 				row.Override = override
+			}
+			// The value a reset would fall back to (config.yaml plus env),
+			// so the panel can show the post-restart address after a reset.
+			if fallback != nil {
+				if fv, ok := config.Lookup(fallback, key); ok {
+					row.Fallback = normalizeSettingValue(fv)
+				}
 			}
 		}
 		if options, ok := configEnumOptions[key]; ok {
@@ -196,8 +204,24 @@ func handleGetConfigOverrides(opts SetupOptions, pending *atomic.Bool) http.Hand
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not read configuration overrides")
 			return
 		}
-		writeJSON(w, http.StatusOK, buildConfigSettings(cfg, overrides, pending.Load()))
+		writeJSON(w, http.StatusOK, buildConfigSettings(cfg, fallbackConfig(opts.ConfigPath, config.OverridesPath(cfg.Server.DataDir), overrides), overrides, pending.Load()))
 	}
+}
+
+// fallbackConfig builds the configuration as it would be without any panel
+// override, so a row can report the value a reset falls back to. Preview with
+// every current override removed yields config.yaml plus the environment; on
+// error the rows simply carry no fallback.
+func fallbackConfig(cfgPath, overridesPath string, overrides map[string]any) *config.Config {
+	stripped := make(map[string]any, len(overrides))
+	for key := range overrides {
+		stripped[key] = nil
+	}
+	fallback, err := config.Preview(cfgPath, overridesPath, stripped)
+	if err != nil {
+		return nil
+	}
+	return fallback
 }
 
 func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *atomic.Bool) http.HandlerFunc {
@@ -261,7 +285,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not read configuration overrides")
 			return
 		}
-		writeJSON(w, http.StatusOK, buildConfigSettings(cfg, overrides, pending.Load()))
+		writeJSON(w, http.StatusOK, buildConfigSettings(cfg, fallbackConfig(opts.ConfigPath, path, overrides), overrides, pending.Load()))
 	}
 }
 

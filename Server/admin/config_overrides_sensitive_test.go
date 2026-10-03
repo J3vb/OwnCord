@@ -652,3 +652,54 @@ func TestConfigOverridesSensitive_LiveKitBinaryGuard(t *testing.T) {
 		t.Errorf("overrides voice.livekit_binary = %#v, want only the empty save", got)
 	}
 }
+
+// Applying acme in one save and moving the listen port to 80 in a later save
+// must still be refused: the second PATCH names only server.port, but the
+// merged preview is acme + port 80, which leaves no port for the HTTP-01
+// challenge. The refusal must name the acme conflict, not merely an
+// unavailable port, so it holds whether or not the probe can bind :80.
+func TestConfigOverridesSensitive_AcmeGuardRunsOnPortOnlyChange(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, `{"tls.mode": "acme", "tls.domain": "chat.example.com"}`)
+	token := createAdminUser(t, f.database)
+
+	w := patchConfig(t, f.handler, token, map[string]any{"server.port": 80}, []string{"server.port"}, "")
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "acme") {
+		t.Errorf("PATCH server.port=80 with acme overrides = %d %s, want 400 naming the acme conflict", w.Code, w.Body.String())
+	}
+	if _, ok := savedOverrides(t, f.dataDir)["server.port"]; ok {
+		t.Error("a refused acme/port-80 PATCH wrote server.port")
+	}
+}
+
+// When exactly one self-signed pair file exists, GenerateSelfSigned truncates
+// it in place: an existing file the server cannot write (for example one left
+// by a root-owned earlier run) would make the restart fail. The guard must
+// prove the existing half is writable before accepting the pair.
+func TestConfigOverridesSensitive_SelfSignedPartialPairMustBeTruncatable(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("truncation semantics: needs a non-root Unix user")
+	}
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	tlsKeys := []string{"tls.mode", "tls.cert_file", "tls.key_file"}
+
+	cert := filepath.Join(f.dataDir, "partial-cert.pem")
+	if err := os.WriteFile(cert, []byte("stale cert"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cert, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"tls.mode":      "self_signed",
+		"tls.cert_file": cert,
+		"tls.key_file":  filepath.Join(f.dataDir, "partial-key.pem"),
+	}
+	if w := patchConfig(t, f.handler, token, body, tlsKeys, ""); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "tls.cert_file") {
+		t.Errorf("PATCH with an unwritable existing self-signed file = %d %s, want 400 naming tls.cert_file", w.Code, w.Body.String())
+	}
+	if len(savedOverrides(t, f.dataDir)) != 0 {
+		t.Fatal("a refused self-signed PATCH wrote overrides")
+	}
+}

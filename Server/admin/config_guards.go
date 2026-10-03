@@ -77,6 +77,13 @@ func guardPort(w http.ResponseWriter, g guardContext) bool {
 	if !g.has("server.port") || g.next.Server.Port == g.opts.RunningCfg.Server.Port {
 		return true
 	}
+	// A port-only change must still catch the acme/port-80 conflict: guardTLS
+	// does not run when the PATCH names no tls.* key.
+	if g.next.TLS.Mode == "acme" && g.next.Server.Port == 80 {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+			"server.port 80 conflicts with tls.mode acme; the HTTPS listener would occupy the port the ACME challenge needs")
+		return false
+	}
 	if updater.RunningInContainer() {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
 			"server.port cannot be changed from the panel in a container; the published port mapping fixes it")
@@ -166,6 +173,18 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 	if keyErr == nil && !keyInfo.Mode().IsRegular() {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.key_file exists but is not a regular file")
 		return false
+	}
+	// When only one half exists, GenerateSelfSigned truncates it in place on
+	// the next boot, so that file must be writable now.
+	if (certErr == nil) != (keyErr == nil) {
+		existing, key := g.next.TLS.CertFile, "tls.cert_file"
+		if certErr != nil {
+			existing, key = g.next.TLS.KeyFile, "tls.key_file"
+		}
+		if !fileWritable(existing) {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", key+": the existing half of the pair is not writable and cannot be regenerated")
+			return false
+		}
 	}
 	if certErr == nil && keyErr == nil {
 		cert, err := tls.LoadX509KeyPair(g.next.TLS.CertFile, g.next.TLS.KeyFile)
@@ -303,7 +322,7 @@ func guardLiveKitBinary(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "voice.livekit_binary must name an existing regular file")
 		return false
 	}
-	if info.Mode().Perm()&0o111 == 0 {
+	if !binaryExecutable(info) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "voice.livekit_binary is not executable")
 		return false
 	}
@@ -339,6 +358,17 @@ func dirExists(path string) bool {
 func dirEmpty(path string) bool {
 	entries, err := os.ReadDir(path)
 	return err == nil && len(entries) == 0
+}
+
+// fileWritable reports whether the server's own user can open path for writing,
+// which is what a truncate-in-place regeneration needs.
+func fileWritable(path string) bool {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0) //nolint:gosec // G304: a config path the guard is judging
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
 }
 
 // dirWritable probes the directory by creating and removing a temp file, so it

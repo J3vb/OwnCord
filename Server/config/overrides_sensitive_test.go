@@ -74,6 +74,7 @@ func TestSaveOverrides_ValidatesSensitiveValues(t *testing.T) {
 		{"tls.domain", "https://chat.example.com"},
 		{"tls.domain", "chat.example.com:443"},
 		{"tls.domain", "-bad.example.com"},
+		{"tls.domain", "192.0.2.1"},                       // an IP literal is not a hostname; auth.loadACME rejects it
 		{"server.admin_allowed_cidrs", []any{"10.0.0.1"}}, // bare IP
 		{"server.trusted_proxies", []any{"0.0.0.0/0"}},    // trusting everyone lets any client forge X-Forwarded-For
 		{"server.trusted_proxies", []any{"::/0"}},
