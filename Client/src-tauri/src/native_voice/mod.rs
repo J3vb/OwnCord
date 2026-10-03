@@ -59,6 +59,9 @@ struct Inner {
     session: Option<(u64, NativeSession)>,
     /// The out-of-call camera preview (settings tab).
     standalone: Option<Standalone>,
+    /// The latest out-of-call camera preview start, so overlapping starts
+    /// cannot leave an older capture owning the single slot.
+    standalone_generation: u64,
     next_id: u64,
 }
 
@@ -90,6 +93,22 @@ impl Inner {
                 ..Default::default()
             },
         }
+    }
+    /// Start a new out-of-call camera preview; returns its generation. A
+    /// later [`Inner::standalone_is_latest`] with an older generation is false.
+    fn begin_standalone(&mut self) -> u64 {
+        self.standalone_generation += 1;
+        self.standalone_generation
+    }
+    /// Whether `generation` is still the latest preview start. A superseded
+    /// start must drop its own capture instead of claiming the slot.
+    fn standalone_is_latest(&self, generation: u64) -> bool {
+        self.standalone_generation == generation
+    }
+    /// Supersede any in-flight start and release the current preview.
+    fn clear_standalone(&mut self) {
+        self.standalone_generation += 1;
+        self.standalone = None;
     }
 }
 
@@ -424,7 +443,8 @@ pub struct CameraPreviewStarted {
 
 /// Start a camera capture and preview with no room (the settings tab), since
 /// WebKitGTK cannot keep a camera alive while the window is hidden. Replaces
-/// any earlier preview. Resolves once the first frame arrives.
+/// any earlier preview. Resolves once the first frame arrives; a start a newer
+/// one superseded while it started rejects after releasing its own capture.
 #[tauri::command]
 pub async fn native_voice_start_camera_preview(
     state: tauri::State<'_, NativeVoiceState>,
@@ -432,6 +452,7 @@ pub async fn native_voice_start_camera_preview(
     capture: camera::CaptureOptions,
 ) -> Result<CameraPreviewStarted, String> {
     let target = camera::Target::parse(&source)?;
+    let generation = state.inner.lock().await.begin_standalone();
     let (capturer, started) = camera::CameraCapture::start(target, capture, || {})?;
     let frames = video::FrameServer::bind().await?;
     frames.set_camera(Some(capturer.preview()));
@@ -439,8 +460,13 @@ pub async fn native_voice_start_camera_preview(
     let (width, height) = started
         .await
         .map_err(|_| "camera preview stopped before it started".to_string())??;
-    // Replacing any prior preview stops its capture and closes its socket.
-    state.inner.lock().await.standalone = Some(Standalone {
+    let mut inner = state.inner.lock().await;
+    // A newer start or a stop superseded this one while it started: drop the
+    // capture here rather than replacing the slot the newer request owns.
+    if !inner.standalone_is_latest(generation) {
+        return Err("camera preview superseded by a newer request".to_string());
+    }
+    inner.standalone = Some(Standalone {
         frames,
         _capture: capturer,
     });
@@ -452,12 +478,13 @@ pub async fn native_voice_start_camera_preview(
 }
 
 /// Stop the out-of-call camera preview (the settings tab), releasing the
-/// pipeline and the device.
+/// pipeline and the device. Also supersedes any start still in flight, so it
+/// drops its capture instead of storing it after the stop.
 #[tauri::command]
 pub async fn native_voice_stop_camera_preview(
     state: tauri::State<'_, NativeVoiceState>,
 ) -> Result<(), String> {
-    state.inner.lock().await.standalone = None;
+    state.inner.lock().await.clear_standalone();
     Ok(())
 }
 
@@ -657,6 +684,7 @@ mod tests {
             key: Some(vec![1]),
             session: None,
             standalone: None,
+            standalone_generation: 0,
             next_id: 3,
         };
         assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
@@ -672,5 +700,19 @@ mod tests {
         let mut inner = Inner::default();
         assert!(inner.current(1).is_err());
         assert_eq!(inner.resources().rooms, 0);
+    }
+
+    #[test]
+    fn a_superseded_camera_preview_start_does_not_claim_the_slot() {
+        let mut inner = Inner::default();
+        let older = inner.begin_standalone();
+        let newer = inner.begin_standalone();
+        // The older start finishes last: it must not claim the slot the newer
+        // start owns.
+        assert!(!inner.standalone_is_latest(older));
+        assert!(inner.standalone_is_latest(newer));
+        // A stop while a start is in flight supersedes it too.
+        inner.clear_standalone();
+        assert!(!inner.standalone_is_latest(newer));
     }
 }

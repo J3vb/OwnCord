@@ -696,7 +696,14 @@ function buildVoiceAudioTabInner(
         maxWidth: 320,
         maxHeight: 180,
       });
-      if (signal.aborted || thisRequest !== cameraRequestId) {
+      if (signal.aborted) {
+        // The tab was torn down while this start was in flight; cleanupMic
+        // found no registered preview to release, so release this capture
+        // here. The backend has no newer start to protect.
+        void desktop.nativeVoice.stopCameraPreview().catch(() => {});
+        return;
+      }
+      if (thisRequest !== cameraRequestId) {
         // A newer request owns the single native preview slot: it has already
         // replaced this capture, so this request disowns it and reclaims
         // nothing (stopping here would release the newer preview's capture).

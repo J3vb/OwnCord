@@ -1626,4 +1626,29 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     });
     void resolveFirst;
   });
+
+  it("releases the in-flight native capture when the tab is torn down", async () => {
+    // The overlay closes while the start IPC is in flight; cleanupMic had no
+    // registered preview to stop, so the resolving start must release it.
+    let resolveStart!: (v: { width: number; height: number; frames: string }) => void;
+    startCameraPreview.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    await vi.waitFor(() => {
+      expect(startCameraPreview).toHaveBeenCalledTimes(1);
+    });
+
+    ac.abort();
+    resolveStart({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok" });
+
+    await vi.waitFor(() => {
+      expect(stopCameraPreview).toHaveBeenCalled();
+    });
+  });
 });
