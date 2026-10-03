@@ -318,7 +318,10 @@ something is pending. The boot log names each overridden key, never its value.
 Almost every key is on the page. The four secrets (`gif.api_key`,
 `github.token`, `voice.livekit_api_key`, `voice.livekit_api_secret`) are
 write-only: the page shows whether one is configured and never sends the value
-back. A key whose wrong value could lock you out or move the data the server
+back. A secret whose rule allows empty (`gif.api_key`, `github.token`) also
+offers a **Clear value** button, which sets it to the empty string and turns the
+feature off; the LiveKit credentials require a value and offer no such button.
+A key whose wrong value could lock you out or move the data the server
 runs on (`server.port`, `tls.mode`, `tls.domain`, `server.restart_mode`,
 `server.admin_allowed_cidrs`, `server.trusted_proxies`, the
 database/backup/uploads/plugins paths, the TLS cert/key/cache paths and the
