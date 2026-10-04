@@ -27,7 +27,11 @@ func buildMentionCount(channelID, count int64) []byte {
 // disconnected reader recovers the authoritative count on their next ready,
 // so a missed frame costs nothing — exactly the posture of
 // NotifyAppealStatus/NotifyModAction. The count is the sender-side total, not
-// a delta, so a lost or duplicated frame still converges.
+// a delta, so a lost or duplicated frame still converges. The service holds
+// one lock across every mention write and this call, so the frames a reader
+// receives arrive in the order the server changed the total (see
+// service.reverseMentionCounts): the last frame always carries the latest
+// committed total, never an overtaken one.
 //
 // The frame is skipped when the reader cannot currently see the channel
 // (CanViewChannel: channel READ_MESSAGES with both override layers, or DM

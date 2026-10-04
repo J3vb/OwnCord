@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"log/slog"
 	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/microcosm-cc/bluemonday"
 )
 
@@ -185,6 +185,12 @@ type MessageService struct {
 	// as before. An atomic pointer because the composition root starts it while
 	// other goroutines may already be sending.
 	mentionWorker atomic.Pointer[mentionWorker]
+	// mentionEmitMu serializes each mention_count write with the frame it emits,
+	// so frame order matches commit order across the coalesced worker flush and
+	// the removal paths (P5-O05 / DP-27 ordering). Held across the write, the
+	// notify and the visibility check inside it; job resolution stays outside.
+	// See mentionWorker.emitMu and reverseMentionCounts.
+	mentionEmitMu syncutil.Mutex
 	// liveStatus returns userID's live status, "" when they hold no live
 	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
 	// constructed, so @here reads the same status the member list overlays
@@ -229,55 +235,6 @@ type MessageService struct {
 	// with no hub) means no frame is pushed, exactly the pre-DP-27 behaviour.
 	// The ws layer installs the hub-backed implementation in NewHub.
 	mentionNotifier MentionCountNotifier
-}
-
-// MentionCountNotifier delivers a live mention_count frame to one reader whose
-// read_states.mention_count changed (DP-27). channelID names the channel and
-// count is the reader's total after the bump.
-type MentionCountNotifier interface {
-	NotifyMentionCount(userID, channelID, count int64)
-}
-
-// SetMentionNotifier installs the live unread-badge hook (DP-27). The ws layer
-// calls this once, in NewHub, with the hub's implementation; passing nil (or
-// never calling it) leaves the hook off.
-func (s *MessageService) SetMentionNotifier(n MentionCountNotifier) {
-	s.mentionNotifier = n
-}
-
-// notifyMentionBumped pushes the badge updates for one inline flush's bumped
-// readers (the no-worker fallback path). It reads the hook at call time, so a
-// notifier installed after SendMessage still receives the frame.
-func (s *MessageService) notifyMentionBumped(channelID int64, bumped map[int64]int64) {
-	if s.mentionNotifier == nil {
-		return
-	}
-	emitMentionBumped(s.mentionNotifier.NotifyMentionCount, channelID, bumped)
-}
-
-// dispatchMentionBadges routes one message's mention-badge job: to the bounded
-// worker when one is running (production), or inline through bg otherwise
-// (tests, and any caller built via NewMessageService directly), so a directly
-// constructed service still has its counts readable right after a send.
-func (s *MessageService) dispatchMentionBadges(bgCtx context.Context, job mentionJob) {
-	if w := s.mentionWorkerForSend(); w != nil {
-		// Production: hand the job to the single bounded worker on the caller's
-		// goroutine. Enqueue never blocks, so no goroutine is spawned per send.
-		w.enqueue(job)
-		return
-	}
-	s.bg(func() {
-		entries := job.apply(bgCtx)
-		if len(entries) == 0 {
-			return
-		}
-		bumped, err := s.st.IncrementMentionCountsBatch(bgCtx, job.channelID, entries)
-		if err != nil {
-			slog.Error("MessageService.mention fan-out IncrementMentionCounts", "err", err, "channel_id", job.channelID)
-			return
-		}
-		s.notifyMentionBumped(job.channelID, bumped)
-	})
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience
@@ -329,6 +286,10 @@ func (s *MessageService) RunBackgroundInlineForTest() {
 // func drains and stops it, and is the caller's (App.Close) job.
 func (s *MessageService) StartMentionWorker(ctx context.Context) func(context.Context) {
 	w := newMentionWorker(s.st)
+	// Share the write+emit lock with the removal paths so a coalesced increment
+	// flush can never be overtaken by an older decrement frame, or vice versa
+	// (DP-27 ordering). The worker's own newMentionWorker lock is discarded.
+	w.emitMu = &s.mentionEmitMu
 	// The live unread-badge hook is installed by NewHub before this runs, so
 	// capturing it here is enough; a nil hook means no hub and no pushes.
 	if s.mentionNotifier != nil {

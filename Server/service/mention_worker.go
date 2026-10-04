@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // mentionQueueSize bounds the mention worker's pending jobs. Under a mention
@@ -84,6 +85,19 @@ type mentionWorker struct {
 	// a directly-constructed worker and whenever no hub is wired, in which
 	// case notification is skipped.
 	notify func(userID, channelID, count int64)
+
+	// emitMu serializes a mention write with the mention_count frame it emits,
+	// so every frame a reader receives reflects a later commit than the one
+	// before it. The worker's coalesced flush and a removal path's synchronous
+	// reverse both hold it. Without it, an increment committed on the worker
+	// loop and a decrement committed on the delete/purge request goroutine push
+	// absolute totals from independently-scheduled emitters, so a delete inside
+	// the coalesce window could be overtaken by an older total and leave the
+	// client badge stale-low until the next ready (the ordering race DP-27
+	// introduced). StartMentionWorker points this at the MessageService's lock
+	// so the inline no-worker fallback and removal paths share it; a directly
+	// constructed worker keeps its own.
+	emitMu *syncutil.Mutex
 }
 
 func newMentionWorker(st Store) *mentionWorker {
@@ -93,6 +107,7 @@ func newMentionWorker(st Store) *mentionWorker {
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 		flushReq: make(chan mentionFlushReq),
+		emitMu:   &syncutil.Mutex{},
 	}
 }
 
@@ -315,12 +330,18 @@ func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 		byChannel[job.channelID] = append(byChannel[job.channelID], entries...)
 	}
 	for channelID, entries := range byChannel {
+		// Hold emitMu across the write and the frames it emits, so this
+		// increment's commit order matches its frame order against a concurrent
+		// removal-path decrement (DP-27 ordering; see emitMu).
+		w.emitMu.Lock()
 		bumped, err := w.st.IncrementMentionCountsBatch(ctx, channelID, entries)
 		if err != nil {
+			w.emitMu.Unlock()
 			slog.Error("mention worker: flush IncrementMentionCountsBatch", "err", err, "channel_id", channelID)
 			continue
 		}
 		w.notifyBumped(channelID, bumped)
+		w.emitMu.Unlock()
 	}
 }
 
