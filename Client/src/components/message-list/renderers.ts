@@ -199,7 +199,9 @@ function renderReplyRef(
   if (ref) {
     const plain = ref.deleted
       ? messagingText("message.deleted")
-      : markdownToPlainText(ref.content, messagingText("spoiler.revealed")).slice(0, 100);
+      : Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+          .slice(0, 100)
+          .join("");
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
@@ -225,10 +227,7 @@ function renderReplyRef(
     const author = resolveAuthor(referenced.user);
     const roleColor = roleColorVar(getUserRole(referenced.user.id));
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-    const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed")).slice(
-      0,
-      100,
-    );
+    const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
     appendChildren(
       bar,
       createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
