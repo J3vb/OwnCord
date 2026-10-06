@@ -719,6 +719,35 @@ describe("acceptCertFingerprint edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(client.getState()).toBe("connecting");
   });
+
+  it("clears certMismatchBlock when the native accept command rejects", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+    });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    expect(client.getState()).toBe("disconnected");
+
+    // The user declined the native dialog; the command rejects.
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "accept_cert_fingerprint"
+        ? Promise.reject("certificate not accepted")
+        : Promise.resolve(undefined),
+    );
+    await expect(client.acceptCertFingerprint("localhost:8443", "sha256:NEW")).rejects.toBe(
+      "certificate not accepted",
+    );
+
+    // A later close must still schedule the reconnect loop; the decline cannot
+    // leave the mismatch latch blocking every redial until restart.
+    emitTauriEvent("ws-state", "closed");
+    expect(client.getState()).toBe("reconnecting");
+  });
 });
 
 describe("disconnect resets certMismatchBlock", () => {

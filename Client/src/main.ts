@@ -22,6 +22,7 @@ import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import {
   bracketBareIPv6Host,
   createWsClient,
+  isCertDeclined,
   normalizeHostForCertCompare,
   PREAUTH_BUSY_CAP_MS,
   PREAUTH_CONNECT_TIMEOUT_MS,
@@ -240,6 +241,11 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
   if (certModalActive) return;
   certModalActive = true;
 
+  const reject = (): void => {
+    modal.destroy?.();
+    certModalActive = false;
+  };
+
   const modal = createCertFirstUseModal({
     host: evt.host,
     fingerprint: evt.fingerprint,
@@ -263,20 +269,36 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
             ws.connect({ host: lastConnectHost, token: lastConnectToken });
           }
         } catch (err) {
-          log.error("Failed to trust first-use certificate", err);
+          if (isCertDeclined(err)) {
+            log.info("First-use certificate not accepted", { host: evt.host });
+            reject();
+            setTransientError(connectText("cert.notAccepted"));
+          } else {
+            log.error("Failed to trust first-use certificate", err);
+          }
         }
       })();
     },
-    onReject: () => {
-      modal.destroy?.();
-      certModalActive = false;
-    },
+    onReject: reject,
   });
   modal.mount(document.body);
 });
 ws.onCertMismatch((evt: CertTofuEvent) => {
   if (certModalActive) return;
   certModalActive = true;
+
+  const reject = (): void => {
+    modal.destroy?.();
+    certModalActive = false;
+    // Only tear down the live session when the mismatch is FOR that
+    // session's host — a rotated cert on an unrelated saved profile must
+    // not disconnect and log out an unrelated authenticated session.
+    if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
+      ws.disconnect();
+      clearAuth();
+      navigate("connect");
+    }
+  };
 
   const modal = createCertMismatchModal({
     host: evt.host,
@@ -301,22 +323,17 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
             );
           }
         } catch (err) {
-          log.error("Failed to accept cert fingerprint", err);
+          if (isCertDeclined(err)) {
+            log.info("Certificate not accepted", { host: evt.host });
+            reject();
+            setTransientError(connectText("cert.notAccepted"));
+          } else {
+            log.error("Failed to accept cert fingerprint", err);
+          }
         }
       })();
     },
-    onReject: () => {
-      modal.destroy?.();
-      certModalActive = false;
-      // Only tear down the live session when the mismatch is FOR that
-      // session's host — a rotated cert on an unrelated saved profile must
-      // not disconnect and log out an unrelated authenticated session.
-      if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
-        ws.disconnect();
-        clearAuth();
-        navigate("connect");
-      }
-    },
+    onReject: reject,
   });
   modal.mount(document.body);
 });

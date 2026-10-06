@@ -7,8 +7,9 @@
 // handshake, then reject the connection and surface the fingerprint so the user
 // can confirm it (via `accept_cert_fingerprint`) before any credential-bearing
 // request is sent. `decide` is a pure function with no persistence side effects;
-// the only writer of a pin is the explicit `accept_cert_fingerprint` command,
-// with one exception (B11-5): a routine public-CA renewal. When the pinned leaf
+// the only user-confirmed writer of a pin is the explicit
+// `accept_cert_fingerprint` command, with one exception (B11-5): a routine
+// public-CA renewal. When the pinned leaf
 // was itself publicly valid for the host and the new leaf is too, `evaluate`
 // re-pins silently instead of prompting. Every other change still prompts.
 
