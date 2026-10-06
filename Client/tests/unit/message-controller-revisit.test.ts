@@ -30,8 +30,10 @@ import type { MessageControllerOptions } from "../../src/pages/main-page/Message
 import { createMessageList } from "@components/MessageList";
 import {
   getChannelMessages,
+  getHistoryLoadState,
   hasMoreMessages,
   invalidateChannelMessageWindow,
+  isWindowDetached,
   messagesStore,
   reattachToPresent,
   resetMessagesStore,
@@ -199,6 +201,35 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
 
     expect(getMessages).toHaveBeenCalledTimes(3);
     expect(ids()).toEqual([...rows(1, 300)].map((m) => m.id));
+  });
+
+  it("keeps the pages it fetched when an optional older page fails", async () => {
+    server = rows(1, 300);
+    cacheWindow(151, 300); // 150 rows loaded
+    openWithUnread(0);
+    const real = getMessages.getMockImplementation()!;
+    getMessages.mockImplementation(async (channelId, opts) => {
+      if (opts?.before) throw new Error("offline");
+      return real(channelId, opts);
+    });
+    const showError = vi.fn();
+    const ctrl = createMessageController({
+      api: { getMessages } as unknown as MessageControllerOptions["api"],
+      showError,
+    });
+    try {
+      await ctrl.loadMessages(CH, new AbortController().signal);
+    } finally {
+      getMessages.mockImplementation(real);
+    }
+
+    // The first, revalidating page (201..300) is installed rather than thrown
+    // away by the failed optional page; more history is reported above it.
+    expect(ids()).toEqual([...rows(201, 300)].map((m) => m.id));
+    expect(hasMoreMessages(CH)).toBe(true);
+    expect(getHistoryLoadState(CH)).toBeNull();
+    expect(isWindowDetached(CH)).toBe(false);
+    expect(showError).not.toHaveBeenCalled();
   });
 
   it("drops the stale cache when the unseen gap outruns the paging bound", async () => {

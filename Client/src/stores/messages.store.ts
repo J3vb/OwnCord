@@ -259,8 +259,9 @@ export function invalidateLoadedMessageWindows(): void {
  * deletes and reactions made while away. The rows themselves are kept (the
  * next visit renders them at once) and setMessages reconciles the refetched
  * page into them, keeping the rows it left unchanged, dropping older rows
- * beyond it and carrying pending/failed rows across. The refetch covers up to
- * 100 cached rows, so a one- or two-page window is kept and revalidated. Like
+ * beyond it and carrying pending/failed rows across. The refetch pages back up
+ * to five 100-row pages, so a cached window that wide is kept and revalidated;
+ * a wider unseen gap keeps the fetched range and drops the rows below it. Like
  * reattachToPresent,
  * this leaves detachedChannels alone: setMessages clears it once the tail has
  * actually landed, and until then a detached window must keep refusing live

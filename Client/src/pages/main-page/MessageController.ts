@@ -83,11 +83,13 @@ export function createMessageController(opts: MessageControllerOptions): Message
         pages < MAX_REVISIT_PAGES;
         pages++
       ) {
-        const older = await api.getMessages(
-          channelId,
-          { before: oldest, limit: MAX_PAGE_SIZE },
-          signal,
-        );
+        const older = await api
+          .getMessages(channelId, { before: oldest, limit: MAX_PAGE_SIZE }, signal)
+          .catch(() => null);
+        if (!older) {
+          hasMoreBefore = true;
+          break;
+        }
         if (older.messages.length === 0) break;
         fetched = [...fetched, ...older.messages];
         oldest = older.messages[older.messages.length - 1]!.id;
