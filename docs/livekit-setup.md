@@ -13,6 +13,8 @@ There are two ways to run LiveKit alongside OwnCord:
 
 ## Docker <a name="docker"></a>
 
+The `ghcr.io/j3vb/owncord-server` image also bundles LiveKit and starts it itself (see [Deployment — LiveKit in Docker](deployment.md#livekit-in-docker)); nothing below is needed for that. The rest of this section is the two-container `docker compose` stack.
+
 When running OwnCord via `docker compose`, LiveKit runs as a separate container on the same internal network. OwnCord reaches it at `ws://livekit:7880` via Docker's internal DNS — no port forwarding needed between containers.
 
 ### Setup
