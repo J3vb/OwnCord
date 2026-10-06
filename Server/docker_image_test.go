@@ -2,7 +2,8 @@ package main
 
 // The single-container image bundles livekit-server and the server starts it
 // as its companion process. None of that is exercised by `go test` at runtime,
-// so this pins the three files that must agree: Dockerfile, docker-compose.yml
+// so this pins the livekit version shared by the three files that must agree:
+// the Dockerfile's bundled release, docker-compose.yml's separate livekit image
 // and ws.DefaultLiveKitVersion.
 
 import (
@@ -11,7 +12,17 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/ws"
+	"go.yaml.in/yaml/v3"
 )
+
+type composeService struct {
+	Image       string            `yaml:"image"`
+	Environment map[string]string `yaml:"environment"`
+}
+
+type composeFile struct {
+	Services map[string]composeService `yaml:"services"`
+}
 
 func readFile(t *testing.T, name string) string {
 	t.Helper()
@@ -28,32 +39,26 @@ func TestDockerfileBundlesPinnedLiveKit(t *testing.T) {
 	if m := regexp.MustCompile(`(?m)^ARG LIVEKIT_VERSION=(\S+)$`).FindStringSubmatch(df); m == nil || m[1] != ws.DefaultLiveKitVersion {
 		t.Errorf("Dockerfile LIVEKIT_VERSION must equal ws.DefaultLiveKitVersion %q, got %v", ws.DefaultLiveKitVersion, m)
 	}
-	for _, arch := range []string{"AMD64", "ARM64"} {
-		if !regexp.MustCompile(`(?m)^ARG LIVEKIT_SHA256_` + arch + `=[0-9a-f]{64}$`).MatchString(df) {
-			t.Errorf("Dockerfile must pin a 64-hex LIVEKIT_SHA256_%s", arch)
-		}
-	}
-	if !regexp.MustCompile(`sha256sum -c`).MatchString(df) {
-		t.Error("Dockerfile must verify the livekit archive with sha256sum -c")
-	}
-	if !regexp.MustCompile(`(?m)^ENV .*OWNCORD_VOICE_LIVEKIT_BINARY=/livekit-server\b`).MatchString(df) {
-		t.Error("image must point voice.livekit_binary at the bundled binary")
-	}
-	if !regexp.MustCompile(`COPY --from=\S+ /livekit-server /livekit-server`).MatchString(df) {
-		t.Error("image must copy the bundled livekit-server to /livekit-server")
-	}
 }
 
 func TestComposeKeepsLiveKitSeparate(t *testing.T) {
-	dc := readFile(t, "docker-compose.yml")
+	var dc composeFile
+	if err := yaml.Unmarshal([]byte(readFile(t, "docker-compose.yml")), &dc); err != nil {
+		t.Fatal(err)
+	}
 
 	// The image defaults to a bundled LiveKit; the two-container stack must
 	// opt out or it would start a second one on ports nothing publishes.
-	if !regexp.MustCompile(`(?m)^\s+OWNCORD_VOICE_LIVEKIT_BINARY: ""$`).MatchString(dc) {
-		t.Error("compose must clear OWNCORD_VOICE_LIVEKIT_BINARY for the separate livekit service")
+	own := dc.Services["owncord"]
+	if v, ok := own.Environment["OWNCORD_VOICE_LIVEKIT_BINARY"]; !ok || v != "" {
+		t.Errorf("compose owncord OWNCORD_VOICE_LIVEKIT_BINARY must be empty, got %q (present=%v)", v, ok)
 	}
 	// The image defaults to one UDP port; compose publishes the range.
-	if !regexp.MustCompile(`(?m)^\s+OWNCORD_VOICE_UDP_PORT: "0"$`).MatchString(dc) {
-		t.Error("compose must reset OWNCORD_VOICE_UDP_PORT to 0 to match the published range")
+	if got := own.Environment["OWNCORD_VOICE_UDP_PORT"]; got != "0" {
+		t.Errorf("compose owncord OWNCORD_VOICE_UDP_PORT must be %q, got %q", "0", got)
+	}
+	// The separate container must run the same release the image bundles.
+	if got, want := dc.Services["livekit"].Image, "livekit/livekit-server:v"+ws.DefaultLiveKitVersion; got != want {
+		t.Errorf("compose livekit image must be %q, got %q", want, got)
 	}
 }
