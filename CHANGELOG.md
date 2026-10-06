@@ -62,6 +62,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Login & connection
 
+- **The desktop app now treats a server as signed in only after the server confirms the login.** Saved credentials and identity keys follow the connection that was actually confirmed, and the setting is released when that connection ends.
 - **A certificate the client cannot verify now says so, distinctly.** A trust-on-first-use refusal or a failed TLS handshake used to reach the sign-in form as "Bad Gateway" or a dropped connection, indistinguishable from an offline server. The desktop proxy now reports these with a distinct certificate code, and the client says "The server's certificate couldn't be verified. Check the server address, or ask the server owner." The first-use and changed-certificate prompts themselves are unchanged.
 
 ### Messages

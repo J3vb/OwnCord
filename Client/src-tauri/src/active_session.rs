@@ -1,20 +1,21 @@
 //! The host of the session this process is currently connected to.
 //!
 //! Scopes credential and identity commands to the server the app is signed
-//! into now. `ws_connect` records the host it dialled, and `ws_disconnect`
-//! (logout, server switch) clears it.
+//! into now. The proxy records the host only when it relays the server's
+//! `auth_ok` over the pinned socket (no renderer command can set it), and
+//! clears it when that connection ends or on `ws_disconnect` (logout, server
+//! switch).
 //!
-//! Some commands legitimately run before any session exists — the connect
-//! page's credential prefill and the saved-password login. Those pass
-//! `allow_pre_session` and are admitted while the slot is empty; the
-//! identity-key and identity-pin commands never run pre-session and require an
-//! exact host match.
+//! Pre-session rule: while the slot is empty, only the connect page's
+//! credential prefill, the stored-token resume and the saved-password login
+//! pass `allow_pre_session`, because they must run before any socket exists.
+//! The identity-key and identity-pin commands never run pre-session and
+//! require an exact host match.
 //!
-//! This scoping guards against accidental cross-host credential and identity
-//! use. The host is set by `ws_connect` and cleared by `ws_disconnect`, both
-//! callable from the renderer, so it is not a barrier against a compromised
-//! renderer. Sourcing the active host from a native-side authenticated event is
-//! a follow-up, not a property this module claims.
+//! Residual: the empty slot is reachable (`ws_disconnect` clears), and the
+//! pre-session commands accept any saved host, so a compromised renderer can
+//! still use them there. Closing that needs the resume and login flows to move
+//! native-side; this module does not claim it.
 
 use std::sync::Mutex;
 
