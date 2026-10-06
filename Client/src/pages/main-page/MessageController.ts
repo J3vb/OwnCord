@@ -67,9 +67,9 @@ export function createMessageController(opts: MessageControllerOptions): Message
       const first = await api.getMessages(channelId, { limit }, signal);
       // A page that stops short of the oldest cached row leaves a gap above the
       // cached window; page backwards until the fetched range reaches the head
-      // (or the history runs out). The bound matches the 500-row window: a
-      // wider gap than any cached window cannot be bridged, so the rows below
-      // the fetched range are dropped instead.
+      // (or the history runs out). Five 100-row pages span the 500-row window:
+      // when the cached window plus the unseen gap exceeds them the head is not
+      // reached, so the rows below the fetched range are dropped instead.
       const head = cached[0]?.id ?? 0;
       let fetched = first.messages;
       let oldest = fetched[fetched.length - 1]?.id ?? 0;
