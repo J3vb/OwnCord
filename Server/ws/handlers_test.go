@@ -1968,3 +1968,54 @@ func TestHandleMessage_KickedClient_FrameNotDispatched(t *testing.T) {
 		}
 	}
 }
+
+// TestChatSend_BroadcastCarriesReferencedMessage verifies the live chat_message
+// frame of a reply carries the parent's snippet, and null for a plain message.
+func TestChatSend_BroadcastCarriesReferencedMessage(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-refmsg1")
+	chID := seedTestChannel(t, database, "send-refmsg-chan")
+	parentID, err := database.CreateMessage(context.Background(), chID, user.ID, "parent message", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage parent: %v", err)
+	}
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "chat_send",
+		"payload": map[string]any{"channel_id": chID, "content": "reply message", "reply_to": parentID},
+	})
+	hub.HandleMessageForTest(c, raw)
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case msg := <-send:
+			var env struct {
+				Type    string `json:"type"`
+				Payload struct {
+					ReferencedMessage *struct {
+						ID      int64  `json:"id"`
+						Content string `json:"content"`
+						Deleted bool   `json:"deleted"`
+					} `json:"referenced_message"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(msg, &env) != nil || env.Type != "chat_message" {
+				continue
+			}
+			ref := env.Payload.ReferencedMessage
+			if ref == nil || ref.ID != parentID || ref.Content != "parent message" || ref.Deleted {
+				t.Fatalf("referenced_message = %+v", ref)
+			}
+			return
+		case <-timer.C:
+			t.Fatal("no chat_message broadcast")
+		}
+	}
+}

@@ -1047,6 +1047,49 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("uses the server snippet when the parent is outside the loaded window", () => {
+      const reply = makeMessage({
+        id: 2,
+        replyTo: 999,
+        content: "replying",
+        referencedMessage: {
+          id: 999,
+          user: { id: 10, username: "alice", avatar: null },
+          content: "**old** parent text",
+          deleted: false,
+          has_attachments: false,
+        },
+      });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(reply, false, [reply], makeOpts(), ac.signal));
+
+      const ref = container.querySelector(".msg-reply-ref")!;
+      expect(ref.querySelector(".rr-author")?.textContent).toBe("alice");
+      expect(ref.querySelector(".rr-text")?.textContent).toBe("old parent text");
+      ac.abort();
+    });
+
+    it("shows the deleted notice for a redacted snippet", () => {
+      const reply = makeMessage({
+        id: 2,
+        replyTo: 999,
+        referencedMessage: {
+          id: 999,
+          user: null,
+          content: "",
+          deleted: true,
+          has_attachments: false,
+        },
+      });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(reply, false, [reply], makeOpts(), ac.signal));
+
+      const ref = container.querySelector(".msg-reply-ref")!;
+      expect(ref.querySelector(".rr-author")).toBeNull();
+      expect(ref.textContent).toBe("[message deleted]");
+      ac.abort();
+    });
+
     it("renders '[message deleted]' preview for deleted referenced message", () => {
       const original = makeMessage({ id: 1, content: "Original", deleted: true });
       const reply = makeMessage({ id: 2, replyTo: 1, content: "reply" });

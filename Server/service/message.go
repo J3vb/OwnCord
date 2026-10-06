@@ -80,6 +80,10 @@ type SendMessageResult struct {
 	// Attachment data for broadcast.
 	Attachments []db.AttachmentInfo
 
+	// ReferencedMessage is the reply parent's snippet for the broadcast; nil
+	// when the send is not a reply or the parent is unavailable.
+	ReferencedMessage *db.ReferencedMessage
+
 	// Mentions is the resolved mentioned user ids (never nil) and
 	// MentionsEveryone an authorized @everyone/@here. Both are broadcast so
 	// clients highlight from server-resolved data instead of re-guessing.

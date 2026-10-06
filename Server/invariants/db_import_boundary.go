@@ -160,6 +160,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/hub_presence.go":              {Disposition: "adapter", Note: "presence coalescer; pure BroadcastStatus helper and the MemberSummary shape"},
 	"ws/hub_visibility.go":            {Disposition: "adapter", Note: "visibility and audience resolve through the VisibilityReader seam; db types in signatures"},
 	"ws/messages.go":                  {Disposition: "adapter", Note: "wire types + pure status helpers"},
+	"ws/messages_chat.go":             {Disposition: "adapter", Note: "chat_message wire type carrying the db reply snippet"},
 	"ws/readers.go":                   {Disposition: "adapter", Note: "the hub's read seams plus the service-backed VoiceStore, PresenceStamper and SocketAuthenticator: db types in the interface signatures, and DBReaders wiring the handle behind the read seams"},
 	"ws/replay.go":                    {Disposition: "adapter", Note: "PersistedEvent type in the cold-tier filter; the resume path's reads bind the VisibilityReader seam and its status stamp goes through PresenceStamper"},
 	"ws/serve_auth.go":                {Disposition: "adapter", Note: "db.User on the handshake result and the pure StatusOffline const; SessionService resolves the token and writes the connect audit"},
