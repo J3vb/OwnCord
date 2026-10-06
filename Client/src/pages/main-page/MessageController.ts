@@ -15,7 +15,6 @@ import {
   setChannelLoading,
   setChannelLoadError,
 } from "@stores/messages.store";
-import { getUnreadOnOpen } from "@stores/channels.store";
 
 const log = createLogger("message-ctrl");
 const PAGE_SIZE = 50;
@@ -44,20 +43,19 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
-    // P4-01 R3: a revisit asks for enough rows to reach back to the oldest
-    // cached row (capped at the server's 100-row page), so the one refetch
-    // revalidates every row it keeps — an edit made while away shows, a delete
-    // made while away is gone. A detached around-window's rows are not the
-    // tail, so they are excluded: a jump back to present fetches a plain page.
+    // P4-01 R3: a revisit asks for the server's largest page, so the one
+    // refetch revalidates every cached row it reaches — an edit made while away
+    // shows, a delete made while away is gone. The page is not sized from the
+    // local unread count: messages posted while the reader was in another
+    // channel arrive unsubscribed and are never counted, so that count can be
+    // 0 while the tail grew. A detached around-window's rows are not the tail,
+    // so they are excluded: a jump back to present fetches a plain page.
     const cached = isWindowDetached(channelId)
       ? []
       : getChannelMessages(channelId).filter((m) => m.status === "sent");
     // Only a revisit has a cached window to reach back to; a first visit asks
     // for a single page regardless of how many messages await it.
-    const limit =
-      cached.length > 0
-        ? Math.min(MAX_PAGE_SIZE, Math.max(PAGE_SIZE, cached.length + getUnreadOnOpen(channelId)))
-        : PAGE_SIZE;
+    const limit = cached.length > 0 ? MAX_PAGE_SIZE : PAGE_SIZE;
     // Runs synchronously before the first await, so an empty message region
     // shows its in-region loading placeholder from the very first render. A
     // revisit's cached rows stay on screen instead, and setMessages below
@@ -73,10 +71,13 @@ export function createMessageController(opts: MessageControllerOptions): Message
       if (!signal.aborted && !isChannelLoaded(channelId)) {
         // Rows the extended page brought from above the cached window would
         // land as a prepend and rebuild the list; leave them for scrolling up.
-        // Only an extended page (limit > PAGE_SIZE) is trimmed — a default
-        // page's extra rows are history the failed-first-load retry fetched.
-        const head = limit > PAGE_SIZE ? (cached[0]?.id ?? 0) : 0;
-        const trimmed = resp.messages.filter((m) => m.id >= head);
+        // A cache shorter than a default page keeps the newest default page
+        // instead — a revisit never shows fewer rows than a first visit.
+        const head = cached[0]?.id ?? 0;
+        let trimmed = resp.messages.filter((m) => m.id >= head);
+        if (cached.length > 0 && trimmed.length > 0 && trimmed.length < PAGE_SIZE) {
+          trimmed = resp.messages.slice(0, PAGE_SIZE);
+        }
         // Never install an empty window: if everything from the cached head
         // upward was deleted while away the trim would drop every row, so keep
         // the fetched page and let setMessages absorb the stale cached rows.

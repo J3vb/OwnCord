@@ -110,7 +110,7 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
     server = rows(1, 200);
   });
 
-  it("asks for enough rows to reach back to the oldest cached row", async () => {
+  it("asks a revisit for the server's full page, so it reaches back to the oldest cached row", async () => {
     cacheWindow(126, 200); // 75 rows loaded
     server = rows(1, 205); // 5 posted while away
     openWithUnread(5);
@@ -118,7 +118,21 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
     await controller().loadMessages(CH, new AbortController().signal);
 
     expect(getMessages).toHaveBeenCalledTimes(1);
-    expect(limitAsked()).toBe(80);
+    expect(limitAsked()).toBe(100);
+  });
+
+  it("keeps the cached history when messages arrived unseen (local unread is 0)", async () => {
+    // Posted while the reader was in another channel: the client was not
+    // subscribed to this topic, so no unread was counted locally.
+    cacheWindow(126, 200);
+    server = rows(1, 220);
+    openWithUnread(0);
+
+    await controller().loadMessages(CH, new AbortController().signal);
+
+    expect(ids()[0]).toBe(126);
+    expect(ids().at(-1)).toBe(220);
+    expect(ids()).toHaveLength(95);
   });
 
   it("keeps the older cached rows as the same objects, revalidated by that one request", async () => {
@@ -155,7 +169,7 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
 
     await controller().loadMessages(CH, new AbortController().signal);
 
-    expect(limitAsked()).toBe(85);
+    expect(limitAsked()).toBe(100);
     expect(ids()[0]).toBe(126);
     expect(ids().at(-1)).toBe(205);
     // The rows left out are still there to scroll up to.
@@ -233,7 +247,7 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
 
     await controller().loadMessages(CH, new AbortController().signal);
 
-    expect(limitAsked()).toBe(50);
+    expect(limitAsked()).toBe(100);
     expect(ids()).toHaveLength(50);
     expect(ids()[0]).toBe(151);
   });
