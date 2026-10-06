@@ -263,12 +263,24 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
 ///
 /// Deleting a non-existent credential is not treated as an error.
 #[tauri::command(async)]
-pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
-    with_credential_lock(|| {
+pub fn delete_credential(
+    app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+    host: String,
+) -> Result<(), String> {
+    let result = with_credential_lock(|| {
         require_non_empty(&host, "host")?;
         secret_store::delete(&app, &login_account(&host))
             .map_err(|e| format!("delete_credential failed: {e}"))
-    })
+    });
+    // Removing the last-verified host's credential (an explicit logout)
+    // releases the pre-session fence, so the next login can read any saved
+    // host as on a first run. A failed delete keeps the credential, and the
+    // fence with it.
+    if result.is_ok() {
+        session.credential_removed(&host);
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------

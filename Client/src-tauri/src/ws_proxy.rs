@@ -373,7 +373,7 @@ fn deactivate_if_current(
     my_generation: u64,
 ) {
     if generation.load(Ordering::SeqCst) == my_generation {
-        session.clear();
+        session.clear_active();
     }
 }
 
@@ -505,8 +505,10 @@ pub async fn ws_disconnect(
     // unused: nothing will ever install under it.
     state.begin_connection().await;
     // Logout / server switch: no session is live, so the credential and
-    // identity commands fall back to their pre-session rule.
-    session.clear();
+    // identity commands fall back to their pre-session rule, which admits a
+    // pre-session flow only for the last verified host. That host itself is
+    // kept until its credential is removed.
+    session.clear_active();
     Ok(())
 }
 
