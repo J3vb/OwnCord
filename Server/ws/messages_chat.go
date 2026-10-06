@@ -1,6 +1,11 @@
 package ws
 
-import "github.com/J3vb/OwnCord/Server/db"
+import (
+	"bytes"
+	"encoding/json"
+
+	"github.com/J3vb/OwnCord/Server/db"
+)
 
 type chatMessagePayload struct {
 	ClientMessageID string            `json:"client_message_id,omitempty"`
@@ -87,4 +92,36 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			ReferencedMessage: a.ReferencedMessage,
 		},
 	})
+}
+
+var referencedMessageKey = []byte(`"referenced_message":{`)
+
+// replayCopy returns the bytes kept for replay (ring buffer and events table).
+// A reply frame's parent snippet is live-only: replay can run after the parent
+// was deleted, so the stored copy carries referenced_message null and the
+// client falls back to the unknown-parent bar. Frames without a snippet are
+// returned as is.
+func replayCopy(frame []byte) []byte {
+	if !bytes.Contains(frame, referencedMessageKey) {
+		return frame
+	}
+	var env map[string]json.RawMessage
+	if json.Unmarshal(frame, &env) != nil {
+		return frame
+	}
+	var payload map[string]json.RawMessage
+	if json.Unmarshal(env["payload"], &payload) != nil {
+		return frame
+	}
+	payload["referenced_message"] = json.RawMessage("null")
+	pb, err := json.Marshal(payload)
+	if err != nil {
+		return frame
+	}
+	env["payload"] = pb
+	out, err := json.Marshal(env)
+	if err != nil {
+		return frame
+	}
+	return out
 }

@@ -46,6 +46,7 @@ import {
   reduceEditMessage,
   reduceDeleteMessage,
   reduceBulkDeleteMessages,
+  reduceRedactReferencedByAuthor,
   reduceSetMessagePinned,
 } from "../features/messaging/messageEdits";
 import {
@@ -327,6 +328,11 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 export function bulkDeleteMessages(payload: ChatBulkDeletedPayload): void {
   if (payload.ids.length === 0) return;
   messagesStore.setState((prev) => reduceBulkDeleteMessages(prev, payload));
+}
+
+/** Account erasure: redact loaded reply snippets whose parent the erased user wrote. */
+export function redactReferencedByAuthor(userId: number): void {
+  messagesStore.setState((prev) => reduceRedactReferencedByAuthor(prev, userId));
 }
 
 /** Toggle the pinned state of a message (optimistic update after API call). */

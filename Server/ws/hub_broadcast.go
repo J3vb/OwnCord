@@ -356,8 +356,9 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	}
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
-	h.replayBuf.Push(seq, channelID, wrapped)
-	h.persistEvent(seq, channelID, wrapped)
+	stored := replayCopy(wrapped)
+	h.replayBuf.Push(seq, channelID, stored)
+	h.persistEvent(seq, channelID, stored)
 
 	for _, userID := range userIDs {
 		h.SendToUser(userID, wrapped)
@@ -425,8 +426,9 @@ func (h *Hub) deliverBroadcast(bm broadcastMsg) {
 		msg := wrapWithSeq(bm.msg, seq)
 
 		// Store in replay buffer for reconnection recovery.
-		h.replayBuf.Push(seq, bm.channelID, msg)
-		h.persistEvent(seq, bm.channelID, msg)
+		stored := replayCopy(msg)
+		h.replayBuf.Push(seq, bm.channelID, stored)
+		h.persistEvent(seq, bm.channelID, stored)
 
 		// Fan out to plugins subscribed to this event type (Phase C Step 9).
 		// Dispatch is a no-op in the default build; the wazero build calls into

@@ -4,6 +4,7 @@ import {
   reduceDeleteMessage,
   reduceBulkDeleteMessages,
   reduceSetMessagePinned,
+  reduceRedactReferencedByAuthor,
 } from "./messageEdits";
 import { INITIAL_STATE } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
@@ -91,5 +92,56 @@ describe("reduceSetMessagePinned", () => {
 
   it("returns prev by identity for an unloaded channel", () => {
     expect(reduceSetMessagePinned(prev, 9, 2, true)).toBe(prev);
+  });
+});
+
+const snippet = (id: number, userId = 9) => ({
+  id,
+  user: { id: userId, username: "old", avatar: null },
+  content: "secret",
+  deleted: false,
+  has_attachments: false,
+});
+const redacted = (id: number) => ({
+  id,
+  user: null,
+  content: "",
+  deleted: true,
+  has_attachments: false,
+});
+
+describe("reply snippets of a deleted or erased parent", () => {
+  // Parents 50 and 51 are outside the loaded window.
+  const withReplies: MessagesState = {
+    ...INITIAL_STATE,
+    messagesByChannel: new Map([
+      [
+        1,
+        [
+          row(10, { replyTo: 50, referencedMessage: snippet(50) }),
+          row(11, { replyTo: 51, referencedMessage: snippet(51, 8) }),
+          row(12),
+        ],
+      ],
+    ]),
+  };
+
+  it("redacts the snippet when the parent is deleted, even outside the window", () => {
+    const next = reduceDeleteMessage(withReplies, { message_id: 50, channel_id: 1 });
+    expect(list(next)[0]!.referencedMessage).toStrictEqual(redacted(50));
+    expect(list(next)[1]!.referencedMessage).toStrictEqual(snippet(51, 8));
+  });
+
+  it("redacts every purged parent on a bulk delete", () => {
+    const next = reduceBulkDeleteMessages(withReplies, { channel_id: 1, ids: [50, 51] });
+    expect(list(next)[0]!.referencedMessage).toStrictEqual(redacted(50));
+    expect(list(next)[1]!.referencedMessage).toStrictEqual(redacted(51));
+  });
+
+  it("redacts the snippets authored by an erased user in every channel", () => {
+    const next = reduceRedactReferencedByAuthor(withReplies, 9);
+    expect(list(next)[0]!.referencedMessage).toStrictEqual(redacted(50));
+    expect(list(next)[1]!.referencedMessage).toStrictEqual(snippet(51, 8));
+    expect(reduceRedactReferencedByAuthor(withReplies, 77)).toBe(withReplies);
   });
 });
