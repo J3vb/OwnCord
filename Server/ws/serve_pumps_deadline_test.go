@@ -95,6 +95,47 @@ func TestWriteDeadline_IdleGapDoesNotExpire(t *testing.T) {
 	}
 }
 
+// A timer that fires just as a write succeeds cancels the shared context even
+// though the write returned nil. The next frame must still go out on the same
+// healthy connection rather than failing on the poisoned context.
+func TestWriteDeadline_LateTimerDoesNotPoisonNextWrite(t *testing.T) {
+	result := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		wd := newWriteDeadline(r.Context(), time.Hour)
+		defer wd.stop()
+		if err := wd.write(conn, []byte("first")); err != nil {
+			result <- err
+			return
+		}
+		wd.timer.Reset(time.Millisecond)
+		<-wd.ctx.Done()
+		result <- wd.write(conn, []byte("second"))
+	}))
+	defer srv.Close()
+	conn := dialTestConn(t, srv.URL)
+	defer func() { _ = conn.CloseNow() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, want := range []string{"first", "second"} {
+		_, msg, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read %q: %v", want, err)
+		}
+		if string(msg) != want {
+			t.Fatalf("got %q want %q", msg, want)
+		}
+	}
+	if err := <-result; err != nil {
+		t.Fatalf("write after late timer: %v", err)
+	}
+}
+
 func queuedClient(n int) *Client {
 	c := &Client{
 		userID:   1,

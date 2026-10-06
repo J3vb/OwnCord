@@ -44,9 +44,11 @@ func writeFragmented(ctx context.Context, conn *websocket.Conn, msg []byte) erro
 // frame (propagateCancel and Deadline were ~5% of server CPU under load). One
 // cancellable context serves the whole pump; a timer cancels it only while a
 // write is in flight, so an idle gap never counts and a stalled peer fails the
-// write after the timeout. Cancelling poisons the context for good, which is
-// fine: a failed write closes the connection.
+// write after the timeout. Cancelling is one-way, so a timer that fires as a
+// write succeeds would poison the shared context and fail every later frame too;
+// a fired timer is observed and reset before the context is reused.
 type writeDeadline struct {
+	parent  context.Context
 	ctx     context.Context
 	cancel  context.CancelFunc
 	timer   *time.Timer
@@ -54,16 +56,32 @@ type writeDeadline struct {
 }
 
 func newWriteDeadline(parent context.Context, timeout time.Duration) *writeDeadline {
-	ctx, cancel := context.WithCancel(parent)
-	t := time.AfterFunc(timeout, cancel)
-	t.Stop()
-	return &writeDeadline{ctx: ctx, cancel: cancel, timer: t, timeout: timeout}
+	d := &writeDeadline{parent: parent, timeout: timeout}
+	d.reset()
+	return d
+}
+
+// reset mints a fresh context, cancel and timer. An AfterFunc timer captures the
+// cancel it was created with, so a new context needs a new timer; stopping the
+// old one leaves at most one armed.
+func (d *writeDeadline) reset() {
+	if d.timer != nil {
+		d.timer.Stop()
+	}
+	d.ctx, d.cancel = context.WithCancel(d.parent)
+	d.timer = time.AfterFunc(d.timeout, d.cancel)
+	d.timer.Stop()
 }
 
 func (d *writeDeadline) write(conn *websocket.Conn, msg []byte) error {
+	if d.ctx.Err() != nil {
+		d.reset()
+	}
 	d.timer.Reset(d.timeout)
 	err := writeFragmented(d.ctx, conn, msg)
-	d.timer.Stop()
+	if !d.timer.Stop() && err == nil {
+		d.reset()
+	}
 	return err
 }
 
