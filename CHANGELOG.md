@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Desktop UI
 
+- **Trusting a new server certificate now also asks the operating system.** After you accept the certificate prompt, the desktop app shows a native dialog with the server and its fingerprint, and saves the certificate only when you answer Yes. Accepting the certificate already saved asks nothing.
 - **Desktop updates now check the signed artifact name before installation.** The name must match the running operating system, processor and installer format.
 - **You can switch the clock between 12-hour and 24-hour.** Every timestamp was fixed to the 12-hour en-US format ("Today at 2:34 PM"). Settings › Appearance now has a **Time Format** choice; the default stays 12-hour, and the choice applies to message and system times, DM list times, search results, session and call times, and other date-and-time labels. It is stored on the device.
 - **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.

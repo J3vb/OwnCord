@@ -18,7 +18,17 @@
  */
 import { expect } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { X509Certificate } from "node:crypto";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -41,6 +51,39 @@ export interface ArtifactDriver {
   screenshot(): Promise<Buffer>;
   close(): Promise<void>;
   log(): string;
+}
+
+/**
+ * The pin the app stores for a server certificate: SHA-256 of the DER as
+ * lowercase colon-hex (`tofu::fingerprint_hex`).
+ */
+export function pinOfCertificate(pem: string): string {
+  return new X509Certificate(pem).fingerprint256.toLowerCase();
+}
+
+/** The pin for the self-signed certificate of a `startTestServer({ tls: true })` server. */
+export async function serverPin(serverDirectory: string): Promise<string> {
+  return pinOfCertificate(await readFile(join(serverDirectory, "data/cert.pem"), "utf8"));
+}
+
+/**
+ * Writes the app's `certs.json` into `appDataDir`, pinning each host.
+ *
+ * This is how the smoke gets past first-use trust without a seam in the shipped
+ * binary: pinning a certificate asks a native OS dialog, which neither CDP nor
+ * WebDriver can answer and which no release build has a bypass for. A pinned
+ * host never asks, and the seeded pin is the certificate the server presents,
+ * so the connect still runs the real TLS check against it. Keys are the
+ * lowercase `host[:port]` the app's cert store uses.
+ */
+export async function certPinsFile(
+  appDataDir: string,
+  pins: Record<string, string>,
+): Promise<string> {
+  const file = join(appDataDir, "certs.json");
+  const keyed = Object.fromEntries(Object.entries(pins).map(([h, fp]) => [h.toLowerCase(), fp]));
+  await writeFile(file, JSON.stringify(keyed, null, 2));
+  return file;
 }
 
 /** The Tauri updater target the installed artifact reports. */
@@ -94,15 +137,25 @@ async function allowWindowsCdp() {
   ]);
 }
 
+export interface LaunchOptions {
+  preserveProfile?: boolean;
+  /** `host[:port]` -> pin, written to the fresh profile before launch (see `certPinsFile`). */
+  pins?: Record<string, string>;
+}
+
 /** Launches the installed artifact and attaches the platform driver. */
 export async function launchArtifact(
   binary: string,
-  options: { preserveProfile?: boolean } = {},
+  options: LaunchOptions = {},
 ): Promise<ArtifactDriver> {
   if (!process.env.CI) throw new Error("Artifact smoke changes machine state: CI only");
   if (process.platform === "win32") {
     await allowWindowsCdp();
-    const app = await startNativeApp(binary, { ...options, identifier: IDENTIFIER });
+    const app = await startNativeApp(binary, {
+      preserveProfile: options.preserveProfile,
+      identifier: IDENTIFIER,
+      seedAppData: options.pins && ((dir) => certPinsFile(dir, options.pins!).then(() => {})),
+    });
     const page = app.page;
     const first = (css: string, text?: string) =>
       (text ? page.locator(css).filter({ hasText: text }) : page.locator(css))
@@ -131,10 +184,7 @@ const ELEMENT = "element-6066-11e4-a52e-4f735466cecf";
 const FIND = `(css, text) => [...document.querySelectorAll(css)].find((el) =>
   el.getClientRects().length > 0 && (!text || (el.textContent ?? "").includes(text))) ?? null`;
 
-async function launchLinux(
-  binary: string,
-  options: { preserveProfile?: boolean },
-): Promise<ArtifactDriver> {
+async function launchLinux(binary: string, options: LaunchOptions): Promise<ArtifactDriver> {
   const home = process.env.HOME ?? "";
   const profiles = [".local/share", ".config", ".cache"].map((root) =>
     join(home, root, IDENTIFIER),
@@ -143,6 +193,11 @@ async function launchLinux(
     for (const profile of profiles) await rm(profile, { recursive: true, force: true });
   };
   if (!options.preserveProfile) await clearProfiles();
+  if (options.pins) {
+    // Tauri's app_data_dir on Linux: $XDG_DATA_HOME/<identifier>.
+    await mkdir(profiles[0]!, { recursive: true });
+    await certPinsFile(profiles[0]!, options.pins);
+  }
   const { port, nativePort } = await freePorts("port", "nativePort");
   const driver = startProcess(
     "tauri-driver",
@@ -306,9 +361,10 @@ export const appVersion = (app: ArtifactDriver) =>
   app.evaluate<string>(`() => window.__TAURI_INTERNALS__.invoke("plugin:app|version")`);
 
 /**
- * Signs in from the connect page. Trusts the first-use certificate when the
- * app asks — every version of the flow shows the same trust button, but not
- * every version asks before the first submit.
+ * Signs in from the connect page. Launch with `pins` for the host: the shipped
+ * app confirms a new pin in a native OS dialog this driver cannot answer, so an
+ * unpinned host would hang here. The trust-button branch stays for an older
+ * installed version that predates the dialog and pins on the modal alone.
  */
 export async function artifactLogin(app: ArtifactDriver, host: string, user: string, pass: string) {
   await waitFor(app, "#host", "", 60_000);

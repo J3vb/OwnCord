@@ -17,6 +17,7 @@ import {
   installArtifact,
   killInstalled,
   launchArtifact,
+  serverPin,
   updaterTarget,
   waitFor,
   type ArtifactDriver,
@@ -101,7 +102,7 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await baseline("launch", async () => {
       await app?.close().catch(() => {});
       await killInstalled(binary);
-      app = await launchArtifact(binary);
+      app = await launchArtifact(binary, { pins: { [host]: await serverPin(server.directory) } });
       await waitFor(app, "#host", "", 60_000);
       previous = await appVersion(app);
       expect(previous).not.toBe(version);
