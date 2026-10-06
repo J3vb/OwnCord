@@ -20,6 +20,8 @@ const log = createLogger("message-ctrl");
 const PAGE_SIZE = 50;
 /** The server's largest history page (maxMessageLimit). */
 const MAX_PAGE_SIZE = 100;
+/** Revisit paging bound: five pages span the 500-row per-channel window. */
+const MAX_REVISIT_PAGES = 5;
 
 // ---------------------------------------------------------------------------
 // Message Controller
@@ -43,10 +45,10 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
-    // P4-01 R3: a revisit asks for the server's largest page, so the one
-    // refetch revalidates every cached row it reaches — an edit made while away
-    // shows, a delete made while away is gone. The page is not sized from the
-    // local unread count: messages posted while the reader was in another
+    // P4-01 R3: a revisit refetches the tail and reconciles it into the cached
+    // window, so every cached row it keeps is revalidated — an edit made while
+    // away shows, a delete made while away is gone. The page is not sized from
+    // the local unread count: messages posted while the reader was in another
     // channel arrive unsubscribed and are never counted, so that count can be
     // 0 while the tail grew. A detached around-window's rows are not the tail,
     // so they are excluded: a jump back to present fetches a plain page.
@@ -62,27 +64,54 @@ export function createMessageController(opts: MessageControllerOptions): Message
     // reconciles the refetched page into them.
     setChannelLoading(channelId);
     try {
-      const resp = await api.getMessages(channelId, { limit }, signal);
-      // Re-check "loaded" after the await: a same-channel jump can install an
+      const first = await api.getMessages(channelId, { limit }, signal);
+      // A page that stops short of the oldest cached row leaves a gap above the
+      // cached window; page backwards until the fetched range reaches the head
+      // (or the history runs out). The bound matches the 500-row window: a
+      // wider gap than any cached window cannot be bridged, so the rows below
+      // the fetched range are dropped instead.
+      const head = cached[0]?.id ?? 0;
+      let fetched = first.messages;
+      let oldest = fetched[fetched.length - 1]?.id ?? 0;
+      let hasMoreBefore = first.has_more;
+      for (
+        let pages = 1;
+        cached.length > 0 &&
+        !signal.aborted &&
+        oldest > head &&
+        hasMoreBefore &&
+        pages < MAX_REVISIT_PAGES;
+        pages++
+      ) {
+        const older = await api.getMessages(
+          channelId,
+          { before: oldest, limit: MAX_PAGE_SIZE },
+          signal,
+        );
+        if (older.messages.length === 0) break;
+        fetched = [...fetched, ...older.messages];
+        oldest = older.messages[older.messages.length - 1]!.id;
+        hasMoreBefore = older.has_more;
+      }
+      // Re-check "loaded" after the awaits: a same-channel jump can install an
       // around-window (setAroundMessages) while this mount-time tail fetch is
       // still in flight — nothing aborts this fetch's signal in that case.
       // Both landing marks the channel loaded, so a tail response that lost
       // the race is discarded instead of clobbering the jump's window.
       if (!signal.aborted && !isChannelLoaded(channelId)) {
-        // Rows the extended page brought from above the cached window would
+        // Rows the fetched range brought from above the cached window would
         // land as a prepend and rebuild the list; leave them for scrolling up.
         // A cache shorter than a default page keeps the newest default page
         // instead — a revisit never shows fewer rows than a first visit.
-        const head = cached[0]?.id ?? 0;
-        let trimmed = resp.messages.filter((m) => m.id >= head);
+        let trimmed = fetched.filter((m) => m.id >= head);
         if (cached.length > 0 && trimmed.length > 0 && trimmed.length < PAGE_SIZE) {
-          trimmed = resp.messages.slice(0, PAGE_SIZE);
+          trimmed = fetched.slice(0, PAGE_SIZE);
         }
         // Never install an empty window: if everything from the cached head
         // upward was deleted while away the trim would drop every row, so keep
-        // the fetched page and let setMessages absorb the stale cached rows.
-        const messages = trimmed.length > 0 ? trimmed : resp.messages;
-        const hasMore = resp.has_more || messages.length < resp.messages.length;
+        // the fetched range and let setMessages absorb the stale cached rows.
+        const messages = trimmed.length > 0 ? trimmed : fetched;
+        const hasMore = hasMoreBefore || messages.length < fetched.length;
         log.info("Messages loaded", {
           channelId,
           count: messages.length,

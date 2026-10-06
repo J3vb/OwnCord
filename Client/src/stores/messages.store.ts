@@ -171,10 +171,11 @@ export function setChannelLoadError(channelId: number): void {
  *  whole history fits in one page (hasMore false). Otherwise cached "sent"
  *  rows older than the page are dropped, so nothing deleted or edited while
  *  away stays on screen (scrolling up loads them again). A revisit's refetch
- *  (MessageController.loadMessages, P4-01 R3) asks for enough rows to cover
- *  the cached window, up to the server's 100-row page, so the rows it keeps
- *  are revalidated by that one page; rows beyond it are still dropped as
- *  before. The list patches
+ *  (MessageController.loadMessages, P4-01 R3) pages backwards from the newest
+ *  message until the fetched range reaches the oldest cached row, so the rows
+ *  it keeps are revalidated by that range; a gap wider than the paging bound
+ *  keeps the fetched range and drops the stale cached rows below it, as before.
+ *  The list patches
  *  only the rows that changed: the dropped head, the new tail and, for a
  *  revisit that opened with unread messages, the NEW divider.
  *

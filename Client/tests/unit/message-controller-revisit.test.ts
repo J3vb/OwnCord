@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // P4-01 R3: a revisit keeps the older history the reader had loaded. The
-// revisit's one refetch asks for enough rows to reach back to the oldest cached
-// row (capped at the server's 100-row page), so every row it keeps is
-// revalidated by that request: an edit made while away shows, a delete made
-// while away is gone, and the older rows need no second request or rebuild.
+// revisit pages backwards from the newest message (100-row server pages) until
+// the fetched range reaches the oldest cached row, so every row it keeps is
+// revalidated: an edit made while away shows, a delete made while away is
+// gone, and the older rows need no rebuild.
 
 // jsdom does not provide ResizeObserver — stub it so MessageList can mount.
 if (typeof globalThis.ResizeObserver === "undefined") {
@@ -176,7 +176,7 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
     expect(hasMoreMessages(CH)).toBe(true);
   });
 
-  it("caps the request at the server's 100-row page", async () => {
+  it("pages back to keep a cached window larger than the newest server page", async () => {
     server = rows(1, 300);
     cacheWindow(151, 300); // 150 rows loaded
     openWithUnread(0);
@@ -184,8 +184,37 @@ describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => 
     await controller().loadMessages(CH, new AbortController().signal);
 
     expect(limitAsked()).toBe(100);
-    expect(ids()[0]).toBe(201);
+    expect(getMessages).toHaveBeenCalledTimes(2);
+    expect(ids()[0]).toBe(151);
     expect(ids().at(-1)).toBe(300);
+    expect(ids()).toHaveLength(150);
+  });
+
+  it("keeps a cached window spanning several server pages", async () => {
+    server = rows(1, 300);
+    cacheWindow(1, 300); // 300 rows loaded
+    openWithUnread(0);
+
+    await controller().loadMessages(CH, new AbortController().signal);
+
+    expect(getMessages).toHaveBeenCalledTimes(3);
+    expect(ids()).toEqual([...rows(1, 300)].map((m) => m.id));
+  });
+
+  it("drops the stale cache when the unseen gap outruns the paging bound", async () => {
+    server = rows(1, 1000);
+    cacheWindow(1, 10); // 10 rows loaded
+    openWithUnread(0);
+
+    await controller().loadMessages(CH, new AbortController().signal);
+
+    // Five 100-row pages reach back to 501 but not to the cached head at 1, and
+    // a gap that wide cannot be bridged: the freshly fetched range stays and the
+    // stale cached rows below it are dropped honestly.
+    expect(getMessages).toHaveBeenCalledTimes(5);
+    expect(ids()[0]).toBe(501);
+    expect(ids().at(-1)).toBe(1000);
+    expect(ids()).toHaveLength(500);
   });
 
   it("asks a first visit for one 50-row page", async () => {
