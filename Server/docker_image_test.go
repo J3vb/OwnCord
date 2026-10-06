@@ -36,7 +36,7 @@ func readFile(t *testing.T, name string) string {
 func TestDockerfileBundlesPinnedLiveKit(t *testing.T) {
 	df := readFile(t, "Dockerfile")
 
-	if m := regexp.MustCompile(`(?m)^ARG LIVEKIT_VERSION=(\S+)$`).FindStringSubmatch(df); m == nil || m[1] != ws.DefaultLiveKitVersion {
+	if m := regexp.MustCompile(`(?m)^ARG LIVEKIT_VERSION=(\S+)$`).FindStringSubmatch(df); len(m) < 2 || m[1] != ws.DefaultLiveKitVersion {
 		t.Errorf("Dockerfile LIVEKIT_VERSION must equal ws.DefaultLiveKitVersion %q, got %v", ws.DefaultLiveKitVersion, m)
 	}
 }
