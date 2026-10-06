@@ -4,6 +4,7 @@
  */
 
 import type { ApiClient } from "@lib/api";
+import type { MessageResponse } from "@lib/types";
 import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
 import {
@@ -71,7 +72,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // when the cached window plus the unseen gap exceeds them the head is not
       // reached, so the rows below the fetched range are dropped instead.
       const head = cached[0]?.id ?? 0;
-      let fetched = first.messages;
+      const fetched: MessageResponse[] = [...first.messages];
       let oldest = fetched[fetched.length - 1]?.id ?? 0;
       let hasMoreBefore = first.has_more;
       for (
@@ -83,6 +84,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
         pages < MAX_REVISIT_PAGES;
         pages++
       ) {
+        // oxlint-disable-next-line no-await-in-loop -- sequential paging: each page is fetched before the one below it
         const older = await api
           .getMessages(channelId, { before: oldest, limit: MAX_PAGE_SIZE }, signal)
           .catch(() => null);
@@ -91,7 +93,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
           break;
         }
         if (older.messages.length === 0) break;
-        fetched = [...fetched, ...older.messages];
+        fetched.push(...older.messages);
         oldest = older.messages[older.messages.length - 1]!.id;
         hasMoreBefore = older.has_more;
       }
