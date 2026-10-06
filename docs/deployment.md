@@ -67,7 +67,7 @@ replaced by a new container that finds the old data intact.
 
 - Docker Engine 24+ and Docker Compose v2
 - `linux/amd64` or `linux/arm64` host
-- Ports available: `8443` (chat), `7881` TCP, `50000-60000` UDP (LiveKit media; a single UDP port instead when the LiveKit config uses `udp_port`)
+- Ports available: `8443` (chat), `7881` TCP, and the LiveKit media UDP port(s) — `7882` for the bundled image (its default), or `50000-60000` for the two-container compose stack (see [LiveKit in Docker](#livekit-in-docker))
 
 ### Health and privilege
 

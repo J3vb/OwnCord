@@ -4,10 +4,10 @@ LiveKit is an open-source SFU (Selective Forwarding Unit) that handles real-time
 
 There are two ways to run LiveKit alongside OwnCord:
 
-| Method                | Best for                   | LiveKit managed by          |
-| --------------------- | -------------------------- | --------------------------- |
-| **Docker Compose**    | Linux servers              | Docker (separate container) |
-| **Companion process** | Windows / bare-metal Linux | OwnCord (auto-start)        |
+| Method                | Best for                                | LiveKit managed by          |
+| --------------------- | --------------------------------------- | --------------------------- |
+| **Docker Compose**    | Linux servers                           | Docker (separate container) |
+| **Companion process** | Windows, bare-metal Linux, Docker image | OwnCord (auto-start)        |
 
 ---
 
