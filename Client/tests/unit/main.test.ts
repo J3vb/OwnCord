@@ -628,6 +628,57 @@ describe("main.ts native certificate-dialog decline", () => {
 
     clearAuth();
   });
+
+  it("mounts no second trust modal while the native dialog is still open", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("pending-native.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    const firstUse = {
+      host: "pending-native.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    };
+    emitTauriEvent("cert-tofu", firstUse);
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+
+    // The native dialog stays open until the test answers it.
+    let answerNative!: (value: unknown) => void;
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "accept_cert_fingerprint"
+        ? new Promise((resolve, reject) => {
+            answerNative = (v) => (v === "no" ? reject("certificate not accepted") : resolve(v));
+          })
+        : Promise.resolve(undefined),
+    );
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    const firstUseCalls = vi.mocked(createCertFirstUseModal).mock.calls.length;
+    const mismatchCalls = vi.mocked(createCertMismatchModal).mock.calls.length;
+
+    // A repeated health check re-raises both kinds of event meanwhile.
+    emitTauriEvent("cert-tofu", firstUse);
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    emitTauriEvent("cert-tofu", {
+      ...firstUse,
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /Certificate fingerprint mismatch/);
+    expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(firstUseCalls);
+    expect(vi.mocked(createCertMismatchModal).mock.calls.length).toBe(mismatchCalls);
+
+    // Once the native dialog is answered, a later event can prompt again.
+    answerNative("no");
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("cert-tofu", firstUse);
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(firstUseCalls + 1);
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onReject();
+
+    clearAuth();
+  });
 });
 
 describe("main.ts connected overlay (OC-0063)", () => {

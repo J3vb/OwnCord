@@ -250,8 +250,9 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
     host: evt.host,
     fingerprint: evt.fingerprint,
     onAccept: () => {
+      // The guard stays set until the native confirmation settles, so a
+      // repeated event cannot mount a second modal behind the OS dialog.
       modal.destroy?.();
-      certModalActive = false;
       void (async () => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
@@ -276,6 +277,8 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
           } else {
             log.error("Failed to trust first-use certificate", err);
           }
+        } finally {
+          certModalActive = false;
         }
       })();
     },
@@ -305,8 +308,9 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
     storedFingerprint: evt.storedFingerprint ?? connectText("common.unknown"),
     newFingerprint: evt.fingerprint,
     onAccept: () => {
+      // The guard stays set until the native confirmation settles, so a
+      // repeated event cannot mount a second modal behind the OS dialog.
       modal.destroy?.();
-      certModalActive = false;
       void (async () => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
@@ -330,6 +334,8 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
           } else {
             log.error("Failed to accept cert fingerprint", err);
           }
+        } finally {
+          certModalActive = false;
         }
       })();
     },
