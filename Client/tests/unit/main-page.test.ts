@@ -2444,6 +2444,22 @@ describe("MainPage — account deletion", () => {
     expect(authStore.getState().isAuthenticated).toBe(false);
   });
 
+  it("account deletion awaits the cache purge before reporting success", async () => {
+    let release!: () => void;
+    mockPruneAttachmentCacheScope.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const api = Object.assign(fakeApi("chat.example"), {
+      deleteAccount: vi.fn(async () => {}),
+    }) as ApiClient;
+    await deleteAccount(api);
+    await vi.waitFor(() => expect(mockPruneAttachmentCacheScope).toHaveBeenCalled());
+
+    expect(container.querySelector(".toast-success")).toBeNull();
+    release();
+    await vi.waitFor(() => expect(container.querySelector(".toast-success")).not.toBeNull());
+  });
+
   it("prunes nothing when the server refuses the deletion", async () => {
     const api = Object.assign(fakeApi("chat.example"), {
       deleteAccount: vi.fn(async () => {

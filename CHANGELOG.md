@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+- **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
+- **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
+- **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
+
 ## v2.2.0-beta.1
 
 **OwnCord 2.2 beta 1** is the next public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It adds an unread bar that opens each channel where you left off, camera capture that keeps working while the window is hidden on Linux, voice sounds, and an admin page that edits almost every server setting. The Docker image now carries voice too, so one container is the whole server.

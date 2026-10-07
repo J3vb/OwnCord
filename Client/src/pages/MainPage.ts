@@ -848,7 +848,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         clearAuth();
         // The account is gone, so its cached server images go too (B7-15c).
         // clearAuth has already disarmed the scope, so no late write follows.
-        if (cacheScope !== null) void pruneAttachmentCacheScope(cacheScope);
+        if (cacheScope !== null) await pruneAttachmentCacheScope(cacheScope);
         showToast(account("toast.accountDeleted"), "success");
       },
       onEnableTotp: async (password) => {
