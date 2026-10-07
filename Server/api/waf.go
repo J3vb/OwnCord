@@ -240,6 +240,14 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 				SecRule REQUEST_HEADERS:User-Agent "@rx (?:nikto|sqlmap|nmap|masscan|dirbuster)" \
 					"id:913100,phase:1,deny,status:403,log,msg:'Scanner blocked',tag:'OWASP_CRS',tag:'automation'"
 
+				# Arguments past SecArgumentsLimit are dropped uninspected; reject
+				# the request rather than let them pass unseen. Phase 1 covers
+				# the query string; phase 2 covers body arguments.
+				SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" \
+					"id:900010,phase:1,deny,status:403,log,msg:'Argument limit exceeded'"
+				SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" \
+					"id:900011,phase:2,deny,status:403,log,msg:'Argument limit exceeded'"
+
 				# Exclude WebSocket upgrade and health endpoints from body inspection
 				SecRule REQUEST_URI "@streq /ws" "id:900001,phase:1,pass,nolog,ctl:ruleRemoveById=942100;941100;932100"
 				SecRule REQUEST_URI "@streq /api/v1/health" "id:900002,phase:1,pass,nolog,ctl:ruleRemoveById=942100;941100;932100"
