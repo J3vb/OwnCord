@@ -4,7 +4,6 @@ import {
   reduceDeleteMessage,
   reduceBulkDeleteMessages,
   reduceSetMessagePinned,
-  reduceRedactReferencedByAuthor,
 } from "./messageEdits";
 import { INITIAL_STATE } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
@@ -110,7 +109,7 @@ const redacted = (id: number) => ({
   has_attachments: false,
 });
 
-describe("reply snippets of a deleted or erased parent", () => {
+describe("reply snippets of a deleted parent", () => {
   // Parents 50 and 51 are outside the loaded window.
   const withReplies: MessagesState = {
     ...INITIAL_STATE,
@@ -136,12 +135,5 @@ describe("reply snippets of a deleted or erased parent", () => {
     const next = reduceBulkDeleteMessages(withReplies, { channel_id: 1, ids: [50, 51] });
     expect(list(next)[0]!.referencedMessage).toStrictEqual(redacted(50));
     expect(list(next)[1]!.referencedMessage).toStrictEqual(redacted(51));
-  });
-
-  it("redacts the snippets authored by an erased user in every channel", () => {
-    const next = reduceRedactReferencedByAuthor(withReplies, 9);
-    expect(list(next)[0]!.referencedMessage).toStrictEqual(redacted(50));
-    expect(list(next)[1]!.referencedMessage).toStrictEqual(snippet(51, 8));
-    expect(reduceRedactReferencedByAuthor(withReplies, 77)).toBe(withReplies);
   });
 });

@@ -116,17 +116,3 @@ export function reduceSetMessagePinned(
   updatedMessages.set(channelId, updatedList);
   return { ...prev, messagesByChannel: updatedMessages };
 }
-
-/** Redact every loaded reply snippet whose parent was written by an erased user. */
-export function reduceRedactReferencedByAuthor(prev: MessagesState, userId: number): MessagesState {
-  let changed = false;
-  const next = new Map(prev.messagesByChannel);
-  for (const [channelId, list] of prev.messagesByChannel) {
-    const updated = redactReplies(list, (ref) => ref.user?.id === userId);
-    if (updated !== list) {
-      next.set(channelId, updated);
-      changed = true;
-    }
-  }
-  return changed ? { ...prev, messagesByChannel: next } : prev;
-}

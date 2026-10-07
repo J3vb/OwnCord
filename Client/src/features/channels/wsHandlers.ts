@@ -22,7 +22,6 @@ import {
   updatePresence,
   applyPresenceBatch,
 } from "../../stores/members.store";
-import { redactReferencedByAuthor } from "../../stores/messages.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
@@ -233,9 +232,6 @@ export function handleMemberJoin(payload: Payload<"member_join">): void {
 export function handleMemberBan(payload: Payload<"member_ban">): void {
   log.info("Member banned", { userId: payload.user_id });
   removeMember(payload.user_id);
-  // member_ban also announces an account erasure: reply quotes of that
-  // author's messages must not outlive them.
-  redactReferencedByAuthor(payload.user_id);
 }
 
 export function handleMemberUpdate(payload: Payload<"member_update">): void {

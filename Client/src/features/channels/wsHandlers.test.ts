@@ -237,7 +237,14 @@ describe("handleMemberUpdate", () => {
 });
 
 describe("handleMemberBan", () => {
-  it("redacts loaded reply snippets the removed account authored", () => {
+  it("leaves loaded reply snippets intact — a ban is not an erasure", () => {
+    const snippet = {
+      id: 50,
+      user: { id: 9, username: "gone", avatar: null },
+      content: "secret",
+      deleted: false,
+      has_attachments: false,
+    };
     messagesStore.setState((prev) => ({
       ...prev,
       messagesByChannel: new Map([
@@ -250,13 +257,7 @@ describe("handleMemberBan", () => {
               user: { id: 2, username: "b", avatar: null },
               content: "re",
               replyTo: 50,
-              referencedMessage: {
-                id: 50,
-                user: { id: 9, username: "gone", avatar: null },
-                content: "secret",
-                deleted: false,
-                has_attachments: false,
-              },
+              referencedMessage: snippet,
               attachments: [],
               reactions: [],
               pinned: false,
@@ -272,12 +273,6 @@ describe("handleMemberBan", () => {
       ]),
     }));
     handleMemberBan({ user_id: 9 });
-    expect(messagesStore.getState().messagesByChannel.get(1)![0]!.referencedMessage).toStrictEqual({
-      id: 50,
-      user: null,
-      content: "",
-      deleted: true,
-      has_attachments: false,
-    });
+    expect(messagesStore.getState().messagesByChannel.get(1)![0]!.referencedMessage).toBe(snippet);
   });
 });
