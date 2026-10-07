@@ -107,7 +107,7 @@ field for the recovery kit secret or a recovery credential from the server
 owner, and a new password (≥ 8). It calls `POST /auth/recover` with the secret
 in `kit_secret` (the server tells a kit from an owner credential by shape), and
 the returned session is signed in through the same `completeLogin` tail as a
-login. A refusal keeps the overlay and shows the server's message; success or
+login. A refusal keeps the overlay and shows the server's message; Cancel is disabled while the request is in flight; success or
 Cancel wipes the secret and the new password from the inputs.
 
 ### 2.3 Login sequence
@@ -306,19 +306,19 @@ not a mismatch. This is correct today; the spec locks it.
 
 ## 6. Logout & session lifecycle
 
-| Trigger      | Target behavior                                                                                                                                                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page                                                                             |
-| Quick switch | `clearAuth("server_switch")` from the server overlay (switch or Add server) → leave voice, disconnect WS, **keep** the host's stored credential and server session, → connect page; a switch target resumes from its stored token |
-| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                                                                                                      |
-| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                                                                                                      |
-| Cert reject  | Disconnect → connect page                                                                                                                                                                                                         |
+| Trigger      | Target behavior                                                                                                                                                                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page                                                                                                                                                              |
+| Quick switch | `clearAuth("server_switch")` from the server overlay (switch or Add server) → leave voice, disconnect WS, **keep** the host's stored credential and server session, → connect page; a switch target resumes from its stored token, only if its profile remembers its sign-in and no manual login has started since |
+| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                                                                                                                                                                                       |
+| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                                                                                                                                                                                       |
+| Cert reject  | Disconnect → connect page                                                                                                                                                                                                                                                                                          |
 
 > **✓ Resolved 2026-07-20 — server session revoked on logout.** User-initiated
 > logout now calls `api.logout()` (`POST /auth/logout`) via the `logout()` helper
 > (`src/lib/logout.ts`), wired into the settings Log Out button
 > (`MainPage.ts` → `logout(api)`). The revocation is strictly best-effort:
-> fire-and-forget with its rejection swallowed, so a slow/offline/rejecting
+> fire-and-forget with its rejection swallowed and the request aborted after 10 s, so a slow/offline/rejecting
 > server never blocks or delays the local teardown — `clearAuth()` always runs
 > synchronously. The credential is still deleted locally (`main.ts`), and the
 > server token is now invalidated too.
