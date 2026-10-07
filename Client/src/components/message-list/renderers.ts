@@ -77,6 +77,28 @@ export function renderDayDivider(iso: string): HTMLDivElement {
 }
 
 /**
+ * The unread bar pinned to the top of the message region (P4-03 step B). The
+ * caller owns the label text and the `hidden` state; the button only reports
+ * the click.
+ */
+export function renderUnreadBar(
+  onMarkRead: () => void,
+  signal: AbortSignal,
+): { readonly bar: HTMLDivElement; readonly label: HTMLSpanElement } {
+  const bar = createElement("div", { class: "unread-bar", "data-testid": "unread-bar" });
+  bar.hidden = true;
+  const label = createElement("span", { "data-testid": "unread-bar-label" });
+  const markRead = createElement(
+    "button",
+    { type: "button", "data-testid": "unread-bar-mark-read" },
+    messagingText("unreadBar.markRead"),
+  );
+  markRead.addEventListener("click", onMarkRead, { signal });
+  appendChildren(bar, label, markRead);
+  return { bar, label };
+}
+
+/**
  * The "NEW" line above the first message the reader has not seen. Built exactly
  * like the day divider — same rule/label/rule shape — so the two read as one
  * family; only the accent colour distinguishes them.

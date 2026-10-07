@@ -27,6 +27,7 @@ import {
   isSameDay,
   renderDayDivider,
   renderNewDivider,
+  renderUnreadBar,
   renderMessage,
   authorAvatarKey,
   refreshConnectionControls,
@@ -42,6 +43,7 @@ import { channelsStore, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
+  formatBadgeCount,
   formatMessageTimestamp,
   getUserRole,
   resolveAuthor,
@@ -303,6 +305,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let bottomSpacer: HTMLDivElement | null = null;
   let contentContainer: HTMLDivElement | null = null;
   let scrollToBottomBtn: HTMLButtonElement | null = null;
+  let unreadBar: HTMLDivElement | null = null;
+  let unreadBarLabel: HTMLSpanElement | null = null;
+  let unreadBarDismissed = false;
+  /** The visit still owes the reader a jump to the NEW divider (cleared on first use). */
+  let openAtDividerPending = false;
   let jumpToPresentPill: HTMLButtonElement | null = null;
   let renderedStart = 0;
   let renderedEnd = 0;
@@ -495,6 +502,55 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     jumpToPresentPill.classList.toggle("visible", isWindowDetached(options.channelId));
   }
 
+  /** Move the view to the NEW divider once one exists. Does not force a row rebuild (R2). */
+  function openAtDividerIfReady(): boolean {
+    if (!openAtDividerPending || root === null) return false;
+    const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
+    if (idx === -1) return false;
+    openAtDividerPending = false;
+    root.scrollTop = offsetBefore(idx);
+    renderWindow();
+    updateScrollToBottomBtn();
+    return true;
+  }
+
+  /** P4-03 step B: the bar shows while the visit has unread it has not dismissed. */
+  function updateUnreadBar(): void {
+    if (unreadBar === null || unreadBarLabel === null) return;
+    let text = "";
+    if (!unreadBarDismissed && unreadOnOpen > 0) {
+      const shown = formatBadgeCount(openedUnread);
+      if (unreadOnOpen === Infinity) {
+        text = messagingText("unreadBar.capped", { shown });
+      } else {
+        // The divider latches to the first unread message; until it does (a
+        // deferred revisit) there is no time to show.
+        const anchor = allMessages.find((m) => m.id === newDividerAnchorId);
+        if (anchor !== undefined) {
+          text = messagingText("unreadBar.since", {
+            count: openedUnread,
+            shown,
+            time: formatMessageTimestamp(anchor.timestamp),
+          });
+        }
+      }
+    }
+    unreadBarLabel.textContent = text;
+    unreadBar.hidden = text === "";
+  }
+
+  function dismissUnreadBar(): void {
+    unreadBarDismissed = true;
+    updateUnreadBar();
+  }
+
+  /** A messagesByChannel / historyLoadState change landed: refresh the bar and the open position. */
+  function settleUnreadNav(): void {
+    // Only while the reader is still at the bottom the mount left them at.
+    if (openAtDividerPending && isNearBottom()) openAtDividerIfReady();
+    updateUnreadBar();
+  }
+
   /**
    * P4-03 step A: the channel is read once the reader has seen its bottom with
    * the window focused. Fires on every scroll and on window focus; the
@@ -509,6 +565,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
     if (!isNearBottom()) return;
     if (isChannelAway(options.channelId)) return;
+    dismissUnreadBar();
     if (!hasUnread(options.channelId)) return;
     markChannelRead(options.channelId);
   }
@@ -1163,6 +1220,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       { signal: disposable.signal },
     );
 
+    const unreadBarParts = renderUnreadBar(() => {
+      markChannelRead(options.channelId);
+      dismissUnreadBar();
+    }, disposable.signal);
+    unreadBar = unreadBarParts.bar;
+    unreadBarLabel = unreadBarParts.label;
+
     jumpToPresentPill = createElement("button", {
       class: "jump-to-present-pill",
       "data-testid": "jump-to-present",
@@ -1179,6 +1243,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     region.appendChild(root);
     region.appendChild(scrollToBottomBtn);
     region.appendChild(jumpToPresentPill);
+    region.appendChild(unreadBar);
 
     root.addEventListener("scroll", handleScroll, {
       signal: disposable.signal,
@@ -1223,10 +1288,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     parentContainer.appendChild(region);
 
+    openAtDividerPending = unreadOnOpen > 0;
     renderAll();
     updateJumpToPresentPill();
-    scrollToBottom();
-    const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
+    const openedAtDivider = openAtDividerIfReady();
+    updateUnreadBar();
+    // A deferred divider still moves the view later, so only the bottom
+    // scrolls are skipped when the open already landed on it.
+    if (!openedAtDivider) scrollToBottom();
+    const initialScrollRaf = requestAnimationFrame(() => {
+      if (!openedAtDivider) scrollToBottom();
+    });
     disposable.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
 
     // A full-ready resync refetches a detached window around this (P2-T4).
@@ -1247,6 +1319,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (!patchRows()) {
             renderAll();
           }
+          settleUnreadNav();
         },
       ),
     );
@@ -1261,6 +1334,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         (s) => s.historyLoadState.get(options.channelId),
         () => {
           if (virtualItems.length === 0 || (newDividerDeferred && !patchRows())) renderAll();
+          settleUnreadNav();
         },
       ),
     );
@@ -1482,6 +1556,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     topSpacer = null;
     bottomSpacer = null;
     scrollToBottomBtn = null;
+    unreadBar = null;
+    unreadBarLabel = null;
     jumpToPresentPill = null;
     olderLoadingRow = null;
   }

@@ -197,6 +197,37 @@
   filter: brightness(1.1);
 }
 
+/* P4-03: unread bar pinned over the top of the message list. */
+.unread-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 16px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--font-size-sm);
+}
+.unread-bar[hidden] {
+  display: none;
+}
+.unread-bar button {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.unread-bar button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+}
+
 /* ── Jump target flash ──
    The row a jump landed on, briefly tinted so the eye can find it after the
    scroll. Applied by MessageList.scrollToMessage for 1.5s. */
