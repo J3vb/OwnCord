@@ -209,6 +209,16 @@ The image also sets `OWNCORD_VOICE_UDP_PORT=7882`, so all media rides one UDP po
 
 The shipped `docker-compose.yml` instead runs `livekit/livekit-server:v1.13.7` as its own container: it clears `OWNCORD_VOICE_LIVEKIT_BINARY` and sets `OWNCORD_VOICE_UDP_PORT` to `0` for the server, so the bundled copy never starts there. Use it when you want to size, restart or upgrade LiveKit independently. See [LiveKit Setup — Docker](livekit-setup.md#docker).
 
+### Unraid
+
+[`deploy/unraid/owncord.xml`](../deploy/unraid/owncord.xml) is a template for Unraid's Docker tab: one container, with voice from the bundled LiveKit. Add its raw URL under **Docker > Template repositories** (or paste the file into `/boot/config/plugins/dockerMan/templates-user/`), then **Add Container > OwnCord**.
+
+It publishes `8443/tcp` (chat and the admin panel), `7881/tcp` and `7882/udp` (voice). Forward the last two from your router for voice outside your LAN ([port-forwarding.md](port-forwarding.md)).
+
+- **Ownership.** The image runs as uid `65532`, but Unraid creates appdata as `99:100` (`nobody:users`), so the template adds `--user 99:100` and the container writes its files as that user. To move an install between the two, `chown -R` the appdata folder to the new owner.
+- **`config.yaml`.** Mounting a single file that does not exist yet makes Docker create a directory in its place. The template mounts the folder `/app` (default `/mnt/user/appdata/owncord`) instead, so the server writes its default `config.yaml` there on first start; edit it and restart the container. `/app/data` is a second mount for the database and uploads.
+- **First start.** Read the setup token from the container log, then open `https://<unraid-ip>:8443/admin`.
+
 ### Linux desktop voice
 
 Two limits apply to Linux desktop clients:

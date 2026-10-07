@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>OwnCord</Name>
+  <Repository>ghcr.io/j3vb/owncord-server:latest</Repository>
+  <Registry>https://github.com/J3vb/OwnCord/pkgs/container/owncord-server</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell/>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/J3vb/OwnCord/issues</Support>
+  <Project>https://github.com/J3vb/OwnCord</Project>
+  <Overview>Self-hosted chat with voice and video: text channels, direct messages, file sharing and screen share, on one container that bundles its own LiveKit voice server and a SQLite database. Pair it with the OwnCord desktop client. After the first start, open the admin panel and create the Owner account with the setup token printed in the container log. Voice needs 7881 TCP and 7882 UDP forwarded to Unraid, see https://github.com/J3vb/OwnCord/blob/main/docs/port-forwarding.md.</Overview>
+  <Category>Network:Messenger Network:Voip Tools:</Category>
+  <WebUI>https://[IP]:[PORT:8443]/admin</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/J3vb/OwnCord/main/deploy/unraid/owncord.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/J3vb/OwnCord/main/Client/src-tauri/icons/128x128.png</Icon>
+  <ExtraParams>--user 99:100 --restart=unless-stopped --stop-timeout 60 --cap-drop=ALL --security-opt=no-new-privileges:true --ulimit nofile=65536:65536</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>The setup token is printed in the container log on first start. The admin panel only accepts private-network addresses by default (server.admin_allowed_cidrs in config.yaml).</Requires>
+  <Config Name="Chat (HTTPS + WebSocket)" Target="8443" Default="8443" Mode="tcp" Description="Chat server, admin panel and the voice signalling proxy." Type="Port" Display="always" Required="true" Mask="false">8443</Config>
+  <Config Name="Voice media (TCP fallback)" Target="7881" Default="7881" Mode="tcp" Description="WebRTC TCP fallback for clients behind strict NAT. Forward to Unraid for voice from outside your LAN." Type="Port" Display="always" Required="true" Mask="false">7881</Config>
+  <Config Name="Voice media (UDP)" Target="7882" Default="7882" Mode="udp" Description="The single UDP port all voice and video media uses. Forward to Unraid for voice from outside your LAN." Type="Port" Display="always" Required="true" Mask="false">7882</Config>
+  <Config Name="Config (config.yaml)" Target="/app" Default="/mnt/user/appdata/owncord" Mode="rw" Description="Holds config.yaml, written with defaults on first start (edit it, then restart). Mounted as a folder so the file need not exist beforehand." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/owncord</Config>
+  <Config Name="Data" Target="/app/data" Default="/mnt/user/appdata/owncord/data" Mode="rw" Description="SQLite database, uploads, TLS certificate, backups and the bundled LiveKit credentials." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/owncord/data</Config>
+  <Config Name="Log level" Target="OWNCORD_LOGGING_LEVEL" Default="info" Mode="" Description="debug, info, warn or error." Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+</Container>
