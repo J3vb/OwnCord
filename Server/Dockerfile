@@ -15,6 +15,30 @@ ARG VERSION=dev
 # which is the right answer for that case.
 ARG TARGETARCH
 
+# Bundled LiveKit SFU, so one container serves chat and voice: the server starts
+# it as its companion process (voice.livekit_binary, set via ENV below). Fetched
+# before the Go sources so a code change never re-downloads it. Pinned per
+# architecture by digest and verified with sha256sum, so the build fails rather
+# than ship an unverified binary. Bump LIVEKIT_VERSION and both digests together
+# with ws.DefaultLiveKitVersion and the livekit image in docker-compose.yml
+# (digests: the release's checksums.txt; TestDockerfileBundlesPinnedLiveKit
+# pins the version match).
+ARG LIVEKIT_VERSION=1.13.7
+ARG LIVEKIT_SHA256_AMD64=6634aeeb2fb1366b6723708ae4320b9d5408106a4c63457c5e845ae3979c90e2
+ARG LIVEKIT_SHA256_ARM64=5d167fdf52cf43c0c72972f25325364479f41f854bfef651056eab2504da5de9
+RUN set -eu; \
+    case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+      amd64) sha="${LIVEKIT_SHA256_AMD64}" ;; \
+      arm64) sha="${LIVEKIT_SHA256_ARM64}" ;; \
+      *) echo "no bundled livekit-server for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    arch="${TARGETARCH:-$(dpkg --print-architecture)}"; \
+    f="livekit_${LIVEKIT_VERSION}_linux_${arch}.tar.gz"; \
+    curl -fsSL -o "/tmp/${f}" "https://github.com/livekit/livekit/releases/download/v${LIVEKIT_VERSION}/${f}"; \
+    echo "${sha}  /tmp/${f}" | sha256sum -c -; \
+    tar -xzf "/tmp/${f}" -C / livekit-server; \
+    rm "/tmp/${f}"
+
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -45,6 +69,7 @@ COPY --from=builder --chown=65532:65532 /skel/app /app
 WORKDIR /app
 
 COPY --from=builder /chatserver /chatserver
+COPY --from=builder /livekit-server /livekit-server
 
 # /app/data is the default data_dir (SQLite DB + uploads).
 # Mount a named volume here to persist data across container restarts.
@@ -52,6 +77,8 @@ VOLUME ["/app/data"]
 
 # Server listens on this port by default (configurable via config.yaml).
 EXPOSE 8443
+# Voice media (bundled LiveKit): TCP fallback and the single UDP port above.
+EXPOSE 7881/tcp 7882/udp
 
 # The binary is its own probe: distroless has no shell, no curl and no wget.
 # Declared on the IMAGE rather than only in docker-compose.yml so every runtime
@@ -65,6 +92,14 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # Refuses the in-place self-update endpoint (the binary is image content;
 # upgrades are image pulls). See Server/updater/container.go.
 ENV OWNCORD_CONTAINER=1
+
+# One container serves chat + voice: the server runs the bundled LiveKit as its
+# companion process, as on bare metal. Voice media goes over ONE UDP port so a
+# single `-p 7882:7882/udp` (plus 7881/tcp) is all a bare `docker run` needs
+# instead of the 50000-60000 range. Override either via the same variables; the
+# two-container docker-compose.yml clears them because LiveKit is separate there.
+ENV OWNCORD_VOICE_LIVEKIT_BINARY=/livekit-server \
+    OWNCORD_VOICE_UDP_PORT=7882
 
 # Run as non-root (distroless provides uid 65532 = "nonroot").
 USER 65532:65532
