@@ -113,7 +113,8 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    (`db.EventNamesUserPredicate`: a persisted row is the wire envelope, so
    the lookups are `$.payload.user_id`, `$.payload.user.id`,
    `$.payload.from_user_id`, `$.payload.referenced_message.user.id` (a
-   reply's embedded parent snippet) and `$.payload.mentions` — HP-4 decision 1);
+   reply's embedded parent snippet; the stored copy carries `null`, so this is
+   a backstop) and `$.payload.mentions` — HP-4 decision 1);
 7. `emoji.uploaded_by` — a server-wide asset — moves to the oldest remaining
    admin-class account, else to the oldest remaining account, else the rows
    are deleted and their files join the job;
