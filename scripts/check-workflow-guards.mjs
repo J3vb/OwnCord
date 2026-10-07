@@ -123,7 +123,9 @@ function main() {
   }
   const cargo = "Client/src-tauri/Cargo.toml";
   if (autoConfirmIsDefault(readFileSync(join(ROOT, cargo), "utf8"))) {
-    failures.push(`${cargo}: e2e-auto-confirm is in the default features — shipped builds would skip the cert-pin dialog`);
+    failures.push(
+      `${cargo}: e2e-auto-confirm is in the default features — shipped builds would skip the cert-pin dialog`,
+    );
   }
 
   if (failures.length) {

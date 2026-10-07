@@ -114,6 +114,9 @@ test("e2e-auto-confirm enabled outside ci.yml is caught", () => {
 });
 
 test("e2e-auto-confirm in the default features is caught", () => {
-  assert.equal(autoConfirmIsDefault('[features]\ndefault = ["devtools", "e2e-auto-confirm"]\n'), true);
-  assert.equal(autoConfirmIsDefault('[features]\ndefault = []\ne2e-auto-confirm = []\n'), false);
+  assert.equal(
+    autoConfirmIsDefault('[features]\ndefault = ["devtools", "e2e-auto-confirm"]\n'),
+    true,
+  );
+  assert.equal(autoConfirmIsDefault("[features]\ndefault = []\ne2e-auto-confirm = []\n"), false);
 });
