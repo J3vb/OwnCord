@@ -73,7 +73,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 **Voice and calls**
 
 - A caller hears ringback while a DM call rings, and a toast reports "declined" or "No answer" if you are on another channel.
-- Join, leave, mute and deafen play a short sound on the speaker you chose (Settings › Voice & Audio); turn them off under Settings › Notifications.
+- Join, leave, mute and deafen play a short sound on the speaker you chose (Settings › Voice & Audio; on Linux they play on the system default speaker); turn them off under Settings › Notifications.
 - Linux: the camera is captured in the app's native backend, and the camera list and self-view come from it.
 - Linux: an empty camera list now names the missing GStreamer packages, and the `.deb` installs them for you.
 
@@ -91,7 +91,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 ### Changed
 
-- Voice media in the Docker image uses the single UDP port `7882` instead of the `50000-60000` range, so publish `-p 7882:7882/udp -p 7881:7881`. A compose file with a separate LiveKit must clear `OWNCORD_VOICE_LIVEKIT_BINARY` and `OWNCORD_VOICE_UDP_PORT`.
+- Voice media in the Docker image uses the single UDP port `7882` instead of the `50000-60000` range, so publish `-p 7882:7882/udp -p 7881:7881`. A compose file with a separate LiveKit must clear `OWNCORD_VOICE_LIVEKIT_BINARY` and set `OWNCORD_VOICE_UDP_PORT` to `0` for range mode (as the shipped `Server/docker-compose.yml` does) or to the same single port configured in LiveKit.
 - Messages that arrive while the window is unfocused now count as unread for the channel you are viewing.
 - Jumping to a message centres it, and a reply always shows who it quotes.
 - Linux: a native crash now ends the client log with a line naming the signal and thread.
@@ -113,6 +113,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 - **Linux desktop:** the native camera is new and has not yet been checked on a real machine. Check it on your own setup, including with screen share on; the app can close without warning when both are on, and the new crash line is there to pin that down.
 - **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A channel that opens at the NEW line with a backlog taller than the screen can miss unread counts.** Messages that arrive below the visible area may not be counted as unread if you leave before scrolling to the bottom.
 - **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
 - **There is no browser client yet.** The desktop app is the only supported client.
 
