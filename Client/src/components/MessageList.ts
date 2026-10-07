@@ -1358,7 +1358,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         // array references are unchanged) never trigger a re-render here.
         (s) => s.messagesByChannel.get(options.channelId),
         () => {
-          const prevLast = allMessages.at(-1)?.id ?? 0;
+          // Optimistic rows (id 0) sit at the tail; live rows land before them.
+          const prevLast = allMessages.findLast((m) => m.id > 0)?.id ?? 0;
           const wasBottom = isNearBottom();
           if (!patchRows()) {
             renderAll();

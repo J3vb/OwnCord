@@ -512,6 +512,19 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(countText()).toBe("");
     });
 
+    it("still counts while the reader's own send is pending at the tail", () => {
+      const pending = { ...makeMessage(0, ME), status: "pending" as const };
+      setMessages([...range(1, 50), pending]);
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      // Live messages land before the trailing optimistic row.
+      setMessages([...range(1, 52), pending]);
+
+      expect(countText()).toBe("2");
+    });
+
     it("does not count older history prepended above", () => {
       setMessages(range(51, 100));
       openChannelWithUnread(0);

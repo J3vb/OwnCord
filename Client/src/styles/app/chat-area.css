@@ -165,7 +165,7 @@
   border-radius: 9px;
   background: var(--accent);
   color: var(--on-accent);
-  font-size: 11px;
+  font-size: var(--font-size-xxs);
   line-height: 18px;
 }
 .scroll-to-bottom-count[hidden] {
