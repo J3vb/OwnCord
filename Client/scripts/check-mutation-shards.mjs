@@ -6,8 +6,13 @@ import { join, matchesGlob } from "node:path";
 
 const clientDir = new URL("..", import.meta.url).pathname;
 process.env.STRYKER_SHARD ||= "livekit"; // satisfy the config's own validation on import
-const { shards } = await import(join(clientDir, "stryker.shard.config.mjs"));
+const { shards, default: shardConfig } = await import(join(clientDir, "stryker.shard.config.mjs"));
 const base = (await import(join(clientDir, "stryker.config.mjs"))).default;
+
+if (!shardConfig.reporters?.includes("json")) {
+  console.error('shard config must list the "json" reporter, or mutation.json is never written');
+  process.exit(1);
+}
 
 const globs = base.mutate;
 const positive = globs.filter((g) => !g.startsWith("!"));

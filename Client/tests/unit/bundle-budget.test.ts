@@ -10,8 +10,15 @@
 //
 // This drives the pure helpers the CLI calls, so it needs no build: feed a
 // fixture manifest and assert the split.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { allCssFiles, startupClosureFiles } from "../../scripts/bundle-budget.mjs";
+import {
+  allCssFiles,
+  findEmbeddedWasm,
+  startupClosureFiles,
+} from "../../scripts/bundle-budget.mjs";
 
 /** A manifest shaped like Vite's: an entry linking a JS chunk and a stylesheet,
  *  a lazy chunk with its own stylesheet, and the standalone `style.css`. */
@@ -48,5 +55,20 @@ describe("bundle budget closure split (D5)", () => {
       "assets/index-aaa.css",
       "assets/style-ccc.css",
     ]);
+  });
+});
+
+describe("embedded WASM scan", () => {
+  it("finds the marker in a nested JS file that no manifest entry names", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bb-wasm-"));
+    try {
+      mkdirSync(join(dir, "workers"));
+      writeFileSync(join(dir, "ok.js"), "clean");
+      writeFileSync(join(dir, "workers", "vad-worklet.js"), "x=AGFzbQ;");
+      writeFileSync(join(dir, "note.txt"), "AGFzbQ");
+      expect(findEmbeddedWasm(dir, "AGFzbQ")).toEqual([join("workers", "vad-worklet.js")]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
