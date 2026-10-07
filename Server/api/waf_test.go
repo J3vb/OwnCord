@@ -265,7 +265,7 @@ func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
 			}
 
 			var over strings.Builder
-			for i := 0; i < 1100; i++ {
+			for i := range 1100 {
 				fmt.Fprintf(&over, "p%d=1&", i)
 			}
 			over.WriteString("q=1%27%20OR%20%271%27%3D%271")
