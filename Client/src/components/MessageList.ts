@@ -580,6 +580,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Only while the reader is still at the bottom the mount left them at.
     if (openAtDividerPending && isNearBottom()) openAtDividerIfReady();
     updateUnreadBar();
+    markReadIfSeen();
   }
 
   /**
