@@ -21,11 +21,18 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 
 /// The host the current session is connected to, plus every host a login was
-/// verified for during this app run (which outlives the connection).
+/// verified for during this app run (which outlives the connection). Both live
+/// under one lock so a command never sees an active host cleared before it
+/// was recorded as verified.
 #[derive(Default)]
 pub struct ActiveSession {
-    host: Mutex<Option<String>>,
-    verified_hosts: Mutex<HashSet<String>>,
+    state: Mutex<SessionState>,
+}
+
+#[derive(Default, Clone)]
+struct SessionState {
+    host: Option<String>,
+    verified_hosts: HashSet<String>,
 }
 
 impl ActiveSession {
@@ -37,36 +44,26 @@ impl ActiveSession {
     /// `auth_ok`; marks both the active session and a verified host.
     pub fn set(&self, host: &str) {
         let key = crate::tofu::cert_store_key(host);
-        if let Ok(mut guard) = self.host.lock() {
-            *guard = Some(key.clone());
-        }
-        if let Ok(mut guard) = self.verified_hosts.lock() {
-            guard.insert(key);
-        }
+        let mut state = self.lock();
+        state.verified_hosts.insert(key.clone());
+        state.host = Some(key);
     }
 
     /// Clear the active host when the connection ends or on `ws_disconnect`.
     /// The verified hosts are deliberately kept.
     pub fn clear_active(&self) {
-        if let Ok(mut guard) = self.host.lock() {
-            *guard = None;
-        }
+        self.lock().host = None;
     }
 
-    /// The active host, normalized, or None when no session is established.
-    fn active(&self) -> Option<String> {
-        self.host
+    fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
     }
 
-    /// Every host a login was verified for during this app run, normalized.
-    fn verified_hosts(&self) -> HashSet<String> {
-        self.verified_hosts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+    /// One consistent view of the active host and the verified hosts.
+    fn snapshot(&self) -> SessionState {
+        self.lock().clone()
     }
 
     /// Guard a credential command's `host`: allowed when it matches the active
@@ -74,9 +71,10 @@ impl ActiveSession {
     /// it names a host verified this app run (any saved host before the first
     /// login). Returns the error the command reports otherwise.
     pub fn ensure(&self, host: &str, allow_pre_session: bool) -> Result<(), String> {
+        let state = self.snapshot();
         if host_access_allowed(
-            self.active().as_deref(),
-            &self.verified_hosts(),
+            state.host.as_deref(),
+            &state.verified_hosts,
             host,
             allow_pre_session,
         ) {
@@ -95,9 +93,10 @@ impl ActiveSession {
         scope: &str,
         allow_pre_session: bool,
     ) -> Result<(), String> {
+        let state = self.snapshot();
         if host_access_allowed(
-            self.active().as_deref(),
-            &self.verified_hosts(),
+            state.host.as_deref(),
+            &state.verified_hosts,
             scope_host(scope),
             allow_pre_session,
         ) {
