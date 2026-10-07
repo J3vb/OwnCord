@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 type chatMessagePayload struct {
@@ -32,7 +32,7 @@ type chatMessagePayload struct {
 	// ReferencedMessage is the reply parent's snippet (null when not a reply,
 	// or the parent is unavailable). A deleted parent is redacted to
 	// {id, deleted: true}. An older server omits the field.
-	ReferencedMessage *db.ReferencedMessage `json:"referenced_message"`
+	ReferencedMessage *service.ReferencedMessage `json:"referenced_message"`
 }
 
 // chatMessageArgs is the input to buildChatMessage. It is a struct rather than
@@ -53,7 +53,7 @@ type chatMessageArgs struct {
 	Mentions          []int64
 	MentionsEveryone  bool
 	MentionsHere      bool
-	ReferencedMessage *db.ReferencedMessage
+	ReferencedMessage *service.ReferencedMessage
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
