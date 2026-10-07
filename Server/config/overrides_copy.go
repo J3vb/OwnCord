@@ -321,7 +321,7 @@ var settingCopy = map[string]SettingCopy{
 		"A long random value, at least 32 characters.",
 		"A mismatch with LiveKit's own secret stops voice working."),
 	"voice.livekit_binary": sc("Voice server program path",
-		"The path of a livekit-server program to start. Empty starts none.",
+		"The livekit-server program to start. Empty uses the automatic download if on, else an external server.",
 		"Empty (default) with automatic download.",
 		"The server runs this file, so only point it at one you trust. A typed confirmation is required."),
 	"voice.livekit_url": sc("Voice server address",
@@ -343,5 +343,5 @@ var settingCopy = map[string]SettingCopy{
 	"voice.udp_port": sc("Voice media port",
 		"Sends all voice traffic through one UDP port. 0 uses the 50000 to 60000 range.",
 		"0 (default), or one port if you want to forward just one.",
-		"Your router must forward the chosen port, or voice fails for remote members. 7880 and 7881 are not allowed."),
+		"Forward this port on your router. If you run your own LiveKit, set the same port in its livekit.yaml. 7880/7881 are not allowed."),
 }

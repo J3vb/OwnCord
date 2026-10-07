@@ -53,3 +53,17 @@ func TestSettingCopy_LabelsAreUnique(t *testing.T) {
 		seen[c.Label] = key
 	}
 }
+
+// Copy that is only true for a managed voice setup must say so: with
+// auto-download an empty binary path still starts LiveKit, and the single UDP
+// port only reaches a LiveKit that OwnCord configures.
+func TestSettingCopy_VoiceCaveats(t *testing.T) {
+	bin, _ := SettingCopyFor("voice.livekit_binary")
+	if !strings.Contains(bin.Description, "download") {
+		t.Errorf("voice.livekit_binary description must mention automatic download: %q", bin.Description)
+	}
+	port, _ := SettingCopyFor("voice.udp_port")
+	if !strings.Contains(port.Effect, "livekit.yaml") {
+		t.Errorf("voice.udp_port effect must say an externally managed LiveKit needs matching: %q", port.Effect)
+	}
+}
