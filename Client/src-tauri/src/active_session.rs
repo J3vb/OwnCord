@@ -1,27 +1,38 @@
 //! The host of the session this process is currently connected to.
 //!
 //! Scopes credential and identity commands to the server the app is signed
-//! into now. `ws_connect` records the host it dialled, and `ws_disconnect`
-//! (logout, server switch) clears it.
+//! into now. The proxy records the host only when it relays the server's
+//! `auth_ok` over the pinned socket (no renderer command can set it), and
+//! clears it when that connection ends or on `ws_disconnect` (logout, server
+//! switch).
 //!
-//! Some commands legitimately run before any session exists — the connect
-//! page's credential prefill and the saved-password login. Those pass
-//! `allow_pre_session` and are admitted while the slot is empty; the
-//! identity-key and identity-pin commands never run pre-session and require an
-//! exact host match.
-//!
-//! This scoping guards against accidental cross-host credential and identity
-//! use. The host is set by `ws_connect` and cleared by `ws_disconnect`, both
-//! callable from the renderer, so it is not a barrier against a compromised
-//! renderer. Sourcing the active host from a native-side authenticated event is
-//! a follow-up, not a property this module claims.
+//! The same `auth_ok` records every host a login was verified for during this
+//! app run. That set survives `ws_disconnect`, a dropped connection and a
+//! credential removal — all renderer-reachable — so a renderer command can
+//! clear the active slot but never widen the set. While the slot is empty, the
+//! pre-session flows (connect-page credential prefill, stored-token resume and
+//! saved-password login) pass `allow_pre_session` and are admitted only for a
+//! host in the set. Before any login has been verified this app run the set is
+//! empty and the first-run behaviour stands, so a restart can still auto-login
+//! from a saved credential. The identity-key and identity-pin commands never
+//! run pre-session and require an exact active match.
 
+use std::collections::HashSet;
 use std::sync::Mutex;
 
-/// The single host the current session is connected to, if any.
+/// The host the current session is connected to, plus every host a login was
+/// verified for during this app run (which outlives the connection). Both live
+/// under one lock so a command never sees an active host cleared before it
+/// was recorded as verified.
 #[derive(Default)]
 pub struct ActiveSession {
-    host: Mutex<Option<String>>,
+    state: Mutex<SessionState>,
+}
+
+#[derive(Default, Clone)]
+struct SessionState {
+    host: Option<String>,
+    verified_hosts: HashSet<String>,
 }
 
 impl ActiveSession {
@@ -29,33 +40,44 @@ impl ActiveSession {
         Self::default()
     }
 
-    /// Record the host a session connected to.
+    /// Record the host a login was verified for. Set only from the relayed
+    /// `auth_ok`; marks both the active session and a verified host.
     pub fn set(&self, host: &str) {
-        if let Ok(mut guard) = self.host.lock() {
-            *guard = Some(crate::tofu::cert_store_key(host));
-        }
+        let key = crate::tofu::cert_store_key(host);
+        let mut state = self.lock();
+        state.verified_hosts.insert(key.clone());
+        state.host = Some(key);
     }
 
-    /// Clear on logout or server switch.
-    pub fn clear(&self) {
-        if let Ok(mut guard) = self.host.lock() {
-            *guard = None;
-        }
+    /// Clear the active host when the connection ends or on `ws_disconnect`.
+    /// The verified hosts are deliberately kept.
+    pub fn clear_active(&self) {
+        self.lock().host = None;
     }
 
-    /// The active host, normalized, or None when no session is established.
-    fn active(&self) -> Option<String> {
-        self.host
+    fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
+        self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+    }
+
+    /// One consistent view of the active host and the verified hosts.
+    fn snapshot(&self) -> SessionState {
+        self.lock().clone()
     }
 
     /// Guard a credential command's `host`: allowed when it matches the active
-    /// session, or when the slot is empty and the command's flow legitimately
-    /// runs pre-session. Returns the error the command reports otherwise.
+    /// session, or — with no active session and for a pre-session flow — when
+    /// it names a host verified this app run (any saved host before the first
+    /// login). Returns the error the command reports otherwise.
     pub fn ensure(&self, host: &str, allow_pre_session: bool) -> Result<(), String> {
-        if host_access_allowed(self.active().as_deref(), host, allow_pre_session) {
+        let state = self.snapshot();
+        if host_access_allowed(
+            state.host.as_deref(),
+            &state.verified_hosts,
+            host,
+            allow_pre_session,
+        ) {
             Ok(())
         } else {
             Err(format!("host {host} is not the active session host"))
@@ -71,8 +93,10 @@ impl ActiveSession {
         scope: &str,
         allow_pre_session: bool,
     ) -> Result<(), String> {
+        let state = self.snapshot();
         if host_access_allowed(
-            self.active().as_deref(),
+            state.host.as_deref(),
+            &state.verified_hosts,
             scope_host(scope),
             allow_pre_session,
         ) {
@@ -98,44 +122,109 @@ fn scope_host(scope: &str) -> &str {
 /// compared with the same normalization the cert store uses, so a
 /// `:443`-suffixed profile host matches the port-less `wss://` host
 /// `ws_connect` records for the same server.
-fn host_access_allowed(active: Option<&str>, host: &str, allow_pre_session: bool) -> bool {
-    match active {
-        Some(a) => crate::tofu::cert_store_key(a) == crate::tofu::cert_store_key(host),
-        None => allow_pre_session,
+///
+/// With no active session, a pre-session flow is admitted only for a host
+/// whose login was verified this app run; before any has been, the set is
+/// empty and the first-login behaviour stands.
+fn host_access_allowed(
+    active: Option<&str>,
+    verified_hosts: &HashSet<String>,
+    host: &str,
+    allow_pre_session: bool,
+) -> bool {
+    if let Some(a) = active {
+        return crate::tofu::cert_store_key(a) == crate::tofu::cert_store_key(host);
     }
+    if !allow_pre_session {
+        return false;
+    }
+    if verified_hosts.is_empty() {
+        return true;
+    }
+    verified_hosts.contains(&crate::tofu::cert_store_key(host))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn set_of(hosts: &[&str]) -> HashSet<String> {
+        hosts
+            .iter()
+            .map(|h| crate::tofu::cert_store_key(h))
+            .collect()
+    }
+
     #[test]
-    fn pre_session_is_allowed_only_for_pre_session_flows() {
-        assert!(host_access_allowed(None, "chat.example.com", true));
-        assert!(!host_access_allowed(None, "chat.example.com", false));
+    fn first_run_admits_pre_session_reads() {
+        // Before any login is verified this app run the set is empty, so the
+        // first-run/startup path (connect-page prefill, stored-token resume)
+        // can still read a saved host.
+        assert!(host_access_allowed(
+            None,
+            &set_of(&[]),
+            "chat.example.com",
+            true
+        ));
+        assert!(!host_access_allowed(
+            None,
+            &set_of(&[]),
+            "chat.example.com",
+            false
+        ));
+    }
+
+    #[test]
+    fn a_verified_host_fences_pre_session_reads() {
+        // After a verified login, a pre-session flow for any other host is
+        // refused even though no session is active.
+        assert!(host_access_allowed(
+            None,
+            &set_of(&["chat.example.com"]),
+            "chat.example.com",
+            true
+        ));
+        assert!(!host_access_allowed(
+            None,
+            &set_of(&["chat.example.com"]),
+            "other.example",
+            true
+        ));
+    }
+
+    #[test]
+    fn every_host_verified_this_app_run_stays_readable() {
+        let verified = set_of(&["a.example", "b.example"]);
+        assert!(host_access_allowed(None, &verified, "a.example", true));
+        assert!(host_access_allowed(None, &verified, "b.example", true));
+        assert!(!host_access_allowed(None, &verified, "c.example", true));
     }
 
     #[test]
     fn an_active_host_is_required_to_match() {
         assert!(host_access_allowed(
             Some("chat.example.com"),
+            &set_of(&[]),
             "chat.example.com",
             false
         ));
         assert!(!host_access_allowed(
             Some("chat.example.com"),
+            &set_of(&[]),
             "other.example",
             false
         ));
         // A matching host stays allowed even for a pre-session-capable command.
         assert!(host_access_allowed(
             Some("chat.example.com"),
+            &set_of(&[]),
             "chat.example.com",
             true
         ));
         // A different host is refused even when pre-session is allowed.
         assert!(!host_access_allowed(
             Some("chat.example.com"),
+            &set_of(&["other.example"]),
             "other.example",
             true
         ));
@@ -145,17 +234,20 @@ mod tests {
     fn host_comparison_normalizes_default_port_and_case() {
         assert!(host_access_allowed(
             Some("chat.example.com"),
+            &set_of(&[]),
             "Chat.Example.COM:443",
             false
         ));
         assert!(host_access_allowed(
             Some("chat.example.com:8443"),
+            &set_of(&[]),
             "chat.example.com:8443",
             false
         ));
         // A non-default port is a distinct server and must not collapse.
         assert!(!host_access_allowed(
             Some("localhost:8443"),
+            &set_of(&[]),
             "localhost:9443",
             false
         ));
@@ -208,10 +300,52 @@ mod tests {
     fn disconnect_clears_the_active_host() {
         let session = ActiveSession::new();
         session.set("chat.example.com");
-        session.clear();
+        session.clear_active();
         // Back to pre-session: identity commands refuse again.
         assert!(session
             .ensure_identity_scope("42@chat.example.com", false)
             .is_err());
+    }
+
+    #[test]
+    fn disconnect_keeps_every_verified_host() {
+        // A renderer-callable disconnect clears the active slot but must not
+        // widen pre-session reads: only the verified host stays readable.
+        let session = ActiveSession::new();
+        session.set("chat.example.com");
+        session.clear_active();
+        assert!(session.ensure("chat.example.com", true).is_ok());
+        assert!(session.ensure("other.example", true).is_err());
+    }
+
+    #[test]
+    fn switching_back_to_a_host_signed_in_this_run_still_resumes() {
+        // Quick switch away and back: both hosts were verified this app run, so
+        // both saved credentials remain readable pre-session.
+        let session = ActiveSession::new();
+        session.set("a.example");
+        session.clear_active();
+        session.set("b.example");
+        session.clear_active();
+        assert!(session.ensure("a.example", true).is_ok());
+        assert!(session.ensure("b.example", true).is_ok());
+        assert!(session.ensure("c.example", true).is_err());
+    }
+
+    #[test]
+    fn a_new_verified_login_activates_the_new_host() {
+        let session = ActiveSession::new();
+        session.set("chat.example.com");
+        session.clear_active();
+        // Switching servers through a real login: the new auth_ok verifies and
+        // activates the new host.
+        session.set("other.example");
+        assert!(session.ensure("other.example", false).is_ok());
+        // The earlier host is verified but no longer active.
+        assert!(session.ensure("chat.example.com", false).is_err());
+        // Both remain readable pre-session once the session ends.
+        session.clear_active();
+        assert!(session.ensure("chat.example.com", true).is_ok());
+        assert!(session.ensure("other.example", true).is_ok());
     }
 }

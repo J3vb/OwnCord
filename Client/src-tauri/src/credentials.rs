@@ -261,7 +261,9 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
 
 /// Delete a credential from the system credential store.
 ///
-/// Deleting a non-existent credential is not treated as an error.
+/// Deleting a non-existent credential is not treated as an error. It does not
+/// touch the session's verified-host set: removing a stored credential must
+/// never widen which hosts a pre-session flow can read.
 #[tauri::command(async)]
 pub fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
     with_credential_lock(|| {
