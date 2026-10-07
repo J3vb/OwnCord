@@ -651,8 +651,9 @@ channel (the server never follows a `reply_to` across channels). A soft-deleted
 parent is redacted to `{id, user: null, content: "", deleted: true,
 has_attachments: false}`. An older server omits the field; clients fall back to
 the loaded message, then to "unknown message". `GET /channels/{id}/messages`
-(history, `around`) and the pins list carry the same field per message. The snippet is live-only: the copy kept for replay (ring buffer and the
-`events` table) carries `referenced_message: null`, so a client resuming after
+(history, `around`) and the pins list carry the same field per message. The
+snippet is live-only: the copy kept for replay (ring buffer and the `events`
+table) carries `referenced_message: null`, so a client resuming after
 the parent was deleted never receives its text and falls back to the unknown
 parent bar. A client that holds a snippet redacts it (`deleted: true`, no
 `user`, no `content`) on `chat_deleted` and `chat_bulk_deleted` when the
