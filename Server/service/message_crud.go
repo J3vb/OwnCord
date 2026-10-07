@@ -78,7 +78,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		// snippet, so it must not fail the send.
 		refs, refErr := s.st.GetReferencedMessages(context.WithoutCancel(ctx), p.ChannelID, []int64{*p.ReplyTo})
 		if refErr != nil {
-			slog.Error("MessageService.SendMessage GetReferencedMessages", "err", refErr, "msg_id", msgID)
+			slog.Error("MessageService.SendMessage GetAttachments", "err", refErr, "msg_id", msgID, "read", "referenced_message")
 		}
 		result.ReferencedMessage = refs[*p.ReplyTo]
 	}
