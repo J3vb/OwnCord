@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Desktop UI
 
+- **Returning to a channel keeps the history you had loaded, even when messages arrived while you were elsewhere.** Leaving a channel and returning used to drop everything you had loaded beyond the newest rows, because the reload was sized from the local unread count — which misses messages posted in a channel you were not viewing. It now pages backwards from the newest message until it reaches the oldest row you had loaded (up to five pages), so the loaded window stays put and is checked for edits and deletes; when the loaded window plus the messages that arrived is larger than those five pages can cover, the oldest loaded rows are still dropped.
 - **Desktop updates now check the signed artifact name before installation.** The name must match the running operating system, processor and installer format.
 - **You can switch the clock between 12-hour and 24-hour.** Every timestamp was fixed to the 12-hour en-US format ("Today at 2:34 PM"). Settings › Appearance now has a **Time Format** choice; the default stays 12-hour, and the choice applies to message and system times, DM list times, search results, session and call times, and other date-and-time labels. It is stored on the device.
 - **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.
@@ -59,7 +60,6 @@ and only when it changes something a contributor or fork holder must do
 
 ### Messages
 
-- **Coming back to a channel keeps the older messages you had scrolled to.** Leaving a channel and returning dropped everything you had loaded beyond the newest 50, so you had to scroll up and wait for them again. The one reload now asks for enough rows to cover what you had loaded (up to 100), so those older messages stay put — and because they are checked in that same reload, an edit or delete made while you were away still shows.
 - **Messages that arrive while the window is unfocused now badge the channel you are looking at.** If you were on a channel in a minimised or background window, an incoming message showed nothing until you switched away. It now counts as unread, and the channel is marked read once you scroll its bottom into view with the window focused.
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
 
