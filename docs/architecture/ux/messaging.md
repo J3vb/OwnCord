@@ -303,11 +303,12 @@ Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
 opened from the OS, a clicked message notification — goes through one path
 (`lib/message-navigation.ts` registry → `main-page/MessageJump.ts`), so they
-behave identically.
+behave identically. A reply never groups into the previous message, so it
+always keeps its quoted-parent header (`shouldGroup`).
 
 | Step                                  | Target UX                                                                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Target loaded                         | Scroll to the row, centre it in the viewport once measured, and flash it (`.highlight-flash`, 1.5s)                    |
+| Target loaded                         | Scroll to the row, keep it centred while rows above resize (~3s), and flash it (`.highlight-flash`, 1.5s)              |
 | Target not loaded                     | Fetch `GET /channels/{id}/messages/around/{messageId}`, replace the channel's window with it, then scroll + flash      |
 | Target in another channel             | Open that channel first, then the above — the jumper owns the switch so the fetch is sequenced after it, not racing it |
 | Channel not visible / message deleted | Toast and stay put; never blank the chat area on an unresolvable link                                                  |
