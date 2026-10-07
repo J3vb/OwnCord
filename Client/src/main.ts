@@ -22,6 +22,7 @@ import { settleNotificationLevelDefault } from "@lib/notificationLevel";
 import {
   bracketBareIPv6Host,
   createWsClient,
+  isCertDeclined,
   normalizeHostForCertCompare,
   PREAUTH_BUSY_CAP_MS,
   PREAUTH_CONNECT_TIMEOUT_MS,
@@ -240,12 +241,18 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
   if (certModalActive) return;
   certModalActive = true;
 
+  const reject = (): void => {
+    modal.destroy?.();
+    certModalActive = false;
+  };
+
   const modal = createCertFirstUseModal({
     host: evt.host,
     fingerprint: evt.fingerprint,
     onAccept: () => {
+      // The guard stays set until the native confirmation settles, so a
+      // repeated event cannot mount a second modal behind the OS dialog.
       modal.destroy?.();
-      certModalActive = false;
       void (async () => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
@@ -263,14 +270,19 @@ ws.onCertFirstUse((evt: CertTofuEvent) => {
             ws.connect({ host: lastConnectHost, token: lastConnectToken });
           }
         } catch (err) {
-          log.error("Failed to trust first-use certificate", err);
+          if (isCertDeclined(err)) {
+            log.info("First-use certificate not accepted", { host: evt.host });
+            reject();
+            setTransientError(connectText("cert.notAccepted"));
+          } else {
+            log.error("Failed to trust first-use certificate", err);
+          }
+        } finally {
+          certModalActive = false;
         }
       })();
     },
-    onReject: () => {
-      modal.destroy?.();
-      certModalActive = false;
-    },
+    onReject: reject,
   });
   modal.mount(document.body);
 });
@@ -278,13 +290,27 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
   if (certModalActive) return;
   certModalActive = true;
 
+  const reject = (): void => {
+    modal.destroy?.();
+    certModalActive = false;
+    // Only tear down the live session when the mismatch is FOR that
+    // session's host — a rotated cert on an unrelated saved profile must
+    // not disconnect and log out an unrelated authenticated session.
+    if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
+      ws.disconnect();
+      clearAuth();
+      navigate("connect");
+    }
+  };
+
   const modal = createCertMismatchModal({
     host: evt.host,
     storedFingerprint: evt.storedFingerprint ?? connectText("common.unknown"),
     newFingerprint: evt.fingerprint,
     onAccept: () => {
+      // The guard stays set until the native confirmation settles, so a
+      // repeated event cannot mount a second modal behind the OS dialog.
       modal.destroy?.();
-      certModalActive = false;
       void (async () => {
         try {
           await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
@@ -301,22 +327,19 @@ ws.onCertMismatch((evt: CertTofuEvent) => {
             );
           }
         } catch (err) {
-          log.error("Failed to accept cert fingerprint", err);
+          if (isCertDeclined(err)) {
+            log.info("Certificate not accepted", { host: evt.host });
+            reject();
+            setTransientError(connectText("cert.notAccepted"));
+          } else {
+            log.error("Failed to accept cert fingerprint", err);
+          }
+        } finally {
+          certModalActive = false;
         }
       })();
     },
-    onReject: () => {
-      modal.destroy?.();
-      certModalActive = false;
-      // Only tear down the live session when the mismatch is FOR that
-      // session's host — a rotated cert on an unrelated saved profile must
-      // not disconnect and log out an unrelated authenticated session.
-      if (evt.host === normalizeHostForCertCompare(lastConnectHost)) {
-        ws.disconnect();
-        clearAuth();
-        navigate("connect");
-      }
-    },
+    onReject: reject,
   });
   modal.mount(document.body);
 });

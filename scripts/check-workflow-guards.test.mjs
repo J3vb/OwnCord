@@ -1,6 +1,11 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { auditWorkflow, signingKeyHolders } from "./check-workflow-guards.mjs";
+import {
+  auditWorkflow,
+  autoConfirmEnablers,
+  autoConfirmIsDefault,
+  signingKeyHolders,
+} from "./check-workflow-guards.mjs";
 
 const good = [
   "name: X",
@@ -93,4 +98,25 @@ test("the signing key read by bracket or set as an env var from another secret i
     ]),
     ["a.yml", "b.yml"],
   );
+});
+
+// e2e-auto-confirm skips the native cert-pin dialog; only ci.yml's E2E build may enable it.
+test("e2e-auto-confirm enabled outside ci.yml is caught", () => {
+  const on = "run: npm run tauri build -- --features e2e-auto-confirm";
+  assert.deepEqual(
+    autoConfirmEnablers([
+      { name: "ci.yml", src: on },
+      { name: "release.yml", src: on },
+      { name: "nightly.yml", src: "run: npm run tauri build" },
+    ]),
+    ["release.yml"],
+  );
+});
+
+test("e2e-auto-confirm in the default features is caught", () => {
+  assert.equal(
+    autoConfirmIsDefault('[features]\ndefault = ["devtools", "e2e-auto-confirm"]\n'),
+    true,
+  );
+  assert.equal(autoConfirmIsDefault("[features]\ndefault = []\ne2e-auto-confirm = []\n"), false);
 });

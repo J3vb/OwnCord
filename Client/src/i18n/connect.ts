@@ -135,6 +135,7 @@ export const connectText = defineCatalog("connect", {
     "This is the first connection to this server, so its certificate is not yet trusted. Verify the fingerprint below out-of-band (e.g. with the server operator) before trusting it — on an untrusted network an attacker could present a fake certificate.",
   "cert.firstUse.fingerprint": "Fingerprint",
   "cert.firstUse.accept": "Trust This Certificate",
+  "cert.notAccepted": "The certificate was not accepted, so the server stays disconnected.",
   "cert.host": "Host",
 
   "connected.title": "Connected!",

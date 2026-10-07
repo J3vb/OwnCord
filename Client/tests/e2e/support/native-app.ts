@@ -23,6 +23,9 @@ export async function startNativeApp(
     /** Seed `owncord-client.log` to this size before launch, so the log
      *  plugin's first write rotates it (CLI-03 rollover coverage). */
     seedActiveLogBytes?: number;
+    /** Runs after the profile clear and before launch, with the app data dir
+     *  (`%APPDATA%/<identifier>`, where Tauri's `app_data_dir` points). */
+    seedAppData?: (appDataDir: string) => Promise<void>;
   } = {},
 ) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
@@ -54,6 +57,11 @@ export async function startNativeApp(
       join(logDir, "owncord-client.log"),
       Buffer.alloc(options.seedActiveLogBytes, 0x61),
     );
+  }
+  if (options.seedAppData) {
+    const appData = join(process.env.APPDATA ?? "", options.identifier ?? "com.owncord.e2e");
+    await mkdir(appData, { recursive: true });
+    await options.seedAppData(appData);
   }
   // One budget for the whole app start. The first launch of a freshly built
   // exe on a cold Windows runner takes up to ~30s more than a warm one, and the

@@ -553,6 +553,134 @@ describe("main.ts pre-auth connection deadline", () => {
   });
 });
 
+describe("main.ts native certificate-dialog decline", () => {
+  // The native command rejects with this exact string when the user picks No
+  // (ws_proxy.rs); every other invoke in these flows resolves.
+  function declineAcceptFingerprint(): void {
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "accept_cert_fingerprint"
+        ? Promise.reject("certificate not accepted")
+        : Promise.resolve(undefined),
+    );
+  }
+
+  it("runs the reject teardown with a notice on the first-use path", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("declined-first.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    emitTauriEvent("cert-tofu", {
+      host: "declined-first.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    const modalCallsBefore = vi.mocked(createCertFirstUseModal).mock.calls.length;
+
+    declineAcceptFingerprint();
+    mockInvoke.mockClear();
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The connection stays closed: no resume dial after the decline.
+    expect(mockInvoke).not.toHaveBeenCalledWith("ws_connect", expect.anything());
+    expect(uiStore.getState().transientError).toContain("not accepted");
+
+    // The reject teardown released the modal guard, so a retry can prompt again.
+    emitTauriEvent("cert-tofu", {
+      host: "declined-first.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    });
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(modalCallsBefore + 1);
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onReject();
+
+    clearAuth();
+  });
+
+  it("runs the reject teardown with a notice on the mismatch path", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("declined-mismatch.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    emitTauriEvent("cert-tofu", {
+      host: "declined-mismatch.example:8443",
+      fingerprint: "sha256:CHANGED",
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /Certificate fingerprint mismatch/);
+
+    declineAcceptFingerprint();
+    vi.mocked(reconnectAfterCertAccept).mockClear();
+    mockInvoke.mockClear();
+    vi.mocked(createCertMismatchModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The mismatch must not resume, and the live session is dropped rather
+    // than left permanently blocked on the mismatch latch.
+    expect(reconnectAfterCertAccept).not.toHaveBeenCalled();
+    expect(mockInvoke).toHaveBeenCalledWith("ws_disconnect");
+    expect(uiStore.getState().transientError).toContain("not accepted");
+
+    clearAuth();
+  });
+
+  it("mounts no second trust modal while the native dialog is still open", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("pending-native.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    const firstUse = {
+      host: "pending-native.example:8443",
+      fingerprint: "sha256:NEW",
+      status: "first_use",
+    };
+    emitTauriEvent("cert-tofu", firstUse);
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+
+    // The native dialog stays open until the test answers it.
+    let answerNative!: (value: unknown) => void;
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "accept_cert_fingerprint"
+        ? new Promise((resolve, reject) => {
+            answerNative = (v) => (v === "no" ? reject("certificate not accepted") : resolve(v));
+          })
+        : Promise.resolve(undefined),
+    );
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
+    await vi.advanceTimersByTimeAsync(10);
+    const firstUseCalls = vi.mocked(createCertFirstUseModal).mock.calls.length;
+    const mismatchCalls = vi.mocked(createCertMismatchModal).mock.calls.length;
+
+    // A repeated health check re-raises both kinds of event meanwhile.
+    emitTauriEvent("cert-tofu", firstUse);
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    emitTauriEvent("cert-tofu", {
+      ...firstUse,
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /Certificate fingerprint mismatch/);
+    expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(firstUseCalls);
+    expect(vi.mocked(createCertMismatchModal).mock.calls.length).toBe(mismatchCalls);
+
+    // Once the native dialog is answered, a later event can prompt again.
+    answerNative("no");
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("cert-tofu", firstUse);
+    expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(firstUseCalls + 1);
+    vi.mocked(createCertFirstUseModal).mock.lastCall![0].onReject();
+
+    clearAuth();
+  });
+});
+
 describe("main.ts connected overlay (OC-0063)", () => {
   it("shows the auth_ok payload's server_name and motd, not the pre-handshake authStore snapshot", async () => {
     await loginAndReachAuthOk("192.168.1.10:8443", "alex", {

@@ -340,7 +340,7 @@ The Tauri desktop client implements the following security measures:
 - The HTTP proxy (`http_proxy`) carrying REST traffic pins against the same store
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
 - All three native tunnels share one TOFU verifier — see [trust-model.md](trust-model.md)
-- Certificate mismatch triggers a modal requiring user acknowledgment
+- Certificate mismatch triggers a modal requiring user acknowledgment. Saving a pin that changes what is trusted is additionally gated by a native OS confirmation dialog in `accept_cert_fingerprint` — the only user-confirmed writer of a pin — naming the host and fingerprint, so a renderer compromise cannot silently pin a host. The artifact smoke seeds the pin in the profile instead of answering the dialog; test-only builds use the `e2e-auto-confirm` feature, which no shipped build enables
 - **First-contact defence is comparison out of band.** The fingerprint is what
   the trust decision rests on, so read it from the server's start-up banner
   (also on the admin Dashboard and the setup wizard's finish step) and compare

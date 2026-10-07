@@ -74,6 +74,21 @@ export function signingKeyHolders(workflows) {
     .map(({ name }) => name);
 }
 
+// e2e-auto-confirm skips the native certificate-pin confirmation dialog. Only
+// ci.yml's native E2E build may enable it; shipped builds (release, nightly,
+// artifact smoke) must keep the dialog.
+const AUTO_CONFIRM_HOLDER = "ci.yml";
+
+export function autoConfirmEnablers(workflows) {
+  return workflows
+    .filter(({ name, src }) => name !== AUTO_CONFIRM_HOLDER && /e2e-auto-confirm/.test(src))
+    .map(({ name }) => name);
+}
+
+export function autoConfirmIsDefault(cargoSrc) {
+  return /^default\s*=\s*\[[^\]]*e2e-auto-confirm/m.test(cargoSrc);
+}
+
 function main() {
   const failures = [];
 
@@ -98,6 +113,18 @@ function main() {
   for (const name of signingKeyHolders(workflows)) {
     failures.push(
       `.github/workflows/${name}: references the updater signing key — only ${SIGNING_KEY_HOLDER} may sign; build unsigned elsewhere`,
+    );
+  }
+
+  for (const name of autoConfirmEnablers(workflows)) {
+    failures.push(
+      `.github/workflows/${name}: enables e2e-auto-confirm — only ${AUTO_CONFIRM_HOLDER} may; shipped builds must keep the native cert-pin dialog`,
+    );
+  }
+  const cargo = "Client/src-tauri/Cargo.toml";
+  if (autoConfirmIsDefault(readFileSync(join(ROOT, cargo), "utf8"))) {
+    failures.push(
+      `${cargo}: e2e-auto-confirm is in the default features — shipped builds would skip the cert-pin dialog`,
     );
   }
 

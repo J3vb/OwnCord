@@ -8,7 +8,7 @@
 // - On first use (no pin yet) the connection is rejected and a `cert-tofu`
 //   "first_use" event is emitted so the user can confirm the fingerprint. F4/F8:
 //   the proxy never silently pins or forwards to an unconfirmed host — the only
-//   writer of a pin is the explicit `accept_cert_fingerprint` command.
+//   user-confirmed writer of a pin is the explicit `accept_cert_fingerprint` command.
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -528,10 +528,43 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
         })
 }
 
+/// Whether writing `fingerprint` changes what `host` trusts: a first pin, or a
+/// different one. Restating the stored pin asks nothing.
+pub(crate) fn pin_needs_confirmation(stored: Option<&Value>, fingerprint: &str) -> bool {
+    !matches!(stored, Some(Value::String(s)) if s == fingerprint)
+}
+
+/// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
+/// `host`. Runs from an async command, off Tauri's main thread, so
+/// `blocking_show` (which dispatches onto the main thread) cannot deadlock.
+#[cfg(not(feature = "e2e-auto-confirm"))]
+fn confirm_pin_natively<R: Runtime>(app: &AppHandle<R>, host: &str, fingerprint: &str) -> bool {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .message(crate::text::cert_accept_prompt(host, fingerprint))
+        .title(crate::text::CERT_ACCEPT_TITLE)
+        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+        .buttons(tauri_plugin_dialog::MessageDialogButtons::YesNo)
+        .blocking_show()
+}
+
+/// The Playwright-driven native E2E builds (identity `com.owncord.e2e`, never a
+/// release artifact) cannot see an OS dialog, so they answer yes. Shipped
+/// builds never enable this feature; the artifact smoke drives those with a
+/// pre-seeded pin instead (`tests/e2e/support/artifact-app.ts`).
+#[cfg(feature = "e2e-auto-confirm")]
+fn confirm_pin_natively<R: Runtime>(_: &AppHandle<R>, _: &str, _: &str) -> bool {
+    true
+}
+
 /// Accept a certificate fingerprint for a host — the only path that writes a pin
 /// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
-#[tauri::command]
+///
+/// A pin that changes what is trusted is written only after a native dialog the
+/// user answers: the renderer already showed its own prompt, but a compromised
+/// renderer must not be able to pin an arbitrary host/fingerprint silently.
+#[tauri::command(async)]
 pub fn accept_cert_fingerprint<R: Runtime>(
     app: AppHandle<R>,
     host: String,
@@ -552,6 +585,11 @@ pub fn accept_cert_fingerprint<R: Runtime>(
 
     // Capture old value before mutating so we can restore it if save fails.
     let old_value = store.get(&host);
+    if pin_needs_confirmation(old_value.as_ref(), &fingerprint)
+        && !confirm_pin_natively(&app, &host, &fingerprint)
+    {
+        return Err("certificate not accepted".into());
+    }
     // A pin that replaces a *different* existing fingerprint is security-
     // significant (cert rotation — or a MITM the user just accepted).
     let changed = matches!(&old_value, Some(Value::String(s)) if *s != fingerprint);
@@ -597,6 +635,22 @@ mod tests {
     /// A well-formed SHA-256 colon-hex fingerprint (32 pairs, 95 chars).
     const VALID: &str = "e3:b0:c4:42:98:fc:1c:14:9a:fb:f4:c8:99:6f:b9:24:\
 27:ae:41:e4:64:9b:93:4c:a4:95:99:1b:78:52:b8:55";
+
+    // The native confirmation guards every pin write that changes what is
+    // trusted; re-accepting the pin already stored asks nothing.
+    #[test]
+    fn a_pin_write_needs_confirmation_unless_it_restates_the_stored_pin() {
+        assert!(pin_needs_confirmation(None, VALID));
+        assert!(pin_needs_confirmation(
+            Some(&Value::String("aa:bb".into())),
+            VALID
+        ));
+        assert!(pin_needs_confirmation(Some(&Value::Null), VALID));
+        assert!(!pin_needs_confirmation(
+            Some(&Value::String(VALID.into())),
+            VALID
+        ));
+    }
 
     // The active session host is set only from a server frame the proxy itself
     // relays, never from a renderer command.

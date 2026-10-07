@@ -67,6 +67,20 @@ export function parseStoredFingerprint(message?: string): string | undefined {
   return match?.[1];
 }
 
+/**
+ * The native `accept_cert_fingerprint` command rejects with this when the user
+ * declines the OS pin-confirmation dialog (`ws_proxy.rs`). Kept in step with
+ * that command the way `TLS_CERT_CODE` mirrors `TLS_CERT_ERROR_CODE`.
+ */
+// i18n-exempt: native rejection code, mapped to catalog text by the caller
+export const CERT_NOT_ACCEPTED = "certificate not accepted";
+
+/** Whether a rejected `acceptCertFingerprint` was the user declining the
+ *  native dialog, rather than failing for another reason. */
+export function isCertDeclined(err: unknown): boolean {
+  return (err instanceof Error ? err.message : String(err)) === CERT_NOT_ACCEPTED;
+}
+
 export type CertMismatchListener = (event: CertTofuEvent) => void;
 export type CertFirstUseListener = (event: CertTofuEvent) => void;
 
@@ -1038,11 +1052,15 @@ export function createWsClient({
     /**
      * Accept a changed certificate fingerprint for a host.
      * Call after the user acknowledges a cert mismatch warning,
-     * then reconnect.
+     * then reconnect. Clears the mismatch latch whether or not the native
+     * command accepted the fingerprint, so a decline cannot block reconnect.
      */
     async acceptCertFingerprint(host: string, fingerprint: string): Promise<void> {
-      await transport.acceptCertificate(host, fingerprint);
-      certMismatchBlock = false;
+      try {
+        await transport.acceptCertificate(host, fingerprint);
+      } finally {
+        certMismatchBlock = false;
+      }
     },
 
     getState(): ConnectionState {

@@ -14,6 +14,7 @@ import {
   findAsset,
   installArtifact,
   launchArtifact,
+  serverPin,
   waitFor,
   type ArtifactDriver,
 } from "../support/artifact-app";
@@ -60,13 +61,15 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
   const host = server.origin.replace("https://", "");
   const { installation, binary } = await installArtifact(ARTIFACTS);
   try {
-    const app = await launchArtifact(binary);
+    const app = await launchArtifact(binary, {
+      pins: { [host]: await serverPin(server.directory) },
+    });
     await withArtifact(app, info, async () => {
       // Boot: the connect page renders and the binary is this commit's.
       await waitFor(app, "#host", "", 60_000);
       expect(await appVersion(app)).toBe(await expectedVersion());
 
-      // Connect: real TLS first-use trust, login and the WS ready handshake.
+      // Connect: real TLS against the seeded pin, login and the WS ready handshake.
       await artifactLogin(app, host, "alice", TEST_PASSWORD);
       await waitFor(app, ".channel-item");
 
@@ -173,10 +176,12 @@ test("installed Linux artifact joins voice by a non-loopback server address", as
   const remoteHost = `${host}:${server.port}`;
   const { installation, binary } = await installArtifact(ARTIFACTS);
   try {
-    const app = await launchArtifact(binary);
+    const app = await launchArtifact(binary, {
+      pins: { [remoteHost]: await serverPin(server.directory) },
+    });
     await withArtifact(app, info, async () => {
       await waitFor(app, "#host", "", 60_000);
-      // Connect to the LAN address: real TLS first-use trust over the tunnel.
+      // Connect to the LAN address: real TLS against the seeded pin over the tunnel.
       await artifactLogin(app, remoteHost, "alice", TEST_PASSWORD);
       await waitFor(app, ".channel-item");
 
