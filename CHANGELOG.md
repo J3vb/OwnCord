@@ -99,7 +99,7 @@ It is still a **beta and a hobby project** — try it if you are comfortable run
 
 ### Fixed
 
-- Leaving a channel and returning no longer drops history you had loaded.
+- Leaving a channel and returning keeps the history you had loaded, unless more new messages arrived than five pages of 100 can cover, in which case the oldest loaded rows are still dropped.
 - A mention in another channel updates the taskbar and tray badge at once, and the badge no longer undercounts when a mention and a delete land together.
 - A deleted mentioning message no longer updates the badge of someone who lost access to the channel.
 - A certificate the client cannot verify now says so, instead of "Bad Gateway" or a dropped connection.
