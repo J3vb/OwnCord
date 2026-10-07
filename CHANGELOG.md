@@ -47,9 +47,15 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Deployment
+
+- **OwnCord now ships an Unraid template, so it installs as one container with voice included.** `deploy/unraid/owncord.xml` sets up the chat port (8443), the voice ports (7881 TCP, 7882 UDP), runs as Unraid's `99:100` and mounts `/app` as a folder so `config.yaml` is created on first start. It is not in Community Apps yet: add the raw file URL under Docker › Template repositories until the listing is accepted. See [Unraid](docs/deployment.md#unraid).
+
 ### Desktop UI
 
 - **Trusting a new server certificate now also asks the operating system.** After you accept the certificate prompt, the desktop app shows a native dialog with the server and its fingerprint, and saves the certificate only when you answer Yes. Accepting the certificate already saved asks nothing.
+- **A channel with unread messages now opens at the NEW line, with an unread bar.** Instead of landing at the bottom, the list opens where the unread messages start, and a bar at the top says how many are new and since when ("5 new messages since 2:34 PM", or "99+ new messages" for 100 or more). **Mark as read** in the bar marks the channel read; scrolling to the bottom with the window focused hides it too.
+- **The jump-to-bottom button now counts new messages.** While you are scrolled up, the ↓ button shows how many messages from other people arrived below the view ("99+" past 99), and its accessible name says the same. The count clears when you return to the bottom.
 - **Returning to a channel keeps the history you had loaded, even when messages arrived while you were elsewhere.** Leaving a channel and returning used to drop everything you had loaded beyond the newest rows, because the reload was sized from the local unread count — which misses messages posted in a channel you were not viewing. It now pages backwards from the newest message until it reaches the oldest row you had loaded (up to five pages), so the loaded window stays put and is checked for edits and deletes; when the loaded window plus the messages that arrived is larger than those five pages can cover, the oldest loaded rows are still dropped.
 - **Desktop updates now check the signed artifact name before installation.** The name must match the running operating system, processor and installer format.
 - **You can switch the clock between 12-hour and 24-hour.** Every timestamp was fixed to the 12-hour en-US format ("Today at 2:34 PM"). Settings › Appearance now has a **Time Format** choice; the default stays 12-hour, and the choice applies to message and system times, DM list times, search results, session and call times, and other date-and-time labels. It is stored on the device.
@@ -63,6 +69,7 @@ and only when it changes something a contributor or fork holder must do
 
 - **Messages that arrive while the window is unfocused now badge the channel you are looking at.** If you were on a channel in a minimised or background window, an incoming message showed nothing until you switched away. It now counts as unread, and the channel is marked read once you scroll its bottom into view with the window focused.
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
+- **Jumping to a message now centres it, and a reply always shows who it quotes.** Jumping to a reply's parent, a search hit or a pin used to leave the target glued to the top edge of the list. It now lands in the middle of the view. A reply from the same author within five minutes of their previous message used to be folded into that message and lose its quoted-parent header; it now starts its own block.
 
 ### Mentions
 
@@ -83,6 +90,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Accounts & admin
 
+- **The admin Server configuration page now explains every setting.** Each row shows a plain-language name (the `config.yaml` key stays beside it), a one-line description, the recommended value, and what changing it affects. Copy for all editable keys ships with the server and a test fails if a key is added without it.
 - **Almost every server setting can now be changed from the admin panel, without editing `config.yaml`.** The owner-only **Server configuration** page writes values to a JSON file beside the database and applies them after a restart, with **Restart now**. Secrets are write-only — the page shows only whether one is configured. A change that can lock you out or move server data (the listen port, TLS, the admin allowlist and trusted proxies, restart mode, the database/backup/uploads/plugins paths and the LiveKit binary) asks for a typed confirmation and is checked on the server before it is saved. `server.data_dir` is shown read-only, because the overrides file and the TOTP, erasure and VAPID keys live inside it; see `docs/server-configuration.md` for the move procedure. The upload file-type lists keep their existing Settings rows and the page links there. A value pinned by an `OWNCORD_*` environment variable stays locked, and a hand-edited overrides file cannot reach a protected key. If a panel change locks you out, stop the server and delete the offending key from `<data_dir>/config-overrides.json` on the host.
 - **The `server.max_ws_connections` ceiling now holds when upgrades arrive together.** The capacity check and reserving a slot were separate steps, so several connections reaching the limit at the same moment could all be admitted past it. A connection now reserves its slot before the upgrade and returns it if the handshake fails.
 

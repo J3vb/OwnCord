@@ -169,7 +169,10 @@ describe("MessageList height cache key for unconfirmed optimistic rows", () => {
     expect(msgList.scrollToMessage(target.id)).toBe(true);
 
     const root = container.querySelector(".messages-container") as HTMLDivElement;
-    const expectedCorrect = HEIGHT_DEFAULT + HEIGHT_A + HEIGHT_B + 5 * HEIGHT_DEFAULT;
+    // scrollToMessage centres the row: jsdom's clientHeight is 0, so the
+    // centred scrollTop sits half the row's own height below its offset.
+    const expectedCorrect =
+      HEIGHT_DEFAULT + HEIGHT_A + HEIGHT_B + 5 * HEIGHT_DEFAULT + HEIGHT_DEFAULT / 2;
 
     // This is the assertion the bug breaks: with the shared "msg-0" cache
     // key, rowA's tree slot gets re-seeded from rowB's cached height instead

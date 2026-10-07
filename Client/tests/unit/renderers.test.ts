@@ -203,6 +203,12 @@ describe("renderers", () => {
       expect(shouldGroup(prev, curr)).toBe(true);
     });
 
+    it("returns false for a same-author reply within the threshold", () => {
+      const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
+      const curr = makeMessage({ id: 2, replyTo: 1, timestamp: "2025-01-15T12:02:00Z" });
+      expect(shouldGroup(prev, curr)).toBe(false);
+    });
+
     it("returns false for different users", () => {
       const prev = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
       const curr = makeMessage({

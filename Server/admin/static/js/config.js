@@ -52,14 +52,29 @@ function configControl(row){
   return'<input class="form-input" type="'+type+'" data-config-key="'+key+'" value="'+esc(value==null?'':value)+'" data-input-action="markConfigChanged"'+dis+'>';
 }
 
+/* The owner-facing copy the server ships per key: a plain label (the dotted
+   key stays visible beside it for config.yaml and the environment), what the
+   setting does, the recommended value, and what changing it affects. */
+function configName(row){
+  return row.label?esc(row.label)+' <code class="setting-key">'+esc(row.key)+'</code>':esc(row.key);
+}
+function configCopyHTML(row,status){
+  let h='';
+  if(row.description)h+='<div class="setting-desc">'+esc(row.description)+'</div>';
+  if(row.recommended)h+='<div class="setting-desc"><strong>Recommended:</strong> '+esc(row.recommended)+'</div>';
+  if(row.effect)h+='<div class="setting-desc"><strong>If you change it:</strong> '+esc(row.effect)+'</div>';
+  if(status)h+='<div class="setting-desc">'+esc(status)+'</div>';
+  return h;
+}
+
 function configRow(row){
   if(row.type==='secret')return configSecretRow(row);
   const overridden=row.override!=null;
   const desc=row.env_locked?'Set by the environment':(overridden?'Overridden from the panel':'');
   const reset=overridden&&!row.env_locked
     ? '<button class="btn btn-ghost" data-action="resetConfigKey" data-args="'+actArgs(row.key)+'">Reset</button>':'';
-  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+esc(row.key)+'</div>'
-    +(desc?'<div class="setting-desc">'+esc(desc)+'</div>':'')+'</div>'
+  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+configName(row)+'</div>'
+    +configCopyHTML(row,desc)+'</div>'
     +'<div class="setting-ctrl">'+configControl(row)+reset+'</div></div>';
 }
 
@@ -77,8 +92,8 @@ function configSecretRow(row){
     ? '<button class="btn btn-ghost" data-action="clearConfigSecretValue" data-args="'+actArgs(row.key)+'" title="Sets the value to empty">Clear value</button>':'';
   const clear=row.override_set&&!row.env_locked
     ? '<button class="btn btn-ghost" data-action="clearConfigSecret" data-args="'+actArgs(row.key)+'" title="Removes the panel override; the value reverts to the value in config.yaml">Remove override</button>':'';
-  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+esc(row.key)+' '+badge+'</div>'
-    +(desc?'<div class="setting-desc">'+esc(desc)+'</div>':'')+'</div>'
+  return'<div class="setting-row"><div class="setting-info"><div class="setting-name">'+configName(row)+' '+badge+'</div>'
+    +configCopyHTML(row,desc)+'</div>'
     +'<div class="setting-ctrl">'+configControl(row)+blank+clear+'</div></div>';
 }
 

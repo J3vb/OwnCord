@@ -17,6 +17,16 @@ export const messagingText = defineCatalog("messaging", {
   retry: "Retry",
   jumpToPresent: "Jump to Present ↓",
   scrollToBottom: "Scroll to bottom",
+  "unreadBar.since": {
+    one: "{shown} new message since {time}",
+    other: "{shown} new messages since {time}",
+  },
+  "unreadBar.capped": "{shown} new messages",
+  "unreadBar.markRead": "Mark as read",
+  scrollToBottomNew: {
+    one: "Scroll to bottom, {shown} new message",
+    other: "Scroll to bottom, {shown} new messages",
+  },
 
   "reply.replyingTo": "Replying to @{username}",
   "reply.cancel": "Cancel reply",

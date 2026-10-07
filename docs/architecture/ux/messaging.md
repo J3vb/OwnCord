@@ -257,6 +257,13 @@ away (`features/messaging/wsHandlers.ts`). The local replay classifier (`isRepla
 `features/messaging/wsHandlers.ts`) gates only the desktop notification/sound/taskbar flash and
 the `@here` mention badge, never an unread count.
 
+**Jump-to-bottom count (P4-03 step C):** while the reader is scrolled away from
+the bottom, the ↓ button shows how many messages from other people were appended
+below the view (`formatBadgeCount`, so "99+" from 100). Own messages, pending
+sends, prepended history and a wholesale window replacement (a jump to present
+or a reconnect resync) never count; the count clears on return to the bottom
+(`MessageList`).
+
 **Deferred to P4-04 (server read-on-open):** the server still advances a
 channel's read state when `channel_focus` lands, and `handleAuthOk` sends it
 for the active channel on every `auth_ok` — including a reconnect while the
@@ -280,6 +287,15 @@ above it. A snapshot at the wire cap (`unread_count` is capped at 100, see
 `docs/protocol.md`) is only a lower bound, so the line stays above the oldest
 loaded message as older history loads rather than latching to a derived row.
 The exact boundary needs the last-read message id, which `ready` does not carry.
+**Unread bar and open at the divider (P4-03):** while the visit carries an unread
+snapshot, a bar at the top of the message region reads "_N_ new messages since
+_time_" (the time is the message the line latched to; `formatBadgeCount` gives
+"99+ new messages", with no time, at the wire cap). Its **Mark as read** button
+sends `mark_read` and hides the bar, as does reaching the bottom with the window
+focused; the NEW line stays for the visit. The list opens scrolled to the line
+rather than the bottom, and a deferred (revisit) line moves the view when it
+lands, provided the reader has not scrolled away. The server still marks a channel
+read when it opens, so the bar covers only the visit in progress.
 
 **Explicit mark-as-read (✓ implemented 2026-08):** the channel context menu gains
 **Mark as Read** (disabled when the channel is already read, absent for voice
@@ -303,11 +319,12 @@ Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
 opened from the OS, a clicked message notification — goes through one path
 (`lib/message-navigation.ts` registry → `main-page/MessageJump.ts`), so they
-behave identically.
+behave identically. A reply never groups into the previous message, so it
+always keeps its quoted-parent header (`shouldGroup`).
 
 | Step                                  | Target UX                                                                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Target loaded                         | Scroll to the row and flash it (`.highlight-flash`, 1.5s)                                                              |
+| Target loaded                         | Scroll to the row, keep it centred while rows above resize (~3s), and flash it (`.highlight-flash`, 1.5s)              |
 | Target not loaded                     | Fetch `GET /channels/{id}/messages/around/{messageId}`, replace the channel's window with it, then scroll + flash      |
 | Target in another channel             | Open that channel first, then the above — the jumper owns the switch so the fetch is sequenced after it, not racing it |
 | Channel not visible / message deleted | Toast and stay put; never blank the chat area on an unresolvable link                                                  |

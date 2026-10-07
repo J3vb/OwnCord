@@ -44,6 +44,7 @@ type configSettingRow struct {
 	Configured           *bool    `json:"configured,omitempty"`
 	OverrideSet          *bool    `json:"override_set,omitempty"`
 	AllowEmpty           bool     `json:"allow_empty,omitempty"`
+	config.SettingCopy
 }
 
 type configSettingsResponse struct {
@@ -64,6 +65,7 @@ func buildConfigSettings(cfg, fallback *config.Config, overrides map[string]any,
 			EnvLocked:            envLocked,
 			RequiresConfirmation: config.RequiresConfirmation(key),
 		}
+		row.SettingCopy, _ = config.SettingCopyFor(key)
 		if config.IsSecret(key) {
 			// Never place a secret value in the row: the panel only needs to
 			// know whether one is configured and whether an override is set.
