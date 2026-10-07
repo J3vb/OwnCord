@@ -242,3 +242,50 @@ func TestWAFMiddleware_PreservesReadableBodyForDownstream(t *testing.T) {
 		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
 	}
 }
+
+// Coraza drops arguments past SecArgumentsLimit (default 1000) and only flags
+// ARGUMENTS_LIMIT_REACHED, so a payload hidden behind padding args would go
+// uninspected. The inline engine must reject such requests; a normal request
+// must still pass.
+func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
+	for _, mode := range []string{CRSModeOff, CRSModeDetect} {
+		t.Run(mode, func(t *testing.T) {
+			called := false
+			handler := NewWAFMiddlewareCRS(2, mode)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+			}))
+
+			serve := func(query string) int {
+				called = false
+				req := httptest.NewRequest(http.MethodGet, "/api/v1/channels?"+query, nil)
+				req.RemoteAddr = "127.0.0.1:9999"
+				rr := httptest.NewRecorder()
+				handler.ServeHTTP(rr, req)
+				return rr.Code
+			}
+
+			var over strings.Builder
+			for i := 0; i < 1100; i++ {
+				fmt.Fprintf(&over, "p%d=1&", i)
+			}
+			over.WriteString("q=1%27%20OR%20%271%27%3D%271")
+			if code := serve(over.String()); code != http.StatusForbidden || called {
+				t.Fatalf("over-limit request: status = %d, handler called = %v, want 403 and not called", code, called)
+			}
+
+			body := httptest.NewRequest(http.MethodPost, "/api/v1/channels", strings.NewReader(over.String()))
+			body.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			body.RemoteAddr = "127.0.0.1:9999"
+			called = false
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, body)
+			if rr.Code != http.StatusForbidden || called {
+				t.Fatalf("over-limit body: status = %d, handler called = %v, want 403 and not called", rr.Code, called)
+			}
+
+			if code := serve("a=1&b=2"); code != http.StatusOK || !called {
+				t.Fatalf("normal request: status = %d, handler called = %v, want 200 and called", code, called)
+			}
+		})
+	}
+}
