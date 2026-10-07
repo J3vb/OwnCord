@@ -410,6 +410,8 @@ let currentPage: { destroy?(): void } | null = null;
  * same snapshot for `registration_mode` and the retention notice.
  */
 const serverInfoByHost = new Map<string, ServerInfoResponse>();
+/** Hosts with a `server-info` probe in flight, so a typed host is not probed twice. */
+const serverInfoInFlight = new Set<string>();
 
 /** The connect page's per-server health readouts. */
 interface HealthReadout {
@@ -447,6 +449,7 @@ async function probeServerInfo(
 ): Promise<boolean> {
   let serverEpoch: number | null = null;
   let compatibility: Compatibility = "unreachable";
+  serverInfoInFlight.add(host);
   try {
     const info = await api.getServerInfo(host, 3000, owner.signal);
     owner.assertCurrent();
@@ -460,6 +463,8 @@ async function probeServerInfo(
       host,
       error: String(infoErr),
     });
+  } finally {
+    serverInfoInFlight.delete(host);
   }
   connectPage.updateCompatibility(host, compatibility, serverEpoch);
   return compatibility !== "unreachable";
@@ -864,7 +869,8 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         getRetentionNotice: (host) => retentionNotice(serverInfoByHost.get(host)),
         // A typed host has no health row; probe it so register mode can read its mode.
         onHostSettled(host) {
-          if (!serverInfoByHost.has(host)) void probeServerInfo(connectPage, host, pageOwner);
+          if (!serverInfoByHost.has(host) && !serverInfoInFlight.has(host))
+            void probeServerInfo(connectPage, host, pageOwner);
         },
         async onLogin(host, username, password) {
           api.endSession();

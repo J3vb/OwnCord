@@ -1401,16 +1401,39 @@ describe("ConnectPage", () => {
       page.destroy?.();
     });
 
-    it("Choose another server clears the protocol-refusal error", () => {
+    it("Choose another server clears the protocol-refusal error", async () => {
       const page = createConnectPage(makeCallbacks(), testProfiles);
       page.mount(container);
 
-      page.showError("Server protocol is newer than this client");
+      setTransientError("Server protocol is newer than this client");
+      await vi.waitFor(() =>
+        expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true),
+      );
       page.showIncompatible("localhost:8443", 2, 1);
       expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
 
       (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
       expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(false);
+
+      page.destroy?.();
+    });
+
+    it("Choose another server keeps an unrelated error", async () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      setTransientError("Server protocol is newer than this client");
+      await vi.waitFor(() =>
+        expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true),
+      );
+      page.showIncompatible("localhost:8443", 2, 1);
+      // A later, unrelated failure replaces the refusal banner.
+      page.showError("Invalid username or password");
+
+      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      const banner = container.querySelector(".error-banner")!;
+      expect(banner.classList.contains("visible")).toBe(true);
+      expect(banner.textContent).toContain("Invalid username or password");
 
       page.destroy?.();
     });

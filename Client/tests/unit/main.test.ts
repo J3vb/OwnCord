@@ -1218,6 +1218,23 @@ describe("main.ts session ownership", () => {
     );
   });
 
+  it("does not start a second server-info probe for a host already being probed", async () => {
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const calls = vi.mocked(api.getServerInfo).mock.calls.length;
+    let release!: () => void;
+    vi.mocked(api.getServerInfo).mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve(mockServerInfo.value as never))),
+    );
+    capturedConnectCallbacks.onHostSettled!("slow.example:8443");
+    capturedConnectCallbacks.onHostSettled!("slow.example:8443");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(vi.mocked(api.getServerInfo).mock.calls.length).toBe(calls + 1);
+    release();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it("signs a recovered session in exactly as a login does (B7-15b)", async () => {
     const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
       typeof createApiClient

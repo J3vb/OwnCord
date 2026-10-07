@@ -121,8 +121,8 @@ export interface LoginFormApi {
   /** Hide the waiting line without reporting a cancel. */
   hideServerWait(): void;
   showError(message: string): void;
-  /** Drop the error banner, if one is showing. */
-  clearError(): void;
+  /** Drop the error banner when it shows exactly `message` (null never matches). */
+  clearError(message: string | null): void;
   /** A non-error, informational message (e.g. pending approval) shown as a
    *  notice rather than the red error banner. */
   showNotice(message: string): void;
@@ -1337,8 +1337,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       transitionTo("error", message);
     },
 
-    clearError(): void {
-      if (formState === "error") transitionTo("idle");
+    clearError(message: string | null): void {
+      if (formState === "error" && message !== null && errorMessage === message) {
+        transitionTo("idle");
+      }
     },
 
     showNotice(message: string): void {
