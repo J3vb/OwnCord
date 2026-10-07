@@ -375,6 +375,7 @@ export function evaluateBars(
   for (const metric of COUNT_METRICS) {
     const phaseCeiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
     const exact = metric === "documents" || metric === "intervals";
+    const tolerance = exact ? 0 : metric === "nodes" ? NODE_BAR_TOLERANCE : COUNT_WOBBLE_TOLERANCE;
     const failures: string[] = [];
     let worstSlope = 0;
     let lastWarm: number | null = null;
@@ -382,11 +383,6 @@ export function evaluateBars(
     for (const { label, group, withinPage } of series) {
       // Run 35986328302: page-0 nodes read 2858→2859 across cycles 6 and 9,
       // slope 1/3 with an identical attached DOM (see NODE_BAR_TOLERANCE).
-      const tolerance = exact
-        ? 0
-        : metric === "nodes"
-          ? NODE_BAR_TOLERANCE
-          : COUNT_WOBBLE_TOLERANCE;
       const values = group.map((s) => s[metric]);
       const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
       if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
@@ -409,7 +405,7 @@ export function evaluateBars(
       slope: worstSlope,
       bar: exact
         ? "every phase and page series exactly flat"
-        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle${`, or a net move <= ${metric === "nodes" ? NODE_BAR_TOLERANCE : COUNT_WOBBLE_TOLERANCE} in either series`}`,
+        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle, or a net move <= ${tolerance} in either series`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;
