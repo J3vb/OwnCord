@@ -613,6 +613,7 @@ describe("main.ts native certificate-dialog decline", () => {
       message: "Stored: sha256:ORIGINAL",
     });
     expectConsole("error", /Certificate fingerprint mismatch/);
+    await vi.advanceTimersByTimeAsync(10); // the modal chunk loads on demand
 
     declineAcceptFingerprint();
     vi.mocked(reconnectAfterCertAccept).mockClear();
@@ -666,6 +667,7 @@ describe("main.ts native certificate-dialog decline", () => {
       message: "Stored: sha256:ORIGINAL",
     });
     expectConsole("error", /Certificate fingerprint mismatch/);
+    await vi.advanceTimersByTimeAsync(10);
     expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(firstUseCalls);
     expect(vi.mocked(createCertMismatchModal).mock.calls.length).toBe(mismatchCalls);
 
@@ -674,6 +676,7 @@ describe("main.ts native certificate-dialog decline", () => {
     await vi.advanceTimersByTimeAsync(10);
     emitTauriEvent("cert-tofu", firstUse);
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10);
     expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(firstUseCalls + 1);
     vi.mocked(createCertFirstUseModal).mock.lastCall![0].onReject();
 
