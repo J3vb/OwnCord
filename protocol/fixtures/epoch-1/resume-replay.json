@@ -67,6 +67,7 @@
             "mentions_here": false,
             "pinned": false,
             "reactions": [],
+            "referenced_message": null,
             "reply_to": null,
             "timestamp": "<ts:string>",
             "user": {
@@ -162,6 +163,7 @@
             "mentions_here": false,
             "pinned": false,
             "reactions": [],
+            "referenced_message": null,
             "reply_to": null,
             "timestamp": "<ts:string>",
             "user": {

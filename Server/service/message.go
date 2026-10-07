@@ -51,6 +51,10 @@ type SendMessageParams struct {
 	AttachmentIDs   []string
 }
 
+// ReferencedMessage is the reply-parent snippet a chat_message frame carries.
+// It aliases the db shape so the ws transport depends on service, not db.
+type ReferencedMessage = db.ReferencedMessage
+
 // SendMessageResult contains the output of a successful message send.
 type SendMessageResult struct {
 	Duplicate bool // retry acknowledgment only, no repeated broadcasts or effects
@@ -79,6 +83,10 @@ type SendMessageResult struct {
 
 	// Attachment data for broadcast.
 	Attachments []db.AttachmentInfo
+
+	// ReferencedMessage is the reply parent's snippet for the broadcast; nil
+	// when the send is not a reply or the parent is unavailable.
+	ReferencedMessage *ReferencedMessage
 
 	// Mentions is the resolved mentioned user ids (never nil) and
 	// MentionsEveryone an authorized @everyone/@here. Both are broadcast so

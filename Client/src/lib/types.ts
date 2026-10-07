@@ -407,6 +407,15 @@ export interface ModQueuePayload {
   readonly state: string;
 }
 
+/** Reply parent snippet. A deleted parent is redacted to `{id, deleted: true}`. */
+export interface ReferencedMessage {
+  readonly id: number;
+  readonly user: MessageUser | null;
+  readonly content: string;
+  readonly deleted: boolean;
+  readonly has_attachments: boolean;
+}
+
 export interface ChatMessagePayload {
   readonly client_message_id?: string;
   readonly id: number;
@@ -414,6 +423,8 @@ export interface ChatMessagePayload {
   readonly user: MessageUser;
   readonly content: string;
   readonly reply_to: number | null;
+  /** Parent snippet. Absent from older servers; null when not a reply. */
+  readonly referenced_message?: ReferencedMessage | null;
   readonly attachments: readonly Attachment[];
   readonly timestamp: string;
   /**
@@ -1131,6 +1142,8 @@ export interface MessageResponse {
   readonly user: MessageUser;
   readonly content: string;
   readonly reply_to: number | null;
+  /** Parent snippet. Absent from older servers; null when not a reply. */
+  readonly referenced_message?: ReferencedMessage | null;
   readonly attachments: readonly Attachment[];
   readonly reactions: readonly ReactionSummary[];
   readonly pinned: boolean;

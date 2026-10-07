@@ -73,6 +73,15 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		MentionsEveryone: mentions.Everyone,
 		MentionsHere:     mentions.HereOnly,
 	}
+	if p.ReplyTo != nil {
+		// The message is committed; a failed snippet read only costs the
+		// snippet, so it must not fail the send.
+		refs, refErr := s.st.GetReferencedMessages(context.WithoutCancel(ctx), p.ChannelID, []int64{*p.ReplyTo})
+		if refErr != nil {
+			slog.Error("MessageService.SendMessage GetAttachments", "err", refErr, "msg_id", msgID, "read", "referenced_message")
+		}
+		result.ReferencedMessage = refs[*p.ReplyTo]
+	}
 
 	// DM path: open DM for recipients.
 	if isDM && !s.sendMessageDMSideEffects(ctx, p, result) {

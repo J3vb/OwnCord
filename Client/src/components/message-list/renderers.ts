@@ -171,6 +171,7 @@ export function refreshConnectionControls(root: ParentNode): void {
  */
 function renderReplyRef(
   replyToId: number,
+  referenced: Message["referencedMessage"],
   allMessages: readonly Message[],
   opts: MessageListOptions,
   signal: AbortSignal,
@@ -198,7 +199,9 @@ function renderReplyRef(
   if (ref) {
     const plain = ref.deleted
       ? messagingText("message.deleted")
-      : markdownToPlainText(ref.content, messagingText("spoiler.revealed")).slice(0, 100);
+      : Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+          .slice(0, 100)
+          .join("");
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
@@ -217,6 +220,23 @@ function renderReplyRef(
       miniAvatar,
       createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement("span", { class: "rr-text" }, preview),
+    );
+  } else if (referenced?.deleted) {
+    setText(bar, messagingText("message.deleted"));
+  } else if (referenced?.user) {
+    const author = resolveAuthor(referenced.user);
+    const roleColor = roleColorVar(getUserRole(referenced.user.id));
+    bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
+    const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
+    appendChildren(
+      bar,
+      createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+      createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
+      createElement(
+        "span",
+        { class: "rr-text" },
+        plain === "" ? messagingText("reply.attachment") : plain,
+      ),
     );
   } else {
     setText(bar, messagingText("reply.unknown"));
@@ -320,7 +340,7 @@ export function renderMessage(
   }
 
   if (msg.replyTo !== null) {
-    el.appendChild(renderReplyRef(msg.replyTo, allMessages, opts, signal));
+    el.appendChild(renderReplyRef(msg.replyTo, msg.referencedMessage, allMessages, opts, signal));
   }
 
   const header = createElement("div", { class: "msg-header" });

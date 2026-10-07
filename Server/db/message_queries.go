@@ -921,7 +921,7 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		}
 	}
 
-	return msgs, nil
+	return d.attachReferencedMessages(ctx, msgs)
 }
 
 // SetMessagePinned updates the pinned column on a message.

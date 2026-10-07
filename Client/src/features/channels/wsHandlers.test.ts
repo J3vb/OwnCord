@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   applyReadyActiveChannel,
   handleChannelDelete,
+  handleMemberBan,
   handleMemberUpdate,
   handleMentionCount,
   markReadyActiveChannelRead,
@@ -232,5 +233,46 @@ describe("handleMemberUpdate", () => {
 
     handleMemberUpdate({ user_id: 10, role: "member" });
     expect(authStore.getState().user?.role).toBe("admin");
+  });
+});
+
+describe("handleMemberBan", () => {
+  it("leaves loaded reply snippets intact — a ban is not an erasure", () => {
+    const snippet = {
+      id: 50,
+      user: { id: 9, username: "gone", avatar: null },
+      content: "secret",
+      deleted: false,
+      has_attachments: false,
+    };
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([
+        [
+          1,
+          [
+            {
+              id: 10,
+              channelId: 1,
+              user: { id: 2, username: "b", avatar: null },
+              content: "re",
+              replyTo: 50,
+              referencedMessage: snippet,
+              attachments: [],
+              reactions: [],
+              pinned: false,
+              editedAt: null,
+              deleted: false,
+              timestamp: "2026-03-15T10:00:00Z",
+              status: "sent" as const,
+              correlationId: null,
+              errorCode: null,
+            },
+          ],
+        ],
+      ]),
+    }));
+    handleMemberBan({ user_id: 9 });
+    expect(messagesStore.getState().messagesByChannel.get(1)![0]!.referencedMessage).toBe(snippet);
   });
 });

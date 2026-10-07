@@ -7,6 +7,7 @@ import type {
   MessageUser,
   Attachment,
   ReactionSummary,
+  ReferencedMessage,
   MessageResponse,
 } from "../../lib/types";
 
@@ -28,6 +29,8 @@ export interface Message {
   readonly user: MessageUser;
   readonly content: string;
   readonly replyTo: number | null;
+  /** Server snippet of the reply parent, for a parent outside the loaded window. */
+  readonly referencedMessage?: ReferencedMessage | null;
   readonly attachments: readonly Attachment[];
   readonly reactions: readonly ReactionSummary[];
   readonly pinned: boolean;
@@ -117,6 +120,9 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     user: payload.user,
     content: payload.content,
     replyTo: payload.reply_to,
+    ...(payload.referenced_message !== undefined && {
+      referencedMessage: payload.referenced_message,
+    }),
     attachments: payload.attachments,
     reactions: [],
     pinned: false,
@@ -139,6 +145,9 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     user: response.user,
     content: response.content,
     replyTo: response.reply_to,
+    ...(response.referenced_message !== undefined && {
+      referencedMessage: response.referenced_message,
+    }),
     attachments: response.attachments,
     reactions: response.reactions,
     pinned: response.pinned,

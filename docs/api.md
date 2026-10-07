@@ -1061,6 +1061,7 @@ Paginated message history for a channel.
       },
       "content": "Hello!",
       "reply_to": null,
+      "referenced_message": null,
       "attachments": [
         {
           "id": "file-uuid",

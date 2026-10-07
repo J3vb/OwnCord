@@ -83,6 +83,7 @@ type Store interface {
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
+	GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error)
 
 	// ── Channels ──
 	ListChannels(ctx context.Context) ([]db.Channel, error)

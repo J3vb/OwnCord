@@ -621,6 +621,7 @@ Direct response to sender (no seq):
     },
     "content": "Hello everyone!",
     "reply_to": null,
+    "referenced_message": null,
     "timestamp": "2026-03-14T10:30:00Z",
     "attachments": [],
     "reactions": [],
@@ -635,11 +636,28 @@ Direct response to sender (no seq):
 `user.display_name` is the author's nickname to render instead of `username`;
 present only when the author has one, omitted otherwise (see `member_join`).
 
-| Field               | Type     | Description                                                                                                         |
-| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| `mentions`          | number[] | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved.                  |
-| `mentions_everyone` | bool     | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel. |
-| `mentions_here`     | bool     | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                             |
+| Field                | Type           | Description                                                                                                              |
+| -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mentions`           | number[]       | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved.                       |
+| `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.      |
+| `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                  |
+| `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below. |
+
+`referenced_message` is `{id, user: {id, username, avatar}, content, deleted,
+has_attachments}`, computed when the frame is built (never stored). `content`
+is the parent's text cut to 100 runes (markdown, not rendered). It is `null`
+when the message is not a reply, or the parent is gone or lives in another
+channel (the server never follows a `reply_to` across channels). A soft-deleted
+parent is redacted to `{id, user: null, content: "", deleted: true,
+has_attachments: false}`. An older server omits the field; clients fall back to
+the loaded message, then to "unknown message". `GET /channels/{id}/messages`
+(history, `around`) and the pins list carry the same field per message. The
+snippet is live-only: the copy kept for replay (ring buffer and the `events`
+table) carries `referenced_message: null`, so a client resuming after
+the parent was deleted never receives its text and falls back to the unknown
+parent bar. A client that holds a snippet redacts it (`deleted: true`, no
+`user`, no `content`) on `chat_deleted` and `chat_bulk_deleted` when the
+deleted message is the parent.
 
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message). An `@word` that
