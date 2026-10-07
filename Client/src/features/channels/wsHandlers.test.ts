@@ -1,8 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   applyReadyActiveChannel,
   handleChannelDelete,
+  handleMemberBan,
   handleMemberUpdate,
+  handleMentionCount,
   markReadyActiveChannelRead,
 } from "./wsHandlers";
 import {
@@ -11,11 +13,16 @@ import {
   setActiveChannel,
   setChannels,
 } from "../../stores/channels.store";
+import { messagesStore } from "../../stores/messages.store";
+import { dmStore } from "../../stores/dm.store";
 import { authStore } from "../../stores/auth.store";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
 
-vi.mock("../../lib/read-state", () => ({ markChannelRead: vi.fn() }));
+vi.mock("../../lib/read-state", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/read-state")>();
+  return { ...actual, markChannelRead: vi.fn() };
+});
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 let lastChannel: number | null = null;
 vi.mock("../../lib/last-channel", () => ({
@@ -39,10 +46,18 @@ function ready(channels: ReadyChannel[], dmIds: number[] = []): Payload<"ready">
   } as unknown as Payload<"ready">;
 }
 
+let hasFocus: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   resetChannelsStore();
+  messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
   lastChannel = null;
   vi.clearAllMocks();
+  hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+});
+
+afterEach(() => {
+  hasFocus.mockRestore();
 });
 
 describe("applyReadyActiveChannel", () => {
@@ -114,6 +129,26 @@ describe("markReadyActiveChannelRead", () => {
     markReadyActiveChannelRead(null);
     expect(markChannelRead).not.toHaveBeenCalled();
   });
+
+  it("keeps the restated unread count and sends no mark_read on an unfocused ready", () => {
+    hasFocus.mockReturnValue(false);
+    setChannels([{ ...channel(5, "text", 0), unread_count: 5 }]);
+    setActiveChannel(5, { clearUnread: false });
+
+    const seen = applyReadyActiveChannel(ready([channel(5, "text", 0)]));
+    markReadyActiveChannelRead(seen);
+
+    expect(markChannelRead).not.toHaveBeenCalled();
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(5);
+  });
+
+  it("does not mark a detached active channel read even while focused", () => {
+    messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
+
+    markReadyActiveChannelRead(5);
+
+    expect(markChannelRead).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleChannelDelete", () => {
@@ -138,6 +173,54 @@ describe("handleChannelDelete", () => {
   });
 });
 
+describe("handleMentionCount", () => {
+  it("sets the badge total on a guild channel from the server's frame", () => {
+    setChannels([{ ...channel(2, "text", 0), mention_count: 0, unread_count: 4 }]);
+
+    handleMentionCount({ channel_id: 2, count: 3 });
+
+    const ch = channelsStore.getState().channels.get(2);
+    expect(ch?.mentionCount).toBe(3);
+    // The frame carries no unread information, so unread is untouched.
+    expect(ch?.unreadCount).toBe(4);
+  });
+
+  it("ignores a frame for the channel on screen, whose chat_message handles it", () => {
+    setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
+    setActiveChannel(2);
+
+    handleMentionCount({ channel_id: 2, count: 3 });
+
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
+  });
+
+  it("ignores a frame for the active channel while the window is unfocused", () => {
+    hasFocus.mockReturnValue(false);
+    setChannels([{ ...channel(2, "text", 0), mention_count: 0 }]);
+    setActiveChannel(2);
+
+    handleMentionCount({ channel_id: 2, count: 3 });
+
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
+  });
+
+  it("ignores a frame for a channel this client does not know", () => {
+    const before = channelsStore.getState();
+    handleMentionCount({ channel_id: 999, count: 1 });
+    expect(channelsStore.getState()).toBe(before);
+  });
+
+  it("ignores a DM-channel id, whose badge lives in dmStore", () => {
+    setChannels([{ ...channel(7, "dm", 0), mention_count: 0 }]);
+    // dmStore's own row must not be disturbed by a channelsStore frame.
+    dmStore.setState(() => ({ channels: [] }));
+
+    handleMentionCount({ channel_id: 7, count: 3 });
+
+    expect(channelsStore.getState().channels.get(7)?.mentionCount).toBe(0);
+  });
+});
+
 describe("handleMemberUpdate", () => {
   it("syncs the signed-in user's own role into authStore", () => {
     authStore.setState((prev) => ({
@@ -150,5 +233,46 @@ describe("handleMemberUpdate", () => {
 
     handleMemberUpdate({ user_id: 10, role: "member" });
     expect(authStore.getState().user?.role).toBe("admin");
+  });
+});
+
+describe("handleMemberBan", () => {
+  it("leaves loaded reply snippets intact — a ban is not an erasure", () => {
+    const snippet = {
+      id: 50,
+      user: { id: 9, username: "gone", avatar: null },
+      content: "secret",
+      deleted: false,
+      has_attachments: false,
+    };
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([
+        [
+          1,
+          [
+            {
+              id: 10,
+              channelId: 1,
+              user: { id: 2, username: "b", avatar: null },
+              content: "re",
+              replyTo: 50,
+              referencedMessage: snippet,
+              attachments: [],
+              reactions: [],
+              pinned: false,
+              editedAt: null,
+              deleted: false,
+              timestamp: "2026-03-15T10:00:00Z",
+              status: "sent" as const,
+              correlationId: null,
+              errorCode: null,
+            },
+          ],
+        ],
+      ]),
+    }));
+    handleMemberBan({ user_id: 9 });
+    expect(messagesStore.getState().messagesByChannel.get(1)![0]!.referencedMessage).toBe(snippet);
   });
 });

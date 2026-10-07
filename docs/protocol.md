@@ -98,7 +98,7 @@ The sequence number system enables reconnection with state recovery.
 | ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`                                                                                                                                   |
 | Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart` |
-| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `channel_create` (targeted per recipient; see below)                                                                               |
+| Ephemeral          | No       | `typing`, a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `appeal_status`, `mention_count`, `channel_create` (targeted per recipient; see below)                                                              |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                             |
 | Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                       |
@@ -621,6 +621,7 @@ Direct response to sender (no seq):
     },
     "content": "Hello everyone!",
     "reply_to": null,
+    "referenced_message": null,
     "timestamp": "2026-03-14T10:30:00Z",
     "attachments": [],
     "reactions": [],
@@ -635,11 +636,28 @@ Direct response to sender (no seq):
 `user.display_name` is the author's nickname to render instead of `username`;
 present only when the author has one, omitted otherwise (see `member_join`).
 
-| Field               | Type     | Description                                                                                                         |
-| ------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- |
-| `mentions`          | number[] | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved.                  |
-| `mentions_everyone` | bool     | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel. |
-| `mentions_here`     | bool     | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                             |
+| Field                | Type           | Description                                                                                                              |
+| -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `mentions`           | number[]       | User IDs the server resolved from `@username` tokens. Always present; empty when nothing resolved.                       |
+| `mentions_everyone`  | bool           | `true` when the message carried `@everyone` or `@here` **and** the author holds `MENTION_EVERYONE` on that channel.      |
+| `mentions_here`      | bool           | `true` when `mentions_everyone` came from `@here` rather than `@everyone` (never both).                                  |
+| `referenced_message` | object or null | Snippet of the `reply_to` parent, so a reply to a message outside the loaded window still shows who and what. See below. |
+
+`referenced_message` is `{id, user: {id, username, avatar}, content, deleted,
+has_attachments}`, computed when the frame is built (never stored). `content`
+is the parent's text cut to 100 runes (markdown, not rendered). It is `null`
+when the message is not a reply, or the parent is gone or lives in another
+channel (the server never follows a `reply_to` across channels). A soft-deleted
+parent is redacted to `{id, user: null, content: "", deleted: true,
+has_attachments: false}`. An older server omits the field; clients fall back to
+the loaded message, then to "unknown message". `GET /channels/{id}/messages`
+(history, `around`) and the pins list carry the same field per message. The
+snippet is live-only: the copy kept for replay (ring buffer and the `events`
+table) carries `referenced_message: null`, so a client resuming after
+the parent was deleted never receives its text and falls back to the unknown
+parent bar. A client that holds a snippet redacts it (`deleted: true`, no
+`user`, no `content`) on `chat_deleted` and `chat_bulk_deleted` when the
+deleted message is the parent.
 
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message). An `@word` that
@@ -958,6 +976,41 @@ Same access check as `channel_focus`: `READ_MESSAGES` on the channel, or DM
 participation. A denied channel answers `FORBIDDEN`; a non-positive
 `channel_id` answers `BAD_REQUEST`. There is no response on success — the client
 clears its local badge optimistically and the next `ready` confirms.
+
+### mention_count (Server -> Client, direct)
+
+```json
+{ "type": "mention_count", "payload": { "channel_id": 5, "count": 3 } }
+```
+
+Tells one reader that their `read_states.mention_count` in `channel_id` changed,
+carrying the new total. `count` is the reader's total after the change (the
+server pushes the total, not a delta), so a lost or duplicated frame still
+converges.
+
+This is the live path for the sidebar and taskbar/tray unread badge when a
+mention lands in a channel the reader is **not** viewing: `chat_message` is
+published only to the channel's topic subscribers (the focused channel), so an
+unfocused reader never receives it. After the mention worker's batched write
+commits, it pushes one `mention_count` frame per reader whose read-state guard
+actually admitted the bump — a reader who had already read the message, or whose
+message was removed before the flush, is not pushed. Deleting or purging a
+mentioning message pushes the same frame with the reader's lowered total, so a
+badge the event raised is also cleared live — but only to a reader who can still
+see the channel; a reader whose access was revoked (removed override, role
+change, left the DM) is skipped, and the stored total is still corrected.
+
+Every write and the frame it pushes are one critical section, so a reader
+receives frames in the order the server changed its total: an increment flush
+coalesced on the mention worker and a deletion's decrement cannot invert, so a
+reader's last frame always carries the latest committed total. Targeted,
+unsequenced and never replayed; a disconnected reader recovers the
+authoritative total on their next `ready`.
+
+The client ignores the frame for the channel currently on screen (its own
+`chat_message` handles that badge, counting a mention that lands while the
+window is unfocused too) and for a DM-channel id (a DM's badge lives in the DM
+store and its mention bump rides the DM's `chat_message`).
 
 ---
 
@@ -2201,7 +2254,7 @@ tables below add per-type behavioral notes.
 | `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
 | `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
 
-### Server -> Client (43 types)
+### Server -> Client (45 types)
 
 | Type                  | Has seq? | Delivery                                                                |
 | --------------------- | -------- | ----------------------------------------------------------------------- |
@@ -2244,6 +2297,7 @@ tables below add per-type behavioral notes.
 | `mod_queue`           | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only               |
 | `mod_action`          | No       | Direct to the live target only                                          |
 | `appeal_status`       | No       | Direct to the appellant only                                            |
+| `mention_count`       | No       | Direct to the reader whose mention badge changed (DP-27)                |
 | `error`               | No       | Direct to requester                                                     |
 | `pong`                | No       | Direct to pinger                                                        |
 | `command_reply`       | No       | Direct to invoking client (ephemeral plugin reply)                      |

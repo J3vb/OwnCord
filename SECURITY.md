@@ -260,6 +260,10 @@ disagreement is a doc bug.
   `TestUserSessionRedactedInLogs`, `TestSecretConfigsRedactedInLogs`). A raw
   token, key or message body passed to `slog` as a string is not scrubbed:
   never pass one.
+- Secrets set from the admin panel are write-only and live in
+  `<data_dir>/config-overrides.json` (mode `0600`). No response, error, log
+  line or audit row carries one; the panel sees only whether a value is
+  configured. Treat that file like `config.yaml` in backups.
 - The audit log (`audit_log` table), which records security-relevant actions
   (auth, 2FA, admin, content, voice moderation, ops events), is held to the
   same rule by tests, not a runtime filter. The `TestAuditCoverage_*` tables in
@@ -327,8 +331,10 @@ disagreement is a doc bug.
   leaves the installed binary untouched.
 - The Tauri desktop client's own updater performs Ed25519 signature
   verification before applying an update, requires that signature to name the
-  version the update check offered, and refuses a file whose name names an
-  operating system or architecture other than the running machine's.
+  version the update check offered, and authenticates the artifact name from
+  the signature's trusted comment: a name that does not match the running
+  machine's operating system, architecture and installer format is refused
+  before installation.
 - Release artifacts also carry SLSA Build L2 provenance attestations (binding
   a file to the workflow and commit that produced it, not to a person), and
   SBOMs for the server binaries (CycloneDX, one per binary or archive) and the

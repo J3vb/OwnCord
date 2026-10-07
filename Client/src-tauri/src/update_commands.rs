@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -175,6 +176,7 @@ fn build_updater(
     // for CA-signed servers. Never blindly accept invalid certs (BUG-134).
     let tls_config = build_tls_config(app, server_url)?;
     app.updater_builder()
+        .pubkey(updater_public_key(app)?)
         .endpoints(vec![url])
         .map_err(|e| format!("failed to set endpoints: {e}"))?
         .configure_client(move |client| {
@@ -192,6 +194,17 @@ fn build_updater(
         })
         .build()
         .map_err(|e| format!("failed to build updater: {e}"))
+}
+
+/// Use one configured trust anchor for the plugin and the artifact-name check.
+fn updater_public_key(app: &AppHandle) -> Result<&str, String> {
+    app.config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|config| config.get("pubkey"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "updater public key is not configured".to_string())
 }
 
 /// Validate that a server URL is safe for the updater to connect to.
@@ -227,12 +240,9 @@ fn cannot_self_update(bundle: Option<&BundleType>) -> bool {
 /// Whether the artifact a release offers is built for the given machine target
 /// (`{os}-{arch}` in the updater plugin's spelling, e.g. `windows-x86_64`).
 ///
-/// The signature only proves the bytes came from OwnCord; it says nothing about
-/// which machine can run them. A signed file for another OS or processor
-/// therefore downloads and installs cleanly and then will not start, so the
-/// offered file name is checked against the running machine before anything is
-/// written. Fail closed: a name that does not name both an operating system and
-/// an architecture is refused, because every signed OwnCord artifact names both.
+/// Used for both the offered URL and the authenticated artifact name. The URL
+/// check is a preflight filter; the signed name is checked again after download
+/// and before installation. Names without an OS and architecture fail closed.
 fn artifact_matches_target(download_url: &str, machine_target: &str) -> bool {
     let Some((machine_os, machine_arch)) = machine_target.split_once('-') else {
         return false;
@@ -348,6 +358,81 @@ pub async fn check_client_update(
     }
 }
 
+/// Whether a signed artifact name is one bare file name. Tauri's signer writes
+/// the artifact's `file_name()`, which keeps spaces and punctuation (an NSIS
+/// artifact is named after `productName` verbatim, e.g. `OwnCord E2E_...`), so
+/// this rejects only what would make the field ambiguous — a directory, URL or
+/// control character — not every non-alphanumeric byte.
+fn is_bare_artifact_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\' | '?' | '#'))
+}
+
+/// Authenticate the signed name before interpreting its target. The plugin
+/// exposes the encoded signature, but not its verified trusted comment, so
+/// use its verifier and trust anchor again, including the global signature.
+fn verify_artifact_target(
+    bytes: &[u8],
+    signature: &str,
+    pubkey: &str,
+    target: &str,
+    bundle: &BundleType,
+) -> Result<(), String> {
+    let decode = |encoded: &str| -> Result<String, String> {
+        let decoded = STANDARD.decode(encoded).map_err(|e| e.to_string())?;
+        String::from_utf8(decoded).map_err(|e| e.to_string())
+    };
+    let key = minisign_verify::PublicKey::decode(&decode(pubkey)?).map_err(|e| e.to_string())?;
+    let signature =
+        minisign_verify::Signature::decode(&decode(signature)?).map_err(|e| e.to_string())?;
+    key.verify(bytes, &signature, true)
+        .map_err(|e| e.to_string())?;
+
+    let mut files = signature
+        .trusted_comment()
+        .split('\t')
+        .filter_map(|field| field.strip_prefix("file:"));
+    let filename = files
+        .next()
+        .ok_or_else(|| "signed update has no artifact name".to_string())?;
+    // A file field is a single basename, never a URL or path. Reject ambiguous
+    // fields instead of reinterpreting them with the URL preflight parser.
+    if files.next().is_some() || !is_bare_artifact_name(filename) {
+        return Err("signed update has an invalid artifact name".into());
+    }
+    let lower = filename.to_ascii_lowercase();
+    let matches_bundle = match bundle {
+        BundleType::AppImage => lower.ends_with(".appimage.tar.gz"),
+        BundleType::Nsis => lower.ends_with(".nsis.zip") || lower.ends_with("-setup.exe"),
+        // OwnCord only publishes updater artifacts for these two bundles.
+        _ => false,
+    };
+    if !matches_bundle || !artifact_matches_target(filename, target) {
+        return Err("signed update artifact is not built for this machine".into());
+    }
+    Ok(())
+}
+
+/// Keep the plugin's signature/version checks before the authenticated target
+/// check, and return bytes to the installer only after both checks succeed.
+async fn download_for_target<C: FnMut(usize, Option<u64>)>(
+    update: &tauri_plugin_updater::Update,
+    pubkey: &str,
+    target: &str,
+    bundle: &BundleType,
+    on_chunk: C,
+) -> Result<Vec<u8>, String> {
+    let bytes = update
+        .download(on_chunk, || {})
+        .await
+        .map_err(|e| format!("download/install failed: {e}"))?;
+    verify_artifact_target(&bytes, &update.signature, pubkey, target, bundle)
+        .map_err(|e| format!("download/install failed: {e}"))?;
+    Ok(bytes)
+}
+
 /// Download and install a pending update. Windows exits through its installer;
 /// on Linux/macOS the frontend must call `relaunch()` after this completes.
 #[tauri::command]
@@ -366,17 +451,22 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
             // A failed emit must never abort the install, hence `let _ =`.
             let progress_app = app.clone();
             let mut received: u64 = 0;
-            let bytes = u
-                .download(
-                    move |chunk_len, total| {
-                        received += chunk_len as u64;
-                        let _ = progress_app
-                            .emit("update-progress", DownloadProgress { received, total });
-                    },
-                    || {},
-                )
-                .await
-                .map_err(|e| format!("download/install failed: {e}"))?;
+            let target = tauri_plugin_updater::target()
+                .ok_or_else(|| "download/install failed: unknown machine target".to_string())?;
+            let bundle = bundle_type()
+                .ok_or_else(|| "download/install failed: unknown bundle type".to_string())?;
+            let bytes = download_for_target(
+                &u,
+                updater_public_key(&app)?,
+                &target,
+                &bundle,
+                move |chunk_len, total| {
+                    received += chunk_len as u64;
+                    let _ =
+                        progress_app.emit("update-progress", DownloadProgress { received, total });
+                },
+            )
+            .await?;
             log::info!(
                 "[update] download finished ({} bytes) for version {}",
                 bytes.len(),
@@ -575,7 +665,7 @@ mod tests {
         let base = format!("http://{}", listener.local_addr().expect("stub address"));
         let offer = serde_json::json!({
             "version": version,
-            "url": format!("{base}/artifact"),
+            "url": format!("{base}/artifact/OwnCord_99.0.0_amd64.AppImage.tar.gz"),
             "signature": signature,
         })
         .to_string();
@@ -603,11 +693,20 @@ mod tests {
     /// server's offer and downloads it. Only the trust anchor is swapped for
     /// the fixture key, and plain http allowed for the loopback stub.
     async fn download_offer(version: &str, signature: &str) -> Result<(), String> {
+        download_offer_for_target(version, signature, FIXTURE_PUBKEY, None).await
+    }
+
+    async fn download_offer_for_target(
+        version: &str,
+        signature: &str,
+        pubkey: &str,
+        target: Option<(&str, &BundleType)>,
+    ) -> Result<(), String> {
         let base = serve_update_offer(version, signature);
         let shipped: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
         let mut updater_config = shipped["plugins"]["updater"].clone();
-        updater_config["pubkey"] = FIXTURE_PUBKEY.into();
+        updater_config["pubkey"] = pubkey.into();
         updater_config["dangerousInsecureTransportProtocol"] = true.into();
 
         let mut context = tauri::test::mock_context(tauri::test::noop_assets());
@@ -631,11 +730,174 @@ mod tests {
             .await
             .map_err(|e| e.to_string())?
             .ok_or("no update offered")?;
+        if let Some((target, bundle)) = target {
+            return download_for_target(&update, pubkey, target, bundle, |_, _| {})
+                .await
+                .map(|_| ());
+        }
         update
             .download(|_, _| {}, || {})
             .await
             .map(|_| ())
             .map_err(|e| e.to_string())
+    }
+
+    // Prehashed minisign fixtures over FIXTURE_PAYLOAD, generated with an
+    // ephemeral Ed25519 key. Its private half was discarded. Every fixture
+    // binds version 99.0.0; only the authenticated file field varies.
+    fn target_fixtures() -> serde_json::Value {
+        serde_json::from_str(include_str!("update_commands/target-fixtures.json"))
+            .expect("signed target fixtures")
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_for_another_architecture_is_refused() {
+        let fixtures = target_fixtures();
+        for (name, target, bundle) in [
+            ("linux_arm64", "linux-x86_64", BundleType::AppImage),
+            ("linux_x64", "linux-aarch64", BundleType::AppImage),
+            ("windows_arm64", "windows-x86_64", BundleType::Nsis),
+            ("windows_x64", "windows-aarch64", BundleType::Nsis),
+        ] {
+            let result = download_offer_for_target(
+                "99.0.0",
+                fixtures[name].as_str().unwrap(),
+                fixtures["pubkey"].as_str().unwrap(),
+                Some((target, &bundle)),
+            )
+            .await;
+            assert_eq!(
+                result,
+                Err(
+                    "download/install failed: signed update artifact is not built for this machine"
+                        .into()
+                ),
+                "{name} must be refused on {target}",
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_for_the_running_target_is_accepted() {
+        let fixtures = target_fixtures();
+        for (name, target, bundle) in [
+            ("linux_x64", "linux-x86_64", BundleType::AppImage),
+            ("linux_arm64", "linux-aarch64", BundleType::AppImage),
+            ("windows_x64", "windows-x86_64", BundleType::Nsis),
+            ("windows_arm64", "windows-aarch64", BundleType::Nsis),
+        ] {
+            assert_eq!(
+                download_offer_for_target(
+                    "99.0.0",
+                    fixtures[name].as_str().unwrap(),
+                    fixtures["pubkey"].as_str().unwrap(),
+                    Some((target, &bundle)),
+                )
+                .await,
+                Ok(()),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn signed_artifact_target_verifies_the_payload_comment_and_key() {
+        let fixtures = target_fixtures();
+        let signature = fixtures["linux_x64"].as_str().unwrap();
+        let pubkey = fixtures["pubkey"].as_str().unwrap();
+        let verify = |bytes: &[u8], signature: &str, pubkey: &str| {
+            verify_artifact_target(
+                bytes,
+                signature,
+                pubkey,
+                "linux-x86_64",
+                &BundleType::AppImage,
+            )
+        };
+        assert_eq!(verify(FIXTURE_PAYLOAD, signature, pubkey), Ok(()));
+        assert!(verify(b"changed payload", signature, pubkey).is_err());
+        assert!(verify(FIXTURE_PAYLOAD, signature, FIXTURE_PUBKEY).is_err());
+        assert!(verify(FIXTURE_PAYLOAD, "invalid base64", pubkey).is_err());
+
+        let arm_signature = String::from_utf8(
+            STANDARD
+                .decode(fixtures["linux_arm64"].as_str().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        let changed_comment = STANDARD.encode(arm_signature.replace("aarch64", "amd64"));
+        assert!(verify(FIXTURE_PAYLOAD, &changed_comment, pubkey).is_err());
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_requires_one_parseable_file_field() {
+        let fixtures = target_fixtures();
+        for name in [
+            "missing",
+            "empty",
+            "unparseable",
+            "duplicate",
+            "path",
+            "query",
+        ] {
+            assert!(
+                download_offer_for_target(
+                    "99.0.0",
+                    fixtures[name].as_str().unwrap(),
+                    fixtures["pubkey"].as_str().unwrap(),
+                    Some(("linux-x86_64", &BundleType::AppImage)),
+                )
+                .await
+                .is_err(),
+                "{name} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn signed_artifact_name_keeps_a_spaced_product_name() {
+        // The packaged E2E app is `OwnCord E2E`, and Tauri names the NSIS
+        // artifact after productName verbatim, so the signed name carries a
+        // space. It is still one bare file name for the running target.
+        let name = "OwnCord E2E_1.2.0-alpha.5_x64-setup.nsis.zip";
+        assert!(is_bare_artifact_name(name));
+        assert!(artifact_matches_target(name, "windows-x86_64"));
+        assert!(is_bare_artifact_name(
+            "OwnCord_99.0.0_amd64.AppImage.tar.gz"
+        ));
+    }
+
+    #[test]
+    fn signed_artifact_name_refuses_an_ambiguous_field() {
+        for name in [
+            "",
+            "folder/OwnCord_1.0.0_amd64.AppImage.tar.gz",
+            r"folder\OwnCord_1.0.0_amd64.AppImage.tar.gz",
+            "OwnCord_1.0.0_amd64.AppImage.tar.gz?name=other",
+            "OwnCord_1.0.0_amd64.AppImage.tar.gz#frag",
+            "OwnCord\t1.0.0_amd64.AppImage.tar.gz",
+        ] {
+            assert!(!is_bare_artifact_name(name), "{name:?} must be refused");
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_artifact_requires_the_running_os_and_bundle() {
+        let fixtures = target_fixtures();
+        for (target, bundle) in [
+            ("windows-x86_64", BundleType::Nsis),
+            ("linux-x86_64", BundleType::Deb),
+            ("linux-x86_64", BundleType::Rpm),
+        ] {
+            assert!(download_offer_for_target(
+                "99.0.0",
+                fixtures["linux_x64"].as_str().unwrap(),
+                fixtures["pubkey"].as_str().unwrap(),
+                Some((target, &bundle)),
+            )
+            .await
+            .is_err());
+        }
     }
 
     #[tokio::test]

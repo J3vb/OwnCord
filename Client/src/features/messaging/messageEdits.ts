@@ -8,7 +8,26 @@ import type {
   ChatDeletedPayload,
   ChatBulkDeletedPayload,
 } from "../../lib/types";
-import type { MessagesState } from "./messageModel";
+import type { ReferencedMessage } from "../../lib/types";
+import type { Message, MessagesState } from "./messageModel";
+
+/** A parent that is deleted, purged or erased: no author, no text. */
+function redactSnippet(id: number): ReferencedMessage {
+  return { id, user: null, content: "", deleted: true, has_attachments: false };
+}
+
+/** Redact the snippet of every reply in `list` whose parent `hit` selects; `list` itself when none. */
+function redactReplies(
+  list: readonly Message[],
+  hit: (ref: ReferencedMessage) => boolean,
+): readonly Message[] {
+  if (!list.some((m) => m.referencedMessage && hit(m.referencedMessage))) return list;
+  return list.map((m) =>
+    m.referencedMessage && hit(m.referencedMessage)
+      ? { ...m, referencedMessage: redactSnippet(m.referencedMessage.id) }
+      : m,
+  );
+}
 
 /** editMessage's reducer. */
 export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
@@ -40,8 +59,9 @@ export function reduceDeleteMessage(
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
-  const updatedList = channelMessages.map((msg) =>
-    msg.id === payload.message_id ? { ...msg, deleted: true } : msg,
+  const updatedList = redactReplies(
+    channelMessages.map((msg) => (msg.id === payload.message_id ? { ...msg, deleted: true } : msg)),
+    (ref) => ref.id === payload.message_id,
   );
 
   const updatedMessages = new Map(prev.messagesByChannel);
@@ -58,10 +78,19 @@ export function reduceBulkDeleteMessages(
   if (!channelMessages) return prev;
 
   const purged = new Set(payload.ids);
-  if (!channelMessages.some((msg) => purged.has(msg.id) && !msg.deleted)) return prev;
+  if (
+    !channelMessages.some(
+      (msg) =>
+        (purged.has(msg.id) && !msg.deleted) ||
+        (msg.referencedMessage && purged.has(msg.referencedMessage.id)),
+    )
+  ) {
+    return prev;
+  }
 
-  const updatedList = channelMessages.map((msg) =>
-    purged.has(msg.id) ? { ...msg, deleted: true } : msg,
+  const updatedList = redactReplies(
+    channelMessages.map((msg) => (purged.has(msg.id) ? { ...msg, deleted: true } : msg)),
+    (ref) => purged.has(ref.id),
   );
 
   const updatedMessages = new Map(prev.messagesByChannel);

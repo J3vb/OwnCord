@@ -26,22 +26,39 @@ vi.mock("../../src/lib/toast", () => ({ showToast }));
 
 const { alertIncomingCall, alertMissedCall } =
   await import("../../src/features/direct-messages/callAlerts");
-const { startRingChime, stopRingChime, playNotificationSound } =
+const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
   await import("../../src/lib/notificationSound");
 const { setChannelMutesHost } = await import("../../src/lib/channel-mutes");
 
 /** Every frequency the app's audio graph was asked to play, in order. */
 const frequencies: number[] = [];
+/** Every oscillator created, so a test can check that a burst in flight was
+ *  cut (a `stop()` with no time), not merely left to finish its envelope. */
+const oscillators: Array<{
+  readonly hz: number;
+  readonly stop: ReturnType<typeof vi.fn>;
+}> = [];
 class MockAudioContext {
   readonly currentTime = 0;
   readonly destination = {};
   createOscillator() {
-    return {
+    let hz = 0;
+    const osc = {
       connect: vi.fn(),
-      frequency: { setValueAtTime: (hz: number) => frequencies.push(hz) },
+      frequency: {
+        setValueAtTime: (value: number) => {
+          hz = value;
+          frequencies.push(value);
+        },
+      },
       start: vi.fn(),
       stop: vi.fn(),
+      get hz() {
+        return hz;
+      },
     };
+    oscillators.push(osc);
+    return osc;
   }
   createGain() {
     return {
@@ -60,6 +77,7 @@ const ring: RingState = { channelId: 50, fromUserId: 10, fromUsername: "Otto" };
 beforeEach(() => {
   testPrefs.clear();
   frequencies.length = 0;
+  oscillators.length = 0;
   showCall.mockReset().mockResolvedValue(undefined);
   requestAttention.mockReset().mockResolvedValue(undefined);
   showToast.mockReset();
@@ -69,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   stopRingChime();
+  stopRingback();
   setChannelMutesHost(null);
   vi.restoreAllMocks();
 });
@@ -181,5 +200,191 @@ describe("the ringtone", () => {
     testPrefs.set("callSounds", false);
     startRingChime();
     expect(frequencies).toEqual([]);
+  });
+});
+
+// DP-25: the caller's ringback.
+describe("the ringback", () => {
+  it("is its own pattern, distinct from the incoming ringtone and the message chime", () => {
+    startRingback();
+    const ringback = [...frequencies];
+    frequencies.length = 0;
+
+    startRingChime();
+
+    expect(ringback.length).toBeGreaterThan(0);
+    expect(frequencies.length).toBeGreaterThan(0);
+    for (const hz of ringback) expect(frequencies).not.toContain(hz);
+  });
+
+  it("is silenced by DND and by the call-sound toggle", () => {
+    testPrefs.set("userStatus", "dnd");
+    startRingback();
+    expect(frequencies).toEqual([]);
+
+    testPrefs.set("userStatus", "online");
+    testPrefs.set("callSounds", false);
+    startRingback();
+    expect(frequencies).toEqual([]);
+  });
+
+  it("repeats until stopped", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      const first = frequencies.length;
+      vi.advanceTimersByTime(3_000);
+      expect(frequencies.length).toBe(first * 2);
+      stopRingback();
+      vi.advanceTimersByTime(10_000);
+      expect(frequencies.length).toBe(first * 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A client either calls or is called; an incoming ring replaces the
+  // outgoing ringback rather than playing both (DP-25 acceptance).
+  it("never plays at the same time as the incoming chime", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      startRingChime();
+      vi.advanceTimersByTime(10_000);
+      const ringtoneFreqs = frequencies.filter((hz) => hz === 660 || hz === 880);
+      const ringbackFreqs = frequencies.filter((hz) => hz === 440);
+      expect(ringbackFreqs.length).toBeGreaterThan(0);
+      expect(ringtoneFreqs.length).toBeGreaterThan(0);
+      // The ringback stopped when the chime started: its 3s interval is gone.
+      const atRingtoneStart = frequencies.indexOf(660);
+      expect(frequencies.slice(atRingtoneStart)).not.toContain(440);
+    } finally {
+      stopRingback();
+      stopRingChime();
+      vi.useRealTimers();
+    }
+  });
+
+  // P3-02 acceptance: the two tones never overlap on one client. Clearing the
+  // repeating interval is not enough: the burst already in flight keeps
+  // sounding for its full envelope unless it is stopped.
+  it("cuts the ringback burst in flight when an incoming chime pre-empts it", () => {
+    startRingback();
+    const burst = oscillators.find((o) => o.hz === 440);
+    expect(burst).toBeDefined();
+    burst!.stop.mockClear();
+
+    startRingChime();
+
+    expect(burst!.stop.mock.calls.some((call) => call.length === 0)).toBe(true);
+  });
+
+  it("cuts the chime burst in flight when the incoming ring ends", () => {
+    startRingChime();
+    const burst = oscillators.filter((o) => o.hz === 660 || o.hz === 880);
+    expect(burst.length).toBeGreaterThan(0);
+    for (const o of burst) o.stop.mockClear();
+
+    stopRingChime();
+
+    for (const o of burst) {
+      expect(o.stop.mock.calls.some((call) => call.length === 0)).toBe(true);
+    }
+  });
+
+  // An incoming ring pre-empts the outgoing ringback, but the outgoing call is
+  // still ringing: when the incoming call ends the ringback must resume, not
+  // stay silent for the rest of the outgoing ring.
+  it("resumes when the incoming chime that pre-empted it ends", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      frequencies.length = 0;
+
+      startRingChime();
+      frequencies.length = 0;
+      vi.advanceTimersByTime(4_000);
+      expect(frequencies).not.toContain(440);
+
+      stopRingChime();
+      expect(frequencies).toContain(440);
+    } finally {
+      stopRingback();
+      stopRingChime();
+      vi.useRealTimers();
+    }
+  });
+
+  // P3-02: DND is re-checked while the ring is in flight, so a caller who
+  // switches it on mid-ring is silenced and hears the ring again when they
+  // switch it off.
+  it("follows a DND toggle made while the outgoing ring is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      frequencies.length = 0;
+
+      testPrefs.set("userStatus", "dnd");
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "userStatus" } }),
+      );
+      vi.advanceTimersByTime(6_000);
+      expect(frequencies).not.toContain(440);
+
+      testPrefs.set("userStatus", "online");
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "userStatus" } }),
+      );
+      expect(frequencies).toContain(440);
+    } finally {
+      stopRingback();
+      vi.useRealTimers();
+    }
+  });
+
+  // The same axis as the call-sound toggle (D2(b)): muting or unmuting call
+  // sounds mid-ring takes effect instead of being read only at start.
+  it("follows a call-sound toggle made while the outgoing ring is in flight", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      frequencies.length = 0;
+
+      testPrefs.set("callSounds", false);
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "callSounds" } }),
+      );
+      vi.advanceTimersByTime(6_000);
+      expect(frequencies).not.toContain(440);
+
+      testPrefs.set("callSounds", true);
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "callSounds" } }),
+      );
+      expect(frequencies).toContain(440);
+    } finally {
+      stopRingback();
+      vi.useRealTimers();
+    }
+  });
+
+  // A caller who hangs up (or is answered) during the incoming ring must not
+  // have a ringback come back when that incoming call ends.
+  it("does not resume after stopRingback", () => {
+    vi.useFakeTimers();
+    try {
+      startRingback();
+      startRingChime();
+      stopRingback();
+      frequencies.length = 0;
+
+      stopRingChime();
+      vi.advanceTimersByTime(4_000);
+      expect(frequencies).not.toContain(440);
+    } finally {
+      stopRingback();
+      stopRingChime();
+      vi.useRealTimers();
+    }
   });
 });

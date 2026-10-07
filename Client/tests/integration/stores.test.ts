@@ -95,6 +95,10 @@ function createMockWsClient(): MockWsClient {
       // no-op in mock
     },
 
+    getConnectFailureCode(): string | null {
+      return null;
+    },
+
     getState(): ConnectionState {
       return currentState;
     },
@@ -287,6 +291,8 @@ describe("Store integration via dispatcher", () => {
     });
 
     it("does not increment unread when message arrives on active channel", () => {
+      // P4-03: the active channel only skips the badge while the window has focus.
+      vi.spyOn(document, "hasFocus").mockReturnValue(true);
       setActiveChannel(1);
 
       ws.simulate("chat_message", {

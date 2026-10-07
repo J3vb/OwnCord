@@ -17,6 +17,7 @@ import {
   incrementUnread,
   incrementMention,
   noteChannelMessage,
+  setMentionCount,
   clearUnread,
   getUnreadOnOpen,
   resetChannelsStore,
@@ -700,6 +701,50 @@ describe("channels store", () => {
       const before = channelsStore.getState();
 
       noteChannelMessage(999, 1, false);
+
+      expect(channelsStore.getState()).toBe(before);
+    });
+  });
+
+  // DP-27: mention_count carries the server's authoritative total, so a
+  // mention that lands in a channel the client is not viewing repaints that
+  // channel's badge live (its chat_message never arrives). It must not touch
+  // unreadCount, which the same frame says nothing about.
+  describe("setMentionCount", () => {
+    it("sets the mention count from the server's authoritative total", () => {
+      setChannels([
+        { ...readyChannels[0]!, unread_count: 1, mention_count: 0, last_message_id: 100 },
+      ]);
+
+      setMentionCount(1, 3);
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.mentionCount).toBe(3);
+      expect(ch?.unreadCount).toBe(1);
+    });
+
+    it("replaces rather than increments, so a lost or duplicated frame converges", () => {
+      setChannels([{ ...readyChannels[0]!, mention_count: 5, last_message_id: 100 }]);
+
+      setMentionCount(1, 2);
+      setMentionCount(1, 2);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(2);
+    });
+
+    it("clears the mention count when the server reports zero", () => {
+      setChannels([{ ...readyChannels[0]!, mention_count: 4, last_message_id: 100 }]);
+
+      setMentionCount(1, 0);
+
+      expect(channelsStore.getState().channels.get(1)?.mentionCount).toBe(0);
+    });
+
+    it("is a no-op for an unknown channel id", () => {
+      setChannels(readyChannels);
+      const before = channelsStore.getState();
+
+      setMentionCount(999, 1);
 
       expect(channelsStore.getState()).toBe(before);
     });

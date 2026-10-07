@@ -20,6 +20,7 @@
 //! the desktop portal on Wayland, and sees the capture only as a preview on
 //! the frame socket. Key material and the frame-socket token are never
 //! logged.
+pub mod camera;
 pub mod capture;
 pub mod playout;
 pub mod screen;
@@ -41,12 +42,26 @@ struct Envelope {
     event: Event,
 }
 
+/// A camera preview outside any room (the settings tab): its own frame socket
+/// and a capture, kept alive until stopped or replaced. The socket is dropped
+/// (and so closed) with the preview; `Drop` holds it only for that side effect.
+struct Standalone {
+    #[allow(dead_code)]
+    frames: video::FrameServer,
+    _capture: camera::CameraCapture,
+}
+
 #[derive(Default)]
 struct Inner {
     /// Key material for the next/current room. Set before connect by the TS
     /// key exchange, rotated in place, cleared on leave.
     key: Option<Vec<u8>>,
     session: Option<(u64, NativeSession)>,
+    /// The out-of-call camera preview (settings tab).
+    standalone: Option<Standalone>,
+    /// The latest out-of-call camera preview start, so overlapping starts
+    /// cannot leave an older capture owning the single slot.
+    standalone_generation: u64,
     next_id: u64,
 }
 
@@ -74,9 +89,26 @@ impl Inner {
             None => Resources {
                 threads: session::process_threads(),
                 screen_captures: screen::active_captures(),
+                camera_captures: camera::active_captures(),
                 ..Default::default()
             },
         }
+    }
+    /// Start a new out-of-call camera preview; returns its generation. A
+    /// later [`Inner::standalone_is_latest`] with an older generation is false.
+    fn begin_standalone(&mut self) -> u64 {
+        self.standalone_generation += 1;
+        self.standalone_generation
+    }
+    /// Whether `generation` is still the latest preview start. A superseded
+    /// start must drop its own capture instead of claiming the slot.
+    fn standalone_is_latest(&self, generation: u64) -> bool {
+        self.standalone_generation == generation
+    }
+    /// Supersede any in-flight start and release the current preview.
+    fn clear_standalone(&mut self) {
+        self.standalone_generation += 1;
+        self.standalone = None;
     }
 }
 
@@ -294,13 +326,76 @@ pub async fn native_voice_set_ptt_gated(
     Ok(())
 }
 
-/// Publish (or replace) the camera; its frames then arrive on the session's
-/// frame socket. Returns the publication sid `native_voice_unpublish_camera`
-/// takes.
+/// List the GStreamer `Video/Source` cameras (V4L2 and PipeWire), in or out
+/// of a call: the ids `native_voice_start_camera` takes.
+#[tauri::command]
+pub async fn native_voice_list_cameras() -> Result<Vec<camera::CameraDevice>, String> {
+    // The monitor runs a discovery pass and blocks.
+    tokio::task::spawn_blocking(session::list_cameras)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Whether the host can capture cameras: GStreamer initialises and the capture
+/// pipeline's required elements exist. A minimal Linux install without the
+/// GStreamer plugin packages reports unavailable with the missing element
+/// names, so the webview can say why no camera appears instead of showing an
+/// empty list.
+#[tauri::command]
+pub async fn native_voice_camera_support() -> Result<camera::CameraSupport, String> {
+    tokio::task::spawn_blocking(camera::support)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraStarted {
+    /// The id `native_voice_publish_camera`, `native_voice_stop_camera` and
+    /// the `cameraCaptureEnded` event carry.
+    capture: u64,
+    width: u32,
+    height: u32,
+}
+
+/// Start native capture of `source` (a `native_voice_list_cameras` id),
+/// replacing any running capture, and resolve once the first frame arrives.
+/// Camera capture runs in the host and keeps running while the webview
+/// window is hidden. Frames then preview on the frame socket's `camera`
+/// route; publishing is `native_voice_publish_camera`.
+#[tauri::command]
+pub async fn native_voice_start_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    source: String,
+    capture: camera::CaptureOptions,
+) -> Result<CameraStarted, String> {
+    let target = camera::Target::parse(&source)?;
+    let (id, started) = state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .start_camera(target, capture)
+        .await?;
+    let (width, height) = started
+        .await
+        .map_err(|_| "camera capture stopped before it started".to_string())??;
+    Ok(CameraStarted {
+        capture: id,
+        width,
+        height,
+    })
+}
+
+/// Publish (or replace) running camera capture `capture`; its frames then go
+/// to remote peers through the camera's `NativeVideoSource`. Returns the
+/// publication sid `native_voice_unpublish_camera` takes.
 #[tauri::command]
 pub async fn native_voice_publish_camera(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
+    capture: u64,
     options: CameraOptions,
 ) -> Result<String, String> {
     state
@@ -308,12 +403,12 @@ pub async fn native_voice_publish_camera(
         .lock()
         .await
         .current(session)?
-        .publish_camera(options)
+        .publish_camera(capture, options)
         .await
 }
 
 /// Unpublish camera `sid` if it is still the published one; a stale sid is a
-/// no-op.
+/// no-op. The capture keeps running for the self-view.
 #[tauri::command]
 pub async fn native_voice_unpublish_camera(
     state: tauri::State<'_, NativeVoiceState>,
@@ -327,6 +422,81 @@ pub async fn native_voice_unpublish_camera(
         .current(session)?
         .unpublish_camera(&sid)
         .await;
+    Ok(())
+}
+
+/// Unpublish and stop camera capture `capture`, releasing the pipeline and
+/// the device; a stale id is a no-op.
+#[tauri::command]
+pub async fn native_voice_stop_camera(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    capture: u64,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .stop_camera(capture)
+        .await;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraPreviewStarted {
+    width: u32,
+    height: u32,
+    /// The frame-socket base URL (token included): read `/camera` for the
+    /// live preview.
+    frames: String,
+}
+
+/// Start a camera capture and preview with no room (the settings tab), since
+/// WebKitGTK cannot keep a camera alive while the window is hidden. Replaces
+/// any earlier preview. Resolves once the first frame arrives; a start a newer
+/// one superseded while it started rejects after releasing its own capture.
+#[tauri::command]
+pub async fn native_voice_start_camera_preview(
+    state: tauri::State<'_, NativeVoiceState>,
+    source: String,
+    capture: camera::CaptureOptions,
+) -> Result<CameraPreviewStarted, String> {
+    let target = camera::Target::parse(&source)?;
+    let generation = state.inner.lock().await.begin_standalone();
+    let (capturer, started) = camera::CameraCapture::start(target, capture, || {})?;
+    let frames = video::FrameServer::bind().await?;
+    frames.set_camera(Some(capturer.preview()));
+    let url = frames.url().to_string();
+    let (width, height) = started
+        .await
+        .map_err(|_| "camera preview stopped before it started".to_string())??;
+    let mut inner = state.inner.lock().await;
+    // A newer start or a stop superseded this one while it started: drop the
+    // capture here rather than replacing the slot the newer request owns.
+    if !inner.standalone_is_latest(generation) {
+        return Err("camera preview superseded by a newer request".to_string());
+    }
+    inner.standalone = Some(Standalone {
+        frames,
+        _capture: capturer,
+    });
+    Ok(CameraPreviewStarted {
+        width,
+        height,
+        frames: url,
+    })
+}
+
+/// Stop the out-of-call camera preview (the settings tab), releasing the
+/// pipeline and the device. Also supersedes any start still in flight, so it
+/// drops its capture instead of storing it after the stop.
+#[tauri::command]
+pub async fn native_voice_stop_camera_preview(
+    state: tauri::State<'_, NativeVoiceState>,
+) -> Result<(), String> {
+    state.inner.lock().await.clear_standalone();
     Ok(())
 }
 
@@ -525,6 +695,8 @@ mod tests {
         let mut inner = Inner {
             key: Some(vec![1]),
             session: None,
+            standalone: None,
+            standalone_generation: 0,
             next_id: 3,
         };
         assert_eq!(inner.key_after_connect(3, &[1]), Ok(None));
@@ -540,5 +712,19 @@ mod tests {
         let mut inner = Inner::default();
         assert!(inner.current(1).is_err());
         assert_eq!(inner.resources().rooms, 0);
+    }
+
+    #[test]
+    fn a_superseded_camera_preview_start_does_not_claim_the_slot() {
+        let mut inner = Inner::default();
+        let older = inner.begin_standalone();
+        let newer = inner.begin_standalone();
+        // The older start finishes last: it must not claim the slot the newer
+        // start owns.
+        assert!(!inner.standalone_is_latest(older));
+        assert!(inner.standalone_is_latest(newer));
+        // A stop while a start is in flight supersedes it too.
+        inner.clear_standalone();
+        assert!(!inner.standalone_is_latest(newer));
     }
 }

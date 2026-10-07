@@ -450,11 +450,12 @@ func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int
 // replay event is about one of a set of messages, bound to a JSON array of
 // message ids as ?1: a message-family frame (chat_message, chat_edited,
 // chat_deleted, chat_bulk_deleted, reaction_update — the ones that carry a
-// message's content or name it) whose payload.id, payload.message_id or one
-// of payload.ids is in the set. ws.eventNamesMessage is the same rule over
+// message's content or name it) whose payload.id, payload.referenced_message.id (a reply's embedded parent
+// snippet), payload.message_id or one of payload.ids is in the set. ws.eventNamesMessage is the same rule over
 // the bytes in the ring buffer; the two must stay in step.
 const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update')
 	 AND (json_extract(payload, '$.payload.id') IN (SELECT value FROM json_each(?1))
+	   OR json_extract(payload, '$.payload.referenced_message.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.message_id') IN (SELECT value FROM json_each(?1))
 	   OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.ids') AS named WHERE named.value IN (SELECT value FROM json_each(?1)))))`
 

@@ -119,6 +119,7 @@ node_modules
 .superpowers/*
 !.superpowers/findings-ledger.json
 !.superpowers/render-ledger.mjs
+FINDINGS.md
 
 .claude/worktrees/
 

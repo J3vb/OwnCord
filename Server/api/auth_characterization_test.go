@@ -320,29 +320,81 @@ func TestAuthCharacterization_UnknownUserTakesAsLongAsWrongPassword(t *testing.T
 	database := newAuthTestDB(t)
 	seedUser(t, database, "timed", "correctPass1", 4)
 
-	median := func(username string) time.Duration {
-		samples := make([]time.Duration, 0, 3)
-		for range 3 {
-			// A fresh limiter per sample keeps every attempt inside the
-			// per-IP route limit and the failure windows.
-			router := buildAuthRouter(database, auth.NewRateLimiter())
-			start := time.Now()
-			rr := send(t, router, http.MethodPost, "/api/v1/auth/login", "", "", "", map[string]string{"username": username, "password": "wrongPass1"})
-			samples = append(samples, time.Since(start))
-			if rr.Code != http.StatusUnauthorized {
-				t.Fatalf("%s: status = %d, want 401", username, rr.Code)
-			}
+	sample := func(username string) time.Duration {
+		// A fresh limiter per sample keeps every attempt inside the
+		// per-IP route limit and the failure windows.
+		router := buildAuthRouter(database, auth.NewRateLimiter())
+		start := time.Now()
+		rr := send(t, router, http.MethodPost, "/api/v1/auth/login", "", "", "", map[string]string{"username": username, "password": "wrongPass1"})
+		elapsed := time.Since(start)
+		if rr.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status = %d, want 401", username, rr.Code)
 		}
-		slices.Sort(samples)
-		return samples[1]
+		return elapsed
 	}
 	// Warm the dummy hash (sync.Once) so its one-off generation is not timed.
 	auth.CheckPassword("", "warm")
 
-	wrong := median("timed")
-	unknown := median("nobody")
-	if unknown < wrong/2 {
-		t.Fatalf("unknown-user rejection took %v, wrong-password %v: the dummy bcrypt compare is not running on the unknown path", unknown, wrong)
+	// Interleave the arms and compare their minima. A loaded runner can delay
+	// one arm's samples for the whole run (Windows CI: 62 ms vs 131 ms), so a
+	// median or mean of either arm reads scheduler load, not the path's own
+	// cost. The minimum is the sample least polluted by the scheduler, and it
+	// still rejects a skipped compare: that drops the unknown path to the
+	// store-scan floor, an order of magnitude below the bcrypt compare.
+	const samples = 4
+	wrongSamples := make([]time.Duration, 0, samples)
+	unknownSamples := make([]time.Duration, 0, samples)
+	for range samples {
+		wrongSamples = append(wrongSamples, sample("timed"))
+		unknownSamples = append(unknownSamples, sample("nobody"))
+	}
+
+	if !constantWork(wrongSamples, unknownSamples) {
+		t.Fatalf("unknown-user rejection min %v (all %v), wrong-password min %v (all %v): the dummy bcrypt compare is not running on the unknown path",
+			minTiming(unknownSamples), unknownSamples, minTiming(wrongSamples), wrongSamples)
+	}
+}
+
+// minTiming is the smallest observed duration, or 0 for an empty slice.
+func minTiming(samples []time.Duration) time.Duration {
+	if len(samples) == 0 {
+		return 0
+	}
+	return slices.Min(samples)
+}
+
+// constantWork reports whether two sample sets are consistent with the same
+// constant-work path. The guard must be robust to scheduler noise: on a loaded
+// runner one arm's samples can all be delayed while the other's stay clean, so
+// comparing medians flags a constant-work path. The minimum is the sample
+// least polluted by the scheduler, so this compares the clean-arm floor: a
+// path that skipped bcrypt runs an order of magnitude below the compare floor
+// and is still rejected.
+func constantWork(wrong, unknown []time.Duration) bool {
+	return minTiming(unknown) >= minTiming(wrong)/2
+}
+
+// The timing guard must ignore asymmetric scheduler noise but still reject a
+// skipped bcrypt compare. The synthetic samples below model the Windows CI
+// flake: both paths run the same constant-work compare, but a few samples in
+// one arm were delayed, so its median is far larger than the other's and a
+// median-based ratio false-alarms. The skipped-hash case drops the unknown
+// path to a store-scan cost with no bcrypt at all.
+func TestAuthCharacterization_TimingGuardIsRobustToAsymmetricNoise(t *testing.T) {
+	const base = 62 * time.Millisecond
+	// Same constant work on both paths, but noise delayed several of the
+	// wrong-password samples: min recovers the base on each arm, median does not.
+	noisyWrong := []time.Duration{base, 131 * time.Millisecond, base + time.Millisecond, 130 * time.Millisecond, 132 * time.Millisecond}
+	noisyUnknown := []time.Duration{base + time.Millisecond, base + 2*time.Millisecond, base, 61 * time.Millisecond, 132 * time.Millisecond}
+	if !constantWork(noisyWrong, noisyUnknown) {
+		t.Errorf("guard rejected a constant-work path under asymmetric noise: min wrong %v, min unknown %v", minTiming(noisyWrong), minTiming(noisyUnknown))
+	}
+	// The unknown path skipped bcrypt: its minimum is the cheap store scan,
+	// an order of magnitude below the wrong-password compare.
+	skippedUnknown := []time.Duration{2 * time.Millisecond, 3 * time.Millisecond, 2 * time.Millisecond, time.Millisecond, 2 * time.Millisecond}
+	cleanWrong := []time.Duration{base, base + time.Millisecond, base, 61 * time.Millisecond, base + 2*time.Millisecond}
+	if constantWork(cleanWrong, skippedUnknown) {
+		t.Errorf("guard accepted a skipped bcrypt compare: min wrong %v, min unknown %v", minTiming(cleanWrong), minTiming(skippedUnknown))
 	}
 }
 

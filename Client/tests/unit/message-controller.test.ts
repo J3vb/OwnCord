@@ -11,6 +11,7 @@ const {
   mockGetChannelMessages,
   mockSetChannelLoading,
   mockSetChannelLoadError,
+  mockIsWindowDetached,
 } = vi.hoisted(() => ({
   mockSetMessages: vi.fn(),
   mockPrependMessages: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockGetChannelMessages: vi.fn((): Array<{ id: number; content?: string }> => []),
   mockSetChannelLoading: vi.fn(),
   mockSetChannelLoadError: vi.fn(),
+  mockIsWindowDetached: vi.fn((): boolean => false),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -36,6 +38,7 @@ vi.mock("@stores/messages.store", () => ({
   getChannelMessages: mockGetChannelMessages,
   setChannelLoading: mockSetChannelLoading,
   setChannelLoadError: mockSetChannelLoadError,
+  isWindowDetached: mockIsWindowDetached,
 }));
 
 // ---------------------------------------------------------------------------

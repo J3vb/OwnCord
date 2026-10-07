@@ -719,6 +719,35 @@ describe("acceptCertFingerprint edge cases", () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(client.getState()).toBe("connecting");
   });
+
+  it("clears certMismatchBlock when the native accept command rejects", async () => {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+
+    emitTauriEvent("cert-tofu", {
+      host: "localhost:8443",
+      fingerprint: "sha256:NEW",
+      status: "mismatch",
+    });
+    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    expect(client.getState()).toBe("disconnected");
+
+    // The user declined the native dialog; the command rejects.
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "accept_cert_fingerprint"
+        ? Promise.reject("certificate not accepted")
+        : Promise.resolve(undefined),
+    );
+    await expect(client.acceptCertFingerprint("localhost:8443", "sha256:NEW")).rejects.toBe(
+      "certificate not accepted",
+    );
+
+    // A later close must still schedule the reconnect loop; the decline cannot
+    // leave the mismatch latch blocking every redial until restart.
+    emitTauriEvent("ws-state", "closed");
+    expect(client.getState()).toBe("reconnecting");
+  });
 });
 
 describe("disconnect resets certMismatchBlock", () => {
@@ -736,6 +765,78 @@ describe("disconnect resets certMismatchBlock", () => {
   afterEach(() => {
     client.disconnect();
     vi.useRealTimers();
+  });
+
+  // DP-54 follow-up: the desktop proxy reports a failed TLS handshake (a
+  // certificate failure that never reached the TOFU modal, e.g. the server
+  // rejecting the handshake) with a distinct `TLS_CERT_UNVERIFIED` code in the
+  // rejected `ws_connect`. The client keeps it so the pre-auth deadline can
+  // show the certificate copy instead of the generic unreachable one.
+  it("records the certificate failure code from a rejected ws_connect", async () => {
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect"
+        ? Promise.reject(
+            JSON.stringify({
+              error: "TLS_CERT_UNVERIFIED",
+              message: "the server's certificate could not be verified",
+            }),
+          )
+        : Promise.resolve(undefined),
+    );
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expect(client.getConnectFailureCode()).toBe("TLS_CERT_UNVERIFIED");
+  });
+
+  it("has no connect failure code for an ordinary dial failure", async () => {
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect"
+        ? Promise.reject("ws connect failed: connection refused")
+        : Promise.resolve(undefined),
+    );
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(20);
+
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expect(client.getConnectFailureCode()).toBeNull();
+    // And a successful reconnect clears it.
+    mockInvoke.mockImplementation(() => Promise.resolve(undefined));
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(client.getConnectFailureCode()).toBeNull();
+  });
+
+  it("clears the certificate failure code when a new dial starts", async () => {
+    // A failed dial sets the code; the reconnect loop then starts a fresh
+    // dial. Until that dial reports its own outcome, an in-flight attempt must
+    // not be attributed the earlier certificate failure — otherwise the
+    // pre-auth deadline shows the wrong copy for a host that is merely slow.
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === "ws_connect"
+        ? Promise.reject(
+            JSON.stringify({
+              error: "TLS_CERT_UNVERIFIED",
+              message: "the server's certificate could not be verified",
+            }),
+          )
+        : Promise.resolve(undefined),
+    );
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(20);
+    expectConsole("error", /\[ws\] ws_connect failed/);
+    expect(client.getConnectFailureCode()).toBe("TLS_CERT_UNVERIFIED");
+
+    client.connect({ host: "localhost:8443", token: "t" });
+    expect(client.getConnectFailureCode()).toBeNull();
+
+    // Let the second (also rejected) dial settle and claim its log line.
+    await vi.advanceTimersByTimeAsync(20);
+    expectConsole("error", /\[ws\] ws_connect failed/);
   });
 
   it("clears certMismatchBlock on intentional disconnect", async () => {

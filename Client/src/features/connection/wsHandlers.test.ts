@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handleAuthError, handleAuthOk, handleConnectionError } from "./wsHandlers";
 import { createReconnectClock } from "./dispatchContext";
 import { authStore } from "../../stores/auth.store";
+import { channelsStore } from "../../stores/channels.store";
+import { messagesStore } from "../../stores/messages.store";
 import { uiStore } from "../../stores/ui.store";
 import { expectConsole } from "../../../tests/helpers/console";
 
@@ -16,6 +18,8 @@ function socketStub() {
 beforeEach(() => {
   authStore.setState((prev) => ({ ...prev, token: "tok", user, isAuthenticated: true }));
   uiStore.setState((prev) => ({ ...prev, sessionReplaced: false, updateRequiredHost: null }));
+  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set() }));
 });
 
 describe("handleAuthOk", () => {
@@ -29,6 +33,18 @@ describe("handleAuthOk", () => {
 
     handleAuthOk(socketStub(), clock, payload);
     expect(clock.lastReconnectHandshakeAt).not.toBeNull();
+  });
+
+  it("re-focuses the active channel on auth_ok", () => {
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
+    const ws = socketStub();
+
+    handleAuthOk(ws, createReconnectClock(), { user, server_name: "s", motd: "" });
+
+    expect(ws.send).toHaveBeenCalledWith({
+      type: "channel_focus",
+      payload: { channel_id: 42 },
+    });
   });
 });
 

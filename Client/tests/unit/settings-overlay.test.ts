@@ -294,9 +294,10 @@ describe("SettingsOverlay", () => {
     overlay.mount(container);
     getTab(container, 2).click();
 
-    // Desktop, flash, @everyone, message sounds, and the call sound (D2).
+    // Desktop, flash, @everyone, message sounds, the call sound (D2) and the
+    // voice UI sounds (DP-40).
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(5);
+    expect(toggles.length).toBe(6);
 
     overlay.destroy?.();
   });
@@ -1203,6 +1204,45 @@ describe("SettingsOverlay", () => {
     expect(secondPane).not.toBe(firstPane);
     // Exactly one pane — the old one was replaced, not appended to.
     expect(container.querySelectorAll(".settings-content .settings-pane").length).toBe(1);
+
+    overlay.destroy?.();
+  });
+
+  // A hidden pane must not keep its DOM — least of all the Account tab's
+  // session rows, which load asynchronously. Retaining the closed pane made the
+  // long-session soak's node count depend on whether that fetch had resolved
+  // before the tab was closed, so one sample read ~30 nodes fewer than the next
+  // (the two session rows), and the nodes bar failed on a first attempt.
+  it("drops the Account tab's session rows when the overlay closes", async () => {
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      onListSessions: vi.fn().mockResolvedValue([
+        {
+          id: 1,
+          device: "desktop",
+          ip: "127.0.0.1",
+          last_used: "2026-01-01T00:00:00Z",
+          is_current: true,
+        },
+        {
+          id: 2,
+          device: "phone",
+          ip: "127.0.0.2",
+          last_used: "2026-01-01T00:00:00Z",
+          is_current: false,
+        },
+      ]),
+    });
+    overlay.mount(container);
+
+    overlay.open();
+    await vi.waitFor(() => {
+      expect(container.querySelectorAll(".session-row").length).toBe(2);
+    });
+
+    overlay.close();
+    expect(container.querySelector(".settings-content .settings-pane")).toBeNull();
+    expect(container.querySelectorAll(".session-row").length).toBe(0);
 
     overlay.destroy?.();
   });

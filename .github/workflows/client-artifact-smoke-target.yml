@@ -63,6 +63,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
+          # libgstreamer1.0-dev on ubuntu-22.04 conflicts with LLVM's slotted
+          # libunwind-14-dev — the release jobs' step and reason.
+          sudo apt-get remove -y libunwind-14-dev || true
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
@@ -73,7 +76,9 @@ jobs:
             libssl-dev \
             patchelf \
             librsvg2-dev \
-            xdg-utils
+            xdg-utils \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
 
       # clang >= 21 and the pinned, digest-verified libwebrtc the Linux client
       # links for native voice — the release jobs' step, same no-cache rule.

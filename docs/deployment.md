@@ -53,7 +53,7 @@ shuts down cleanly on a stop signal, and restarts on the same data directory.
 
 ## Docker (Linux)
 
-The easiest way to run OwnCord on Linux. Includes the chat server and LiveKit voice/video as separate containers on a shared internal network. The server image is built `FROM gcr.io/distroless/static-debian12` and runs as a non-root user (`65532`), so there is no shell inside the container.
+The easiest way to run OwnCord on Linux. The compose stack runs the chat server and LiveKit voice/video as separate containers on a shared internal network; the image itself also bundles LiveKit (see [LiveKit in Docker](#livekit-in-docker)), so a single container can serve both. The server image is built `FROM gcr.io/distroless/static-debian12` and runs as a non-root user (`65532`), so there is no shell inside the container.
 
 `ghcr.io/j3vb/owncord-server` is published as a single multi-architecture tag
 covering **`linux/amd64` and `linux/arm64`** — a Raspberry Pi 4/5, an Ampere or
@@ -67,7 +67,7 @@ replaced by a new container that finds the old data intact.
 
 - Docker Engine 24+ and Docker Compose v2
 - `linux/amd64` or `linux/arm64` host
-- Ports available: `8443` (chat), `7881` TCP, `50000-60000` UDP (LiveKit media; a single UDP port instead when the LiveKit config uses `udp_port`)
+- Ports available: `8443` (chat), `7881` TCP, and the LiveKit media UDP port(s) — `7882` for the bundled image (its default), or `50000-60000` for the two-container compose stack (see [LiveKit in Docker](#livekit-in-docker))
 
 ### Health and privilege
 
@@ -197,7 +197,27 @@ stopped.
 
 ### LiveKit in Docker
 
-LiveKit runs as its own container (`livekit/livekit-server:v1.13.7`) and is **not** managed by OwnCord's companion-process system. Leave `voice.livekit_binary` unset and `voice.auto_download_livekit` false. See [LiveKit Setup — Docker](livekit-setup.md#docker) for details.
+The image bundles the pinned, checksum-verified `livekit-server` (the version in `ws.DefaultLiveKitVersion`) and sets `OWNCORD_VOICE_LIVEKIT_BINARY=/livekit-server`, so the server starts it as its companion process, exactly as on bare metal. One container serves chat and voice:
+
+```bash
+docker run -d -v owncord-data:/app/data \
+  -p 8443:8443 -p 7881:7881 -p 7882:7882/udp \
+  ghcr.io/j3vb/owncord-server:latest
+```
+
+The image also sets `OWNCORD_VOICE_UDP_PORT=7882`, so all media rides one UDP port rather than the `50000-60000` range. Override either variable to change that. LiveKit's credentials and `livekit.yaml` live in `/app/data` (the volume).
+
+The shipped `docker-compose.yml` instead runs `livekit/livekit-server:v1.13.7` as its own container: it clears `OWNCORD_VOICE_LIVEKIT_BINARY` and sets `OWNCORD_VOICE_UDP_PORT` to `0` for the server, so the bundled copy never starts there. Use it when you want to size, restart or upgrade LiveKit independently. See [LiveKit Setup — Docker](livekit-setup.md#docker).
+
+### Unraid
+
+[`deploy/unraid/owncord.xml`](../deploy/unraid/owncord.xml) is a template for Unraid's Docker tab: one container, with voice from the bundled LiveKit. Add its raw URL under **Docker > Template repositories** (or paste the file into `/boot/config/plugins/dockerMan/templates-user/`), then **Add Container > OwnCord**.
+
+It publishes `8443/tcp` (chat and the admin panel), `7881/tcp` and `7882/udp` (voice). Forward the last two from your router for voice outside your LAN ([port-forwarding.md](port-forwarding.md)).
+
+- **Ownership.** The image runs as uid `65532`, but Unraid creates appdata as `99:100` (`nobody:users`), so the template adds `--user 99:100` and the container writes its files as that user. To move an install between the two, `chown -R` the appdata folder to the new owner.
+- **`config.yaml`.** Mounting a single file that does not exist yet makes Docker create a directory in its place. The template mounts the folder `/app` (default `/mnt/user/appdata/owncord`) instead, so the server writes its default `config.yaml` there on first start; edit it and restart the container. `/app/data` is a second mount for the database and uploads.
+- **First start.** Read the setup token from the container log, then open `https://<unraid-ip>:8443/admin`.
 
 ### Linux desktop voice
 
@@ -643,6 +663,10 @@ one out costs you:
   lose their pinned certificate only if the lost config said
   `tls.mode: acme` or `manual`, because the fallback to self-signed then
   serves a different one.
+- **`data/config-overrides.json`** — the settings saved from the admin panel's
+  Server configuration page are lost. The keys it held fall back to
+  `config.yaml` and `OWNCORD_*` at the next boot, so a restore silently reverts
+  them (see [Server Configuration](server-configuration.md#changing-settings-from-the-admin-panel)).
 
 None of these are in a database backup. `data/uploads/`, the three key files
 and `data/erasure/` all live under the data directory, so copying `data/`

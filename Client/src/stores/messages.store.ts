@@ -170,8 +170,13 @@ export function setChannelLoadError(channelId: number): void {
  *  reference as it was. A post-only page only appends when the channel's
  *  whole history fits in one page (hasMore false). Otherwise cached "sent"
  *  rows older than the page are dropped, so nothing deleted or edited while
- *  away stays on screen (scrolling up loads them again); retaining them
- *  across a revisit (P4-01 R3) is deferred to a follow-up. The list patches
+ *  away stays on screen (scrolling up loads them again). A revisit's refetch
+ *  (MessageController.loadMessages, P4-01 R3) pages backwards from the newest
+ *  message until the fetched range reaches the oldest cached row, so the rows
+ *  it keeps are revalidated by that range; when the cached window plus the
+ *  unseen gap outruns the paging bound, the fetched range is kept and the
+ *  stale cached rows below it are dropped, as before.
+ *  The list patches
  *  only the rows that changed: the dropped head, the new tail and, for a
  *  revisit that opened with unread messages, the NEW divider.
  *
@@ -255,7 +260,11 @@ export function invalidateLoadedMessageWindows(): void {
  * deletes and reactions made while away. The rows themselves are kept (the
  * next visit renders them at once) and setMessages reconciles the refetched
  * page into them, keeping the rows it left unchanged, dropping older rows
- * beyond it and carrying pending/failed rows across. Like reattachToPresent,
+ * beyond it and carrying pending/failed rows across. The refetch pages back up
+ * to five 100-row pages, so the cached window is kept and revalidated when it
+ * plus the unseen gap fits within them; when the two together outrun that
+ * range, the fetched range is kept and the rows below it are dropped. Like
+ * reattachToPresent,
  * this leaves detachedChannels alone: setMessages clears it once the tail has
  * actually landed, and until then a detached window must keep refusing live
  * broadcasts.

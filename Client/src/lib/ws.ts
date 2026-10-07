@@ -67,6 +67,20 @@ export function parseStoredFingerprint(message?: string): string | undefined {
   return match?.[1];
 }
 
+/**
+ * The native `accept_cert_fingerprint` command rejects with this when the user
+ * declines the OS pin-confirmation dialog (`ws_proxy.rs`). Kept in step with
+ * that command the way `TLS_CERT_CODE` mirrors `TLS_CERT_ERROR_CODE`.
+ */
+// i18n-exempt: native rejection code, mapped to catalog text by the caller
+export const CERT_NOT_ACCEPTED = "certificate not accepted";
+
+/** Whether a rejected `acceptCertFingerprint` was the user declining the
+ *  native dialog, rather than failing for another reason. */
+export function isCertDeclined(err: unknown): boolean {
+  return (err instanceof Error ? err.message : String(err)) === CERT_NOT_ACCEPTED;
+}
+
 export type CertMismatchListener = (event: CertTofuEvent) => void;
 export type CertFirstUseListener = (event: CertTofuEvent) => void;
 
@@ -257,6 +271,12 @@ export function createWsClient({
   // accepted the dial), an explicit takeover ("Use here") or disconnect().
   let pendingWake = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
+  // DP-54 follow-up: the distinct failure code from the most recent rejected
+  // connect, when the transport could read one (a certificate failure carries
+  // `TLS_CERT_UNVERIFIED`). Lets the pre-auth deadline name a certificate
+  // failure instead of calling it unreachable. Cleared on each new dial and on
+  // a successful connect.
+  let connectFailureCode: string | null = null;
   // Mirror of the proxy's own open/closed state, kept here because the
   // send-failure codes below are decided on this side of the seam.
   let proxyOpen = false;
@@ -721,6 +741,7 @@ export function createWsClient({
   function handleTransportState(next: SocketConnectionState, retryHint?: SocketRetryHint): void {
     if (next === "connected") {
       proxyOpen = true;
+      connectFailureCode = null;
       log.info("WebSocket open, sending auth", {
         host: config?.host ?? "unknown",
         isReconnect: reconnectAttempt > 0,
@@ -750,6 +771,10 @@ export function createWsClient({
       });
     } else if (next === "disconnected") {
       proxyOpen = false;
+      // Record the transport's distinct failure code, if any: a failed connect
+      // can carry one (a certificate failure today), and a plain close clears
+      // it. The pre-auth deadline reads this to name the failure.
+      connectFailureCode = retryHint?.errorCode ?? null;
       log.info("WebSocket closed", {
         host: config?.host ?? "unknown",
         intentional: intentionalClose,
@@ -788,6 +813,7 @@ export function createWsClient({
     // disconnect(), e.g. a suppressed-modal cert latch from an unrelated
     // host) must not inherit a stale block from a previous connection.
     certMismatchBlock = false;
+    connectFailureCode = null;
     restartRedialAt = null;
     busyRetryAfterMs = undefined;
     busyHold = false;
@@ -1026,15 +1052,27 @@ export function createWsClient({
     /**
      * Accept a changed certificate fingerprint for a host.
      * Call after the user acknowledges a cert mismatch warning,
-     * then reconnect.
+     * then reconnect. Clears the mismatch latch whether or not the native
+     * command accepted the fingerprint, so a decline cannot block reconnect.
      */
     async acceptCertFingerprint(host: string, fingerprint: string): Promise<void> {
-      await transport.acceptCertificate(host, fingerprint);
-      certMismatchBlock = false;
+      try {
+        await transport.acceptCertificate(host, fingerprint);
+      } finally {
+        certMismatchBlock = false;
+      }
     },
 
     getState(): ConnectionState {
       return state;
+    },
+
+    /** The distinct failure code from the most recent rejected connect, when
+     *  the transport reported one (a certificate failure carries
+     *  `TLS_CERT_UNVERIFIED`); null otherwise. Read by the pre-auth deadline so
+     *  it can name a certificate failure instead of calling it unreachable. */
+    getConnectFailureCode(): string | null {
+      return connectFailureCode;
     },
 
     /** @internal for testing */

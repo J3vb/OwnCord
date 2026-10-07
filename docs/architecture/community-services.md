@@ -119,7 +119,9 @@ deliberately outside the file a restore overwrites (`Server/db/markers.go`).
 **"B4-11 sweep" is narrower than "retention", and wider than "messages".**
 The sweep _selects_ only out of `messages` (`retentionCandidates`,
 `Server/db/retention.go`), but the transaction it runs reaches further: it
-reverses mention counts on `read_states`, deletes the `attachments` rows of the
+reverses mention counts on `read_states` (without a live `mention_count`
+frame — the sweep has no hub, so a badge it lowers converges on the next
+`ready`), deletes the `attachments` rows of the
 swept messages and unlinks their files, and purges the matching `events` rows
 and ring-buffer frames (`Server/db/retention.go`, `Server/service/retention.go`).
 So **"not swept" in a lifecycle row means "the sweep neither selects this class

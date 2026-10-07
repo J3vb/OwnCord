@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.1.0-beta.2"
+version = "2.2.0-beta.1"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -29,6 +29,9 @@ tauri-build = { version = "2", features = [] }
 [features]
 default = []
 devtools = ["tauri/devtools"]
+# Test-only: the native E2E builds skip the native cert-pin confirmation dialog,
+# which Playwright cannot answer. Never enabled for a shipped build.
+e2e-auto-confirm = []
 
 [dependencies]
 tauri = { version = "2.12", features = ["tray-icon"] }
@@ -58,6 +61,9 @@ tauri-plugin-fs = "2"
 # plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
 # floor: older releases ignore tauri.conf.json's `requireSignedVersion`.
 tauri-plugin-updater = "2.13"
+# Read authenticated artifact metadata with the same verifier as the updater.
+# Already present transitively through tauri-plugin-updater.
+minisign-verify = "0.2"
 tauri-plugin-process = "2"
 url = "2"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
@@ -158,6 +164,9 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# sigaction/prctl/dlsym for crash_log.rs, the last log line of a native
+# crash. Already in the tree under most of the dependency graph.
+libc = "0.2"
 # Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
 # IdleMonitor and the freedesktop ScreenSaver interface. Already in the tree
 # as keyring's sync-secret-service transport, same libdbus, no new build.
@@ -202,6 +211,21 @@ nnnoiseless = { version = "0.5", default-features = false }
 # wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
 # enable-webrtc setting.
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# Native Linux camera capture (native_voice/camera.rs). WebKitGTK freezes a
+# hidden page's <video> element and stops requestVideoFrameCallback, so the
+# webview camera pump (features/voice/native/cameraUplink.ts) stalls whenever
+# the OwnCord window is hidden, minimized or covered — exactly what sharing
+# the screen or switching apps does (docs/architecture/voice-e2ee.md, "the
+# camera stalls while the window is hidden"). Capture runs here instead,
+# independent of window visibility. gstreamer-rs 0.24 targets the GStreamer
+# 1.24 runtime that ships with WebKitGTK on Ubuntu 24.04 (CI's ubuntu-latest);
+# its glib 0.21 is a separate Rust binding version from webkit2gtk's glib 0.18
+# and they never exchange GObject values, so both coexist. (0.23 was rejected:
+# it pulls the unmaintained `paste`, which cargo-deny fails closed on.) Build
+# system deps: libgstreamer1.0-dev and libgstreamer-plugins-base1.0-dev.
+gstreamer = "0.24"
+gstreamer-app = "0.24"
+gstreamer-video = "0.24"
 
 [dev-dependencies]
 # Paused virtual time for tests of real-time deadlines (the ws_proxy liveness

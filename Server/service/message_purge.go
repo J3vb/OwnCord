@@ -90,7 +90,7 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 	// OC-0275: reverse the mention_count increments of every purged message,
 	// the same correction a single moderator delete makes in DeleteMessage.
 	// Detached from ctx for the same reason as the audit write above.
-	if mcErr := s.st.DecrementMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {
+	if mcErr := s.reverseMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {
 		slog.Error("MessageService.PurgeMessages DecrementMentionCounts", "err", mcErr, "channel_id", channelID)
 	}
 

@@ -53,6 +53,10 @@ export const settingsText = defineCatalog("settings", {
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
   "appearance.compactMode": "Compact Mode",
+  "appearance.timeFormat": "Time Format",
+  "appearance.timeFormat.desc": "Choose 12-hour or 24-hour clocks for timestamps",
+  "appearance.timeFormat.12h": "12-hour",
+  "appearance.timeFormat.24h": "24-hour",
   "appearance.accentColor": "Accent Color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":
@@ -79,6 +83,9 @@ export const settingsText = defineCatalog("settings", {
   "notifications.sounds.desc": "Play sounds for notifications",
   "notifications.callSound.label": "Incoming Call Sound",
   "notifications.callSound.desc": "Ring when someone calls you, even with notification sounds off",
+  "notifications.voiceSounds.label": "Voice Sounds",
+  "notifications.voiceSounds.desc":
+    "Play a sound when someone joins or leaves your call, and when you mute or deafen",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
   "notifications.level.all": "All",
@@ -313,6 +320,8 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.mic.noAccess": "No microphone access",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
+  "voiceAudio.gstreamerMissing":
+    "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
   "voiceAudio.default": "Default",
   "voiceAudio.inputVolume": "Input Volume",

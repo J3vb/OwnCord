@@ -150,7 +150,8 @@ sockets and peer connections, live tracks and `AudioContext`s, and heap. The bar
 is no growth after warm-up: every count's slope is at most 0.05 per cycle
 (documents and intervals exactly flat), both across pages at the same page age
 and within one page (cycles 6 and 9, after that page's reconnect). A nodes
-series also passes on a net move of at most 2 in either series, because a
+series also passes on a net move of at most 2 (listeners, abort controllers and
+timeouts: 1) in either series, because a
 detached node can be in flux at one sample even after the settle loop (a
 1-node move in a two-sample page series is a slope of 1/3). That is a blind
 spot: every page is two samples however long the soak runs, so page-scoped node

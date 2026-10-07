@@ -105,3 +105,56 @@ describe("INITIAL_STATE", () => {
     expect(MAX_MESSAGES_PER_CHANNEL).toBe(500);
   });
 });
+
+describe("reply snippet (referenced_message)", () => {
+  const ref = {
+    id: 5,
+    user: { id: 1, username: "al", avatar: null },
+    content: "parent",
+    deleted: false,
+    has_attachments: false,
+  };
+
+  it("carries the snippet from a live frame and a history row", () => {
+    const live: ChatMessagePayload = {
+      id: 7,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: 5,
+      referenced_message: ref,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    expect(chatPayloadToMessage(live).referencedMessage).toStrictEqual(ref);
+
+    const history: MessageResponse = {
+      id: 8,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: 5,
+      referenced_message: ref,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    expect(messageResponseToMessage(history).referencedMessage).toStrictEqual(ref);
+  });
+
+  it("leaves the field off when an older server omits it", () => {
+    const live: ChatMessagePayload = {
+      id: 7,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: 5,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    expect("referencedMessage" in chatPayloadToMessage(live)).toBe(false);
+  });
+});

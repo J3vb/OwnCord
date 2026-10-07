@@ -187,6 +187,12 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
       desc: t("notifications.callSound.desc"),
       fallback: true,
     },
+    {
+      key: "voiceSounds",
+      label: t("notifications.voiceSounds.label"),
+      desc: t("notifications.voiceSounds.desc"),
+      fallback: true,
+    },
   ];
 
   const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];

@@ -22,6 +22,10 @@ use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::camera::{
+    self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
+    Target as CameraTarget,
+};
 use super::capture::{self, Apm, Capture};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
@@ -156,6 +160,12 @@ pub enum Event {
     /// window went away. The webview stops the share as the web path does
     /// when a browser capture track ends.
     ScreenCaptureEnded {
+        capture: u64,
+    },
+    /// Camera capture `capture` stopped on its own after it had started: the
+    /// device was unplugged or the pipeline errored. The webview turns the
+    /// camera off as the web path does when a camera track ends.
+    CameraCaptureEnded {
         capture: u64,
     },
     Reconnecting,
@@ -308,6 +318,9 @@ pub struct Resources {
     /// Screen capture threads alive, each holding a capturer (and, on
     /// Wayland, a portal session): zero once every share is stopped.
     pub screen_captures: usize,
+    /// Native camera capture threads alive (each holding a GStreamer
+    /// pipeline and the device): zero once the camera is off.
+    pub camera_captures: usize,
     /// Process thread count, the observable for rust-sdks #1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
@@ -350,6 +363,12 @@ pub fn list_devices() -> Devices {
         inputs: capture::list_inputs(),
         outputs: playout::list_outputs(),
     }
+}
+
+/// The GStreamer `Video/Source` devices (V4L2 and PipeWire), in or out of a
+/// call. Blocking: the monitor runs a discovery pass.
+pub fn list_cameras() -> Vec<CameraDevice> {
+    camera::list_devices()
 }
 
 /// The device kinds the web path's `switchActiveDevice` names.
@@ -436,6 +455,14 @@ struct ScreenShare {
     capture: ScreenCapture,
 }
 
+/// The running native camera capture: its id and the GStreamer pipeline
+/// thread. Held whether or not it is published, like `ScreenShare`, so the
+/// self-view preview survives a mute/unpublish (the web path keeps its track).
+struct CameraShare {
+    id: u64,
+    capture: CameraCapture,
+}
+
 pub struct NativeSession {
     room: Room,
     key_provider: KeyProvider,
@@ -450,9 +477,13 @@ pub struct NativeSession {
     /// interop example published a synthetic one).
     mic_source: Option<NativeAudioSource>,
     camera: VideoSlot,
+    /// The running native camera capture, independent of publication: the
+    /// self-view preview reads it back over the frame socket's `camera` route.
+    camera_capture: Option<CameraShare>,
     screen: Option<ScreenShare>,
     screen_publication: VideoSlot,
     next_capture: u64,
+    next_camera: u64,
     on_event: EventSink,
     frames: FrameServer,
     playout: Playout,
@@ -503,9 +534,11 @@ impl NativeSession {
             mic: None,
             mic_source: None,
             camera,
+            camera_capture: None,
             screen: None,
             screen_publication,
             next_capture: 0,
+            next_camera: 0,
             on_event,
             frames,
             playout,
@@ -626,14 +659,46 @@ impl NativeSession {
         Ok(())
     }
 
-    /// Publish the camera. Its frames arrive on the frame socket's `camera`
-    /// route (the webview's `getUserMedia` track, uploaded by
-    /// `cameraUplink.ts`); E2EE covers the track exactly as it covers the
-    /// microphone, through the room's one key provider. A camera already
-    /// published is replaced. Returns the publication's sid, which
-    /// [`Self::unpublish_camera`] takes.
-    pub async fn publish_camera(&mut self, opts: CameraOptions) -> Result<String, String> {
+    /// Start native camera capture of `target` (a [`camera::list_devices`] id,
+    /// or a synthetic source for the interop test), replacing any capture
+    /// already running. Returns the capture's id and a receiver that resolves
+    /// with the first frame's size, or why capture never began. Capture is
+    /// independent of the window and of publication: it keeps running while
+    /// the webview is hidden.
+    pub async fn start_camera(
+        &mut self,
+        target: CameraTarget,
+        options: CameraCaptureOptions,
+    ) -> Result<(u64, Started), String> {
         self.release_camera().await;
+        self.next_camera += 1;
+        let id = self.next_camera;
+        let on_event = self.on_event.clone();
+        let (capture, started) = CameraCapture::start(target, options, move || {
+            on_event(Event::CameraCaptureEnded { capture: id })
+        })?;
+        self.frames.set_camera(Some(capture.preview()));
+        self.camera_capture = Some(CameraShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Publish running camera capture `capture` as the camera track. E2EE
+    /// covers it through the room's one key provider, exactly as the
+    /// microphone. Returns the publication's sid, which [`Self::unpublish_camera`]
+    /// takes. A capture already published is replaced.
+    pub async fn publish_camera(
+        &mut self,
+        capture: u64,
+        opts: CameraOptions,
+    ) -> Result<String, String> {
+        if !self
+            .camera_capture
+            .as_ref()
+            .is_some_and(|c| c.id == capture)
+        {
+            return Err(format!("camera capture {capture} is not running"));
+        }
+        self.release_camera_publication().await;
         let source = NativeVideoSource::new(
             VideoResolution {
                 width: opts.width,
@@ -661,14 +726,17 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
-        self.frames.set_camera(Some(source));
+        if let Some(camera) = &self.camera_capture {
+            camera.capture.set_source(Some(source));
+        }
         *self.camera.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
         Ok(sid.to_string())
     }
 
     /// Unpublish camera `sid` (the web path unpublishes rather than mutes, so
     /// remote tiles close the same way). A stale sid, one a later publish
-    /// already replaced, is a no-op: it must not remove the newer camera.
+    /// already replaced, is a no-op: it must not remove the newer camera. The
+    /// capture keeps running for the self-view preview.
     pub async fn unpublish_camera(&mut self, sid: &str) {
         let issued = self
             .camera
@@ -677,13 +745,13 @@ impl NativeSession {
             .as_ref()
             .is_some_and(|c| c.issued == sid);
         if issued {
-            self.release_camera().await;
+            self.release_camera_publication().await;
         }
     }
 
-    /// Unpublish whatever camera is published. The upload socket ends with it.
-    async fn release_camera(&mut self) {
-        self.frames.set_camera(None);
+    /// Unpublish the camera track without stopping the capture (the self-view
+    /// stays live).
+    async fn release_camera_publication(&mut self) {
         let camera = self.camera.lock().unwrap().take();
         if let Some(camera) = camera {
             if let Err(e) = self
@@ -695,6 +763,27 @@ impl NativeSession {
                 log::warn!("[native_voice] camera unpublish: {e}");
             }
         }
+    }
+
+    /// Stop capture `capture` if it is still the running one (a stale id is a
+    /// no-op): unpublish it and release the pipeline and the device.
+    pub async fn stop_camera(&mut self, capture: u64) {
+        if self
+            .camera_capture
+            .as_ref()
+            .is_some_and(|c| c.id == capture)
+        {
+            self.release_camera().await;
+        }
+    }
+
+    /// Unpublish whatever camera is published and stop its capture: the
+    /// preview socket ends with it.
+    async fn release_camera(&mut self) {
+        self.release_camera_publication().await;
+        self.frames.set_camera(None);
+        // Dropping joins the capture thread and tears down the pipeline.
+        self.camera_capture.take();
     }
 
     /// Start capturing `target` for a screen share, replacing any capture
@@ -866,6 +955,7 @@ impl NativeSession {
             audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
             screen_captures: screen::active_captures(),
+            camera_captures: camera::active_captures(),
             threads: process_threads(),
         }
     }

@@ -203,6 +203,12 @@ describe("renderers", () => {
       expect(shouldGroup(prev, curr)).toBe(true);
     });
 
+    it("returns false for a same-author reply within the threshold", () => {
+      const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
+      const curr = makeMessage({ id: 2, replyTo: 1, timestamp: "2025-01-15T12:02:00Z" });
+      expect(shouldGroup(prev, curr)).toBe(false);
+    });
+
     it("returns false for different users", () => {
       const prev = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
       const curr = makeMessage({
@@ -1038,6 +1044,49 @@ describe("renderers", () => {
       expect(replyRef).not.toBeNull();
       expect(replyRef!.textContent).toBe("Reply to unknown message");
 
+      ac.abort();
+    });
+
+    it("uses the server snippet when the parent is outside the loaded window", () => {
+      const reply = makeMessage({
+        id: 2,
+        replyTo: 999,
+        content: "replying",
+        referencedMessage: {
+          id: 999,
+          user: { id: 10, username: "alice", avatar: null },
+          content: "**old** parent text",
+          deleted: false,
+          has_attachments: false,
+        },
+      });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(reply, false, [reply], makeOpts(), ac.signal));
+
+      const ref = container.querySelector(".msg-reply-ref")!;
+      expect(ref.querySelector(".rr-author")?.textContent).toBe("alice");
+      expect(ref.querySelector(".rr-text")?.textContent).toBe("old parent text");
+      ac.abort();
+    });
+
+    it("shows the deleted notice for a redacted snippet", () => {
+      const reply = makeMessage({
+        id: 2,
+        replyTo: 999,
+        referencedMessage: {
+          id: 999,
+          user: null,
+          content: "",
+          deleted: true,
+          has_attachments: false,
+        },
+      });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(reply, false, [reply], makeOpts(), ac.signal));
+
+      const ref = container.querySelector(".msg-reply-ref")!;
+      expect(ref.querySelector(".rr-author")).toBeNull();
+      expect(ref.textContent).toBe("[message deleted]");
       ac.abort();
     });
 

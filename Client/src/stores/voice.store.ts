@@ -13,6 +13,7 @@ import type {
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
+import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -146,8 +147,30 @@ const INITIAL_STATE: VoiceState = {
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 
+// Keep the sound module's session flag in step with channel membership on every
+// edge (join, leave, channel switch, reconnect roster, logout) without that
+// module importing this store (DP-40). localDeafened itself is mirrored
+// synchronously by setLocalDeafened/resetVoiceStore.
+voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
+
+/** Incremented by the incremental roster mutators (updateVoiceState,
+ *  removeVoiceUser) — never by setVoiceStates, which replaces the whole
+ *  roster on the initial `ready` and on a full resync. DP-40's voice UI sounds
+ *  read it to tell a live join/leave edge from a wholesale replacement, so a
+ *  reconnect replay cannot produce a sound storm. Module state, not store
+ *  state: a listener only needs the delta since its last read, and a test
+ *  fixture that restates VoiceState need not carry it. */
+let voiceRosterRevision = 0;
+
+/** Read `voiceRosterRevision` (see its comment). */
+export function getVoiceRosterRevision(): number {
+  return voiceRosterRevision;
+}
+
 /** Reset voice store to initial state (e.g. on logout). */
 export function resetVoiceStore(): void {
+  setVoiceDeafened(false);
+  setVoiceInSession(false);
   voiceStore.setState(() => ({
     currentChannelId: null,
     voiceUsers: new Map(),
@@ -235,6 +258,7 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
   const serverMuted = payload.server_muted ?? false;
   const serverDeafened = payload.server_deafened ?? false;
+  voiceRosterRevision++;
   voiceStore.setState((prev) => {
     const nextChannels = new Map(prev.voiceUsers);
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
@@ -297,6 +321,7 @@ export function updateVoiceUserProfile(userId: number, patch: { readonly usernam
 
 /** Remove a user from a voice channel. */
 export function removeVoiceUser(payload: VoiceLeavePayload): void {
+  voiceRosterRevision++;
   voiceStore.setState((prev) => {
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
     if (!existingChannel || !existingChannel.has(payload.user_id)) return prev;
@@ -404,6 +429,10 @@ export function setLocalMuted(muted: boolean): void {
 
 /** Toggle local deafen state. */
 export function setLocalDeafened(deafened: boolean): void {
+  // Mirror into the leaf the always-loaded sound module reads (DP-40), so
+  // notification and voice sounds stay silent while deafened without that
+  // module importing this store.
+  setVoiceDeafened(deafened);
   voiceStore.setState((prev) => ({
     ...prev,
     localDeafened: deafened,

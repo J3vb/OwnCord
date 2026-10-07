@@ -113,6 +113,23 @@ ci.yml caches the libwebrtc directory, and clang is installed fresh each run.
 Windows client builds and server-only work need none of this. Design and rationale:
 [docs/architecture/voice-e2ee.md](architecture/voice-e2ee.md).
 
+**Linux native camera build prerequisite.** The Linux client captures the
+camera with GStreamer (`src-tauri/src/native_voice/camera.rs`), so a Linux Rust
+build needs the GStreamer development headers in addition to the LiveKit
+prerequisites above:
+
+```bash
+sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+```
+
+The GStreamer runtime libraries already ship with WebKitGTK; the `.deb` also
+declares them and the camera plugins, and the AppImage bundles its own. Only
+the `-dev` headers are a build-time addition. Every CI Linux leg that builds the
+client installs them before the native-voice build, and
+`scripts/check-workflow-guards.mjs` fails a workflow whose Tauri build install
+omits them. They are needed only where the `camera.rs` module compiles, i.e. the
+same Linux Rust legs as `webrtc-sys`.
+
 **Tests**
 
 | Command                     | Description                                |

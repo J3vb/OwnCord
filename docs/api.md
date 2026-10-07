@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 177 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 180 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -67,6 +67,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | PUT     | `/admin/api/channels/{id}/user-permissions/{userId}`                 |
 | GET     | `/admin/api/config`                                                  |
+| GET     | `/admin/api/config/settings`                                         |
+| PATCH   | `/admin/api/config/settings`                                         |
 | DELETE  | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/level`                                              |
 | PATCH   | `/admin/api/logs/level`                                              |
@@ -76,6 +78,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/registrations`                                           |
 | POST    | `/admin/api/registrations/{id}/approve`                              |
 | POST    | `/admin/api/registrations/{id}/deny`                                 |
+| POST    | `/admin/api/restart`                                                 |
 | GET     | `/admin/api/retention`                                               |
 | GET     | `/admin/api/retention/preview`                                       |
 | POST    | `/admin/api/retention/preview`                                       |
@@ -1058,6 +1061,7 @@ Paginated message history for a channel.
       },
       "content": "Hello!",
       "reply_to": null,
+      "referenced_message": null,
       "attachments": [
         {
           "id": "file-uuid",
@@ -3165,6 +3169,7 @@ Authorization is two-layered:
 | `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
 | `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
 | `GET /admin/api/config`                                                                                         | `MANAGE_SERVER`                                                                              |
+| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                               | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 | `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
 | `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
 | `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |

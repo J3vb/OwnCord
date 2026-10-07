@@ -4,14 +4,16 @@ LiveKit is an open-source SFU (Selective Forwarding Unit) that handles real-time
 
 There are two ways to run LiveKit alongside OwnCord:
 
-| Method                | Best for                   | LiveKit managed by          |
-| --------------------- | -------------------------- | --------------------------- |
-| **Docker Compose**    | Linux servers              | Docker (separate container) |
-| **Companion process** | Windows / bare-metal Linux | OwnCord (auto-start)        |
+| Method                | Best for                                | LiveKit managed by          |
+| --------------------- | --------------------------------------- | --------------------------- |
+| **Docker Compose**    | Linux servers                           | Docker (separate container) |
+| **Companion process** | Windows, bare-metal Linux, Docker image | OwnCord (auto-start)        |
 
 ---
 
 ## Docker <a name="docker"></a>
+
+The `ghcr.io/j3vb/owncord-server` image also bundles LiveKit and starts it itself (see [Deployment — LiveKit in Docker](deployment.md#livekit-in-docker)); nothing below is needed for that. The rest of this section is the two-container `docker compose` stack.
 
 When running OwnCord via `docker compose`, LiveKit runs as a separate container on the same internal network. OwnCord reaches it at `ws://livekit:7880` via Docker's internal DNS — no port forwarding needed between containers.
 
@@ -46,11 +48,11 @@ When running OwnCord via `docker compose`, LiveKit runs as a separate container 
    **Single-port option.** To forward one UDP port instead of the 10,000-port
    range, replace `port_range_start`/`port_range_end` with `udp_port: 7882`
    (any free UDP port), and publish that same port in `docker-compose.yml` in
-   place of the range. Also uncomment `OWNCORD_VOICE_UDP_PORT` on the
-   `owncord` service with the same port, so the admin connectivity report and
-   the boot warning name that port rather than the range. LiveKit ignores the
-   range once `udp_port` is set. This
-   is the easier path through a restrictive firewall or a router with a small
+   place of the range. Also set the existing `OWNCORD_VOICE_UDP_PORT` on the
+   `owncord` service to the same port (it ships as `"0"`), so the admin
+   connectivity report and the boot warning name that port rather than the
+   range. LiveKit ignores the range once `udp_port` is set. This is the easier
+   path through a restrictive firewall or a router with a small
    port-forwarding table. When OwnCord runs LiveKit itself (the
    `livekit_binary`/auto-download path), `voice.udp_port` in `config.yaml`
    generates the same single-port config for you.

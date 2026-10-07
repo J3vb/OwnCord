@@ -213,7 +213,10 @@ func (t *dockerTarget) start(version string) error {
 		"-p", containerPublish,
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges:true",
-		"-e", noLiveKitDownload)
+		"-e", noLiveKitDownload,
+		// The image now bundles LiveKit and would start it; the rehearsal
+		// compares data-dir state byte for byte, so keep voice off.
+		"-e", "OWNCORD_VOICE_LIVEKIT_BINARY=")
 	for _, kv := range t.extraEnv {
 		args = append(args, "-e", kv)
 	}

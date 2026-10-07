@@ -476,6 +476,21 @@ describe("parseRelayedLogin", () => {
     expect(() => parseRelayedLogin({ status: 502, body: "" })).toThrow(TransportError);
   });
 
+  it("keeps the tunnel's distinct TLS certificate code on a relayed 502", () => {
+    // The proxy now answers a refused certificate with a JSON body, so the
+    // saved-password path narrows on the same code as the typed one.
+    try {
+      parseRelayedLogin({
+        status: 502,
+        body: '{"error":"TLS_CERT_UNVERIFIED","message":"the server\\u0027s certificate could not be verified"}',
+      });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiClientError);
+      expect((err as InstanceType<typeof ApiClientError>).code).toBe("TLS_CERT_UNVERIFIED");
+    }
+  });
+
   it("throws rather than silently succeeding on an unreadable 2xx body", () => {
     // Returning {} would enter neither the token nor the 2FA branch, stranding
     // the login form in its loading state with nothing shown to the user.

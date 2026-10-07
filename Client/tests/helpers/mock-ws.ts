@@ -106,6 +106,10 @@ export function createMockWsClient() {
       return state;
     },
 
+    getConnectFailureCode(): string | null {
+      return null;
+    },
+
     // ---------------------------------------------------------------
     // Test-only helpers
     // ---------------------------------------------------------------

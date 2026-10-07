@@ -38,6 +38,9 @@ export interface NativeVoiceResources {
   /** Screen capturers alive (each holds, on Wayland, a portal session);
    *  zero once every share has stopped. */
   screenCaptures: number;
+  /** Native camera capture threads alive (each holds a GStreamer pipeline
+   *  and the device); zero once the camera is off. */
+  cameraCaptures: number;
   /** Process thread count, the observable for a leaked frame-cryptor thread. */
   threads: number;
 }
@@ -68,6 +71,9 @@ export type NativeVoiceEvent =
   /** Screen capture `capture` ended on its own after it started: stopped
    *  from the desktop's sharing indicator, or the shared window closed. */
   | { type: "screenCaptureEnded"; capture: number }
+  /** Camera capture `capture` ended on its own after it started: the device
+   *  was unplugged or the pipeline errored. */
+  | { type: "cameraCaptureEnded"; capture: number }
   | { type: "reconnecting" }
   | { type: "reconnected" }
   | { type: "disconnected"; reason: string };
@@ -107,6 +113,44 @@ export interface NativeVoiceCameraOptions {
   maxBitrate: number;
   maxFramerate: number;
   simulcast: boolean;
+}
+
+/** A native camera device: the id `startCamera` takes. */
+export interface NativeVoiceCameraDevice {
+  id: string;
+  name: string;
+}
+
+/** Whether the host can capture cameras at all: GStreamer initialises and the
+ *  capture pipeline's required elements exist. `missing` names the required
+ *  elements that could not be found. */
+export interface NativeVoiceCameraSupport {
+  available: boolean;
+  missing: string[];
+}
+
+/** Capture pacing and size cap for the native camera; 0 for both sizes is the
+ *  source size. */
+export interface NativeVoiceCameraCapture {
+  fps: number;
+  maxWidth: number;
+  maxHeight: number;
+}
+
+/** A started camera capture: its id and the first frame's size. */
+export interface NativeVoiceCameraStarted {
+  capture: number;
+  width: number;
+  height: number;
+}
+
+/** A camera preview outside any room (the settings tab): the live preview
+ *  plays on the frame socket's `/camera` route. */
+export interface NativeVoiceCameraPreview {
+  width: number;
+  height: number;
+  /** The preview's frame-socket base URL, token included. */
+  frames: string;
 }
 
 export interface NativeVoiceScreenSource {
@@ -182,13 +226,46 @@ export interface NativeVoice {
   /** Play `identity`'s screen-share audio at `volume` (1 is unity, 0 when
    *  muted), the value the web path gives its screen-share audio element. */
   setScreenshareVolume(session: number, identity: string, volume: number): Promise<void>;
-  /** Publish (or replace) the camera; its frames then go up the session's
-   *  frame socket. E2EE covers it with the room key, as for the microphone.
-   *  Resolves with the publication's sid. */
-  publishCamera(session: number, options: NativeVoiceCameraOptions): Promise<string>;
+  /** Publish (or replace) camera capture `capture`; its frames then go to
+   *  remote peers from the host. E2EE covers it with the room key, as for
+   *  the microphone. Resolves with the publication's sid. */
+  publishCamera(
+    session: number,
+    capture: number,
+    options: NativeVoiceCameraOptions,
+  ): Promise<string>;
   /** Unpublish camera `sid` if it is still the published one; a sid a later
-   *  publish replaced is a no-op. */
+   *  publish replaced is a no-op. The capture keeps running for the preview. */
   unpublishCamera(session: number, sid: string): Promise<void>;
+  /** List the GStreamer `Video/Source` cameras (V4L2 and PipeWire), in or out
+   *  of a call. */
+  listCameras(): Promise<NativeVoiceCameraDevice[]>;
+  /** Whether the host can capture cameras: GStreamer initialises and the
+   *  capture pipeline's required elements exist. An empty list with this
+   *  available is "no camera plugged in"; this false is "camera support is
+   *  missing". */
+  cameraSupport(): Promise<NativeVoiceCameraSupport>;
+  /** Start capturing native camera `source` (replacing any running capture)
+   *  and resolve once its first frame arrives; a source that fails or yields
+   *  no frame in time rejects. The preview then plays on the frame socket's
+   *  `/camera` route. Capture runs in the host and is independent of the
+   *  window being visible. */
+  startCamera(
+    session: number,
+    source: string,
+    capture: NativeVoiceCameraCapture,
+  ): Promise<NativeVoiceCameraStarted>;
+  /** Unpublish and stop camera capture `capture`, releasing the pipeline and
+   *  the device; a stale id is a no-op. */
+  stopCamera(session: number, capture: number): Promise<void>;
+  /** Start a camera preview outside any room (the settings tab) and resolve
+   *  once its first frame arrives. */
+  startCameraPreview(
+    source: string,
+    capture: NativeVoiceCameraCapture,
+  ): Promise<NativeVoiceCameraPreview>;
+  /** Stop the out-of-call camera preview. */
+  stopCameraPreview(): Promise<void>;
   /** What can be shared, with thumbnails; enumerating is slow (one capture
    *  per source). */
   screenSources(): Promise<NativeVoiceScreenSources>;

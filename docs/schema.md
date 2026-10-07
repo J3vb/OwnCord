@@ -687,8 +687,11 @@ _broadcast_ status is not `offline` — the column stores the status the user
 chose, so a reader who picked `invisible` is collapsed to `offline` here and is
 skipped, exactly as they appear to everyone else. Edits never increment it — a badge is only
 raised by the original send, so an edit cannot double-count a mention. The
-`channel_focus` read-state upsert resets it to 0, and the `ready` payload ships
-it per channel.
+`channel_focus` read-state upsert resets it to 0, the `ready` payload ships
+it per channel, and each raise or reversal pushes the reader a per-user
+`mention_count` frame so a badge in a channel they are not viewing stays live
+(DP-27; delivery conditions in
+[protocol.md](protocol.md#mention_count-server---client-direct)).
 
 ---
 

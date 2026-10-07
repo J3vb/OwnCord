@@ -489,6 +489,30 @@ export function noteChannelMessage(
   });
 }
 
+/**
+ * Set a channel's mention count from the server's authoritative total (DP-27).
+ * A mention that lands in a channel the user is not viewing never reaches this
+ * client through the channel topic, so the server pushes a per-user
+ * `mention_count` frame with the new total instead. Replacing rather than
+ * incrementing keeps the count convergent across a lost or duplicated frame.
+ *
+ * `unreadCount` is deliberately untouched: the frame says nothing about it, and
+ * a guild channel's taskbar/tray badge counts only mentions anyway. A no-op for
+ * a channel this client does not know, so a stale frame cannot invent a row.
+ */
+export function setMentionCount(channelId: number, count: number): void {
+  channelsStore.setState((prev) => {
+    const existing = prev.channels.get(channelId);
+    if (existing === undefined || existing.mentionCount === count) {
+      return prev;
+    }
+    const updated: Channel = { ...existing, mentionCount: count };
+    const next = new Map(prev.channels);
+    next.set(channelId, updated);
+    return { ...prev, channels: next };
+  });
+}
+
 /** Clear the unread and mention counts for a channel — they clear together. */
 export function clearUnread(channelId: number): void {
   channelsStore.setState((prev) => {

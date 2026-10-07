@@ -268,6 +268,68 @@ describe("MessageList", () => {
     expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
+  it("scrollToMessage centres the target in the viewport once its row is measured", () => {
+    const many = Array.from({ length: 200 }, (_, i) => makeMessage({ id: i + 1 }));
+    setMessages(1, many);
+    msgList.mount(container);
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 400 });
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(100);
+
+    expect(msgList.scrollToMessage(150)).toBe(true);
+    offsetHeight.mockRestore();
+
+    // Spacer height + rows above the target in the rendered window = the
+    // target's top; centred means that top sits (400 - 100) / 2 below scrollTop.
+    const spacer = container.querySelector(".virtual-spacer-top") as HTMLElement;
+    const row = container.querySelector('[data-testid="message-150"]') as HTMLElement;
+    const rowIdx = Array.from(row.parentElement!.children).indexOf(row);
+    expect(root.scrollTop).toBe(parseFloat(spacer.style.height) + rowIdx * 100 - 150);
+  });
+
+  it("scrollToMessage keeps the target centred when rows above it resize after the jump", () => {
+    const observers: Array<() => void> = [];
+    const original = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(cb: () => void) {
+        observers.push(cb);
+      }
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+    const rafs: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => rafs.push(cb));
+    try {
+      const many = Array.from({ length: 200 }, (_, i) => makeMessage({ id: i + 1 }));
+      setMessages(1, many);
+      msgList.mount(container);
+      const root = container.querySelector(".messages-container") as HTMLDivElement;
+      Object.defineProperty(root, "clientHeight", { configurable: true, value: 400 });
+      let height = 100;
+      vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(() => height);
+
+      expect(msgList.scrollToMessage(150)).toBe(true);
+      const settled = root.scrollTop;
+
+      // A preview above the target finishes loading: every rendered row grows.
+      height = 160;
+      observers.forEach((cb) => cb());
+      rafs.splice(0).forEach((cb) => cb(0));
+
+      const spacer = container.querySelector(".virtual-spacer-top") as HTMLElement;
+      const row = container.querySelector('[data-testid="message-150"]') as HTMLElement;
+      const rowIdx = Array.from(row.parentElement!.children).indexOf(row);
+      expect(root.scrollTop).not.toBe(settled);
+      expect(root.scrollTop).toBe(parseFloat(spacer.style.height) + rowIdx * 160 - (400 - 160) / 2);
+    } finally {
+      globalThis.ResizeObserver = original;
+      vi.restoreAllMocks();
+    }
+  });
+
   it("OC-0217/OC-0286: repeated jumps do not each register a permanent row listener on the component-lifetime signal", () => {
     // As a user clicking a reply bar's jump arrow, a search hit, or a pinned
     // entry repeatedly does across a live session.
@@ -1685,6 +1747,37 @@ describe("MessageList", () => {
         msgList.destroy?.();
 
         expect(vi.getTimerCount()).toBe(pendingBeforeMount);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("time format preference", () => {
+    afterEach(() => {
+      localStorage.removeItem("owncord:settings:timeFormat");
+      window.dispatchEvent(
+        new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }),
+      );
+    });
+
+    it("relabels rendered message times when the clock format changes", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
+        setMessages(1, [makeMessage({ id: 1, timestamp: new Date().toISOString() })]);
+        msgList.mount(container);
+
+        expect(container.querySelector(".msg-time")!.textContent).toContain("6:34 PM");
+
+        localStorage.setItem("owncord:settings:timeFormat", JSON.stringify("24h"));
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }),
+        );
+
+        const text = container.querySelector(".msg-time")!.textContent!;
+        expect(text).toContain("18:34");
+        expect(text).not.toMatch(/AM|PM/i);
       } finally {
         vi.useRealTimers();
       }

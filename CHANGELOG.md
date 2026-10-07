@@ -47,6 +47,82 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.2.0-beta.1
+
+**OwnCord 2.2 beta 1** is the next public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It adds an unread bar that opens each channel where you left off, camera capture that keeps working while the window is hidden on Linux, voice sounds, and an admin page that edits almost every server setting. The Docker image now carries voice too, so one container is the whole server.
+
+It is still a **beta and a hobby project** — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive. Update the server and the desktop app together.
+
+### Highlights
+
+- **Channels open at the NEW line**, with an unread bar and a counter on the jump-to-bottom button.
+- **Linux camera that survives a hidden window**: captured natively, so screen sharing or minimizing no longer freezes it for everyone else.
+- **Voice that sounds like a call**: ringback when you place a DM call, and short chimes for join, leave, mute and deafen.
+- **Run the whole server from the admin panel**: every setting is explained, and almost all of them can be changed without editing `config.yaml`.
+- **One Docker container for chat and voice**, plus a ready-made Unraid template.
+
+### Added
+
+**Messages and channels**
+
+- An unread bar at the top of a channel says how many messages are new and since when; **Mark as read** clears it.
+- The jump-to-bottom button counts new messages from other people while you are scrolled up.
+- A reply to an old message shows a short snippet of the original, or "[message deleted]".
+- `:` autocomplete uses the complete Discord emoji short-name table, so `:cry` is 😢 and `:sunglasses` is 😎.
+
+**Voice and calls**
+
+- A caller hears ringback while a DM call rings, and a toast reports "declined" or "No answer" if you are on another channel.
+- Join, leave, mute and deafen play a short sound on the speaker you chose (Settings › Voice & Audio; on Linux they play on the system default speaker); turn them off under Settings › Notifications.
+- Linux: the camera is captured in the app's native backend, and the camera list and self-view come from it.
+- Linux: an empty camera list now names the missing GStreamer packages, and the `.deb` installs them for you.
+
+**Desktop**
+
+- Settings › Appearance has a **Time Format** choice, 12-hour or 24-hour.
+- Trusting a new server certificate also asks in a native operating-system dialog showing the fingerprint.
+
+**Admin and deployment**
+
+- The owner-only **Server configuration** page edits almost every setting, applies it after a restart, and keeps secrets write-only. Risky changes ask for a typed confirmation.
+- Each setting shows a plain-language name, a description, the recommended value and what changing it affects.
+- The Docker image bundles LiveKit, so `docker run` serves chat and voice; voice uses UDP `7882` and TCP `7881`.
+- An Unraid template is included (`deploy/unraid/owncord.xml`).
+
+### Changed
+
+- Voice media in the Docker image uses the single UDP port `7882` instead of the `50000-60000` range, so publish `-p 7882:7882/udp -p 7881:7881`. A compose file with a separate LiveKit must clear `OWNCORD_VOICE_LIVEKIT_BINARY` and set `OWNCORD_VOICE_UDP_PORT` to `0` for range mode (as the shipped `Server/docker-compose.yml` does) or to the same single port configured in LiveKit.
+- Messages that arrive while the window is unfocused now count as unread for the channel you are viewing.
+- Jumping to a message centres it, and a reply always shows who it quotes.
+- Linux: a native crash now ends the client log with a line naming the signal and thread.
+- The server spends less CPU delivering live events.
+
+### Fixed
+
+- Leaving a channel and returning keeps the history you had loaded, unless more new messages arrived than five pages of 100 can cover, in which case the oldest loaded rows are still dropped.
+- A mention in another channel updates the taskbar and tray badge at once, and the badge no longer undercounts when a mention and a delete land together.
+- A deleted mentioning message no longer updates the badge of someone who lost access to the channel.
+- A certificate the client cannot verify now says so, instead of "Bad Gateway" or a dropped connection.
+- A server counts as signed in only after it confirms the login, and saved credentials are read only for servers used this run.
+- Desktop updates check the signed artifact's name against your system before installing.
+- The `server.max_ws_connections` limit holds when many connections arrive at once.
+- Closing Settings releases the last tab's memory.
+
+### Known issues
+
+- **Linux desktop:** the native camera is new and has not yet been checked on a real machine. Check it on your own setup, including with screen share on; the app can close without warning when both are on, and the new crash line is there to pin that down.
+- **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A channel that opens at the NEW line with a backlog taller than the screen can miss unread counts.** Messages that arrive below the visible area may not be counted as unread if you leave before scrolling to the bottom.
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Cached reply snippets, per-connection write timers and ordered mention-badge frames keep live delivery cheap and consistent.
+- Certificate-trust dialogs load lazily to keep app startup within budget.
+- Configuration copy for every setting ships with the server, and a test fails if a key lacks it.
+
 ## v2.1.0-beta.2
 
 `v2.1.0-beta.1` was tagged but never published, so these notes ship as `v2.1.0-beta.2`.

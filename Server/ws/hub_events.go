@@ -266,6 +266,11 @@ func eventNamesUser(data []byte, userID int64) bool {
 			Updates []struct {
 				UserID int64 `json:"user_id"`
 			} `json:"updates"`
+			Referenced *struct {
+				User *struct {
+					ID int64 `json:"id"`
+				} `json:"user"`
+			} `json:"referenced_message"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -275,6 +280,7 @@ func eventNamesUser(data []byte, userID int64) bool {
 	return (pl.UserID != nil && *pl.UserID == userID) ||
 		(pl.FromUserID != nil && *pl.FromUserID == userID) ||
 		(pl.User != nil && pl.User.ID == userID) ||
+		(pl.Referenced != nil && pl.Referenced.User != nil && pl.Referenced.User.ID == userID) ||
 		slices.Contains(pl.Mentions, userID) ||
 		slices.ContainsFunc(pl.Updates, func(u struct {
 			UserID int64 `json:"user_id"`
@@ -306,6 +312,10 @@ func eventNamesMessage(data []byte, ids map[int64]struct{}) bool {
 			ID        *int64  `json:"id"`
 			MessageID *int64  `json:"message_id"`
 			IDs       []int64 `json:"ids"`
+			// A reply frame embeds its parent's snippet.
+			Referenced *struct {
+				ID int64 `json:"id"`
+			} `json:"referenced_message"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal(data, &frame); err != nil {
@@ -317,6 +327,11 @@ func eventNamesMessage(data []byte, ids map[int64]struct{}) bool {
 	pl := frame.Payload
 	if pl.ID != nil {
 		if _, ok := ids[*pl.ID]; ok {
+			return true
+		}
+	}
+	if pl.Referenced != nil {
+		if _, ok := ids[pl.Referenced.ID]; ok {
 			return true
 		}
 	}

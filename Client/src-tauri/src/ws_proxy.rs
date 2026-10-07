@@ -8,7 +8,7 @@
 // - On first use (no pin yet) the connection is rejected and a `cert-tofu`
 //   "first_use" event is emitted so the user can confirm the fingerprint. F4/F8:
 //   the proxy never silently pins or forwards to an unconfirmed host — the only
-//   writer of a pin is the explicit `accept_cert_fingerprint` command.
+//   user-confirmed writer of a pin is the explicit `accept_cert_fingerprint` command.
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -130,7 +130,6 @@ pub(crate) fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json
 pub async fn ws_connect<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, WsState>,
-    session: tauri::State<'_, crate::active_session::ActiveSession>,
     url: String,
 ) -> Result<(), String> {
     info!("[ws_proxy] connecting to {}", url);
@@ -172,6 +171,13 @@ pub async fn ws_connect<R: Runtime>(
         })?
         .map_err(|e| {
             error!("[ws_proxy] connect failed to {}: {}", url, e);
+            // A TLS handshake failure (as opposed to an unreachable host) is
+            // reported with the distinct certificate code so the webview can
+            // show the certificate copy instead of the generic unreachable one
+            // (DP-54 follow-up). The TOFU decision flow itself is unchanged.
+            if is_tls_failure(&e) {
+                return tofu::cert_connect_error(&format!("ws connect failed: {e}"));
+            }
             format!("ws connect failed: {e}")
         })?;
 
@@ -214,8 +220,12 @@ pub async fn ws_connect<R: Runtime>(
                 }),
             );
             // Do not open the socket: the user must confirm the fingerprint
-            // (accept_cert_fingerprint) before anything is sent over it.
-            return Err(crate::text::cert_not_trusted(&host));
+            // (accept_cert_fingerprint) before anything is sent over it. The
+            // refusal carries the distinct certificate code so the webview can
+            // tell it apart from an unreachable server.
+            return Err(tofu::cert_connect_error(&crate::text::cert_not_trusted(
+                &host,
+            )));
         }
         TofuOutcome::Mismatch { stored } => {
             let msg = tofu::mismatch_message(&host, &stored, &fingerprint);
@@ -234,8 +244,10 @@ pub async fn ws_connect<R: Runtime>(
                     "storedFingerprint": stored,
                 }),
             );
-            // Reject the connection — do not proceed.
-            return Err(msg);
+            // Reject the connection — do not proceed. The refusal carries the
+            // distinct certificate code so the webview can tell it apart from
+            // an unreachable server.
+            return Err(tofu::cert_connect_error(&msg));
         }
     }
     // ── End TOFU check ───────────────────────────────────────────────────
@@ -253,9 +265,8 @@ pub async fn ws_connect<R: Runtime>(
 
     info!("[ws_proxy] connected to {}", host);
     emit_ws_state(&app, "open");
-    // Record the host this session is on, so the credential and identity
-    // commands can refuse any other host while it is live.
-    session.set(&host);
+    // The socket being open proves nothing: the active session host is set
+    // only when the server answers with `auth_ok` (see the read task below).
 
     let app_read = app.clone();
     let app_state = app.clone();
@@ -263,6 +274,8 @@ pub async fn ws_connect<R: Runtime>(
     // including worker task panics, without needing tauri::State.
     let tx_arc = Arc::clone(&state.tx);
     let generation_arc = Arc::clone(&state.generation);
+    let host_read = host.clone();
+    let generation_read = Arc::clone(&state.generation);
 
     // Single outer task owns a JoinSet containing read and write workers.
     // join_next() blocks until the first worker finishes (normally or via panic),
@@ -277,6 +290,15 @@ pub async fn ws_connect<R: Runtime>(
                 stream,
                 LIVENESS_TIMEOUT,
                 |text| {
+                    // Native-side authenticated event: the server answered the
+                    // auth message over this pinned socket. Set the host before
+                    // relaying so it is active by the time the page sees it.
+                    if is_auth_ok(&text) && generation_read.load(Ordering::SeqCst) == my_generation
+                    {
+                        app_read
+                            .state::<crate::active_session::ActiveSession>()
+                            .set(&host_read);
+                    }
                     let _ = app_read.emit("ws-message", text);
                 },
                 |err| {
@@ -312,6 +334,12 @@ pub async fn ws_connect<R: Runtime>(
         // unconditionally would kill a newer connection's sender and tell JS
         // that the live connection had closed.
         if clear_sender_if_current(&tx_arc, &generation_arc, my_generation).await {
+            // The authenticated session ended on the wire: no host is active.
+            deactivate_if_current(
+                &app_state.state::<crate::active_session::ActiveSession>(),
+                &generation_arc,
+                my_generation,
+            );
             // Always emit closed, even after a panic.
             emit_ws_state(&app_state, "closed");
         } else {
@@ -320,6 +348,50 @@ pub async fn ws_connect<R: Runtime>(
     });
 
     Ok(())
+}
+
+/// Whether a relayed server frame is the `auth_ok` envelope that completes the
+/// WebSocket login. Only the top-level `type` counts; a chat message whose
+/// content says "auth_ok" does not.
+fn is_auth_ok(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|v| {
+            v.get("type")
+                .and_then(Value::as_str)
+                .map(|t| t == "auth_ok")
+        })
+        .unwrap_or(false)
+}
+
+/// Clear the active session host when the connection that authenticated it
+/// ends, but only while `my_generation` is still current: a superseded
+/// connection's teardown must not drop a newer session's host.
+fn deactivate_if_current(
+    session: &crate::active_session::ActiveSession,
+    generation: &AtomicU64,
+    my_generation: u64,
+) {
+    if generation.load(Ordering::SeqCst) == my_generation {
+        session.clear_active();
+    }
+}
+
+/// Whether a tungstenite connect error is a TLS/certificate rejection rather
+/// than an unreachable host. Drives the distinct `TLS_CERT_UNVERIFIED` code the
+/// webview maps to its certificate copy (DP-54 follow-up). `Error::Tls` is the
+/// direct case; when tokio-rustls rejects the handshake it wraps the rustls
+/// error in an `Error::Io` of kind `InvalidData` (a clean EOF is
+/// `UnexpectedEof`, and a dead socket keeps its own kind), so that kind is the
+/// precise signal — a plain network error is never mistaken for a certificate
+/// one.
+pub(crate) fn is_tls_failure(error: &tokio_tungstenite::tungstenite::Error) -> bool {
+    use tokio_tungstenite::tungstenite::Error;
+    match error {
+        Error::Tls(_) => true,
+        Error::Io(e) => e.kind() == std::io::ErrorKind::InvalidData,
+        _ => false,
+    }
 }
 
 /// Why [`read_frames`] stopped.
@@ -432,9 +504,10 @@ pub async fn ws_disconnect(
     // path a superseding connect() already has. The returned generation is
     // unused: nothing will ever install under it.
     state.begin_connection().await;
-    // Logout / server switch: no session is live, so the credential and
-    // identity commands fall back to their pre-session rule.
-    session.clear();
+    // Logout / server switch: no session is live, so the credential commands
+    // fall back to their pre-session rule, which admits a read only for a host
+    // whose login was verified this app run. That set is kept.
+    session.clear_active();
     Ok(())
 }
 
@@ -455,10 +528,43 @@ pub(crate) fn is_valid_cert_fingerprint(fingerprint: &str) -> bool {
         })
 }
 
+/// Whether writing `fingerprint` changes what `host` trusts: a first pin, or a
+/// different one. Restating the stored pin asks nothing.
+pub(crate) fn pin_needs_confirmation(stored: Option<&Value>, fingerprint: &str) -> bool {
+    !matches!(stored, Some(Value::String(s)) if s == fingerprint)
+}
+
+/// Ask the user, in a native dialog, to confirm pinning `fingerprint` for
+/// `host`. Runs from an async command, off Tauri's main thread, so
+/// `blocking_show` (which dispatches onto the main thread) cannot deadlock.
+#[cfg(not(feature = "e2e-auto-confirm"))]
+fn confirm_pin_natively<R: Runtime>(app: &AppHandle<R>, host: &str, fingerprint: &str) -> bool {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .message(crate::text::cert_accept_prompt(host, fingerprint))
+        .title(crate::text::CERT_ACCEPT_TITLE)
+        .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+        .buttons(tauri_plugin_dialog::MessageDialogButtons::YesNo)
+        .blocking_show()
+}
+
+/// The Playwright-driven native E2E builds (identity `com.owncord.e2e`, never a
+/// release artifact) cannot see an OS dialog, so they answer yes. Shipped
+/// builds never enable this feature; the artifact smoke drives those with a
+/// pre-seeded pin instead (`tests/e2e/support/artifact-app.ts`).
+#[cfg(feature = "e2e-auto-confirm")]
+fn confirm_pin_natively<R: Runtime>(_: &AppHandle<R>, _: &str, _: &str) -> bool {
+    true
+}
+
 /// Accept a certificate fingerprint for a host — the only path that writes a pin
 /// on the user's word (`tofu::evaluate` re-pins only a publicly valid renewal).
 /// Called after the user acknowledges a first-use or cert-mismatch prompt.
-#[tauri::command]
+///
+/// A pin that changes what is trusted is written only after a native dialog the
+/// user answers: the renderer already showed its own prompt, but a compromised
+/// renderer must not be able to pin an arbitrary host/fingerprint silently.
+#[tauri::command(async)]
 pub fn accept_cert_fingerprint<R: Runtime>(
     app: AppHandle<R>,
     host: String,
@@ -479,6 +585,11 @@ pub fn accept_cert_fingerprint<R: Runtime>(
 
     // Capture old value before mutating so we can restore it if save fails.
     let old_value = store.get(&host);
+    if pin_needs_confirmation(old_value.as_ref(), &fingerprint)
+        && !confirm_pin_natively(&app, &host, &fingerprint)
+    {
+        return Err("certificate not accepted".into());
+    }
     // A pin that replaces a *different* existing fingerprint is security-
     // significant (cert rotation — or a MITM the user just accepted).
     let changed = matches!(&old_value, Some(Value::String(s)) if *s != fingerprint);
@@ -524,6 +635,88 @@ mod tests {
     /// A well-formed SHA-256 colon-hex fingerprint (32 pairs, 95 chars).
     const VALID: &str = "e3:b0:c4:42:98:fc:1c:14:9a:fb:f4:c8:99:6f:b9:24:\
 27:ae:41:e4:64:9b:93:4c:a4:95:99:1b:78:52:b8:55";
+
+    // The native confirmation guards every pin write that changes what is
+    // trusted; re-accepting the pin already stored asks nothing.
+    #[test]
+    fn a_pin_write_needs_confirmation_unless_it_restates_the_stored_pin() {
+        assert!(pin_needs_confirmation(None, VALID));
+        assert!(pin_needs_confirmation(
+            Some(&Value::String("aa:bb".into())),
+            VALID
+        ));
+        assert!(pin_needs_confirmation(Some(&Value::Null), VALID));
+        assert!(!pin_needs_confirmation(
+            Some(&Value::String(VALID.into())),
+            VALID
+        ));
+    }
+
+    // The active session host is set only from a server frame the proxy itself
+    // relays, never from a renderer command.
+    #[test]
+    fn only_an_auth_ok_frame_activates_the_session() {
+        assert!(is_auth_ok(
+            r#"{"type":"auth_ok","payload":{"user":{"id":1}}}"#
+        ));
+        assert!(!is_auth_ok(r#"{"type":"auth_fail","payload":{}}"#));
+        assert!(!is_auth_ok(
+            r#"{"type":"chat_message","payload":{"content":"auth_ok"}}"#
+        ));
+        assert!(!is_auth_ok(r#"{"payload":{"type":"auth_ok"}}"#));
+        assert!(!is_auth_ok("not json"));
+        assert!(!is_auth_ok(""));
+    }
+
+    #[test]
+    fn a_connection_that_ends_deactivates_only_its_own_session() {
+        let session = crate::active_session::ActiveSession::new();
+        session.set("chat.example.com");
+        // Stale generation: a superseded connection must not clear the host.
+        let generation = AtomicU64::new(2);
+        deactivate_if_current(&session, &generation, 1);
+        assert!(session.ensure("other.example", false).is_err());
+        assert!(session.ensure("chat.example.com", false).is_ok());
+        deactivate_if_current(&session, &generation, 2);
+        assert!(session.ensure("chat.example.com", false).is_err());
+    }
+
+    // DP-54 follow-up: a failed TLS handshake or a refused certificate must be
+    // distinguishable from an unreachable host by the webview. The connect
+    // error and the refused-cert command error both carry the distinct code.
+    #[test]
+    fn a_certificate_connect_error_carries_the_distinct_code() {
+        let raw = tofu::cert_connect_error("certificate for example.com is not yet trusted");
+        let parsed: serde_json::Value = serde_json::from_str(&raw).expect("JSON error body");
+        assert_eq!(
+            parsed.get("error").and_then(serde_json::Value::as_str),
+            Some(tofu::TLS_CERT_ERROR_CODE),
+        );
+        assert!(parsed
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
+    }
+
+    #[test]
+    fn a_tls_handshake_error_is_classified_but_a_plain_io_error_is_not() {
+        use tokio_tungstenite::tungstenite::{error::TlsError, Error};
+        assert!(is_tls_failure(&Error::Tls(TlsError::InvalidDnsName)));
+        // tokio-rustls wraps a rustls rejection inside Error::Io/InvalidData.
+        assert!(is_tls_failure(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid peer certificate: UnknownIssuer",
+        ))));
+        // A dropped or dead host is not a certificate failure.
+        assert!(!is_tls_failure(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "tls handshake eof",
+        ))));
+        assert!(!is_tls_failure(&Error::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionRefused,
+            "Connection refused",
+        ))));
+    }
 
     #[test]
     fn valid_fingerprint_is_accepted() {

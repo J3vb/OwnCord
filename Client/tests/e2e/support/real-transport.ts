@@ -208,6 +208,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "plugin:window|show":
         case "plugin:window|inner_size":
         case "plugin:window|outer_position":
+        // Taskbar attention flash on a notification while unfocused: no real
+        // window exists in this stack, so there is nothing to flash.
+        case "plugin:window|request_user_attention":
         case "plugin:notification|is_permission_granted":
         // Auto-idle's OS idle poll: "the OS cannot say", in-window idle only.
         case "system_idle_ms":

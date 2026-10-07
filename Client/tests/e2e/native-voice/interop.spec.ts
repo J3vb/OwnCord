@@ -456,8 +456,9 @@ test("native and browser peers decode each other's video with the same key", asy
   const browser = await readBrowserPeer(page, "user-2");
   await peer.done;
 
-  // The native camera (RGBA over the frame socket, VP8, E2EE) decodes in the
-  // browser at the published size and a real frame rate, with no decrypt errors.
+  // The native camera (a synthetic source through the host's GStreamer
+  // pipeline, VP8, E2EE) decodes in the browser at the published size and a
+  // real frame rate, with no decrypt errors.
   console.log(
     `browser decoded native video: ${browser.videoFrames} frames in 5 s at ${browser.videoWidth}x${browser.videoHeight}`,
   );
@@ -477,8 +478,12 @@ test("native and browser peers decode each other's video with the same key", asy
     expect.objectContaining({ loopback: true, wrongTokenRefused: true, noTokenRefused: true }),
   ]);
   expect(resources.localTracks).toBe(2);
-  expect(resources.videoSockets).toBe(2);
+  // One open socket: the native peer subscribes to the browser's camera only;
+  // its own camera now captures in the host, so no webview upload socket.
+  expect(resources.videoSockets).toBe(1);
+  expect(resources.cameraCaptures).toBe(1);
   expect(closed.frameSocketGone).toBe(true);
+  expect(closed.cameraCaptures).toBe(0);
   const camBefore = threads.find((t) => t.phase === "camera-before")!.count;
   const camAfter = threads.find((t) => t.phase === "camera-after")!.count;
   console.log(`native peer threads: before=${camBefore} after 5 camera cycles=${camAfter}`);
@@ -489,6 +494,48 @@ test("native and browser peers decode each other's video with the same key", asy
   // VideoFrameTransformer threads it keeps alive. Pinned as the ceiling, as
   // for the join cycles above; docs/architecture/voice-e2ee.md records it.
   expect(camAfter - camBefore).toBeLessThanOrEqual(3 * 5 + 2);
+});
+
+test("a simulcast native camera keeps decoding in the browser", async ({ page }) => {
+  // The app publishes its camera simulcast at every quality but "source",
+  // 1280x720 for the default "high" preset (screenShare.ts), unlike the
+  // 640x360 single-layer camera above.
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key);
+  const peer = runNativePeer([
+    "--url",
+    url,
+    "--token",
+    joinToken("user-2"),
+    "--key",
+    key,
+    "--secs",
+    "20",
+    "--video",
+    "1280x720",
+    "--simulcast",
+  ]);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  const perSecond: number[] = [];
+  for (let i = 0; i < 8; i++) {
+    await resetBrowserMeters(page);
+    await page.waitForTimeout(1_000);
+    perSecond.push((await readBrowserPeer(page, "user-2")).videoFrames);
+  }
+  const browser = await readBrowserPeer(page, "user-2");
+  await peer.done;
+  console.log(
+    `browser decoded simulcast native camera, frames/s: ${perSecond.join(",")} at ${browser.videoWidth}x${browser.videoHeight}`,
+  );
+  // Every second of the window, not just its total: a camera that sends one
+  // frame and then stalls must fail here.
+  expect(Math.min(...perSecond)).toBeGreaterThan(10);
+  expect(browser.videoWidth).toBeGreaterThan(0);
+  expect(browser.encErrors).toBe(0);
 });
 
 test("a native peer with the wrong key decodes no video and is decoded by no one", async ({
@@ -665,4 +712,64 @@ test("a native screen share with the wrong key is decoded by no one", async ({ p
   // Subscribed to the share, and not one frame of it decoded.
   expect(browser.videoFrames).toBe(0);
   expect(browser.encErrors).toBeGreaterThan(0);
+});
+
+// The silent-crash report (#2095): on Linux the app died with camera and
+// screen share on together, in the same process. This runs the native camera
+// and screen capture pipelines together, alongside E2EE, for a few minutes
+// and asserts both decode and the process closes cleanly. It is the soak the
+// PR asks for; a crash log line would be the crash's evidence, not a fix.
+test("native camera and screen share run together with E2EE and close cleanly", async ({
+  page,
+}) => {
+  const key = randomBytes(32).toString("base64");
+  const url = `ws://127.0.0.1:${livekitPort}`;
+  await joinBrowserPeer(page, url, joinToken("user-1"), key, true);
+
+  let resources: Record<string, number> = {};
+  let closed: Record<string, unknown> = {};
+  const peer = runNativePeer(
+    [
+      "--url",
+      url,
+      "--token",
+      joinToken("user-2"),
+      "--key",
+      key,
+      "--secs",
+      "150",
+      "--video",
+      "640x360",
+      "--screen",
+      "1280x720",
+    ],
+    ({ event }) => {
+      if (event.type === "resources") resources = event.resources as Record<string, number>;
+      if (event.type === "closed") closed = event;
+    },
+  );
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2")).videoSubscribed, { timeout: 60_000 })
+    .toBe(true);
+  await expect
+    .poll(async () => (await readBrowserPeer(page, "user-2#screen")).videoSubscribed, {
+      timeout: 60_000,
+    })
+    .toBe(true);
+  await page.waitForTimeout(4_000);
+  await resetBrowserMeters(page);
+  // Both pipelines stay live for the soak window.
+  await page.waitForTimeout(20_000);
+  const camera = await readBrowserPeer(page, "user-2");
+  const screen = await readBrowserPeer(page, "user-2#screen");
+  expect(camera.videoFrames).toBeGreaterThan(20 * 5);
+  expect(screen.videoFrames).toBeGreaterThan(20 * 3);
+  expect(camera.encErrors).toBe(0);
+  expect(screen.encErrors).toBe(0);
+  // The process closes cleanly with both captures released.
+  await peer.done;
+  expect(resources.cameraCaptures).toBe(1);
+  expect(resources.screenCaptures).toBe(1);
+  expect(closed.cameraCaptures).toBe(0);
+  expect(closed.screenCaptures).toBe(0);
 });

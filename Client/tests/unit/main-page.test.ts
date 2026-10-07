@@ -68,7 +68,10 @@ vi.mock("@lib/livekitSession", () => ({
 vi.mock("@lib/notificationSound", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
+  startRingback: vi.fn(),
+  stopRingback: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
+  playVoiceSound: vi.fn(),
 }));
 
 // DP-24: the OS-level call alerts are a lazy chunk the page loads on a ring;
@@ -292,7 +295,7 @@ import { desktop } from "../../src/platform/desktop";
 import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
-import { startRingChime } from "../../src/lib/notificationSound";
+import { startRingChime, startRingback, stopRingback } from "../../src/lib/notificationSound";
 import { alertIncomingCall, alertMissedCall } from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
@@ -352,6 +355,7 @@ function fakeWs(): FakeWsClient {
     onServerBusy: vi.fn(() => () => {}),
     startCertListener: vi.fn(async () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
+    getConnectFailureCode: vi.fn(() => null),
     getState: vi.fn(() => "connected" as ConnectionState),
     _getWs: vi.fn(() => null),
   };
@@ -1257,6 +1261,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
     expect(panel.dataset.state).toBe("unanswered");
+    // The panel is the caller's feedback while the DM is open: no toast too.
+    expect(container.querySelector('[data-testid="toast"]')).toBeNull();
 
     vi.mocked(ws.send).mockClear();
     (panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
@@ -1264,6 +1270,68 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(panel.dataset.state).toBe("outgoing");
 
     // The call timer is the page's to stop.
+    page.destroy?.();
+  });
+
+  it("a callee's decline while the caller is on another channel shows one toast", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    vi.mocked(startRingback).mockClear();
+    vi.mocked(stopRingback).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    expect(startRingback).toHaveBeenCalledTimes(1);
+    // The caller moves on to another channel while the callee decides.
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+
+    expect(stopRingback).toHaveBeenCalledTimes(1);
+    const toasts = container.querySelectorAll('[data-testid="toast"]');
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.textContent).toContain("bob declined");
+
+    page.destroy?.();
+  });
+
+  it("an unanswered ring while the caller is on another channel shows one 'No answer' toast", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+
+    // Catch the outgoing call's own 30s window and run it by hand.
+    const realSetTimeout = globalThis.setTimeout;
+    let ringTimeout: (() => void) | null = null;
+    const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      fn: () => void,
+      ms?: number,
+    ) => {
+      if (ms !== 30_000) return realSetTimeout(fn, ms);
+      ringTimeout = fn;
+      return 0;
+    }) as unknown as typeof setTimeout);
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    timers.mockRestore();
+
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
+    channelsStore.flush();
+
+    expect(ringTimeout).not.toBeNull();
+    ringTimeout!();
+
+    expect(stopRingback).toHaveBeenCalled();
+    const toasts = container.querySelectorAll('[data-testid="toast"]');
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.textContent).toContain("No answer");
+
     page.destroy?.();
   });
 

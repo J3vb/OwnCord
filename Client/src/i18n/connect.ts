@@ -135,6 +135,7 @@ export const connectText = defineCatalog("connect", {
     "This is the first connection to this server, so its certificate is not yet trusted. Verify the fingerprint below out-of-band (e.g. with the server operator) before trusting it — on an untrusted network an attacker could present a fake certificate.",
   "cert.firstUse.fingerprint": "Fingerprint",
   "cert.firstUse.accept": "Trust This Certificate",
+  "cert.notAccepted": "The certificate was not accepted, so the server stays disconnected.",
   "cert.host": "Host",
 
   "connected.title": "Connected!",
@@ -145,6 +146,8 @@ export const connectText = defineCatalog("connect", {
   "session.expired": "Your session expired — sign in again.",
   "session.banned": "You have been banned.",
   "error.serverFallback": "Server error",
+  "error.tlsFailed":
+    "The server's certificate couldn't be verified. Check the server address, or ask the server owner.",
   "error.rateLimited": "Too many requests. Try again later.",
   "error.accountLocked":
     "Your account is temporarily locked after too many failed sign-in attempts. Try again later.",

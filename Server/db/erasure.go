@@ -426,6 +426,7 @@ var erasureStatements = []struct {
 const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
 	 OR json_extract(payload, '$.payload.user.id') = ?1
 	 OR json_extract(payload, '$.payload.from_user_id') = ?1
+	 OR json_extract(payload, '$.payload.referenced_message.user.id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
 

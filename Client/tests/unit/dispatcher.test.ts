@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
@@ -146,6 +146,7 @@ function createMockWs() {
     onServerBusy: vi.fn(() => () => {}),
     onCertMismatch: vi.fn(() => () => {}),
     acceptCertFingerprint: vi.fn(async () => {}),
+    getConnectFailureCode: vi.fn(() => null),
     getState: vi.fn(() => "disconnected" as const),
     _getWs: vi.fn(() => null),
   };
@@ -1020,6 +1021,44 @@ describe("WS Dispatcher", () => {
 
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
     });
+
+    // DP-27: a mention in a channel the user is NOT viewing never reaches this
+    // client as a chat_message (the server sends it to the channel topic only),
+    // so the server pushes the new total per user as mention_count. This is the
+    // taskbar/tray badge's live path.
+    it("repaints a non-viewed channel's badge from the server's mention_count frame", () => {
+      seedChannel();
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+
+      mock.dispatch("mention_count", { channel_id: 5, count: 3 });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(3);
+    });
+
+    it("ignores a mention_count frame for the channel on screen", () => {
+      // P4-03: the frame carries an absolute total, not a delta, so applying
+      // it to the active channel would reintroduce mentions already seen while
+      // it was focused. Its own chat_message handles the badge either way.
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
+      seedChannel();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+
+      mock.dispatch("mention_count", { channel_id: 5, count: 3 });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
+
+    it("ignores a mention_count frame for the active channel while the window is unfocused (P4-03)", () => {
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      onTestFinished(() => focus.mockRestore());
+      seedChannel();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+
+      mock.dispatch("mention_count", { channel_id: 5, count: 3 });
+
+      expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
   });
 
   it("wires presence to members store", () => {
@@ -1759,6 +1798,8 @@ describe("WS Dispatcher", () => {
       // read_states go stale while a channel stays focused (channel_focus is
       // sent once per mount), so a full-ready resync restates non-zero counts
       // for the channel the user is currently reading.
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
       const sender = vi.fn();
       setMarkReadSender(sender);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
@@ -1787,7 +1828,40 @@ describe("WS Dispatcher", () => {
       expect(sender).toHaveBeenCalledWith(1);
     });
 
+    it("keeps the restated badge and sends no mark_read for an unfocused resync", () => {
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      onTestFinished(() => focus.mockRestore());
+      const sender = vi.fn();
+      setMarkReadSender(sender);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+      mock.dispatch("ready", {
+        channels: [
+          {
+            id: 1,
+            name: "general",
+            type: "text",
+            category: null,
+            position: 0,
+            unread_count: 4,
+            mention_count: 2,
+          },
+        ],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      });
+
+      const ch = channelsStore.getState().channels.get(1);
+      expect(ch?.unreadCount).toBe(4);
+      expect(ch?.mentionCount).toBe(2);
+      expect(sender).not.toHaveBeenCalled();
+    });
+
     it("clears the badge for the actively viewed DM too", () => {
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
       const sender = vi.fn();
       setMarkReadSender(sender);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
@@ -4733,6 +4807,9 @@ describe("WS Dispatcher", () => {
     });
 
     it("updates DM preview (no unread) when DM channel is active", () => {
+      // P4-03: an active DM only skips the badge while the window has focus.
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
       authStore.setState((prev) => ({
         ...prev,
@@ -4810,6 +4887,9 @@ describe("WS Dispatcher", () => {
     });
 
     it("does not badge a DM mention in the focused DM", () => {
+      // P4-03: an active DM only skips the badge while the window has focus.
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+      onTestFinished(() => focus.mockRestore());
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
       authStore.setState((prev) => ({
         ...prev,

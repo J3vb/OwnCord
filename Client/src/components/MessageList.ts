@@ -27,6 +27,7 @@ import {
   isSameDay,
   renderDayDivider,
   renderNewDivider,
+  renderUnreadBar,
   renderMessage,
   authorAvatarKey,
   refreshConnectionControls,
@@ -38,10 +39,11 @@ import { highlightsCurrentUser } from "@lib/mentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
-import { getUnreadOnOpen } from "@stores/channels.store";
+import { channelsStore, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
+  formatBadgeCount,
   formatMessageTimestamp,
   getUserRole,
   resolveAuthor,
@@ -50,6 +52,7 @@ import {
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
+import { markChannelRead, hasUnread, isChannelAway } from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -97,6 +100,10 @@ const SCROLL_TOP_VIEWPORTS = 2;
  *  this long before retrying, unless the reader leaves the zone first. */
 const OLDER_RETRY_COOLDOWN_MS = 5000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
+const JUMP_RECENTRE_MS = 3000;
+
+/** Headroom above the NEW divider on open: the unread bar overlays the top of the viewport. */
+const UNREAD_BAR_CLEARANCE = 40;
 
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
@@ -302,6 +309,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let bottomSpacer: HTMLDivElement | null = null;
   let contentContainer: HTMLDivElement | null = null;
   let scrollToBottomBtn: HTMLButtonElement | null = null;
+  let unreadBar: HTMLDivElement | null = null;
+  let unreadBarLabel: HTMLSpanElement | null = null;
+  let unreadBarDismissed = false;
+  /** The visit still owes the reader a jump to the NEW divider (cleared on first use). */
+  let openAtDividerPending = false;
+  let scrollToBottomCount: HTMLSpanElement | null = null;
+  /** Messages from others that landed below the view since the reader scrolled up. */
+  let newBelowCount = 0;
   let jumpToPresentPill: HTMLButtonElement | null = null;
   let renderedStart = 0;
   let renderedEnd = 0;
@@ -483,15 +498,94 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (scrollToBottomBtn === null) return;
     if (isNearBottom()) {
       scrollToBottomBtn.classList.remove("visible");
+      newBelowCount = 0;
     } else {
       scrollToBottomBtn.classList.add("visible");
     }
+    if (scrollToBottomCount === null) return;
+    const shown = formatBadgeCount(newBelowCount);
+    scrollToBottomCount.hidden = newBelowCount === 0;
+    scrollToBottomCount.textContent = newBelowCount === 0 ? "" : shown;
+    scrollToBottomBtn.setAttribute(
+      "aria-label",
+      newBelowCount === 0
+        ? messagingText("scrollToBottom")
+        : messagingText("scrollToBottomNew", { count: newBelowCount, shown }),
+    );
   }
 
   /** The pill is the only signal that the bottom of the list is not "now". */
   function updateJumpToPresentPill(): void {
     if (jumpToPresentPill === null) return;
     jumpToPresentPill.classList.toggle("visible", isWindowDetached(options.channelId));
+  }
+
+  /** Move the view to the NEW divider once one exists. Does not force a row rebuild (R2). */
+  function openAtDividerIfReady(): boolean {
+    if (!openAtDividerPending || root === null) return false;
+    const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
+    if (idx === -1) return false;
+    openAtDividerPending = false;
+    // The caller decides whether to re-window now; the scroll event does on the next frame.
+    root.scrollTop = Math.max(0, offsetBefore(idx) - UNREAD_BAR_CLEARANCE);
+    updateScrollToBottomBtn();
+    return true;
+  }
+
+  /** P4-03 step B: the bar shows while the visit has unread it has not dismissed. */
+  function updateUnreadBar(): void {
+    if (unreadBar === null || unreadBarLabel === null) return;
+    let text = "";
+    if (!unreadBarDismissed && unreadOnOpen > 0) {
+      const shown = formatBadgeCount(openedUnread);
+      if (unreadOnOpen === Infinity) {
+        text = messagingText("unreadBar.capped", { shown });
+      } else {
+        // The divider latches to the first unread message; until it does (a
+        // deferred revisit) there is no time to show.
+        const anchor = allMessages.find((m) => m.id === newDividerAnchorId);
+        if (anchor !== undefined) {
+          text = messagingText("unreadBar.since", {
+            count: openedUnread,
+            shown,
+            time: formatMessageTimestamp(anchor.timestamp),
+          });
+        }
+      }
+    }
+    unreadBarLabel.textContent = text;
+    unreadBar.hidden = text === "";
+  }
+
+  function dismissUnreadBar(): void {
+    unreadBarDismissed = true;
+    updateUnreadBar();
+  }
+
+  /** A messagesByChannel / historyLoadState change landed: refresh the bar and the open position. */
+  function settleUnreadNav(): void {
+    // Only while the reader is still at the bottom the mount left them at.
+    if (openAtDividerPending && isNearBottom()) openAtDividerIfReady();
+    updateUnreadBar();
+  }
+
+  /**
+   * P4-03 step A: the channel is read once the reader has seen its bottom with
+   * the window focused. Fires on every scroll and on window focus; the
+   * hasUnread gate keeps a plain scroll from spending the server's 5/s
+   * mark_read budget, and the bottom of a detached window is not the present
+   * (OC-0204), so that case is excluded too (isChannelAway, lib/read-state.ts).
+   * The bottom-in-view check alone also covers focus returning while the reader
+   * is scrolled up.
+   */
+  function markReadIfSeen(): void {
+    if (root === null) return;
+    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (!isNearBottom()) return;
+    if (isChannelAway(options.channelId)) return;
+    dismissUnreadBar();
+    if (!hasUnread(options.channelId)) return;
+    markChannelRead(options.channelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -614,6 +708,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     for (const owner of rowOwners.values()) owner.destroy();
     rowOwners.clear();
   }
+
+  // The last jumped-to message, re-centred from the resize callback while
+  // content above it is still sizing.
+  let jumpTarget: { readonly messageId: number; readonly until: number } | null = null;
 
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
@@ -1099,6 +1197,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Update floating scroll-to-bottom button visibility
     updateScrollToBottomBtn();
+    // Reaching the bottom counts as seeing it (P4-03 step A).
+    markReadIfSeen();
 
     // Debounce virtual window updates to animation frames
     if (scrollRafId === 0) {
@@ -1132,7 +1232,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       class: "scroll-to-bottom-btn",
       "aria-label": messagingText("scrollToBottom"),
     });
-    scrollToBottomBtn.textContent = "↓";
+    scrollToBottomBtn.append("↓");
+    scrollToBottomCount = createElement("span", {
+      class: "scroll-to-bottom-count",
+      "data-testid": "scroll-to-bottom-count",
+      hidden: "",
+    });
+    scrollToBottomBtn.appendChild(scrollToBottomCount);
     scrollToBottomBtn.addEventListener(
       "click",
       () => {
@@ -1141,6 +1247,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       },
       { signal: disposable.signal },
     );
+
+    const unreadBarParts = renderUnreadBar(() => {
+      markChannelRead(options.channelId);
+      dismissUnreadBar();
+    }, disposable.signal);
+    unreadBar = unreadBarParts.bar;
+    unreadBarLabel = unreadBarParts.label;
 
     jumpToPresentPill = createElement("button", {
       class: "jump-to-present-pill",
@@ -1158,11 +1271,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     region.appendChild(root);
     region.appendChild(scrollToBottomBtn);
     region.appendChild(jumpToPresentPill);
+    region.appendChild(unreadBar);
 
     root.addEventListener("scroll", handleScroll, {
       signal: disposable.signal,
       passive: true,
     });
+
+    // Focus returning with the bottom already in view counts as seeing it
+    // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
+    window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
     // Batched via RAF with anchor-based scroll preservation.
@@ -1173,6 +1291,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
         if (root === null || contentContainer === null) return;
+
+        const jumpIdx =
+          jumpTarget !== null && Date.now() < jumpTarget.until
+            ? virtualItems.findIndex(
+                (item) => item.kind === "message" && item.message.id === jumpTarget?.messageId,
+              )
+            : -1;
+        if (jumpIdx !== -1) {
+          measureRendered();
+          updateSpacers();
+          centreOnIndex(jumpIdx);
+          return;
+        }
 
         const atBottom = isNearBottom();
 
@@ -1198,10 +1329,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     parentContainer.appendChild(region);
 
+    openAtDividerPending = unreadOnOpen > 0;
     renderAll();
     updateJumpToPresentPill();
-    scrollToBottom();
-    const initialScrollRaf = requestAnimationFrame(() => scrollToBottom());
+    const openedAtDivider = openAtDividerIfReady();
+    if (openedAtDivider) renderWindow();
+    updateUnreadBar();
+    // A deferred divider still moves the view later, so only the bottom
+    // scrolls are skipped when the open already landed on it.
+    if (!openedAtDivider) scrollToBottom();
+    const initialScrollRaf = requestAnimationFrame(() => {
+      if (!openedAtDivider) scrollToBottom();
+    });
     disposable.signal.addEventListener("abort", () => cancelAnimationFrame(initialScrollRaf));
 
     // A full-ready resync refetches a detached window around this (P2-T4).
@@ -1219,9 +1358,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         // array references are unchanged) never trigger a re-render here.
         (s) => s.messagesByChannel.get(options.channelId),
         () => {
+          // Optimistic rows (id 0) sit at the tail; live rows land before them.
+          const prevLast = allMessages.findLast((m) => m.id > 0)?.id ?? 0;
+          const wasBottom = isNearBottom();
           if (!patchRows()) {
             renderAll();
           }
+          if (!wasBottom && prevLast > 0 && allMessages.some((m) => m.id === prevLast)) {
+            // Only an append counts: a window swap drops the previous last row.
+            // Older ids (a prepend) and the reader's own rows never count.
+            for (const m of allMessages) {
+              if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
+            }
+          }
+          updateScrollToBottomBtn();
+          settleUnreadNav();
         },
       ),
     );
@@ -1236,6 +1387,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         (s) => s.historyLoadState.get(options.channelId),
         () => {
           if (virtualItems.length === 0 || (newDividerDeferred && !patchRows())) renderAll();
+          settleUnreadNav();
         },
       ),
     );
@@ -1301,6 +1453,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // outside the window get fresh text when renderWindow builds them. Owned
     // by disposable.signal: destroy() releases the pending timer.
     atEachMidnight(disposable.signal, relabelRenderedTimes);
+
+    // Switching the 12h/24h clock preference relabels the rendered rows in
+    // place, the same way midnight does. Owned by disposable.signal, so the
+    // listener dies with the component.
+    window.addEventListener(
+      "owncord:pref-change",
+      ((e: CustomEvent<{ key: string }>) => {
+        if (e.detail.key === "timeFormat") relabelRenderedTimes();
+      }) as EventListener,
+      { signal: disposable.signal },
+    );
   }
 
   /**
@@ -1446,8 +1609,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     topSpacer = null;
     bottomSpacer = null;
     scrollToBottomBtn = null;
+    unreadBar = null;
+    unreadBarLabel = null;
+    scrollToBottomCount = null;
+    newBelowCount = 0;
     jumpToPresentPill = null;
     olderLoadingRow = null;
+  }
+
+  /** Scroll so row `idx` is centred; false when it was already centred. */
+  function centreOnIndex(idx: number): boolean {
+    if (root === null) return false;
+    const centred = Math.max(0, offsetBefore(idx) - (root.clientHeight - getItemHeight(idx)) / 2);
+    if (centred === root.scrollTop) return false;
+    root.scrollTop = centred;
+    renderWindow();
+    return true;
   }
 
   function scrollToMessage(messageId: number): boolean {
@@ -1472,6 +1649,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // that never rendered. This lets callers (e.g. MessageJump) fall back to
     // fetching the around-window instead of treating this as a landed jump.
     if (renderedStart < 0) return false;
+
+    // Rendering measured the target (and its neighbours), so the top-aligned
+    // offset above was built from estimates. Centre it with the real height.
+    // Each move can render and measure new rows above the target, shifting
+    // its offset again, so settle for a few passes (usually one or two).
+    for (let pass = 0; pass < 3; pass++) {
+      if (!centreOnIndex(idx)) break;
+    }
+    // Late-sizing content (previews, images) above the target keeps it
+    // centred until the highlight flash ends.
+    jumpTarget = { messageId, until: Date.now() + JUMP_RECENTRE_MS };
 
     // Briefly highlight the target message element
     if (contentContainer !== null) {

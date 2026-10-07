@@ -59,8 +59,10 @@ describe("loadEmojiCatalog", () => {
   });
 
   it("names an emoji by its Discord name ahead of its Unicode shortcode", () => {
-    expect(entry("❤️").names).toEqual(["heart", "love", "red_heart"]);
+    // The complete Discord table leads, then the curated names, then the code.
+    expect(entry("❤️").names).toEqual(["heart", "red_heart", "love"]);
     expect(entry("⭐").names).toEqual(["star"]);
+    expect(entry("👍").names[0]).toBe("thumbsup");
     expect(emojiMatches(entry("❤️"), "red heart")).toBe(true);
   });
 

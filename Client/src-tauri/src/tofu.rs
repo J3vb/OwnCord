@@ -7,8 +7,9 @@
 // handshake, then reject the connection and surface the fingerprint so the user
 // can confirm it (via `accept_cert_fingerprint`) before any credential-bearing
 // request is sent. `decide` is a pure function with no persistence side effects;
-// the only writer of a pin is the explicit `accept_cert_fingerprint` command,
-// with one exception (B11-5): a routine public-CA renewal. When the pinned leaf
+// the only user-confirmed writer of a pin is the explicit
+// `accept_cert_fingerprint` command, with one exception (B11-5): a routine
+// public-CA renewal. When the pinned leaf
 // was itself publicly valid for the host and the new leaf is too, `evaluate`
 // re-pins silently instead of prompting. Every other change still prompts.
 
@@ -18,6 +19,20 @@ use std::sync::Arc;
 use tauri::{AppHandle, Runtime};
 
 use crate::constants::{CERTS_STORE, CERT_WEB_PKI_STORE};
+
+/// The distinct code a loopback proxy reports for a TLS/certificate failure.
+/// The webview maps it to its own certificate copy (DP-54 follow-up): without
+/// it, a refused or failed handshake is indistinguishable from an unreachable
+/// server. Kept in step with `Client/src/lib/api.ts`'s `TLS_CERT_CODE`.
+pub(crate) const TLS_CERT_ERROR_CODE: &str = "TLS_CERT_UNVERIFIED";
+
+/// A small JSON error body carrying [`TLS_CERT_ERROR_CODE`], for a websocket
+/// (`ws_connect`) command error. The `cert-tofu` event still drives the
+/// accept/reject modal; this is what lets the webview tell a certificate
+/// failure apart from an unreachable server.
+pub(crate) fn cert_connect_error(message: &str) -> String {
+    serde_json::json!({ "error": TLS_CERT_ERROR_CODE, "message": message }).to_string()
+}
 
 /// What the handshake showed: the leaf's fingerprint, and whether the chain
 /// validated against the public web-PKI roots for the connection's DNS name.

@@ -74,6 +74,39 @@ export function signingKeyHolders(workflows) {
     .map(({ name }) => name);
 }
 
+// e2e-auto-confirm skips the native certificate-pin confirmation dialog. Only
+// ci.yml's native E2E build may enable it; shipped builds (release, nightly,
+// artifact smoke) must keep the dialog.
+const AUTO_CONFIRM_HOLDER = "ci.yml";
+
+export function autoConfirmEnablers(workflows) {
+  return workflows
+    .filter(({ name, src }) => name !== AUTO_CONFIRM_HOLDER && /e2e-auto-confirm/.test(src))
+    .map(({ name }) => name);
+}
+
+export function autoConfirmIsDefault(cargoSrc) {
+  return /^default\s*=\s*\[[^\]]*e2e-auto-confirm/m.test(cargoSrc);
+}
+
+// The Linux client links gstreamer-rs for native camera capture, whose -sys
+// crates probe pkg-config at build time. An apt install that sets up a Tauri
+// build (it lists libwebkit2gtk-4.1-dev) without these fails the build.
+const GSTREAMER_BUILD_DEPS = ["libgstreamer1.0-dev", "libgstreamer-plugins-base1.0-dev"];
+
+export function gstreamerBuildDepsMissing(workflows) {
+  return workflows
+    .filter(({ src }) =>
+      // One install command: from `apt-get install` through its `\` continuations.
+      (src.match(/apt-get install(?:[^\n]*\\\n)*[^\n]*/g) ?? []).some(
+        (cmd) =>
+          /\blibwebkit2gtk-4\.1-dev\b/.test(cmd) &&
+          !GSTREAMER_BUILD_DEPS.every((dep) => cmd.includes(dep)),
+      ),
+    )
+    .map(({ name }) => name);
+}
+
 function main() {
   const failures = [];
 
@@ -101,11 +134,28 @@ function main() {
     );
   }
 
+  for (const name of autoConfirmEnablers(workflows)) {
+    failures.push(
+      `.github/workflows/${name}: enables e2e-auto-confirm — only ${AUTO_CONFIRM_HOLDER} may; shipped builds must keep the native cert-pin dialog`,
+    );
+  }
+  for (const name of gstreamerBuildDepsMissing(workflows)) {
+    failures.push(
+      `.github/workflows/${name}: installs Tauri's Linux build deps without ${GSTREAMER_BUILD_DEPS.join(" and ")} — the client's gstreamer-sys build needs them`,
+    );
+  }
+  const cargo = "Client/src-tauri/Cargo.toml";
+  if (autoConfirmIsDefault(readFileSync(join(ROOT, cargo), "utf8"))) {
+    failures.push(
+      `${cargo}: e2e-auto-confirm is in the default features — shipped builds would skip the cert-pin dialog`,
+    );
+  }
+
   if (failures.length) {
     console.error(`\n${failures.length} workflow guard(s) missing:\n`);
     for (const f of failures) console.error(`  ${f}`);
     console.error(
-      "\nThese guards bound who can start a metered run, how long it may last, and which workflow may sign updates.",
+      "\nThese guards bound who can start a metered run, how long it may last, which workflow may sign updates, and what a Linux client build installs.",
     );
     process.exit(1);
   }

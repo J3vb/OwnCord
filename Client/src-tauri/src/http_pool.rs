@@ -70,9 +70,26 @@ const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 #[cfg(not(windows))]
 const KEEPALIVE_PROBES: u32 = 3;
 
-/// The reply the webview gets when the TOFU check refuses a connection.
-pub(crate) const BAD_GATEWAY: &[u8] =
-    b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+/// The reply the webview gets when a connection is refused for a TLS reason:
+/// the TOFU check rejected a first-use or changed certificate, or the TLS
+/// handshake failed. It is a 502 carrying a small JSON body with the distinct
+/// `TLS_CERT_UNVERIFIED` code, so the webview can tell a certificate failure
+/// apart from an unreachable server (DP-54 follow-up). The TOFU decision flow
+/// itself (what prompts, what is pinned) is unchanged — only the refusal's
+/// shape.
+pub(crate) fn cert_error_response() -> Vec<u8> {
+    let body = serde_json::json!({
+        "error": crate::tofu::TLS_CERT_ERROR_CODE,
+        "message": crate::text::CERT_UNVERIFIED,
+    })
+    .to_string();
+    format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .into_bytes()
+}
 
 /// Cap on a response head, and on a chunked body's trailer section.
 const MAX_RESPONSE_HEAD: usize = 64 * 1024;
@@ -557,8 +574,10 @@ where
     }
 }
 
-/// A freshly dialed upstream connection: verified by the TOFU check (with the
-/// fingerprint it verified), or refused by it.
+/// A freshly dialed upstream connection that passed the TOFU check (with the
+/// fingerprint it verified), or one refused for a TLS reason — a first-use or
+/// changed certificate, or a failed handshake. Both refusals answer the webview
+/// with the distinct certificate code via [`cert_error_response`].
 pub(crate) enum Fresh<S> {
     Verified(S, String),
     Rejected(BoxError),
@@ -599,7 +618,7 @@ where
     let (stream, fingerprint) = match dial().await? {
         Fresh::Verified(stream, fingerprint) => (stream, fingerprint),
         Fresh::Rejected(e) => {
-            let _ = local.write_all(BAD_GATEWAY).await;
+            let _ = local.write_all(&cert_error_response()).await;
             return Err(e);
         }
     };
@@ -1013,6 +1032,38 @@ mod tests {
         assert!(
             !pooled,
             "an out-of-sync connection would answer the next request wrongly"
+        );
+    }
+
+    // DP-54 follow-up: a tunnel that refuses a certificate must say so with a
+    // distinct code, not an empty 502, so the webview can show the certificate
+    // message instead of the generic unreachable copy. The TOFU decision flow
+    // is unchanged — only the refusal's body.
+    #[test]
+    fn a_certificate_refusal_is_a_json_502_carrying_the_distinct_code() {
+        let response = cert_error_response();
+        let text = String::from_utf8(response).expect("response is valid utf-8");
+        let (head, body) = text
+            .split_once("\r\n\r\n")
+            .expect("the response has a header/body boundary");
+        assert!(head.starts_with("HTTP/1.1 502 "), "head: {head:?}");
+        assert!(
+            head.to_ascii_lowercase()
+                .contains("content-type: application/json"),
+            "the webview must parse a JSON body: {head:?}"
+        );
+        let declar: Option<&str> = head
+            .lines()
+            .find_map(|l| l.strip_prefix("Content-Length: "));
+        assert_eq!(
+            declar.and_then(|n| n.trim().parse::<usize>().ok()),
+            Some(body.len()),
+            "the declared length must match the body"
+        );
+        let parsed: serde_json::Value = serde_json::from_str(body).expect("body is JSON");
+        assert_eq!(
+            parsed.get("error").and_then(serde_json::Value::as_str),
+            Some(crate::tofu::TLS_CERT_ERROR_CODE),
         );
     }
 

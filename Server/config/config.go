@@ -783,10 +783,10 @@ func Load(cfgPath string) (*Config, error) {
 }
 
 // loadBytes builds a Config from raw YAML: compiled defaults, then the file,
-// then the OWNCORD_* environment. Unmarshal overwrites only the keys a
-// document actually names, so a section that is present but empty — a bare
-// `voice:`, or one whose children are all commented out — leaves its defaults
-// in place and needs no refill pass.
+// then the admin-panel overrides file, then the OWNCORD_* environment.
+// Unmarshal overwrites only the keys a document actually names, so a section
+// that is present but empty — a bare `voice:`, or one whose children are all
+// commented out — leaves its defaults in place and needs no refill pass.
 //
 // The environment layer is marshalled to YAML and unmarshalled through the
 // same path as the file, never spliced into text, so a value containing YAML
@@ -796,9 +796,33 @@ func Load(cfgPath string) (*Config, error) {
 // the file it is about to write must survive the load path the server boots
 // with, and that path now has an environment layer in it.
 func loadBytes(raw []byte, cfgPath string) (*Config, error) {
+	cfg, err := loadBytesWith(raw, cfgPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
+		return nil, fmt.Errorf("applying voice defaults: %w", err)
+	}
+	return cfg, nil
+}
+
+// loadBytesWith builds a Config with the overrides layer injected and no
+// generation side effects. A nil overrides map reads the overrides file (Load
+// and Save's verifyLoadable gate); Preview passes the current file merged with
+// the pending changes instead. loadBytes calls this and then generates the
+// runtime LiveKit credentials.
+func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Config, error) {
 	cfg := defaults()
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
+	}
+	// The admin panel's overrides sit between the file and the environment.
+	if overrides == nil {
+		if err := applyOverrideLayer(&cfg); err != nil {
+			return nil, err
+		}
+	} else if err := applyOverrides(&cfg, overrides); err != nil {
+		return nil, err
 	}
 	env, err := envOverrides()
 	if err != nil {
@@ -819,9 +843,6 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 	applyBounds(&cfg)
 	if err := normalizeUploadExtensions(&cfg.Upload); err != nil {
 		return nil, err
-	}
-	if err := ensureVoiceCredentials(&cfg.Voice); err != nil {
-		return nil, fmt.Errorf("applying voice defaults: %w", err)
 	}
 	return &cfg, nil
 }

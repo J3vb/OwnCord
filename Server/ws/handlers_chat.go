@@ -53,21 +53,22 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	}
 
 	broadcast := buildChatMessage(chatMessageArgs{
-		ClientMessageID:  sendCmd.ClientMessageID,
-		MsgID:            result.MessageID,
-		ChannelID:        sendCmd.ChannelID,
-		UserID:           info.UserID,
-		Username:         info.Username,
-		Avatar:           info.Avatar,
-		DisplayName:      info.DisplayName,
-		RoleName:         info.RoleName,
-		Content:          result.Content,
-		Timestamp:        result.Timestamp,
-		ReplyTo:          sendCmd.ReplyTo,
-		Attachments:      attData,
-		Mentions:         result.Mentions,
-		MentionsEveryone: result.MentionsEveryone,
-		MentionsHere:     result.MentionsHere,
+		ClientMessageID:   sendCmd.ClientMessageID,
+		MsgID:             result.MessageID,
+		ChannelID:         sendCmd.ChannelID,
+		UserID:            info.UserID,
+		Username:          info.Username,
+		Avatar:            info.Avatar,
+		DisplayName:       info.DisplayName,
+		RoleName:          info.RoleName,
+		Content:           result.Content,
+		Timestamp:         result.Timestamp,
+		ReplyTo:           sendCmd.ReplyTo,
+		Attachments:       attData,
+		Mentions:          result.Mentions,
+		MentionsEveryone:  result.MentionsEveryone,
+		MentionsHere:      result.MentionsHere,
+		ReferencedMessage: result.ReferencedMessage,
 	})
 
 	if !result.IsDM {

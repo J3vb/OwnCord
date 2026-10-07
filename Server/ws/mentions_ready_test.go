@@ -73,6 +73,67 @@ func TestChatSend_BroadcastCarriesMentions(t *testing.T) {
 	}
 }
 
+// TestChatSend_MentionReachesUnfocusedReaderLive is DP-27's end-to-end proof:
+// a reader focused on no channel (so it holds no subscription to the mentioned
+// channel's topic and would never receive the chat_message) still gets a
+// targeted mention_count frame carrying its new total, so the taskbar/tray and
+// sidebar badge update without waiting for a reconnect.
+func TestChatSend_MentionReachesUnfocusedReaderLive(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	// No mention worker is started here, so the inline fallback runs the badge
+	// write; RunBackgroundInlineForTest makes it synchronous.
+	hub.RunMentionCountsInlineForTest()
+
+	author := seedCoverageOwner(t, database, "live-author") // owner role holds MENTION_EVERYONE
+	target := seedCoverageOwner(t, database, "live-target")
+	chID := seedTestChannel(t, database, "live-chan")
+
+	authorSend := make(chan []byte, 32)
+	authorClient := ws.NewTestClientWithUser(hub, author, chID, authorSend)
+	hub.Register(authorClient)
+	waitRegistered(t, hub, authorClient)
+
+	// The target is connected but viewing no channel: no ChannelTopic(chID)
+	// subscription, so the chat_message broadcast cannot reach it.
+	targetSend := make(chan []byte, 32)
+	targetClient := ws.NewTestClientWithUser(hub, target, 0, targetSend)
+	hub.Register(targetClient)
+	waitRegistered(t, hub, targetClient)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type": "chat_send",
+		"payload": map[string]any{
+			"channel_id": chID,
+			"content":    "@live-target please look",
+		},
+	})
+	hub.HandleMessageForTest(authorClient, raw)
+
+	var found bool
+	for _, msg := range drainChanTimeout(targetSend, 500*time.Millisecond) {
+		var env struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ChannelID int64 `json:"channel_id"`
+				Count     int64 `json:"count"`
+			} `json:"payload"`
+		}
+		if json.Unmarshal(msg, &env) != nil || env.Type != "mention_count" {
+			continue
+		}
+		found = true
+		if env.Payload.ChannelID != chID {
+			t.Errorf("channel_id = %d, want %d", env.Payload.ChannelID, chID)
+		}
+		if env.Payload.Count != 1 {
+			t.Errorf("count = %d, want 1", env.Payload.Count)
+		}
+	}
+	if !found {
+		t.Fatal("unfocused target received no mention_count frame")
+	}
+}
+
 // TestChatSend_BroadcastDistinguishesHereFromEveryone locks OC-0271: the wire
 // must carry mentions_here alongside mentions_everyone so a client replaying
 // this frame after a reconnect can tell a here-only fan-out (which mention

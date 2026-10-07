@@ -28,6 +28,8 @@ import {
   PICKER_DISMISSED,
   PORTAL_NOT_STARTED,
 } from "../features/voice/native/platform";
+import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTrack";
+import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 
 const log = createLogger("screenShare");
@@ -217,12 +219,35 @@ export function rollbackPendingVideo(id: string): "camera" | "screen" | undefine
 
 /** Mutable state for the manually published camera track. */
 export interface CameraTrackState extends GenerationGuarded {
-  manualCameraTrack: LocalVideoTrack | null;
+  manualCameraTrack: LocalVideoTrack | NativeCameraTrack | null;
+}
+
+/** The native camera publication surface `NativeRoom` adds to
+ *  `localParticipant`, reached through a cast because the shared modules see
+ *  livekit-client's `Room`. Captures in the host so it survives a hidden
+ *  window; the returned track is a `NativeCameraTrack`. */
+interface NativeCameraParticipant {
+  createCameraTracks(options: {
+    source?: string;
+    simulcast?: boolean;
+    videoEncoding?: { maxBitrate: number; maxFramerate?: number };
+  }): Promise<NativeCameraTrack[]>;
+}
+
+function hasCameraTracks(
+  participant: Room["localParticipant"],
+): participant is Room["localParticipant"] & NativeCameraParticipant {
+  return typeof (participant as Partial<NativeCameraParticipant>).createCameraTracks === "function";
 }
 
 /** Unpublishing can reject later during WebRTC renegotiation. Track cleanup
- *  must proceed immediately and contain that asynchronous failure too. */
-function unpublishManualTrack(room: Room, track: LocalTrack): void {
+ *  must proceed immediately and contain that asynchronous failure too. Takes
+ *  any track with a `mediaStreamTrack` (browser `LocalTrack` or a native
+ *  camera/screen track). */
+function unpublishManualTrack(
+  room: Room,
+  track: LocalTrack | { mediaStreamTrack: MediaStreamTrack },
+): void {
   try {
     void room.localParticipant.unpublishTrack(track.mediaStreamTrack).catch((err: unknown) => {
       log.warn("Failed to unpublish stopped video track (non-fatal)", err);
@@ -248,16 +273,51 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     deps.onError(voiceText("share.joinVoiceFirst"));
     return;
   }
+  const generation = state.generation ?? 0;
   setLocalCamera(true);
   const quality = getStreamQuality();
-  const generation = state.generation ?? 0;
+  let cameraEndedCleanup: (() => void) | undefined;
   try {
+    // Linux captures in the backend, which needs GStreamer's camera elements:
+    // without them no capture can ever start, so name the missing support
+    // rather than failing later with a generic "no camera".
+    if (hasCameraTracks(room.localParticipant)) {
+      const support = await nativeCameraSupport();
+      if ((state.generation ?? 0) !== generation) {
+        return;
+      }
+      if (support !== null && !support.available) {
+        log.warn("Cannot enable camera: native camera support is missing", support.missing);
+        deps.onError(voiceText("share.gstreamerMissing"));
+        setLocalCamera(false);
+        return;
+      }
+    }
     const savedVideoDevice = loadPref<string>("videoInputDevice", "");
     stopManualCameraTrack(state, room);
-    const videoTrack = await createLocalVideoTrack({
-      ...CAMERA_PRESETS[quality],
-      ...(savedVideoDevice ? { deviceId: savedVideoDevice } : {}),
-    });
+    // Linux captures in the native backend (WebKitGTK freezes a hidden page's
+    // <video>, which stalled the webview pump): the room's `createCameraTracks`
+    // stands in for `createLocalVideoTrack` and its track previews the host
+    // capture over the frame socket. Windows and macOS keep the web path. The
+    // cast is the same seam the native room crosses: `NativeCameraTrack` is
+    // structurally the `LocalVideoTrack` slice this function uses.
+    const videoTrack = (
+      hasCameraTracks(room.localParticipant)
+        ? (
+            await room.localParticipant.createCameraTracks({
+              source: Track.Source.Camera,
+              simulcast: quality !== "source",
+              videoEncoding: {
+                maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
+                maxFramerate: quality === "low" ? 15 : 30,
+              },
+            })
+          )[0]!
+        : await createLocalVideoTrack({
+            ...CAMERA_PRESETS[quality],
+            ...(savedVideoDevice ? { deviceId: savedVideoDevice } : {}),
+          })
+    ) as LocalVideoTrack;
     if ((state.generation ?? 0) !== generation) {
       // A disableCamera ran to completion while getUserMedia was pending —
       // it already reset localCamera and sent voice_camera(false).
@@ -266,6 +326,30 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       return;
     }
     state.manualCameraTrack = videoTrack;
+    // The `ended` listener is per-track and self-scoped: it acts only while
+    // this track is still the reported camera, independent of any other stop
+    // path.
+    const onEnded = (): void => {
+      if (
+        (state.generation ?? 0) !== generation ||
+        state.manualCameraTrack !== videoTrack ||
+        deps.getRoom() !== room ||
+        deps.getWs() !== ws
+      ) {
+        return;
+      }
+      log.info("Camera track ended externally (device unplugged)");
+      void disableCamera(state, deps);
+    };
+    const removeEndedListener = (): void => {
+      videoTrack.mediaStreamTrack.removeEventListener("ended", onEnded);
+    };
+    cameraEndedCleanup = removeEndedListener;
+    videoTrack.mediaStreamTrack.addEventListener("ended", onEnded, { once: true });
+    if (videoTrack.mediaStreamTrack.readyState === "ended") {
+      await disableCamera(state, deps);
+      return;
+    }
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
       simulcast: quality !== "source",
@@ -274,12 +358,14 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
         maxFramerate: quality === "low" ? 15 : 30,
       },
     });
-    if ((state.generation ?? 0) !== generation) {
-      // A disableCamera ran to completion while publishTrack was in flight —
-      // it already reset localCamera and sent voice_camera(false). The publish
-      // may have landed after its unpublish, so undo it again, and stay silent:
-      // announcing voice_camera(true) now would override the disable's final
-      // word on the server.
+    if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
+      // A disableCamera (or the track unplugging) ran to completion while
+      // publishTrack was in flight — it already reset localCamera, stopped the
+      // track and sent voice_camera(false). The publish may have landed after
+      // its unpublish, so undo it again, and stay silent: announcing
+      // voice_camera(true) now would override the disable's final word on the
+      // server.
+      removeEndedListener();
       unpublishManualTrack(room, videoTrack);
       videoTrack.stop();
       if (state.manualCameraTrack === videoTrack) state.manualCameraTrack = null;
@@ -290,6 +376,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", { quality, maxBitrate: CAMERA_PUBLISH_BITRATES[quality] });
   } catch (err) {
+    cameraEndedCleanup?.();
     if ((state.generation ?? 0) !== generation) {
       // A disableCamera (and possibly a newer enableCamera) already ran to
       // completion while this attempt's device acquisition/publish was in

@@ -232,6 +232,20 @@ type MessageAPIResponse struct {
 	// MentionsEveryone reports an authorized @everyone/@here.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// ReferencedMessage is the reply parent's snippet, computed at read time
+	// (never stored). Null when this is not a reply or the parent is gone or
+	// in another channel.
+	ReferencedMessage *ReferencedMessage `json:"referenced_message"`
+}
+
+// ReferencedMessage is the snippet of a reply's parent. A deleted parent is
+// redacted to {id, deleted: true}: no author, no content.
+type ReferencedMessage struct {
+	ID             int64       `json:"id"`
+	User           *UserPublic `json:"user"`
+	Content        string      `json:"content"`
+	Deleted        bool        `json:"deleted"`
+	HasAttachments bool        `json:"has_attachments"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.

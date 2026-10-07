@@ -21,6 +21,7 @@ import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
 import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
 import { accountText as account } from "../i18n/account";
+import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
 import { logout } from "@lib/logout";
@@ -84,7 +85,8 @@ import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner
 import { createRingController, createOutgoingCall } from "@lib/call-ring";
 import type { RingController, OutgoingCall } from "@lib/call-ring";
 import type { DmCallPanelComponent } from "@components/DmCallPanel";
-import { startRingChime, stopRingChime } from "@lib/notificationSound";
+import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib/notificationSound";
+import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
 import { createChatArea } from "./main-page/ChatArea";
@@ -978,6 +980,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (!tornDown) unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
     });
 
+    // DP-40: short voice UI sounds on join/leave and mute/deafen. This module
+    // statically imports stores the page already pulls in, so it rides the
+    // MainPage chunk rather than splitting a new shared one off the entry.
+    if (!tornDown) unsubscribers.push(startVoiceUiSounds());
+
     // Toast container
     toast = createToastContainer();
     toast.mount(root);
@@ -1008,7 +1015,39 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     children.push(callBanner);
 
     outgoingCall = createOutgoingCall({
-      onChange: (state) => callPanel?.setOutgoing(state),
+      onChange: (state) => {
+        callPanel?.setOutgoing(state);
+        // The panel is the caller's feedback only while their DM is on screen;
+        // elsewhere the ringback and a toast are all they get (DP-25).
+        if (state !== null && state.phase !== "ringing") {
+          const ui = uiStore.getState();
+          const panelShows =
+            ui.activeView === null &&
+            !ui.settingsOpen &&
+            channelsStore.getState().activeChannelId === state.channelId;
+          if (!panelShows) {
+            const dm = dmStore.getState().channels.find((c) => c.channelId === state.channelId);
+            // The same name the call panel would show: a 1:1 DM resolves the
+            // recipient through the members store (the nickname every other
+            // identity surface uses), a group uses the DM's own name.
+            let name = dm !== undefined ? dmDisplayName(dm) : "";
+            if (dm !== undefined && !dm.isGroup) {
+              const member = membersStore.getState().members.get(dm.recipient.id);
+              name =
+                (member !== undefined ? memberDisplayName(member) : "") ||
+                (dm.recipient.displayName ?? "") ||
+                dm.recipient.username ||
+                name;
+            }
+            const text =
+              state.phase === "declined"
+                ? dmCallText("declinedStatus", { name })
+                : dmCallText("noAnswerStatus");
+            showToast(text, "info", 6000);
+          }
+        }
+      },
+      onRingback: (playing) => (playing ? startRingback() : stopRingback()),
     });
     // Loaded on demand like the sidebar drawer: the panel is only drawn in a
     // DM with a call, so its code stays out of the eager MainPage chunk

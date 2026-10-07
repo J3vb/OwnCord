@@ -25,6 +25,8 @@
  * download. The expansion transform exists for tests only.
  */
 
+import { getTimeFormat } from "../lib/timeFormat";
+
 /** The locale every catalog string, number and date is written in. */
 export const TEXT_LOCALE = "en-US";
 
@@ -68,9 +70,13 @@ export function formatNumber(value: number, options?: Intl.NumberFormatOptions):
     : new Intl.NumberFormat(TEXT_LOCALE, options).format(value);
 }
 
-/** Format a date or time for display in the catalog locale. */
+/** Format a date or time for display in the catalog locale, honouring the
+ *  user's 12h/24h clock preference. */
 export function formatDate(value: Date | number, options: Intl.DateTimeFormatOptions): string {
-  return new Intl.DateTimeFormat(TEXT_LOCALE, options).format(value);
+  return new Intl.DateTimeFormat(TEXT_LOCALE, {
+    ...options,
+    hour12: getTimeFormat() === "12h",
+  }).format(value);
 }
 
 function interpolate(template: string, params: Readonly<Record<string, TextValue>>): string {

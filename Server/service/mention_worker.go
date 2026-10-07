@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // mentionQueueSize bounds the mention worker's pending jobs. Under a mention
@@ -76,6 +78,26 @@ type mentionWorker struct {
 	// dropped counts jobs refused because the queue was full or the worker had
 	// stopped. Cosmetic badge work is dropped rather than blocking a send.
 	dropped atomic.Uint64
+
+	// notify delivers one live mention_count frame to a reader whose badge a
+	// flush raised (DP-27). Captured from MessageService.NotifyMentionCount at
+	// start-up (the hook is installed before StartMentionWorker runs); nil in
+	// a directly-constructed worker and whenever no hub is wired, in which
+	// case notification is skipped.
+	notify func(userID, channelID, count int64)
+
+	// emitMu serializes a mention write with the mention_count frame it emits,
+	// so every frame a reader receives reflects a later commit than the one
+	// before it. The worker's coalesced flush and a removal path's synchronous
+	// reverse both hold it. Without it, an increment committed on the worker
+	// loop and a decrement committed on the delete/purge request goroutine push
+	// absolute totals from independently-scheduled emitters, so a delete inside
+	// the coalesce window could be overtaken by an older total and leave the
+	// client badge stale-low until the next ready (the ordering race DP-27
+	// introduced). StartMentionWorker points this at the MessageService's lock
+	// so the inline no-worker fallback and removal paths share it; a directly
+	// constructed worker keeps its own.
+	emitMu *syncutil.Mutex
 }
 
 func newMentionWorker(st Store) *mentionWorker {
@@ -85,6 +107,7 @@ func newMentionWorker(st Store) *mentionWorker {
 		stop:     make(chan struct{}),
 		done:     make(chan struct{}),
 		flushReq: make(chan mentionFlushReq),
+		emitMu:   &syncutil.Mutex{},
 	}
 }
 
@@ -288,6 +311,12 @@ func (w *mentionWorker) flushSelected(ctx context.Context, pending []mentionJob,
 // flush resolves every job's recipients and writes them as one transaction per
 // channel. A job whose apply returns no entries still counts as flushed: it
 // simply had no recipients by the time the filters ran.
+//
+// After a channel's transaction commits, each reader whose badge it actually
+// raised gets one live mention_count frame (DP-27), so an unfocused channel's
+// taskbar/tray badge updates without waiting for the next ready. The
+// notification runs outside the transaction and after it commits, so a push
+// can never outrun the write it describes.
 func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 	if len(jobs) == 0 {
 		return
@@ -301,8 +330,40 @@ func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 		byChannel[job.channelID] = append(byChannel[job.channelID], entries...)
 	}
 	for channelID, entries := range byChannel {
-		if err := w.st.IncrementMentionCountsBatch(ctx, channelID, entries); err != nil {
+		// Hold emitMu across the write and the frames it emits, so this
+		// increment's commit order matches its frame order against a concurrent
+		// removal-path decrement (DP-27 ordering; see emitMu).
+		w.emitMu.Lock()
+		bumped, err := w.st.IncrementMentionCountsBatch(ctx, channelID, entries)
+		if err != nil {
+			w.emitMu.Unlock()
 			slog.Error("mention worker: flush IncrementMentionCountsBatch", "err", err, "channel_id", channelID)
+			continue
 		}
+		w.notifyBumped(channelID, bumped)
+		w.emitMu.Unlock()
+	}
+}
+
+// notifyBumped pushes one mention_count frame per reader whose badge the
+// flush raised. A nil notifier (no hub, every test) is a no-op.
+func (w *mentionWorker) notifyBumped(channelID int64, bumped map[int64]int64) {
+	emitMentionBumped(w.notify, channelID, bumped)
+}
+
+// emitMentionBumped pushes one mention_count frame per reader whose badge a
+// flush raised (DP-27), in a deterministic order so a test's recorded calls do
+// not depend on map iteration order. A nil n (no hub) is a no-op.
+func emitMentionBumped(n func(userID, channelID, count int64), channelID int64, bumped map[int64]int64) {
+	if n == nil || len(bumped) == 0 {
+		return
+	}
+	userIDs := make([]int64, 0, len(bumped))
+	for uid := range bumped {
+		userIDs = append(userIDs, uid)
+	}
+	slices.Sort(userIDs)
+	for _, uid := range userIDs {
+		n(uid, channelID, bumped[uid])
 	}
 }

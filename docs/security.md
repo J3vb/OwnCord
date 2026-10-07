@@ -40,6 +40,13 @@ how transport and at-rest data are protected, and what beta does not claim are
 stated in one place: [trust-model.md](trust-model.md). Every claim there cites
 the code line or test that makes it true.
 
+Configuration secrets set from the admin panel (`gif.api_key`, `github.token`
+and the LiveKit key and secret) are write-only and stored in
+`<data_dir>/config-overrides.json` (mode `0600`). The panel is told only
+whether a value is configured; the server never returns, logs or audits one.
+Treat that file like `config.yaml` in backups. See
+[server-configuration.md](server-configuration.md#changing-settings-from-the-admin-panel).
+
 ## Two-Factor Authentication
 
 OwnCord supports TOTP-based 2FA:
@@ -272,13 +279,13 @@ Security-relevant actions are recorded in the `audit_log` table with actor, acti
 
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`, `account_erasure_replayed`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
-- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`, `retention_policy_change`, `channel_retention_change`, `permission_explain`, `permission_preview`
+- **Admin:** `role_change`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `config_override_change`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`, `retention_policy_change`, `channel_retention_change`, `permission_explain`, `permission_preview`
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
 - **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_download`,
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
-  `update_failed`, `ws_connect`
+  `update_failed`, `server_restart_requested`, `ws_connect`
 
 Rows about an erased account are unlinked by the erasure (B4-10): they keep
 action, time and order, `actor_id`/`target_id` become 0, `detail` is cleared,
@@ -314,7 +321,7 @@ The Tauri desktop client implements the following security measures:
 - Credentials are stored in the OS keyring (Windows Credential Manager / macOS Keychain / Secret Service) via the `keyring` crate, with every write read back and verified; if no keyring is available they fall back to an encrypted file (Windows DPAPI with `CRYPTPROTECT_UI_FORBIDDEN`, ChaCha20-Poly1305 elsewhere) — see [credential-storage.md](credential-storage.md)
 - Plaintext passwords are **never** returned to the frontend over IPC — only tokens are accessible from JavaScript. The field is `#[serde(skip)]` on `CredentialData` and the claim is test-locked (`credential_data_never_serializes_the_password`). A remembered password is shown in the login form as a placeholder and submitted by the `login_with_saved_password` command, which reads the password in Rust and logs in through the same pinned loopback proxy a normal request uses
 - Auto-login uses stored tokens for reconnection, not passwords
-- Credential and identity commands are scoped to the active session host held in Rust state, which guards against accidental cross-host use. That host is set by `ws_connect` and cleared by `ws_disconnect`, both callable from the renderer, so this does not stop a compromised renderer; sourcing the active host from a native-side authenticated event is a follow-up
+- Credential and identity commands are scoped to the active session host held in Rust state. The host is set only when the proxy relays the server's `auth_ok` over the pinned socket (not by a renderer command) and is cleared when that connection ends or on `ws_disconnect`. The relayed `auth_ok` also records every host a login was verified for during this app run; that set survives the disconnect and a credential removal. While no session is active, the connect-page credential prefill, stored-token resume and saved-password login are admitted only for a host in the set, never for another saved host. Before any login has been verified this app run the set is empty and the first-run behaviour stands, so a restart can still auto-login from a saved credential.
 
 ### Tauri Capabilities (Least Privilege)
 
@@ -333,7 +340,7 @@ The Tauri desktop client implements the following security measures:
 - The HTTP proxy (`http_proxy`) carrying REST traffic pins against the same store
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
 - All three native tunnels share one TOFU verifier — see [trust-model.md](trust-model.md)
-- Certificate mismatch triggers a modal requiring user acknowledgment
+- Certificate mismatch triggers a modal requiring user acknowledgment. Saving a pin that changes what is trusted is additionally gated by a native OS confirmation dialog in `accept_cert_fingerprint` — the only user-confirmed writer of a pin — naming the host and fingerprint, so a renderer compromise cannot silently pin a host. The artifact smoke seeds the pin in the profile instead of answering the dialog; test-only builds use the `e2e-auto-confirm` feature, which no shipped build enables
 - **First-contact defence is comparison out of band.** The fingerprint is what
   the trust decision rests on, so read it from the server's start-up banner
   (also on the admin Dashboard and the setup wizard's finish step) and compare

@@ -93,7 +93,9 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    (the avatar is one) or attached to a message the subject wrote — the file
    list the job row carries;
 4. reverse the `read_states.mention_count` bumps the subject's own messages
-   made (OC-0294/OC-0293);
+   made (OC-0294/OC-0293); like the retention sweep, erasure pushes no live
+   `mention_count` frame, so an affected reader recovers the lowered total on
+   their next `ready`;
 5. delete the subject's `rate_lockouts` keys — every key is `<prefix>:<value>`
    with the value the id or the case-folded username, matched on the exact
    suffix;
@@ -110,7 +112,9 @@ connection with `PRAGMA secure_delete = ON` for its duration (HP-4 decision
    redeemed, and the subject's replay `events` rows
    (`db.EventNamesUserPredicate`: a persisted row is the wire envelope, so
    the lookups are `$.payload.user_id`, `$.payload.user.id`,
-   `$.payload.from_user_id` and `$.payload.mentions` — HP-4 decision 1);
+   `$.payload.from_user_id`, `$.payload.referenced_message.user.id` (a
+   reply's embedded parent snippet; the stored copy carries `null`, so this is
+   a backstop) and `$.payload.mentions` — HP-4 decision 1);
 7. `emoji.uploaded_by` — a server-wide asset — moves to the oldest remaining
    admin-class account, else to the oldest remaining account, else the rows
    are deleted and their files join the job;
@@ -350,7 +354,10 @@ pinned messages exempt; tombstones included), each batch one writer
 transaction that reverses the mention counts those messages raised
 (OC-0294), deletes their attachment rows and returns the `stored_as`
 names, and deletes the rows (the FTS trigger drops the index entries;
-`reply_to` on later messages becomes NULL). The run is journaled in
+`reply_to` on later messages becomes NULL). The reversed badge is not pushed
+live: unlike `deleteMessage`/`purgeMessages`, the sweep has no hub to send a
+`mention_count` frame (DP-27), so an affected reader keeps a stale-high badge
+until their next `ready`. The run is journaled in
 `retention_runs` — counts and the file list, before any unlink — then the
 files are removed through the upload storage (a missing file counts as
 removed) and the run is finished. Each batch's frames leave the replay
@@ -701,13 +708,15 @@ SELECT COUNT(*) FROM voice_states WHERE user_id = :uid;
 -- 20 replay events naming the subject: a row is the wire envelope the hub
 --    sent ({"seq":…,"type":…,"payload":{…}}), so every id sits under
 --    payload — "user_id" on state frames, "user":{"id":…} on message
---    frames, "mentions" on chat frames, "from_user_id" on a relayed E2EE
+--    frames, "user":{"id":…} under "referenced_message" on a reply's parent
+--    snippet, "mentions" on chat frames, "from_user_id" on a relayed E2EE
 --    offer (docs/protocol.md). db.EventNamesUserPredicate is this test as
 --    code; json_extract is SQLite's built-in JSON1.
 SELECT COUNT(*) FROM events
  WHERE json_extract(payload, '$.payload.user_id') = :uid
     OR json_extract(payload, '$.payload.user.id') = :uid
     OR json_extract(payload, '$.payload.from_user_id') = :uid
+    OR json_extract(payload, '$.payload.referenced_message.user.id') = :uid
     OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE value = :uid);
 -- 21 audit rows still naming the subject by id (0 after B4-10's unlinking;
 --    the rows survive with subject_token or actor_token = HMAC(erasure.key, :uid))

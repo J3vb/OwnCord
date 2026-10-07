@@ -59,9 +59,31 @@ pub fn startup_dialog_body(error: &str) -> String {
 pub const CERT_NOT_TRUSTED: &str =
     "certificate for {host} is not yet trusted; confirm the fingerprint to continue";
 
+/// The fallback message a certificate refusal carries in its `TLS_CERT_UNVERIFIED`
+/// JSON body. The webview shows its own catalog copy for that code; this is what
+/// a caller that ignores the code still reads.
+pub const CERT_UNVERIFIED: &str = "the server's certificate could not be verified";
+
 /// The first-use refusal, with the host as a parameter.
 pub fn cert_not_trusted(host: &str) -> String {
     CERT_NOT_TRUSTED.replace("{host}", host)
+}
+
+/// Title of the native dialog that confirms pinning a certificate. The dialog
+/// is the trust boundary: `accept_cert_fingerprint` pins nothing until the user
+/// answers it, so a compromised renderer cannot silently pin a host.
+#[cfg_attr(feature = "e2e-auto-confirm", allow(dead_code))]
+pub const CERT_ACCEPT_TITLE: &str = "Confirm server certificate";
+
+/// Body of the native cert-confirmation dialog: the host and the fingerprint it
+/// is being pinned to.
+#[cfg_attr(feature = "e2e-auto-confirm", allow(dead_code))]
+pub fn cert_accept_prompt(host: &str, fingerprint: &str) -> String {
+    format!(
+        "Trust this certificate for {host}?\n\n\
+         Fingerprint:\n{fingerprint}\n\n\
+         Only continue if this matches the fingerprint your server shows."
+    )
 }
 
 /// The human-readable mismatch message. The frontend parses `Stored:` out of
@@ -104,6 +126,17 @@ mod tests {
             cert_not_trusted("example.com:8443"),
             "certificate for example.com:8443 is not yet trusted; confirm the fingerprint to continue"
         );
+        assert_eq!(
+            CERT_UNVERIFIED,
+            "the server's certificate could not be verified"
+        );
+        assert_eq!(CERT_ACCEPT_TITLE, "Confirm server certificate");
+        assert_eq!(
+            cert_accept_prompt("example.com:8443", "aa:bb:cc"),
+            "Trust this certificate for example.com:8443?\n\n\
+             Fingerprint:\naa:bb:cc\n\n\
+             Only continue if this matches the fingerprint your server shows."
+        );
         // The proxies build the mismatch message through tofu, so check it there.
         assert_eq!(
             crate::tofu::mismatch_message("example.com:8443", "aa:bb", "cc:dd"),
@@ -126,6 +159,7 @@ mod tests {
             ("tofu.rs", include_str!("tofu.rs")),
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
             ("http_proxy.rs", include_str!("http_proxy.rs")),
+            ("http_pool.rs", include_str!("http_pool.rs")),
         ];
         let quoted = [
             TRAY_SHOW_HIDE,
@@ -140,6 +174,7 @@ mod tests {
             TRAY_QUIT,
             TRAY_TOOLTIP,
             STARTUP_DIALOG_TITLE,
+            CERT_UNVERIFIED,
         ]
         .map(|literal| format!("\"{literal}\""));
         let prose = [

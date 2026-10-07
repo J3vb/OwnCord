@@ -116,9 +116,12 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   each native session serves them on a token-authenticated `127.0.0.1`
   WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
   through `native/videoRenderer.ts` (WebGL, exposed as a canvas
-  `MediaStreamTrack` so the grid stays MediaStream-based) and the camera is
-  the webview's own `getUserMedia` track, pumped up the socket by
-  `native/cameraUplink.ts`. Screen share captures in the backend
+  `MediaStreamTrack` so the grid stays MediaStream-based) and camera capture
+  runs in the backend (`src-tauri/src/native_voice/camera.rs`, GStreamer:
+  `GstDeviceMonitor`/`v4l2src`/`pipewiresrc` → `decodebin` → I420 `appsink`),
+  so the camera keeps working while the window is hidden; the
+  `NativeCameraTrack` (`native/nativeCameraTrack.ts`) is its preview, read
+  back over the frame socket. Screen share captures in the backend
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
   on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
@@ -154,8 +157,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   runs over WebView2 in `client-native` and at length through
   `npm run test:e2e:soak`. Its bars hold within one page as well as across
   logins, so a leak the re-login navigation would release still fails (bar a
-  nodes net move of at most 2 in either series, a known blind spot; a real
-  leak past it still fails). A native
+  net move of at most 2 nodes, or 1 listener, abort controller or timeout, in
+  either series, a known blind spot; a real leak past it still fails). A native
   voice backend keeps these rules plus three IPC ones (owned `listen()` with a
   late-unlisten, native handles released in the web room's teardown, native
   counts reported through `getSessionDebugInfo`):

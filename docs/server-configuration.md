@@ -6,11 +6,12 @@ Complete reference for all OwnCord server configuration options.
 
 OwnCord server reads configuration from `config.yaml` in the working directory. On first run, if the file does not exist, a default `config.yaml` is created automatically.
 
-Configuration is loaded in three layers (later layers override earlier ones):
+Configuration is loaded in four layers (later layers override earlier ones):
 
 1. **Built-in defaults** (compiled into the binary)
 2. **YAML file** (`config.yaml`)
-3. **Environment variables** (prefix: `OWNCORD_`)
+3. **Admin-panel overrides** (`config-overrides.json`, see [Changing settings from the admin panel](#changing-settings-from-the-admin-panel))
+4. **Environment variables** (prefix: `OWNCORD_`)
 
 ### First-run setup wizard
 
@@ -291,6 +292,111 @@ warning.
 | `attention.writer_wait_ms_per_min` | int  | `5000`  | Warn when requests spend more than this many ms per minute queueing for the single SQLite writer.                                                                                                                                        |
 | `attention.reconnects_per_min`     | int  | `30`    | Warn when clients resume sessions faster than this.                                                                                                                                                                                      |
 | `attention.delivery_drops_per_min` | int  | `1`     | Warn when hub broadcast drops, per-channel topic sheds and send-queue overflow disconnects together exceed this rate. Low-priority typing and presence drops are not counted.                                                            |
+
+## Changing settings from the admin panel
+
+The owner can change most settings from the **Server configuration** page in
+the admin panel, without editing `config.yaml` or opening a shell. The page
+writes its values to a JSON file beside the database,
+`<server.data_dir>/config-overrides.json`, owned and readable only by the
+server's user (mode `0600`).
+
+Precedence, lowest to highest:
+
+1. Compiled defaults.
+2. `config.yaml`.
+3. Admin-panel overrides (`config-overrides.json`).
+4. `OWNCORD_*` environment variables.
+
+The panel is newer, more specific intent than the file, so it wins. The
+environment still wins over the panel because it is how a deployment pins a
+value: a key set through the environment is shown as locked on the page, and a
+save to it is refused (the value would lose at the next boot). An override
+takes effect at the next server start; the page offers **Restart now** once
+something is pending. The boot log names each overridden key, never its value.
+
+Almost every key is on the page. Each row shows a plain-language name (the
+`config.yaml` key beside it), a one-line description, the recommended value and
+what changing it affects; this copy ships with the server
+(`Server/config/overrides_copy.go`). The four secrets (`gif.api_key`,
+`github.token`, `voice.livekit_api_key`, `voice.livekit_api_secret`) are
+write-only: the page shows whether one is configured and never sends the value
+back. A secret whose rule allows empty (`gif.api_key`, `github.token`) also
+offers a **Clear value** button, which sets it to the empty string and turns the
+feature off; the LiveKit credentials require a value and offer no such button.
+A key whose wrong value could lock you out or move the data the server
+runs on (`server.port`, `tls.mode`, `tls.domain`, `server.restart_mode`,
+`server.admin_allowed_cidrs`, `server.trusted_proxies`, the
+database/backup/uploads/plugins paths, the TLS cert/key/cache paths and the
+executed `voice.livekit_binary`) asks for a typed confirmation, and the server
+runs its own checks on the configuration the next boot would use before saving.
+The update source (`github.owner`, `github.repo`) and the host-only
+diagnostics (`server.pprof_*`) are changed here too.
+
+Only two groups stay off the overrides file:
+
+- `server.data_dir`, shown read-only: the overrides file, and the TOTP,
+  erasure and VAPID keys, live inside it. See [Moving
+  `server.data_dir`](#moving-serverdata_dir).
+- `upload.blocked_extensions` and `upload.allowed_extensions`, which already
+  have live rows on the **Settings** page; this page links there.
+
+`server.name` is likewise not offered a second time: the **Settings** page owns
+it and this page links there.
+
+A hand-edited `config-overrides.json` is tolerated: a key the panel does not
+own is ignored with a warning rather than preventing the server from starting.
+
+Secrets set from the panel live in the same `0600` `config-overrides.json`, so
+treat that file like `config.yaml` in backups; it is never returned, logged or
+written to the audit log. The full-archive export already ships it beside
+`config.yaml`.
+
+### If a panel change locks you out
+
+A wrong port, TLS mode, admin allowlist, trusted-proxies list, path or restart
+mode can put the panel out of reach. On the host:
+
+1. Stop the server.
+2. Edit `<data_dir>/config-overrides.json` and delete the offending key, or
+   delete the whole file to drop every panel override. The file is plain JSON
+   keyed by the dotted config key.
+3. Start the server. `config.yaml` values apply again.
+
+Without editing the file: set the matching `OWNCORD_*` variable (for example
+`OWNCORD_SERVER_PORT=8443` or
+`OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=127.0.0.0/8`). The environment always wins
+over the panel. Then reach the panel through an SSH tunnel
+(`ssh -L 8443:127.0.0.1:8443 host`) and reset the key there.
+
+In Docker the file is in the `owncord-data` volume:
+`docker compose exec owncord rm /app/data/config-overrides.json`, or run a
+shell on the volume while the server container is stopped.
+
+With `server.restart_mode: supervised` and no supervisor, the server exits at
+the next restart and nothing starts it again. Start it by hand, then fix the
+key.
+
+Moving the database or uploads from the panel only points the server at a copy
+you made. Make that copy from a backup (Backups → download, then restore at the
+new path) or with the server stopped. Anything written after the copy stays in
+the old location; resetting the key returns to it.
+
+### Moving `server.data_dir`
+
+`server.data_dir` cannot be changed from the panel. The overrides file lives
+inside it, so a panel override would move the server away from the file that
+holds the override, and the new directory would generate a fresh TOTP key, so
+every existing 2FA secret (the owner's included) could no longer be decrypted.
+In Docker it is the `owncord-data` volume, and a move needs a shell copy
+anyway, so the panel would add risk and save no work. To move it:
+
+1. Stop the server.
+2. Copy the whole directory, including `totp.key`, `erasure.key`,
+   `push_vapid.key` and `config-overrides.json`, to the new location.
+3. Set `server.data_dir` in `config.yaml`, or `OWNCORD_SERVER_DATA_DIR`.
+4. Start the server. If you moved the database, uploads, certificates,
+   backups or plugins too, point their separate keys at the moved files.
 
 ## Key index (generated)
 

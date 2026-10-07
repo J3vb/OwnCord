@@ -1,10 +1,10 @@
 import { defineCatalog } from "./format";
 
 /**
- * The DM call panel's copy (components/DmCallPanel.ts). Its own catalog so it
- * loads with the panel's lazy chunk, not with the main page. The panel also
- * reads the shared voice catalog for status and control names it has in
- * common with the voice widget.
+ * The DM call panel's copy (components/DmCallPanel.ts), and the caller's
+ * declined/no-answer toast in the main page. Its own catalog rather than the
+ * shared voice catalog. The panel also reads the shared voice catalog for
+ * status and control names it has in common with the voice widget.
  */
 export const dmCallText = defineCatalog("dmCall", {
   region: "Call with {name}",
