@@ -293,7 +293,8 @@ _time_" (the time is the message the line latched to; `formatBadgeCount` gives
 "99+ new messages", with no time, at the wire cap). Its **Mark as read** button
 sends `mark_read` and hides the bar, as does reaching the true bottom (within 1 px,
 not the 100 px near-bottom used for stick-to-bottom) with the window focused; the
-bar stays while a revisit's divider is still deferred. The count is also announced
+bar stays while a revisit's divider is still deferred, and a reader already at the
+true bottom is marked read once it settles. The count is also announced
 through a persistent `role="status"` live region outside the hidden bar, once when
 it first appears. The NEW line stays for the visit. The list opens scrolled to the line
 rather than the bottom, and a deferred (revisit) line moves the view when it
