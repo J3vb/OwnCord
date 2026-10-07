@@ -141,6 +141,8 @@ export interface LaunchOptions {
   preserveProfile?: boolean;
   /** `host[:port]` -> pin, written to the fresh profile before launch (see `certPinsFile`). */
   pins?: Record<string, string>;
+  /** Extra environment for the app process (Linux: inherited through the driver). */
+  env?: Record<string, string>;
 }
 
 /** Launches the installed artifact and attaches the platform driver. */
@@ -215,7 +217,7 @@ async function launchLinux(binary: string, options: LaunchOptions): Promise<Arti
     // runtime's parent process when the app exits; killInstalled never matches
     // that parent (APPIMAGE is set only in its child), so a relaunch of the
     // same file could lose its files to the old parent's cleanup. Keep them.
-    { ...process.env, APPIMAGE_EXTRACT_AND_RUN: "1", NO_CLEANUP: "1" },
+    { ...process.env, APPIMAGE_EXTRACT_AND_RUN: "1", NO_CLEANUP: "1", ...options.env },
   );
   const base = `http://127.0.0.1:${port}`;
   const call = async (method: string, path: string, body?: unknown) => {
@@ -359,6 +361,12 @@ export async function waitFor(app: ArtifactDriver, css: string, text = "", timeo
 
 export const appVersion = (app: ArtifactDriver) =>
   app.evaluate<string>(`() => window.__TAURI_INTERNALS__.invoke("plugin:app|version")`);
+
+/** The native camera's GStreamer support, as the webview's notice reads it (Linux). */
+export const cameraSupport = (app: ArtifactDriver) =>
+  app.evaluate<{ available: boolean; missing: string[] }>(
+    `() => window.__TAURI_INTERNALS__.invoke("native_voice_camera_support")`,
+  );
 
 /**
  * Signs in from the connect page. Launch with `pins` for the host: the shipped

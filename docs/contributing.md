@@ -122,11 +122,13 @@ prerequisites above:
 sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 ```
 
-The GStreamer runtime libraries already ship with WebKitGTK (and the app's
-distro packages pull them in); only the `-dev` headers are a build-time
-addition. CI's Linux legs install them before the native-voice build. They are
-needed only where the `camera.rs` module compiles, i.e. the same Linux Rust
-legs as `webrtc-sys`.
+The GStreamer runtime libraries already ship with WebKitGTK; the `.deb` also
+declares them and the camera plugins, and the AppImage bundles its own. Only
+the `-dev` headers are a build-time addition. Every CI Linux leg that builds the
+client installs them before the native-voice build, and
+`scripts/check-workflow-guards.mjs` fails a workflow whose Tauri build install
+omits them. They are needed only where the `camera.rs` module compiles, i.e. the
+same Linux Rust legs as `webrtc-sys`.
 
 **Tests**
 

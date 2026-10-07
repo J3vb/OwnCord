@@ -4,6 +4,7 @@ import {
   auditWorkflow,
   autoConfirmEnablers,
   autoConfirmIsDefault,
+  gstreamerBuildDepsMissing,
   signingKeyHolders,
 } from "./check-workflow-guards.mjs";
 
@@ -119,4 +120,33 @@ test("e2e-auto-confirm in the default features is caught", () => {
     true,
   );
   assert.equal(autoConfirmIsDefault("[features]\ndefault = []\ne2e-auto-confirm = []\n"), false);
+});
+
+// The Linux client links gstreamer-rs (native camera), so every apt install that
+// sets up a Tauri build (it carries libwebkit2gtk-4.1-dev) needs the GStreamer
+// dev packages too, or gstreamer-sys's pkg-config probe fails the build.
+test("a Tauri build install without the GStreamer dev packages is caught", () => {
+  const install = (...pkgs) =>
+    ["      - run: |", "          sudo apt-get update", "          sudo apt-get install -y \\"]
+      .concat(pkgs.map((p, i) => `            ${p}${i < pkgs.length - 1 ? " \\" : ""}`))
+      .join("\n");
+  assert.deepEqual(
+    gstreamerBuildDepsMissing([
+      {
+        name: "full.yml",
+        src: install(
+          "libwebkit2gtk-4.1-dev",
+          "libgstreamer1.0-dev",
+          "libgstreamer-plugins-base1.0-dev",
+        ),
+      },
+      { name: "bare.yml", src: install("libwebkit2gtk-4.1-dev", "libgtk-3-dev") },
+      {
+        name: "half.yml",
+        src: `${install("libwebkit2gtk-4.1-dev", "libgstreamer1.0-dev")}\n${install("k6")}`,
+      },
+      { name: "driver.yml", src: install("webkit2gtk-driver", "xvfb") },
+    ]),
+    ["bare.yml", "half.yml"],
+  );
 });

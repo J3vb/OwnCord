@@ -6,11 +6,13 @@
  */
 import { test, expect, type TestInfo } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   appVersion,
   artifactLogin,
+  cameraSupport,
   findAsset,
   installArtifact,
   launchArtifact,
@@ -27,6 +29,20 @@ const NEW_PASSWORD = "Recovered-E2E-pass-456!";
 
 async function expectedVersion(): Promise<string> {
   return JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8")).version;
+}
+
+/**
+ * A GStreamer plugin directory holding the host's plugins minus the camera
+ * sources, as on a host without gstreamer1.0-plugins-good (or pipewire's).
+ */
+async function pluginsWithoutCameraSources(dir: string): Promise<string> {
+  const host = `/usr/lib/${process.arch === "arm64" ? "aarch64" : "x86_64"}-linux-gnu/gstreamer-1.0`;
+  await mkdir(dir, { recursive: true });
+  const kept = (await readdir(host)).filter(
+    (name) => name.endsWith(".so") && !/^libgst(video4linux2|pipewire)\.so$/.test(name),
+  );
+  await Promise.all(kept.map((name) => symlink(join(host, name), join(dir, name))));
+  return dir;
 }
 
 /** Diagnostics first, then teardown; never mask the test's own failure. */
@@ -68,6 +84,11 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
       // Boot: the connect page renders and the binary is this commit's.
       await waitFor(app, "#host", "", 60_000);
       expect(await appVersion(app)).toBe(await expectedVersion());
+      // The AppImage carries its own GStreamer and camera plugins, so native
+      // camera capture works on a host without any GStreamer packages.
+      if (process.platform === "linux") {
+        expect(await cameraSupport(app)).toEqual({ available: true, missing: [] });
+      }
 
       // Connect: real TLS against the seeded pin, login and the WS ready handshake.
       await artifactLogin(app, host, "alice", TEST_PASSWORD);
@@ -143,6 +164,26 @@ test("the .deb package installs through apt and boots", async ({}, info) => {
     await withArtifact(app, info, async () => {
       await waitFor(app, "#host", "", 60_000);
       expect(await appVersion(app)).toBe(await expectedVersion());
+      // The package's declared GStreamer dependencies give the camera its pipeline.
+      expect(await cameraSupport(app)).toEqual({ available: true, missing: [] });
+    });
+
+    // Without the camera plugins the app still boots and names what is
+    // missing, which the webview turns into its install notice.
+    const bare = await launchArtifact("/usr/bin/owncord-client", {
+      env: {
+        GST_PLUGIN_SYSTEM_PATH_1_0: await pluginsWithoutCameraSources(
+          info.outputPath("gst-plugins"),
+        ),
+        GST_REGISTRY_1_0: info.outputPath("gst-registry.bin"),
+      },
+    });
+    await withArtifact(bare, info, async () => {
+      await waitFor(bare, "#host", "", 60_000);
+      expect(await cameraSupport(bare)).toEqual({
+        available: false,
+        missing: ["v4l2src", "pipewiresrc"],
+      });
     });
   } finally {
     await exec("sudo", ["apt-get", "remove", "-y", name], { timeout: 60_000 }).catch(() => {});
