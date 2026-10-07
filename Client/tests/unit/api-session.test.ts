@@ -66,6 +66,24 @@ describe("API session ownership", () => {
     expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer alice");
   });
 
+  it("a detached logout that never answers is aborted after the logout timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetch.mockImplementation(() => new Promise(() => {}));
+      const api = createApiClient({ host: "same.example", token: "alice" });
+      const revoked = api.logout();
+      const settled = revoked.then(
+        () => "resolved",
+        () => "rejected",
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await settled).toBe("rejected");
+      expect((mockFetch.mock.calls[0]![1] as RequestInit).signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("releases a consumed 401 body before onUnauthorized synchronously ends the session", async () => {
     let api: ApiClient;
     const unauthorized = vi.fn(() => api.endSession());

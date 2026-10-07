@@ -903,6 +903,83 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
   });
 });
 
+describe("main.ts quick-switch resume", () => {
+  const target = "server-b.example:8443";
+  const profile = {
+    id: "p-b",
+    name: "Server B",
+    host: target,
+    username: "alex",
+    autoConnect: false,
+    rememberPassword: true,
+  };
+
+  afterEach(() => {
+    sessionStorage.clear();
+    mockProfileManager.getAll.mockReturnValue([]);
+    vi.mocked(loadCredential).mockResolvedValue(null);
+    mockProfileManager.loadProfiles.mockResolvedValue(undefined);
+  });
+
+  /** Sign in on server A, then leave it the way the quick-switch overlay does. */
+  async function quickSwitchAway(profiles: Array<typeof profile>): Promise<void> {
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    mockProfileManager.getAll.mockReturnValue(profiles);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "stored-token",
+      hasPassword: false,
+    });
+    sessionStorage.setItem("owncord:quick-switch-target", target);
+    clearAuth();
+  }
+  const flush = async () => {
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+  };
+  const lastPage = () =>
+    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showAutoConnecting: ReturnType<typeof vi.fn>;
+    };
+
+  it("resumes a profile that remembers its sign-in", async () => {
+    await quickSwitchAway([profile]);
+    await flush();
+    expect(lastPage().showAutoConnecting).toHaveBeenCalledWith("Server B");
+  });
+
+  it("does not resume a profile whose remember-password is off", async () => {
+    await quickSwitchAway([{ ...profile, rememberPassword: false }]);
+    await flush();
+    expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
+  });
+
+  it("is not replaced by a resume once a manual login started while profiles load", async () => {
+    let release!: () => void;
+    mockProfileManager.loadProfiles.mockReturnValue(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    await quickSwitchAway([profile]);
+    await flush();
+    mockLogin.mockResolvedValue({ token: "manual-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!(target, "alex", "hunter2");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    vi.mocked(loadCredential).mockClear();
+    release();
+    await flush();
+    expect(loadCredential).not.toHaveBeenCalled();
+    expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
+  });
+});
+
 describe("main.ts invite deep link keeps the current server's credential (F7)", () => {
   afterEach(() => {
     mockOnOpenUrl.mockClear();

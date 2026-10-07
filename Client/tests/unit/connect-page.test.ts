@@ -984,6 +984,26 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("selectServer does not load the stored credential for a profile that opted out of remembering", async () => {
+    mockLoadCredential.mockClear();
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    page.selectServer("localhost:8443", "initialuser", false, false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockLoadCredential).not.toHaveBeenCalled();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    page.destroy?.();
+  });
+
   it("selectServer sets credentials without password when username is provided", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);

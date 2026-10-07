@@ -46,6 +46,9 @@ export interface ApiClientConfig {
   readonly token?: string;
 }
 
+/** How long a detached logout may wait for the server before it is abandoned. */
+const LOGOUT_TIMEOUT_MS = 10_000;
+
 /**
  * Per-request options for the internal `doFetch`. `onUploadProgress` tags a
  * multipart upload with a fresh id so the native transport's `upload-progress`
@@ -57,6 +60,8 @@ interface RequestOptions {
   token?: string;
   multipart?: boolean;
   detached?: boolean;
+  /** Aborts the request once this many ms pass, so a server that never answers cannot hang it. */
+  timeoutMs?: number;
   onUploadProgress?: (fraction: number) => void;
 }
 
@@ -603,6 +608,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     // disposing the logical request scope and all of its parent listeners.
     const transport = new AbortController();
     const releaseTransport = owner.addCleanup(() => transport.abort());
+    const timer =
+      opts?.timeoutMs === undefined ? undefined : setTimeout(() => owner.dispose(), opts.timeoutMs);
     try {
       owner.assertCurrent();
       const headers: Record<string, string> = {};
@@ -672,6 +679,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       owner.assertCurrent();
       return data;
     } finally {
+      clearTimeout(timer);
       owner.dispose();
     }
   }
@@ -781,6 +789,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>("POST", "/auth/logout", undefined, signal, {
         detached: true,
         skipUnauthorized: true,
+        timeoutMs: LOGOUT_TIMEOUT_MS,
       });
     },
 

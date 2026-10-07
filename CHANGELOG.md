@@ -52,12 +52,16 @@ and only when it changes something a contributor or fork holder must do
 - **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
+- **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
 - **Voice behind a reverse proxy**: joining voice failed with 403 when the proxy forwarded the host without its `:443` port — the server now accepts the connection.
 - **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
 
-### Fixed
+### Login & connection
 
-- **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
+- Signing out no longer waits forever on a server that never answers; the request is dropped after 10 seconds.
+- Cancel is greyed out while an account recovery is being sent, so the result is never hidden.
+- Switching back to a server resumes its saved sign-in only when "remember password" is on, and no longer overrides a login you started yourself.
+- Picking a server whose "remember password" is off no longer loads or fills in its saved password.
 
 ## v2.2.0-beta.1
 
