@@ -1070,6 +1070,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       profile: ResumableProfile,
       waitIfDown = true,
     ): Promise<void> {
+      // The stored token outlives an opt-out whose delete failed, so the
+      // profile's own setting decides, not the credential's presence.
+      if (profile.rememberPassword !== true) return;
       const attempt = api.getSession();
       try {
         const cred = await loadCredential(profile.host);
@@ -1221,7 +1224,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
         // A quick switch keeps each server's saved sign-in (B7-13), so
         // switching back resumes with the stored token exactly as auto-login
         // does. Without a stored credential the prefilled form stays up.
-        if (targetProfile !== undefined) await resumeStoredSession(targetProfile);
+        if (targetProfile !== undefined && startupAttempt.isCurrent()) {
+          await resumeStoredSession(targetProfile);
+        }
         return; // Skip auto-login when switching servers
       }
 

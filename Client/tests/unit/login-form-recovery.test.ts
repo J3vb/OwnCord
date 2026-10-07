@@ -213,6 +213,24 @@ describe("Account recovery from the connect page", () => {
     f.page.destroy?.();
   });
 
+  it("Cancel is disabled while recovery is in flight", async () => {
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const f = await mountPage(vi.fn().mockReturnValue(pending));
+    f.secret.value = KIT;
+    f.password.value = "N3w-Str0ng!";
+    f.submit.click();
+    expect(f.cancel.disabled).toBe(true);
+    f.cancel.click();
+    expect(f.overlay.classList.contains("totp-overlay--hidden")).toBe(false);
+    finish();
+    await vi.waitFor(() => expect(f.overlay.classList.contains("totp-overlay--hidden")).toBe(true));
+    expect(f.cancel.disabled).toBe(false);
+    f.page.destroy?.();
+  });
+
   it("wipes the secret on cancel", async () => {
     const f = await mountPage(vi.fn());
     f.secret.value = KIT;

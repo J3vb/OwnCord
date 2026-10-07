@@ -53,6 +53,11 @@ and only when it changes something a contributor or fork holder must do
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
 - **Voice behind a reverse proxy**: joining voice failed with 403 when the proxy forwarded the host without its `:443` port — the server now accepts the connection.
+### Login & connection
+
+- Signing out no longer waits forever on a server that never answers; the request is dropped after 10 seconds.
+- Cancel is greyed out while an account recovery is being sent, so the result is never hidden.
+- Switching back to a server resumes its saved sign-in only when "remember password" is on, and no longer overrides a login you started yourself.
 
 ### Fixed
 
