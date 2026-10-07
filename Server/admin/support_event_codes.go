@@ -58,7 +58,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"MessageService.SendMessage GetAttachments":                                                               "messageservice_sendmessage_getattachments",
 	"MessageService.SendMessage GetDMDeliveryTargets":                                                         "messageservice_sendmessage_getdmdeliverytargets",
 	"MessageService.SendMessage GetDMParticipants":                                                            "messageservice_sendmessage_getdmparticipants",
-	"MessageService.SendMessage GetReferencedMessages":                                                        "messageservice_sendmessage_getreferencedmessages",
 	"MessageService.SendMessage LinkAttachments":                                                              "messageservice_sendmessage_linkattachments",
 	"MessageService.SendMessage OpenDM":                                                                       "messageservice_sendmessage_opendm",
 	"MessageService.SendMessage: first-contact gate failed":                                                   "messageservice_sendmessage_first_contact_gate_failed",
