@@ -130,7 +130,6 @@ pub(crate) fn emit_cert_tofu<R: Runtime>(app: &AppHandle<R>, payload: serde_json
 pub async fn ws_connect<R: Runtime>(
     app: AppHandle<R>,
     state: tauri::State<'_, WsState>,
-    session: tauri::State<'_, crate::active_session::ActiveSession>,
     url: String,
 ) -> Result<(), String> {
     info!("[ws_proxy] connecting to {}", url);
@@ -266,9 +265,8 @@ pub async fn ws_connect<R: Runtime>(
 
     info!("[ws_proxy] connected to {}", host);
     emit_ws_state(&app, "open");
-    // Record the host this session is on, so the credential and identity
-    // commands can refuse any other host while it is live.
-    session.set(&host);
+    // The socket being open proves nothing: the active session host is set
+    // only when the server answers with `auth_ok` (see the read task below).
 
     let app_read = app.clone();
     let app_state = app.clone();
@@ -276,6 +274,8 @@ pub async fn ws_connect<R: Runtime>(
     // including worker task panics, without needing tauri::State.
     let tx_arc = Arc::clone(&state.tx);
     let generation_arc = Arc::clone(&state.generation);
+    let host_read = host.clone();
+    let generation_read = Arc::clone(&state.generation);
 
     // Single outer task owns a JoinSet containing read and write workers.
     // join_next() blocks until the first worker finishes (normally or via panic),
@@ -290,6 +290,15 @@ pub async fn ws_connect<R: Runtime>(
                 stream,
                 LIVENESS_TIMEOUT,
                 |text| {
+                    // Native-side authenticated event: the server answered the
+                    // auth message over this pinned socket. Set the host before
+                    // relaying so it is active by the time the page sees it.
+                    if is_auth_ok(&text) && generation_read.load(Ordering::SeqCst) == my_generation
+                    {
+                        app_read
+                            .state::<crate::active_session::ActiveSession>()
+                            .set(&host_read);
+                    }
                     let _ = app_read.emit("ws-message", text);
                 },
                 |err| {
@@ -325,6 +334,12 @@ pub async fn ws_connect<R: Runtime>(
         // unconditionally would kill a newer connection's sender and tell JS
         // that the live connection had closed.
         if clear_sender_if_current(&tx_arc, &generation_arc, my_generation).await {
+            // The authenticated session ended on the wire: no host is active.
+            deactivate_if_current(
+                &app_state.state::<crate::active_session::ActiveSession>(),
+                &generation_arc,
+                my_generation,
+            );
             // Always emit closed, even after a panic.
             emit_ws_state(&app_state, "closed");
         } else {
@@ -333,6 +348,33 @@ pub async fn ws_connect<R: Runtime>(
     });
 
     Ok(())
+}
+
+/// Whether a relayed server frame is the `auth_ok` envelope that completes the
+/// WebSocket login. Only the top-level `type` counts; a chat message whose
+/// content says "auth_ok" does not.
+fn is_auth_ok(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|v| {
+            v.get("type")
+                .and_then(Value::as_str)
+                .map(|t| t == "auth_ok")
+        })
+        .unwrap_or(false)
+}
+
+/// Clear the active session host when the connection that authenticated it
+/// ends, but only while `my_generation` is still current: a superseded
+/// connection's teardown must not drop a newer session's host.
+fn deactivate_if_current(
+    session: &crate::active_session::ActiveSession,
+    generation: &AtomicU64,
+    my_generation: u64,
+) {
+    if generation.load(Ordering::SeqCst) == my_generation {
+        session.clear_active();
+    }
 }
 
 /// Whether a tungstenite connect error is a TLS/certificate rejection rather
@@ -462,9 +504,10 @@ pub async fn ws_disconnect(
     // path a superseding connect() already has. The returned generation is
     // unused: nothing will ever install under it.
     state.begin_connection().await;
-    // Logout / server switch: no session is live, so the credential and
-    // identity commands fall back to their pre-session rule.
-    session.clear();
+    // Logout / server switch: no session is live, so the credential commands
+    // fall back to their pre-session rule, which admits a read only for a host
+    // whose login was verified this app run. That set is kept.
+    session.clear_active();
     Ok(())
 }
 
@@ -607,6 +650,35 @@ mod tests {
             Some(&Value::String(VALID.into())),
             VALID
         ));
+    }
+
+    // The active session host is set only from a server frame the proxy itself
+    // relays, never from a renderer command.
+    #[test]
+    fn only_an_auth_ok_frame_activates_the_session() {
+        assert!(is_auth_ok(
+            r#"{"type":"auth_ok","payload":{"user":{"id":1}}}"#
+        ));
+        assert!(!is_auth_ok(r#"{"type":"auth_fail","payload":{}}"#));
+        assert!(!is_auth_ok(
+            r#"{"type":"chat_message","payload":{"content":"auth_ok"}}"#
+        ));
+        assert!(!is_auth_ok(r#"{"payload":{"type":"auth_ok"}}"#));
+        assert!(!is_auth_ok("not json"));
+        assert!(!is_auth_ok(""));
+    }
+
+    #[test]
+    fn a_connection_that_ends_deactivates_only_its_own_session() {
+        let session = crate::active_session::ActiveSession::new();
+        session.set("chat.example.com");
+        // Stale generation: a superseded connection must not clear the host.
+        let generation = AtomicU64::new(2);
+        deactivate_if_current(&session, &generation, 1);
+        assert!(session.ensure("other.example", false).is_err());
+        assert!(session.ensure("chat.example.com", false).is_ok());
+        deactivate_if_current(&session, &generation, 2);
+        assert!(session.ensure("chat.example.com", false).is_err());
     }
 
     // DP-54 follow-up: a failed TLS handshake or a refused certificate must be
