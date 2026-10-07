@@ -32,7 +32,7 @@
 // The pure helpers below are exported so a unit test can drive the split with a
 // fixture manifest; importing this module must not touch the filesystem.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 
 const DIST = "dist-budget";
@@ -151,18 +151,22 @@ function main() {
 
   // --- no embedded WASM in ANY JS chunk -------------------------------------
   const marker = budgets.forbidEmbeddedWasm.marker;
-  for (const node of Object.values(manifest)) {
-    if (!node.file?.endsWith(".js")) continue;
-    if (readFileSync(`${DIST}/${node.file}`, "utf8").includes(marker)) {
-      console.error(
-        `bundle-budget: FAIL ${node.name ?? node.file} embeds the WASM marker '${marker}'`,
-      );
-      failed = true;
-    }
+  for (const file of findEmbeddedWasm(DIST, marker)) {
+    console.error(`bundle-budget: FAIL ${file} embeds the WASM marker '${marker}'`);
+    failed = true;
   }
 
   if (failed) exit(1);
   console.log("bundle-budget: all budgets ok");
+}
+
+/** Every emitted .js file under `dir` (relative paths) that contains `marker`.
+ *  Walks the directory, not the manifest: worklets and workers copied from
+ *  public/ never appear in it. */
+export function findEmbeddedWasm(dir, marker) {
+  return readdirSync(dir, { recursive: true })
+    .filter((f) => f.endsWith(".js") && readFileSync(`${dir}/${f}`, "utf8").includes(marker))
+    .sort();
 }
 
 if (process.argv[1] === import.meta.filename) main();

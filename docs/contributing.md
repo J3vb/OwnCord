@@ -102,7 +102,8 @@ test`, `cargo clippy`, `tauri build`):
 eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
 ```
 
-It uses `CC`/`CXX` if both are already set, else an installed `clang++-21` or
+It uses `CC`/`CXX` if both are already set (they must both be clang >= 21,
+else it exits with an error), else an installed `clang++-21` or
 `clang++` reporting version 21 or newer; only if neither exists does it install
 clang-21 from apt.llvm.org (once, system-wide, on the Debian/Ubuntu releases
 apt.llvm.org publishes — elsewhere install clang >= 21 yourself). It downloads

@@ -208,6 +208,8 @@ if (!Object.prototype.hasOwnProperty.call(shards, shard)) {
 export default {
   ...base,
   mutate: shards[shard],
+  // The base list has no "json", so jsonReporter.fileName alone writes nothing.
+  reporters: [...base.reporters, "json"],
   // Per-shard report paths: parallel shard jobs (and a local serial run) each
   // keep their own report, so the workflow can upload one artifact per shard.
   htmlReporter: {
