@@ -1220,6 +1220,7 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           quickSwitchTarget,
           targetProfile?.username ?? undefined,
           targetProfile?.autoConnect === true,
+          targetProfile?.rememberPassword,
         );
         // A quick switch keeps each server's saved sign-in (B7-13), so
         // switching back resumes with the stored token exactly as auto-login

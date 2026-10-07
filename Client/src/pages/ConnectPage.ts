@@ -90,7 +90,12 @@ export function createConnectPage(
   /** Re-render the server profile list with updated data. */
   refreshProfiles(profiles: readonly SimpleProfile[]): void;
   /** Pre-select a server by host — fills the login form and loads saved credentials. */
-  selectServer(host: string, username?: string, autoConnect?: boolean): void;
+  selectServer(
+    host: string,
+    username?: string,
+    autoConnect?: boolean,
+    rememberPassword?: boolean,
+  ): void;
   /** Pre-fill + switch to register mode from an owncord:// invite deep link. */
   applyInviteLink(code: string, host?: string): void;
 } {
@@ -423,12 +428,19 @@ export function createConnectPage(
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       serverPanel.renderProfiles(profiles);
     },
-    selectServer(host: string, username?: string, autoConnect?: boolean): void {
+    selectServer(
+      host: string,
+      username?: string,
+      autoConnect?: boolean,
+      rememberPassword?: boolean,
+    ): void {
       loginForm.setHost(host);
       if (username) {
         loginForm.setCredentials(username);
       }
       loginForm.setAutoConnect(autoConnect === true);
+      // A profile that opted out must not pick up a stored credential that outlived the opt-out.
+      if (rememberPassword === false) return;
       // Load saved credentials asynchronously (same flow as clicking a server card)
       void (async () => {
         try {
