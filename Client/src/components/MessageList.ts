@@ -101,6 +101,9 @@ const SCROLL_TOP_VIEWPORTS = 2;
 const OLDER_RETRY_COOLDOWN_MS = 5000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 
+/** Headroom above the NEW divider on open: the unread bar overlays the top of the viewport. */
+const UNREAD_BAR_CLEARANCE = 40;
+
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
 
@@ -508,7 +511,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
     if (idx === -1) return false;
     openAtDividerPending = false;
-    root.scrollTop = offsetBefore(idx);
+    root.scrollTop = Math.max(0, offsetBefore(idx) - UNREAD_BAR_CLEARANCE);
     renderWindow();
     updateScrollToBottomBtn();
     return true;
