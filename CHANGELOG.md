@@ -88,6 +88,7 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - **Linux desktop:** a native crash (voice/video or the window system) now ends the client log with a line naming the signal and thread, instead of the log just stopping.
+- **The server spends less CPU delivering live events.** Each outgoing WebSocket frame used to set up its own write timer; one is now reused for the whole connection. A stalled connection still fails after 10 seconds.
 
 ### Known issues
 

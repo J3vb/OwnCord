@@ -65,7 +65,7 @@ func TestWritePumpWrite_PeerPingAnsweredDuringLargeMessage(t *testing.T) {
 				}
 			}
 		}()
-		writePumpWrite(srvCtx, conn, &Client{userID: 1}, msg)
+		writePumpWrite(newWriteDeadline(srvCtx, writeTimeout), conn, &Client{userID: 1}, msg)
 		<-srvCtx.Done()
 	}))
 	srv.Listener = slowListener{srv.Listener}
