@@ -466,4 +466,86 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(root().scrollTop).toBeGreaterThanOrEqual(SCROLL_HEIGHT - CLIENT_HEIGHT - 100);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Step C — the ↓ button counts what arrived below
+  // ---------------------------------------------------------------------------
+
+  describe("Step C: the scroll-to-bottom button counts new messages", () => {
+    const button = () => container.querySelector<HTMLButtonElement>(".scroll-to-bottom-btn")!;
+    function countText(): string {
+      const el = container.querySelector<HTMLElement>('[data-testid="scroll-to-bottom-count"]');
+      return el === null || el.hidden ? "" : (el.textContent ?? "");
+    }
+
+    it("shows how many messages arrived while scrolled up", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      setMessages(range(1, 53));
+
+      expect(countText()).toBe("3");
+      expect(button().getAttribute("aria-label")).toContain("3 new messages");
+    });
+
+    it("counts nothing while the reader is at the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollToEnd();
+
+      setMessages(range(1, 53));
+
+      expect(countText()).toBe("");
+    });
+
+    it("does not count the reader's own messages", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      setMessages([...range(1, 50), makeMessage(51, ME)]);
+
+      expect(countText()).toBe("");
+    });
+
+    it("does not count older history prepended above", () => {
+      setMessages(range(51, 100));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      setMessages(range(1, 100));
+
+      expect(countText()).toBe("");
+    });
+
+    it("clears when the reader jumps back to the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+      setMessages(range(1, 52));
+      expect(countText()).toBe("2");
+
+      button().click();
+
+      expect(countText()).toBe("");
+      expect(button().getAttribute("aria-label")).not.toContain("new message");
+    });
+
+    it("caps the count at 99+", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      setMessages(range(1, 150));
+
+      expect(countText()).toBe("99+");
+    });
+  });
 });
