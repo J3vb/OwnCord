@@ -137,3 +137,37 @@ describe("reply snippets of a deleted parent", () => {
     expect(list(next)[1]!.referencedMessage).toStrictEqual(redacted(51));
   });
 });
+
+const edit = (content: string) => ({
+  message_id: 50,
+  channel_id: 1,
+  content,
+  edited_at: "T2",
+});
+
+describe("reply snippets of an edited parent", () => {
+  // Parent 50 is outside the loaded window.
+  const withReply: MessagesState = {
+    ...INITIAL_STATE,
+    messagesByChannel: new Map([
+      [
+        1,
+        [row(10, { replyTo: 50, referencedMessage: { ...snippet(50), content: "old" } }), row(12)],
+      ],
+    ]),
+  };
+
+  it("an edit refreshes the snippet of replies whose parent is outside the window", () => {
+    const next = reduceEditMessage(withReply, edit("new"));
+    expect(list(next)[0]!.referencedMessage).toStrictEqual({
+      ...snippet(50),
+      content: "new",
+    });
+    expect(list(next)[1]).toBe(list(withReply)[1]);
+  });
+
+  it("cuts the refreshed snippet to the server's 100 code points", () => {
+    const next = reduceEditMessage(withReply, edit("😀".repeat(150)));
+    expect(list(next)[0]!.referencedMessage!.content).toBe("😀".repeat(100));
+  });
+});
