@@ -30,7 +30,9 @@ let currentDate: string | null = null;
 let buffer: string[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
-let activeFlush: Promise<void> | null = null;
+// Every write chains onto this, so a flush() always waits for a write the
+// debounce timer already started, and appends land in the order they were logged.
+let writeChain: Promise<void> = Promise.resolve();
 
 export async function clearPendingPersistedLogs(): Promise<void> {
   buffer = [];
@@ -38,9 +40,7 @@ export async function clearPendingPersistedLogs(): Promise<void> {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
-  if (activeFlush !== null) {
-    await activeFlush;
-  }
+  await writeChain;
 }
 
 /** Get today's date as YYYY-MM-DD. */
@@ -53,8 +53,8 @@ function logFilePath(dir: string, date: string): string {
   return `${dir}/${date}.jsonl`;
 }
 
-/** Flush buffered log lines to disk. */
-async function flushBuffer(): Promise<void> {
+/** Write the buffered log lines; always runs on `writeChain`. */
+async function doFlush(): Promise<void> {
   if (buffer.length === 0 || !logDir) return;
 
   const date = today();
@@ -63,27 +63,22 @@ async function flushBuffer(): Promise<void> {
     await rotateOldFiles();
   }
 
+  // Snapshot after any await above, so lines logged while waiting go out in order.
   const lines = buffer.join("\n") + "\n";
   buffer = [];
 
-  const flushPromise = (async () => {
-    try {
-      const filePath = logFilePath(logDir, date);
-      await writeTextFile(filePath, lines, { append: true });
-    } catch (err) {
-      // Log persistence failure shouldn't crash the app.
-      log.error("flush failed", err);
-    }
-  })();
-
-  activeFlush = flushPromise;
   try {
-    await flushPromise;
-  } finally {
-    if (activeFlush === flushPromise) {
-      activeFlush = null;
-    }
+    await writeTextFile(logFilePath(logDir, date), lines, { append: true });
+  } catch (err) {
+    // Log persistence failure shouldn't crash the app.
+    log.error("flush failed", err);
   }
+}
+
+/** Flush buffered log lines to disk, after any write already in flight. */
+function flushBuffer(): Promise<void> {
+  writeChain = writeChain.then(doFlush, doFlush);
+  return writeChain;
 }
 
 /** Schedule a flush after a short debounce. */

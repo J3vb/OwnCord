@@ -403,14 +403,20 @@ export function openCacheDb(): Promise<IDBDatabase | null> {
   });
 }
 
-function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): void {
-  const close = (): void => db.close();
-  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
-  tx.oncomplete = close;
-  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
-  tx.onabort = close;
-  // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
-  tx.onerror = close;
+/** Closes `db` once `tx` ends; the promise resolves then, and never rejects. */
+function closeDbAfterTransaction(tx: IDBTransaction, db: IDBDatabase): Promise<void> {
+  return new Promise((resolve) => {
+    const close = (): void => {
+      db.close();
+      resolve();
+    };
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
+    tx.oncomplete = close;
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
+    tx.onabort = close;
+    // oxlint-disable-next-line prefer-add-event-listener -- IDBTransaction does not support addEventListener
+    tx.onerror = close;
+  });
 }
 
 /** Delete every durable entry outside `scope` (including pre-B7-13 keys) when
@@ -420,7 +426,7 @@ async function idbPrune(scope: string, keep: boolean): Promise<void> {
   if (db === null) return;
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
-    closeDbAfterTransaction(tx, db);
+    const ended = closeDbAfterTransaction(tx, db);
     const store = tx.objectStore(IDB_STORE);
     const req = store.getAllKeys();
     const prefix = idbKey(scope, "");
@@ -431,6 +437,7 @@ async function idbPrune(scope: string, keep: boolean): Promise<void> {
         if (inside !== keep) store.delete(key);
       }
     };
+    await ended;
   } catch {
     db.close();
   }
@@ -479,7 +486,7 @@ async function idbGet(key: string): Promise<Blob | null> {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(IDB_STORE, "readonly");
-      closeDbAfterTransaction(tx, db);
+      void closeDbAfterTransaction(tx, db);
       const req = tx.objectStore(IDB_STORE).get(key);
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onsuccess = () => {
@@ -519,7 +526,7 @@ async function idbPut(scope: string, url: string, blob: Blob): Promise<void> {
   }
   try {
     const tx = db.transaction(IDB_STORE, "readwrite");
-    closeDbAfterTransaction(tx, db);
+    void closeDbAfterTransaction(tx, db);
     const store = tx.objectStore(IDB_STORE);
     const entry: StoredImage = { blob, bytes: blob.size, used: Date.now() };
     store.put(entry, idbKey(scope, url));

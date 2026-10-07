@@ -251,6 +251,14 @@ describe("buildSupportBundle", () => {
     );
   });
 
+  it("does not claim secrets are never read, and warns that logs may hold sensitive values", () => {
+    const readme = text(
+      readZip(buildSupportBundle(sources())).find((e) => e.name === "README.txt")!.data,
+    );
+    expect(readme).not.toContain("never read into this bundle");
+    expect(readme).toContain("can contain anything the app logged");
+  });
+
   it("tolerates a malformed profile list and an unreadable setting", () => {
     const entries = readZip(
       buildSupportBundle(

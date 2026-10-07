@@ -281,3 +281,55 @@ describe("LogFiles.readNative", () => {
     await expect(mod.logFiles.readNative()).resolves.toEqual([]);
   });
 });
+
+// Codex review of B7-15c: flush() must wait for a write the debounce timer
+// already started, and writes must land in order.
+describe("LogFiles.flush ordering", () => {
+  const emit = (message: string): void =>
+    capturedListener?.({
+      timestamp: new Date().toISOString(),
+      level: "info",
+      component: "test",
+      message,
+    });
+
+  test("flush waits for a write the debounce timer already started", async () => {
+    vi.useFakeTimers();
+    try {
+      const mod = await freshModule();
+      appLogDir.mockResolvedValue("/logs");
+      await mod.logFiles.init();
+
+      const releases: (() => void)[] = [];
+      writeTextFile.mockImplementation(
+        () => new Promise<void>((resolve) => releases.push(resolve)),
+      );
+
+      emit("first");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(writeTextFile).toHaveBeenCalledTimes(1);
+
+      emit("second");
+      let flushed = false;
+      const flushing = mod.logFiles.flush().then(() => {
+        flushed = true;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(flushed).toBe(false);
+      // The second write must not start until the first has finished.
+      expect(writeTextFile).toHaveBeenCalledTimes(1);
+
+      releases[0]!();
+      await vi.waitFor(() => expect(writeTextFile).toHaveBeenCalledTimes(2));
+      expect(flushed).toBe(false);
+      releases[1]!();
+      await flushing;
+
+      expect(flushed).toBe(true);
+      expect(writeTextFile.mock.calls[0]![1]).toContain("first");
+      expect(writeTextFile.mock.calls[1]![1]).toContain("second");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
