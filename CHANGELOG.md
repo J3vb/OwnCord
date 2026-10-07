@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Deployment
+
+- **OwnCord now ships an Unraid template, so it installs as one container with voice included.** `deploy/unraid/owncord.xml` sets up the chat port (8443), the voice ports (7881 TCP, 7882 UDP), runs as Unraid's `99:100` and mounts `/app` as a folder so `config.yaml` is created on first start. It is not in Community Apps yet: add the raw file URL under Docker › Template repositories until the listing is accepted. See [Unraid](docs/deployment.md#unraid).
+
 ### Desktop UI
 
 - **A channel with unread messages now opens at the NEW line, with an unread bar.** Instead of landing at the bottom, the list opens where the unread messages start, and a bar at the top says how many are new and since when ("5 new messages since 2:34 PM", or "99+ new messages" for 100 or more). **Mark as read** in the bar marks the channel read; scrolling to the bottom with the window focused hides it too.
