@@ -91,10 +91,10 @@ example `7882`) to carry all media on a **single** UDP port: OwnCord writes
 that one port. On the Docker stack, edit `livekit.yaml` directly — replace
 `port_range_start`/`port_range_end` with `udp_port: 7882` and publish
 `7882/udp` in `docker-compose.yml` in place of the range, then set
-`OWNCORD_VOICE_UDP_PORT: "7882"` on the `owncord` service (the commented line in
-its `environment:` block) so the admin connectivity report names that port
-rather than the range. LiveKit ignores the range once `udp_port` is set, so use
-one form or the other, never both.
+`OWNCORD_VOICE_UDP_PORT: "7882"` on the `owncord` service (it ships as `"0"`)
+so the admin connectivity report names that port rather than the range.
+LiveKit ignores the range once `udp_port` is set, so use one form or the
+other, never both.
 
 Two things are needed together:
 

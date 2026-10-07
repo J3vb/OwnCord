@@ -50,6 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Desktop UI
 
 - **Trusting a new server certificate now also asks the operating system.** After you accept the certificate prompt, the desktop app shows a native dialog with the server and its fingerprint, and saves the certificate only when you answer Yes. Accepting the certificate already saved asks nothing.
+- **Returning to a channel keeps the history you had loaded, even when messages arrived while you were elsewhere.** Leaving a channel and returning used to drop everything you had loaded beyond the newest rows, because the reload was sized from the local unread count — which misses messages posted in a channel you were not viewing. It now pages backwards from the newest message until it reaches the oldest row you had loaded (up to five pages), so the loaded window stays put and is checked for edits and deletes; when the loaded window plus the messages that arrived is larger than those five pages can cover, the oldest loaded rows are still dropped.
 - **Desktop updates now check the signed artifact name before installation.** The name must match the running operating system, processor and installer format.
 - **You can switch the clock between 12-hour and 24-hour.** Every timestamp was fixed to the 12-hour en-US format ("Today at 2:34 PM"). Settings › Appearance now has a **Time Format** choice; the default stays 12-hour, and the choice applies to message and system times, DM list times, search results, session and call times, and other date-and-time labels. It is stored on the device.
 - **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.
@@ -60,7 +61,6 @@ and only when it changes something a contributor or fork holder must do
 
 ### Messages
 
-- **Coming back to a channel keeps the older messages you had scrolled to.** Leaving a channel and returning dropped everything you had loaded beyond the newest 50, so you had to scroll up and wait for them again. The one reload now asks for enough rows to cover what you had loaded (up to 100), so those older messages stay put — and because they are checked in that same reload, an edit or delete made while you were away still shows.
 - **Messages that arrive while the window is unfocused now badge the channel you are looking at.** If you were on a channel in a minimised or background window, an incoming message showed nothing until you switched away. It now counts as unread, and the channel is marked read once you scroll its bottom into view with the window focused.
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
 
@@ -79,6 +79,7 @@ and only when it changes something a contributor or fork holder must do
 - **Linux desktop: your camera now keeps working while the OwnCord window is hidden.** Sharing your screen, minimizing or covering the window froze the camera for everyone else — they saw one frame and then a stalled tile — because the desktop webview stops servicing a hidden page's video element. The camera is now captured in the app's native backend, independent of the window, so it stays live while you share your screen or switch apps. The camera list in Settings › Voice & Audio and the self-view preview now come from the same backend. Windows and macOS are unchanged.
 - **Join, leave, mute and deafen now make a short sound, on the speaker you chose.** A call was silent apart from the ring: you could not hear someone join or leave your channel, and toggling mute or deafen gave no feedback. These now play a short chime, on the output device picked in Settings › Voice & Audio (on Linux the system default, where the desktop webview cannot route it). Everything stays silent while you are deafened in a call — except an incoming ring, which still plays for a call. Turn the voice sounds off under Settings › Notifications.
 - **Linux desktop: an empty camera list now says when GStreamer is missing.** A minimal or non-Debian install without the GStreamer plugins showed no cameras with no hint why. Settings › Voice & Audio and the in-call camera button now name the packages to install (`gstreamer1.0-plugins-good` on Ubuntu/Debian, `gstreamer1-plugins-good` on Fedora, `gst-plugins-good` on Arch); a host with the plugins but no camera still reads "No camera found".
+- **The Docker image now bundles LiveKit, so one container serves chat and voice.** `ghcr.io/j3vb/owncord-server` ships the pinned, checksum-verified `livekit-server` and the server starts it itself, as on bare metal — `docker run` needs no second container. Voice media uses the single UDP port `7882` (plus TCP `7881`) instead of the `50000-60000` range, so publish `-p 7882:7882/udp -p 7881:7881`. The two-container `docker-compose.yml` is unchanged in behaviour: it now clears `OWNCORD_VOICE_LIVEKIT_BINARY` and `OWNCORD_VOICE_UDP_PORT` so its separate LiveKit keeps the port range. If you run your own compose file with a separate LiveKit, set those two the same way.
 
 ### Accounts & admin
 
@@ -88,6 +89,7 @@ and only when it changes something a contributor or fork holder must do
 ### Changed
 
 - **Linux desktop:** a native crash (voice/video or the window system) now ends the client log with a line naming the signal and thread, instead of the log just stopping.
+- **The server spends less CPU delivering live events.** Each outgoing WebSocket frame used to set up its own write timer; one is now reused for the whole connection. A stalled connection still fails after 10 seconds.
 
 ### Known issues
 
