@@ -1509,6 +1509,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // fetching the around-window instead of treating this as a landed jump.
     if (renderedStart < 0) return false;
 
+    // Rendering measured the target (and its neighbours), so the top-aligned
+    // offset above was built from estimates. Centre it with the real height.
+    // Each move can render and measure new rows above the target, shifting
+    // its offset again, so settle for a few passes (usually one or two).
+    for (let pass = 0; pass < 3; pass++) {
+      const centred = Math.max(0, offsetBefore(idx) - (root.clientHeight - getItemHeight(idx)) / 2);
+      if (centred === root.scrollTop) break;
+      root.scrollTop = centred;
+      renderWindow();
+    }
+
     // Briefly highlight the target message element
     if (contentContainer !== null) {
       const localIdx = idx - renderedStart;

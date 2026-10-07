@@ -268,6 +268,27 @@ describe("MessageList", () => {
     expect(container.querySelector('[data-testid="message-150"]')).not.toBeNull();
   });
 
+  it("scrollToMessage centres the target in the viewport once its row is measured", () => {
+    const many = Array.from({ length: 200 }, (_, i) => makeMessage({ id: i + 1 }));
+    setMessages(1, many);
+    msgList.mount(container);
+    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    Object.defineProperty(root, "clientHeight", { configurable: true, value: 400 });
+    const offsetHeight = vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(100);
+
+    expect(msgList.scrollToMessage(150)).toBe(true);
+    offsetHeight.mockRestore();
+
+    // Spacer height + rows above the target in the rendered window = the
+    // target's top; centred means that top sits (400 - 100) / 2 below scrollTop.
+    const spacer = container.querySelector(".virtual-spacer-top") as HTMLElement;
+    const row = container.querySelector('[data-testid="message-150"]') as HTMLElement;
+    const rowIdx = Array.from(row.parentElement!.children).indexOf(row);
+    expect(root.scrollTop).toBe(parseFloat(spacer.style.height) + rowIdx * 100 - 150);
+  });
+
   it("OC-0217/OC-0286: repeated jumps do not each register a permanent row listener on the component-lifetime signal", () => {
     // As a user clicking a reply bar's jump arrow, a search hit, or a pinned
     // entry repeatedly does across a live session.
