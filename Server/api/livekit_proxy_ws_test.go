@@ -269,6 +269,38 @@ func TestLiveKitProxy_WebSocket_CrossOriginRejected(t *testing.T) {
 	}
 }
 
+// A reverse proxy (nginx's $host) forwards Host without the default port while
+// the client's Origin keeps it. isOriginAllowed treats the two as the same
+// origin, so the upgrade must succeed rather than pass the pre-check and then
+// be refused by websocket.Accept's own literal host comparison.
+func TestLiveKitProxy_WebSocket_DefaultPortOriginBehindProxy(t *testing.T) {
+	backend := echoWSBackend(t)
+	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, nil))
+	t.Cleanup(proxy.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	conn, resp, err := websocket.Dial(ctx, "ws://"+proxy.Listener.Addr().String()+"/rtc/v1", &websocket.DialOptions{
+		Host:       "owncord.example",
+		HTTPHeader: http.Header{"Origin": []string{"https://owncord.example:443"}},
+	})
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close() //nolint:errcheck // best-effort close in test
+	}
+	if err != nil {
+		t.Fatalf("upgrade with a default-port Origin was refused: %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte("signal")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, got, err := conn.Read(ctx); err != nil || string(got) != "signal" {
+		t.Fatalf("read = %q, %v; want echoed signal", got, err)
+	}
+}
+
 // ─── handleLiveKitHealth (the real handler) ─────────────────────────────────
 
 // hubWithLiveKit returns a Hub whose LiveKit client points at a stub room
