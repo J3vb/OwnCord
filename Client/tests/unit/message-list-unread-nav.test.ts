@@ -232,6 +232,23 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(unreadCount()).toBe(0);
     });
 
+    it("does not mark read while 50px above the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      incrementUnread(CHANNEL_ID, true);
+
+      scrollTo(SCROLL_HEIGHT - CLIENT_HEIGHT - 50);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      expect(unreadCount()).toBe(1);
+
+      scrollToEnd();
+
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+    });
+
     it("does not mark read when focus returns while the reader is scrolled up", () => {
       hasFocus.mockReturnValue(false);
       setMessages(range(1, 50));
@@ -452,6 +469,70 @@ describe("MessageList — unread navigation (P4-03)", () => {
       await nextFrame();
 
       expectDividerInView(DIVIDER_PX + 50 * ROW_PX);
+    });
+
+    function loadRevisit(): void {
+      setMessages(range(1, 50));
+      messagesStore.setState((prev) => ({
+        ...prev,
+        historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+      }));
+      openChannelWithUnread(10);
+    }
+
+    function settleHistory(state: "error" | null): void {
+      messagesStore.setState((prev) => {
+        const next = new Map(prev.messagesByChannel);
+        next.set(CHANNEL_ID, range(1, 60));
+        const load = new Map(prev.historyLoadState);
+        if (state === null) load.delete(CHANNEL_ID);
+        else load.set(CHANNEL_ID, state);
+        return { ...prev, messagesByChannel: next, historyLoadState: load };
+      });
+      messagesStore.flush();
+    }
+
+    it("a revisit's cached-bottom scroll does not dismiss the unread bar before the refetch lands", () => {
+      loadRevisit();
+      mount();
+      scrollToEnd();
+
+      settleHistory(null);
+
+      expect(barShown()).toBe(true);
+      expect(barLabel()).not.toBe("");
+    });
+
+    it("a failed refetch leaves the bar dismissable", () => {
+      loadRevisit();
+      mount();
+      settleHistory("error");
+      expect(barShown()).toBe(true);
+
+      scrollToEnd();
+
+      expect(barShown()).toBe(false);
+    });
+
+    it("announces the unread count once when the deferred divider resolves", () => {
+      loadRevisit();
+      mount();
+      const announcer = container.querySelector('[role="status"]');
+      expect(announcer).not.toBeNull();
+      expect(announcer!.textContent).toBe("");
+
+      settleHistory(null);
+      expect(announcer!.textContent).toBe(barLabel());
+      expect(announcer!.textContent).not.toBe("");
+
+      // A refresh with the same text does not rewrite the live region.
+      const rewrite = vi.fn();
+      new MutationObserver(rewrite).observe(announcer!, { childList: true, characterData: true });
+      setMessages(range(1, 61));
+      expect(rewrite).not.toHaveBeenCalled();
+
+      markReadButton()!.click();
+      expect(announcer!.textContent).toBe("");
     });
 
     it("keeps following new messages at the bottom once the reader has scrolled down", async () => {

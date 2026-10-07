@@ -186,11 +186,15 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  * client is not viewing, whose chat_message broadcast never arrives. The frame
  * is the only way such a change reaches the sidebar/taskbar badge live.
  *
- * Ignored for the active channel: a mention in the channel on screen is already
- * handled by its own chat_message (and, when that window is detached from the
- * live tail, counted there with the evenIfActive escape hatch). Applying the
- * server total here would paint a red badge on the channel the user is reading —
- * the badge the active-channel skip in noteChannelMessage exists to prevent.
+ * Ignored for the active channel while the reader is present: a mention in the
+ * channel on screen is already handled by its own chat_message (and, when that
+ * window is detached from the live tail, counted there with the evenIfActive
+ * escape hatch). Applying the server total here would paint a red badge on the
+ * channel the user is reading — the badge the active-channel skip in
+ * noteChannelMessage exists to prevent. While the reader is away (unfocused,
+ * detached) the frame may only lower the badge, never raise it: raises still
+ * come from the channel's own chat_message, so applying them would double
+ * count, but a delete or purge that reverses a mention must reach the badge.
  * The frame carries an absolute total, not a delta, so a channel the reader
  * watched focused and then left would over-count mentions already seen; while
  * away, its own chat_message keeps counting live mentions. Ignored for a
@@ -198,12 +202,14 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  * the DM's own chat_message.
  */
 export function handleMentionCount(payload: Payload<"mention_count">): void {
-  if (payload.channel_id === channelsStore.getState().activeChannelId) return;
   const ch = channelsStore.getState().channels.get(payload.channel_id);
-  if (ch === undefined) return;
-  if (ch.type !== "dm") {
-    setMentionCount(payload.channel_id, payload.count);
+  if (ch === undefined || ch.type === "dm") return;
+  if (payload.channel_id === channelsStore.getState().activeChannelId) {
+    if (!isChannelAway(payload.channel_id)) return;
+    setMentionCount(payload.channel_id, Math.min(ch.mentionCount, payload.count));
+    return;
   }
+  setMentionCount(payload.channel_id, payload.count);
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {
