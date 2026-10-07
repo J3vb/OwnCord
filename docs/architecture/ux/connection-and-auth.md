@@ -62,8 +62,9 @@ drives the login form's `auto-connecting` state.
 **Incompatible epoch state (B7-12).** A mismatch is shown in two places, never
 as a bare badge:
 
-- The 15 s preflight (`GET /api/v1/server-info`, `api.getServerInfo`) only
-  **badges** the row — "Client update needed" / "Server update needed". The
+- The 15 s preflight (`GET /api/v1/server-info`, `api.getServerInfo`; it also
+  runs when the health call fails, since a degraded 503 server still answers it)
+  only **badges** the row — "Client update needed" / "Server update needed". The
   badge is **advisory**: it never disables Connect, and the WebSocket
   `auth_error` (`protocol_epoch_unsupported`) is the authority.
 - Selecting the row, or a WS refusal, raises the `IncompatibleNotice`
@@ -71,7 +72,8 @@ as a bare badge:
   the server's own terms — which side updates, with both epoch numbers. It is
   exitable: "Update client" mounts the existing updater (client-older only; an
   older server needs operator guidance, not a client install) and "Choose
-  another server" dismisses it, leaving the list usable. The notice never
+  another server" dismisses it and clears the refusal error from the login form,
+  leaving the list usable. The notice never
   appears for a background-probe profile the user has not selected.
 
 ### 2.2 Login form — state machine
@@ -155,7 +157,9 @@ sequenceDiagram
 
 Same form; register mode adapts to the host's `registration_mode`, read from the
 per-host `server-info` snapshot the 15 s preflight keeps (`serverInfoByHost` in
-`main.ts`, re-derived on host edit, mode toggle, invite link, and each probe):
+`main.ts`, re-derived on host edit, mode toggle, invite link, and each probe; a typed host
+with no health row is probed once, debounced 500 ms, when register mode is
+entered or the host settles):
 
 | Mode                     | Register affordances                                                      |
 | ------------------------ | ------------------------------------------------------------------------- |

@@ -63,6 +63,12 @@ and only when it changes something a contributor or fork holder must do
 - Switching back to a server resumes its saved sign-in only when "remember password" is on, and no longer overrides a login you started yourself.
 - Picking a server whose "remember password" is off no longer loads or fills in its saved password.
 
+### Login & connection
+
+- Registering on a server you typed in (not a saved one) now checks that server's sign-up rules, so an open server no longer asks for an invite code.
+- A server reporting degraded health still gets its version-compatibility check.
+- "Choose another server" now clears the leftover version-mismatch error from the login form.
+
 ## v2.2.0-beta.1
 
 **OwnCord 2.2 beta 1** is the next public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It adds an unread bar that opens each channel where you left off, camera capture that keeps working while the window is hidden on Linux, voice sounds, and an admin page that edits almost every server setting. The Docker image now carries voice too, so one container is the whole server.

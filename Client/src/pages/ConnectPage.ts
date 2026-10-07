@@ -44,6 +44,8 @@ export interface ConnectPageCallbacks {
   getRegistrationMode?(host: string): RegistrationMode | null;
   /** The retention sentence `server-info` reported for a host, if known. */
   getRetentionNotice?(host: string): string | null;
+  /** A typed host settled in register mode; probe its `server-info` if unknown. */
+  onHostSettled?(host: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,7 @@ export function createConnectPage(
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
     getRegistrationMode: callbacks.getRegistrationMode,
     getRetentionNotice: callbacks.getRetentionNotice,
+    onHostSettled: callbacks.onHostSettled,
   });
 
   // Per-host compatibility from the advisory preflight. The notice reads it
@@ -128,9 +131,18 @@ export function createConnectPage(
     { readonly compatibility: Compatibility; readonly serverEpoch: number | null }
   >();
 
+  // The banner text of the last transient error, and of the one a protocol
+  // refusal raised: leaving the notice clears only the latter.
+  let lastTransientError: string | null = null;
+  let refusalError: string | null = null;
+
   const incompatibleNotice = createIncompatibleNotice({
     onUpdate: (host) => callbacks.onUpdateClient?.(host),
-    onLeave: () => incompatibleNotice.hide(),
+    onLeave: () => {
+      incompatibleNotice.hide();
+      loginForm.clearError(refusalError);
+      refusalError = null;
+    },
   });
 
   function selectHost(host: string): void {
@@ -348,6 +360,7 @@ export function createConnectPage(
       (s) => s.transientError,
       (msg) => {
         if (msg) {
+          lastTransientError = msg;
           loginForm.showError(msg);
           setTransientError(null);
         }
@@ -356,6 +369,7 @@ export function createConnectPage(
     // Show any pending auth error (e.g. "already connected from another client")
     const pendingError = uiStore.getState().transientError;
     if (pendingError) {
+      lastTransientError = pendingError;
       loginForm.showError(pendingError);
       setTransientError(null);
     }
@@ -419,6 +433,7 @@ export function createConnectPage(
       }
     },
     showIncompatible(host: string, serverEpoch: number | null, clientEpoch = PROTOCOL_EPOCH): void {
+      refusalError = lastTransientError;
       incompatibleNotice.show(host, serverEpoch, clientEpoch);
     },
     getRememberPassword: () => loginForm.getRememberPassword(),
