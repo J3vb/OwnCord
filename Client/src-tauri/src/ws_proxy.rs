@@ -8,7 +8,7 @@
 // - On first use (no pin yet) the connection is rejected and a `cert-tofu`
 //   "first_use" event is emitted so the user can confirm the fingerprint. F4/F8:
 //   the proxy never silently pins or forwards to an unconfirmed host — the only
-//   writer of a pin is the explicit `accept_cert_fingerprint` command.
+//   user-confirmed writer of a pin is the explicit `accept_cert_fingerprint` command.
 
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info, warn};
