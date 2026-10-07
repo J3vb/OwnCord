@@ -314,6 +314,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let unreadBarDismissed = false;
   /** The visit still owes the reader a jump to the NEW divider (cleared on first use). */
   let openAtDividerPending = false;
+  let scrollToBottomCount: HTMLSpanElement | null = null;
+  /** Messages from others that landed below the view since the reader scrolled up. */
+  let newBelowCount = 0;
   let jumpToPresentPill: HTMLButtonElement | null = null;
   let renderedStart = 0;
   let renderedEnd = 0;
@@ -495,9 +498,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (scrollToBottomBtn === null) return;
     if (isNearBottom()) {
       scrollToBottomBtn.classList.remove("visible");
+      newBelowCount = 0;
     } else {
       scrollToBottomBtn.classList.add("visible");
     }
+    if (scrollToBottomCount === null) return;
+    const shown = formatBadgeCount(newBelowCount);
+    scrollToBottomCount.hidden = newBelowCount === 0;
+    scrollToBottomCount.textContent = newBelowCount === 0 ? "" : shown;
+    scrollToBottomBtn.setAttribute(
+      "aria-label",
+      newBelowCount === 0
+        ? messagingText("scrollToBottom")
+        : messagingText("scrollToBottomNew", { count: newBelowCount, shown }),
+    );
   }
 
   /** The pill is the only signal that the bottom of the list is not "now". */
@@ -1218,7 +1232,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       class: "scroll-to-bottom-btn",
       "aria-label": messagingText("scrollToBottom"),
     });
-    scrollToBottomBtn.textContent = "↓";
+    scrollToBottomBtn.append("↓");
+    scrollToBottomCount = createElement("span", {
+      class: "scroll-to-bottom-count",
+      "data-testid": "scroll-to-bottom-count",
+      hidden: "",
+    });
+    scrollToBottomBtn.appendChild(scrollToBottomCount);
     scrollToBottomBtn.addEventListener(
       "click",
       () => {
@@ -1338,9 +1358,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         // array references are unchanged) never trigger a re-render here.
         (s) => s.messagesByChannel.get(options.channelId),
         () => {
+          // Optimistic rows (id 0) sit at the tail; live rows land before them.
+          const prevLast = allMessages.findLast((m) => m.id > 0)?.id ?? 0;
+          const wasBottom = isNearBottom();
           if (!patchRows()) {
             renderAll();
           }
+          if (!wasBottom && prevLast > 0 && allMessages.some((m) => m.id === prevLast)) {
+            // Only an append counts: a window swap drops the previous last row.
+            // Older ids (a prepend) and the reader's own rows never count.
+            for (const m of allMessages) {
+              if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
+            }
+          }
+          updateScrollToBottomBtn();
           settleUnreadNav();
         },
       ),
@@ -1580,6 +1611,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     scrollToBottomBtn = null;
     unreadBar = null;
     unreadBarLabel = null;
+    scrollToBottomCount = null;
+    newBelowCount = 0;
     jumpToPresentPill = null;
     olderLoadingRow = null;
   }

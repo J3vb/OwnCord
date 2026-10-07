@@ -257,6 +257,13 @@ away (`features/messaging/wsHandlers.ts`). The local replay classifier (`isRepla
 `features/messaging/wsHandlers.ts`) gates only the desktop notification/sound/taskbar flash and
 the `@here` mention badge, never an unread count.
 
+**Jump-to-bottom count (P4-03 step C):** while the reader is scrolled away from
+the bottom, the ↓ button shows how many messages from other people were appended
+below the view (`formatBadgeCount`, so "99+" from 100). Own messages, pending
+sends, prepended history and a wholesale window replacement (a jump to present
+or a reconnect resync) never count; the count clears on return to the bottom
+(`MessageList`).
+
 **Deferred to P4-04 (server read-on-open):** the server still advances a
 channel's read state when `channel_focus` lands, and `handleAuthOk` sends it
 for the active channel on every `auth_ok` — including a reconnect while the

@@ -156,6 +156,21 @@
   transform: translateY(0);
   pointer-events: auto;
 }
+.scroll-to-bottom-count {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--font-size-xxs);
+  line-height: 18px;
+}
+.scroll-to-bottom-count[hidden] {
+  display: none;
+}
 .scroll-to-bottom-btn:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
