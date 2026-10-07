@@ -42,7 +42,7 @@ func TestUnraidTemplateMatchesImage(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(readFile(t, "docker-compose.yml")), &compose); err != nil {
 		t.Fatal(err)
 	}
-	if want := strings.Split(compose.Services["owncord"].Image, ":")[0]; !strings.HasPrefix(tpl.Repository, want) {
+	if want, _, _ := strings.Cut(compose.Services["owncord"].Image, ":"); !strings.HasPrefix(tpl.Repository, want) {
 		t.Errorf("Repository %q must be the compose image %q", tpl.Repository, want)
 	}
 
