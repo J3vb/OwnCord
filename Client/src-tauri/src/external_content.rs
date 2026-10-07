@@ -534,6 +534,8 @@ struct Handles {
 /// Handles kept before the oldest is forgotten; a forgotten handle's image
 /// is refused as expired, and the renderer re-asks once for the preview.
 const MAX_HANDLES: usize = 4096;
+/// A longer preview image URL is dropped, which bounds what `Handles` holds.
+const MAX_IMAGE_URL_BYTES: usize = 2048;
 
 impl Handles {
     fn new() -> Self {
@@ -708,22 +710,25 @@ impl ExternalContentState {
     }
 
     async fn fetch(&self, raw: &str, want: Want) -> Result<Fetched, Failure> {
-        let _permit = self
-            .gate
-            .acquire()
-            .await
-            .map_err(|_| Failure::Unavailable)?;
         let deadline = match want {
             Want::Page => self.limits.page_deadline,
             Want::Image => self.limits.image_deadline,
         };
-        let mut reservation = Reservation {
-            budget: &self.in_flight,
-            held: 0,
-        };
-        tokio::time::timeout(deadline, self.follow(raw, want, deadline, &mut reservation))
-            .await
-            .map_err(|_| Failure::Unavailable)?
+        // The deadline covers the wait for a permit as well as the fetch.
+        tokio::time::timeout(deadline, async {
+            let _permit = self
+                .gate
+                .acquire()
+                .await
+                .map_err(|_| Failure::Unavailable)?;
+            let mut reservation = Reservation {
+                budget: &self.in_flight,
+                held: 0,
+            };
+            self.follow(raw, want, deadline, &mut reservation).await
+        })
+        .await
+        .map_err(|_| Failure::Unavailable)?
     }
 
     async fn follow(
@@ -890,7 +895,8 @@ fn reduce_page(fetched: &Fetched) -> Result<PreviewData, Failure> {
         .as_deref()
         .filter(|s| !s.is_empty())
         .and_then(|s| fetched.url.join(s).ok())
-        .map(|u| u.to_string());
+        .map(|u| u.to_string())
+        .filter(|u| u.len() <= MAX_IMAGE_URL_BYTES);
     Ok(PreviewData {
         title: tags.title,
         description: tags.description,
@@ -1479,6 +1485,35 @@ mod tests {
         let b = ExternalContentState::with(loopback_policy(), limits);
         let got = b.image("p", None, Some(&format!("{base}/hang"))).await;
         assert_eq!(got.err(), Some(Failure::Unavailable));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fetch_deadline_includes_the_wait_for_a_permit() {
+        let b = broker();
+        let _held = b.gate.acquire_many(MAX_CONCURRENT as u32).await.unwrap();
+        let fetch = b.fetch("http://127.0.0.1:1/", Want::Image);
+        tokio::pin!(fetch);
+        // Past the image deadline with every permit held, the call must give up.
+        let got = tokio::time::timeout(
+            small_limits().image_deadline + Duration::from_secs(1),
+            &mut fetch,
+        )
+        .await
+        .expect("fetch must end by its own deadline, not wait on the gate");
+        assert_eq!(got.err(), Some(Failure::Unavailable));
+    }
+
+    #[test]
+    fn overlong_og_image_is_dropped() {
+        let page = |img: &str| Fetched {
+            body: format!(r#"<meta property="og:image" content="{img}">"#).into_bytes(),
+            content_type: "text/html".into(),
+            url: Url::parse("https://example.com/p").unwrap(),
+        };
+        let long = format!("/{}", "a".repeat(3000));
+        assert_eq!(reduce_page(&page(&long)).unwrap().image_url, None);
+        let short = format!("/{}", "a".repeat(200));
+        assert!(reduce_page(&page(&short)).unwrap().image_url.is_some());
     }
 
     #[tokio::test]
