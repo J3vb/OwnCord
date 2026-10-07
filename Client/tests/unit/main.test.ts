@@ -630,6 +630,33 @@ describe("main.ts native certificate-dialog decline", () => {
     clearAuth();
   });
 
+  it("fails closed when the mismatch modal cannot open", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("modal-load.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+
+    vi.mocked(createCertMismatchModal).mockImplementationOnce(() => {
+      throw new Error("chunk load failed");
+    });
+    mockInvoke.mockClear();
+    emitTauriEvent("cert-tofu", {
+      host: "modal-load.example:8443",
+      fingerprint: "sha256:CHANGED",
+      status: "mismatch",
+      message: "Stored: sha256:ORIGINAL",
+    });
+    expectConsole("error", /Certificate fingerprint mismatch/);
+    await vi.advanceTimersByTimeAsync(10);
+    expectConsole("error", /Failed to open certificate modal/);
+
+    // The mismatch latch is set and no modal will answer it, so the session
+    // drops rather than sitting on stale authenticated UI.
+    expect(mockInvoke).toHaveBeenCalledWith("ws_disconnect");
+
+    clearAuth();
+  });
+
   it("mounts no second trust modal while the native dialog is still open", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("pending-native.example:8443", "alex", "hunter2");
