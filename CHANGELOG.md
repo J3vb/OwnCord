@@ -57,6 +57,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
+
 ### Login & connection
 
 - Registering on a server you typed in (not a saved one) now checks that server's sign-up rules, so an open server no longer asks for an invite code.
