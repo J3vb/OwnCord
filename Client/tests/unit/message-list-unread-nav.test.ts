@@ -30,6 +30,7 @@ import {
   incrementUnread,
 } from "@stores/channels.store";
 import { setMarkReadSender } from "@lib/read-state";
+import { formatMessageTimestamp } from "@lib/formatting";
 
 const CHANNEL_ID = 1;
 const ME = 1;
@@ -37,6 +38,14 @@ const ME = 1;
  *  scroll position reads as "at the bottom". */
 const SCROLL_HEIGHT = 100_000;
 const CLIENT_HEIGHT = 600;
+/** Estimated heights MessageList uses before anything is measured (jsdom
+ *  measures 0): a day or NEW divider is 32 px, an ungrouped text row 61 px. */
+const DIVIDER_PX = 32;
+const ROW_PX = 61;
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
 
 function resetStores(): void {
   messagesStore.setState(() => ({
@@ -296,6 +305,165 @@ describe("MessageList — unread navigation (P4-03)", () => {
       window.dispatchEvent(new Event("focus"));
 
       expect(sendMarkRead).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Step B — the unread bar and opening at the NEW divider
+  // ---------------------------------------------------------------------------
+
+  describe("Step B: unread bar and open at the divider", () => {
+    const bar = () => container.querySelector<HTMLElement>('[data-testid="unread-bar"]');
+    const barShown = () => bar() !== null && !bar()!.hidden;
+    const barLabel = () =>
+      container.querySelector('[data-testid="unread-bar-label"]')?.textContent ?? "";
+    const markReadButton = () =>
+      container.querySelector<HTMLButtonElement>('[data-testid="unread-bar-mark-read"]');
+
+    it("shows the count and the time of the first unread message", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+
+      expect(barShown()).toBe(true);
+      expect(barLabel()).toBe(
+        `5 new messages since ${formatMessageTimestamp(makeMessage(46).timestamp)}`,
+      );
+      expect(markReadButton()?.textContent).toBe("Mark as read");
+    });
+
+    it("uses the singular for one new message", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(1);
+      mount();
+
+      expect(barLabel()).toBe(
+        `1 new message since ${formatMessageTimestamp(makeMessage(50).timestamp)}`,
+      );
+    });
+
+    // With #2024 a capped count (ready reports 100 for 100 or more) puts the
+    // divider at the top of the loaded page, which is not the first unread
+    // message, so the bar gives no time.
+    it("says 99+ new messages when the count is capped", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(100);
+      mount();
+
+      expect(barShown()).toBe(true);
+      expect(barLabel()).toBe("99+ new messages");
+    });
+
+    it("shows no bar when the channel opened with nothing unread", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+
+      expect(barShown()).toBe(false);
+    });
+
+    it("shows no bar while the window is detached", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      setDetached(true);
+      mount();
+
+      expect(barShown()).toBe(false);
+    });
+
+    it("Mark as read clears the badge, sends mark_read and hides the bar", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+      incrementUnread(CHANNEL_ID, true);
+
+      markReadButton()!.click();
+
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+      expect(barShown()).toBe(false);
+      // The divider stays for the rest of the visit.
+      expect(container.querySelector('[data-testid="new-messages-divider"]')).not.toBeNull();
+    });
+
+    it("hides the bar once the reader reaches the bottom with the window focused", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+
+      hasFocus.mockReturnValue(false);
+      scrollToEnd();
+      expect(barShown()).toBe(true);
+
+      hasFocus.mockReturnValue(true);
+      scrollUp();
+      scrollToEnd();
+      expect(barShown()).toBe(false);
+    });
+
+    /** The NEW divider and the first unread row below it are inside the viewport. */
+    function expectDividerInView(dividerOffset: number): void {
+      const top = root().scrollTop;
+      expect(top).toBeLessThanOrEqual(dividerOffset);
+      expect(top + CLIENT_HEIGHT).toBeGreaterThanOrEqual(dividerOffset + DIVIDER_PX + ROW_PX);
+    }
+
+    it("opens at the NEW divider instead of the bottom", async () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+      await nextFrame();
+
+      // Day divider + 45 read rows above the NEW line.
+      expectDividerInView(DIVIDER_PX + 45 * ROW_PX);
+      const divider = container.querySelector('[data-testid="new-messages-divider"]');
+      expect(divider).not.toBeNull();
+      expect((divider!.nextElementSibling as HTMLElement).dataset.testid).toBe("message-46");
+    });
+
+    it("still opens at the bottom when nothing is unread", async () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      await nextFrame();
+
+      expect(root().scrollTop).toBeGreaterThanOrEqual(SCROLL_HEIGHT - CLIENT_HEIGHT - 100);
+    });
+
+    // DP-10/R2: a revisit renders the cached rows first and places the divider
+    // when the refetched tail lands; the view moves to it then, since the
+    // reader has not scrolled yet.
+    it("moves to a deferred divider when the revisit's refetch lands", async () => {
+      setMessages(range(1, 50));
+      messagesStore.setState((prev) => ({
+        ...prev,
+        historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+      }));
+      openChannelWithUnread(10);
+      mount();
+      await nextFrame();
+
+      messagesStore.setState((prev) => {
+        const next = new Map(prev.messagesByChannel);
+        next.set(CHANNEL_ID, range(1, 60));
+        return { ...prev, messagesByChannel: next, historyLoadState: new Map() };
+      });
+      messagesStore.flush();
+      await nextFrame();
+
+      expectDividerInView(DIVIDER_PX + 50 * ROW_PX);
+    });
+
+    it("keeps following new messages at the bottom once the reader has scrolled down", async () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+      await nextFrame();
+      scrollToEnd();
+
+      setMessages(range(1, 51));
+
+      expect(root().scrollTop).toBeGreaterThanOrEqual(SCROLL_HEIGHT - CLIENT_HEIGHT - 100);
     });
   });
 });
