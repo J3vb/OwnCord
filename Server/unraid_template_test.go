@@ -29,6 +29,7 @@ type unraidTemplate struct {
 	Support     string         `xml:"Support"`
 	Icon        string         `xml:"Icon"`
 	Network     string         `xml:"Network"`
+	Shell       string         `xml:"Shell"`
 	Configs     []unraidConfig `xml:"Config"`
 }
 
@@ -83,6 +84,11 @@ func TestUnraidTemplateMatchesImage(t *testing.T) {
 	// then the appdata mount, not the root-owned image dir).
 	if !strings.Contains(tpl.ExtraParams, "--user 99:100") {
 		t.Errorf("ExtraParams %q must run the container as 99:100", tpl.ExtraParams)
+	}
+	// Unraid's Console action runs this shell in the container; the distroless
+	// image has none, so naming one makes that action fail.
+	if tpl.Shell != "" {
+		t.Errorf("Shell %q must be empty: the image has no shell", tpl.Shell)
 	}
 	if !strings.HasSuffix(tpl.WebUI, "[PORT:8443]/admin") {
 		t.Errorf("WebUI %q must point at the admin panel", tpl.WebUI)

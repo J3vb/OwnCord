@@ -5,7 +5,7 @@
   <Registry>https://github.com/J3vb/OwnCord/pkgs/container/owncord-server</Registry>
   <Network>bridge</Network>
   <MyIP/>
-  <Shell>sh</Shell>
+  <Shell/>
   <Privileged>false</Privileged>
   <Support>https://github.com/J3vb/OwnCord/issues</Support>
   <Project>https://github.com/J3vb/OwnCord</Project>
