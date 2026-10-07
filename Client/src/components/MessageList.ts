@@ -311,6 +311,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let scrollToBottomBtn: HTMLButtonElement | null = null;
   let unreadBar: HTMLDivElement | null = null;
   let unreadBarLabel: HTMLSpanElement | null = null;
+  let unreadAnnouncer: HTMLDivElement | null = null;
   let unreadBarDismissed = false;
   /** The visit still owes the reader a jump to the NEW divider (cleared on first use). */
   let openAtDividerPending = false;
@@ -489,6 +490,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return scrollHeight - scrollTop - clientHeight < SCROLL_BOTTOM_THRESHOLD;
   }
 
+  /** The true bottom (1 px tolerates fractional scrollTop on HiDPI), unlike the 100 px isNearBottom. */
+  function isAtBottom(): boolean {
+    if (root === null) return true;
+    const { scrollTop, scrollHeight, clientHeight } = root;
+    return scrollHeight - scrollTop - clientHeight <= 1;
+  }
+
   function scrollToBottom(): void {
     if (root === null) return;
     root.scrollTop = root.scrollHeight;
@@ -555,6 +563,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     unreadBarLabel.textContent = text;
     unreadBar.hidden = text === "";
+    // Announce when the count first appears, not on every refresh.
+    if (unreadAnnouncer !== null) {
+      if (text === "") unreadAnnouncer.textContent = "";
+      else if (unreadAnnouncer.textContent === "") unreadAnnouncer.textContent = text;
+    }
   }
 
   function dismissUnreadBar(): void {
@@ -567,6 +580,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Only while the reader is still at the bottom the mount left them at.
     if (openAtDividerPending && isNearBottom()) openAtDividerIfReady();
     updateUnreadBar();
+    markReadIfSeen();
   }
 
   /**
@@ -581,8 +595,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function markReadIfSeen(): void {
     if (root === null) return;
     if (channelsStore.getState().activeChannelId !== options.channelId) return;
-    if (!isNearBottom()) return;
+    if (!isAtBottom()) return;
     if (isChannelAway(options.channelId)) return;
+    // The cached bottom of a revisit predates what arrived while away; keep
+    // the bar until the refetched tail places the divider.
+    if (newDividerDeferred) return;
     dismissUnreadBar();
     if (!hasUnread(options.channelId)) return;
     markChannelRead(options.channelId);
@@ -1254,6 +1271,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }, disposable.signal);
     unreadBar = unreadBarParts.bar;
     unreadBarLabel = unreadBarParts.label;
+    unreadAnnouncer = unreadBarParts.announcer;
 
     jumpToPresentPill = createElement("button", {
       class: "jump-to-present-pill",
@@ -1272,6 +1290,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     region.appendChild(scrollToBottomBtn);
     region.appendChild(jumpToPresentPill);
     region.appendChild(unreadBar);
+    region.appendChild(unreadAnnouncer);
 
     root.addEventListener("scroll", handleScroll, {
       signal: disposable.signal,
@@ -1611,6 +1630,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     scrollToBottomBtn = null;
     unreadBar = null;
     unreadBarLabel = null;
+    unreadAnnouncer = null;
     scrollToBottomCount = null;
     newBelowCount = 0;
     jumpToPresentPill = null;

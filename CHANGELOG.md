@@ -53,6 +53,7 @@ and only when it changes something a contributor or fork holder must do
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
 - **Voice behind a reverse proxy**: joining voice failed with 403 when the proxy forwarded the host without its `:443` port — the server now accepts the connection.
+- **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
 
 ### Fixed
 
