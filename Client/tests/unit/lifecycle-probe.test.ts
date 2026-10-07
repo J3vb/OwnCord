@@ -224,18 +224,39 @@ describe("lifecycle soak pass bars", () => {
     expect(nodes.bar).not.toMatch(/page \d:/);
   });
 
-  it("keeps the tolerance to nodes: a 1-unit wobble in another metric still fails", () => {
-    const listeners = [
+  it("tolerates a 1-unit single-sample wobble in listeners, but not documents or intervals", () => {
+    // The CI flake: listeners 203→204 between cycles 6 and 9 (slope 1/3) with
+    // nothing leaked, then a pass on retry.
+    const wobble = (overrides: Partial<LifecycleSample>) => [
       sample(5),
-      sample(6, { listeners: 100 }),
-      sample(9, { listeners: 101 }),
+      sample(6),
+      sample(9, overrides),
       sample(10),
       sample(15),
-      sample(16, { listeners: 100 }),
-      sample(19, { listeners: 101 }),
+      sample(16),
+      sample(19, overrides),
       sample(20),
     ];
-    expect(bar(evaluateBars(listeners), "listeners").pass).toBe(false);
+    expect(bar(evaluateBars(wobble({ listeners: 51 })), "listeners").pass).toBe(true);
+    expect(bar(evaluateBars(wobble({ timeouts: 2 })), "timeouts").pass).toBe(true);
+    expect(bar(evaluateBars(wobble({ documents: 2 })), "documents").pass).toBe(false);
+    expect(bar(evaluateBars(wobble({ intervals: 2 })), "intervals").pass).toBe(false);
+  });
+
+  it("still fails a listeners leak of 2 or more per page, or one per cycle", () => {
+    const twoPerPage = [
+      sample(5),
+      sample(6),
+      sample(9, { listeners: 52 }),
+      sample(10),
+      sample(15),
+      sample(16),
+      sample(19, { listeners: 52 }),
+      sample(20),
+    ];
+    expect(bar(evaluateBars(twoPerPage), "listeners").pass).toBe(false);
+    const perCycle = [5, 6, 9, 10, 15, 16, 19, 20].map((c) => sample(c, { listeners: 50 + c }));
+    expect(bar(evaluateBars(perCycle), "listeners").pass).toBe(false);
   });
 
   it("leaves the samples at the 5-cycle marks (reconnect, logout) out of the page pair", () => {

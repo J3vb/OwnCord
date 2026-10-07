@@ -48,10 +48,18 @@ const COUNT_BAR_SLOPE = 0.05;
  * spot: each page is always exactly two samples (cycles 6 and 9), however long
  * the soak runs, so page-scoped node growth of up to 2 between them that the
  * re-login navigation releases is accepted. A real leak past the tolerance
- * still fails, phase series included. Every other counter settles exactly under
- * the settle loop and gets none.
+ * still fails, phase series included. Other non-exact counters get only the
+ * 1-unit COUNT_WOBBLE_TOLERANCE below.
  */
 const NODE_BAR_TOLERANCE = 2;
+/**
+ * The other non-exact counters (listeners, abort controllers, timeouts) can
+ * read one unit high at a single sample (CI: listeners 203→204, then a pass on
+ * retry). A net move of 1 passes; a real per-cycle leak moves a two-sample page
+ * pair by 3 and a phase series by 5 or more, so it still fails. `documents` and
+ * `intervals` stay exact.
+ */
+const COUNT_WOBBLE_TOLERANCE = 1;
 const HEAP_BAR_RATIO = 1.1;
 const HEAP_BAR_SLOPE = 25 * 1024;
 
@@ -374,7 +382,11 @@ export function evaluateBars(
     for (const { label, group, withinPage } of series) {
       // Run 35986328302: page-0 nodes read 2858→2859 across cycles 6 and 9,
       // slope 1/3 with an identical attached DOM (see NODE_BAR_TOLERANCE).
-      const tolerance = metric === "nodes" ? NODE_BAR_TOLERANCE : 0;
+      const tolerance = exact
+        ? 0
+        : metric === "nodes"
+          ? NODE_BAR_TOLERANCE
+          : COUNT_WOBBLE_TOLERANCE;
       const values = group.map((s) => s[metric]);
       const measuredSlope = slope(group.map((s) => ({ x: s.cycle, y: s[metric] })));
       if (Math.abs(measuredSlope) >= Math.abs(worstSlope)) {
@@ -397,9 +409,7 @@ export function evaluateBars(
       slope: worstSlope,
       bar: exact
         ? "every phase and page series exactly flat"
-        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle${
-            metric === "nodes" ? `, or a net move <= ${NODE_BAR_TOLERANCE} in either series` : ""
-          }`,
+        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle${`, or a net move <= ${metric === "nodes" ? NODE_BAR_TOLERANCE : COUNT_WOBBLE_TOLERANCE} in either series`}`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;
