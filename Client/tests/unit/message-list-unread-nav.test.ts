@@ -523,6 +523,17 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(countText()).toBe("");
     });
 
+    it("does not count a wholesale window replacement", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      setMessages(range(200, 249));
+
+      expect(countText()).toBe("");
+    });
+
     it("clears when the reader jumps back to the bottom", () => {
       setMessages(range(1, 50));
       openChannelWithUnread(0);

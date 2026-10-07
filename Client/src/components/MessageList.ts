@@ -1363,7 +1363,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (!patchRows()) {
             renderAll();
           }
-          if (!wasBottom) {
+          if (!wasBottom && prevLast > 0 && allMessages.some((m) => m.id === prevLast)) {
+            // Only an append counts: a window swap drops the previous last row.
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
