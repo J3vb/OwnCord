@@ -97,6 +97,9 @@ export interface LoginFormOptions {
   /** The server-default retention sentence for a host, shown at sign-up;
    *  null when unknown, and then nothing is shown (B7-15c). */
   readonly getRetentionNotice?: (host: string) => string | null;
+  /** The host box settled (debounced) in register mode, or register mode was
+   *  entered with a host typed; lets the owner fetch that host's mode. */
+  readonly onHostSettled?: (host: string) => void;
 }
 
 export interface LoginFormApi {
@@ -118,6 +121,8 @@ export interface LoginFormApi {
   /** Hide the waiting line without reporting a cancel. */
   hideServerWait(): void;
   showError(message: string): void;
+  /** Drop the error banner, if one is showing. */
+  clearError(): void;
   /** A non-error, informational message (e.g. pending approval) shown as a
    *  notice rather than the red error banner. */
   showNotice(message: string): void;
@@ -185,7 +190,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     onAutoLoginCancel,
     getRegistrationMode,
     getRetentionNotice,
+    onHostSettled,
   } = opts;
+
+  // Debounce token: only the latest scheduled host-settled call fires.
+  let hostSettledSeq = 0;
 
   let usingSavedPassword = false;
 
@@ -368,7 +377,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     hostInput = qs("input", hostGroup)!;
     // Registration policy is per host, so a manually edited address re-derives
     // the mode (and the invite requirement) as the user types.
-    hostInput.addEventListener("input", updateRegistrationUi, { signal });
+    hostInput.addEventListener(
+      "input",
+      () => {
+        updateRegistrationUi();
+        scheduleHostSettled();
+      },
+      { signal },
+    );
 
     // Username
     const usernameGroup = buildFormGroup(
@@ -989,6 +1005,21 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     hostInput.value = host;
   }
 
+  /** Register mode only: tell the owner which host the user settled on. */
+  function scheduleHostSettled(delayMs = 500): void {
+    if (!onHostSettled || formMode !== "register") return;
+    const seq = ++hostSettledSeq;
+    const host = hostInput.value.trim();
+    if (!host) return;
+    setOwnedTimeout(
+      signal,
+      () => {
+        if (seq === hostSettledSeq && formMode === "register") onHostSettled(host);
+      },
+      delayMs,
+    );
+  }
+
   function handleToggleMode(): void {
     cancelAuthBusyRetry?.();
     formMode = formMode === "login" ? "register" : "login";
@@ -1008,6 +1039,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
 
     updateRegistrationUi();
+    scheduleHostSettled(0);
 
     // Clear any existing error
     if (formState === "error") {
@@ -1303,6 +1335,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     showError(message: string): void {
       transitionTo("error", message);
+    },
+
+    clearError(): void {
+      if (formState === "error") transitionTo("idle");
     },
 
     showNotice(message: string): void {

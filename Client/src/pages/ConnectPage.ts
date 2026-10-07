@@ -44,6 +44,8 @@ export interface ConnectPageCallbacks {
   getRegistrationMode?(host: string): RegistrationMode | null;
   /** The retention sentence `server-info` reported for a host, if known. */
   getRetentionNotice?(host: string): string | null;
+  /** A typed host settled in register mode; probe its `server-info` if unknown. */
+  onHostSettled?(host: string): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,7 @@ export function createConnectPage(
     onAutoLoginCancel: callbacks.onAutoLoginCancel,
     getRegistrationMode: callbacks.getRegistrationMode,
     getRetentionNotice: callbacks.getRetentionNotice,
+    onHostSettled: callbacks.onHostSettled,
   });
 
   // Per-host compatibility from the advisory preflight. The notice reads it
@@ -125,7 +128,10 @@ export function createConnectPage(
 
   const incompatibleNotice = createIncompatibleNotice({
     onUpdate: (host) => callbacks.onUpdateClient?.(host),
-    onLeave: () => incompatibleNotice.hide(),
+    onLeave: () => {
+      incompatibleNotice.hide();
+      loginForm.clearError();
+    },
   });
 
   function selectHost(host: string): void {
