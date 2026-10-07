@@ -307,7 +307,7 @@ behave identically.
 
 | Step                                  | Target UX                                                                                                              |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Target loaded                         | Scroll to the row and flash it (`.highlight-flash`, 1.5s)                                                              |
+| Target loaded                         | Scroll to the row, centre it in the viewport once measured, and flash it (`.highlight-flash`, 1.5s)                    |
 | Target not loaded                     | Fetch `GET /channels/{id}/messages/around/{messageId}`, replace the channel's window with it, then scroll + flash      |
 | Target in another channel             | Open that channel first, then the above — the jumper owns the switch so the fetch is sequenced after it, not racing it |
 | Channel not visible / message deleted | Toast and stay put; never blank the chat area on an unresolvable link                                                  |
