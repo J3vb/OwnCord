@@ -511,8 +511,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
     if (idx === -1) return false;
     openAtDividerPending = false;
+    // The caller decides whether to re-window now; the scroll event does on the next frame.
     root.scrollTop = Math.max(0, offsetBefore(idx) - UNREAD_BAR_CLEARANCE);
-    renderWindow();
     updateScrollToBottomBtn();
     return true;
   }
@@ -1295,6 +1295,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     renderAll();
     updateJumpToPresentPill();
     const openedAtDivider = openAtDividerIfReady();
+    if (openedAtDivider) renderWindow();
     updateUnreadBar();
     // A deferred divider still moves the view later, so only the bottom
     // scrolls are skipped when the open already landed on it.
