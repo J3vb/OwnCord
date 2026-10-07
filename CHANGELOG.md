@@ -62,6 +62,7 @@ and only when it changes something a contributor or fork holder must do
 
 - **Messages that arrive while the window is unfocused now badge the channel you are looking at.** If you were on a channel in a minimised or background window, an incoming message showed nothing until you switched away. It now counts as unread, and the channel is marked read once you scroll its bottom into view with the window focused.
 - **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
+- **Jumping to a message now centres it, and a reply always shows who it quotes.** Jumping to a reply's parent, a search hit or a pin used to leave the target glued to the top edge of the list. It now lands in the middle of the view. A reply from the same author within five minutes of their previous message used to be folded into that message and lose its quoted-parent header; it now starts its own block.
 
 ### Mentions
 

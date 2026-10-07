@@ -98,6 +98,7 @@ const SCROLL_TOP_VIEWPORTS = 2;
  *  this long before retrying, unless the reader leaves the zone first. */
 const OLDER_RETRY_COOLDOWN_MS = 5000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
+const JUMP_RECENTRE_MS = 3000;
 
 /** Number of items to render beyond visible viewport in each direction. */
 const OVERSCAN = 20;
@@ -633,6 +634,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     for (const owner of rowOwners.values()) owner.destroy();
     rowOwners.clear();
   }
+
+  // The last jumped-to message, re-centred from the resize callback while
+  // content above it is still sizing.
+  let jumpTarget: { readonly messageId: number; readonly until: number } | null = null;
 
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
@@ -1199,6 +1204,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         resizeRafId = 0;
         if (root === null || contentContainer === null) return;
 
+        const jumpIdx =
+          jumpTarget !== null && Date.now() < jumpTarget.until
+            ? virtualItems.findIndex(
+                (item) => item.kind === "message" && item.message.id === jumpTarget?.messageId,
+              )
+            : -1;
+        if (jumpIdx !== -1) {
+          measureRendered();
+          updateSpacers();
+          centreOnIndex(jumpIdx);
+          return;
+        }
+
         const atBottom = isNearBottom();
 
         // Capture anchor: topmost visible item and its offset from viewport top
@@ -1486,6 +1504,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     olderLoadingRow = null;
   }
 
+  /** Scroll so row `idx` is centred; false when it was already centred. */
+  function centreOnIndex(idx: number): boolean {
+    if (root === null) return false;
+    const centred = Math.max(0, offsetBefore(idx) - (root.clientHeight - getItemHeight(idx)) / 2);
+    if (centred === root.scrollTop) return false;
+    root.scrollTop = centred;
+    renderWindow();
+    return true;
+  }
+
   function scrollToMessage(messageId: number): boolean {
     if (root === null) return false;
     const idx = virtualItems.findIndex(
@@ -1508,6 +1536,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // that never rendered. This lets callers (e.g. MessageJump) fall back to
     // fetching the around-window instead of treating this as a landed jump.
     if (renderedStart < 0) return false;
+
+    // Rendering measured the target (and its neighbours), so the top-aligned
+    // offset above was built from estimates. Centre it with the real height.
+    // Each move can render and measure new rows above the target, shifting
+    // its offset again, so settle for a few passes (usually one or two).
+    for (let pass = 0; pass < 3; pass++) {
+      if (!centreOnIndex(idx)) break;
+    }
+    // Late-sizing content (previews, images) above the target keeps it
+    // centred until the highlight flash ends.
+    jumpTarget = { messageId, until: Date.now() + JUMP_RECENTRE_MS };
 
     // Briefly highlight the target message element
     if (contentContainer !== null) {
