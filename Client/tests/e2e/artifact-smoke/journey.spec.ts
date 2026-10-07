@@ -77,15 +77,27 @@ test("installed artifact boots, connects, joins voice and recovers an account", 
   const host = server.origin.replace("https://", "");
   const { installation, binary } = await installArtifact(ARTIFACTS);
   try {
+    const emptyPlugins = info.outputPath("gst-empty-plugins");
+    await mkdir(emptyPlugins, { recursive: true });
     const app = await launchArtifact(binary, {
       pins: { [host]: await serverPin(server.directory) },
+      env:
+        process.platform === "linux"
+          ? {
+              GST_PLUGIN_SYSTEM_PATH_1_0: emptyPlugins,
+              GST_PLUGIN_PATH_1_0: emptyPlugins,
+              GST_PLUGIN_SCANNER_1_0: "/nonexistent",
+              GST_REGISTRY_1_0: info.outputPath("gst-appimage-registry.bin"),
+            }
+          : undefined,
     });
     await withArtifact(app, info, async () => {
       // Boot: the connect page renders and the binary is this commit's.
       await waitFor(app, "#host", "", 60_000);
       expect(await appVersion(app)).toBe(await expectedVersion());
-      // The AppImage carries its own GStreamer and camera plugins, so native
-      // camera capture works on a host without any GStreamer packages.
+      // The host GStreamer plugin paths were pointed at an empty directory
+      // above (AppRun re-points them at the bundled copy), so camera support
+      // here does not depend on the host's plugin path.
       if (process.platform === "linux") {
         expect(await cameraSupport(app)).toEqual({ available: true, missing: [] });
       }
