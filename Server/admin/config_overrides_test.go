@@ -343,3 +343,40 @@ func TestConfigOverrides_RestartNow(t *testing.T) {
 		t.Errorf("second POST /restart = %d %s, want 409 RESTART_PENDING", w.Code, w.Body.String())
 	}
 }
+
+// Each row carries the owner-facing copy from the config registry, so the page
+// can show a plain label, what the setting does, a recommendation and the
+// effect of changing it. A secret row carries it too.
+func TestConfigOverrides_RowsCarrySettingCopy(t *testing.T) {
+	f := newConfigOverridesFixture(t)
+	token := createAdminUser(t, f.database)
+
+	w := doRequest(t, f.handler, http.MethodGet, "/config/settings", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /config/settings = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Settings []struct {
+			Key         string `json:"key"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+			Recommended string `json:"recommended"`
+			Effect      string `json:"effect"`
+		} `json:"settings"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Settings) == 0 {
+		t.Fatal("no settings rows")
+	}
+	for _, s := range resp.Settings {
+		want, _ := config.SettingCopyFor(s.Key)
+		if s.Label == "" || s.Description == "" || s.Recommended == "" || s.Effect == "" {
+			t.Errorf("%s: row is missing copy: %+v", s.Key, s)
+		}
+		if s.Label != want.Label || s.Description != want.Description || s.Recommended != want.Recommended || s.Effect != want.Effect {
+			t.Errorf("%s: row copy does not match the registry", s.Key)
+		}
+	}
+}

@@ -315,7 +315,10 @@ save to it is refused (the value would lose at the next boot). An override
 takes effect at the next server start; the page offers **Restart now** once
 something is pending. The boot log names each overridden key, never its value.
 
-Almost every key is on the page. The four secrets (`gif.api_key`,
+Almost every key is on the page. Each row shows a plain-language name (the
+`config.yaml` key beside it), a one-line description, the recommended value and
+what changing it affects; this copy ships with the server
+(`Server/config/overrides_copy.go`). The four secrets (`gif.api_key`,
 `github.token`, `voice.livekit_api_key`, `voice.livekit_api_secret`) are
 write-only: the page shows whether one is configured and never sends the value
 back. A secret whose rule allows empty (`gif.api_key`, `github.token`) also

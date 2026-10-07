@@ -227,6 +227,7 @@ input,select,textarea{font-family:inherit;border:none}
 .setting-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}
 .setting-row:last-child{border-bottom:none}
 .setting-info{flex:1;min-width:0}.setting-name{font-size:14px;color:var(--text-normal);margin-bottom:2px}
+.setting-key{font-size:11px;color:var(--text-muted);margin-left:6px}
 .setting-desc{font-size:12px;color:var(--text-muted)}.setting-ctrl{flex-shrink:0;margin-left:16px}
 /* Server pages (Settings, Backups & restore, Updates). */
 .setting-ctrl .form-input{width:280px;max-width:100%}
