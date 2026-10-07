@@ -47,64 +47,81 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
-### Deployment
+## v2.2.0-beta.1
 
-- **OwnCord now ships an Unraid template, so it installs as one container with voice included.** `deploy/unraid/owncord.xml` sets up the chat port (8443), the voice ports (7881 TCP, 7882 UDP), runs as Unraid's `99:100` and mounts `/app` as a folder so `config.yaml` is created on first start. It is not in Community Apps yet: add the raw file URL under Docker › Template repositories until the listing is accepted. See [Unraid](docs/deployment.md#unraid).
+**OwnCord 2.2 beta 1** is the next public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It adds an unread bar that opens each channel where you left off, camera capture that keeps working while the window is hidden on Linux, voice sounds, and an admin page that edits almost every server setting. The Docker image now carries voice too, so one container is the whole server.
 
-### Desktop UI
+It is still a **beta and a hobby project** — try it if you are comfortable running a small server for a group of friends, and don't use it for anything sensitive. Update the server and the desktop app together.
 
-- **Trusting a new server certificate now also asks the operating system.** After you accept the certificate prompt, the desktop app shows a native dialog with the server and its fingerprint, and saves the certificate only when you answer Yes. Accepting the certificate already saved asks nothing.
-- **A channel with unread messages now opens at the NEW line, with an unread bar.** Instead of landing at the bottom, the list opens where the unread messages start, and a bar at the top says how many are new and since when ("5 new messages since 2:34 PM", or "99+ new messages" for 100 or more). **Mark as read** in the bar marks the channel read; scrolling to the bottom with the window focused hides it too.
-- **The jump-to-bottom button now counts new messages.** While you are scrolled up, the ↓ button shows how many messages from other people arrived below the view ("99+" past 99), and its accessible name says the same. The count clears when you return to the bottom.
-- **Returning to a channel keeps the history you had loaded, even when messages arrived while you were elsewhere.** Leaving a channel and returning used to drop everything you had loaded beyond the newest rows, because the reload was sized from the local unread count — which misses messages posted in a channel you were not viewing. It now pages backwards from the newest message until it reaches the oldest row you had loaded (up to five pages), so the loaded window stays put and is checked for edits and deletes; when the loaded window plus the messages that arrived is larger than those five pages can cover, the oldest loaded rows are still dropped.
-- **Desktop updates now check the signed artifact name before installation.** The name must match the running operating system, processor and installer format.
-- **You can switch the clock between 12-hour and 24-hour.** Every timestamp was fixed to the 12-hour en-US format ("Today at 2:34 PM"). Settings › Appearance now has a **Time Format** choice; the default stays 12-hour, and the choice applies to message and system times, DM list times, search results, session and call times, and other date-and-time labels. It is stored on the device.
-- **Closing Settings no longer keeps the last tab's contents in memory.** The closed overlay kept the tab pane you last viewed, including the Account tab's session list, until you opened it again. The pane is now released the moment Settings closes.
+### Highlights
 
-### Login & connection
+- **Channels open at the NEW line**, with an unread bar and a counter on the jump-to-bottom button.
+- **Linux camera that survives a hidden window**: captured natively, so screen sharing or minimizing no longer freezes it for everyone else.
+- **Voice that sounds like a call**: ringback when you place a DM call, and short chimes for join, leave, mute and deafen.
+- **Run the whole server from the admin panel**: every setting is explained, and almost all of them can be changed without editing `config.yaml`.
+- **One Docker container for chat and voice**, plus a ready-made Unraid template.
 
-- **The desktop app now treats a server as signed in only after the server confirms the login.** Saved credentials and identity keys follow the connection that was actually confirmed, the setting is released when that connection ends, and while no connection is open saved credentials can be read only for servers signed in during this app run — not another saved server's. A quick switch back to any server used this run still resumes, and signing out does not widen the read to others.
-- **A certificate the client cannot verify now says so, distinctly.** A trust-on-first-use refusal or a failed TLS handshake used to reach the sign-in form as "Bad Gateway" or a dropped connection, indistinguishable from an offline server. The desktop proxy now reports these with a distinct certificate code, and the client says "The server's certificate couldn't be verified. Check the server address, or ask the server owner." The first-use and changed-certificate prompts themselves are unchanged.
+### Added
 
-### Messages
+**Messages and channels**
 
-- **A reply to an old message now shows who and what it answers.** A reply whose original sat outside the loaded history said "Reply to unknown message". The server now sends a short snippet of the original with each reply, and a deleted original shows "[message deleted]". Needs the server and client updated together; an older server keeps the old wording.
-- **Messages that arrive while the window is unfocused now badge the channel you are looking at.** If you were on a channel in a minimised or background window, an incoming message showed nothing until you switched away. It now counts as unread, and the channel is marked read once you scroll its bottom into view with the window focused.
-- **`:` autocomplete now leads with the same emoji Discord does.** Names such as `:cry`, `:sob`, `:joy` and `:sunglasses` were added piecemeal, so the first row could be a different emoji than Discord (`:cry` offered 😂, now 😢; `:sunglasses` offered 🕶️, now 😎). The popup now uses the complete Discord short-name table and ranks an exact short-name match above one that only matches without its underscores (`:icecream` is 🍦, `:ice_cream` is 🍨).
-- **Jumping to a message now centres it, and a reply always shows who it quotes.** Jumping to a reply's parent, a search hit or a pin used to leave the target glued to the top edge of the list. It now lands in the middle of the view. A reply from the same author within five minutes of their previous message used to be folded into that message and lose its quoted-parent header; it now starts its own block.
+- An unread bar at the top of a channel says how many messages are new and since when; **Mark as read** clears it.
+- The jump-to-bottom button counts new messages from other people while you are scrolled up.
+- A reply to an old message shows a short snippet of the original, or "[message deleted]".
+- `:` autocomplete uses the complete Discord emoji short-name table, so `:cry` is 😢 and `:sunglasses` is 😎.
 
-### Mentions
+**Voice and calls**
 
-- **A mention in a channel you are not viewing now updates the taskbar and tray badge at once.** The badge only caught up on your next reconnect; it is now live, alongside the channel's own red badge.
-- **A mention badge no longer briefly undercounts when a mention lands at the same moment another is deleted.** The live badge updates could arrive out of order, so a delete could overwrite a newer mention with the older total until your next reconnect. The updates are now delivered in the order the server changed the count.
-- **Deleting a mentioning message no longer updates the badge of someone who can no longer see the channel.** A member who lost read access to a channel (or left the direct message) after being mentioned could still receive the badge update for it. The update now checks current channel visibility first and is skipped for readers who cannot see the channel; the stored count is still corrected.
+- A caller hears ringback while a DM call rings, and a toast reports "declined" or "No answer" if you are on another channel.
+- Join, leave, mute and deafen play a short sound on the speaker you chose (Settings › Voice & Audio; on Linux they play on the system default speaker); turn them off under Settings › Notifications.
+- Linux: the camera is captured in the app's native backend, and the camera list and self-view come from it.
+- Linux: an empty camera list now names the missing GStreamer packages, and the `.deb` installs them for you.
 
-### Direct messages & members
+**Desktop**
 
-- **A caller hears ringback and always learns the outcome.** Placing a DM call was silent on your side while the other person's phone rang, and if you moved to another channel you never saw whether they declined or never answered. You now hear a soft ringback while the call is ringing — it stops the moment someone joins, every callee declines, the 30 seconds run out or you leave — and if you are looking at another channel a toast tells you "<name> declined" or "No answer". Do Not Disturb and the "Incoming Call Sound" switch silence it, and ringing again restarts it.
+- Settings › Appearance has a **Time Format** choice, 12-hour or 24-hour.
+- Trusting a new server certificate also asks in a native operating-system dialog showing the fingerprint.
 
-### Voice
+**Admin and deployment**
 
-- **Linux desktop: your camera now keeps working while the OwnCord window is hidden.** Sharing your screen, minimizing or covering the window froze the camera for everyone else — they saw one frame and then a stalled tile — because the desktop webview stops servicing a hidden page's video element. The camera is now captured in the app's native backend, independent of the window, so it stays live while you share your screen or switch apps. The camera list in Settings › Voice & Audio and the self-view preview now come from the same backend. Windows and macOS are unchanged.
-- **Join, leave, mute and deafen now make a short sound, on the speaker you chose.** A call was silent apart from the ring: you could not hear someone join or leave your channel, and toggling mute or deafen gave no feedback. These now play a short chime, on the output device picked in Settings › Voice & Audio (on Linux the system default, where the desktop webview cannot route it). Everything stays silent while you are deafened in a call — except an incoming ring, which still plays for a call. Turn the voice sounds off under Settings › Notifications.
-- **Linux desktop: an empty camera list now says when GStreamer is missing.** A minimal or non-Debian install without the GStreamer plugins showed no cameras with no hint why. Settings › Voice & Audio and the in-call camera button now name the packages to install (`gstreamer1.0-plugins-good` on Ubuntu/Debian, `gstreamer1-plugins-good` on Fedora, `gst-plugins-good` on Arch); a host with the plugins but no camera still reads "No camera found".
-- **Linux desktop: the `.deb` now installs the GStreamer camera plugins itself.** The package now depends on `gstreamer1.0-plugins-good` and the GStreamer libraries the camera links against, so the native camera works right after `apt install`; the AppImage already bundles its own.
-- **The Docker image now bundles LiveKit, so one container serves chat and voice.** `ghcr.io/j3vb/owncord-server` ships the pinned, checksum-verified `livekit-server` and the server starts it itself, as on bare metal — `docker run` needs no second container. Voice media uses the single UDP port `7882` (plus TCP `7881`) instead of the `50000-60000` range, so publish `-p 7882:7882/udp -p 7881:7881`. The two-container `docker-compose.yml` is unchanged in behaviour: it now clears `OWNCORD_VOICE_LIVEKIT_BINARY` and `OWNCORD_VOICE_UDP_PORT` so its separate LiveKit keeps the port range. If you run your own compose file with a separate LiveKit, set those two the same way.
-
-### Accounts & admin
-
-- **The admin Server configuration page now explains every setting.** Each row shows a plain-language name (the `config.yaml` key stays beside it), a one-line description, the recommended value, and what changing it affects. Copy for all editable keys ships with the server and a test fails if a key is added without it.
-- **Almost every server setting can now be changed from the admin panel, without editing `config.yaml`.** The owner-only **Server configuration** page writes values to a JSON file beside the database and applies them after a restart, with **Restart now**. Secrets are write-only — the page shows only whether one is configured. A change that can lock you out or move server data (the listen port, TLS, the admin allowlist and trusted proxies, restart mode, the database/backup/uploads/plugins paths and the LiveKit binary) asks for a typed confirmation and is checked on the server before it is saved. `server.data_dir` is shown read-only, because the overrides file and the TOTP, erasure and VAPID keys live inside it; see `docs/server-configuration.md` for the move procedure. The upload file-type lists keep their existing Settings rows and the page links there. A value pinned by an `OWNCORD_*` environment variable stays locked, and a hand-edited overrides file cannot reach a protected key. If a panel change locks you out, stop the server and delete the offending key from `<data_dir>/config-overrides.json` on the host.
-- **The `server.max_ws_connections` ceiling now holds when upgrades arrive together.** The capacity check and reserving a slot were separate steps, so several connections reaching the limit at the same moment could all be admitted past it. A connection now reserves its slot before the upgrade and returns it if the handshake fails.
+- The owner-only **Server configuration** page edits almost every setting, applies it after a restart, and keeps secrets write-only. Risky changes ask for a typed confirmation.
+- Each setting shows a plain-language name, a description, the recommended value and what changing it affects.
+- The Docker image bundles LiveKit, so `docker run` serves chat and voice; voice uses UDP `7882` and TCP `7881`.
+- An Unraid template is included (`deploy/unraid/owncord.xml`).
 
 ### Changed
 
-- **Linux desktop:** a native crash (voice/video or the window system) now ends the client log with a line naming the signal and thread, instead of the log just stopping.
-- **The server spends less CPU delivering live events.** Each outgoing WebSocket frame used to set up its own write timer; one is now reused for the whole connection. A stalled connection still fails after 10 seconds.
+- Voice media in the Docker image uses the single UDP port `7882` instead of the `50000-60000` range, so publish `-p 7882:7882/udp -p 7881:7881`. A compose file with a separate LiveKit must clear `OWNCORD_VOICE_LIVEKIT_BINARY` and set `OWNCORD_VOICE_UDP_PORT` to `0` for range mode (as the shipped `Server/docker-compose.yml` does) or to the same single port configured in LiveKit.
+- Messages that arrive while the window is unfocused now count as unread for the channel you are viewing.
+- Jumping to a message centres it, and a reply always shows who it quotes.
+- Linux: a native crash now ends the client log with a line naming the signal and thread.
+- The server spends less CPU delivering live events.
+
+### Fixed
+
+- Leaving a channel and returning keeps the history you had loaded, unless more new messages arrived than five pages of 100 can cover, in which case the oldest loaded rows are still dropped.
+- A mention in another channel updates the taskbar and tray badge at once, and the badge no longer undercounts when a mention and a delete land together.
+- A deleted mentioning message no longer updates the badge of someone who lost access to the channel.
+- A certificate the client cannot verify now says so, instead of "Bad Gateway" or a dropped connection.
+- A server counts as signed in only after it confirms the login, and saved credentials are read only for servers used this run.
+- Desktop updates check the signed artifact's name against your system before installing.
+- The `server.max_ws_connections` limit holds when many connections arrive at once.
+- Closing Settings releases the last tab's memory.
 
 ### Known issues
 
-- **Linux desktop:** the app can close without warning when the camera and screen share are both on; the new crash line is there to pin it down.
+- **Linux desktop:** the native camera is new and has not yet been checked on a real machine. Check it on your own setup, including with screen share on; the app can close without warning when both are on, and the new crash line is there to pin that down.
+- **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A channel that opens at the NEW line with a backlog taller than the screen can miss unread counts.** Messages that arrive below the visible area may not be counted as unread if you leave before scrolling to the bottom.
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Cached reply snippets, per-connection write timers and ordered mention-badge frames keep live delivery cheap and consistent.
+- Certificate-trust dialogs load lazily to keep app startup within budget.
+- Configuration copy for every setting ships with the server, and a test fails if a key lacks it.
 
 ## v2.1.0-beta.2
 
