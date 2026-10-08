@@ -10,7 +10,7 @@
  *
  * The frames come from the Tauri mock's own IPC log (`window.__invokeLog`),
  * which records every `ws_send` envelope the client handed to the transport, and
- * from a second init script that records `plugin:http|fetch` calls (the block
+ * from a `wrappers` entry that records `plugin:http|fetch` calls (the block
  * PUT/DELETE). A send is proven by its frame, and "gated" is proven by the
  * absence of a frame plus the disabled control that would have produced it.
  */
@@ -131,7 +131,7 @@ interface CapturedCall {
   readonly url?: string;
 }
 
-/** Installed as a second init script, after the Tauri mock sets up `invoke`. */
+/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
 function captureScript(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -239,6 +239,7 @@ interface MockOpts {
 async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -259,7 +260,6 @@ async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
       },
     }),
   );
-  await page.addInitScript(captureScript);
   await page.goto("/");
   await navigateToMainPage(page);
   await waitForWsReady(page);

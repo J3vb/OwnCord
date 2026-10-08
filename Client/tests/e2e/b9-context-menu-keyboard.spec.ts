@@ -79,6 +79,7 @@ async function capturedCalls(page: Page): Promise<CapturedCall[]> {
 async function mockSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -96,7 +97,6 @@ async function mockSession(page: Page): Promise<void> {
       },
     }),
   );
-  await page.addInitScript(captureScript);
 }
 
 /**
