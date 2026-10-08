@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
+	"encoding/base64"
+	"errors"
 	"testing"
 	"time"
 
@@ -130,5 +132,26 @@ func TestPushSweep_NoKeyInstalledSweepsByTimeOnly(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("Sweep deleted %d rows, want 1 (time-only: the key mismatch must not also fire)", n)
+	}
+}
+
+// TestSubscribe_RejectsOffCurveP256dh: a 65-byte value with the 0x04 prefix
+// that is not a point on P-256 must be refused at subscribe time, not accepted
+// and then fail every dispatch.
+func TestSubscribe_RejectsOffCurveP256dh(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1})
+	svc := NewPushService(database)
+	svc.SetVAPIDKey(genTestVAPIDKey(t))
+
+	offCurve := make([]byte, 65)
+	offCurve[0] = 0x04
+	_, err := svc.Subscribe(context.Background(), 1, PushSubscribeInput{
+		Endpoint: "https://push.example/off-curve",
+		P256dh:   base64.RawURLEncoding.EncodeToString(offCurve),
+		Auth:     base64.RawURLEncoding.EncodeToString(make([]byte, 16)),
+	})
+	if !errors.Is(err, ErrInvalidSubscription) {
+		t.Fatalf("Subscribe(off-curve p256dh) = %v, want ErrInvalidSubscription", err)
 	}
 }
