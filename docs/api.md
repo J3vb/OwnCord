@@ -3258,6 +3258,13 @@ reopen the wizard; afterwards the endpoint returns an error.
 `setup_token` must equal the token the server printed in its start-up output;
 a missing or different value is `403 FORBIDDEN`. The server makes a fresh token each time it starts.
 
+Once setup is done the endpoint answers `403 FORBIDDEN` before hashing the
+password. The hash waits in the same process-wide password-check queue as login
+and registration; when that queue is full or the wait runs out, the response is
+`429 AUTH_BUSY` with `Retry-After` set and no account is created. The owner's
+session in the response is created already seen, so it does not show as an
+unreviewed new login.
+
 #### Request
 
 ```json
