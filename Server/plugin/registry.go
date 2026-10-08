@@ -624,6 +624,8 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 		_ = r.cfg.Store.DisablePlugin(ctx, id)
 		r.mu.Lock()
 		inst.Enabled = false
+		// Free any compile activation retained, as DisablePlugin does.
+		r.platformDeactivate(ctx, inst)
 		r.mu.Unlock()
 		return err
 	}
