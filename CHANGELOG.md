@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
 - **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
 - **Voice behind a reverse proxy**: joining voice failed with 403 when the proxy forwarded the host without its `:443` port — the server now accepts the connection.
+- **Linux voice on plain ALSA**: a microphone or speaker that offers no float audio format (common without PipeWire or PulseAudio) now opens; a device with no 48 kHz format reports that instead of a generic error.
 - **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
 
 ### Login & connection

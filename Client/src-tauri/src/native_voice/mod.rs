@@ -25,6 +25,7 @@ pub mod capture;
 pub mod playout;
 pub mod screen;
 pub mod session;
+pub mod stream_format;
 pub mod video;
 
 use serde::Serialize;

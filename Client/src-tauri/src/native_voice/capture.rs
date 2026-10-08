@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use futures_util::FutureExt;
 use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -22,6 +23,7 @@ use nnnoiseless::DenoiseState;
 
 use super::playout::{host_devices, pinned_listed, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
+use super::stream_format::pick_config;
 
 /// A lock helper mirroring playout's, for the shared input-stream slot.
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -447,50 +449,27 @@ fn open_input(
     source: NativeAudioSource,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
-    let channels = device
-        .default_input_config()
-        .map_err(|e| format!("capture device config: {e}"))?
-        .channels();
-    let width = usize::from(channels.max(1));
+    let supported = device
+        .supported_input_configs()
+        .map_err(|e| format!("capture device configs: {e}"))?;
+    let channels = device.default_input_config().ok().map(|c| c.channels());
+    let (config, format) = pick_config(supported, SAMPLE_RATE, channels)
+        .ok_or("the capture device offers no 48 kHz format")?;
     // Shared by the two build attempts; only the one that succeeds runs.
     let state = Arc::new(Mutex::new((processor, source)));
     let build = |buffer_size| {
-        let state = state.clone();
-        let dead = dead.clone();
-        device.build_input_stream::<f32, _, _>(
-            cpal::StreamConfig {
-                channels,
-                sample_rate: SAMPLE_RATE,
-                buffer_size,
-            },
-            move |data, _| {
-                let mut guard = state.lock().unwrap_or_else(|p| p.into_inner());
-                let (processor, source) = &mut *guard;
-                let mono = data
-                    .chunks_exact(width)
-                    .map(|f| f.iter().sum::<f32>() / width as f32);
-                processor.push(mono, |frame| {
-                    // The source is unbuffered (queue 0), so this completes at once.
-                    let _ = source
-                        .capture_frame(&AudioFrame {
-                            data: frame.into(),
-                            sample_rate: SAMPLE_RATE,
-                            num_channels: 1,
-                            samples_per_channel: FRAME as u32,
-                        })
-                        .now_or_never();
-                });
-            },
-            // A stream the sound server tore down (suspend/resume, a
-            // pulseaudio restart) is reported only here: flag it so the
-            // watcher reopens it, or the user goes silent to peers with no
-            // signal (voice #3).
-            move |e| {
-                log::warn!("[native_voice] capture stream: {e}");
-                dead.store(true, Ordering::Relaxed);
-            },
-            None,
-        )
+        let config = cpal::StreamConfig {
+            buffer_size,
+            ..config
+        };
+        let (state, dead) = (state.clone(), dead.clone());
+        match format {
+            SampleFormat::I16 => build_input::<i16>(device, config, state, dead),
+            SampleFormat::I32 => build_input::<i32>(device, config, state, dead),
+            SampleFormat::U16 => build_input::<u16>(device, config, state, dead),
+            // `pick_config` returns no other format.
+            _ => build_input::<f32>(device, config, state, dead),
+        }
     };
     let stream = build(cpal::BufferSize::Fixed(FRAME as u32))
         .or_else(|_| build(cpal::BufferSize::Default))
@@ -499,6 +478,56 @@ fn open_input(
         .play()
         .map_err(|e| format!("starting the capture stream: {e}"))?;
     Ok(stream)
+}
+
+/// Interleaved device samples (`width` channels) as mono f32 (-1 to 1).
+fn to_mono<T>(data: &[T], width: usize) -> impl Iterator<Item = f32> + '_
+where
+    T: Sample,
+    f32: FromSample<T>,
+{
+    data.chunks_exact(width)
+        .map(move |f| f.iter().map(|s| s.to_sample::<f32>()).sum::<f32>() / width as f32)
+}
+
+fn build_input<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    state: Arc<Mutex<(Processor, NativeAudioSource)>>,
+    dead: Arc<AtomicBool>,
+) -> Result<cpal::Stream, cpal::Error>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let width = usize::from(config.channels.max(1));
+    device.build_input_stream::<T, _, _>(
+        config,
+        move |data, _| {
+            let mut guard = state.lock().unwrap_or_else(|p| p.into_inner());
+            let (processor, source) = &mut *guard;
+            processor.push(to_mono(data, width), |frame| {
+                // The source is unbuffered (queue 0), so this completes at once.
+                let _ = source
+                    .capture_frame(&AudioFrame {
+                        data: frame.into(),
+                        sample_rate: SAMPLE_RATE,
+                        num_channels: 1,
+                        samples_per_channel: FRAME as u32,
+                    })
+                    .now_or_never();
+            });
+        },
+        // A stream the sound server tore down (suspend/resume, a
+        // pulseaudio restart) is reported only here: flag it so the
+        // watcher reopens it, or the user goes silent to peers with no
+        // signal (voice #3).
+        move |e| {
+            log::warn!("[native_voice] capture stream: {e}");
+            dead.store(true, Ordering::Relaxed);
+        },
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -705,6 +734,21 @@ mod tests {
         assert_eq!(front_mono(&[0.2, 0.6]), 0.4);
         assert_eq!(front_mono(&[0.2, 0.6, 1.0, 1.0, 1.0, 1.0]), 0.4);
         assert_eq!(front_mono(&[0.3]), 0.3);
+    }
+
+    /// An integer device's samples reach the processing as the same mono
+    /// f32 a float device's would.
+    #[test]
+    fn integer_device_samples_are_mixed_to_mono_f32() {
+        let mono = |data: &[f32]| to_mono(data, 2).collect::<Vec<_>>();
+        let want = mono(&[0.5, -0.5, -1.0, 0.0, 0.25, 0.25]);
+        assert_eq!(want, [0.0, -0.5, 0.25]);
+        let i16s = [16384i16, -16384, -32768, 0, 8192, 8192];
+        assert_eq!(to_mono(&i16s, 2).collect::<Vec<_>>(), want);
+        let u16s = [49152u16, 16384, 0, 32768, 40960, 40960];
+        assert_eq!(to_mono(&u16s, 2).collect::<Vec<_>>(), want);
+        let i32s = [1i32 << 30, -(1 << 30), i32::MIN, 0, 1 << 29, 1 << 29];
+        assert_eq!(to_mono(&i32s, 2).collect::<Vec<_>>(), want);
     }
 
     /// Not a gate: the CPU cost the task asked to report. Run with
