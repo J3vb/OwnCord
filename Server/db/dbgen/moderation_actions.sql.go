@@ -398,8 +398,9 @@ func (q *Queries) ListUnacknowledgedWarnings(ctx context.Context, targetID int64
 
 const retireRetiredCandidates = `-- name: RetireRetiredCandidates :execrows
 DELETE FROM moderation_actions
- WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < ?1)
-    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < ?1)
+ WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < ?1)
+    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < ?1))
+   AND id NOT IN (SELECT server_muted_by FROM voice_states WHERE server_muted_by IS NOT NULL)
 `
 
 // The maintenance-tick retention sweep, kept only as the pre-appeals

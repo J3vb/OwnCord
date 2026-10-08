@@ -127,8 +127,9 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
 -- after lifted_at when lifted early. Ban, kick and removal rows are never
 -- touched here.
 DELETE FROM moderation_actions
- WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
-    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff));
+ WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
+    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff)))
+   AND id NOT IN (SELECT server_muted_by FROM voice_states WHERE server_muted_by IS NOT NULL);
 
 -- name: ListOwnModerationActions :many
 -- GET /api/v1/users/me/moderation (B9 Q6): the caller's own warning,

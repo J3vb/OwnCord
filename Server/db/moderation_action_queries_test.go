@@ -813,3 +813,65 @@ func seedTestChannel(t *testing.T, database *db.DB) int64 {
 	}
 	return id
 }
+
+// TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute: deleting an
+// owner row would NULL voice_states.server_muted_by (ON DELETE SET NULL) and
+// strand the mute where reconciliation can no longer find it.
+func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+	chanID, err := database.CreateChannel(ctx, "vc-retire", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	if err := database.JoinVoiceChannel(ctx, memberID, chanID); err != nil {
+		t.Fatalf("JoinVoiceChannel: %v", err)
+	}
+	state, err := database.GetVoiceState(ctx, memberID)
+	if err != nil || state == nil {
+		t.Fatalf("GetVoiceState: %v", err)
+	}
+	ownerAction, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "owns mute", time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("TimeoutUser(owner): %v", err)
+	}
+	if matched, _, err := database.MuteForTimeoutSession(ctx, memberID, chanID, ownerAction, state.JoinedAt, nil); err != nil || !matched {
+		t.Fatalf("MuteForTimeoutSession: matched=%v err=%v", matched, err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE moderation_actions SET expires_at = datetime('now', '-100 days') WHERE id = ?`, ownerAction); err != nil {
+		t.Fatalf("backdate owner: %v", err)
+	}
+	// Equally old, but owns no voice_states row.
+	plainAction, err := database.WarnUser(ctx, memberID, ownerID, nil, "no mute")
+	if err != nil {
+		t.Fatalf("WarnUser: %v", err)
+	}
+	if ok, err := database.AcknowledgeWarning(ctx, memberID, plainAction); err != nil || !ok {
+		t.Fatalf("ack: ok=%v err=%v", ok, err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE moderation_actions SET acknowledged_at = datetime('now', '-100 days') WHERE id = ?`, plainAction); err != nil {
+		t.Fatalf("backdate plain: %v", err)
+	}
+
+	if n, err := database.RetireModerationActions(ctx, 90); err != nil || n != 1 {
+		t.Fatalf("RetireModerationActions = (%d, %v), want (1, nil)", n, err)
+	}
+	var got []int64
+	rows, err := database.QueryContext(ctx, `SELECT id FROM moderation_actions WHERE id IN (?, ?)`, ownerAction, plainAction)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got = append(got, id)
+	}
+	if len(got) != 1 || got[0] != ownerAction {
+		t.Fatalf("surviving ids = %v, want [%d] (the mute owner only)", got, ownerAction)
+	}
+}

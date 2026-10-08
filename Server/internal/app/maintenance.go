@@ -177,8 +177,8 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 }
 
 // steps is the pass, in order. Later steps depend on earlier ones having
-// run: the reconciliation pass at the end only sees what the orphan and
-// retention sweeps stranded this tick.
+// run: voice mute reconciliation precedes moderation action retention so a
+// mute owner is released before its row can be retired.
 func (m *maintenance) steps() []maintenanceStep {
 	return []maintenanceStep{
 		{job: "Expired sessions", failLog: "failed to delete expired sessions", run: m.sweepSessions},
@@ -189,8 +189,8 @@ func (m *maintenance) steps() []maintenanceStep {
 		{job: "Orphaned attachments", failLog: "failed to delete orphaned attachments", run: m.sweepOrphans},
 		{job: "Message retention", failLog: "retention sweep failed", run: m.sweepRetention},
 		{job: "Report content retention", failLog: "report content retention failed", run: m.pruneReportContent},
-		{job: "Moderation action retention", failLog: "moderation action retention failed", run: m.retireModerationActions},
 		{job: "Voice mute reconciliation", failLog: "orphaned voice mute reconciliation failed", run: m.reconcileOrphanedVoiceMutes},
+		{job: "Moderation action retention", failLog: "moderation action retention failed", run: m.retireModerationActions},
 		{job: "Account erasure", failLog: "erasure jobs still pending", run: m.resumeErasure},
 		{job: "Storage reconciliation", failLog: "storage reconciliation failed", run: m.reconcileFiles},
 		// Last on purpose: every sweep above that deletes attachment rows
