@@ -35,6 +35,7 @@ type RetentionStore interface {
 	FinishRetentionRun(ctx context.Context, runID int64, filesRemoved int, lastError string) error
 	ListUnfinishedRetentionRuns(ctx context.Context) ([]db.RetentionRun, error)
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	ListChannels(ctx context.Context) ([]db.Channel, error)
 }
 
 // RetentionMinDays is the smallest window the policy accepts (owner
@@ -404,6 +405,28 @@ func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID i
 		return fmt.Errorf("retention marker for channel %d: %w", channelID, err)
 	}
 	return nil
+}
+
+// RetentionChannel is a channel a retention policy can be set on: id and name
+// only, so the page needs nothing beyond MANAGE_SERVER to list them.
+type RetentionChannel struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// Channels lists the non-DM channels (DMs are never in retention scope).
+func (s *RetentionService) Channels(ctx context.Context) ([]RetentionChannel, error) {
+	all, err := s.st.ListChannels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
+	}
+	out := make([]RetentionChannel, 0, len(all))
+	for _, c := range all {
+		if c.Type != "dm" {
+			out = append(out, RetentionChannel{ID: c.ID, Name: c.Name})
+		}
+	}
+	return out, nil
 }
 
 // removeFiles unlinks the journaled files; a missing file counts as removed.

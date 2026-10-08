@@ -12,6 +12,23 @@ import (
 
 // handleGetRetention returns the policy: the server window and every
 // channel override.
+// handleGetRetentionChannels lists the channels a policy can target, for a
+// MANAGE_SERVER principal that cannot read /channels (MANAGE_CHANNELS).
+func handleGetRetentionChannels(retention *service.RetentionService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if retention == nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			return
+		}
+		channels, err := retention.Channels(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
+			return
+		}
+		writeJSON(w, http.StatusOK, channels)
+	}
+}
+
 func handleGetRetention(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {

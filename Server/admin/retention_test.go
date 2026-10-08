@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -204,5 +205,66 @@ func TestAdminRetentionPreviewPermissionsAndConflicts(t *testing.T) {
 	}
 	if w := requestAdminRetentionApply(t, handler, otherToken, service.RetentionChange{Scope: "server", Days: new(1)}, ""); w.Code != 400 {
 		t.Fatalf("unpreviewed PATCH = %d", w.Code)
+	}
+}
+
+// A role holding MANAGE_SERVER but not MANAGE_CHANNELS cannot read /channels,
+// so the retention page lists channels through its own route (codex-oc-1530).
+func TestRetentionChannels_ManageServerOnlyRoleListsChannels(t *testing.T) {
+	database := openMigratedAdminDB(t)
+	ctx := context.Background()
+	svc := service.New(database, auth.NewRateLimiter())
+	svc.Auth = service.NewAuthService(database, auth.NewRateLimiter(), nil, nil)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, svc)
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (9, 'Keeper', ?, 50, 0)`,
+		permissions.ManageServer,
+	); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (10, 'Janitor', ?, 51, 0)`,
+		permissions.ManageChannels,
+	); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+	keeper := createUserWithRole(t, database, "keeper", 9)
+	janitor := createUserWithRole(t, database, "janitor", 10)
+	chID, err := database.CreateChannel(ctx, "ret-text", "text", "", "secret topic", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := database.GetOrCreateDMChannel(ctx, 1, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := doRequest(t, handler, http.MethodGet, "/channels", keeper, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("precondition: GET /channels = %d, want 403 for a MANAGE_SERVER-only role", w.Code)
+	}
+	w := doRequest(t, handler, http.MethodGet, "/retention/channels", keeper, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /retention/channels = %d: %s", w.Code, w.Body.String())
+	}
+	var got []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range got {
+		if len(c) != 2 {
+			t.Errorf("entry %v carries more than id and name", c)
+		}
+		if int64(c["id"].(float64)) == chID && c["name"] == "ret-text" {
+			found = true
+		}
+		if c["name"] == "" {
+			t.Errorf("DM channel listed: %v", c)
+		}
+	}
+	if !found {
+		t.Errorf("text channel %d missing from %v", chID, got)
+	}
+	if w := doRequest(t, handler, http.MethodGet, "/retention/channels", janitor, nil); w.Code != http.StatusForbidden {
+		t.Errorf("role without MANAGE_SERVER = %d, want 403", w.Code)
 	}
 }
