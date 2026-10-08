@@ -40,6 +40,8 @@ export interface E2EEDeps {
   getWs: () => WsClient | null;
   getServerHost: () => string | null;
   getCurrentChannelId: () => number | null;
+  /** A room key was installed into the worker (every install, browser and native). */
+  onRoomKeyInstalled?: () => void;
 }
 
 // --- E2EEManager class ---
@@ -136,6 +138,7 @@ export class E2EEManager {
   private _worker = new E2EEWorker({
     getSessionGeneration: () => this._sessionGeneration,
     getRoomKey: () => this._roomKey,
+    onKeyInstalled: () => this.deps.onRoomKeyInstalled?.(),
   });
   /** E2EE key provider — shared across Room instances. */
   get keyProvider(): ExternalE2EEKeyProvider {

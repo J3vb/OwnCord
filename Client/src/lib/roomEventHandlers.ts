@@ -29,17 +29,19 @@ import { voiceText } from "../i18n/voice";
 const log = createLogger("roomEventHandlers");
 
 /** OC-0452: how long a remote sender's decrypt failures may last before they
- *  count as a real E2EE failure, and the quiet gap that ends a streak. The gap
- *  sits above the worker's 1 s per-participant error throttle, so a persistent
- *  failure stays one streak, but below the grace window, so separate rotation
- *  races a few seconds apart each start a fresh streak. */
+ *  count as a real E2EE failure. A streak starts fresh only after a room key
+ *  install: a quiet gap alone is no evidence the peer's frames decrypt again,
+ *  while every rotation race comes with its own install. */
 const DECRYPT_GRACE_MS = 3000;
-const DECRYPT_STREAK_RESET_MS = 2500;
+/** How long without a remote decrypt failure before a native room's decrypt
+ *  degradation counts as recovered. It sits above the native room's 1 s
+ *  re-report cadence while a peer keeps failing. */
+const NATIVE_DECRYPT_QUIET_MS = 2500;
 
 /** Polish #21: how long without a remote decrypt failure before a decrypt
  *  degradation counts as recovered on the browser path (the native room
- *  re-reports every second while a peer fails, so its streak reset is
- *  enough). livekit-client's ErrorRateLimiter lets the worker report a
+ *  re-reports every second while a peer fails, so its shorter quiet window
+ *  is enough). livekit-client's ErrorRateLimiter lets the worker report a
  *  failing peer at most 5 times per 60 s window, so a failure that persists
  *  goes quiet for most of each minute; only a gap longer than that window
  *  means the frames decrypt again. */
@@ -117,6 +119,9 @@ export interface RoomEventHandlers {
   readonly handleSdkReconnected: () => void;
   readonly handleEncryptionError: (error: Error, participant?: Participant) => void;
   readonly removeAutoplayUnlock: () => void;
+  /** A room key was installed into the E2EE worker: the next remote decrypt
+   *  failure starts a fresh grace window. */
+  readonly noteRoomKeyInstalled: () => void;
   /** Forget the session's encryption-recovery state (leave). */
   readonly resetEncryptionRecovery: () => void;
 }
@@ -132,6 +137,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   // must not clear it.
   let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the last room key was installed (0: none this session). */
+  let keyInstalledAt = 0;
 
   function clearDecryptQuietTimer(): void {
     if (decryptQuietTimer !== null) {
@@ -152,13 +159,18 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
           setEncryptionDegraded(false);
         }
       },
-      deps.isNativeRoom() ? DECRYPT_STREAK_RESET_MS : DECRYPT_QUIET_MS,
+      deps.isNativeRoom() ? NATIVE_DECRYPT_QUIET_MS : DECRYPT_QUIET_MS,
     );
+  }
+
+  function noteRoomKeyInstalled(): void {
+    keyInstalledAt = Date.now();
   }
 
   function resetEncryptionRecovery(): void {
     clearDecryptQuietTimer();
     degradedBy = null;
+    keyInstalledAt = 0;
   }
 
   function removeAutoplayUnlock(): void {
@@ -327,6 +339,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  has it, so a short streak of these is expected; the frames are dropped,
    *  never played in clear. A streak that outlasts the grace window (the
    *  worker re-reports once a second) is a real failure and still degrades.
+   *  Only a key install since the streak's last failure starts a new one.
    */
   const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
@@ -338,7 +351,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
       const now = Date.now();
       const prev = decryptStreaks.get(participant);
-      const start = prev && now - prev.last <= DECRYPT_STREAK_RESET_MS ? prev.start : now;
+      const start = prev && keyInstalledAt <= prev.last ? prev.start : now;
       decryptStreaks.set(participant, { start, last: now });
       if (now - start < DECRYPT_GRACE_MS) {
         log.warn("LiveKit E2EE receive-side decrypt failure — tolerating key rotation race", {
@@ -378,6 +391,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleSdkReconnected,
     handleEncryptionError,
     removeAutoplayUnlock,
+    noteRoomKeyInstalled,
     resetEncryptionRecovery,
   };
 }
