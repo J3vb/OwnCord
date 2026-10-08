@@ -324,6 +324,7 @@ export const settingsText = defineCatalog("settings", {
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
   "voiceAudio.default": "Default",
+  "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",
   "voiceAudio.inputSensitivity": "Input Sensitivity",
   "voiceAudio.sensitivityValue": "Sensitivity {value}%",
