@@ -1473,7 +1473,9 @@ re-verifies every BPR.
 16. _(added 2026-10-08)_ Add decoded media to the
     release-candidate artifact smoke. The artifact smoke proves a join and
     working controls only (BPR-010). On each of the four shipped artifacts,
-    add a second participant and assert inbound audio after the join. Decoded
+    add a second participant and assert decoded audio after the join: audio
+    energy and decoded sample counts must advance, as `expectDecodedMedia`
+    requires, not only inbound RTP bytes. Decoded
     media stays proven in `client-fullstack` and the native-voice interop until
     this item lands.
 
