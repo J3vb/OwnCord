@@ -64,6 +64,7 @@ vi.mock("livekit-client", () => ({
   LogLevel: { warn: 3, error: 4 },
   setLogLevel: vi.fn(),
   setLogExtension: vi.fn(),
+  AudioPresets: { musicHighQualityStereo: { maxBitrate: 128_000 } },
   // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
   Room: vi.fn(function () {
     return mockRoom;

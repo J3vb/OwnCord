@@ -74,10 +74,11 @@ export function cameraSimulcastLayers(quality: StreamQuality): VideoPreset[] | u
  *  It only takes effect through the real picker: with
  *  `--use-fake-ui-for-media-stream` Chromium answers getDisplayMedia with the
  *  default microphone as the "screen audio" and never reads it, so the window
- *  must not pass that flag (see tauri.conf.json). */
-/** The captured track is game or music audio, not a voice: switch Chromium's
- *  voice processing off (it would duck, gate and compress it) and ask for
- *  stereo. Published as music in `SCREENSHARE_AUDIO_PUBLISH`. */
+ *  must not pass that flag (see tauri.conf.json).
+ *
+ *  The captured track is game or music audio, not a voice: Chromium's voice
+ *  processing is switched off (it would duck, gate and compress it) and stereo
+ *  is requested. Published as music in `SCREENSHARE_AUDIO_PUBLISH`. */
 const SCREENSHARE_AUDIO: AudioCaptureOptions = {
   restrictOwnAudio: true,
   echoCancellation: false,
