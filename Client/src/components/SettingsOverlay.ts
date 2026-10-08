@@ -182,10 +182,43 @@ export function createSettingsOverlay(
   const logsTab = createLogsTab(() => activeTab, disposable.signal);
   const voiceTab = createVoiceAudioTab(disposable.signal);
 
+  // ---- One-time secret guard ------------------------------------------------
+
+  /**
+   * A recovery kit or recovery codes response is the only copy of the new
+   * secret, and the request has already invalidated the old one. While one is
+   * in flight, ignore close and tab switches so the tab's signal cannot abort
+   * before the secret is shown. Logout/destroy still tear down regardless.
+   */
+  let secretRequests = 0;
+  function holdOpen<A extends unknown[], R>(
+    fn: (...args: A) => Promise<R>,
+  ): (...args: A) => Promise<R> {
+    return async (...args) => {
+      secretRequests++;
+      try {
+        return await fn(...args);
+      } finally {
+        secretRequests--;
+      }
+    };
+  }
+  function requestClose(): void {
+    if (secretRequests === 0) options.onClose();
+  }
+
   // ---- Tab content builders -------------------------------------------------
 
   const TAB_BUILDERS: Readonly<Record<TabName, (signal: AbortSignal) => HTMLDivElement>> = {
-    Account: (signal) => buildAccountTab(options, signal),
+    Account: (signal) =>
+      buildAccountTab(
+        {
+          ...options,
+          onEnrolRecoveryKit: holdOpen(options.onEnrolRecoveryKit),
+          onRegenerateRecoveryCodes: holdOpen(options.onRegenerateRecoveryCodes),
+        },
+        signal,
+      ),
     // Only reachable through its tab button, which exists only with the option.
     Safety: (signal) => options.safetyTab?.(signal) ?? createElement("div"),
     Appearance: (signal) => buildAppearanceTab(signal),
@@ -225,7 +258,7 @@ export function createSettingsOverlay(
   }
 
   function setActiveTab(tab: TabName): void {
-    if (tab === activeTab) return;
+    if (tab === activeTab || secretRequests > 0) return;
     // Clean up stateful tabs when switching away
     cleanupActiveTab();
     activeTab = tab;
@@ -466,13 +499,7 @@ export function createSettingsOverlay(
     const closeWrap = createElement("div", { class: "settings-close-wrap" });
     const closeBtn = createElement("button", { class: "settings-close-btn" });
     closeBtn.appendChild(createIcon("x", 18));
-    closeBtn.addEventListener(
-      "click",
-      () => {
-        options.onClose();
-      },
-      { signal: disposable.signal },
-    );
+    closeBtn.addEventListener("click", requestClose, { signal: disposable.signal });
     const escLabel = createElement(
       "div",
       { class: "settings-esc-label" },
@@ -485,7 +512,7 @@ export function createSettingsOverlay(
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && root?.classList.contains("open")) {
-          options.onClose();
+          requestClose();
         }
       },
       { signal: disposable.signal },
@@ -503,7 +530,7 @@ export function createSettingsOverlay(
     root.addEventListener(
       "click",
       (e: MouseEvent) => {
-        if (e.target === root) options.onClose();
+        if (e.target === root) requestClose();
       },
       { signal: disposable.signal },
     );

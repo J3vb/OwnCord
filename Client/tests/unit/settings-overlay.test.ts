@@ -198,6 +198,60 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  describe("while a one-time recovery secret request is in flight", () => {
+    function deferred<T>(): { promise: Promise<T>; resolve(v: T): void } {
+      let resolve!: (v: T) => void;
+      const promise = new Promise<T>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+    const byId = (id: string): HTMLElement =>
+      container.querySelector<HTMLElement>(`[data-testid='${id}']`)!;
+    function submit(prefix: string): void {
+      byId(`${prefix}-btn`).click();
+      (byId(`${prefix}-password`) as HTMLInputElement).value = "pw";
+      byId(`${prefix}-submit`).click();
+    }
+    function tryToLeave(): void {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      clickEl(container.querySelector(".settings-close-btn"));
+      clickEl(container.querySelector(".settings-overlay"));
+      getTab(container, 1).click();
+    }
+
+    it.each([
+      [
+        "recovery kit enrolment",
+        "recovery-kit",
+        "onEnrolRecoveryKit",
+        { kit_secret: "KIT-SECRET" },
+      ],
+      ["recovery code regeneration", "totp-regenerate", "onRegenerateRecoveryCodes", ["CODE-ONE"]],
+    ])("stays open on %s until the secret is shown", async (_n, prefix, method, result) => {
+      mockAuthState.user = { ...mockAuthState.user, totp_enabled: true };
+      mockUiState.settingsOpen = true;
+      const pending = deferred<unknown>();
+      const overlay = createSettingsOverlay({
+        ...defaultOptions,
+        [method]: vi.fn().mockReturnValue(pending.promise),
+      });
+      overlay.mount(container);
+      submit(prefix);
+
+      tryToLeave();
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+      expect(getTab(container, 0).classList.contains("active")).toBe(true);
+
+      pending.resolve(result);
+      await vi.waitFor(() => expect(container.textContent).toMatch(/KIT-SECRET|CODE-ONE/));
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(defaultOptions.onClose).toHaveBeenCalled();
+      overlay.destroy?.();
+    });
+  });
+
   it("renders close button that calls onClose", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
