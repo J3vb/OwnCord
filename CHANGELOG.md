@@ -52,6 +52,8 @@ and only when it changes something a contributor or fork holder must do
 - **First-run setup**: the owner's own setup login no longer shows up as an unreviewed new login, and setting up shares the same limit on simultaneous password checks as sign-in, answering "try again later" when the server is busy.
 - **Linux voice after a moderator mute**: when a moderator lifts a server mute, your microphone is published again automatically instead of staying silent.
 - **Plugin and push fetches check the content type**: a response whose declared type disagrees with what its bytes look like (for example JSON declared, HTML body) is now refused.
+- **Message retention page for server managers**: a role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first channel rule.
+
 - **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
@@ -62,6 +64,7 @@ and only when it changes something a contributor or fork holder must do
 - **Voice "Secured" badge**: repeated decrypt failures from a participant now degrade it even when they arrive in short bursts; the grace window restarts only after a new room key is installed.
 - **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
 - **Recovery kit and codes**: Settings now stays open until a new recovery kit or set of recovery codes is shown, so the one-time secret is never lost by closing Settings mid-request.
+- **New channels after a reconnect**: a client that reconnects while a channel is being created now always gets that channel in its sidebar, instead of occasionally missing it until the next restart.
 
 ### Login & connection
 
