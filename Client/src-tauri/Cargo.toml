@@ -137,9 +137,6 @@ tauri-plugin-deep-link = "2"
 notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
-# Already in the tree through wry (same 0.39): the media permission handler
-# (windows_media.rs) registers on the controller's CoreWebView2.
-webview2-com = "0.39"
 # Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,
 # with Win32_System_SystemInformation's GetTickCount, the last-input time
 # auto-idle reads (idle.rs).
