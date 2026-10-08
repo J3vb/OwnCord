@@ -345,8 +345,7 @@ func drainMultipartTail(mr *multipart.Reader) error {
 // boundary, truncated headers — is the same "invalid multipart form"
 // ParseMultipartForm gave for any structural failure.
 func writeUploadPartError(w http.ResponseWriter, err error) {
-	var mbe *http.MaxBytesError
-	if errors.As(err, &mbe) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeErr(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds the upload size limit")
 		return
 	}
