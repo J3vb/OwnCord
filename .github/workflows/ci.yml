@@ -690,7 +690,7 @@ jobs:
       # capability is true (permissions.ts, its unit test, the Stryker
       # configs, or any non-PR event, which selects everything). The config
       # mutates one file but Stryker's dry run executes the full Vitest suite
-      # once. Wall time: measure on the first PR run and record it here.
+      # once. Wall time: about 3m40s on ubuntu-latest (first PR run, 2026-10-08).
       - name: Permissions mutation hotspot
         if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.permissions == 'true') }}
         run: npx stryker run stryker.ci.config.mjs
