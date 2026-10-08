@@ -4,7 +4,7 @@ import { defineCatalog } from "./format";
  * Shell and navigation copy (B9-18): the sidebar (server header, channels,
  * direct messages, members), channel management dialogs and menus, the member
  * context menu, invites, the user bar and status picker, quick switching,
- * stream previews, the connection banner, the identity-key prompt and the
+ * the connection banner, the identity-key prompt and the
  * shell's toasts. It loads with the main page; copy a
  * startup-chunk module shows lives in connect.ts.
  */
@@ -225,12 +225,6 @@ export const shellText = defineCatalog("shell", {
   "quickSwitch.escapeHint": "Press Escape to cancel",
   "quickSwitcher.label": "Quick switcher",
   "quickSwitcher.placeholder": "Where do you want to go?",
-
-  "stream.previewLabel": "Stream preview for {username}",
-  "stream.previewAnnouncement": "Showing stream preview for {username}",
-  "stream.joinToPreview": "Join to preview",
-  "stream.joinToPreviewLabel": "Join channel to preview stream",
-  "stream.unavailable": "Stream unavailable",
 
   "pins.unpinFailed": "Failed to unpin message",
   "pins.loadFailed": "Failed to load pinned messages",

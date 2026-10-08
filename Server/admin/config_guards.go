@@ -160,6 +160,12 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 }
 
 func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
+	// The boot writes a missing half, so in a container both live under
+	// data_dir like every other path the server writes.
+	if containerOutsideDataDir(g, g.next.TLS.CertFile, "tls.cert_file", w) ||
+		containerOutsideDataDir(g, g.next.TLS.KeyFile, "tls.key_file", w) {
+		return false
+	}
 	if sameFile(g.next.TLS.CertFile, g.next.TLS.KeyFile) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file and tls.key_file must be different paths")
 		return false
@@ -222,6 +228,7 @@ func guardDataPaths(ctx context.Context, w http.ResponseWriter, g guardContext) 
 		guardBackupDir(w, g) &&
 		guardStorageDir(w, g) &&
 		guardPluginsDir(w, g) &&
+		guardPluginsOverlap(w, g) &&
 		guardAcmeCacheDir(w, g)
 }
 
@@ -269,12 +276,32 @@ func guardPluginsDir(w http.ResponseWriter, g guardContext) bool {
 		return true
 	}
 	dir := g.next.Plugins.Directory
+	if containerOutsideDataDir(g, dir, "plugins.directory", w) {
+		return false
+	}
 	if !dirExists(dir) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing directory")
 		return false
 	}
+	return true
+}
+
+// guardPluginsOverlap keeps the plugins directory apart from server data
+// whichever of the three directories a PATCH moves. A plugin install replaces
+// <plugins.directory>/<name> wholesale, so the plugins directory must not live
+// inside uploads, nor be or hold data_dir, uploads or backups.
+func guardPluginsOverlap(w http.ResponseWriter, g guardContext) bool {
+	if !g.anyOf("plugins.directory", "upload.storage_dir", "backup.dir") {
+		return true
+	}
+	dir := g.next.Plugins.Directory
 	if pathWithin(dir, g.next.Upload.StorageDir) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must not live inside the uploads directory")
+		return false
+	}
+	if pathWithin(g.next.Server.DataDir, dir) || pathWithin(g.next.Upload.StorageDir, dir) || pathWithin(g.next.Backup.Dir, dir) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+			"plugins.directory must not be or contain server.data_dir, upload.storage_dir or backup.dir")
 		return false
 	}
 	return true
@@ -409,8 +436,8 @@ func pathWithin(child, parent string) bool {
 	if child == "" || parent == "" {
 		return false
 	}
-	c, err1 := filepath.Abs(child)
-	p, err2 := filepath.Abs(parent)
+	c, err1 := resolvePath(child)
+	p, err2 := resolvePath(parent)
 	if err1 != nil || err2 != nil {
 		return false
 	}

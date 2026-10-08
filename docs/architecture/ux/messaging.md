@@ -190,8 +190,7 @@ so surrounding context and reply references stay intact.
 
 **Who reacted (✓ implemented 2026-08):** hovering (or focusing) a reaction pill
 for 300 ms fetches the reactor list and shows a tooltip reading
-_"alice, bob, carol and 4 others reacted with 👍"_. The debounce mirrors
-`lib/streamPreview.ts` so a pointer crossing a row of pills fires no requests.
+_"alice, bob, carol and 4 others reacted with 👍"_. The debounce keeps a pointer crossing a row of pills fires no requests.
 The list comes from `GET /channels/{id}/messages/{messageId}/reactions/{emoji}/users`
 (oldest first, capped at 100 server-side) and is cached per message+emoji in
 `features/messaging/reactionUsers.ts` (the tooltip component renders it); a

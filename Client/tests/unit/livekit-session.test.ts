@@ -2651,14 +2651,6 @@ describe("LiveKitSession", () => {
   // -----------------------------------------------------------------------
 
   describe("delegation methods (video)", () => {
-    it("getRemoteVideoStream returns null with no room", () => {
-      expect(session.getRemoteVideoStream(42, "camera")).toBeNull();
-    });
-
-    it("getRemoteVideoStream returns null with no room for screenshare", () => {
-      expect(session.getRemoteVideoStream(42, "screenshare")).toBeNull();
-    });
-
     it("getLocalCameraStream returns null with no room", () => {
       expect(session.getLocalCameraStream()).toBeNull();
     });
