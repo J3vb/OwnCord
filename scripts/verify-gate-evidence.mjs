@@ -48,6 +48,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const CI_WORKFLOW = ".github/workflows/ci.yml";
 const PROTECTION_SCRIPT = "docs/plans/b0-dev-branch-protection.sh";
 
 // The contexts array in the protection script is the single source of truth for
@@ -141,31 +142,43 @@ async function fetchCheckRuns(repo, sha, token) {
   return runs;
 }
 
-// Workflow runs for the commit, split into the suites to distrust and whether the
-// push-to-main CI run exists. CodeQL default-setup suites are not pull_request
-// events, so they stay eligible.
-async function fetchRunTrust(repo, sha, token) {
-  const url = `https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`;
-  const res = await fetch(url, {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token}`,
-      "x-github-api-version": "2022-11-28",
-    },
-  });
-  if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
-  const { workflow_runs: wr } = await res.json();
+// A ci.yml run counts only as the push-to-main one; every other ci.yml suite
+// (pull request, workflow_dispatch, schedule) is distrusted, as is any pull
+// request run. CodeQL default-setup suites are not ci.yml, so they stay eligible.
+export function classifyRuns(workflowRuns) {
+  const isMainPush = (r) => r.event === "push" && r.head_branch === "main";
   return {
     excludedSuites: new Set(
-      wr
-        .filter((r) => r.event === "pull_request" || r.event === "pull_request_target")
+      workflowRuns
+        .filter(
+          (r) =>
+            r.event === "pull_request" ||
+            r.event === "pull_request_target" ||
+            (r.path === CI_WORKFLOW && !isMainPush(r)),
+        )
         .map((r) => r.check_suite_id),
     ),
-    mainRunFound: wr.some(
-      (r) =>
-        r.path === ".github/workflows/ci.yml" && r.event === "push" && r.head_branch === "main",
-    ),
+    mainRunFound: workflowRuns.some((r) => r.path === CI_WORKFLOW && isMainPush(r)),
   };
+}
+
+async function fetchRunTrust(repo, sha, token) {
+  const runs = [];
+  for (let page = 1; ; page++) {
+    const url = `https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=100&page=${page}`;
+    const res = await fetch(url, {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    const body = await res.json();
+    runs.push(...body.workflow_runs);
+    if (runs.length >= body.total_count || body.workflow_runs.length === 0) break;
+  }
+  return classifyRuns(runs);
 }
 
 async function main() {

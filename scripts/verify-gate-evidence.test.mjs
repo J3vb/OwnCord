@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { requiredContexts, strictUpToDate, evaluate } from "./verify-gate-evidence.mjs";
+import {
+  requiredContexts,
+  strictUpToDate,
+  evaluate,
+  classifyRuns,
+} from "./verify-gate-evidence.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROTECTION_SCRIPT = "docs/plans/b0-dev-branch-protection.sh";
@@ -141,4 +146,27 @@ test("no push-to-main CI run for the commit is not releasable", () => {
       .join(" | ")
       .includes("no push-to-main CI run for this commit"),
   );
+});
+
+const wr = (id, event, head_branch, path = ".github/workflows/ci.yml") => ({
+  check_suite_id: id,
+  event,
+  head_branch,
+  path,
+});
+
+test("a workflow_dispatch ci.yml suite is distrusted, the push-to-main one is not", () => {
+  const { excludedSuites, mainRunFound } = classifyRuns([
+    wr(1, "push", "main"),
+    wr(2, "workflow_dispatch", "main"),
+    wr(3, "schedule", "main"),
+    wr(4, "pull_request", "feature"),
+    wr(5, "dynamic", "main", "dynamic/github-code-scanning/codeql"),
+  ]);
+  assert.deepEqual([...excludedSuites].sort(), [2, 3, 4]);
+  assert.equal(mainRunFound, true);
+});
+
+test("no push-to-main ci.yml run among the workflow runs is reported", () => {
+  assert.equal(classifyRuns([wr(2, "workflow_dispatch", "main")]).mainRunFound, false);
 });
