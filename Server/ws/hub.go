@@ -136,6 +136,7 @@ type Hub struct {
 	// at or before it takes the full-ready path. Reset on restart — a fresh
 	// connection always gets a correctly filtered ready payload anyway.
 	visibilityChangeSeq atomic.Uint64
+	targetedFanouts     int // targeted fan-outs in flight (beginTargetedFanout); guarded by seqMu
 
 	// replayPurgeSeq is the watermark of the last account-erasure replay
 	// purge (PurgeUserFromReplay): a client resuming from a seq at or

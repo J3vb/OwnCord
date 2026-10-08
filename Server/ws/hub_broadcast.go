@@ -150,16 +150,18 @@ func (h *Hub) BroadcastServerRestart(reason RestartReason, delaySeconds int) {
 // can_moderate_voice verdicts for the new channel, the same targeted form
 // RefreshChannelVisibility sends: a brand-new channel has no earlier verdict
 // for an absent field to leave unchanged. Like RefreshChannelVisibility the
-// sends bypass the sequenced replay path, so the watermark is bumped on both
-// sides to force a client that missed them onto a full ready.
+// sends bypass the sequenced replay path, so begin/endTargetedFanout force a
+// reconnect that registers during or resumes across them onto a full ready.
 //
 // The admin HubBroadcaster interface carries no context, so — like
 // RefreshChannelVisibility — the audience is resolved against Background: the
 // fan-out must complete regardless of the triggering request.
 func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
-	h.bumpVisibilityWatermark()
+	h.beginTargetedFanout()
+	defer h.endTargetedFanout()
 	ctx := context.Background()
 	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
+		fireBroadcastChannelCreateRaceHook(uid)
 		live := h.GetClient(uid)
 		if live == nil {
 			continue
@@ -167,7 +169,6 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 		canSend, canModerateVoice := h.refreshChannelVisibilityAffordances(ctx, ch, uid)
 		live.sendMsg(buildChannelCreateFor(ch, canSend, canModerateVoice))
 	}
-	h.bumpVisibilityWatermark()
 }
 
 // BroadcastChannelUpdate sends a channel_update message to the connected

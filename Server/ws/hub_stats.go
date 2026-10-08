@@ -196,12 +196,13 @@ func (h *Hub) applyQueueContentDrops() {
 // mustFullResyncAtRegister is reconnectRegister's final watermark check, run
 // under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
 // so a resume racing the dispatch of the frames ahead of it still takes the
-// full-ready path.
+// full-ready path. So does a targeted fan-out still in flight
+// (beginTargetedFanout).
 func (h *Hub) mustFullResyncAtRegister(lastSeq uint64) bool {
 	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
 		h.bumpVisibilityWatermark()
 	}
-	return h.mustFullResync(lastSeq)
+	return h.targetedFanouts > 0 || h.mustFullResync(lastSeq)
 }
 
 // BroadcastQueueDepth is the number of frames currently waiting on the hub's
