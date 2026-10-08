@@ -170,3 +170,12 @@ test("a workflow_dispatch ci.yml suite is distrusted, the push-to-main one is no
 test("no push-to-main ci.yml run among the workflow runs is reported", () => {
   assert.equal(classifyRuns([wr(2, "workflow_dispatch", "main")]).mainRunFound, false);
 });
+
+test("a ref-suffixed workflow path still identifies ci.yml", () => {
+  const { excludedSuites, mainRunFound } = classifyRuns([
+    wr(1, "push", "main", ".github/workflows/ci.yml@refs/heads/main"),
+    wr(2, "workflow_dispatch", "main", ".github/workflows/ci.yml@refs/heads/main"),
+  ]);
+  assert.equal(mainRunFound, true);
+  assert.deepEqual([...excludedSuites], [2]);
+});

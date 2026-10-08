@@ -146,6 +146,8 @@ async function fetchCheckRuns(repo, sha, token) {
 // (pull request, workflow_dispatch, schedule) is distrusted, as is any pull
 // request run. CodeQL default-setup suites are not ci.yml, so they stay eligible.
 export function classifyRuns(workflowRuns) {
+  // The API may report `path` with a ref suffix (`ci.yml@refs/heads/main`).
+  const isCi = (r) => r.path?.split("@")[0] === CI_WORKFLOW;
   const isMainPush = (r) => r.event === "push" && r.head_branch === "main";
   return {
     excludedSuites: new Set(
@@ -154,11 +156,11 @@ export function classifyRuns(workflowRuns) {
           (r) =>
             r.event === "pull_request" ||
             r.event === "pull_request_target" ||
-            (r.path === CI_WORKFLOW && !isMainPush(r)),
+            (isCi(r) && !isMainPush(r)),
         )
         .map((r) => r.check_suite_id),
     ),
-    mainRunFound: workflowRuns.some((r) => r.path === CI_WORKFLOW && isMainPush(r)),
+    mainRunFound: workflowRuns.some((r) => isCi(r) && isMainPush(r)),
   };
 }
 
