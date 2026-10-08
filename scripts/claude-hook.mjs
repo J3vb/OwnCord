@@ -7,7 +7,8 @@
 //                  command; a relative path then resolves somewhere else and a
 //                  gate can report a green result from the wrong directory.
 //                  Use a subshell `( cd DIR && ... )`, `git -C DIR`, or paths
-//                  from the repository root instead.
+//                  from the repository root instead. Also refuses a command
+//                  that names a `.env` file (secrets).
 //
 // Exit code 2 from a PreToolUse hook blocks the tool call and shows stderr to
 // the model; anything else lets it through.
@@ -38,11 +39,22 @@ if (mode === "session-start") {
   } catch {
     // no or malformed input: nothing to check
   }
-  // A `cd` that starts the command or follows a chain operator or newline is a
-  // top-level statement; `( cd DIR && ... )` is not matched.
-  if (/(^|\n|&&|\|\||;)\s*cd(\s|$)/.test(command)) {
+  // A `cd` that starts the command or follows a chain operator, newline, brace
+  // or compound keyword is a top-level statement; `( cd DIR && ... )` is not
+  // matched.
+  if (/(^|\n|&&|\|\||[;&|{]|\b(?:then|do|else)\b)\s*cd(\s|$)/.test(command)) {
     console.error(
       "Blocked: a top-level `cd` leaks the persistent shell cwd into every later command. Use a subshell `( cd DIR && ... )`, `git -C DIR`, or paths from the repository root.",
+    );
+    process.exit(2);
+  }
+  // A path token that is exactly `.env` or ends in `/.env` (not `.env.example`
+  // or `.envoy`). The Read deny rule in .claude/settings.json does not cover
+  // Bash. This is an accidental-exposure guard, not a sandbox: a determined
+  // command can still read the file.
+  if (/(^|[\s'"=/(])\.env(?=$|[\s'");|&])/.test(command)) {
+    console.error(
+      "Blocked: this command names a `.env` file, which holds secrets. Do not read it; ask the human for the value you need.",
     );
     process.exit(2);
   }

@@ -770,6 +770,9 @@ jobs:
       - name: Self-test the release gate
         run: node --test scripts/verify-gate-evidence.test.mjs
 
+      - name: Self-test the Claude Code Bash hook
+        run: node --test scripts/claude-hook.test.mjs
+
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation
       # failure. Rendering twice and comparing tests both: the render must
