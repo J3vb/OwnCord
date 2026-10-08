@@ -77,6 +77,19 @@ func (s *UploadService) Record(ctx context.Context, rec AttachmentRecord, res *S
 	return nil
 }
 
+// Unrecord undoes Record for a file that never got used: it deletes the
+// still-unlinked row and recounts the user's counter, so the row's charge is
+// returned now instead of at the next orphan sweep. The caller deletes the
+// stored bytes.
+func (s *UploadService) Unrecord(ctx context.Context, fileID string, userID int64) error {
+	s.quota.mu.Lock()
+	defer s.quota.mu.Unlock()
+	if _, err := s.st.DeleteUnlinkedAttachment(ctx, fileID, userID); err != nil {
+		return fmt.Errorf("%w: failed to remove attachment: %w", ErrInternal, err)
+	}
+	return s.recountLocked(ctx, userID)
+}
+
 // Resolve looks up the attachment behind fileID and applies the checks that
 // make a file unservable regardless of who is asking.
 //

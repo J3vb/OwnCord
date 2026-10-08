@@ -124,20 +124,42 @@ fn toggle_window_visibility<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// What a menu pick does. Kept apart from the side effects so the id → action
+/// and id → payload mapping is unit-tested.
+#[derive(Debug, PartialEq)]
+enum MenuAction {
+    ToggleWindow,
+    /// The `status-change` payload the renderer accepts.
+    Status(&'static str),
+    /// The `voice-shortcut` payload.
+    Voice(&'static str),
+    OpenLogs,
+    Quit,
+}
+
+fn menu_action(id: &str) -> Option<MenuAction> {
+    Some(match id {
+        SHOW_HIDE_ID => MenuAction::ToggleWindow,
+        STATUS_ONLINE_ID => MenuAction::Status("online"),
+        STATUS_IDLE_ID => MenuAction::Status("idle"),
+        STATUS_DND_ID => MenuAction::Status("dnd"),
+        STATUS_OFFLINE_ID => MenuAction::Status("offline"),
+        OPEN_LOGS_ID => MenuAction::OpenLogs,
+        MUTE_ID => MenuAction::Voice("mute"),
+        DEAFEN_ID => MenuAction::Voice("deafen"),
+        QUIT_ID => MenuAction::Quit,
+        _ => return None,
+    })
+}
+
 fn handle_menu_event<R: Runtime>(app_handle: &tauri::AppHandle<R>, id: &str) {
-    match id {
-        SHOW_HIDE_ID => toggle_window_visibility(app_handle),
-        STATUS_ONLINE_ID => emit_status_change(app_handle, "online"),
-        STATUS_IDLE_ID => emit_status_change(app_handle, "idle"),
-        STATUS_DND_ID => emit_status_change(app_handle, "dnd"),
-        STATUS_OFFLINE_ID => emit_status_change(app_handle, "offline"),
-        OPEN_LOGS_ID => open_log_folder(app_handle),
-        MUTE_ID => emit_voice_shortcut(app_handle, "mute"),
-        DEAFEN_ID => emit_voice_shortcut(app_handle, "deafen"),
-        QUIT_ID => {
-            app_handle.exit(0);
-        }
-        _ => {}
+    match menu_action(id) {
+        Some(MenuAction::ToggleWindow) => toggle_window_visibility(app_handle),
+        Some(MenuAction::Status(status)) => emit_status_change(app_handle, status),
+        Some(MenuAction::Voice(action)) => emit_voice_shortcut(app_handle, action),
+        Some(MenuAction::OpenLogs) => open_log_folder(app_handle),
+        Some(MenuAction::Quit) => app_handle.exit(0),
+        None => {}
     }
 }
 
@@ -196,5 +218,26 @@ mod tests {
         );
         assert_eq!(menu.quit, (QUIT_ID, text::TRAY_QUIT));
         assert_eq!(menu.tooltip, text::TRAY_TOOLTIP);
+    }
+
+    #[test]
+    fn every_status_item_maps_to_the_renderer_payload() {
+        let payloads = ["online", "idle", "dnd", "offline"];
+        for ((id, _), payload) in tray_menu().statuses.into_iter().zip(payloads) {
+            assert_eq!(menu_action(id), Some(MenuAction::Status(payload)), "{id}");
+        }
+    }
+
+    #[test]
+    fn other_items_map_to_their_actions() {
+        assert_eq!(menu_action("voice_mute"), Some(MenuAction::Voice("mute")));
+        assert_eq!(
+            menu_action("voice_deafen"),
+            Some(MenuAction::Voice("deafen"))
+        );
+        assert_eq!(menu_action("show_hide"), Some(MenuAction::ToggleWindow));
+        assert_eq!(menu_action("open_logs"), Some(MenuAction::OpenLogs));
+        assert_eq!(menu_action("quit"), Some(MenuAction::Quit));
+        assert_eq!(menu_action("nope"), None);
     }
 }

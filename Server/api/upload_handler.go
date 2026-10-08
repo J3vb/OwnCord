@@ -259,6 +259,17 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
+		// Drain the rest of the body: the tail meets the body cap and the
+		// multipart parser too, so a padded or malformed tail refuses the
+		// upload instead of riding in behind the file part.
+		if err := drainMultipartTail(mr); err != nil {
+			if delErr := store.Delete(stored.id); delErr != nil {
+				slog.Error("failed to clean up refused upload file", "stored_as", stored.id, "error", delErr)
+			}
+			writeUploadPartError(w, err)
+			return
+		}
+
 		// Record the attachment (unlinked — message_id is NULL) and commit
 		// the reservation under the same lock.
 		if err := uploads.Record(r.Context(), service.AttachmentRecord{
@@ -311,12 +322,33 @@ func findFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 	}
 }
 
+// drainMultipartTail reads every part after the file to its end, discarding
+// the bytes, and reports the first error the reader or the body cap raises.
+func drainMultipartTail(mr *multipart.Reader) error {
+	for {
+		p, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(io.Discard, p); err != nil {
+			return err
+		}
+	}
+}
+
 // writeUploadPartError maps findFilePart's error onto the response the
 // handler always gave: running out of parts without finding "file" is the
 // same "missing file field" FormFile gave, and anything else — a malformed
 // boundary, truncated headers — is the same "invalid multipart form"
 // ParseMultipartForm gave for any structural failure.
 func writeUploadPartError(w http.ResponseWriter, err error) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		writeErr(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds the upload size limit")
+		return
+	}
 	if errors.Is(err, io.EOF) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
 		return
