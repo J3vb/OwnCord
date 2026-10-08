@@ -26,6 +26,11 @@ version: 2
 # branch and the only branch that takes PRs; `main` carries releases. Without
 # this, Dependabot opens against `main`, and retargeting by hand does not stick
 # — `@dependabot rebase` recreates the PR against the configured target.
+#
+# `target-branch` covers version updates only. Dependabot *security* updates
+# always open against the default branch (`main`). Before closing one, open an
+# equivalent PR against `dev` and track it: the weekly grouped update ignores
+# semver-major updates and some packages entirely, so it may never ship the fix.
 
 updates:
   # Go server dependencies
