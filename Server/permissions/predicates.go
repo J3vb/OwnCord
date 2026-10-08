@@ -71,11 +71,11 @@ type Subject struct {
 }
 
 // Has reports whether the subject's effective permission in the channel holds
-// every bit of perm. Administrator bypasses both override layers; a zero perm
-// is never held. This is the single value-taking bit predicate — Checker and
-// PermissionService resolve a Subject and ask it.
+// every bit of perm. Administrator bypasses both override layers, but a zero
+// perm is never held, administrator included. This is the single value-taking
+// bit predicate — Checker and PermissionService resolve a Subject and ask it.
 func (s Subject) Has(perm int64) bool {
-	return HasAdmin(s.RolePerms) || HasPerm(EffectiveChannelPerms(s.RolePerms, s.Override), perm)
+	return perm != 0 && (HasAdmin(s.RolePerms) || HasPerm(EffectiveChannelPerms(s.RolePerms, s.Override), perm))
 }
 
 // missing wraps ErrPermissionDenied with the bit a caller would name in its

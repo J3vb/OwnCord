@@ -1377,12 +1377,12 @@ db`). No control file is committed.
   every B2-5 predicate against the raw two-layer bit formula written out
   longhand, plus the two definitional identities (`CanAdmitSession` ≡
   `CanViewChannel`, `CanType` ≡ `CanSendMessage`). Writing the formula out
-  surfaced one ordering worth stating: `Subject.Has` applies the Administrator
-  bypass **before** the zero-permission refusal, so an administrator holds the
-  empty mask while `HasPerm(_, 0)` is false. Parity is the target's purpose, so
-  the oracle keeps that ordering and
-  `TestSubjectHasZeroPermIsAdminBypassed` records the divergence as observed
-  behaviour. **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
+  surfaced one ordering worth stating: `Subject.Has` once applied the
+  Administrator bypass **before** the zero-permission refusal, so an
+  administrator held the empty mask while `HasPerm(_, 0)` was false. That
+  divergence has since been closed: the zero mask is refused first, the oracle
+  agrees, and `TestSubjectHasZeroPermIsNeverHeld` pins it.
+  **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
   is called from `permissions/predicates.go` (five fixed masks) and from
   `Checker.HasChannelPerm` / `HasChannelPermBatch`; every leaf caller across
   `api/`, `service/` and `ws/` names a `permissions.*` constant or an OR of
