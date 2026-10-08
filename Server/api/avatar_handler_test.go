@@ -369,3 +369,29 @@ type userUpdateSpy struct {
 func (s *userUpdateSpy) BroadcastUserUpdate(u ws.UserUpdate) {
 	s.got = append(s.got, u)
 }
+
+// UpdateProfile failing after the avatar row committed must not leave the row
+// or its quota charge behind.
+func TestUploadAvatar_ProfileUpdateFailureRemovesRowAndCharge(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildAvatarRouter(database, store)
+	token := uploadCreateToken(t, database, "pfp_failer", 4)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `CREATE TRIGGER fail_avatar BEFORE UPDATE OF avatar ON users BEGIN SELECT RAISE(ABORT, 'forced'); END`); err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+
+	rr := doAvatarUpload(t, router, token, "me.png", makePNGBytes(t, 32, 32))
+	if rr.Code < 500 {
+		t.Fatalf("status = %d, want a server error; body = %s", rr.Code, rr.Body.String())
+	}
+	var rows int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM attachments`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("attachments = %d, %v; want 0", rows, err)
+	}
+	var used int64
+	if err := database.QueryRowContext(ctx, `SELECT COALESCE(SUM(bytes_used), 0) FROM user_storage`).Scan(&used); err != nil || used != 0 {
+		t.Fatalf("bytes_used = %d, %v; want 0", used, err)
+	}
+}

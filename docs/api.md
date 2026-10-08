@@ -822,7 +822,9 @@ picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
 attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
-it is replaced.
+it is replaced. If the profile update fails after the bytes were stored, the
+unlinked attachment row and the stored file are removed and the user's storage
+counter is recounted, so a failed avatar change does not leave a charge behind.
 
 Not registered when the server has no working storage backend.
 
@@ -2042,7 +2044,7 @@ Upload a file as multipart form data.
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
-**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB").
+**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB"). The parts after `file` are read to the end too: a body padded past the cap is refused with `413 PAYLOAD_TOO_LARGE` and a malformed tail with `400 BAD_REQUEST`, and the stored file is deleted.
 **Content-Type:** `multipart/form-data`
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
