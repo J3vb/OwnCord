@@ -100,13 +100,13 @@ export function auditArtifactPathLists(src) {
   const lines = src.split("\n");
   const mixed = [];
   for (let i = 0; i < lines.length; i++) {
-    const head = lines[i].match(/^(\s*)path:\s*\|\s*$/);
+    const head = lines[i].match(/^(\s*)path:\s*\|[-+]?\s*$/);
     if (!head) continue;
     const indent = head[1].length;
     const paths = [];
     for (let j = i + 1; j < lines.length; j++) {
       const line = lines[j];
-      if (!line.trim()) break;
+      if (!line.trim()) continue;
       if (line.match(/^(\s*)/)[1].length <= indent) break;
       paths.push(line.trim());
     }

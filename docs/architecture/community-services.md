@@ -847,7 +847,8 @@ describes the control it adds, never the gap it closes.
 
 `Server/migrations/community_services_doc_test.go`
 (`TestCommunityServicesDocIsCurrent`) reads this file and fails when it drifts
-from the tree. It checks five things:
+from the tree. It checks four of these; the fourth is checked by
+`scripts/check-doc-citations.mjs` (Docs & Ledger Consistency job):
 
 1. **All seven services are present**, each as an `## S`_n_ heading, pinned by
    name — including any that later has nothing to say, for the same reason

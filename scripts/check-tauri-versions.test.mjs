@@ -7,7 +7,10 @@ function fixture(npm = "2.5.9", rust = "2.5.7") {
     {
       lockfileVersion: 3,
       packages: {
-        "": { name: "owncord-client", dependencies: { "@tauri-apps/plugin-http": "^2" } },
+        "": {
+          name: "owncord-client",
+          dependencies: { "@tauri-apps/api": "^2", "@tauri-apps/plugin-http": "^2" },
+        },
         "node_modules/@tauri-apps/api": { version: "2.11.0" },
         "node_modules/@tauri-apps/plugin-http": { version: npm },
       },
@@ -87,4 +90,17 @@ test("fails closed on missing, malformed, or empty resolved package inputs", () 
   delete npm.packages["node_modules/@tauri-apps/plugin-http"];
   delete npm.packages["node_modules/@tauri-apps/api"];
   assert.throws(() => checkTauriVersions(npm, cargo), /No paired Tauri/);
+});
+
+test("ignores a hoisted transitive plugin that the app does not depend on directly", () => {
+  const [npm, cargo] = fixture();
+  npm.packages["node_modules/@tauri-apps/plugin-foo"] = { version: "3.0.0" };
+  assert.deepEqual(
+    checkTauriVersions(
+      npm,
+      cargo.replace(' "tauri-plugin-http",\n', ' "tauri-plugin-foo",\n "tauri-plugin-http",\n') +
+        '\n[[package]]\nname = "tauri-plugin-foo"\nversion = "2.1.0"\n',
+    ),
+    { checked: 2, mismatches: [] },
+  );
 });
