@@ -16,6 +16,11 @@ SELECT user_id, device, ip_address, failures, expires_at
 FROM partial_auth_challenges
 WHERE token_hash = ?;
 
+-- name: IncrementPartialAuthFailures :one
+UPDATE partial_auth_challenges SET failures = failures + 1
+WHERE token_hash = ? AND expires_at > ?
+RETURNING failures;
+
 -- name: DeletePartialAuthChallenge :execresult
 DELETE FROM partial_auth_challenges WHERE token_hash = ?;
 

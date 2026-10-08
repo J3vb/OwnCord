@@ -133,6 +133,24 @@ func (q *Queries) GetPendingTOTPEnrollment(ctx context.Context, userID int64) (G
 	return i, err
 }
 
+const incrementPartialAuthFailures = `-- name: IncrementPartialAuthFailures :one
+UPDATE partial_auth_challenges SET failures = failures + 1
+WHERE token_hash = ? AND expires_at > ?
+RETURNING failures
+`
+
+type IncrementPartialAuthFailuresParams struct {
+	TokenHash string `json:"tokenHash"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+func (q *Queries) IncrementPartialAuthFailures(ctx context.Context, arg IncrementPartialAuthFailuresParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, incrementPartialAuthFailures, arg.TokenHash, arg.ExpiresAt)
+	var failures int64
+	err := row.Scan(&failures)
+	return failures, err
+}
+
 const insertRecoveryCode = `-- name: InsertRecoveryCode :exec
 INSERT INTO totp_recovery_codes (user_id, code_hash, created_at)
 VALUES (?, ?, ?)
