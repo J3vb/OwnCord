@@ -370,7 +370,7 @@ function buildVoiceAudioTabInner(
   );
   speakersCard.appendChild(outputVolumeHeader);
   const outputVolumeRow = createElement("div", { class: "slider-row" });
-  const savedOutputVolume = loadPref<number>("outputVolume", 100);
+  const savedOutputVolume = Math.min(100, loadPref<number>("outputVolume", 100));
   const outputVolumeSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
