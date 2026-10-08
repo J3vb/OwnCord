@@ -463,6 +463,13 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 	return insertSession(ctx, d.q, userID, tokenHash, device, ip, true)
 }
 
+// CreateFirstSession inserts an account's first session already seen: there is
+// no other device to tell, so it must not surface as an unreviewed new login.
+// Being the only session, it needs no cap eviction.
+func (d *DB) CreateFirstSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
+	return insertSession(ctx, d.q, userID, tokenHash, device, ip, false)
+}
+
 // insertSession inserts one session row through q — d.q, or d.q.WithTx(tx)
 // when the row must commit with other writes (CreateUserWithInvite).
 // unseen marks the row as a new login the account has not acknowledged yet
