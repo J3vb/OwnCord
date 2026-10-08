@@ -1095,3 +1095,110 @@ describe("handleSdkReconnecting / handleSdkReconnected", () => {
     expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
   });
 });
+
+// ── stalled signal resume ──────────────────────────────────────────────────
+
+// livekit-client resumes a cut signal socket up to 10 times, each allowed 15 s
+// to open, before it emits Disconnected, so a cut the SFU never answers leaves
+// the badge on "reconnecting" and every stream frozen for minutes while a
+// manual rejoin takes ~150 ms. The widget gives the SDK a short budget, then
+// abandons that room and runs its own reconnect loop.
+describe("a stalled signal resume", () => {
+  const BUDGET_MS = 10_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("drops the stuck room and starts the reconnect loop once the budget is spent", () => {
+    const h = build();
+    onRoom(h.room as unknown as Room, RoomEvent.Disconnected, h.handlers.handleDisconnected);
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS - 1);
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.teardownForReconnect).toHaveBeenCalled();
+    expect(h.spies.setRoom).toHaveBeenCalledWith(null);
+    expect(h.room.off).toHaveBeenCalledWith(RoomEvent.Disconnected, h.handlers.handleDisconnected);
+    expect(h.room.disconnect).toHaveBeenCalled();
+    expect(h.spies.setReconnectAc).toHaveBeenCalledWith(expect.any(AbortController));
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalledWith(
+      "tok",
+      "wss://lk.example",
+      12,
+      undefined,
+      expect.any(AbortSignal),
+    );
+    // A recovery, not a leave: no error toast and the channel is kept.
+    expect(h.spies.leaveVoice).not.toHaveBeenCalled();
+    expect(h.spies.onError).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the SDK reconnects within the budget", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS - 1);
+    h.handlers.handleSdkReconnected();
+    vi.advanceTimersByTime(BUDGET_MS);
+
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the SDK gives up on its own within the budget", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnecting();
+    h.handlers.handleDisconnected(DisconnectReason.CLIENT_INITIATED);
+    vi.advanceTimersByTime(BUDGET_MS * 2);
+
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+  });
+
+  it("counts the budget from the first event when Reconnecting follows SignalReconnecting", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS / 2);
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS / 2);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a room that is no longer the connected session room alone", () => {
+    let current: Room | null = {} as Room;
+    const h = build({ getRoom: () => current });
+
+    h.handlers.handleSdkReconnecting();
+    current = null; // the user left, or another attempt replaced the room
+    vi.advanceTimersByTime(BUDGET_MS);
+
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(h.spies.setRoom).not.toHaveBeenCalled();
+  });
+
+  it("stays out of the way when there is no token to reconnect with", () => {
+    const h = build({ getLatestToken: () => null });
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.leaveVoice).not.toHaveBeenCalled();
+  });
+});

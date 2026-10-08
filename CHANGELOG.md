@@ -53,6 +53,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- **Voice stuck on "reconnecting"**: when the voice connection dropped and did not come back, the badge stayed on "reconnecting" and streams stayed frozen for minutes until you rejoined by hand. After 10 seconds the app now drops that connection and reconnects (or rejoins) on its own.
 - **Linux microphone quality**: the Linux desktop app now sends the microphone at the bitrate the server's `voice.quality` sets, instead of a fixed 48 kbps, so `high` takes effect there too.
 - **Full screen for a popped-out stream**: full screen on a popped-out stream or camera showed an empty tile while the video stayed in the pop-out window — fullscreen from a popped-out stream moves it into the main window's fullscreen view; leaving fullscreen returns it to the grid (Pop out re-pops it).
 - **Voice join**: a saved per-user or output volume above 100% could make joining a voice channel fail. Volumes now top out at 100%: the sliders end there, and older saved values above it play at 100%.
