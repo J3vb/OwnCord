@@ -458,7 +458,13 @@ export function buildTauriMockScript(opts: {
     voice_states?: unknown[];
     dm_channels?: unknown[];
     notices?: unknown[];
+    roles?: unknown[];
   };
+  /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
+   *  same init script, because Playwright does not order separate
+   *  `addInitScript` registrations. Each is serialised with `toString()`, so it
+   *  must be self-contained (no closure variables). */
+  wrappers?: Array<() => void>;
   /** Pinned peer identity keys served by get_identity_pin, keyed by userId
    *  (string). Absent key = null = "never pinned". */
   identityPins?: Record<string, string>;
@@ -846,6 +852,7 @@ export function buildTauriMockScript(opts: {
 
       convertFileSrc: (path) => path,
     };
+    ${(opts.wrappers ?? []).map((fn) => `;(${fn.toString()})();`).join("\n")}
   `;
 }
 

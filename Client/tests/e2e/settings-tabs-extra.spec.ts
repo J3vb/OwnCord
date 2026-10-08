@@ -40,9 +40,55 @@ import { Q1, setAppearance, textContrast } from "./support/b9-accessibility";
 // Local harness additions
 // ---------------------------------------------------------------------------
 
+/** Wraps the invoke the mock installed; passed as a `wrappers` entry so it runs
+ *  in the mock's own init script. Self-contained: it is serialised. */
+function stubNativeFs(): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const internals = (window as any).__TAURI_INTERNALS__;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const log = (window as any).__invokeLog as Array<{ cmd: string; args?: unknown }>;
+  const orig = internals.invoke;
+  internals.invoke = async (cmd: string, args: unknown) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const a = args as any;
+    // The stubs below answer before `orig` would record the call, so mirror
+    // the mock's own `__invokeLog` here to keep the IPC evidence complete.
+    const stubs =
+      cmd === "plugin:path|resolve_directory" ||
+      cmd === "plugin:path|join" ||
+      cmd === "plugin:fs|read_dir" ||
+      cmd === "plugin:fs|remove" ||
+      cmd === "plugin:fs|exists" ||
+      cmd === "plugin:fs|mkdir" ||
+      cmd === "plugin:fs|write_text_file";
+    if (stubs) log.push({ cmd, args });
+    if (cmd === "plugin:path|resolve_directory") return "/mock/appdata";
+    if (cmd === "plugin:path|join") return ((a?.paths as string[]) ?? []).join("/");
+    // A small set of on-disk log files so the Advanced tab's cache actions
+    // have something to delete (the log dir holds at most MAX_LOG_FILES).
+    if (cmd === "plugin:fs|read_dir") {
+      return [
+        { name: "2026-01-01.jsonl", isDirectory: false },
+        { name: "2026-01-02.jsonl", isDirectory: false },
+      ];
+    }
+    if (cmd === "plugin:fs|remove") return;
+    if (cmd === "plugin:fs|exists") return true;
+    if (cmd === "plugin:fs|mkdir") return;
+    if (cmd === "plugin:fs|write_text_file") return;
+    // The broker hands a .gif URL back as a 1x1 GIF so the GIF-freeze path
+    // runs; every other external image still refuses as in the base mock.
+    if (cmd === "external_image" && String(a?.url ?? "").endsWith(".gif")) {
+      const gif = atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
+      return Uint8Array.from(gif, (c) => c.charCodeAt(0)).buffer;
+    }
+    return orig(cmd, args);
+  };
+}
+
 /**
  * A full mocked session whose ready payload can override members, plus a
- * second init script that answers the native path/fs plugin calls the
+ * `wrappers` entry that answers the native path/fs plugin calls the
  * Advanced tab's cache actions make. Without it `appLogDir()`/`readDir()`
  * resolve null from the mock's unhandled-command fallback and "Clear Log
  * Files" lands in its "Failed" branch instead of exercising the real flow.
@@ -60,55 +106,10 @@ async function mockSession(
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],
       simulateWsFlow: true,
+      wrappers: [stubNativeFs],
       ...(opts.members !== undefined ? { readyOverrides: { members: opts.members } } : {}),
     }),
   );
-
-  // Runs after the Tauri mock script (addInitScript order is insertion order),
-  // so it wraps the invoke the mock installed.
-  await page.addInitScript(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const internals = (window as any).__TAURI_INTERNALS__;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const log = (window as any).__invokeLog as Array<{ cmd: string; args?: unknown }>;
-    const orig = internals.invoke;
-    internals.invoke = async (cmd: string, args: unknown) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const a = args as any;
-      // The stubs below answer before `orig` would record the call, so mirror
-      // the mock's own `__invokeLog` here to keep the IPC evidence complete.
-      const stubs =
-        cmd === "plugin:path|resolve_directory" ||
-        cmd === "plugin:path|join" ||
-        cmd === "plugin:fs|read_dir" ||
-        cmd === "plugin:fs|remove" ||
-        cmd === "plugin:fs|exists" ||
-        cmd === "plugin:fs|mkdir" ||
-        cmd === "plugin:fs|write_text_file";
-      if (stubs) log.push({ cmd, args });
-      if (cmd === "plugin:path|resolve_directory") return "/mock/appdata";
-      if (cmd === "plugin:path|join") return ((a?.paths as string[]) ?? []).join("/");
-      // A small set of on-disk log files so the Advanced tab's cache actions
-      // have something to delete (the log dir holds at most MAX_LOG_FILES).
-      if (cmd === "plugin:fs|read_dir") {
-        return [
-          { name: "2026-01-01.jsonl", isDirectory: false },
-          { name: "2026-01-02.jsonl", isDirectory: false },
-        ];
-      }
-      if (cmd === "plugin:fs|remove") return;
-      if (cmd === "plugin:fs|exists") return true;
-      if (cmd === "plugin:fs|mkdir") return;
-      if (cmd === "plugin:fs|write_text_file") return;
-      // The broker hands a .gif URL back as a 1x1 GIF so the GIF-freeze path
-      // runs; every other external image still refuses as in the base mock.
-      if (cmd === "external_image" && String(a?.url ?? "").endsWith(".gif")) {
-        const gif = atob("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
-        return Uint8Array.from(gif, (c) => c.charCodeAt(0)).buffer;
-      }
-      return orig(cmd, args);
-    };
-  });
 
   if (opts.seedMutes !== undefined && opts.seedMutes.length > 0) {
     // Legacy unscoped key on purpose: channel-mutes migrates it to the
