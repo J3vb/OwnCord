@@ -29,7 +29,11 @@ import { vadThreshold } from "@lib/audioPipeline";
 // so the singleton stays one.
 import * as appLogger from "@lib/logger";
 import { expectConsole } from "../helpers/console";
-import { FakeAudioWorkletNode, installFakeAudio } from "../helpers/fakeAudioContext";
+import {
+  FakeAudioContext,
+  FakeAudioWorkletNode,
+  installFakeAudio,
+} from "../helpers/fakeAudioContext";
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -782,6 +786,20 @@ describe("VoiceAudioTab UI structure", () => {
           type: "config",
           threshold: vadThreshold(30),
         });
+        ac.abort();
+      });
+
+      it("meters the microphone after Input Volume, as the live gate does", async () => {
+        localStorage.setItem("owncord:settings:inputVolume", "150");
+        const { el, ac } = await meter();
+        const entry = () =>
+          FakeAudioContext.instances.at(-1)!.nodes.find((n) => n.kind === "gain")!.gain;
+        await vi.waitFor(() => expect(entry().value).toBe(1.5));
+
+        const slider = el.querySelector<HTMLInputElement>('input[aria-label="Input Volume"]')!;
+        slider.value = "50";
+        slider.dispatchEvent(new Event("input"));
+        expect(entry().value).toBe(0.5);
         ac.abort();
       });
 

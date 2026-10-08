@@ -94,7 +94,7 @@ export interface VadDetector {
 export interface VadDetectorHandlers {
   /** The gate verdict: true = closed (silence). */
   onGate(gated: boolean): void;
-  /** The loudest quantum since the last report, for a level meter. */
+  /** The loudest smoothed level since the last report, for a level meter. */
   onRms?(rms: number): void;
   /** Which path is running once it has started. */
   onStarted?(usingWorklet: boolean): void;
@@ -103,7 +103,7 @@ export interface VadDetectorHandlers {
 /**
  * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
  * when it loads, otherwise a setTimeout poll with the same timing. Both apply
- * the same attack (~32 ms) and hold (~200 ms), so the settings meter and the
+ * the same attack (~32 ms) and hold (~320 ms), so the settings meter and the
  * live gate open and close alike.
  */
 export function startVadDetector(
@@ -122,10 +122,10 @@ export function startVadDetector(
     // backgrounded, which freezes the VAD gate. setTimeout continues firing
     // (throttled ~1Hz when hidden), still fast enough for VAD gate timing.
     const dataArray = new Float32Array(analyser.fftSize);
-    let silentFrames = 0;
+    let quietSince = 0; // Date.now() of the first poll below the threshold, 0 = none
     let speechFrames = 0;
     let gated = false;
-    const GATE_ON_FRAMES = 12;
+    const GATE_HOLD_MS = 320; // as vad-worklet.js holds; elapsed time, as timers throttle
     const GATE_OFF_FRAMES = 2;
     let startupFrames = 0;
     const STARTUP_GRACE = 30;
@@ -148,13 +148,14 @@ export function startVadDetector(
         startupFrames++;
       } else if (rms < threshold) {
         speechFrames = 0;
-        silentFrames++;
-        if (!gated && silentFrames >= GATE_ON_FRAMES) {
+        const now = Date.now();
+        if (quietSince === 0) quietSince = now;
+        if (!gated && now - quietSince >= GATE_HOLD_MS) {
           gated = true;
           handlers.onGate(true);
         }
       } else {
-        silentFrames = 0;
+        quietSince = 0;
         speechFrames++;
         if (gated && speechFrames >= GATE_OFF_FRAMES) {
           gated = false;

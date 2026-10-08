@@ -91,11 +91,21 @@ describe("voice gate on recorded audio", () => {
     expect(firstOpen!.atMs - onsetMs).toBeLessThan(LOOKAHEAD_MS);
   });
 
-  it("reports the loudest quantum since its last report, not whichever came last", async () => {
-    // One loud quantum in a run of quiet ones: the meter reading has to show
-    // what the gate compared against.
+  it("smooths the level over four quanta: one loud quantum reads at half its RMS", async () => {
     const input = new Float32Array(FIXTURE_SAMPLE_RATE).fill(0.01);
-    input.fill(0.5, QUANTUM * 312, QUANTUM * 315);
+    input.fill(0.5, QUANTUM * 312, QUANTUM * 313);
+
+    const messages = await gate(50, input);
+
+    const readings = messages.filter((m) => m.type === "rms").map((m) => m.value!);
+    expect(Math.max(...readings)).toBeCloseTo(0.25, 1);
+  });
+
+  it("reports the loudest smoothed level since its last report, not whichever came last", async () => {
+    // A burst in a run of quiet quanta: the meter reading has to show what the
+    // gate compared against, the ~10 ms (4 quanta) smoothed level.
+    const input = new Float32Array(FIXTURE_SAMPLE_RATE).fill(0.01);
+    input.fill(0.5, QUANTUM * 312, QUANTUM * 316);
 
     const messages = await gate(50, input);
 

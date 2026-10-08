@@ -52,17 +52,23 @@ describe("createMicProcessor", () => {
   });
 
   it("gates the output: either gate closed is silence, both open is the input gain", async () => {
-    const { processor, output } = await started();
+    const { processor, entry, output } = await started();
+    // Input Volume rides on the entry node, ahead of the detector's tap; the
+    // output node carries only the gates.
+    const level = () => entry.gain.value * output.gain.value;
     processor.setInputGain(0.8);
-    expect(output.gain.value).toBe(0.8);
+    expect(entry.gain.value).toBe(0.8);
+    expect(level()).toBe(0.8);
 
     processor.setGate("vad", true);
-    expect(output.gain.value).toBe(0);
+    expect(level()).toBe(0);
+    expect(entry.gain.value).toBe(0.8);
     processor.setGate("ptt", true);
     processor.setGate("vad", false);
-    expect(output.gain.value).toBe(0);
+    expect(level()).toBe(0);
     processor.setGate("ptt", false);
-    expect(output.gain.value).toBe(0.8);
+    expect(level()).toBe(0.8);
+    expect(processor.gainValue).toBe(0.8);
     expect(processor.isGateClosed("vad")).toBe(false);
   });
 
@@ -82,9 +88,11 @@ describe("createMicProcessor", () => {
     await processor.init({ kind: Track.Kind.Audio, track: fakeMediaStreamTrack("mic") } as never);
 
     const ctx = processor.context as unknown as FakeAudioContext;
-    expect(ctx.nodes.filter((n) => n.kind === "gain")[1]!.gain.value).toBe(0);
+    const [entry, output] = ctx.nodes.filter((n) => n.kind === "gain");
+    expect(entry!.gain.value).toBe(1.5);
+    expect(output!.gain.value).toBe(0);
     processor.setGate("ptt", false);
-    expect(ctx.nodes.filter((n) => n.kind === "gain")[1]!.gain.value).toBe(1.5);
+    expect(output!.gain.value).toBe(1);
   });
 
   it("routes through RNNoise when enhanced, and around it again when not", async () => {

@@ -1,10 +1,13 @@
 // MicProcessor — the microphone's whole outbound chain as one livekit-client
 // TrackProcessor:
 //
-//   capture track → [RNNoise] ─┬→ AnalyserNode (the voice detector's tap)
-//                              └→ DelayNode (gate lookahead) → GainNode
-//                                   (inputVolume × voice gate × push-to-talk)
-//                                   → MediaStreamDestination = processedTrack
+//   capture track → GainNode (inputVolume) → [RNNoise] ─┬→ AnalyserNode (the voice detector's tap)
+//                                                       └→ DelayNode (gate lookahead) → GainNode
+//                                                            (voice gate × push-to-talk)
+//                                                            → MediaStreamDestination = processedTrack
+//
+// Input Volume sits ahead of the detector's tap so the gate, the settings
+// meter and the slider agree: turning a quiet mic up lifts it over the gate.
 //
 // livekit-client publishes, republishes and restarts a track through
 // `track.mediaStreamTrack`, which is `processor.processedTrack` whenever a
@@ -99,8 +102,7 @@ export function createMicProcessor(): MicProcessor {
 
   function applyGain(timeConstant: number): void {
     if (gain === null) return;
-    const effective = closed.vad || closed.ptt ? 0 : inputGain;
-    gain.gain.setTargetAtTime(effective, ctx.currentTime, timeConstant);
+    gain.gain.setTargetAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime, timeConstant);
   }
 
   /** Wire entry → (RNNoise →) analyser + delay for the current `enhanced`. */
@@ -127,7 +129,7 @@ export function createMicProcessor(): MicProcessor {
       return analyser;
     },
     get gainValue() {
-      return gain?.gain.value ?? null;
+      return gain === null || entry === null ? null : gain.gain.value * entry.gain.value;
     },
     get inputGain() {
       return inputGain;
@@ -142,13 +144,14 @@ export function createMicProcessor(): MicProcessor {
     async init(opts: AudioProcessorOptions): Promise<void> {
       void ctx.resume(); // WebView2 autoplay policy can leave it suspended
       entry = ctx.createGain();
+      entry.gain.setValueAtTime(inputGain, ctx.currentTime);
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.3;
       delay = ctx.createDelay(GATE_LOOKAHEAD_S);
       delay.delayTime.value = 0;
       gain = ctx.createGain();
-      gain.gain.setValueAtTime(closed.vad || closed.ptt ? 0 : inputGain, ctx.currentTime);
+      gain.gain.setValueAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime);
       dest = ctx.createMediaStreamDestination();
       delay.connect(gain);
       gain.connect(dest);
@@ -183,7 +186,7 @@ export function createMicProcessor(): MicProcessor {
 
     setInputGain(next: number): void {
       inputGain = next;
-      applyGain(GAIN_TIME_CONSTANT_S);
+      entry?.gain.setTargetAtTime(next, ctx.currentTime, GAIN_TIME_CONSTANT_S);
     },
 
     setGate(gate: GateSource, isClosed: boolean): void {
