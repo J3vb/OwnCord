@@ -972,3 +972,15 @@ test("capacity counts a VU's first voice_token once, however many arrive", () =>
   assert.equal(h.metrics.voice_tokens.length, 2);
   assert.equal(h.metrics.voice_vus_joined.length, 1);
 });
+
+test("capacity closes every socket itself before ramp-down, however late the VU dials in", () => {
+  const h = harness({ K6_PROFILE: "capacity" });
+  const sustainEndS = h.evaluate("RAMP_S + SUSTAIN_S");
+  h.at(h.evaluate("RAMP_S") - 1); // the last VU of the ramp
+  h.start();
+  const hold = h.timeouts.at(-1);
+  assert.ok(hold.ms <= (sustainEndS - h.evaluate("RAMP_S") + 1) * 1000, "hold ends by ramp-down");
+  hold.callback();
+  h.close();
+  assert.equal(h.metrics.ws_unexpected_closes?.length ?? 0, 0);
+});

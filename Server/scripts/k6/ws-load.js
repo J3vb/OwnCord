@@ -1556,6 +1556,14 @@ export default function () {
     } else {
       vuHoldEnd = openAt + HOLD_MS;
       closeIn = HOLD_MS;
+      if (IS_CAPACITY) {
+        // Capacity holds to the start of ramp-down, not the end of the run:
+        // a VU that ramped in late would otherwise still own its socket when
+        // k6 tears it down, and that teardown reads as an unexpected close.
+        const rampDownAt = exec.scenario.startTime + (RAMP_S + SUSTAIN_S) * 1000;
+        closeIn = Math.max(1, Math.min(HOLD_MS, rampDownAt - 1000 - openAt));
+        vuHoldEnd = openAt + closeIn;
+      }
     }
 
     // First frame must be the auth envelope (serve_auth.go). The clock for
@@ -1960,7 +1968,7 @@ export default function () {
     if (joinsVoice && !IS_OPERATIONAL) {
       socket.setTimeout(function () {
         socket.send(envelope("voice_leave", {}));
-      }, HOLD_MS - 2000);
+      }, Math.max(1, closeIn - 2000));
     }
 
     // Hold the connection for the whole run (see HOLD_MS); a resumed
