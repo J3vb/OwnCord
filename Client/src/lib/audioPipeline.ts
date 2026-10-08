@@ -393,7 +393,7 @@ export class AudioPipeline {
       return;
     }
     processor.setLookahead(GATE_LOOKAHEAD_S);
-    this.onGateSpeaking?.(false);
+    this.onGateSpeaking?.(true);
     this.vad = startVadDetector(processor.context, processor.analyser, vadThreshold(sensitivity), {
       onGate: (gated) => {
         if (this.processor !== processor) return;

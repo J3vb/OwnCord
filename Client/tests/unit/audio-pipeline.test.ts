@@ -227,7 +227,7 @@ describe("AudioPipeline", () => {
       await pipeline.attach(micTrack());
       await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
       const vad = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
-      expect(verdicts.at(-1)).toBe(false);
+      expect(verdicts.at(-1)).toBe(true);
       verdicts.length = 0;
 
       vad.emit({ type: "gate", gated: false });
