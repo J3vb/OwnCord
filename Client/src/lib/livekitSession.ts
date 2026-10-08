@@ -886,11 +886,6 @@ export class LiveKitSession {
     );
   }
 
-  /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
-  getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
-    return this._remoteTracks.getRemoteVideoStream(userId, type);
-  }
-
   /** One receiver sample of a remote camera or screen share (video tile chip). */
   getRemoteVideoStats(
     userId: number,
@@ -899,14 +894,9 @@ export class LiveKitSession {
     return this._remoteTracks.getRemoteVideoStats(userId, type);
   }
 
-  /** Ask for only what a remote video tile, or the hover preview, shows (P3-07). */
-  setRemoteVideoView(
-    userId: number,
-    type: "camera" | "screenshare",
-    view: VideoView,
-    preview?: boolean,
-  ): void {
-    this._remoteTracks.setRemoteVideoView(userId, type, view, preview);
+  /** Ask for only what a remote video tile shows (P3-07). */
+  setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
+    this._remoteTracks.setRemoteVideoView(userId, type, view);
   }
 
   getRoom(): Room | null {
@@ -991,7 +981,6 @@ export const reapplyEnhancedNoiseSuppression =
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
-export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);

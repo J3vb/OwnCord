@@ -52,7 +52,6 @@ const {
   enableScreenshare,
   getLocalCameraStream,
   getLocalScreenshareStream,
-  getRemoteVideoStream,
   stopManualCameraTrack,
   stopManualScreenTracks,
   rollbackPendingVideo,
@@ -1168,65 +1167,6 @@ describe("stream getters", () => {
 
   it("getLocalScreenshareStream returns null when nothing is published", () => {
     expect(getLocalScreenshareStream(fakeRoom().room)).toBeNull();
-  });
-});
-
-describe("getRemoteVideoStream", () => {
-  function roomWithRemote(identity: string, source: Track.Source, track: unknown): Room {
-    return {
-      localParticipant: { getTrackPublication: () => undefined },
-      remoteParticipants: new Map([
-        [
-          identity,
-          {
-            identity,
-            getTrackPublication: (s: Track.Source) => (s === source ? { track } : undefined),
-          },
-        ],
-      ]),
-    } as unknown as Room;
-  }
-
-  it("returns null without a room", () => {
-    expect(getRemoteVideoStream(null, 7, "camera")).toBeNull();
-  });
-
-  it("matches an identity carrying a join-token suffix", () => {
-    // getParticipantByIdentity would miss this, which is why the module scans.
-    const room = roomWithRemote("user-42:abc123", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "camera")).not.toBeNull();
-  });
-
-  it("matches a bare identity", () => {
-    const room = roomWithRemote("user-42", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "camera")).not.toBeNull();
-  });
-
-  it("selects the screenshare source when asked", () => {
-    const room = roomWithRemote("user-42:tok", Track.Source.ScreenShare, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "screenshare")).not.toBeNull();
-    expect(getRemoteVideoStream(room, 42, "camera")).toBeNull();
-  });
-
-  it("returns null for a user who is not in the room", () => {
-    const room = roomWithRemote("user-42:tok", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 99, "camera")).toBeNull();
-  });
-
-  it("does not confuse user 4 with user 42", () => {
-    const room = roomWithRemote("user-42:tok", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 4, "camera")).toBeNull();
-  });
-
-  it("ignores participants with an unparseable identity", () => {
-    const room = roomWithRemote("anonymous", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "camera")).toBeNull();
   });
 });
 

@@ -7,8 +7,8 @@
  * `reaction_update` handler can invalidate it without importing this component.
  * This module renders the tooltip and wires the hover that triggers the load.
  *
- * Hover is debounced 300ms, mirroring lib/streamPreview.ts: a pointer crossing
- * a row of pills must not fire a request per pill.
+ * Hover is debounced 300ms: a pointer crossing a row of pills must not fire a
+ * request per pill.
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";

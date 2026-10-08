@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 
-// Mock livekitSession (required by streamPreview). rePinPeerIdentity is hoisted
+// Mock livekitSession. rePinPeerIdentity is hoisted
 // so the mock factory can reference it and tests can assert re-pin was invoked.
 const { mockRePinPeerIdentity } = vi.hoisted(() => ({
   mockRePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
@@ -8,16 +8,7 @@ const { mockRePinPeerIdentity } = vi.hoisted(() => ({
 vi.mock("@lib/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
-  getRemoteVideoStream: vi.fn(() => null),
   rePinPeerIdentity: mockRePinPeerIdentity,
-}));
-
-// Mock streamPreview to isolate sidebar tests from preview DOM logic
-const mockAttachStreamPreview = vi.fn();
-const mockAttachScrollCollapse = vi.fn();
-vi.mock("@lib/streamPreview", () => ({
-  attachStreamPreview: (...args: unknown[]) => mockAttachStreamPreview(...args),
-  attachScrollCollapse: (...args: unknown[]) => mockAttachScrollCollapse(...args),
 }));
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
@@ -2076,16 +2067,9 @@ describe("ChannelSidebar", () => {
     sidebarWithWatch.destroy?.();
   });
 
-  // T12: Self-user → no preview attached
-  it("does not attach stream preview for self user", () => {
-    mockAttachStreamPreview.mockClear();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 42, username: "Me", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+  // The voice row has no hover/focus stream preview, for anyone.
+  it("opens no stream preview when a voice row with video is hovered or focused", () => {
+    vi.useFakeTimers();
     setChannels(testChannels);
     voiceStore.setState(() => ({
       currentChannelId: 3,
@@ -2094,10 +2078,10 @@ describe("ChannelSidebar", () => {
           3,
           new Map([
             [
-              42,
+              99,
               {
-                userId: 42,
-                username: "Me",
+                userId: 99,
+                username: "User",
                 speaking: false,
                 muted: false,
                 deafened: false,
@@ -2118,9 +2102,12 @@ describe("ChannelSidebar", () => {
       voiceStatus: "idle",
     }));
     sidebar.mount(container);
-
-    // Should not have called attachStreamPreview for self
-    expect(mockAttachStreamPreview).not.toHaveBeenCalled();
+    const row = container.querySelector<HTMLElement>(".voice-user-item")!;
+    row.dispatchEvent(new MouseEvent("mouseenter"));
+    row.dispatchEvent(new FocusEvent("focusin"));
+    vi.advanceTimersByTime(1000);
+    expect(container.querySelector(".vu-preview")).toBeNull();
+    vi.useRealTimers();
   });
 
   // T20: Constant shared — sidebar uses SCREENSHARE_TILE_ID_OFFSET from constants
@@ -2165,45 +2152,6 @@ describe("ChannelSidebar", () => {
     // 1 + 1_000_000 = 1_000_001 — proves the shared constant is used
     expect(onWatchStream).toHaveBeenCalledWith(1_000_001);
     sidebarWithWatch.destroy?.();
-  });
-
-  // T14: attachScrollCollapse is called for voice users containers
-  it("attaches scroll collapse to voice-users-list containers", () => {
-    mockAttachScrollCollapse.mockClear();
-    setChannels(testChannels);
-    voiceStore.setState(() => ({
-      currentChannelId: 3,
-      voiceUsers: new Map([
-        [
-          3,
-          new Map([
-            [
-              99,
-              {
-                userId: 99,
-                username: "User",
-                speaking: false,
-                muted: false,
-                deafened: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
-      voiceConfigs: new Map(),
-      localMuted: false,
-      localDeafened: false,
-      localCamera: false,
-      localScreenshare: false,
-      joinedAt: null,
-      listenOnly: false,
-      voiceStatus: "idle",
-    }));
-    sidebar.mount(container);
-
-    expect(mockAttachScrollCollapse).toHaveBeenCalled();
   });
 });
 

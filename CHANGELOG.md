@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Removed
+
+- **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
+
 ### Fixed
 
 - **Full screen for a popped-out stream**: full screen on a popped-out stream or camera showed an empty tile while the video stayed in the pop-out window — fullscreen from a popped-out stream moves it into the main window's fullscreen view; leaving fullscreen returns it to the grid (Pop out re-pops it).
