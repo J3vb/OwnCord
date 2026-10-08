@@ -105,14 +105,14 @@ mod tests {
 
     #[test]
     fn refuses_foreign_and_malformed_origins() {
-        assert!(!auto_allow(Kind::Microphone, "https://evil.example/"));
+        assert!(!auto_allow(Kind::Microphone, "https://evil.example.com/"));
         assert!(!auto_allow(
             Kind::Camera,
-            "http://tauri.localhost.evil.example/"
+            "http://tauri.localhost.evil.example.com/"
         ));
         assert!(!auto_allow(
             Kind::Camera,
-            "http://evil.example/tauri.localhost"
+            "http://evil.example.com/tauri.localhost"
         ));
         assert!(!auto_allow(Kind::Microphone, "ftp://tauri.localhost/"));
         assert!(!auto_allow(Kind::Microphone, "not a url"));
