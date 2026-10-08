@@ -10,6 +10,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"time"
 )
 
 // subscriptionStillCurrent re-reads, immediately before one delivery attempt,
@@ -69,4 +70,31 @@ func (d *PushDispatcher) recipientBlocksAuthor(ctx context.Context, userID, auth
 		return true
 	}
 	return blocked
+}
+
+// prune deletes a subscription a push service reported dead (404/410) and
+// counts it -- the authoritative staleness signal S7 names, separate from
+// B5-4's time-based sweep.
+func (d *PushDispatcher) prune(ctx context.Context, id int64) {
+	if deleted, err := d.st.DeletePushSubscriptionByID(ctx, id); err != nil {
+		slog.Error("PushDispatcher.prune DeletePushSubscriptionByID", "err", err, "id", id)
+		d.failed.Add(1)
+	} else if deleted {
+		d.pruned.Add(1)
+	}
+}
+
+// expireCoalesceLocked removes every entry whose window has already
+// expired. Called with d.mu held.
+//
+// ponytail: a full linear scan on every call, bounded by pushCoalesceMapCap
+// entries. Fine at that size; move to a background ticker or a
+// time-ordered structure if the cap is ever raised enough for this to show
+// up in profiles.
+func (d *PushDispatcher) expireCoalesceLocked(now time.Time) {
+	for k, t := range d.lastSent {
+		if now.Sub(t) >= pushCoalesceWindow {
+			delete(d.lastSent, k)
+		}
+	}
 }

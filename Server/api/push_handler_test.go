@@ -46,9 +46,11 @@ func buildPushRouter(t *testing.T, database *db.DB, enabled bool) (http.Handler,
 
 // validP256dh / validAuth are well-formed Web Push credential bytes.
 func validP256dh() string {
-	b := make([]byte, 65)
-	b[0] = 0x04
-	return base64.RawURLEncoding.EncodeToString(b)
+	priv, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
 }
 
 func validAuth() string {
@@ -256,6 +258,11 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 		b[0] = 0x05
 		return base64.RawURLEncoding.EncodeToString(b)
 	}()
+	badP256dhOffCurve := func() string {
+		b := make([]byte, 65)
+		b[0] = 0x04
+		return base64.RawURLEncoding.EncodeToString(b)
+	}()
 	badAuth15 := base64.RawURLEncoding.EncodeToString(make([]byte, 15))
 
 	tests := []struct {
@@ -269,6 +276,7 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 		{"endpoint too long", pushSubscribeBody{Endpoint: "https://push.example.com/" + strings.Repeat("x", 2048), Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}}},
 		{"p256dh 64 bytes", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: badP256dh64, Auth: validAuth()}}},
 		{"p256dh wrong prefix", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: badP256dhWrongPrefix, Auth: validAuth()}}},
+		{"p256dh off curve", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: badP256dhOffCurve, Auth: validAuth()}}},
 		{"auth 15 bytes", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: validP256dh(), Auth: badAuth15}}},
 		{"device_name control char", pushSubscribeBody{Endpoint: "https://push.example.com/sub/x", Keys: pushKeys{P256dh: validP256dh(), Auth: validAuth()}, DeviceName: "bad\x00name"}},
 	}

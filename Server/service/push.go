@@ -352,6 +352,9 @@ func validatePushSubscription(in PushSubscribeInput) (p256dh, auth, deviceName s
 	if decErr != nil || len(p256dhBytes) != pushP256dhLen || p256dhBytes[0] != 0x04 {
 		return "", "", "", fmt.Errorf("%w: p256dh must be a 65-byte uncompressed P-256 point", ErrInvalidSubscription)
 	}
+	if _, err := ecdh.P256().NewPublicKey(p256dhBytes); err != nil {
+		return "", "", "", fmt.Errorf("%w: p256dh is not a valid P-256 point", ErrInvalidSubscription)
+	}
 	authBytes, authErr := decodePushBase64(in.Auth)
 	if authErr != nil || len(authBytes) != pushAuthLen {
 		return "", "", "", fmt.Errorf("%w: auth must be 16 bytes", ErrInvalidSubscription)

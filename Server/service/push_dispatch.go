@@ -239,9 +239,24 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 		return
 	}
 
+	// The coalescing window is reserved only once a user has a prepared
+	// request, so a missing subscription or a failed lookup never suppresses
+	// a later mention. A user who loses the reservation to a concurrent
+	// Notify has their items dropped (the guard against a double send).
+	now := time.Now()
+	reserved := make(map[int64]bool, len(coalesced))
 	items := make([]pushRoundItem, 0, len(subs))
 	for _, sub := range subs {
-		if req, ok := d.prepareRequest(sub); ok {
+		req, ok := d.prepareRequest(sub)
+		if !ok {
+			continue
+		}
+		won, seen := reserved[sub.UserID]
+		if !seen {
+			won = !d.coalesced(sub.UserID, channelID, now)
+			reserved[sub.UserID] = won
+		}
+		if won {
 			items = append(items, pushRoundItem{sub: sub, req: req})
 		}
 	}
@@ -408,7 +423,7 @@ func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, c
 		if !d.trustsAuthor(ctx, ch, uid, authorID) {
 			continue
 		}
-		if d.coalesced(uid, ch.ID, now) {
+		if d.recentlySent(uid, ch.ID, now) {
 			continue
 		}
 		out = append(out, uid)
@@ -493,6 +508,15 @@ func (d *PushDispatcher) stillEligible(ctx context.Context, channelID, authorID,
 	return d.eligibleFor(ctx, ch, userID)
 }
 
+// recentlySent is the read-only half of coalesced: it reports whether userID
+// is inside an open window for channelID without starting one.
+func (d *PushDispatcher) recentlySent(userID, channelID int64, now time.Time) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	last, ok := d.lastSent[pushCoalesceKey{userID, channelID}]
+	return ok && now.Sub(last) < pushCoalesceWindow
+}
+
 // coalesced reports whether userID was already pushed about channelID
 // within pushCoalesceWindow. If not, and the map has room (see
 // expireCoalesceLocked), it starts a new window from now and returns false;
@@ -513,29 +537,4 @@ func (d *PushDispatcher) coalesced(userID, channelID int64, now time.Time) bool 
 	}
 	d.lastSent[key] = now
 	return false
-}
-
-// expireCoalesceLocked removes every entry whose window has already
-// expired. Called with d.mu held.
-//
-// ponytail: a full linear scan on every call, bounded by pushCoalesceMapCap
-// entries. Fine at that size; move to a background ticker or a
-// time-ordered structure if the cap is ever raised enough for this to show
-// up in profiles.
-func (d *PushDispatcher) expireCoalesceLocked(now time.Time) {
-	for k, t := range d.lastSent {
-		if now.Sub(t) >= pushCoalesceWindow {
-			delete(d.lastSent, k)
-		}
-	}
-}
-
-// prune deletes a subscription a push service reported dead (404/410) and
-// counts it -- the authoritative staleness signal S7 names, separate from
-// B5-4's time-based sweep.
-func (d *PushDispatcher) prune(ctx context.Context, id int64) {
-	if _, err := d.st.DeletePushSubscriptionByID(ctx, id); err != nil {
-		slog.Error("PushDispatcher.prune DeletePushSubscriptionByID", "err", err, "id", id)
-	}
-	d.pruned.Add(1)
 }

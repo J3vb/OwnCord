@@ -1725,3 +1725,76 @@ func TestPushDispatch_RecheckBeforeEachAttempt_ValidWorkStillRetries(t *testing.
 		t.Errorf("counters = %d/%d/%d, want 1/0/0", d, fl, p)
 	}
 }
+
+// listingErrorOnceStore fails the first dispatch listing, then serves normally.
+type listingErrorOnceStore struct {
+	Store
+	calls atomic.Int32
+}
+
+func (s *listingErrorOnceStore) ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error) {
+	if s.calls.Add(1) == 1 {
+		return nil, errors.New("boom")
+	}
+	return s.Store.ListPushSubscriptionsForDispatch(ctx, userIDs, keyID)
+}
+
+// deleteErrorStore fails every prune delete.
+type deleteErrorStore struct{ Store }
+
+func (deleteErrorStore) DeletePushSubscriptionByID(context.Context, int64) (bool, error) {
+	return false, errors.New("boom")
+}
+
+// A mention that finds no subscription must not reserve the 60s window: the
+// user subscribes afterwards and the next mention must still be pushed.
+func TestNotify_NoSubscriptionDoesNotReserveCoalesceWindow(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+	f.subscribe(t, 2, "https://push.example.net/late-subscriber")
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if got := fetch.countFor("https://push.example.net/late-subscriber"); got != 1 {
+		t.Errorf("second Notify delivered %d pushes, want 1 -- a mention with no subscription reserved the window", got)
+	}
+}
+
+// A failed subscription lookup sends nothing and so must not reserve the window.
+func TestNotify_FailedLookupDoesNotReserveWindow(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	seedUserRole(t, f.database, 1, 4)
+	seedUserRole(t, f.database, 2, 4)
+	f.subscribe(t, 2, "https://push.example.net/after-error")
+
+	fetch := newRecordingPushFetcher()
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
+	dispatcher.st = &listingErrorOnceStore{Store: dispatcher.st}
+
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
+
+	if got := fetch.countFor("https://push.example.net/after-error"); got != 1 {
+		t.Errorf("second Notify delivered %d pushes, want 1 -- the failed lookup reserved the window", got)
+	}
+}
+
+// A delete that fails leaves the row in place, so it must not count as pruned.
+func TestPrune_DeleteFailureIsNotCounted(t *testing.T) {
+	f := newPushDispatchFixture(t)
+	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
+	dispatcher.st = deleteErrorStore{Store: dispatcher.st}
+
+	dispatcher.prune(context.Background(), 1)
+
+	if _, fl, p := dispatcher.Counters(); p != 0 || fl != 1 {
+		t.Errorf("pruned/failed = %d/%d after a failed delete, want 0/1", p, fl)
+	}
+}
