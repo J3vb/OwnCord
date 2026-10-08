@@ -68,6 +68,7 @@ export const CAPABILITIES = [
   "harness", // widen the development browser run from smoke to full
   "workflows", // Workflow Security Lint (zizmor over .github/workflows/)
   "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
+  "permissions", // the permissions.ts mutation hotspot step inside Client Static Checks
 ];
 
 /** Server paths outside the Client/Server pair that a Server test reads. */
@@ -185,6 +186,18 @@ const K6_HARNESS_PATHS = new Set([
 ]);
 export { K6_HARNESS_PATHS };
 
+/**
+ * The permissions mutation hotspot (Client/stryker.ci.config.mjs mutates only
+ * permissions.ts). A path-gated step, not a job: it needs only the file, its
+ * direct unit test and the two Stryker configs that decide what it measures.
+ */
+const PERMISSIONS_MUTATION_PATHS = new Set([
+  "Client/src/lib/permissions.ts",
+  "Client/tests/unit/permissions.test.ts",
+  "Client/stryker.config.mjs",
+  "Client/stryker.ci.config.mjs",
+]);
+
 /** Root files that change how every component is built or installed. */
 const ROOT_BUILD_FILES = new Set([
   "package.json",
@@ -249,6 +262,7 @@ export function classify(paths) {
     if (RUST_READS_OUTSIDE.has(path)) add("rust");
     if (RUST_HARNESS_PREFIXES.some((p) => path.startsWith(p))) add("rust");
     if (K6_HARNESS_PATHS.has(path)) add("server");
+    if (PERMISSIONS_MUTATION_PATHS.has(path)) add("permissions");
     if (DEPS_FILES.has(path)) add("deps");
     if (HARNESS_FILES.has(path) || HARNESS_PREFIXES.some((p) => path.startsWith(p))) {
       add("harness");
