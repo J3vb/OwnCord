@@ -30,6 +30,8 @@ import {
   incrementUnread,
 } from "@stores/channels.store";
 import { setMarkReadSender } from "@lib/read-state";
+import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
+import { createReconnectClock } from "../../src/features/connection/dispatchContext";
 import { formatMessageTimestamp } from "@lib/formatting";
 
 const CHANNEL_ID = 1;
@@ -651,6 +653,46 @@ describe("MessageList — unread navigation (P4-03)", () => {
       setMessages(range(1, 150));
 
       expect(countText()).toBe("99+");
+    });
+  });
+
+  describe("arrivals while the live tail is out of view", () => {
+    const liveMessage = (id: number) => ({
+      id,
+      channel_id: CHANNEL_ID,
+      user: { id: 2, username: "user2", avatar: null },
+      content: `Message ${id}`,
+      reply_to: null,
+      attachments: [],
+      timestamp: new Date().toISOString(),
+    });
+
+    it("counts a live message while scrolled up, and clears it at the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      handleChatMessage(createReconnectClock(), liveMessage(51));
+      expect(unreadCount()).toBe(1);
+
+      scrollToEnd();
+
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+    });
+
+    it("stops counting once the list is destroyed", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+      msgList?.destroy?.();
+      msgList = null;
+
+      handleChatMessage(createReconnectClock(), liveMessage(51));
+
+      expect(unreadCount()).toBe(0);
     });
   });
 });

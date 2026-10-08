@@ -17,6 +17,7 @@ import {
 import { messagesStore } from "../../stores/messages.store";
 import { dmStore } from "../../stores/dm.store";
 import { authStore } from "../../stores/auth.store";
+import { setLiveTailInView } from "../../lib/read-state";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
 
@@ -147,6 +148,15 @@ describe("markReadyActiveChannelRead", () => {
     messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
 
     markReadyActiveChannelRead(5);
+
+    expect(markChannelRead).not.toHaveBeenCalled();
+  });
+
+  it("does not mark an active channel read while its list is scrolled up", () => {
+    setLiveTailInView(5, false);
+
+    markReadyActiveChannelRead(5);
+    setLiveTailInView(5, true);
 
     expect(markChannelRead).not.toHaveBeenCalled();
   });
