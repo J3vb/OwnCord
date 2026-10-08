@@ -4032,6 +4032,7 @@ dependencies = [
  "keyring",
  "libc",
  "livekit",
+ "livekit-protocol",
  "log",
  "minisign-verify",
  "nnnoiseless",

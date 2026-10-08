@@ -7,6 +7,7 @@
 //! (`video.rs`), screen share (`screen.rs`), and a stream of room events for
 //! the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
@@ -476,6 +477,9 @@ pub struct NativeSession {
     /// The published microphone's source, fed by `capture` (none when the
     /// interop example published a synthetic one).
     mic_source: Option<NativeAudioSource>,
+    /// Set when the server withdrew the microphone publication (a moderator
+    /// mute); the next enable republishes instead of unmuting a dead track.
+    mic_withdrawn: MicWithdrawn,
     camera: VideoSlot,
     /// The running native camera capture, independent of publication: the
     /// self-view preview reads it back over the frame socket's `camera` route.
@@ -520,12 +524,14 @@ impl NativeSession {
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
         let playout = Playout::default();
+        let mic_withdrawn = MicWithdrawn::default();
         let forwarder = tokio::spawn(forward_events(
             events,
             on_event.clone(),
             frames.observer(),
             playout.listener(),
             [camera.clone(), screen_publication.clone()],
+            mic_withdrawn.clone(),
         ));
         Ok(Self {
             room,
@@ -533,6 +539,7 @@ impl NativeSession {
             apm: None,
             mic: None,
             mic_source: None,
+            mic_withdrawn,
             camera,
             camera_capture: None,
             screen: None,
@@ -604,6 +611,19 @@ impl NativeSession {
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
+        if enabled && self.mic_withdrawn.take() {
+            // The SFU dropped the publication; the track is dead. Best effort
+            // unpublish, then fall through to a fresh first publish.
+            if let Some(track) = self.mic.take() {
+                let _ = self
+                    .room
+                    .local_participant()
+                    .unpublish_track(&track.sid())
+                    .await;
+            }
+            self.capture.stop();
+            self.mic_source = None;
+        }
         let Some(track) = &self.mic else {
             if !enabled {
                 return Ok(());
@@ -988,6 +1008,7 @@ async fn forward_events(
     frames: Observer,
     playout: playout::Listener,
     published: [VideoSlot; 2],
+    mic_withdrawn: MicWithdrawn,
 ) {
     while let Some(ev) = events.recv().await {
         if let RoomEvent::LocalTrackRepublished {
@@ -1026,6 +1047,15 @@ async fn forward_events(
                 });
             }
         }
+        if let RoomEvent::ParticipantPermissionChanged {
+            participant: Participant::Local(_),
+            permission: Some(permission),
+        } = &ev
+        {
+            if !mic_allowed(permission) {
+                mic_withdrawn.set();
+            }
+        }
         // Before the webview hears of a video track, so its frame socket
         // finds it.
         frames.observe(&ev);
@@ -1033,6 +1063,30 @@ async fn forward_events(
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }
+    }
+}
+
+/// Whether the server's grant lets this participant publish the microphone:
+/// an empty source list means every source (LiveKit's rule).
+fn mic_allowed(permission: &livekit_protocol::ParticipantPermission) -> bool {
+    permission.can_publish
+        && (permission.can_publish_sources.is_empty()
+            || permission
+                .can_publish_sources
+                .contains(&(livekit_protocol::TrackSource::Microphone as i32)))
+}
+
+/// Shared between `forward_events` (sets it on a revocation) and
+/// `set_microphone` (consumes it on the next enable).
+#[derive(Clone, Default)]
+struct MicWithdrawn(Arc<AtomicBool>);
+
+impl MicWithdrawn {
+    fn set(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+    fn take(&self) -> bool {
+        self.0.swap(false, Ordering::SeqCst)
     }
 }
 
@@ -1065,6 +1119,45 @@ fn apply_republish(
 mod tests {
     use super::*;
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
+    use livekit_protocol as proto;
+
+    fn permission(
+        can_publish: bool,
+        sources: &[proto::TrackSource],
+    ) -> proto::ParticipantPermission {
+        proto::ParticipantPermission {
+            can_publish,
+            can_publish_sources: sources.iter().map(|s| *s as i32).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn mic_revoked_when_sources_exclude_microphone() {
+        assert!(!mic_allowed(&permission(
+            true,
+            &[proto::TrackSource::Camera]
+        )));
+        assert!(!mic_allowed(&permission(false, &[])));
+    }
+
+    #[test]
+    fn mic_allowed_when_sources_empty_or_listed() {
+        assert!(mic_allowed(&permission(true, &[])));
+        assert!(mic_allowed(&permission(
+            true,
+            &[proto::TrackSource::Microphone]
+        )));
+    }
+
+    #[test]
+    fn withdrawn_flag_is_consumed_once() {
+        let w = MicWithdrawn::default();
+        assert!(!w.take());
+        w.set();
+        assert!(w.take());
+        assert!(!w.take());
+    }
 
     /// The Windows client derives from the UTF-8 bytes of the base64 text
     /// (`ExternalE2EEKeyProvider.setKey(string)`), never from the decoded key.
