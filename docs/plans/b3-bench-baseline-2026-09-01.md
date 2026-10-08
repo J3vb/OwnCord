@@ -45,10 +45,20 @@ go test -run '^$' -bench '^Benchmark(PermissionInvalidation|ReadStateWrite|Broad
 
 ## Against the 2026-08-30 baseline this replaces
 
+**Amended 2026-10-08 (factual correction):** The 2026-08-30 baseline's provenance
+line named `1356cc1a`, while the B3-6 evidence block
+(`b3-server-architecture-guardrails-2026-08-29.md:1650`) names `ec8ef24a`, the
+commit that recorded it. The re-run was at `ec8ef24a`, which is different code
+from `1356cc1a` (diverged branches; `Server/ws`, `permissions`, `service` differ).
+The re-run at `ec8ef24a` does not reproduce the recorded `PermissionInvalidation`
+row. The benchmark has not been run at `1356cc1a`, so which commit produced the
+recorded figure is not established. Nothing gates on the old row; this baseline
+replaced it.
+
 Same machine, same toolchain. Five of six rows reproduce within their
 confidence ranges. `PermissionInvalidation` does not (927.4µ ± 2% / 3.601k
 allocs recorded → 1.496m ± 12% / 3.801k here), but the recorded row is
-**irreproducible at its own provenance commit**: re-run at `ec8ef24a` on
+**not reproduced at the commit that recorded it**: re-run at `ec8ef24a` on
 this machine it measures 1.21–1.29 ms / 3.801k allocs — and allocs/op is
 deterministic for fixed code, so the recorded run's working tree did not
 match the commit it names (it was recorded mid-flight in the B3-6

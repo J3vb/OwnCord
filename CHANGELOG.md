@@ -50,6 +50,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - **Release gate evidence**: the pre-release check now ignores results from pull request runs of the tagged commit and refuses a commit that has no push-to-main CI run, so only the full-matrix run counts.
+- **Bundle budgets**: the Settings, pop-out window and screen-share lazy chunks now have their own size budgets in `Client/bundle-budgets.json`, so growth in them fails CI instead of going unnoticed.
 - **Advisory gate**: the dependency audit check no longer treats a 401, 403 or 404 from the audit endpoint as a registry outage, so a broken registry or credentials setup fails the job instead of passing with a warning; only 5xx answers and network failures are still forgiven.
 - **Mocked end-to-end checks**: the slow-mode exemption, note privacy, volume reset, auto-login handover, large-font size, OS motion sync, search debounce, paste upload and avatar decode tests now assert the behaviour itself instead of a marker that would pass without it
 - **Lifecycle soak bars**: the soak now fails on any open socket, peer connection or track after the voice leave and on any change in the number of audio contexts, instead of forgiving a one-unit move, and a run with no comparable samples no longer passes with every bar green.

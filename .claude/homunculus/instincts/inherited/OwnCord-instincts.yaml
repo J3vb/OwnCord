@@ -98,12 +98,13 @@ source_repo: https://github.com/J3vb/OwnCord
 
 ## Action
 
-Prefer default exports
+Prefer named exports in Client/src; config files and tool entry points (Vite, Vitest, Playwright configs) use default exports because their loaders expect them
 
 ## Evidence
 
-- Export pattern analysis
-- Dominant style: default
+- `git grep 'export default' -- 'Client/src/**/*.ts'` finds no matches; Client/src uses named exports
+- Vite, Vitest and Playwright configs and tests/e2e/global-teardown.ts use `export default`
+- Hand-corrected 2026-10-08
 
 ---
 id: OwnCord-test-framework
@@ -118,12 +119,14 @@ source_repo: https://github.com/J3vb/OwnCord
 
 ## Action
 
-Use playwright as the test framework
+Use Vitest for unit, integration and contract tests (`*.test.ts`) and for real-browser tests under Client/tests/browser (`npm run test:browser`); use Playwright only for E2E tests (`*.spec.ts`) under Client/tests/e2e
 
 ## Evidence
 
-- Test framework detected: playwright
-- File pattern: *.spec.ts
+- Client/vitest.config.ts includes tests/**/*.test.ts and src/**/*.test.ts
+- Client/vitest.config.browser.ts includes tests/browser/**/*.test.ts
+- Client/playwright.config.ts sets testDir to ./tests/e2e
+- Hand-corrected 2026-10-08
 
 ---
 id: OwnCord-test-naming
@@ -138,12 +141,12 @@ source_repo: https://github.com/J3vb/OwnCord
 
 ## Action
 
-Name test files using the pattern: *.spec.ts
+Name Vitest test files `*.test.ts`; name Playwright E2E files `*.spec.ts` under Client/tests/e2e
 
 ## Evidence
 
-- File pattern: *.spec.ts
-- Consistent across test files
+- Client/vitest.config.ts includes only *.test.ts
+- Hand-corrected 2026-10-08
 
 ---
 id: OwnCord-test-types

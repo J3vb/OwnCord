@@ -4,7 +4,7 @@
 **Base commit:** `64d2e108` (`dev`, post-PR #1425); `main` @ `b7d388a3` =
 `v1.2.0-alpha.4` — claims verified at `64d2e108`; the branch was rebased
 onto `dd7ed091` (#1432) before merge  
-**Status:** in progress — entry gate 1 of 3 met at draft time (see below); B2-0,
+**Status:** **complete** — HP-2 accepted 2026-08-29. History: entry gate 1 of 3 met at draft time (see below); B2-0,
 B2-1 and B2-8 landed 2026-08-28, B2-2 (with B2-3 and B2-4 folded in) and B2-5 on 2026-08-29 (evidence in their sections); B2-6 landed 2026-08-29 (PR #1441); B2-7 landed 2026-08-29 (PR #1443 = `88c7a824`); B2-9 done 2026-08-29 (PR #1444 = `2bfc5e30`); **HP-2 accepted 2026-08-29** ([hp-2-scorecard-2026-08-29.md](hp-2-scorecard-2026-08-29.md)) — **B2 is complete, B3 may begin.**
 Update this line, not only the step table, when a step lands.
 
