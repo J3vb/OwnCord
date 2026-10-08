@@ -228,6 +228,7 @@ func guardDataPaths(ctx context.Context, w http.ResponseWriter, g guardContext) 
 		guardBackupDir(w, g) &&
 		guardStorageDir(w, g) &&
 		guardPluginsDir(w, g) &&
+		guardPluginsOverlap(w, g) &&
 		guardAcmeCacheDir(w, g)
 }
 
@@ -282,12 +283,22 @@ func guardPluginsDir(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing writable directory")
 		return false
 	}
+	return true
+}
+
+// guardPluginsOverlap keeps the plugins directory apart from server data
+// whichever of the three directories a PATCH moves. A plugin install replaces
+// <plugins.directory>/<name> wholesale, so the plugins directory must not live
+// inside uploads, nor be or hold data_dir, uploads or backups.
+func guardPluginsOverlap(w http.ResponseWriter, g guardContext) bool {
+	if !g.anyOf("plugins.directory", "upload.storage_dir", "backup.dir") {
+		return true
+	}
+	dir := g.next.Plugins.Directory
 	if pathWithin(dir, g.next.Upload.StorageDir) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must not live inside the uploads directory")
 		return false
 	}
-	// A plugin install replaces <dir>/<name> wholesale, so dir must not be,
-	// or hold, a directory whose subdirectories are server data.
 	if pathWithin(g.next.Server.DataDir, dir) || pathWithin(g.next.Upload.StorageDir, dir) || pathWithin(g.next.Backup.Dir, dir) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
 			"plugins.directory must not be or contain server.data_dir, upload.storage_dir or backup.dir")
@@ -425,8 +436,8 @@ func pathWithin(child, parent string) bool {
 	if child == "" || parent == "" {
 		return false
 	}
-	c, err1 := filepath.Abs(child)
-	p, err2 := filepath.Abs(parent)
+	c, err1 := resolvePath(child)
+	p, err2 := resolvePath(parent)
 	if err1 != nil || err2 != nil {
 		return false
 	}
