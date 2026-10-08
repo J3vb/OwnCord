@@ -254,10 +254,10 @@ The report queue's content retention window (B5-8). The `reports` row itself
 — the outcome, kept for `VIEW_AUDIT_LOG` holders and B4-10's marker
 unlinking — is never pruned; only its content is bounded.
 
-| Key                                | Type | Default | Description                                                                                                                                                                                                                                                           |
-| ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning.       |
-| `moderation.action_retention_days` | int  | `90`    | Days after `acknowledged_at` (a warning) or `expires_at`/`lifted_at` (a timeout) before the row retires, unless an appeal references it. `0` = never retire. Ban, kick and removal rows are never touched. A negative value falls back to the default with a warning. |
+| Key                                | Type | Default | Description                                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | ---- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning.                                     |
+| `moderation.action_retention_days` | int  | `90`    | Days after `acknowledged_at` (a warning) or `expires_at`/`lifted_at` (a timeout) before the row retires, unless an appeal references it or it still owns a voice mute. `0` = never retire. Ban, kick and removal rows are never touched. A negative value falls back to the default with a warning. |
 
 ### Admin attention panel (`attention`)
 
