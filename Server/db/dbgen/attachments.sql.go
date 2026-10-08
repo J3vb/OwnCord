@@ -92,6 +92,23 @@ func (q *Queries) DeleteOrphanedAttachments(ctx context.Context, uploadedAt stri
 	return items, nil
 }
 
+const deleteUnlinkedAttachment = `-- name: DeleteUnlinkedAttachment :execrows
+DELETE FROM attachments WHERE id = ? AND uploader_id = ? AND message_id IS NULL
+`
+
+type DeleteUnlinkedAttachmentParams struct {
+	ID         string `json:"id"`
+	UploaderID *int64 `json:"uploaderId"`
+}
+
+func (q *Queries) DeleteUnlinkedAttachment(ctx context.Context, arg DeleteUnlinkedAttachmentParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUnlinkedAttachment, arg.ID, arg.UploaderID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getAttachmentByID = `-- name: GetAttachmentByID :one
 SELECT id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id
 FROM attachments WHERE id = ?

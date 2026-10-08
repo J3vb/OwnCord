@@ -52,12 +52,16 @@ func (q *Queries) ChargeUserStorageUnbounded(ctx context.Context, arg ChargeUser
 
 const ensureUserStorage = `-- name: EnsureUserStorage :exec
 
-INSERT OR IGNORE INTO user_storage (user_id, bytes_used) VALUES (?, 0)
+INSERT OR IGNORE INTO user_storage (user_id, bytes_used)
+SELECT ?1, COALESCE(SUM(size), 0) FROM attachments WHERE uploader_id = ?1
 `
 
 // user_storage is the per-user upload byte counter (migration 044, B5-2).
 // Keep this file ASCII-only: sqlc v1.30 truncates the next query by the
 // byte/rune difference of any multi-byte character.
+// A user with no counter row has never been charged, so nothing is in
+// flight: the first row starts from the attachments that already exist
+// (seeded or restored rows), not from zero.
 func (q *Queries) EnsureUserStorage(ctx context.Context, userID int64) error {
 	_, err := q.db.ExecContext(ctx, ensureUserStorage, userID)
 	return err

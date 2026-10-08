@@ -3,7 +3,11 @@
 -- byte/rune difference of any multi-byte character.
 
 -- name: EnsureUserStorage :exec
-INSERT OR IGNORE INTO user_storage (user_id, bytes_used) VALUES (?, 0);
+-- A user with no counter row has never been charged, so nothing is in
+-- flight: the first row starts from the attachments that already exist
+-- (seeded or restored rows), not from zero.
+INSERT OR IGNORE INTO user_storage (user_id, bytes_used)
+SELECT sqlc.arg(user_id), COALESCE(SUM(size), 0) FROM attachments WHERE uploader_id = sqlc.arg(user_id);
 
 -- name: ChargeUserStorage :execrows
 -- The quota guard and the increment are one statement, so exactly one of
