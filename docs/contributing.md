@@ -534,6 +534,9 @@ closing audit findings 2026-04-07 #8 / DC-11):
   ignored across the board — majors are adopted deliberately, by a human,
   reading the changelog. Peer-coupled groups (`vitest`/`@vitest/*`,
   `@stryker-mutator/*`) update as one PR so exact peer pins cannot wedge.
+  `target-branch` covers version updates only. Dependabot _security_ updates
+  always open against the default branch (`main`); close them, and the fix
+  reaches `dev` through the weekly grouped update or a manual bump.
 - **Security gates run on every PR:** `npm audit --omit=dev
 --audit-level=high` (shipped deps only — dev-tooling advisories are
   triaged in the workflow comment instead of blocking on unfixable pins),
