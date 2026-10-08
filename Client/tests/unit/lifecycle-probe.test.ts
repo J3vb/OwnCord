@@ -243,6 +243,45 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(evaluateBars(wobble({ intervals: 2 })), "intervals").pass).toBe(false);
   });
 
+  const layout = (overrides: Partial<LifecycleSample>) =>
+    [5, 6, 9, 10, 15, 16, 19, 20].map((c) => sample(c, overrides));
+
+  it("fails a 1-unit page-scoped socket, peer connection or track leak the wobble tolerance would hide", () => {
+    const wobble = (overrides: Partial<LifecycleSample>) => [
+      sample(5),
+      sample(6),
+      sample(9, overrides),
+      sample(10),
+      sample(15),
+      sample(16),
+      sample(19, overrides),
+      sample(20),
+    ];
+    expect(bar(evaluateBars(wobble({ sockets: 1 })), "sockets").pass).toBe(false);
+    expect(bar(evaluateBars(wobble({ peerConnections: 1 })), "peerConnections").pass).toBe(false);
+    expect(bar(evaluateBars(wobble({ tracks: 1 })), "tracks").pass).toBe(false);
+  });
+
+  it("fails a socket, peer connection or track that stays live across every sample", () => {
+    expect(bar(evaluateBars(layout({ sockets: 1 })), "sockets").pass).toBe(false);
+    expect(bar(evaluateBars(layout({ peerConnections: 1 })), "peerConnections").pass).toBe(false);
+    expect(bar(evaluateBars(layout({ tracks: 2 })), "tracks").pass).toBe(false);
+    expect(bar(evaluateBars(layout({ sockets: 1 })), "sockets").bar).toContain("exactly 0");
+  });
+
+  it("holds audioContexts exactly flat, not to the 1-unit wobble", () => {
+    const wobble = [5, 6, 9, 10, 15, 16, 19, 20].map((c) =>
+      sample(c, { audioContexts: c === 9 || c === 19 ? 2 : 1 }),
+    );
+    expect(bar(evaluateBars(wobble), "audioContexts").pass).toBe(false);
+    // The page-lifetime notification-sound context is constant, not a leak.
+    expect(bar(evaluateBars(layout({ audioContexts: 1 })), "audioContexts").pass).toBe(true);
+  });
+
+  it("returns no bars when no series has two samples", () => {
+    expect(evaluateBars([sample(5), sample(6)])).toEqual([]);
+  });
+
   it("still fails a listeners leak of 2 or more per page, or one per cycle", () => {
     const twoPerPage = [
       sample(5),
@@ -298,7 +337,7 @@ describe("lifecycle soak pass bars", () => {
   });
 
   it("formats a report with one row per metric", () => {
-    const report = formatBars(evaluateBars([sample(5), sample(10)]));
+    const report = formatBars(evaluateBars([sample(5), sample(10), sample(15), sample(20)]));
     expect(report.split("\n")[0]).toMatch(/metric \| warm \| final \| slope \| bar \| pass/);
     expect(report).toContain("listeners");
     expect(report).toContain("heapUsed");

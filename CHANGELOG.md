@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- **Lifecycle soak bars**: the soak now fails on any open socket, peer connection or track after the voice leave and on any change in the number of audio contexts, instead of forgiving a one-unit move, and a run with no comparable samples no longer passes with every bar green.
 - **Moderation queue ordering**: a new appeal is announced to moderators before it can be assigned, and a report's history entries (assigned, noted, closed) are now saved together with the change itself, so none is lost, reordered or credited to an account that no longer exists.
 - **Message requests**: opening a conversation with someone whose message request you have not answered now accepts that request, and blocking someone removes your trust in them so their messages arrive as a request again after an unblock (unblocking also clears a decided request so a new one can form).
 - **Plugins that fail to start**: a plugin whose command list traps or times out while enabling now fails to enable, and the memory it compiled is released instead of staying held until restart.

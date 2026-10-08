@@ -158,7 +158,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `npm run test:e2e:soak`. Its bars hold within one page as well as across
   logins, so a leak the re-login navigation would release still fails (bar a
   net move of at most 2 nodes, or 1 listener, abort controller or timeout, in
-  either series, a known blind spot; a real leak past it still fails). A native
+  either series, a known blind spot; a real leak past it still fails). Sockets,
+  peer connections and tracks must be exactly 0 at every sample and
+  `AudioContext`s exactly flat (one page-lifetime notification context). A native
   voice backend keeps these rules plus three IPC ones (owned `listen()` with a
   late-unlisten, native handles released in the web room's teardown, native
   counts reported through `getSessionDebugInfo`):

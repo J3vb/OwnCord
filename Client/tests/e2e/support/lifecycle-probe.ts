@@ -53,13 +53,21 @@ const COUNT_BAR_SLOPE = 0.05;
  */
 const NODE_BAR_TOLERANCE = 2;
 /**
- * The other non-exact counters (listeners, abort controllers, timeouts) can
- * read one unit high at a single sample (CI: listeners 203→204, then a pass on
- * retry). A net move of 1 passes; a real per-cycle leak moves a two-sample page
- * pair by 3 and a phase series by 5 or more, so it still fails. `documents` and
- * `intervals` stay exact.
+ * Listeners, abort controllers and timeouts can read one unit high at a single
+ * sample (CI: listeners 203→204, then a pass on retry). A net move of 1 passes;
+ * a real per-cycle leak moves a two-sample page pair by 3 and a phase series by
+ * 5 or more, so it still fails. Only those three get it: `documents`,
+ * `intervals` and `audioContexts` stay exactly flat, and `sockets`,
+ * `peerConnections` and `tracks` must be exactly 0.
  */
 const COUNT_WOBBLE_TOLERANCE = 1;
+const WOBBLE_METRICS: ReadonlySet<CountMetric> = new Set([
+  "listeners",
+  "abortControllers",
+  "timeouts",
+]);
+/** Page-scoped media resources: none may be live at any sample after the voice leave. */
+const ZERO_METRICS: ReadonlySet<CountMetric> = new Set(["sockets", "peerConnections", "tracks"]);
 const HEAP_BAR_RATIO = 1.1;
 const HEAP_BAR_SLOPE = 25 * 1024;
 
@@ -342,7 +350,10 @@ const COUNT_METRICS: readonly CountMetric[] = [
  * `slopeCeilings` raises the phase-series ceiling of a metric with a known,
  * recorded leak that survives the navigation, so the gate still fails on any
  * growth past the measured slope. It never applies to the within-page series.
- * `documents` and `intervals` must be exactly flat in every group.
+ * `documents`, `intervals` and `audioContexts` must be exactly flat in every
+ * group, and `sockets`, `peerConnections` and `tracks` exactly 0 in every
+ * sample. A run in which no series has two samples asserts nothing, so it
+ * returns no bars rather than all-green ones.
  */
 export function evaluateBars(
   samples: readonly LifecycleSample[],
@@ -371,10 +382,14 @@ export function evaluateBars(
     ...[...pages].map(([page, group]) => ({ label: `page ${page}`, group, withinPage: true })),
   ];
 
+  if (!series.some((s) => s.group.length >= 2)) return [];
+
   const results: BarResult[] = [];
   for (const metric of COUNT_METRICS) {
     const phaseCeiling = slopeCeilings[metric] ?? COUNT_BAR_SLOPE;
-    const exact = metric === "documents" || metric === "intervals";
+    const zero = ZERO_METRICS.has(metric);
+    // Only the listed metrics are tolerant, so a new metric defaults to exact.
+    const exact = metric !== "nodes" && !WOBBLE_METRICS.has(metric);
     const tolerance = exact ? 0 : metric === "nodes" ? NODE_BAR_TOLERANCE : COUNT_WOBBLE_TOLERANCE;
     const failures: string[] = [];
     let worstSlope = 0;
@@ -393,9 +408,11 @@ export function evaluateBars(
       const flat = values.every((v) => v === values[0]);
       const net = values[values.length - 1]! - values[0]!;
       const withinTolerance = tolerance > 0 && net <= tolerance;
-      const ok = exact
-        ? flat
-        : withinTolerance || measuredSlope <= (withinPage ? COUNT_BAR_SLOPE : phaseCeiling);
+      const ok = zero
+        ? values.every((v) => v === 0)
+        : exact
+          ? flat
+          : withinTolerance || measuredSlope <= (withinPage ? COUNT_BAR_SLOPE : phaseCeiling);
       if (!ok) failures.push(`${label}: ${values.join("→")}`);
     }
     const result: BarResult = {
@@ -403,9 +420,11 @@ export function evaluateBars(
       warm: lastWarm,
       final: lastFinal,
       slope: worstSlope,
-      bar: exact
-        ? "every phase and page series exactly flat"
-        : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle, or a net move <= ${tolerance} in either series`,
+      bar: zero
+        ? "exactly 0 in every phase and page series"
+        : exact
+          ? "every phase and page series exactly flat"
+          : `every phase series slope <= ${phaseCeiling}/cycle, every page series <= ${COUNT_BAR_SLOPE}/cycle, or a net move <= ${tolerance} in either series`,
       pass: failures.length === 0,
     };
     if (failures.length > 0) result.bar += ` — FAIL ${failures.join("; ")}`;
