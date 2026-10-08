@@ -1660,6 +1660,65 @@ describe("VideoGrid", () => {
         .requestPictureInPicture;
     });
 
+    it("brings a popped-out stream into full screen, and leaves it in the grid after", async () => {
+      let pipElement: Element | null = null;
+      const popOut = (el: Element): void => {
+        pipElement = el;
+      };
+      const requestPip = vi.fn(function (this: HTMLVideoElement) {
+        popOut(this);
+        return Promise.resolve();
+      });
+      const exitPip = vi.fn(() => {
+        pipElement = null;
+        return Promise.resolve();
+      });
+      Object.defineProperty(document, "pictureInPictureElement", {
+        configurable: true,
+        get: () => pipElement,
+      });
+      Object.defineProperty(document, "exitPictureInPicture", {
+        configurable: true,
+        value: exitPip,
+      });
+      Object.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
+        configurable: true,
+        value: requestPip,
+      });
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        control(SCREEN, "pip").click();
+        expect(pipElement).toBe(cell(SCREEN).querySelector("video"));
+
+        control(SCREEN, "fullscreen").click();
+        await Promise.resolve();
+        expect(exitPip).toHaveBeenCalledTimes(1);
+        expect(pipElement).toBeNull();
+        expect(fullscreenElement).toBe(cell(SCREEN));
+
+        control(SCREEN, "fullscreen").click();
+        await Promise.resolve();
+        expect(fullscreenElement).toBeNull();
+        expect(requestPip).toHaveBeenCalledTimes(1);
+        expect(pipElement).toBeNull();
+        expect(cell(SCREEN).isConnected).toBe(true);
+
+        exitPip.mockClear();
+        requestPip.mockClear();
+        control(SCREEN, "fullscreen").click();
+        await Promise.resolve();
+        control(SCREEN, "fullscreen").click();
+        await Promise.resolve();
+        expect(exitPip).not.toHaveBeenCalled();
+        expect(requestPip).not.toHaveBeenCalled();
+      } finally {
+        delete (HTMLVideoElement.prototype as { requestPictureInPicture?: unknown })
+          .requestPictureInPicture;
+        delete (document as { exitPictureInPicture?: unknown }).exitPictureInPicture;
+        delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
+      }
+    });
+
     it("shows resolution and frame rate on the focused stream, with a stats popover", async () => {
       // Focus needs a connected tree.
       document.body.appendChild(container);
