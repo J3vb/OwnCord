@@ -43,3 +43,12 @@ func (s *ModerationService) refreshTimeoutMirror(ctx context.Context) {
 		slog.Error("ModerationService: RefreshTimeouts", "err", err)
 	}
 }
+
+// releaseSupersededMute lifts the voice mute of superseded timeouts when the
+// replacing actor cannot moderate voice: only MuteForTimeout transfers a mute,
+// and no FinalizeTimeoutLift is needed because the new timeout is active.
+func (s *ModerationService) releaseSupersededMute(ctx context.Context, targetID int64, supersededIDs []int64) {
+	if s.voiceMuter != nil && len(supersededIDs) > 0 {
+		s.voiceMuter.UnmuteForTimeout(context.WithoutCancel(ctx), targetID, supersededIDs)
+	}
+}

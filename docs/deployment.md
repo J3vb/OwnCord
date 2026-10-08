@@ -1818,8 +1818,8 @@ open a circuit breaker that skips one tick and then retries:
 6. Orphaned attachments are deleted (uploaded but never linked, older than 1 hour)
 7. The retention sweep runs (messages past the configured window, if any)
 8. Closed reports' content past `moderation.report_retention_days` is pruned
-9. Retired moderation actions past `moderation.action_retention_days` are removed
-10. Orphaned voice mutes are reconciled
+9. Orphaned voice mutes are reconciled
+10. Retired moderation actions past `moderation.action_retention_days` are removed (never one that still owns a voice mute)
 11. Pending erasure jobs resume
 12. Storage files are reconciled against the database (at most 500 files per tick)
 13. A storage recount runs — last on purpose, so it measures what the sweeps above freed

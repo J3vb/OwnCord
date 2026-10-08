@@ -695,6 +695,38 @@ func TestTimeout_VoiceHalf_ChannelScopedAuthorization(t *testing.T) {
 		}
 	})
 
+	// TestTimeout_SupersedeWithoutVoicePermissionReleasesOldMute: the superseded
+	// timeout is lifted, so the mute it owned must not outlive it just because
+	// the replacing actor cannot moderate voice; ownership must not pass to
+	// that actor either.
+	t.Run("supersede without voice permission releases the old mute", func(t *testing.T) {
+		f := newModerationActionsFixture(t)
+		if err := f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel); err != nil {
+			t.Fatalf("JoinVoiceChannel: %v", err)
+		}
+		oldID, _, err := f.database.TimeoutUser(ctx, fixtureMember, fixtureMod, nil, "first", time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatalf("TimeoutUser(old): %v", err)
+		}
+		//nolint:contextcheck // seedChannelOverride always uses context.Background() internally
+		seedChannelOverride(t, f.database, 2, fixtureChannel, 0, permissions.MuteMembers)
+		muter := newFakeVoiceMuter()
+		f.mod.SetVoiceMuter(muter)
+		result, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "second", time.Hour, nil)
+		if err != nil {
+			t.Fatalf("Timeout: %v", err)
+		}
+		if !result.VoiceSkipped {
+			t.Fatal("VoiceSkipped = false, want true: the actor cannot moderate voice here")
+		}
+		if len(muter.calls) != 0 {
+			t.Fatalf("MuteForTimeout calls = %v, want none", muter.calls)
+		}
+		if len(muter.unmuteCalls) != 1 || len(muter.unmuteCalls[0]) != 1 || muter.unmuteCalls[0][0] != oldID {
+			t.Fatalf("UnmuteForTimeout calls = %v, want exactly [[%d]]", muter.unmuteCalls, oldID)
+		}
+	})
+
 	t.Run("target not in voice at all: skipped", func(t *testing.T) {
 		f := newModerationActionsFixture(t)
 		muter := newFakeVoiceMuter()

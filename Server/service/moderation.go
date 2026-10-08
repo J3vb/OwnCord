@@ -395,6 +395,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64, supersededIDs []int64) bool {
 	auth, ok := s.actorCanModerateVoiceFor(ctx, actorID, targetID)
 	if !ok || s.voiceMuter == nil {
+		s.releaseSupersededMute(ctx, targetID, supersededIDs)
 		return false
 	}
 	if timeoutPreMuteHook != nil {
