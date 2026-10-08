@@ -1470,6 +1470,12 @@ re-verifies every BPR.
     the HP-2 Q3 blanks (and the B2-7 evidence block — both must agree).
     Owner decision 2026-08-31: tracked as a release-gate row so a missing
     reader blocks the beta, not B3–B9 work.
+16. _(added 2026-10-08, decision D-4)_ Add decoded media to the
+    release-candidate artifact smoke. The artifact smoke proves a join and
+    working controls only (BPR-010). On each of the four shipped artifacts,
+    add a second participant and assert inbound audio after the join. Decoded
+    media stays proven in `client-fullstack` and the native-voice interop until
+    this item lands.
 
 ### Hold point HP-10 — Human go/no-go
 

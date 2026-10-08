@@ -450,6 +450,12 @@ the owner signed HP-7 with them:
 - **Real-desktop Linux device check.** This is an owner-run check of device
   switching and headset hot-plug. It is still outstanding. The smoke proves a
   join with working controls but does not exercise device handling.
+- **Decoded media on the installed artifacts (2026-10-08 scope note).** The
+  artifact smoke proves a media join and working controls on all four shipped
+  artifacts. Decoded media is proven in `client-fullstack`
+  (`Client/tests/e2e/fullstack/media.spec.ts`) and the native-voice interop
+  (`npm run test:e2e:native-voice`), not on the installed artifacts. B10 adds
+  decoded media to the release-candidate artifact smoke.
 
 **Register rows.** Each row below carries a dated B7 note in the
 [issue register](repo-health-issue-register-2026-08-23.md):
