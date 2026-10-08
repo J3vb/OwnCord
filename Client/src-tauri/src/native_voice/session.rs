@@ -453,6 +453,35 @@ pub struct CameraOptions {
     pub simulcast: bool,
 }
 
+/// The camera's publish options. A 1080p camera adds the web path's
+/// `cameraSimulcastLayers` (360p and 720p) so a viewer on a 1-3 Mbps link gets
+/// 720p rather than the SDK default's 360p; 720p and below keep the defaults.
+fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
+    let layer = |width, height, max_bitrate, max_framerate| VideoPreset {
+        width,
+        height,
+        encoding: VideoEncoding {
+            max_bitrate,
+            max_framerate,
+        },
+    };
+    TrackPublishOptions {
+        source: TrackSource::Camera,
+        simulcast: opts.simulcast,
+        simulcast_layers: (opts.simulcast && opts.height > 720).then(|| {
+            vec![
+                layer(640, 360, 450_000, 20.0),
+                layer(1280, 720, 1_700_000, 30.0),
+            ]
+        }),
+        video_encoding: Some(VideoEncoding {
+            max_bitrate: opts.max_bitrate,
+            max_framerate: opts.max_framerate,
+        }),
+        ..Default::default()
+    }
+}
+
 pub fn process_threads() -> usize {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -793,18 +822,7 @@ impl NativeSession {
         let publication = self
             .room
             .local_participant()
-            .publish_track(
-                LocalTrack::Video(track),
-                TrackPublishOptions {
-                    source: TrackSource::Camera,
-                    simulcast: opts.simulcast,
-                    video_encoding: Some(VideoEncoding {
-                        max_bitrate: opts.max_bitrate,
-                        max_framerate: opts.max_framerate,
-                    }),
-                    ..Default::default()
-                },
-            )
+            .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
@@ -1220,6 +1238,40 @@ mod tests {
         let opts = screen_publish_options(&screen(false));
         assert!(!opts.simulcast);
         assert!(opts.simulcast_layers.is_none());
+    }
+
+    fn camera(height: u32, simulcast: bool) -> CameraOptions {
+        CameraOptions {
+            width: height * 16 / 9,
+            height,
+            max_bitrate: 4_000_000,
+            max_framerate: 30.0,
+            simulcast,
+        }
+    }
+
+    #[test]
+    fn a_1080p_camera_gets_360p_and_720p_simulcast_layers() {
+        let opts = camera_publish_options(&camera(1080, true));
+        assert_eq!(opts.source, TrackSource::Camera);
+        assert!(opts.simulcast);
+        let layers = opts.simulcast_layers.expect("custom simulcast layers");
+        let sizes: Vec<_> = layers.iter().map(|l| (l.width, l.height)).collect();
+        assert_eq!(sizes, [(640, 360), (1280, 720)]);
+    }
+
+    #[test]
+    fn a_720p_camera_keeps_the_sdk_default_layers() {
+        let opts = camera_publish_options(&camera(720, true));
+        assert!(opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+    }
+
+    #[test]
+    fn a_camera_without_simulcast_has_no_layers() {
+        assert!(camera_publish_options(&camera(1080, false))
+            .simulcast_layers
+            .is_none());
     }
 
     #[test]

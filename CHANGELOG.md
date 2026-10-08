@@ -51,6 +51,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
 
+### Changed
+
+- **Camera defaults to 720p**: a new camera now sends 720p instead of 1080p, with half the CPU cost. Choosing 1080p in Voice settings still works and now also sends a 720p layer, so viewers on a slow link get a sharp 720p picture rather than a blurry 360p one. A quality you already chose is kept.
+
 ### Fixed
 
 - **Choppy or robotic voice on a quiet microphone**: the sensitivity gate now reads a smoothed ~10 ms level instead of single 2.7 ms blocks, holds 320 ms before closing (it was 200 ms) so it no longer closes between words, and measures the microphone after the Input Volume slider, so raising Input Volume lifts a quiet microphone over the gate. The settings meter shows the same level the gate uses.
