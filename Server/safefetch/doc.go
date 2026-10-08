@@ -27,7 +27,8 @@
 //     after inflation, because a Content-Length header is a claim and a
 //     gzip stream can be four orders of magnitude larger than its wire form;
 //   - the media type is checked twice: as declared, and as sniffed from the
-//     bytes actually received;
+//     bytes actually received, and the two must be compatible — each being
+//     allowlisted alone is not enough;
 //   - and the number of fetches in flight is capped, per Fetcher and across
 //     the process.
 //
