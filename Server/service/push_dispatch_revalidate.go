@@ -78,6 +78,7 @@ func (d *PushDispatcher) recipientBlocksAuthor(ctx context.Context, userID, auth
 func (d *PushDispatcher) prune(ctx context.Context, id int64) {
 	if deleted, err := d.st.DeletePushSubscriptionByID(ctx, id); err != nil {
 		slog.Error("PushDispatcher.prune DeletePushSubscriptionByID", "err", err, "id", id)
+		d.failed.Add(1)
 	} else if deleted {
 		d.pruned.Add(1)
 	}

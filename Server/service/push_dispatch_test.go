@@ -1794,7 +1794,7 @@ func TestPrune_DeleteFailureIsNotCounted(t *testing.T) {
 
 	dispatcher.prune(context.Background(), 1)
 
-	if _, _, p := dispatcher.Counters(); p != 0 {
-		t.Errorf("pruned = %d after a failed delete, want 0", p)
+	if _, fl, p := dispatcher.Counters(); p != 0 || fl != 1 {
+		t.Errorf("pruned/failed = %d/%d after a failed delete, want 0/1", p, fl)
 	}
 }
