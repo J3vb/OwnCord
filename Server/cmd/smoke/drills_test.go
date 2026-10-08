@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -413,4 +415,60 @@ func errorFrame(code string) wsFrame {
 		panic(err)
 	}
 	return wsFrame{Type: "error", Payload: payload}
+}
+
+// A docker cp that hits ENOSPC may already have extracted most of the file, so
+// the filler must still own the name: release() is the only thing that can
+// shrink it again.
+func TestDockerFiller_NoSpaceRecordsPartialName(t *testing.T) {
+	var staged [][]string
+	f := &dockerFiller{t: &dockerTarget{name: "c"}, dir: t.TempDir()}
+	f.copyIn = func(_, dir string) error {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		staged = append(staged, names)
+		if len(staged) == 1 {
+			return errors.New("Error response from daemon: no space left on device")
+		}
+		b, err := os.ReadFile(filepath.Join(dir, "drill-junk-1"))
+		if err != nil || len(b) != 1 {
+			t.Errorf("release staged %d bytes (err %v), want 1", len(b), err)
+		}
+		return nil
+	}
+	if _, err := f.fill(1 << 20); !errors.Is(err, errNoSpace) {
+		t.Fatalf("fill err = %v, want errNoSpace", err)
+	}
+	if got := strings.Join(f.junk, ","); got != "drill-junk-1" {
+		t.Fatalf("junk = %q, want the partial file recorded", got)
+	}
+	if err := f.release(); err != nil {
+		t.Fatal(err)
+	}
+	if len(staged) != 2 || len(staged[1]) != 1 || staged[1][0] != "drill-junk-1" {
+		t.Fatalf("release staged %v, want drill-junk-1", staged)
+	}
+}
+
+type noSpaceFiller struct{ released int }
+
+func (f *noSpaceFiller) fill(uint64) (uint64, error) { return 0, errNoSpace }
+func (f *noSpaceFiller) release() error              { f.released++; return nil }
+func (f *noSpaceFiller) total() uint64               { return 0 }
+
+func TestTmpfsReachable_ReleasesAfterNoSpace(t *testing.T) {
+	f := &noSpaceFiller{}
+	ok, err := (&drill{}).tmpfsReachable(f)
+	if err != nil || !ok {
+		t.Fatalf("got (%v, %v), want (true, nil)", ok, err)
+	}
+	if f.released != 1 {
+		t.Fatalf("release called %d times, want 1", f.released)
+	}
 }

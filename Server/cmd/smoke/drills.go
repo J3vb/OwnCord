@@ -2216,6 +2216,12 @@ func (d *drill) tmpfsReachable(f filler) (bool, error) {
 		// Neither a full filesystem nor a success: this is the harness failing,
 		// and the raw error is what a reader needs to tell that from ENOSPC.
 		return false, d.annotate(err)
+	case errors.Is(err, errNoSpace):
+		// The probe may have left a partial file on the tmpfs: free it before
+		// setup runs on a filesystem that is already full.
+		if err := f.release(); err != nil {
+			return false, d.annotate(err)
+		}
 	}
 	return true, nil
 }
@@ -2745,6 +2751,8 @@ type dockerFiller struct {
 	t    *dockerTarget
 	dir  string   // host staging directory, one name per fill
 	junk []string // the names this filler created, in the order it created them
+	// copyIn is a seam so a test can fake the copy; newDockerFiller sets it to t.copyIn.
+	copyIn func(container, dir string) error
 }
 
 func newDockerFiller(t *dockerTarget) (*dockerFiller, error) {
@@ -2752,7 +2760,7 @@ func newDockerFiller(t *dockerTarget) (*dockerFiller, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &dockerFiller{t: t, dir: dir}, nil
+	return &dockerFiller{t: t, dir: dir, copyIn: t.copyIn}, nil
 }
 
 func (f *dockerFiller) fill(n uint64) (uint64, error) {
@@ -2764,8 +2772,12 @@ func (f *dockerFiller) fill(n uint64) (uint64, error) {
 	if err := os.WriteFile(filepath.Join(stage, name), make([]byte, n), 0o600); err != nil {
 		return 0, err
 	}
-	if err := f.t.copyIn(f.t.name, stage); err != nil {
+	if err := f.copyIn(f.t.name, stage); err != nil {
 		if isNoSpace(err) {
+			// docker cp may have extracted most of the file before the daemon hit
+			// ENOSPC, so release() must still overwrite it. f.bytes stays put: the
+			// partial size is unknown.
+			f.junk = append(f.junk, name)
 			return 0, errNoSpace
 		}
 		// isNoSpace matches the daemon's wording, not an errno — docker cp
@@ -2795,7 +2807,7 @@ func (f *dockerFiller) release() error {
 	}
 	// One copy, one tar: every name this filler created is replaced by a
 	// one-byte file, which frees the blocks the big ones held.
-	if err := f.t.copyIn(f.t.name, stage); err != nil {
+	if err := f.copyIn(f.t.name, stage); err != nil {
 		return fmt.Errorf("releasing the container's junk: %w", err)
 	}
 	return nil
