@@ -70,6 +70,37 @@ jobs:
           path: Client/reports/mutation/${{ matrix.shard }}/
           retention-days: 7
 
+  mutation-score:
+    # The one full-surface score (docs/plans/b7-8-mutation-baseline-2026-09-20.md):
+    # statuses are summed across shards, never averaged. Fails when a shard
+    # report is missing, since a partial score is not the full-surface score.
+    # Not a required status context; it only exists on the nightly.
+    name: Nightly full-surface mutation score
+    needs: mutation
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: mutation-report-*
+          merge-multiple: false
+          path: Client/reports/mutation-shards
+      - run: node scripts/aggregate-mutation-shards.mjs reports/mutation-shards
+        working-directory: Client
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-score-summary
+          path: Client/reports/mutation/summary.json
+          retention-days: 7
+
   mutation-permissions:
     name: Nightly permission mutation testing
     runs-on: ubuntu-latest

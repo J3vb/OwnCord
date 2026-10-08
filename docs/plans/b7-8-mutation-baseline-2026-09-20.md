@@ -18,6 +18,14 @@ C-16 row and every B7 document since cite "stale at 67.04 %"; that figure is a
 the number below. B7-0 recorded the harness cost (a dry run), not a score
 (`docs/plans/b7-0-client-baseline-2026-09-19.md:48`).
 
+**Re-recording the headline.** The nightly `mutation-score` job in
+`.github/workflows/nightly-test-depth.yml` sums the six shards' `mutation.json`
+reports with `Client/scripts/aggregate-mutation-shards.mjs` (same formula:
+`(killed + timeout) / (killed + timeout + survived + no coverage)`, errored
+mutants reported but excluded) and publishes the result as the step summary and
+the `mutation-score-summary` artifact. Use that number for any later headline;
+never average the per-shard percentages.
+
 ## Honesty caveats — read these with the score
 
 1. **Errored mutants are excluded from the denominator.** Stryker's score is
