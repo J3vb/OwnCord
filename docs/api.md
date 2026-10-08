@@ -1943,7 +1943,9 @@ Block a user.
 
 ### DELETE /api/v1/blocks/{userId}
 
-Unblock a user.
+Unblock a user. Also clears any already-decided (accepted, ignored, deleted or
+blocked) message request from that user to the caller, so their next first
+message forms a fresh request; a still-pending request is kept.
 
 **Auth:** Required
 
