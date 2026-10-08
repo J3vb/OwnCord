@@ -58,7 +58,11 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
  *  captured stream. Without `restrictOwnAudio` a screen share on Windows
  *  captures system loopback — the call itself — and echoes every other caller
  *  back into the stream the viewers hear. Chromium-only (WebView2 included);
- *  other browsers ignore the constraint and keep their current behaviour. */
+ *  other browsers ignore the constraint and keep their current behaviour.
+ *  It only takes effect through the real picker: with
+ *  `--use-fake-ui-for-media-stream` Chromium answers getDisplayMedia with the
+ *  default microphone as the "screen audio" and never reads it, so the window
+ *  must not pass that flag (see tauri.conf.json). */
 const SCREENSHARE_AUDIO: AudioCaptureOptions = { restrictOwnAudio: true };
 
 export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOptions> = {
