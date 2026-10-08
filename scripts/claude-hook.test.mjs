@@ -26,6 +26,10 @@ const blocked = [
   "cat .env",
   "sed -n 1p .env",
   `python3 -c "open('.env')"`,
+  "case x in x) cd Client;; esac",
+  "cat<.env",
+  "cat .env>out",
+  "cat<./.env>out",
 ];
 
 const allowed = [

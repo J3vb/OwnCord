@@ -42,7 +42,7 @@ if (mode === "session-start") {
   // A `cd` that starts the command or follows a chain operator, newline, brace
   // or compound keyword is a top-level statement; `( cd DIR && ... )` is not
   // matched.
-  if (/(^|\n|&&|\|\||[;&|{]|\b(?:then|do|else)\b)\s*cd(\s|$)/.test(command)) {
+  if (/(^|\n|&&|\|\||[;&|{)]|\b(?:then|do|else)\b)\s*cd(\s|$)/.test(command)) {
     console.error(
       "Blocked: a top-level `cd` leaks the persistent shell cwd into every later command. Use a subshell `( cd DIR && ... )`, `git -C DIR`, or paths from the repository root.",
     );
@@ -52,7 +52,7 @@ if (mode === "session-start") {
   // or `.envoy`). The Read deny rule in .claude/settings.json does not cover
   // Bash. This is an accidental-exposure guard, not a sandbox: a determined
   // command can still read the file.
-  if (/(^|[\s'"=/(])\.env(?=$|[\s'");|&])/.test(command)) {
+  if (/(^|[\s'"=/(<>])\.env(?=$|[\s'");|&<>])/.test(command)) {
     console.error(
       "Blocked: this command names a `.env` file, which holds secrets. Do not read it; ask the human for the value you need.",
     );
