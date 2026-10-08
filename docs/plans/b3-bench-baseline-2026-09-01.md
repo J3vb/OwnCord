@@ -50,9 +50,10 @@ line named `1356cc1a`, while the B3-6 evidence block
 (`b3-server-architecture-guardrails-2026-08-29.md:1650`) names `ec8ef24a`, the
 commit that recorded it. The re-run was at `ec8ef24a`, which is different code
 from `1356cc1a` (diverged branches; `Server/ws`, `permissions`, `service` differ).
-The recorded `PermissionInvalidation` row therefore matches neither documented
-state; it was not re-run at `1356cc1a`. Nothing gates on the old row; this
-baseline replaced it.
+The re-run at `ec8ef24a` does not reproduce the recorded `PermissionInvalidation`
+row. The benchmark has not been run at `1356cc1a`, so which commit produced the
+recorded figure is not established. Nothing gates on the old row; this baseline
+replaced it.
 
 Same machine, same toolchain. Five of six rows reproduce within their
 confidence ranges. `PermissionInvalidation` does not (927.4µ ± 2% / 3.601k
