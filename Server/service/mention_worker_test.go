@@ -143,7 +143,7 @@ func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
 	st := &orderedRaceStore{
 		incStarted: make(chan struct{}),
 		incRelease: make(chan struct{}),
-		decStarted: make(chan struct{}),
+		decStarted: make(chan struct{}, 1),
 	}
 	notifier := &fakeMentionNotifier{}
 	svc := NewMessageService(st, nil, nil)

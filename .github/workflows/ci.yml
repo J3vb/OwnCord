@@ -66,6 +66,7 @@ jobs:
       harness: ${{ steps.select.outputs.harness }}
       workflows: ${{ steps.select.outputs.workflows }}
       deps: ${{ steps.select.outputs.deps }}
+      permissions: ${{ steps.select.outputs.permissions }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -684,6 +685,17 @@ jobs:
       # chunk is exit 2, over-budget is exit 1.
       - name: Bundle budgets
         run: npm run build:budget && npm run check:budgets
+
+      # B7-8: the permissions.ts mutation hotspot was recorded as a PR check
+      # but only ever ran nightly. A step inside this already-required job, so
+      # no new status context; it runs only when ci-select's `permissions`
+      # capability is true (permissions.ts, its unit test, the Stryker
+      # configs, or any non-PR event, which selects everything). The config
+      # mutates one file but Stryker's dry run executes the full Vitest suite
+      # once. Wall time: about 3m40s on ubuntu-latest (first PR run, 2026-10-08).
+      - name: Permissions mutation hotspot
+        if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.permissions == 'true') }}
+        run: npx stryker run stryker.ci.config.mjs
 
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN

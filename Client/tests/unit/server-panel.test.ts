@@ -1020,6 +1020,25 @@ describe("ServerPanel", () => {
       expect(container.querySelector(".modal-overlay")).toBeNull();
     });
 
+    it("refuses a host that already has a saved profile (case-insensitive)", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), [
+        { name: "Existing", host: "chat.example.com:8443" },
+      ]);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".btn-add-server") as HTMLElement).click();
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "Second account";
+      inputs[1]!.value = "CHAT.example.com:8443";
+
+      (container.querySelector(".modal-footer .btn-primary") as HTMLElement).click();
+
+      expect(onAddProfile).not.toHaveBeenCalled();
+      expect(inputs[1]!.validationMessage).toBe("This server is already in your list.");
+      expect(container.querySelector(".modal-overlay")).not.toBeNull();
+    });
+
     it("does NOT call onAddProfile when name is empty", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);

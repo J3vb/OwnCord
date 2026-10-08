@@ -500,7 +500,11 @@ func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectTo
 // true, a restored backup cannot resurrect the content. The reports row
 // itself SURVIVES, rewritten to id 0 plus the token, detail and target_ref
 // cleared, and — if still open — closed as subject_erased: an unlinkable
-// outcome row, action/time/order and the token, nothing else (S5-d). An
+// outcome row, action/time/order and the token, nothing else of the
+// subject's (S5-d). Correction: "no identity" means no identity of the erased
+// SUBJECT; reporter_id and assignee_id stay, each unlinked by its own
+// principal's erasure, and channel_id stays as a plain reference (a channel has
+// no erasure right) (TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns). An
 // implementation that deletes the row instead of rewriting it passes a test
 // that only checks the content is gone and fails the negative control that
 // checks the row (and its state) survives — this is the abuse path decision

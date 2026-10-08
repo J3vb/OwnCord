@@ -152,7 +152,8 @@ same Linux Rust legs as `webrtc-sys`.
 | `npm run test:browser`      | Vitest browser-mode tests                  |
 
 PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
-`src/lib/permissions.ts`). The full-client mutation baseline (the base config's
+`src/lib/permissions.ts`), as a step in Client Static Checks that runs only when
+a PR touches that file, its unit test or the Stryker configs. The full-client mutation baseline (the base config's
 configured surface, 146 files today) is the sharded `mutation` job in
 `.github/workflows/nightly-test-depth.yml`, driven locally with `cd Client &&
 STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores|safety-moderation>
