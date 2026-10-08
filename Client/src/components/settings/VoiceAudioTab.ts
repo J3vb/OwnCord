@@ -2,7 +2,7 @@
  * Voice & Audio settings tab — input/output device, sensitivity, audio processing.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
 import { createLogger } from "@lib/logger";
 import {
@@ -46,6 +46,8 @@ function isRealInput(d: MediaDeviceInfo): boolean {
 const MIC_NOISE_FLOOR = 0.005;
 /** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
 const MIC_HEARD_HOLD_MS = 1000;
+/** DeviceManager debounces a devicechange by 500 ms, then moves the capture. */
+const DEVICE_MANAGER_SETTLE_MS = 1000;
 
 export interface VoiceAudioTabHandle {
   /**
@@ -589,7 +591,7 @@ function buildVoiceAudioTabInner(
       // "Default" is a preference; name the device the call really captures,
       // which can lag the system default after an unplug and replug. Only a
       // web room has a mic track to read, so the list is the webview's.
-      const live = getLocalMicSettings();
+      const live = loadPref<string>("audioInputDevice", "") === "" ? getLocalMicSettings() : null;
       const liveDevice =
         live === null
           ? undefined
@@ -621,6 +623,8 @@ function buildVoiceAudioTabInner(
       "devicechange",
       () => {
         void populateDevices();
+        // The session moves the capture after its own debounce; re-read then.
+        setOwnedTimeout(signal, () => void populateDevices(), DEVICE_MANAGER_SETTLE_MS);
       },
       { signal },
     );
@@ -630,7 +634,9 @@ function buildVoiceAudioTabInner(
     "change",
     () => {
       savePref("audioInputDevice", inputSelect.value);
-      restartMeterAfter(switchInputDevice(inputSelect.value));
+      const switched = switchInputDevice(inputSelect.value);
+      restartMeterAfter(switched);
+      void switched.then(populateDevices, populateDevices);
     },
     { signal },
   );

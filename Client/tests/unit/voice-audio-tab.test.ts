@@ -493,6 +493,49 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("shows a plain Default while a named microphone is saved", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("usb-mic"));
+    mockGetLocalMicSettings.mockReturnValue({ deviceId: "usb-mic", groupId: "g-usb" });
+    stubNavigator([
+      { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+    ]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+    expect(inputSelect.options[0]!.text).toBe("Default");
+    mockGetLocalMicSettings.mockReturnValue(null);
+    ac.abort();
+  });
+
+  it("refreshes the Default label once the session has moved the capture", async () => {
+    vi.useFakeTimers();
+    try {
+      mockGetLocalMicSettings.mockReturnValue({ deviceId: "webcam-mic", groupId: "g-webcam" });
+      stubNavigator([
+        { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+        { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
+      ]);
+      const ac = new AbortController();
+      const el = createVoiceAudioTab(ac.signal).build();
+      document.body.appendChild(el);
+      const inputSelect = el.querySelectorAll("select")[0]!;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)");
+
+      emitDeviceChange();
+      mockGetLocalMicSettings.mockReturnValue({ deviceId: "usb-mic", groupId: "g-usb" });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(inputSelect.options[0]!.text).toBe("Default (USB Mic)");
+      mockGetLocalMicSettings.mockReturnValue(null);
+      ac.abort();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps a plain Default label when no call captures the microphone", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g" }]);
     const ac = new AbortController();
