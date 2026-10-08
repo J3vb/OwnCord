@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 )
@@ -536,5 +537,71 @@ func TestPlatformInitPageCountDoesNotOverflowUint32(t *testing.T) {
 		t.Fatalf("CompileModule with MaxMemoryMB=4096 should succeed (4096 MiB = 65536 pages, "+
 			"wazero's own ceiling) but got: %v — the byte-count math overflowed uint32 and wrapped "+
 			"the effective memory limit to (near) zero pages", err)
+	}
+}
+
+// listTrapWASM exports memory and a list_commands that traps immediately:
+//
+//	(module
+//	  (memory (export "memory") 1)
+//	  (func (export "list_commands") (result i32 i32) unreachable))
+var listTrapWASM = []byte{
+	0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	0x01, 0x06, 0x01, 0x60, 0x00, 0x02, 0x7f, 0x7f, // type: () -> (i32,i32)
+	0x03, 0x02, 0x01, 0x00,
+	0x05, 0x03, 0x01, 0x00, 0x01,
+	0x07, 0x1a, 0x02,
+	0x06, 0x6d, 0x65, 0x6d, 0x6f, 0x72, 0x79, 0x02, 0x00,
+	0x0d, 0x6c, 0x69, 0x73, 0x74, 0x5f, 0x63, 0x6f, 0x6d, 0x6d, 0x61, 0x6e, 0x64, 0x73, 0x00, 0x00,
+	0x0a, 0x05, 0x01,
+	0x03, 0x00,
+	0x00, 0x0b, // unreachable end
+}
+
+// A list_commands that traps (without the runtime closing the module) must
+// fail activation rather than activate with no command bindings.
+func TestActivate_ListCommandsTrapFailsActivation(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{"name":"listtrap","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"x"}]}`
+	writeTestPlugin(t, dir, "listtrap", manifest, listTrapWASM)
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx := context.Background()
+	if err := reg.LoadAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := mem.ListPlugins(ctx)
+	if err := reg.EnablePlugin(ctx, rows[0].ID); err == nil {
+		t.Fatal("EnablePlugin must fail when list_commands traps")
+	}
+	reg.mu.RLock()
+	inst := reg.plugins[rows[0].ID]
+	reg.mu.RUnlock()
+	if inst.module != nil {
+		t.Fatal("a trapped module must not stay installed")
+	}
+}
+
+// A failed enable must free the retained compile, not pin it until upgrade or
+// registry Close.
+func TestEnablePlugin_ActivationFailureReleasesCompiled(t *testing.T) {
+	dir := t.TempDir()
+	manifest := `{"name":"listspin","version":"0.1.0","entrypoint":"hello.wasm","permissions":["commands"],"commands":[{"name":"x"}]}`
+	writeTestPlugin(t, dir, "listspin", manifest, listSpinWASM)
+	reg, mem := newWazeroTestRegistry(t, dir)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := reg.LoadAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := mem.ListPlugins(ctx)
+	if err := reg.EnablePlugin(ctx, rows[0].ID); err == nil {
+		t.Fatal("EnablePlugin must fail when list_commands overruns its budget")
+	}
+	reg.mu.RLock()
+	inst := reg.plugins[rows[0].ID]
+	compiled := inst.compiled
+	reg.mu.RUnlock()
+	if compiled != nil {
+		t.Fatal("failed enable must release the retained compile")
 	}
 }

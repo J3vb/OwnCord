@@ -203,11 +203,14 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 		// reached at enable, at startup, and on every lazy re-activation (with
 		// inst.invokeMu held), so an unbounded call here is an unbounded hold.
 		listCtx, cancel := context.WithTimeout(ctx, r.guestBudget(inst))
-		cmds := listExportedCommands(listCtx, module)
+		cmds, err := listExportedCommands(listCtx, module)
 		cancel()
-		if module.IsClosed() {
+		if err != nil || module.IsClosed() {
+			// A trap leaves the module open; close it so releaseClosedModule
+			// (a no-op on an open module) drops it.
+			_ = module.Close(ctx)
 			r.releaseClosedModule(inst, module)
-			return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped", inst.Manifest.Name)
+			return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped: %v", inst.Manifest.Name, err)
 		}
 		for _, cmd := range cmds {
 			if err := r.RegisterCommand(cmd, inst); err != nil {
@@ -448,33 +451,36 @@ func (r *Registry) releaseClosedModule(inst *Instance, mod api.Module) {
 // which returns (ptr u32, len u32) pointing to a JSON array of command name
 // strings. If the export is absent, the module declares no linear memory, or
 // the result is invalid JSON, an empty slice is returned and no command
-// bindings are created.
-func listExportedCommands(ctx context.Context, mod api.Module) []string {
+// bindings are created. A failed call (trap, budget overrun) is an error.
+func listExportedCommands(ctx context.Context, mod api.Module) ([]string, error) {
 	fn := mod.ExportedFunction("list_commands")
 	if fn == nil {
-		return nil
+		return nil, nil
 	}
 	results, err := fn.Call(ctx)
-	if err != nil || len(results) < 2 {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if len(results) < 2 {
+		return nil, nil
 	}
 	// A guest with no memory section has no memory to read the name list from
 	// (and its api.Memory must not be touched — see guestMemory).
 	mem := guestMemory(mod)
 	if mem == nil {
-		return nil
+		return nil, nil
 	}
 	ptr, length := uint32(results[0]), uint32(results[1])
 	if length > maxGuestResultBytes {
-		return nil
+		return nil, nil
 	}
 	raw, ok := mem.Read(ptr, length)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	var cmds []string
 	if err := json.Unmarshal(raw, &cmds); err != nil {
-		return nil
+		return nil, nil
 	}
-	return cmds
+	return cmds, nil
 }
