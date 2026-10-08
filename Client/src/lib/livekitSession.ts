@@ -10,6 +10,7 @@ import {
   isPttPollingLive,
   setListenOnly,
   setVoiceStatus,
+  setLocalGateSpeaking,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
@@ -327,6 +328,7 @@ export class LiveKitSession {
   private _screenState: ScreenTrackState = { manualScreenTracks: [] };
 
   constructor() {
+    this._audioPipeline.onGateSpeaking = setLocalGateSpeaking;
     this._eventHandlers = createRoomEventHandlers({
       getRoom: () => this._room,
       setRoom: (r) => {

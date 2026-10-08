@@ -8,7 +8,7 @@
  * false in between. The harness is livekit-session.test.ts's, except that
  * every `new Room()` is a distinct object so live rooms can be counted.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // --- Mocks must be declared before imports ---
 
@@ -152,6 +152,7 @@ vi.mock("@stores/voice.store", () => ({
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setLocalGateSpeaking: vi.fn(),
   setVoiceStatus: vi.fn(),
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),

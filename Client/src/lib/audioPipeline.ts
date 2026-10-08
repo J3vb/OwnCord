@@ -225,6 +225,11 @@ export class AudioPipeline {
   /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
   private voiceSensitivity: number | null = null;
 
+  /** The local speaking verdict straight from the sensitivity gate: true while
+   *  it is open, false while closed, null when no gate runs. Drives the local
+   *  ring so it matches the slider and what transmits. */
+  onGateSpeaking: ((speaking: boolean | null) => void) | null = null;
+
   setRoom(room: Room | null): void {
     this.room = room;
   }
@@ -388,11 +393,13 @@ export class AudioPipeline {
       return;
     }
     processor.setLookahead(GATE_LOOKAHEAD_S);
+    this.onGateSpeaking?.(false);
     this.vad = startVadDetector(processor.context, processor.analyser, vadThreshold(sensitivity), {
       onGate: (gated) => {
         if (this.processor !== processor) return;
         this.vadGated = gated;
         processor.setGate("vad", gated);
+        this.onGateSpeaking?.(!gated);
       },
       onRms: (rms) => {
         this._lastVadRms = rms;
@@ -412,6 +419,7 @@ export class AudioPipeline {
     this._lastVadRms = 0;
     this.vadGated = false;
     this.processor?.setGate("vad", false);
+    this.onGateSpeaking?.(null);
     return stopped;
   }
 

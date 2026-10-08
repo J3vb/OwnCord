@@ -15,6 +15,7 @@ import {
   setLocalScreenshare,
   setListenOnly,
   setSpeakers,
+  setLocalGateSpeaking,
   setVoiceConfig,
   getChannelVoiceUsers,
   setVoiceStatus,
@@ -623,6 +624,59 @@ describe("voice store", () => {
       const before = voiceStore.getState().voiceUsers.get(10)?.get(1);
       setSpeakers({ channel_id: 10, speakers: [], threshold_mode: "forwarding" });
       expect(voiceStore.getState().voiceUsers.get(10)?.get(1)).toBe(before);
+    });
+  });
+
+  describe("setLocalGateSpeaking", () => {
+    beforeEach(() => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+      joinVoiceChannel(10);
+    });
+
+    afterEach(() => {
+      setLocalGateSpeaking(null);
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
+
+    const localSpeaking = () => voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking;
+
+    it("lights the local ring the moment the input-sensitivity gate opens", () => {
+      setLocalGateSpeaking(true);
+      expect(localSpeaking()).toBe(true);
+      setLocalGateSpeaking(false);
+      expect(localSpeaking()).toBe(false);
+    });
+
+    it("keeps the ring dark for speech below the gate even when LiveKit reports it", () => {
+      setLocalGateSpeaking(false);
+      setSpeakers({ channel_id: 10, speakers: [1, 2] });
+      expect(localSpeaking()).toBe(false);
+      expect(voiceStore.getState().voiceUsers.get(10)?.get(2)?.speaking).toBe(true);
+    });
+
+    it("does not light the ring while self-muted", () => {
+      setLocalMuted(true);
+      setLocalGateSpeaking(true);
+      expect(localSpeaking()).toBe(false);
+    });
+
+    it("defers to LiveKit when there is no gate", () => {
+      setLocalGateSpeaking(null);
+      setSpeakers({ channel_id: 10, speakers: [1] });
+      expect(localSpeaking()).toBe(true);
     });
   });
 

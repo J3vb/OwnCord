@@ -218,6 +218,28 @@ describe("AudioPipeline", () => {
     });
   });
 
+  describe("local speaking verdict", () => {
+    it("reports the sensitivity gate itself, so the ring follows the slider", async () => {
+      FakeAudioContext.workletsLoad = true;
+      const pipeline = new AudioPipeline();
+      const verdicts: Array<boolean | null> = [];
+      pipeline.onGateSpeaking = (speaking) => verdicts.push(speaking);
+      await pipeline.attach(micTrack());
+      await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+      const vad = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+      expect(verdicts.at(-1)).toBe(false);
+      verdicts.length = 0;
+
+      vad.emit({ type: "gate", gated: false });
+      vad.emit({ type: "gate", gated: true });
+      expect(verdicts).toEqual([true, false]);
+
+      // Sensitivity 100 runs no gate: LiveKit decides again.
+      pipeline.setVoiceSensitivity(100);
+      expect(verdicts.at(-1)).toBeNull();
+    });
+  });
+
   describe("reapplyEnhancedNoiseSuppression", () => {
     it("routes the live processor through RNNoise without restarting the capture", async () => {
       FakeAudioContext.workletsLoad = true;
