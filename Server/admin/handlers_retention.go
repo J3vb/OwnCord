@@ -10,8 +10,6 @@ import (
 
 // ─── Retention (B4-11) ───────────────────────────────────────────────────────
 
-// handleGetRetention returns the policy: the server window and every
-// channel override.
 // handleGetRetentionChannels lists the channels a policy can target, for a
 // MANAGE_SERVER principal that cannot read /channels (MANAGE_CHANNELS).
 func handleGetRetentionChannels(retention *service.RetentionService) http.HandlerFunc {
@@ -29,6 +27,8 @@ func handleGetRetentionChannels(retention *service.RetentionService) http.Handle
 	}
 }
 
+// handleGetRetention returns the policy: the server window and every
+// channel override.
 func handleGetRetention(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {
