@@ -90,7 +90,9 @@ This project uses **hybrid** module organization.
 
 ### Import Style: Relative Imports
 
-### Export Style: Named Exports
+### Export Style: Named Exports in Client/src
+
+Application source under `Client/src` uses named exports. Config files and tool entry points (Vite, Vitest and Playwright configs, `tests/e2e/global-teardown.ts`) use `export default`, because their loaders expect it.
 
 _Preferred import style_
 
@@ -112,6 +114,7 @@ export function UserProfile() { ... }
 ### Test Framework: Vitest and Playwright
 
 - **Unit, integration and contract tests**: Vitest, `*.test.ts`. They live in `Client/tests/unit`, `Client/tests/integration` and `Client/tests/contract`, and colocated as `Client/src/**/*.test.ts` (`Client/vitest.config.ts` includes only `*.test.ts`).
+- **Real-browser tests** (AudioContext, WASM): a separate Vitest suite, `*.test.ts` under `Client/tests/browser/**`, run by `npm run test:browser` (`Client/vitest.config.browser.ts`). It is excluded from `npm test`.
 - **E2E tests**: Playwright, `*.spec.ts`, only under `Client/tests/e2e/**` (`Client/playwright.config.ts`).
 - **Go tests**: `*_test.go` in `Server/`.
 
@@ -146,10 +149,10 @@ Based on analysis of the codebase, follow these practices:
 ### Do
 
 - Use conventional commit format (feat:, fix:, etc.)
-- Write unit, integration and contract tests with Vitest; write E2E tests with Playwright
+- Write unit, integration, contract and real-browser tests with Vitest; write E2E tests with Playwright
 - Name Vitest files `*.test.ts` and Playwright E2E files `*.spec.ts`
 - Use kebab-case for file names
-- Use named exports
+- Use named exports in `Client/src`; config files follow their tool's default-export convention
 
 ### Don't
 
