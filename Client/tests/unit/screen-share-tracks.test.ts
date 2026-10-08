@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import process from "node:process";
-import { Track } from "livekit-client";
+import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
@@ -749,6 +749,26 @@ describe("enableScreenshare", () => {
       payload: { enabled: true },
     });
     expect(voiceStore.getState().localScreenshare).toBe(true);
+  });
+
+  it("publishes the screen audio as music: no DTX, stereo, music preset", async () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+    expect(audioOpts).toMatchObject({
+      source: Track.Source.ScreenShareAudio,
+      dtx: false,
+      forceStereo: true,
+      audioPreset: AudioPresets.musicHighQualityStereo,
+    });
+    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    expect(videoOpts).not.toHaveProperty("dtx");
+    expect(videoOpts).not.toHaveProperty("forceStereo");
   });
 
   it("sets a video encoding on the video track only", async () => {
