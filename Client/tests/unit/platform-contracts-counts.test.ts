@@ -213,6 +213,21 @@ describe("platform invoke map parser", () => {
     ]);
   });
 
+  it("ignores returns that belong to a nested function inside the factory", () => {
+    const source = `
+      import { invoke } from "@tauri-apps/api/core";
+      const factory = () => {
+        const nested = () => {
+          return invoke;
+        };
+        void nested;
+        return (cmd: string) => cmd;
+      };
+      factory()("not_a_command");
+    `;
+    expect(invokeFixture(source).commands.size).toBe(0);
+  });
+
   it("ignores commented-out imports, calls, strings and unrelated functions named invoke", () => {
     const source = `
       // import { invoke } from "@tauri-apps/api/core";

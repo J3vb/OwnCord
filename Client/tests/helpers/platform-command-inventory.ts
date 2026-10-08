@@ -149,14 +149,18 @@ export function platformInvokes(
       if (decl && ts.isFunctionLike(decl) && "body" in decl && decl.body) {
         if (!ts.isBlock(decl.body)) return isInvoke(decl.body, new Set(seen));
         let found = false;
-        walk(decl.body, (node) => {
+        // Returns of nested functions belong to those functions, not this factory.
+        const scan = (node: ts.Node): void => {
+          if (ts.isFunctionLike(node)) return;
           if (
             ts.isReturnStatement(node) &&
             node.expression &&
             isInvoke(node.expression, new Set(seen))
           )
             found = true;
-        });
+          ts.forEachChild(node, scan);
+        };
+        ts.forEachChild(decl.body, scan);
         return found;
       }
     }

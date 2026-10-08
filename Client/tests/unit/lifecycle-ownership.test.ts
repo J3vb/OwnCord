@@ -287,29 +287,27 @@ function calleeName(node: ts.CallExpression): string {
   return "";
 }
 
-const lastName = (e: ts.Expression): string | undefined =>
-  ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : undefined;
-
 /**
  * R2: a `setInterval` handle must be kept and cleared in its own file. The
- * handle's name is the declared variable, the assigned property
- * (`this.x = …` → `x`) or, for `map.set(k, setInterval(…))`, the receiver
- * (`map`); the site passes only when some `clearInterval(<arg>)` in the file
- * mentions that name. Any other shape (discarded, returned, passed on) fails.
+ * handle is the declared variable, the assigned target (`this.x = …`), or the
+ * receiver of `map.set(k, setInterval(…))`; the site passes only when some
+ * `clearInterval(<arg>)` in the file mentions that exact expression text
+ * (`clearInterval(this.x)`, `clearInterval(map.get(k))`), so a bare `x` does
+ * not clear `this.x`. Any other shape (discarded, returned, passed on) fails.
  */
 function r2Violations(sf: ts.SourceFile): Site[] {
   const rel = sf.fileName;
   const cleared = new Set<string>();
   const intervals: ts.CallExpression[] = [];
-  const idents = (n: ts.Node): void => {
-    if (ts.isIdentifier(n)) cleared.add(n.text);
-    ts.forEachChild(n, idents);
+  const mentions = (n: ts.Node): void => {
+    if (ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) cleared.add(n.getText(sf));
+    ts.forEachChild(n, mentions);
   };
   const collect = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const name = calleeName(node);
       if (name === "setInterval") intervals.push(node);
-      if (name === "clearInterval" && node.arguments[0]) idents(node.arguments[0]);
+      if (name === "clearInterval" && node.arguments[0]) mentions(node.arguments[0]);
     }
     ts.forEachChild(node, collect);
   };
@@ -324,9 +322,14 @@ function r2Violations(sf: ts.SourceFile): Site[] {
       p.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       p.right === node
     )
-      handle = lastName(p.left);
-    else if (ts.isCallExpression(p) && ts.isPropertyAccessExpression(p.expression))
-      handle = lastName(p.expression.expression);
+      handle = p.left.getText(sf);
+    else if (
+      ts.isCallExpression(p) &&
+      ts.isPropertyAccessExpression(p.expression) &&
+      p.expression.name.text === "set" &&
+      p.arguments[1] === node
+    )
+      handle = p.expression.expression.getText(sf);
     if (handle !== undefined && cleared.has(handle)) continue;
     const fn = enclosingFunction(sf, node);
     const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
@@ -475,9 +478,21 @@ describe("lifecycle ownership inventory (R1-R4)", () => {
         "class C { go() { this.timers.set(id, setInterval(f, 1)); } stop() { clearInterval(this.timers.get(id)); } }",
       ),
     ).toEqual([]);
-    expect(check("let t; function s() { this.t = setInterval(f, 1); } clearInterval(t);")).toEqual(
-      [],
-    );
+    expect(
+      check("class C { s() { this.t = setInterval(f, 1); } e() { clearInterval(this.t); } }"),
+    ).toEqual([]);
+    // a bare `t` is a different binding from the `this.t` property
+    expect(check("let t; function s() { this.t = setInterval(f, 1); } clearInterval(t);")).toEqual([
+      "x.ts:1 setInterval this.t never cleared in file",
+    ]);
+    // a handle that is only passed on is not owned, even if the receiver is mentioned
+    expect(check("owner.enqueue(setInterval(f, 1)); clearInterval(owner.current);")).toEqual([
+      "x.ts:1 setInterval handle not kept",
+    ]);
+    // the handle must be the stored value (2nd argument of set), not the key
+    expect(check("m.set(setInterval(f, 1), 1); clearInterval(m.get(k));")).toEqual([
+      "x.ts:1 setInterval handle not kept",
+    ]);
   });
 
   it("R3: every setTimeout handle is kept, or the site is allowlisted", () => {
