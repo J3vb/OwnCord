@@ -9,7 +9,7 @@ import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "../../lib/logger";
-import type { AudioPipeline } from "../../lib/audioPipeline";
+import { micProcessingOptions, type AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
@@ -172,11 +172,9 @@ export class RoomLifecycle {
       // Dynacast stops publishing unused simulcast layers — off for "source"
       // quality to keep full resolution.
       dynacast: !isSource,
-      audioCaptureDefaults: {
-        echoCancellation: loadPref("echoCancellation", true),
-        noiseSuppression: loadPref("noiseSuppression", true),
-        autoGainControl: loadPref("autoGainControl", true),
-      },
+      // The device is not here: the join points capture at the saved input
+      // itself (joinOrchestration RT-6), non-exact so a missing one degrades.
+      audioCaptureDefaults: micProcessingOptions(),
       videoCaptureDefaults: CAMERA_PRESETS[quality],
       publishDefaults: {
         videoEncoding: {
