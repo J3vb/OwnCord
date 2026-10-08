@@ -259,6 +259,11 @@ func TestServerRestart_SpreadScalesWithConnectedCount(t *testing.T) {
 	go h.Run()
 	t.Cleanup(h.Stop)
 	ctx := context.Background()
+	// awaitDispatch returns at once while Run has not started, which would
+	// leave the frame undispatched on a slow runner.
+	for !h.RunningForTest() {
+		time.Sleep(time.Millisecond)
+	}
 
 	clients := make([]*Client, 0, 3)
 	for i := range 3 {

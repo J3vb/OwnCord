@@ -51,11 +51,14 @@ and only when it changes something a contributor or fork holder must do
 
 - **Message requests**: opening a conversation with someone whose message request you have not answered now accepts that request, and blocking someone removes your trust in them so their messages arrive as a request again after an unblock (unblocking also clears a decided request so a new one can form).
 - **Message requests**: a one-time cleanup removes the trust you already held in people you currently block, so their messages arrive as a request after an unblock.
+- **Plugins that fail to start**: a plugin whose command list traps or times out while enabling now fails to enable, and the memory it compiled is released instead of staying held until restart.
 - **First-run setup**: the owner's own setup login no longer shows up as an unreviewed new login, and setting up shares the same limit on simultaneous password checks as sign-in, answering "try again later" when the server is busy.
 - **Linux voice after a moderator mute**: when a moderator lifts a server mute, your microphone is published again automatically instead of staying silent.
 - **Plugin and push fetches check the content type**: a response whose declared type disagrees with what its bytes look like (for example JSON declared, HTML body) is now refused.
 - **Message retention page for server managers**: a role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first channel rule.
+- **Your own moderation history**: the list of warnings, timeouts, removals and bans shown to you now returns the newest 200 entries instead of every row ever recorded. Reading it needs a signed-in session; an API token is refused.
 
+- **Permission checks**: asking whether a member holds an empty permission set now always answers no, administrators included, matching the other permission helpers.
 - **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.

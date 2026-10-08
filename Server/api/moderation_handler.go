@@ -249,11 +249,12 @@ type ownModerationActionResponse struct {
 
 func handleOwnModeration(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requireUser(w, r)
-		if !ok {
+		p, ok := principal(r)
+		if !ok || p.Session == nil {
+			writeNotAuthenticated(w)
 			return
 		}
-		rows, err := svc.Moderation.ListOwnActions(r.Context(), user.ID)
+		rows, err := svc.Moderation.ListOwnActions(r.Context(), p.User.ID)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
