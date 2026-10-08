@@ -4,7 +4,7 @@
 // to the WebView2 browser process by default, but setting `additionalBrowserArgs`
 // REPLACES that default string rather than appending to it (see
 // WindowConfig::additional_browser_args / WebViewBuilder::with_additional_browser_args).
-// Our config sets additionalBrowserArgs for autoplay/fake-media-stream, which
+// Our config sets additionalBrowserArgs for autoplay, which
 // silently re-enables SmartScreen (URL-reputation lookups against Microsoft for
 // in-webview navigations/downloads — a leak for a self-hosted, TOFU-pinned
 // client) and the msWebOOUI/msPdfOOUI overlays. The dropped default must be
@@ -24,10 +24,12 @@ describe("tauri.conf.json — Windows WebView2 additionalBrowserArgs", () => {
     expect(args).toContain("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
   });
 
-  it("still passes the autoplay and fake-media-stream flags this client needs", () => {
+  it("keeps the autoplay flag but not the fake-UI flag that hides the screen picker", () => {
     const win = tauriConf.app.windows[0] as { additionalBrowserArgs?: string };
     const args = win.additionalBrowserArgs ?? "";
     expect(args).toContain("--autoplay-policy=no-user-gesture-required");
-    expect(args).toContain("--use-fake-ui-for-media-stream");
+    // --use-fake-ui-for-media-stream makes getDisplayMedia skip WebView2's
+    // screen/window picker; mic/camera are allowed by src-tauri/src/windows_media.rs.
+    expect(args).not.toContain("--use-fake-ui-for-media-stream");
   });
 });

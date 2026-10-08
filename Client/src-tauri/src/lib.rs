@@ -37,6 +37,7 @@ mod tofu;
 mod tray;
 mod unread_badge;
 mod update_commands;
+mod windows_media;
 mod ws_proxy;
 
 /// Map the RUST_LOG env var to a global level filter for the log plugin.
@@ -279,6 +280,10 @@ pub fn run() {
             // voice/video works on Linux (no-op elsewhere; see linux_media).
             #[cfg(target_os = "linux")]
             linux_media::enable_media_capture(app.handle());
+            // WebView2 prompts for everything once the fake-UI flag is gone
+            // (it also hid the screen picker) — allow mic/camera silently.
+            #[cfg(windows)]
+            windows_media::enable_media_permissions(app.handle());
             Ok(())
         })
         .build(tauri::generate_context!())

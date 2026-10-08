@@ -4065,6 +4065,7 @@ dependencies = [
  "url",
  "webkit2gtk",
  "webpki-roots 1.0.9",
+ "webview2-com",
  "windows 0.58.0",
  "windows-sys 0.60.2",
  "zeroize",
