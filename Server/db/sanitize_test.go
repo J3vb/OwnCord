@@ -81,3 +81,12 @@ func TestSanitizeFTSQuery_CombiningMarksDoNotSplitTokens(t *testing.T) {
 		t.Fatalf("sanitizeFTSQuery(NFD résumé) = %q, want %q", got, "resume")
 	}
 }
+
+func TestSanitizeFTSQuery_NonLatinMarksStaySeparators(t *testing.T) {
+	// unicode61 only folds the combining diacritics block into the token; a
+	// Devanagari vowel sign (Mc) is a separator there, so "काम" indexes as
+	// "क म" and the query must split the same way.
+	if got := sanitizeFTSQuery("काम"); got != "क म" {
+		t.Fatalf("sanitizeFTSQuery(काम) = %q, want %q", got, "क म")
+	}
+}
