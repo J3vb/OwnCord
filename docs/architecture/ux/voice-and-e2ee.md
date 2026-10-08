@@ -197,7 +197,7 @@ reflects their `speaking/muted/deafened/camera/screenshare`. **Target:**
 | `voice_leave`     | Remove the tile; if it's us (kick/disconnect), clear local voice state (already `handleVoiceLeave`, `features/voice/wsHandlers.ts`) |
 | key-holder change | Invisible to users (re-election is automatic on leave); no UI churn                                                                 |
 
-Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store).
+Per-user volume is adjustable (0–100%; saved values above 100% are read as 100%) and persisted (`userVolume_{id}` in the Rust store).
 
 ---
 
