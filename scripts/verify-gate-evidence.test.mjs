@@ -108,3 +108,37 @@ test("a failed re-run supersedes an earlier success", () => {
 test("a commit with no checks at all is not releasable", () => {
   assert.equal(evaluate(req, []).length, 2);
 });
+
+// Evidence must come from the push-to-main CI run, not a dev-PR run of the same SHA.
+test("a newer green run from an excluded (pull request) suite does not mask a failure", () => {
+  const runs = [
+    ok("A"),
+    {
+      name: "B",
+      status: "completed",
+      conclusion: "failure",
+      started_at: "2020-01-01T00:00:00Z",
+      check_suite: { id: 1 },
+    },
+    ok("B", { started_at: "2020-01-02T00:00:00Z", check_suite: { id: 2 } }),
+  ];
+  const problems = evaluate(req, runs, { excludedSuites: new Set([2]) }).join(" | ");
+  assert.ok(problems.includes("B: failure"));
+});
+
+test("a run that only exists in an excluded suite counts as never reported", () => {
+  const runs = [ok("A"), ok("B", { check_suite: { id: 2 } })];
+  assert.ok(
+    evaluate(req, runs, { excludedSuites: new Set([2]) })
+      .join(" | ")
+      .includes("B: never reported"),
+  );
+});
+
+test("no push-to-main CI run for the commit is not releasable", () => {
+  assert.ok(
+    evaluate(req, [ok("A"), ok("B")], { mainRunFound: false })
+      .join(" | ")
+      .includes("no push-to-main CI run for this commit"),
+  );
+});
