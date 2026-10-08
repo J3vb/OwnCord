@@ -494,6 +494,7 @@ describe("Server/admin/static — panel behaviour", () => {
           json: { server_days: 30, revision: "revision-1", channels: [{ channel_id: 5, days: 0 }] },
         };
       if (p === "/retention/preview") return { json: method === "POST" ? proposedPreview : [] };
+      if (p === "/retention/channels") return { json: [{ id: 5, name: "general" }] };
       if (p === "/stats") return { json: { user_count: 2 } };
       if (p === "/api/v1/admin/plugins/")
         return { json: [{ id: 1, name: "hello", version: "1.0.0", enabled: true }] };
