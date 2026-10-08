@@ -802,7 +802,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       rememberPassword: boolean,
       autoConnect: boolean,
     ): void {
-      const existing = profileManager.getAll().find((p) => p.host.toLowerCase() === host.toLowerCase());
+      const existing = profileManager
+        .getAll()
+        .find((p) => p.host.toLowerCase() === host.toLowerCase());
       if (existing) {
         // Update username, rememberPassword preference, and lastConnected
         profileManager.updateProfile(existing.id, { username, rememberPassword });
@@ -820,7 +822,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       }
 
       // Re-find: the profile may have just been created above.
-      const profile = profileManager.getAll().find((p) => p.host.toLowerCase() === host.toLowerCase());
+      const profile = profileManager
+        .getAll()
+        .find((p) => p.host.toLowerCase() === host.toLowerCase());
       if (profile) {
         if (autoConnect) {
           profileManager.setAutoLogin(profile.id);
