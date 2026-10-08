@@ -142,6 +142,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
   let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallRoom: import("livekit-client").Room | null = null;
   /** Room key installs so far. A decrypt streak continues only while this is
    *  unchanged, so event order never rests on clock resolution. */
   let keyInstalls = 0;
@@ -326,13 +327,17 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (stallTimer !== null) {
       clearTimeout(stallTimer);
       stallTimer = null;
+      stallRoom = null;
     }
   }
 
   function armStallTimer(room: import("livekit-client").Room): void {
-    if (stallTimer !== null) return;
+    if (stallTimer !== null && stallRoom === room) return;
+    clearStallTimer();
+    stallRoom = room;
     stallTimer = setTimeout(() => {
       stallTimer = null;
+      stallRoom = null;
       // Only the room that stalled: the user may have left or a newer attempt
       // replaced it while the SDK was retrying.
       if (deps.getRoom() !== room) return;

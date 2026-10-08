@@ -1190,6 +1190,23 @@ describe("a stalled signal resume", () => {
     expect(h.spies.setRoom).not.toHaveBeenCalled();
   });
 
+  it("re-arms for a rejoined room when a stale timer from the left room is pending", () => {
+    let current: Room = {} as Room;
+    const h = build({ getRoom: () => current });
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(3000);
+    current = h.room as unknown as Room; // left, then rejoined into a new room
+    vi.advanceTimersByTime(2000);
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS - 1);
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalled();
+  });
+
   it("stays out of the way when there is no token to reconnect with", () => {
     const h = build({ getLatestToken: () => null });
 
