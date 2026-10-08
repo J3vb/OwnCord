@@ -118,6 +118,53 @@ func TestPartialAuthStore_RestoreAndExhaustionPersist(t *testing.T) {
 	}
 }
 
+// staleReadPersister serves one fixed GetPartialAuth snapshot and passes
+// every other call to the database: the view of a failure that read the
+// row just before a concurrent Consume deleted it.
+type staleReadPersister struct {
+	*db.DB
+	userID    int64
+	device    string
+	ip        string
+	failures  int
+	expiresAt time.Time
+}
+
+func (p *staleReadPersister) GetPartialAuth(context.Context, string) (int64, string, string, int, time.Time, bool, error) {
+	return p.userID, p.device, p.ip, p.failures, p.expiresAt, true, nil
+}
+
+func TestRegisterFailure_AfterConsumeDoesNotResurrect(t *testing.T) {
+	ctx := context.Background()
+	database := persistedDB(t)
+
+	store := auth.NewPartialAuthStore(time.Minute).WithPersister(database)
+	token, err := store.Issue(ctx, 1, "d", "ip")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	userID, device, ip, failures, expiresAt, _, err := database.GetPartialAuth(ctx, auth.HashToken(token))
+	if err != nil {
+		t.Fatalf("GetPartialAuth: %v", err)
+	}
+	stale := auth.NewPartialAuthStore(time.Minute).WithPersister(&staleReadPersister{
+		DB: database, userID: userID, device: device, ip: ip, failures: failures, expiresAt: expiresAt,
+	})
+
+	if _, ok := store.Consume(ctx, token); !ok {
+		t.Fatal("Consume failed")
+	}
+	if stale.RegisterFailure(ctx, token, 5) {
+		t.Fatal("RegisterFailure reported a consumed challenge as alive")
+	}
+	if _, ok := store.Lookup(ctx, token); ok {
+		t.Fatal("a failure recorded after Consume brought the challenge back")
+	}
+	if _, ok := store.Consume(ctx, token); ok {
+		t.Fatal("a consumed challenge was consumed a second time")
+	}
+}
+
 func TestPendingTOTPStore_SurvivesRestartSealed(t *testing.T) {
 	ctx := context.Background()
 	database := persistedDB(t)
@@ -235,6 +282,9 @@ func (failingPersister) GetPartialAuth(context.Context, string) (int64, string, 
 }
 func (failingPersister) DeletePartialAuth(context.Context, string) (bool, error) {
 	return false, errPersister
+}
+func (failingPersister) IncrementPartialAuthFailures(context.Context, string, time.Time) (int, bool, error) {
+	return 0, false, errPersister
 }
 func (failingPersister) UpsertPendingTOTP(context.Context, int64, string, time.Time) error {
 	return errPersister

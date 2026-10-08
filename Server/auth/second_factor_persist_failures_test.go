@@ -27,8 +27,9 @@ type flakyPersister struct {
 		expiresAt time.Time
 		present   bool
 	}
-	failWrites bool
-	deletes    int
+	failWrites    bool
+	failIncrement bool
+	deletes       int
 }
 
 var errFlaky = errors.New("flaky persister")
@@ -55,6 +56,17 @@ func (p *flakyPersister) DeletePartialAuth(context.Context, string) (bool, error
 	was := p.challenge.present
 	p.challenge.present = false
 	return was, nil
+}
+
+func (p *flakyPersister) IncrementPartialAuthFailures(_ context.Context, _ string, now time.Time) (int, bool, error) {
+	if p.failIncrement {
+		return 0, false, errFlaky
+	}
+	if !p.challenge.present || !p.challenge.expiresAt.After(now) {
+		return 0, false, nil
+	}
+	p.challenge.failures++
+	return p.challenge.failures, true, nil
 }
 
 func (p *flakyPersister) UpsertPendingTOTP(_ context.Context, _ int64, sealed string, expiresAt time.Time) error {
@@ -106,9 +118,11 @@ func TestPartialAuthStore_WriteFailuresAfterIssueAreLoggedNotFatal(t *testing.T)
 	// A failure count that cannot be persisted still counts the attempt as
 	// alive; an exhausted challenge that cannot be deleted still reads as
 	// exhausted to the caller.
+	p.failIncrement = true
 	if !store.RegisterFailure(ctx, token, 5) {
 		t.Fatal("RegisterFailure reported the challenge dead on a persist failure")
 	}
+	p.failIncrement = false
 	if store.RegisterFailure(ctx, token, 1) {
 		t.Fatal("RegisterFailure kept an exhausted challenge alive because the delete failed")
 	}
