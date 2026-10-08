@@ -356,8 +356,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  retry loop's own attempt rooms are left alone. */
   const handleSdkReconnecting = (): void => {
     const room = deps.getRoom();
-    if (room === null || voiceStore.getState().voiceStatus !== "connected") return;
-    setVoiceStatus("reconnecting");
+    const status = voiceStore.getState().voiceStatus;
+    if (room === null || (status !== "connected" && status !== "reconnecting")) return;
+    if (status === "connected") setVoiceStatus("reconnecting");
     armStallTimer(room);
   };
   const handleSdkReconnected = (): void => {
