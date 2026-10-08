@@ -60,6 +60,7 @@ const mockRoom = vi.hoisted(() => ({
 }));
 
 vi.mock("livekit-client", () => ({
+  AudioPresets: { musicHighQualityStereo: { maxBitrate: 128_000 } },
   // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
   Room: vi.fn(function () {
     return mockRoom;

@@ -37,6 +37,7 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
 
 const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
 vi.mock("livekit-client", () => ({
+  AudioPresets: { musicHighQualityStereo: { maxBitrate: 128_000 } },
   Room: vi.fn(function () {
     throw new Error("the web Room must not be built on Linux");
   }),
