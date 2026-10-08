@@ -52,18 +52,11 @@ pub fn pick_config(
     want_rate: SampleRate,
     want_channels: Option<ChannelCount>,
 ) -> Option<(StreamConfig, SampleFormat)> {
-    let usable: Vec<_> = supported
+    supported
         .filter(|r| r.min_sample_rate() <= want_rate && want_rate <= r.max_sample_rate())
         .filter_map(|r| Some((FORMATS.iter().position(|f| *f == r.sample_format())?, r)))
-        .collect();
-    let on_default =
-        |(_, r): &&(usize, SupportedStreamConfigRange)| Some(r.channels()) == want_channels;
-    let default_count = usable.iter().any(|c| on_default(&c));
-    usable
-        .iter()
-        .filter(|c| !default_count || on_default(c))
-        // The first of equal ranks wins: the first count listed.
-        .min_by_key(|(rank, _)| *rank)
+        // The first of equal keys wins: the first count listed.
+        .min_by_key(|(rank, r)| (Some(r.channels()) != want_channels, *rank))
         .map(|(_, r)| {
             let config = StreamConfig {
                 channels: r.channels(),
