@@ -287,6 +287,57 @@ function calleeName(node: ts.CallExpression): string {
   return "";
 }
 
+const lastName = (e: ts.Expression): string | undefined =>
+  ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : undefined;
+
+/**
+ * R2: a `setInterval` handle must be kept and cleared in its own file. The
+ * handle's name is the declared variable, the assigned property
+ * (`this.x = …` → `x`) or, for `map.set(k, setInterval(…))`, the receiver
+ * (`map`); the site passes only when some `clearInterval(<arg>)` in the file
+ * mentions that name. Any other shape (discarded, returned, passed on) fails.
+ */
+function r2Violations(sf: ts.SourceFile): Site[] {
+  const rel = sf.fileName;
+  const cleared = new Set<string>();
+  const intervals: ts.CallExpression[] = [];
+  const idents = (n: ts.Node): void => {
+    if (ts.isIdentifier(n)) cleared.add(n.text);
+    ts.forEachChild(n, idents);
+  };
+  const collect = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const name = calleeName(node);
+      if (name === "setInterval") intervals.push(node);
+      if (name === "clearInterval" && node.arguments[0]) idents(node.arguments[0]);
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(sf);
+  const out: Site[] = [];
+  for (const node of intervals) {
+    const p = node.parent;
+    let handle: string | undefined;
+    if (ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) handle = p.name.text;
+    else if (
+      ts.isBinaryExpression(p) &&
+      p.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      p.right === node
+    )
+      handle = lastName(p.left);
+    else if (ts.isCallExpression(p) && ts.isPropertyAccessExpression(p.expression))
+      handle = lastName(p.expression.expression);
+    if (handle !== undefined && cleared.has(handle)) continue;
+    const fn = enclosingFunction(sf, node);
+    const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+    out.push([
+      `${rel}|${fn}`,
+      `${rel}:${line} setInterval ${handle === undefined ? "handle not kept" : `${handle} never cleared in file`}`,
+    ]);
+  }
+  return out;
+}
+
 const r1Found: Site[] = [];
 const r2Found: Site[] = [];
 const r3Found: Site[] = [];
@@ -306,7 +357,6 @@ for (const rel of sourceFiles) {
     true,
   );
   const line = (node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
-  const fileText = sf.getFullText();
 
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
@@ -331,13 +381,7 @@ for (const rel of sourceFiles) {
       }
       if (name === "setTimeout" || name === "setInterval") {
         const discarded = ts.isExpressionStatement(node.parent) || ts.isVoidExpression(node.parent);
-        if (name === "setInterval") {
-          if (discarded || !fileText.includes("clearInterval("))
-            r2Found.push([
-              `${rel}|${enclosingFunction(sf, node)}`,
-              `${rel}:${line(node)} setInterval ${discarded ? "discarded" : "no clearInterval in file"}`,
-            ]);
-        } else if (discarded) {
+        if (name === "setTimeout" && discarded) {
           r3Found.push([
             `${rel}|${enclosingFunction(sf, node)}`,
             `${rel}:${line(node)} discarded setTimeout in ${enclosingFunction(sf, node)}`,
@@ -368,6 +412,7 @@ for (const rel of sourceFiles) {
     ts.forEachChild(node, visit);
   };
   visit(sf);
+  r2Found.push(...r2Violations(sf));
 }
 
 /**
@@ -396,6 +441,9 @@ function compare(label: string, found: readonly Site[], allowed: readonly string
 const keys = (entries: readonly { file: string; fn: string }[]) =>
   entries.map((e) => `${e.file}|${e.fn}`);
 
+const check = (src: string) =>
+  r2Violations(ts.createSourceFile("x.ts", src, ts.ScriptTarget.Latest, true)).map((v) => v[1]);
+
 describe("lifecycle ownership inventory (R1-R4)", () => {
   it("scans the tree it claims to scan", () => {
     expect(sourceFiles.length).toBeGreaterThan(200);
@@ -412,6 +460,24 @@ describe("lifecycle ownership inventory (R1-R4)", () => {
 
   it("R2: every setInterval keeps its handle and is cleared in its own file", () => {
     compare("R2", r2Found, []);
+  });
+
+  it("R2 flags an uncleared interval in a file that clears a different one", () => {
+    expect(
+      check("let a = setInterval(f, 1);\nconst b = setInterval(g, 1);\nclearInterval(a);"),
+    ).toEqual(["x.ts:2 setInterval b never cleared in file"]);
+    expect(check("setInterval(f, 1);\nclearInterval(a);")).toEqual([
+      "x.ts:1 setInterval handle not kept",
+    ]);
+    expect(check("const h = setInterval(f, 1); addCleanup(() => clearInterval(h));")).toEqual([]);
+    expect(
+      check(
+        "class C { go() { this.timers.set(id, setInterval(f, 1)); } stop() { clearInterval(this.timers.get(id)); } }",
+      ),
+    ).toEqual([]);
+    expect(check("let t; function s() { this.t = setInterval(f, 1); } clearInterval(t);")).toEqual(
+      [],
+    );
   });
 
   it("R3: every setTimeout handle is kept, or the site is allowlisted", () => {

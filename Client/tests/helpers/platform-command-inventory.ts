@@ -123,9 +123,10 @@ export function platformInvokes(
         const decl = sig.getDeclaration();
         return (
           decl &&
-          /@tauri-apps\/api\/core\.d\.ts$/.test(
-            decl.getSourceFile().fileName.replaceAll("\\", "/"),
-          ) &&
+          decl
+            .getSourceFile()
+            .fileName.replaceAll("\\", "/")
+            .endsWith("@tauri-apps/api/core.d.ts") &&
           decl.name?.getText() === "invoke"
         );
       })
@@ -145,7 +146,8 @@ export function platformInvokes(
     }
     if (ts.isCallExpression(expr)) {
       const decl = checker.getResolvedSignature(expr)?.getDeclaration();
-      if (decl && ts.isFunctionDeclaration(decl) && decl.body) {
+      if (decl && ts.isFunctionLike(decl) && "body" in decl && decl.body) {
+        if (!ts.isBlock(decl.body)) return isInvoke(decl.body, new Set(seen));
         let found = false;
         walk(decl.body, (node) => {
           if (
