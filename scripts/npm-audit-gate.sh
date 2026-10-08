@@ -27,7 +27,7 @@ ATTEMPTS=3
 # Errors that mean "the endpoint did not answer", never "your dependencies are
 # fine". Anything not matched here is treated as a real result. The generic
 # "audit endpoint returned an error" line is deliberately absent (see above).
-OUTAGE_RE='Internal Server Error|Service Unavailable|Bad Gateway|Gateway Time-?out|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network timeout|request to .* failed'
+OUTAGE_RE='npm (warn|error) audit 5[0-9]{2} |Internal Server Error|Service Unavailable|Bad Gateway|Gateway Time-?out|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network timeout|request to .* failed'
 
 is_outage() {
   # A parseable audit report is a real result whatever words it contains, so
@@ -58,6 +58,12 @@ npm error audit endpoint returned an error"
 npm error audit endpoint returned an error"
   check outage "a 500 answer" \
     "npm warn audit 500 Internal Server Error - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Internal Server Error
+npm error audit endpoint returned an error"
+  check outage "a 501 answer" \
+    "npm warn audit 501 Not Implemented - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Not Implemented
+npm error audit endpoint returned an error"
+  check outage "a CDN 522 answer" \
+    "npm warn audit 522 Connection Timed Out - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Connection Timed Out
 npm error audit endpoint returned an error"
   # A permanent answer is a broken registry or auth setup: it must fail the
   # gate, not be waved through as an outage.
