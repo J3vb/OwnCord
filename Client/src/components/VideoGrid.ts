@@ -247,7 +247,7 @@ interface CellEntry {
   view?: string;
 }
 
-/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-100 %) volume
  *  of a remote tile: mute, a slider named for whose it is, and its value. */
 function buildVolumeControls(config: TileConfig): {
   overlay: HTMLDivElement;
@@ -255,9 +255,8 @@ function buildVolumeControls(config: TileConfig): {
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
-  // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
-  // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
+  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Both sliders
+  // are 0-100 (HTMLAudioElement.volume caps at 1.0).
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
     : getUserVolume(config.audioUserId);
@@ -273,7 +272,7 @@ function buildVolumeControls(config: TileConfig): {
   const volumeSlider = createElement("input", {
     type: "range",
     min: "0",
-    max: config.isScreenshare ? "100" : "200",
+    max: "100",
     value: String(currentVolume),
     class: "tile-volume-slider",
     // Lets a tile rebuild or removal put focus back on the same control

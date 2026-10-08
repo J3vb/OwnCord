@@ -426,9 +426,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     session.setUserVolume(4, 150);
     session.setOutputVolume(50);
     expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
-      ["setVolume", [1, "user-4", 1.5]],
+      ["setVolume", [1, "user-4", 1]],
       ["setVolume", [1, "user-3", 0.25]],
-      ["setVolume", [1, "user-4", 0.75]],
+      ["setVolume", [1, "user-4", 0.5]],
     ]);
   });
 
@@ -437,7 +437,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     host.commands.length = 0;
     const sent = () => host.commands.filter(([n]) => n === "setScreenshareVolume");
-    // Per-user stream volume x master output, clamped to 0-1; muted is 0.
+    // Per-user stream volume x master output, clamped to 0-1 (output volume caps at 100%); muted is 0.
     session.setScreenshareAudioVolume(3, 0.8);
     session.setOutputVolume(50);
     session.muteScreenshareAudio(3, true);
@@ -448,7 +448,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       ["setScreenshareVolume", [1, "user-3", 0.4]],
       ["setScreenshareVolume", [1, "user-3", 0]],
       ["setScreenshareVolume", [1, "user-3", 0.4]],
-      ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setScreenshareVolume", [1, "user-3", 0.8]],
     ]);
   });
 
