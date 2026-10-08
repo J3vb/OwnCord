@@ -21,6 +21,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -67,5 +68,38 @@ func TestRegistry_EnablePlugin_ConcurrentDisableDuringActivationWindow(t *testin
 	if bound {
 		t.Error("command binding for \"greet\" survived a concurrent DisablePlugin that raced EnablePlugin's " +
 			"activation window — DispatchCommand would still route into a plugin the admin just disabled")
+	}
+}
+
+// A failed activation that left command bindings behind (a retried enable on
+// an already-active plugin) must drop them in the rollback, as DisablePlugin
+// does, so dispatch stops routing into the disabled instance.
+func TestEnablePlugin_ActivationFailureDropsCommandBindings(t *testing.T) {
+	r, _, dir := newRegistryWithDir(t)
+	ctx := context.Background()
+
+	writePluginDir(t, dir, "alpha", `{"name":"alpha","version":"1.0.0","entrypoint":"alpha.wasm","permissions":["commands"],"commands":[{"name":"greet"}]}`)
+	if err := r.LoadAll(ctx); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	inst := r.List()[0]
+	if err := r.RegisterCommand("greet", inst); err != nil {
+		t.Fatalf("RegisterCommand: %v", err)
+	}
+
+	orig := enablePluginActivate
+	t.Cleanup(func() { enablePluginActivate = orig })
+	enablePluginActivate = func(*Registry, context.Context, *Instance) error {
+		return errors.New("activation failed")
+	}
+
+	if err := r.EnablePlugin(ctx, inst.ID); err == nil {
+		t.Fatal("EnablePlugin must return the activation error")
+	}
+	r.mu.RLock()
+	_, bound := r.commands["greet"]
+	r.mu.RUnlock()
+	if bound {
+		t.Error("command binding survived a failed enable")
 	}
 }

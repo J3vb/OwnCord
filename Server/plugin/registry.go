@@ -624,7 +624,13 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 		_ = r.cfg.Store.DisablePlugin(ctx, id)
 		r.mu.Lock()
 		inst.Enabled = false
-		// Free any compile activation retained, as DisablePlugin does.
+		// Drop bindings and free any compile activation retained, as
+		// DisablePlugin does.
+		for cmd, owner := range r.commands {
+			if owner == inst {
+				delete(r.commands, cmd)
+			}
+		}
 		r.platformDeactivate(ctx, inst)
 		r.mu.Unlock()
 		return err
