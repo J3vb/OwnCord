@@ -1,7 +1,7 @@
 # Voice, Video & E2EE — target UX
 
-**Verified against:** commit `5630aa1`, 2026-08-04 — except the mute/deafen and
-`streamPreview` rows, re-measured at `a3a0a49b`, 2026-09-18.
+**Verified against:** commit `5630aa1`, 2026-08-04 — except the mute/deafen
+rows, re-measured at `a3a0a49b`, 2026-09-18.
 Part of the [Client UX Specification](README.md). The signaling/crypto mechanics
 are mapped structurally in [../voice-e2ee.md](../voice-e2ee.md); this document
 specifies the **user-facing** states and reactions.
@@ -150,9 +150,7 @@ Each remote tile asks only for what it shows (`setRemoteVideoView`, since
 `adaptiveStream` stays off for OC-0455): a tile no one can see (grid closed,
 app hidden or minimised, Stop watching) receives no video, a small tile gets
 the lower simulcast layer that fits it, and the stream you watch (focused,
-full screen or popped out) gets the top one. An open sidebar stream preview
-keeps its stream playing even while the grid is closed, but not while the app
-is hidden.
+full screen or popped out) gets the top one.
 
 **Mic-permission failure** (`restoreLocalVoiceState`): on denied/absent mic, set
 `listenOnly` and surface the specific reason ("Microphone permission denied" /
@@ -297,9 +295,8 @@ trust action entirely (a blind accept is refused).
   plug/unplug and re-routes the active input/output without rejoining. An
   unplugged saved device falls back to the system default but stays the
   saved pick, and the call switches back to it once it is listed again.
-- **Stream preview:** `lib/streamPreview.ts` renders a hover/focus live preview
-  of a **remote** participant's camera or screenshare in the voice channel
-  sidebar (300 ms debounce, attached from `components/ChannelSidebar.ts`). There
+- **No stream preview:** the voice channel sidebar shows camera/screenshare
+  indicators only; hovering a user opens no live preview. There
   is no pre-share preview of your own stream in the app on Windows — that step
   is the OS `getDisplayMedia` picker dialog; on Linux it is the "Share your
   screen" dialog (`components/ScreenSharePicker.ts`).

@@ -45,7 +45,6 @@ export const shards = {
     "src/lib/deviceManager.ts",
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
-    "src/lib/streamPreview.ts",
     "src/lib/media-visibility.ts",
   ], // 1954 mutants
   "transport-auth": [

@@ -291,7 +291,7 @@ func (u *Updater) downloadFile(ctx context.Context, url, destPath string) error 
 	if err != nil {
 		return err
 	}
-	if u.githubToken != "" && u.shouldSendToken(url) {
+	if u.githubToken != "" && u.trustedURL(url) {
 		req.Header.Set("Authorization", "token "+u.githubToken)
 	}
 

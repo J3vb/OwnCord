@@ -25,7 +25,6 @@ import { voiceStore, getChannelVoiceUsers, getPeerVerification } from "@stores/v
 import type { PeerVerification, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/context-menu";
-import { attachStreamPreview, attachScrollCollapse } from "@lib/streamPreview";
 import { showUserVolumeMenu } from "./channel-sidebar/volume-menu";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
@@ -645,8 +644,7 @@ function renderVoiceChannelItem(
             // Don't trigger if the right-click menu is open
             if (e.button !== 0) return;
             e.stopPropagation();
-            // Watching a stream needs a live LiveKit room -- join first, same
-            // as the hover/focus preview's placeholder click below.
+            // Watching a stream needs a live LiveKit room -- join first.
             if (voiceStore.getState().currentChannelId !== channel.id) {
               onVoiceJoin(channel.id);
             }
@@ -660,34 +658,8 @@ function renderVoiceChannelItem(
         row.style.cursor = "pointer";
       }
 
-      // Hover/focus preview for remote users with video
-      if (
-        (currentUser === null || currentUser.id !== user.userId) &&
-        (user.camera || user.screenshare)
-      ) {
-        const tileId = user.screenshare ? user.userId + SCREENSHARE_TILE_ID_OFFSET : user.userId;
-        attachStreamPreview(
-          row,
-          user.userId,
-          user.username || shellText("common.unknown"),
-          user.screenshare,
-          user.camera,
-          signal,
-          () => {
-            // Placeholder click: join voice channel and watch stream
-            // Only join if not already in this channel
-            if (voiceStore.getState().currentChannelId !== channel.id) {
-              onVoiceJoin(channel.id);
-            }
-            if (onWatchStream !== undefined) onWatchStream(tileId);
-          },
-          onWatchStream !== undefined ? () => onWatchStream(tileId) : undefined,
-        );
-      }
-
       usersContainer.appendChild(row);
     }
-    attachScrollCollapse(usersContainer, signal);
     wrapper.appendChild(usersContainer);
   }
 

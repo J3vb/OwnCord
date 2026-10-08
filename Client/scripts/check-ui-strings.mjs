@@ -65,7 +65,7 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purge-prompt)\.ts|components\/channel-sidebar\/context-menu\.ts|lib\/(streamPreview|safe-render|credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purge-prompt)\.ts|components\/channel-sidebar\/context-menu\.ts|lib\/(safe-render|credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [

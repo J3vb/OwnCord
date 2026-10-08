@@ -175,26 +175,27 @@ func isGitHubHost(rawURL string) bool {
 		strings.HasSuffix(host, ".githubusercontent.com")
 }
 
-// shouldSendToken reports whether the GitHub token should be attached to a
-// request for the given URL. It returns true for GitHub hosts and for any URL
-// that starts with the configured baseURL (which may be a test server override).
-func (u *Updater) shouldSendToken(rawURL string) bool {
-	if isGitHubHost(rawURL) {
+// trustedURL reports whether rawURL may be fetched and carry the GitHub
+// token: an https GitHub host, or the test base URL. Asset URLs come from the
+// release JSON, so every fetch and every redirect hop must pass it.
+func (u *Updater) trustedURL(rawURL string) bool {
+	if u.baseURL != "" && (rawURL == u.baseURL || strings.HasPrefix(rawURL, strings.TrimSuffix(u.baseURL, "/")+"/")) {
 		return true
 	}
-	if u.baseURL != "" && strings.HasPrefix(rawURL, u.baseURL) {
-		return true
-	}
-	return false
+	parsed, err := neturl.Parse(rawURL)
+	return err == nil && parsed.Scheme == "https" && isGitHubHost(rawURL)
 }
 
 // fetchBody performs a GET request and returns the response body as bytes.
 func (u *Updater) fetchBody(ctx context.Context, url string) ([]byte, error) {
+	if !u.trustedURL(url) {
+		return nil, fmt.Errorf("refusing to fetch %s: not a GitHub release host", url)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if u.githubToken != "" && u.shouldSendToken(url) {
+	if u.githubToken != "" {
 		req.Header.Set("Authorization", "token "+u.githubToken)
 	}
 

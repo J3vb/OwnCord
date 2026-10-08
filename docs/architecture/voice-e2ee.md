@@ -284,7 +284,7 @@ the call. Three routes:
 frame with a WebGL2 I420→RGB shader (BT.601 limited range) and exposes the
 canvas as a `MediaStreamTrack` (`canvas.captureStream()`). The adapter raises
 `RoomEvent.TrackSubscribed` with that track, so `roomEventHandlers`, the video
-grid, stream previews and `getRemoteVideoStream` consume a MediaStream exactly
+grid consumes a MediaStream exactly
 as they do on Windows. `trackUnsubscribed`, `trackUnpublished` and a
 participant leaving dispose the renderer and raise `TrackUnsubscribed`
 (before `ParticipantDisconnected`, as livekit-client does); `disconnect()`

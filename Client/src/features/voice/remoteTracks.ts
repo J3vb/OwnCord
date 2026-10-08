@@ -6,7 +6,6 @@ import { VideoQuality, type Room } from "livekit-client";
 import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
-  getRemoteVideoStream as doGetRemoteVideoStream,
 } from "../../lib/screenShare";
 import { parseUserId } from "./sessionState";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
@@ -51,20 +50,9 @@ interface StatsTrack {
   >;
 }
 
-/** The view that shows the more of a stream; either may be unset. */
-function larger(a: VideoView | undefined, b: VideoView | undefined): VideoView | undefined {
-  if (a?.enabled !== true) return b ?? a;
-  if (b?.enabled !== true) return a;
-  if (a.size === undefined || b.size === undefined) return { enabled: true };
-  return a.size.width >= b.size.width ? a : b;
-}
-
 export class RemoteTracks {
   onRemoteVideoCallback: RemoteVideoCallback | null = null;
   onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
-  /** The grid tile's and the open hover preview's views, by `type:userId`. */
-  private readonly gridViews = new Map<string, VideoView>();
-  private readonly previews = new Map<string, VideoView>();
 
   constructor(private readonly getRoom: () => Room | null) {}
 
@@ -86,11 +74,6 @@ export class RemoteTracks {
 
   getLocalScreenshareStream(): MediaStream | null {
     return doGetLocalScreenshareStream(this.getRoom());
-  }
-
-  /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
-  getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
-    return doGetRemoteVideoStream(this.getRoom(), userId, type);
   }
 
   /** One receiver sample of a user's camera or screen share, for the video
@@ -117,27 +100,15 @@ export class RemoteTracks {
   }
 
   /** Ask the SFU for only what a user's stream shows (P3-07): the grid tile
-   *  drives the layer because adaptiveStream is off (roomLifecycle.ts), and
-   *  the sidebar's hover preview (`preview`, `{ enabled: false }` once it
-   *  closes) plays the same track, so while it is open the stream gets the
-   *  larger of the two. The layer is set before enabling, so a re-shown tile
-   *  resumes at its own size. */
-  setRemoteVideoView(
-    userId: number,
-    type: "camera" | "screenshare",
-    view: VideoView,
-    preview = false,
-  ): void {
-    const key = `${type}:${userId}`;
-    if (!preview) this.gridViews.set(key, view);
-    else if (view.enabled) this.previews.set(key, view);
-    else this.previews.delete(key);
-    const wanted = larger(this.gridViews.get(key), this.previews.get(key));
+   *  drives the layer because adaptiveStream is off (roomLifecycle.ts). The
+   *  layer is set before enabling, so a re-shown tile resumes at its own
+   *  size. */
+  setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
     const pub = this.publication(userId, type);
-    if (wanted === undefined || pub === undefined) return;
-    if (wanted.size !== undefined) pub.setVideoDimensions(wanted.size);
-    else if (wanted.enabled) pub.setVideoQuality(VideoQuality.HIGH);
-    pub.setEnabled(wanted.enabled);
+    if (pub === undefined) return;
+    if (view.size !== undefined) pub.setVideoDimensions(view.size);
+    else if (view.enabled) pub.setVideoQuality(VideoQuality.HIGH);
+    pub.setEnabled(view.enabled);
   }
 
   private publication(userId: number, type: "camera" | "screenshare") {

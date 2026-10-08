@@ -1772,6 +1772,25 @@ func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
 	}
 }
 
+// A 4500x4500 16-bit PNG, about 160 KB on disk, would take over 150 MiB to
+// decode and more again to scale: it is over the cap and passed through.
+func TestServeThumb_16BitPNG4500IsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumb16b", 4)
+	content := encodePNG(t, image.NewGray16(image.Rect(0, 0, 4500, 4500)))
+	id := uploadForThumb(t, router, token, "deep4500.png", content)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("4500x4500 16-bit PNG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the 4500x4500 16-bit PNG: %v", err)
+	}
+}
+
 // A baseline JPEG is counted at its decoded image alone, so a 24-megapixel
 // camera photo gets a real thumbnail.
 func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {

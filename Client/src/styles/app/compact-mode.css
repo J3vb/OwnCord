@@ -119,13 +119,6 @@
   height: 16px;
   font-size: 7px;
 }
-.compact-mode .vu-preview {
-  margin: 1px 0;
-}
-.compact-mode .vu-preview video,
-.compact-mode .vu-preview-placeholder {
-  aspect-ratio: 16 / 9;
-}
 /* User bar */
 .compact-mode .user-bar {
   height: 42px;

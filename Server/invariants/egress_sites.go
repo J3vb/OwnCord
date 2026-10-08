@@ -60,7 +60,7 @@ var EgressAllow = map[string]EgressEntry{
 		"proxies a connected client's LiveKit signalling socket to the configured LiveKit; that signalling leaves the machine when the URL is remote",
 		[]string{"proxyWebSocket"}},
 	"updater/assets.go": {"manual", "api.github.com and github.com release assets (github.owner/github.repo)", "an admin's update check or apply, or a client asking /api/v1/client-update",
-		"release metadata and asset fetches for the two rows above; refuses any other host",
+		"release metadata and asset fetches for the two rows above; refuses a URL that is not https on a GitHub host, on every redirect hop too",
 		[]string{"(*Updater).fetchBody"}},
 	// B5-1 moved the dialing out of api/gif_handler.go and
 	// plugin/host_http.go and into Server/safefetch, so both of those rows

@@ -190,17 +190,27 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, work 
 	return outPath, nil
 }
 
-// resolvePath returns p as an absolute path with symlinks resolved, or just
-// absolute when it does not exist yet.
-func resolvePath(p string) (string, error) {
-	abs, err := filepath.Abs(p)
+// resolvePath is filepath.Abs with the symlinks in the path's longest existing
+// prefix resolved, so a link below a directory cannot carry a path out of it
+// unseen. A dangling link on the way is an error: where it leads is unknown.
+func resolvePath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real, nil
+	rest := ""
+	for dir := abs; ; dir = filepath.Dir(dir) {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest), nil
+		}
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("%s: dangling symlink", dir)
+		}
+		if parent := filepath.Dir(dir); parent == dir {
+			return abs, nil
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
 	}
-	return abs, nil
 }
 
 // isWithin reports whether path is root or lies below it.

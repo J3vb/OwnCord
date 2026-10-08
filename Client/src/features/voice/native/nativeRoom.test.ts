@@ -651,7 +651,6 @@ describe("NativeRoom remote video", () => {
     });
     expect(pub).toMatchObject({ source: "camera", track: raised });
     expect(participant).toBe(room.remoteParticipants.get("user-2"));
-    // screenShare.getRemoteVideoStream looks the track up by source.
     expect(room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.track).toBe(
       raised,
     );

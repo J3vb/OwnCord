@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Removed
+
+- **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
+
 ### Fixed
 
 - **Full screen for a popped-out stream**: full screen on a popped-out stream or camera showed an empty tile while the video stayed in the pop-out window — fullscreen from a popped-out stream moves it into the main window's fullscreen view; leaving fullscreen returns it to the grid (Pop out re-pops it).
@@ -55,6 +59,11 @@ and only when it changes something a contributor or fork holder must do
 - **Release gate evidence**: the pre-release check now ignores results from pull request runs of the tagged commit and refuses a commit that has no push-to-main CI run, so only the full-matrix run counts.
 - **Channel order**: moving a channel's position in the admin panel now reorders the sidebar categories live, matching what a restart shows; equal positions fall back to channel id like the server.
 - **Screen share on Windows**: starting a share now shows WebView2's screen and window picker instead of silently sharing the primary screen. The `--use-fake-ui-for-media-stream` flag that hid it is replaced by Chromium's `--auto-accept-camera-and-microphone-capture`, so microphone and camera stay prompt-free. Shared system audio now excludes OwnCord's own call audio instead of capturing the microphone, which made viewers hear the sharer twice.
+- **Default blocked upload types**: `.html`, `.svg`, `.sh`, `.docm`, `.xlsm`, `.desktop` and `.command` files are now refused by default; an owner who wants them can edit `upload.blocked_extensions`.
+- **Plugins folder setting**: `plugins.directory` must now be a folder that neither is nor holds the data, uploads or backups folder, and in a container it must sit under the data folder.
+- **Self-signed certificate paths in a container**: `tls.cert_file` and `tls.key_file` must sit under the data folder, like every other path the server writes there.
+- **Update checks**: release files are fetched only from GitHub over https, redirects included.
+- **Image thumbnails**: the memory a thumbnail decode may take is now capped at 96 MiB instead of 160 MiB; larger images are shown as the original, and 24-megapixel photos still get a thumbnail.
 - **Bundle budgets**: the Settings, pop-out window and screen-share lazy chunks now have their own size budgets in `Client/bundle-budgets.json`, so growth in them fails CI instead of going unnoticed.
 - **Saved servers**: adding a server whose address is already in your list is now refused with a message, so two profiles can no longer share (and overwrite) one saved sign-in. Profiles you already have are left as they are.
 - **Advisory gate**: the dependency audit check no longer treats a 401, 403 or 404 from the audit endpoint as a registry outage, so a broken registry or credentials setup fails the job instead of passing with a warning; only 5xx answers and network failures are still forgiven.

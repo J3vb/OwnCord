@@ -20,8 +20,9 @@ const (
 	thumbBox = 800
 	// thumbMaxDecodeBytes caps the memory a decode may take, estimated from
 	// the header (thumbOrientation): an image declaring more is passed
-	// through without a decode.
-	thumbMaxDecodeBytes = 160 << 20
+	// through without a decode. 96 MiB still fits a 24-megapixel photo at
+	// 4 bytes a pixel and refuses a 4500x4500 16-bit image.
+	thumbMaxDecodeBytes = 96 << 20
 	// thumbConcurrency is how many thumbnails are generated at once; the rest
 	// wait. Each is generated once and then kept beside its original.
 	thumbConcurrency = 1
