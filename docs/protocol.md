@@ -2020,8 +2020,8 @@ to one ring every 3 seconds per user — per _user_, not per channel, because th
 abuse it prevents is spamming somebody with call banners.
 
 The client joins the DM's voice channel **before** ringing: the ring is only
-truthful once the caller is actually there. It sends the ring once the join has
-succeeded (none if the join is refused or the caller leaves first) and holds it
+truthful once the caller is actually there. It sends the ring once the voice session
+is connected, not while it is still securing (none if the join is refused or the caller leaves first) and holds it
 back so it never goes out within 3 seconds of the previous ring.
 
 ### call_incoming (Server -> Client)
