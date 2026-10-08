@@ -126,7 +126,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Voice:           NewVoiceService(st),
 		Tokens:          NewTokenService(st),
 		Sessions:        NewSessionService(st),
-		Setup:           NewSetupService(st),
+		Setup:           NewSetupService(st, limiter),
 		Reports:         NewReportService(st, permSvc, messages, uploads, moderation, limiter),
 		Appeals:         NewAppealService(st, permSvc, moderation, limiter),
 		Push:            NewPushService(st),

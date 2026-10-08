@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,6 +160,14 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		switch {
 		case errors.Is(err, service.ErrSetupAlreadyDone):
 			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			return
+		case errors.Is(err, service.ErrAuthBusy):
+			var hinted interface{ RetryAfter() time.Duration }
+			if errors.As(err, &hinted) {
+				secs := int((hinted.RetryAfter() + time.Second - 1) / time.Second)
+				w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
+			}
+			writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", service.ErrAuthBusy.Error())
 			return
 		case err != nil:
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
@@ -18,7 +19,7 @@ func setupFixture(t *testing.T) (*SetupService, *db.DB, context.Context) {
 	t.Helper()
 	database := newTestDB(t)
 	seedRole(t, database, &db.Role{ID: permissions.OwnerRoleID, Name: "Owner", Position: permissions.OwnerRolePosition})
-	return NewSetupService(database), database, context.Background()
+	return NewSetupService(database, nil), database, context.Background()
 }
 
 func TestSetupService_BootstrapMakesAServerUsable(t *testing.T) {
@@ -271,5 +272,43 @@ func TestSetupService_BootstrapWithoutRecoveryKitStoresNone(t *testing.T) {
 	}
 	if kit != nil {
 		t.Error("a recovery kit row exists though the run did not ask for one")
+	}
+}
+
+func TestSetupService_BootstrapFirstSessionIsSeen(t *testing.T) {
+	svc, database, ctx := setupFixture(t)
+	res, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "correct horse battery staple", Device: "d", Host: "127.0.0.1"})
+	if err != nil || res.Token == "" {
+		t.Fatalf("Bootstrap = %+v, %v", res, err)
+	}
+	var unseen int
+	if err := database.QueryRowContext(ctx, `SELECT unseen FROM sessions WHERE user_id = ?`, res.OwnerID).Scan(&unseen); err != nil {
+		t.Fatalf("reading the bootstrap session: %v", err)
+	}
+	if unseen != 0 {
+		t.Error("the owner's own setup session is flagged as an unreviewed new login")
+	}
+}
+
+func TestSetupService_BootstrapHashesUnderSharedAdmissionBudget(t *testing.T) {
+	database := newTestDB(t)
+	seedRole(t, database, &db.Role{ID: permissions.OwnerRoleID, Name: "Owner", Position: permissions.OwnerRolePosition})
+	limiter := auth.NewRateLimiter()
+	limiter.SetAdmissionBudget(1)
+	release, ok := limiter.Admission().TryAcquire()
+	if !ok {
+		t.Fatal("could not take the budget's only slot")
+	}
+	defer release()
+	svc := NewSetupService(database, limiter)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "correct horse battery staple"})
+	if !errors.Is(err, ErrAuthBusy) {
+		t.Fatalf("Bootstrap with the budget exhausted: err = %v, want ErrAuthBusy", err)
+	}
+	if n, err := database.UserCount(context.Background()); err != nil || n != 0 {
+		t.Errorf("UserCount = %d, %v; a refused setup must create no user", n, err)
 	}
 }

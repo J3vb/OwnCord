@@ -164,7 +164,7 @@ func adminRequiredServices(database *db.DB, svc *service.Services) *service.Serv
 		filled.Sessions = service.NewSessionService(database)
 	}
 	if filled.Setup == nil {
-		filled.Setup = service.NewSetupService(database)
+		filled.Setup = service.NewSetupService(database, nil)
 	}
 	if filled.Users == nil {
 		filled.Users = service.NewUserService(database)
