@@ -53,12 +53,21 @@ func newestMigration(t *testing.T) (string, string) {
 	if len(names) == 0 {
 		t.Fatal("Server/migrations holds no migration")
 	}
-	migration := names[len(names)-1]
-	reversal := strings.TrimSuffix(migration, ".sql") + ".down.sql"
-	if _, err := rollback.FS.ReadFile(reversal); err != nil {
-		t.Fatalf("%s has no %s in Server/rollback: %v", migration, reversal, err)
+	// A reversal marked "data-only" undoes no schema, so there is nothing for
+	// the drills to interrupt: they take the newest migration that has one.
+	for i := len(names) - 1; i >= 0; i-- {
+		migration := names[i]
+		reversal := strings.TrimSuffix(migration, ".sql") + ".down.sql"
+		raw, err := rollback.FS.ReadFile(reversal)
+		if err != nil {
+			t.Fatalf("%s has no %s in Server/rollback: %v", migration, reversal, err)
+		}
+		if !strings.Contains(string(raw), "data-only") {
+			return migration, reversal
+		}
 	}
-	return migration, reversal
+	t.Fatal("every migration is data-only")
+	return "", ""
 }
 
 // fileSize is a missing-file-safe size, for the drill logs that say how far

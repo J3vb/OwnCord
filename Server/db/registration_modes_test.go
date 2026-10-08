@@ -24,7 +24,7 @@ func migrationsBefore(t *testing.T, stop string) fstest.MapFS {
 	}
 	out := fstest.MapFS{}
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), stop) {
+		if e.Name() >= stop {
 			continue
 		}
 		data, err := fs.ReadFile(migrations.FS, e.Name())
