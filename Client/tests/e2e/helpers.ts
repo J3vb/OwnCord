@@ -447,7 +447,17 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 export function buildTauriMockScript(opts: {
   /** `method`, when set, restricts a route to that HTTP method — for one path
    *  that answers GET and DELETE differently. */
-  httpRoutes: Array<{ pattern: string; status: number; body: unknown; method?: string }>;
+  httpRoutes: Array<{
+    pattern: string;
+    status: number;
+    body: unknown;
+    method?: string;
+    /** Raw response bytes, served instead of the JSON-encoded `body` — for a
+     *  route the app must decode (an image), not parse. */
+    bodyBytes?: number[];
+    /** Content type for `bodyBytes`; JSON routes keep application/json. */
+    contentType?: string;
+  }>;
   simulateWsFlow: boolean;
   deferReady?: boolean;
   echoChatSend?: boolean;
@@ -456,6 +466,7 @@ export function buildTauriMockScript(opts: {
     channels?: unknown[];
     members?: unknown[];
     voice_states?: unknown[];
+    roles?: unknown[];
     dm_channels?: unknown[];
     notices?: unknown[];
     roles?: unknown[];
@@ -621,9 +632,10 @@ export function buildTauriMockScript(opts: {
           const responseRid = __nextRid++;
 
           if (pending?.route) {
-            const bodyStr = JSON.stringify(pending.route.body);
-            const encoder = new TextEncoder();
-            const bodyBytes = encoder.encode(bodyStr);
+            const rawBytes = pending.route.bodyBytes;
+            const bodyBytes = rawBytes
+              ? new Uint8Array(rawBytes)
+              : new TextEncoder().encode(JSON.stringify(pending.route.body));
             __pendingBody[responseRid] = bodyBytes;
             __bodyRead[responseRid] = false;
 
@@ -631,7 +643,7 @@ export function buildTauriMockScript(opts: {
               status: pending.route.status,
               statusText: pending.route.status === 200 ? "OK" : "Error",
               url: pending.url,
-              headers: [["content-type", "application/json"]],
+              headers: [["content-type", rawBytes ? pending.route.contentType : "application/json"]],
               rid: responseRid,
             };
           }

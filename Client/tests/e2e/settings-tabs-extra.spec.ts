@@ -334,12 +334,20 @@ test.describe("Settings — Accessibility Tab", () => {
     await openSettings(page);
     await switchSettingsTab(page, "Accessibility");
 
+    const fontSize = () =>
+      page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--font-size").trim(),
+      );
+    expect(await fontSize()).toBe("16px");
+
     const toggle = toggleFor(page, "Large Font");
     await toggle.click();
     expect(await htmlClasses(page)).toContain("large-font");
+    expect(await fontSize()).toBe("18px");
 
     await toggle.click();
     expect(await htmlClasses(page)).not.toContain("large-font");
+    expect(await fontSize()).toBe("16px");
   });
 
   test("Reduce Motion toggles the html reduced-motion class", async ({ page }) => {
@@ -371,6 +379,12 @@ test.describe("Settings — Accessibility Tab", () => {
     const toggle = toggleFor(page, "Sync with OS");
     await expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(await htmlClasses(page)).toContain("reduced-motion");
+
+    // With sync on the class follows the OS query live, in both directions.
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect.poll(() => htmlClasses(page)).not.toContain("reduced-motion");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect.poll(() => htmlClasses(page)).toContain("reduced-motion");
 
     await toggle.click();
     expect(await htmlClasses(page)).not.toContain("reduced-motion");

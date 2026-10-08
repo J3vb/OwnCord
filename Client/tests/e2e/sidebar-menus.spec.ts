@@ -533,5 +533,13 @@ test.describe("Per-user volume menu", () => {
     await expect(
       menu.locator(".context-menu-item", { hasText: "User Volume: 100%" }),
     ).toBeVisible();
+
+    // The reset was saved, not just painted: the reopened menu reads 100.
+    await page.mouse.click(5, 5);
+    await expect(menu).not.toBeVisible();
+    await row.click({ button: "right" });
+    await expect(page.locator(".user-vol-menu")).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("100");
+    await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("100%");
   });
 });

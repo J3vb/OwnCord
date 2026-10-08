@@ -185,6 +185,10 @@ test.describe("Search overlay", () => {
     await expect
       .poll(() => searchRequests(page))
       .toEqual([{ q: "hello", channelId: "", sort: "recent", before: "" }]);
+
+    // Past the rate-limit window and a fresh debounce: no delayed duplicate.
+    await page.clock.runFor(1_000);
+    expect(await searchRequests(page)).toHaveLength(1);
   });
 
   test("the scope toggle narrows the search to the current channel (D4)", async ({ page }) => {

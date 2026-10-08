@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- **Mocked end-to-end checks**: the slow-mode exemption, note privacy, volume reset, auto-login handover, large-font size, OS motion sync, search debounce, paste upload and avatar decode tests now assert the behaviour itself instead of a marker that would pass without it
 - **Lifecycle soak bars**: the soak now fails on any open socket, peer connection or track after the voice leave and on any change in the number of audio contexts, instead of forgiving a one-unit move, and a run with no comparable samples no longer passes with every bar green.
 - **Moderation queue ordering**: a new appeal is announced to moderators before it can be assigned, and a report's history entries (assigned, noted, closed) are now saved together with the change itself, so none is lost, reordered or credited to an account that no longer exists.
 - **Push notifications**: a mention that finds no usable device no longer silences the next mention for a minute, a failed cleanup of a dead device is no longer counted as removed, and a subscription whose key is not a valid P-256 point is refused when it is registered.
