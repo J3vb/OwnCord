@@ -1790,3 +1790,61 @@ func TestAppeal_DecidingModeratorErasureUnlinks(t *testing.T) {
 		t.Errorf("appeal after erasure = %+v, want the decision itself unchanged", appeal)
 	}
 }
+
+// assignAfterInsertStore runs Assign in a goroutine right after the real
+// InsertAppeal commits and waits briefly for it, simulating a moderator
+// polling the queue between Submit's insert and its "open" broadcast.
+type assignAfterInsertStore struct {
+	Store
+	appeals *AppealService
+	actor   int64
+}
+
+func (s *assignAfterInsertStore) InsertAppeal(ctx context.Context, publicID string, actionID, appellantID int64, body string) (int64, error) {
+	id, err := s.Store.InsertAppeal(ctx, publicID, actionID, appellantID, body)
+	if err != nil {
+		return id, err
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = s.appeals.Assign(ctx, s.actor, publicID, false)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+	}
+	return id, nil
+}
+
+// TestSubmit_OpenBroadcastPrecedesConcurrentAssign: the appeal's lock must be
+// held across Submit's insert, so a moderator who assigns the fresh row
+// immediately cannot broadcast "assigned" before Submit's "open".
+func TestSubmit_OpenBroadcastPrecedesConcurrentAssign(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+
+	rec := &appealOrderRecorder{}
+	store := &assignAfterInsertStore{Store: f.database, actor: fixturePeerMod}
+	appeals := NewAppealService(store, f.mod.perms, f.mod, auth.NewRateLimiter())
+	store.appeals = appeals
+	appeals.SetQueueBroadcaster(&orderedQueueBroadcaster{rec: rec})
+
+	if _, err := appeals.Submit(ctx, fixtureMember, actionID, "please"); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Assign may still be parked on the appeal's lock; wait for it to drain.
+	deadline := time.Now().Add(2 * time.Second)
+	for len(rec.snapshot()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	want := []string{"queue:open", "queue:assigned"}
+	if got := rec.snapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("broadcast order = %v, want %v", got, want)
+	}
+}
