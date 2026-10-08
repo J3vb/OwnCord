@@ -24,12 +24,15 @@ describe("tauri.conf.json — Windows WebView2 additionalBrowserArgs", () => {
     expect(args).toContain("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
   });
 
-  it("keeps the autoplay flag but not the fake-UI flag that hides the screen picker", () => {
+  it("auto-accepts mic/camera without the fake-UI flag that hides the screen picker", () => {
     const win = tauriConf.app.windows[0] as { additionalBrowserArgs?: string };
     const args = win.additionalBrowserArgs ?? "";
     expect(args).toContain("--autoplay-policy=no-user-gesture-required");
-    // --use-fake-ui-for-media-stream makes getDisplayMedia skip WebView2's
-    // screen/window picker; mic/camera are allowed by src-tauri/src/windows_media.rs.
+    // --use-fake-ui-for-media-stream also answers getDisplayMedia itself: no
+    // picker, and the "screen audio" is the default microphone, so
+    // restrictOwnAudio never applies. The auto-accept flag leaves screen
+    // capture alone (Chromium CHECK-crashes if both are passed).
+    expect(args).toContain("--auto-accept-camera-and-microphone-capture");
     expect(args).not.toContain("--use-fake-ui-for-media-stream");
   });
 });
