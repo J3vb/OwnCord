@@ -1014,6 +1014,9 @@ func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 		{"html declared, xml body", "text/html", []byte("<?xml version=\"1.0\"?><html/>"), true},
 		{"plain declared, xml body", "text/plain", []byte("<?xml version=\"1.0\"?><a/>"), true},
 		{"json declared, xml body", "application/json", []byte("<?xml version=\"1.0\"?><a/>"), false},
+		{"svg declared, comment-first body", "image/svg+xml", []byte("<!-- c --><svg/>"), true},
+		{"xml declared, comment-first body", "text/xml", []byte("<!-- c --><a/>"), true},
+		{"json declared, comment-first body", "application/json", []byte("<!-- c -->"), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

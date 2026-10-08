@@ -176,7 +176,9 @@ func compatible(declared, sniffed string) bool {
 	case sniffed == "text/xml":
 		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
 	case sniffed == "text/html":
-		return declared == "application/xhtml+xml"
+		// A leading "<!--" sniffs as HTML but is equally a valid XML/SVG/CSS
+		// comment, so the markup and stylesheet types stay compatible.
+		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
 	}
 	return false
 }
