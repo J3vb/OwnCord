@@ -472,7 +472,7 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
         return { imported: 0, skipped: 0 };
       }
 
-      const existingHosts = new Set(currentProfiles().map((p) => p.host));
+      const existingHosts = new Set(currentProfiles().map((p) => p.host.toLowerCase()));
       let imported = 0;
       let skipped = 0;
       const newProfiles: ServerProfile[] = [];
@@ -482,7 +482,7 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
           skipped++;
           continue;
         }
-        if (existingHosts.has(raw.host)) {
+        if (existingHosts.has(raw.host.toLowerCase())) {
           skipped++;
         } else {
           const profile: ServerProfile = {
@@ -496,7 +496,7 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
             lastConnected: null,
           };
           newProfiles.push(profile);
-          existingHosts.add(profile.host);
+          existingHosts.add(profile.host.toLowerCase());
           imported++;
         }
       }
