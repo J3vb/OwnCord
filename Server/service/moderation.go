@@ -909,12 +909,16 @@ type OwnModerationAction struct {
 	Appealable bool
 }
 
+// ownModerationListLimit caps ListOwnActions: removal and ban rows never
+// retire, so an unbounded read would grow with the member's whole history.
+const ownModerationListLimit = 200
+
 // ListOwnActions is the caller's own restart-safe sanctions read (B9 Q6):
 // userID's own ledger rows, read from storage, with no permission bit —
 // the query is scoped to target_id = userID and selects no field a member
 // may not see.
 func (s *ModerationService) ListOwnActions(ctx context.Context, userID int64) ([]OwnModerationAction, error) {
-	rows, err := s.st.ListOwnModerationActions(ctx, userID)
+	rows, err := s.st.ListOwnModerationActions(ctx, userID, ownModerationListLimit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
