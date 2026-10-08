@@ -13,9 +13,11 @@
 #   { error: 'Service Unavailable' }
 #   npm error audit endpoint returned an error
 #
-# This keeps the gate and drops the outage. It is deliberately FAIL-CLOSED:
-# only a recognised transport/outage signature is forgiven, and anything else
-# — including any real finding — still fails. A persistent outage warns and
+# That generic line is printed for every non-OK answer, so it is not a signal
+# on its own: a 401, 403 or 404 is a broken registry or auth setup and must
+# keep failing. This keeps the gate and drops the outage. It is deliberately
+# FAIL-CLOSED: only transient statuses (5xx) and transport failures are
+# forgiven, and anything else — including any real finding — still fails. A persistent outage warns and
 # passes rather than blocking every PR for as long as npm is down; the warning
 # is visible in the job summary, and the gate runs again on the next push.
 set -uo pipefail
@@ -23,8 +25,9 @@ set -uo pipefail
 ATTEMPTS=3
 
 # Errors that mean "the endpoint did not answer", never "your dependencies are
-# fine". Anything not matched here is treated as a real result.
-OUTAGE_RE='audit endpoint returned an error|Service Unavailable|Bad Gateway|Gateway Time-?out|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network timeout|request to .* failed'
+# fine". Anything not matched here is treated as a real result. The generic
+# "audit endpoint returned an error" line is deliberately absent (see above).
+OUTAGE_RE='Internal Server Error|Service Unavailable|Bad Gateway|Gateway Time-?out|ENOTFOUND|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network timeout|request to .* failed'
 
 is_outage() {
   # A parseable audit report is a real result whatever words it contains, so
@@ -46,6 +49,26 @@ selftest() {
   # The exact shape that reddened the build.
   check outage "npm's audit endpoint error" \
     "{ error: 'Service Unavailable' }
+npm error audit endpoint returned an error"
+  # Recorded from npm 11 against a local server answering the audit endpoint
+  # with each status. The generic "audit endpoint returned an error" line is
+  # printed for every non-OK answer, so only the status text tells them apart.
+  check outage "a 503 answer" \
+    "npm warn audit 503 Service Unavailable - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Service Unavailable
+npm error audit endpoint returned an error"
+  check outage "a 500 answer" \
+    "npm warn audit 500 Internal Server Error - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Internal Server Error
+npm error audit endpoint returned an error"
+  # A permanent answer is a broken registry or auth setup: it must fail the
+  # gate, not be waved through as an outage.
+  check real "a 401 answer" \
+    "npm warn audit 401 Unauthorized - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Unauthorized
+npm error audit endpoint returned an error"
+  check real "a 403 answer" \
+    "npm warn audit 403 Forbidden - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Forbidden
+npm error audit endpoint returned an error"
+  check real "a 404 answer" \
+    "npm warn audit 404 Not Found - POST http://127.0.0.1:1/-/npm/v1/security/advisories/bulk - Not Found
 npm error audit endpoint returned an error"
   check outage "DNS failure" "npm error code ENOTFOUND"
   check outage "proxy 502" "npm error 502 Bad Gateway - GET https://registry.npmjs.org/-/npm/v1/security/audits"
