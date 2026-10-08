@@ -279,8 +279,8 @@ func guardPluginsDir(w http.ResponseWriter, g guardContext) bool {
 	if containerOutsideDataDir(g, dir, "plugins.directory", w) {
 		return false
 	}
-	if !dirExists(dir) || !dirWritable(dir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing writable directory")
+	if !dirExists(dir) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing directory")
 		return false
 	}
 	return true

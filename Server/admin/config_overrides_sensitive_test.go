@@ -747,7 +747,7 @@ func TestConfigOverridesSensitive_SelfSignedPairConfinedToDataDirInContainer(t *
 }
 
 // plugins.directory is where a plugin install renames aside and removes
-// <directory>/<name>, so it must be a writable directory of its own: never
+// <directory>/<name>, so it must be a directory of its own: never
 // data_dir, the uploads directory or the backups directory, nor one holding
 // them, and in a container it must live under data_dir.
 func TestConfigOverridesSensitive_PluginsDirGuard(t *testing.T) {
@@ -774,14 +774,6 @@ func TestConfigOverridesSensitive_PluginsDirGuard(t *testing.T) {
 	refused(backupParent, "containing backup.dir")
 	refused(f.dataDir, "equal to data_dir")
 	refused(filepath.Dir(f.dataDir), "containing data_dir")
-
-	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
-		readOnly := filepath.Join(t.TempDir(), "ro")
-		if err := os.Mkdir(readOnly, 0o500); err != nil {
-			t.Fatal(err)
-		}
-		refused(readOnly, "that is not writable")
-	}
 
 	t.Setenv("OWNCORD_CONTAINER", "1")
 	refused(t.TempDir(), "outside data_dir in a container")
