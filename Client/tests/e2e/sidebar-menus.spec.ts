@@ -497,9 +497,7 @@ test.describe("Per-user volume menu", () => {
       await slider.press("ArrowLeft");
     }
     await expect(menu.locator(".slider-val")).toHaveText("90%");
-    await expect(
-      menu.locator(".context-menu-item", { hasText: "User Volume: 90%" }),
-    ).toBeVisible();
+    await expect(menu.locator(".context-menu-item", { hasText: "User Volume: 90%" })).toBeVisible();
 
     // Dismiss, then reopen: the saved volume is what the menu reads back.
     await page.mouse.click(5, 5);
