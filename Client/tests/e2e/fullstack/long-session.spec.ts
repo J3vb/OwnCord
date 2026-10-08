@@ -65,8 +65,9 @@ const EXPECTED_CONSOLE_ERRORS = [
   // `ws_send` on a closed socket (lib/ws.ts:539).
   /\[ws\] ws_send failed \{error: WS is not open/,
   // LiveKit's signaling socket, dropped by the every-5th-cycle reconnect; the
-  // message's own text, not a bare "reconnect" substring.
-  /error reading from signal stream \{room: channel-\d+.*WS closed unexpectedly with code 100[06]/,
+  // SDK's own message (its logger extension prints the cause as `error: Object`),
+  // not a bare "reconnect" substring.
+  /\[livekit\] error reading from signal stream \{room: channel-\d+/,
   // livekit-client's own log of a receive-side key race at join (OC-0452).
   // Anchored to its bare message: the app's judgement of it is the
   // `[roomEventHandlers] LiveKit E2EE encryption error` line, which a race
