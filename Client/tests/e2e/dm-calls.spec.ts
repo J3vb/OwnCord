@@ -22,6 +22,7 @@ import {
   waitForWsReady,
   voiceJoinWithTokenHandlers,
   parkLiveKitSocket,
+  connectVoiceSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -428,6 +429,7 @@ test.describe("DM calls — starting a call", () => {
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
 
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
 
     // Joining first, then ringing — the caller must actually be in the room.
     const join = await sentTo(page, "voice_join", DM_CHANNEL_ID);
@@ -498,6 +500,7 @@ test.describe("DM calls — call panel", () => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
     await expect(panel(page)).toHaveAttribute("aria-label", "Call with Otto");
 
@@ -553,6 +556,7 @@ test.describe("DM calls — call panel", () => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
 
     await panel(page).locator("[data-testid='dcp-leave']").click();
@@ -569,6 +573,7 @@ test.describe("DM calls — call panel", () => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
 
     // Move to the other DM: the call panel and its "Calling…" are gone.

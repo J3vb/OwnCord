@@ -1296,3 +1296,21 @@ export async function emitWsMessageAndWait(
   await emitWsMessage(page, message);
   await expect(confirmLocator).toBeVisible({ timeout });
 }
+
+/**
+ * Stand in for room.connect() succeeding: wait for the parked join to reach
+ * "securing", then mark the session "connected" (the real status writer's
+ * transition). A DM call rings only from there. Imports the app's own store
+ * module, so it needs the Vite dev server the e2e suite runs against.
+ */
+export async function connectVoiceSession(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const { voiceStore, setVoiceStatus } = await import("/src/stores/voice.store.ts");
+    const deadline = Date.now() + 5000;
+    while (voiceStore.getState().voiceStatus !== "securing") {
+      if (Date.now() > deadline) throw new Error("voice join never reached securing");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    setVoiceStatus("connected");
+  });
+}

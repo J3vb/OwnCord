@@ -25,6 +25,7 @@ import {
   waitForWsReady,
   voiceJoinWithTokenHandlers,
   parkLiveKitSocket,
+  connectVoiceSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -327,6 +328,7 @@ test.describe("User profile popup — member list", () => {
     // ...then joins that DM's voice channel and rings it. Joining is first:
     // the caller must actually be in the room before the ring is truthful.
     const join = await waitForSent(page, "voice_join", NEW_DM);
+    await connectVoiceSession(page);
     const ring = await waitForSent(page, "call_ring", NEW_DM);
     expect(ring.payload).toEqual({ channel_id: NEW_DM });
     const frames = await sentFrames(page);
@@ -349,6 +351,7 @@ test.describe("User profile popup — member list", () => {
     await page.locator("[data-testid='upp-call-btn']").click();
 
     const join = await waitForSent(page, "voice_join", OTHER_DM);
+    await connectVoiceSession(page);
     const ring = await waitForSent(page, "call_ring", OTHER_DM);
     expect(ring.payload).toEqual({ channel_id: OTHER_DM });
     expect(join.type).toBe("voice_join");
