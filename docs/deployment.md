@@ -568,8 +568,9 @@ The server listens on every interface and has no bind-address setting, so with
 - **Bare metal or VM:** add a host firewall rule that admits 8443 only from the
   proxy (loopback for a same-host proxy), and do not port-forward 8443 on your
   router.
-- **Check:** from another machine, `curl -k https://<host>:8443/api/v1/health`
-  (or the plain-http equivalent) must fail to connect.
+- **Check:** with `tls.mode: "off"` the port speaks plain HTTP, so from another
+  machine run `curl --max-time 5 http://<host>:8443/api/v1/health`; it must
+  fail to connect. A reply means the port is still exposed.
 
 One consequence worth knowing before you choose: with a proxy terminating TLS,
 desktop clients pin the _proxy's_ certificate. When the proxy uses a public CA,
