@@ -395,10 +395,8 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64, supersededIDs []int64) bool {
 	auth, ok := s.actorCanModerateVoiceFor(ctx, actorID, targetID)
 	if !ok || s.voiceMuter == nil {
-		// The superseded timeouts are already lifted, and only MuteForTimeout
-		// transfers their mute: release it here rather than leave it owned by
-		// a lifted action (and not by an actor who cannot moderate voice). No
-		// FinalizeTimeoutLift: the new timeout is still active.
+		// Superseded timeouts are lifted and only MuteForTimeout transfers their
+		// mute: release it. No FinalizeTimeoutLift, the new timeout is active.
 		if s.voiceMuter != nil && len(supersededIDs) > 0 {
 			s.voiceMuter.UnmuteForTimeout(context.WithoutCancel(ctx), targetID, supersededIDs)
 		}
