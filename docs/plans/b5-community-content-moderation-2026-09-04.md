@@ -367,7 +367,10 @@ and the owner retired it on 2026-09-24 without publishing an advisory.)
    - the evidence snapshot's **content** is hard-deleted with the account,
      like every other class, so B4-9's signed exit condition holds;
    - the report's **outcome row survives as an unlinkable audit row** —
-     action, time, order, marker token, no content and no identity;
+     action, time, order, marker token, no content and no identity
+     **of the erased subject** _(factual correction, 2026-10-08: the reporter, the
+     assigned moderator and the channel stay, each unlinked by its own
+     principal's erasure)_;
    - the open report closes as `subject_erased`.
      _Why the change:_ it costs nothing against B4 (the surviving row is
      already the shape B4-10 blessed) and it closes an abuse path the original

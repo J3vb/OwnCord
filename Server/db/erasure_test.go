@@ -376,6 +376,58 @@ func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
 	}
 }
 
+// TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns pins, column by
+// column, what the surviving row of an erased SUBJECT keeps. "No identity" in
+// Decision 7 means no identity of the erased subject: the reporter, the
+// assigned moderator and the channel stay, each unlinked only by its own
+// principal's erasure.
+func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "reporter-kept")
+	subject := seedUser(t, database, "subject-cleared")
+	moderator := seedUser(t, database, "mod-kept")
+	channel := seedChannel(t, database, "report-channel")
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO reports (id, public_id, reporter_id, subject_id, assignee_id, channel_id, target_type, target_ref, reason, detail) VALUES (970, 'pub-970', ?, ?, ?, ?, 'user', 'ref', 'spam', 'the detail')`,
+		reporter, subject, moderator, channel); err != nil {
+		t.Fatalf("seed report: %v", err)
+	}
+	if _, err := database.EraseAccount(ctx, subject, "marker-tok-columns"); err != nil {
+		t.Fatalf("EraseAccount(subject): %v", err)
+	}
+	var reporterID, subjectID, assigneeID int64
+	var channelID sql.NullInt64
+	var subjectToken sql.NullString
+	var state, outcome, detail, targetRef string
+	if err := database.QueryRowContext(ctx,
+		`SELECT reporter_id, subject_id, subject_token, assignee_id, channel_id, state, outcome, detail, target_ref FROM reports WHERE id = 970`,
+	).Scan(&reporterID, &subjectID, &subjectToken, &assigneeID, &channelID, &state, &outcome, &detail, &targetRef); err != nil {
+		t.Fatalf("read report 970: %v", err)
+	}
+	if subjectID != 0 || !subjectToken.Valid || subjectToken.String != "marker-tok-columns" {
+		t.Errorf("subject columns = id=%d token=%v, want id 0 and the marker token", subjectID, subjectToken)
+	}
+	if detail != "" || targetRef != "" {
+		t.Errorf("content columns = detail=%q target_ref=%q, want both empty", detail, targetRef)
+	}
+	if state != "subject_erased" || outcome != "subject_erased" {
+		t.Errorf("state/outcome = %q/%q, want subject_erased for a report that was open", state, outcome)
+	}
+	// The reporter keeps their own history (ListReportsMine reads this id).
+	if reporterID != reporter {
+		t.Errorf("reporter_id = %d, want %d unchanged", reporterID, reporter)
+	}
+	// Moderator accountability: unlinked only by the moderator's own erasure.
+	if assigneeID != moderator {
+		t.Errorf("assignee_id = %d, want %d unchanged", assigneeID, moderator)
+	}
+	// A channel is not a person.
+	if !channelID.Valid || channelID.Int64 != channel {
+		t.Errorf("channel_id = %v, want %d unchanged", channelID, channel)
+	}
+}
+
 // TestReport_ReporterErasureKeepsTheReport pins that erasing the REPORTER
 // leaves the report and its outcome exactly as they were: only the reporter
 // columns are unlinked. Decision 7 is about the subject's content; the
