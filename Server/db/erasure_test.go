@@ -397,6 +397,11 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 		reporter, subject, moderator, channel); err != nil {
 		t.Fatalf("seed report: %v", err)
 	}
+	// Backdate updated_at so a stamp by the erasure is distinguishable from the column default.
+	const backdated = "2000-01-01 00:00:00"
+	if _, err := database.ExecContext(ctx, `UPDATE reports SET updated_at = ? WHERE id = 970`, backdated); err != nil {
+		t.Fatalf("backdate updated_at: %v", err)
+	}
 	var createdBefore string
 	if err := database.QueryRowContext(ctx, `SELECT created_at FROM reports WHERE id = 970`).Scan(&createdBefore); err != nil {
 		t.Fatalf("read created_at before erasure: %v", err)
@@ -420,8 +425,8 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 	if createdAt != createdBefore {
 		t.Errorf("created_at = %q, want %q unchanged", createdAt, createdBefore)
 	}
-	if !closedAt.Valid || closedAt.String == "" || updatedAt == "" {
-		t.Errorf("closed_at/updated_at = %v/%q, want both set by the closing erasure", closedAt, updatedAt)
+	if !closedAt.Valid || closedAt.String == "" || updatedAt == "" || updatedAt == backdated {
+		t.Errorf("closed_at/updated_at = %v/%q, want closed_at set and updated_at advanced past the backdated value", closedAt, updatedAt)
 	}
 	// Sticky source metadata shares the row's lifecycle, so it survives.
 	if !sourceNSFW.Valid || sourceNSFW.Int64 != 1 {
