@@ -11,8 +11,8 @@
 //
 // Exits 1 when any shard's report is missing: a partial score is not the
 // full-surface score.
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCORED = ["Killed", "Timeout", "Survived", "NoCoverage"];
@@ -35,6 +35,12 @@ export function aggregate(reports) {
   return { totals, files: seen.size, scored, score: scored ? sum(DETECTED) / scored : 0 };
 }
 
+/** Writes the summary JSON, creating the parent directory (a fresh CI checkout has none). */
+export function writeSummary(path, summary) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(summary, null, 2) + "\n");
+}
+
 function main() {
   const clientDir = fileURLToPath(new URL("..", import.meta.url));
   const reportsDir = join(clientDir, "reports/mutation");
@@ -52,11 +58,16 @@ function main() {
       process.exit(1);
     }
     const result = aggregate(paths.map((p) => JSON.parse(readFileSync(p, "utf8"))));
-    const summary = { shards: names, ...result };
-    writeFileSync(join(reportsDir, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
+    // Configured files that emit no mutants (constants.ts, protocolTypes.ts) appear in no report.
+    const configured = Object.values(shards).flat().length;
+    writeSummary(join(reportsDir, "summary.json"), {
+      shards: names,
+      configuredFiles: configured,
+      ...result,
+    });
     const pct = (result.score * 100).toFixed(2);
     const lines = [
-      `Full-surface mutation score: ${pct} % over ${result.files} files (${result.scored} scored mutants)`,
+      `Full-surface mutation score: ${pct} % over ${configured} configured files (${result.files} with mutants, ${result.scored} scored mutants)`,
       ...Object.entries(result.totals).map(([s, n]) => `  ${s}: ${n}`),
     ];
     console.log(lines.join("\n"));
@@ -64,7 +75,7 @@ function main() {
       const rows = Object.entries(result.totals).map(([s, n]) => `| ${s} | ${n} |`);
       appendFileSync(
         process.env.GITHUB_STEP_SUMMARY,
-        `## Full-surface mutation score: ${pct} %\n\n${result.files} files across ${names.length} shards, ${result.scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n`,
+        `## Full-surface mutation score: ${pct} %\n\n${configured} configured files (${result.files} with mutants) across ${names.length} shards, ${result.scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n`,
       );
     }
   });

@@ -1,6 +1,9 @@
 import { strict as assert } from "node:assert";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { aggregate } from "./aggregate-mutation-shards.mjs";
+import { aggregate, writeSummary } from "./aggregate-mutation-shards.mjs";
 
 /** A parsed Stryker report: `{ "src/a.ts": ["Killed", "Survived"] }`. */
 const report = (files) => ({
@@ -45,4 +48,15 @@ test("the same file in two shards fails loudly", () => {
 
 test("no reports is an error, not a score of zero", () => {
   assert.throws(() => aggregate([]), /no reports/i);
+});
+
+test("writeSummary creates a missing parent directory", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agg-"));
+  try {
+    const path = join(dir, "reports", "mutation", "summary.json");
+    writeSummary(path, { score: 0.5 });
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), { score: 0.5 });
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });
