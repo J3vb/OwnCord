@@ -1581,6 +1581,11 @@ receives a `dm_channel_open`. Re-opening an existing DM (`200`) emits nothing �
 it only touches the caller's own open state. The creator is not sent the event
 on either path; it learns the channel from the response body above.
 
+If the caller holds a `pending` or `ignored` message request from the other
+user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
+conversation and marks the request `accepted`, and sends the caller's other
+devices the `dm_channel_open` and `dm_request` frames `accept` sends.
+
 ---
 
 ### GET /api/v1/dms
@@ -1781,6 +1786,10 @@ Transitions are **recipient-only** and legal **only from `pending`**:
 - `block` — blocks the sender (`PUT /api/v1/blocks/{userId}`'s existing
   effects) and only then marks the request blocked.
 
+Blocking a user also revokes the blocker's trust in them (the blocked user's
+trust in the blocker is untouched), so after an unblock their next message is a
+request again.
+
 A transition attempted on a row that is not pending returns **409
 CONFLICT** if the row exists for the caller (a race, including the loser of
 two simultaneous decisions) or **404 NOT_FOUND** if it does not — including
@@ -1934,7 +1943,9 @@ Block a user.
 
 ### DELETE /api/v1/blocks/{userId}
 
-Unblock a user.
+Unblock a user. Also clears any already-decided (accepted, ignored, deleted or
+blocked) message request from that user to the caller, so their next first
+message forms a fresh request; a still-pending request is kept.
 
 **Auth:** Required
 

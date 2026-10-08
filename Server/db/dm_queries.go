@@ -91,7 +91,7 @@ func NewDMChannelInfo(channelID int64, name string, isGroup bool, participants [
 // apply (cmd/seed's demo data) — service/dm.go's CreateDM goes through
 // GetOrCreateDMChannelGated instead.
 func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*Channel, bool, error) {
-	ch, created, _, err := d.getOrCreateDMChannel(ctx, user1ID, user2ID, false)
+	ch, created, _, _, err := d.getOrCreateDMChannel(ctx, user1ID, user2ID, false)
 	return ch, created, err
 }
 
@@ -107,7 +107,7 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 // the recipient had meanwhile accepted (the trust write racing the read).
 // recipientOpened is only meaningful when created is true — an existing
 // channel's recipient side is whatever it already was, untouched here.
-func (d *DB) GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *Channel, created bool, recipientOpened bool, err error) {
+func (d *DB) GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *Channel, created bool, recipientOpened bool, accepted *MessageRequest, err error) {
 	return d.getOrCreateDMChannel(ctx, callerID, recipientID, true)
 }
 
@@ -119,12 +119,12 @@ func (d *DB) GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientI
 // where two concurrent requests both see ErrNoRows and each create a
 // separate DM channel for the same user pair — and, when gated, to keep the
 // trust check and the dm_open_state write atomic.
-func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, gateRecipient bool) (*Channel, bool, bool, error) {
+func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, gateRecipient bool) (*Channel, bool, bool, *MessageRequest, error) {
 	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
 	}
 
 	// Check for an existing DM channel inside the transaction.
@@ -156,21 +156,32 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
 			user1ID, existingID,
 		)
+		// A recipient opening the DM themselves while the other user's request
+		// is still undecided is an acceptance: same trust, open state and state
+		// transition AcceptMessageRequest writes, in this transaction.
+		var accepted *MessageRequest
+		if gateRecipient {
+			var acceptErr error
+			if accepted, acceptErr = acceptUndecidedRequestOnOpen(ctx, d.q.WithTx(tx), user1ID, user2ID); acceptErr != nil {
+				_ = tx.Rollback()
+				return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel accept request: %w", acceptErr)
+			}
+		}
 		if commitErr := tx.Commit(); commitErr != nil {
-			return nil, false, false, fmt.Errorf("GetOrCreateDMChannel commit existing: %w", commitErr)
+			return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel commit existing: %w", commitErr)
 		}
 		ch, getErr := d.GetChannel(ctx, existingID)
 		if getErr != nil {
-			return nil, false, false, fmt.Errorf("GetOrCreateDMChannel fetch existing: %w", getErr)
+			return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel fetch existing: %w", getErr)
 		}
 		if ch == nil {
-			return nil, false, false, fmt.Errorf("GetOrCreateDMChannel: channel %d vanished", existingID)
+			return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel: channel %d vanished", existingID)
 		}
-		return ch, false, true, nil
+		return ch, false, true, accepted, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel lookup: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel lookup: %w", err)
 	}
 
 	// No existing DM — create one inside the same transaction.
@@ -181,12 +192,12 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel insert channel: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel insert channel: %w", err)
 	}
 	channelID, err := res.LastInsertId()
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel last insert id: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel last insert id: %w", err)
 	}
 
 	// Insert both participants.
@@ -196,7 +207,7 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel insert participants: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel insert participants: %w", err)
 	}
 
 	// Test seam (package db only, no exported setter): lets a same-package
@@ -206,7 +217,7 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	if hook := d.afterDMParticipantsInsertHook; hook != nil {
 		if hookErr := hook(); hookErr != nil {
 			_ = tx.Rollback()
-			return nil, false, false, hookErr
+			return nil, false, false, nil, hookErr
 		}
 	}
 
@@ -216,18 +227,47 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	recipientOpened, err := decideAndOpenRecipientDM(tx, user1ID, user2ID, channelID, gateRecipient)
 	if err != nil {
 		_ = tx.Rollback()
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel commit: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel commit: %w", err)
 	}
 
 	ch, err := d.GetChannel(ctx, channelID)
 	if err != nil {
-		return nil, false, false, fmt.Errorf("GetOrCreateDMChannel fetch new: %w", err)
+		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel fetch new: %w", err)
 	}
-	return ch, true, recipientOpened, nil
+	return ch, true, recipientOpened, nil, nil
+}
+
+// acceptUndecidedRequestOnOpen accepts the pending or ignored request that
+// senderID holds against recipientID (the caller opening the DM), if any:
+// TrustSender, then the transition to accepted. The recipient's dm_open_state
+// row is already written by the caller. Returns nil when there is no such
+// request. q must be bound to the caller's transaction.
+func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipientID, senderID int64) (*MessageRequest, error) {
+	row, err := q.GetMessageRequestByPair(ctx, dbgen.GetMessageRequestByPairParams{SenderID: senderID, RecipientID: recipientID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get request: %w", err)
+	}
+	if row.State != "pending" && row.State != "ignored" {
+		return nil, nil
+	}
+	if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: recipientID, SenderID: senderID, Source: "accepted"}); err != nil {
+		return nil, fmt.Errorf("trust: %w", err)
+	}
+	if _, err := q.AcceptUndecidedMessageRequest(ctx, dbgen.AcceptUndecidedMessageRequestParams{ID: row.ID, RecipientID: recipientID}); err != nil {
+		return nil, fmt.Errorf("transition: %w", err)
+	}
+	updated, err := q.GetMessageRequestForRecipient(ctx, dbgen.GetMessageRequestForRecipientParams{ID: row.ID, RecipientID: recipientID})
+	if err != nil {
+		return nil, fmt.Errorf("reread: %w", err)
+	}
+	return fromDBGenMessageRequest(updated), nil
 }
 
 // decideAndOpenRecipientDM decides (when gateRecipient) whether user2ID
@@ -347,122 +387,6 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 	}
 	return result, nil
 }
-
-// ─── Group DM mutation ──────────────────────────────────────────────────────
-
-// CreateGroupDMChannel creates a new group DM channel with the given
-// participants (creator included in participantIDs) and opens it for all of
-// them. It always creates: unlike a 1:1 DM there is no canonical "the DM
-// between these people", because the same set of people may reasonably want
-// two separate groups.
-//
-// The whole insert runs in one transaction so a crash cannot leave a channel
-// with no participants — which would be an unreachable, undeletable row.
-func (d *DB) CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*Channel, error) {
-	if len(participantIDs) < 3 {
-		return nil, fmt.Errorf("CreateGroupDMChannel: need at least 3 participants, got %d", len(participantIDs))
-	}
-	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return nil, fmt.Errorf("CreateGroupDMChannel begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }() //nolint:errcheck // no-op after a successful Commit
-
-	res, err := tx.ExecContext(ctx, `INSERT INTO channels (name, type, is_group) VALUES (?, 'dm', 1)`, name)
-	if err != nil {
-		return nil, fmt.Errorf("CreateGroupDMChannel insert channel: %w", err)
-	}
-	channelID, err := res.LastInsertId()
-	if err != nil {
-		return nil, fmt.Errorf("CreateGroupDMChannel last insert id: %w", err)
-	}
-
-	for _, pid := range participantIDs {
-		if _, err = tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO dm_participants (channel_id, user_id) VALUES (?, ?)`,
-			channelID, pid,
-		); err != nil {
-			return nil, fmt.Errorf("CreateGroupDMChannel insert participant: %w", err)
-		}
-		if _, err = tx.ExecContext(ctx,
-			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
-			pid, channelID,
-		); err != nil {
-			return nil, fmt.Errorf("CreateGroupDMChannel open dm: %w", err)
-		}
-	}
-
-	if err = tx.Commit(); err != nil {
-		return nil, fmt.Errorf("CreateGroupDMChannel commit: %w", err)
-	}
-
-	ch, err := d.GetChannel(ctx, channelID)
-	if err != nil {
-		return nil, fmt.Errorf("CreateGroupDMChannel fetch new: %w", err)
-	}
-	return ch, nil
-}
-
-// LeaveGroupDM removes userID from a group DM's participant list and from
-// their open list, and reports whether that emptied the channel.
-//
-// When the last participant leaves, the channel row is deleted: a DM channel
-// with no participants is reachable by nobody and would sit in the database
-// forever, and its messages/attachments cascade off the channels row. Leaving
-// is therefore destructive for the last leaver only — everyone else's leave is
-// just a removal.
-func (d *DB) LeaveGroupDM(ctx context.Context, userID, channelID int64) (deleted bool, err error) {
-	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return false, fmt.Errorf("LeaveGroupDM begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }() //nolint:errcheck // no-op after a successful Commit
-
-	if _, err = tx.ExecContext(ctx,
-		`DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?`, channelID, userID,
-	); err != nil {
-		return false, fmt.Errorf("LeaveGroupDM remove participant: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx,
-		`DELETE FROM dm_open_state WHERE channel_id = ? AND user_id = ?`, channelID, userID,
-	); err != nil {
-		return false, fmt.Errorf("LeaveGroupDM close dm: %w", err)
-	}
-
-	var remaining int
-	if err = tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM dm_participants WHERE channel_id = ?`, channelID,
-	).Scan(&remaining); err != nil {
-		return false, fmt.Errorf("LeaveGroupDM count: %w", err)
-	}
-	if remaining == 0 {
-		// Unlink attachments before the channel delete below: messages.channel_id
-		// and attachments.message_id both cascade ON DELETE (migrations/001), so
-		// without this the cascade destroys the attachment rows along with the
-		// channel — the only handle the orphan sweep (main.go's maintenance
-		// tick, DeleteOrphanedAttachments) has on the uploaded files, stranding
-		// them on disk forever. Setting message_id to NULL first turns them
-		// into ordinary orphaned attachments the sweep already reclaims.
-		if _, err = tx.ExecContext(ctx,
-			`UPDATE attachments SET message_id = NULL
-			   WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)`,
-			channelID,
-		); err != nil {
-			return false, fmt.Errorf("LeaveGroupDM unlink attachments: %w", err)
-		}
-		if _, err = tx.ExecContext(ctx, `DELETE FROM channels WHERE id = ?`, channelID); err != nil {
-			return false, fmt.Errorf("LeaveGroupDM delete channel: %w", err)
-		}
-		deleted = true
-	}
-
-	if err = tx.Commit(); err != nil {
-		return false, fmt.Errorf("LeaveGroupDM commit: %w", err)
-	}
-	return deleted, nil
-}
-
-// CountDMParticipants returns how many users are in a DM channel.
 func (d *DB) CountDMParticipants(ctx context.Context, channelID int64) (int, error) {
 	n, err := d.q.CountDMParticipants(ctx, channelID)
 	if err != nil {

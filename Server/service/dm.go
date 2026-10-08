@@ -101,6 +101,11 @@ type CreateDMResult struct {
 	// RecipientOpened tells the caller (api/dm_handler.go) whether to
 	// broadcast dm_channel_open.
 	RecipientOpened bool
+	// AcceptedRequest is the caller's own undecided message request from the
+	// other user that opening the DM just accepted (db.GetOrCreateDMChannelGated),
+	// so the caller can send the same dm_request update Accept does. Nil
+	// otherwise.
+	AcceptedRequest *db.MessageRequest
 }
 
 // CreateDM creates or retrieves a DM channel between two users.
@@ -163,7 +168,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 	// channel and participants — no separate post-hoc CloseDM call for a
 	// cancellation, a CloseDM failure, or a stale read racing an
 	// in-flight accept to land in.
-	ch, created, recipientOpened, err := s.st.GetOrCreateDMChannelGated(ctx, userID, recipientID)
+	ch, created, recipientOpened, accepted, err := s.st.GetOrCreateDMChannelGated(ctx, userID, recipientID)
 	if err != nil {
 		slog.Error("DMService.CreateDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create DM channel", ErrInternal)
@@ -174,6 +179,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		Created:         created,
 		Recipient:       recipient,
 		RecipientOpened: recipientOpened,
+		AcceptedRequest: accepted,
 	}, nil
 }
 

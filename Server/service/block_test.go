@@ -171,3 +171,73 @@ func TestBlockService_ListBlocked(t *testing.T) {
 		t.Errorf("ListBlocked(2) = %v, want empty", other)
 	}
 }
+
+// Blocking revokes the blocker's trust in the target, so after an unblock the
+// target's next message is a request again rather than silently delivered. The
+// target's own trust in the blocker is left alone.
+func TestBlockUser_RevokesBlockersTrustInTarget(t *testing.T) {
+	database, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+	if err := database.TrustSender(ctx, 2, 1, "accepted"); err != nil {
+		t.Fatalf("TrustSender(2,1): %v", err)
+	}
+	if err := database.TrustSender(ctx, 1, 2, "accepted"); err != nil {
+		t.Fatalf("TrustSender(1,2): %v", err)
+	}
+
+	if err := svc.Blocks.BlockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("UnblockUser: %v", err)
+	}
+
+	if ok, _ := database.IsTrustedSender(ctx, 2, 1); ok {
+		t.Error("blocker still trusts the blocked user after block + unblock")
+	}
+	if ok, _ := database.IsTrustedSender(ctx, 1, 2); !ok {
+		t.Error("blocked user's trust in the blocker was revoked, want untouched")
+	}
+	res, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if len(res.RequestCreatedFor) != 1 {
+		t.Errorf("RequestCreatedFor = %v, want one pending request", res.RequestCreatedFor)
+	}
+}
+
+// A request the blocker already decided (here: accepted) must not swallow the
+// sender's first message after block + unblock: the pair gets a fresh request.
+func TestBlockUser_ResetsDecidedRequestSoNextSendIsARequestAgain(t *testing.T) {
+	_, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+	first, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+	})
+	if err != nil || len(first.RequestCreatedFor) != 1 {
+		t.Fatalf("first send: %v, RequestCreatedFor=%v", err, first.RequestCreatedFor)
+	}
+	if _, err := svc.MessageRequests.Accept(ctx, 2, first.RequestCreatedFor[0].ID); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	if err := svc.Blocks.BlockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("UnblockUser: %v", err)
+	}
+
+	again, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi again",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage after unblock: %v", err)
+	}
+	if len(again.RequestCreatedFor) != 1 {
+		t.Errorf("RequestCreatedFor = %v, want a fresh request", again.RequestCreatedFor)
+	}
+}

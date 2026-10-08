@@ -9,6 +9,39 @@ import (
 	"context"
 )
 
+const acceptUndecidedMessageRequest = `-- name: AcceptUndecidedMessageRequest :execrows
+UPDATE message_requests
+SET state = 'accepted', decided_at = datetime('now')
+WHERE id = ? AND recipient_id = ? AND state IN ('pending', 'ignored')
+`
+
+type AcceptUndecidedMessageRequestParams struct {
+	ID          int64 `json:"id"`
+	RecipientID int64 `json:"recipientId"`
+}
+
+func (q *Queries) AcceptUndecidedMessageRequest(ctx context.Context, arg AcceptUndecidedMessageRequestParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, acceptUndecidedMessageRequest, arg.ID, arg.RecipientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteDecidedMessageRequestByPair = `-- name: DeleteDecidedMessageRequestByPair :exec
+DELETE FROM message_requests WHERE sender_id = ? AND recipient_id = ? AND state <> 'pending'
+`
+
+type DeleteDecidedMessageRequestByPairParams struct {
+	SenderID    int64 `json:"senderId"`
+	RecipientID int64 `json:"recipientId"`
+}
+
+func (q *Queries) DeleteDecidedMessageRequestByPair(ctx context.Context, arg DeleteDecidedMessageRequestByPairParams) error {
+	_, err := q.db.ExecContext(ctx, deleteDecidedMessageRequestByPair, arg.SenderID, arg.RecipientID)
+	return err
+}
+
 const getMessageRequestByPair = `-- name: GetMessageRequestByPair :one
 SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests
@@ -214,5 +247,19 @@ type TrustSenderParams struct {
 
 func (q *Queries) TrustSender(ctx context.Context, arg TrustSenderParams) error {
 	_, err := q.db.ExecContext(ctx, trustSender, arg.RecipientID, arg.SenderID, arg.Source)
+	return err
+}
+
+const untrustSender = `-- name: UntrustSender :exec
+DELETE FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?
+`
+
+type UntrustSenderParams struct {
+	RecipientID int64 `json:"recipientId"`
+	SenderID    int64 `json:"senderId"`
+}
+
+func (q *Queries) UntrustSender(ctx context.Context, arg UntrustSenderParams) error {
+	_, err := q.db.ExecContext(ctx, untrustSender, arg.RecipientID, arg.SenderID)
 	return err
 }

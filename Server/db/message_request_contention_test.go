@@ -167,7 +167,7 @@ func TestGetOrCreateDMChannelGated_FailureAfterParticipantsLeavesRecipientNeverO
 	database.afterDMParticipantsInsertHook = func() error { return injected }
 	defer func() { database.afterDMParticipantsInsertHook = nil }()
 
-	if _, _, _, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient); !errors.Is(err, injected) {
+	if _, _, _, _, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient); !errors.Is(err, injected) {
 		t.Fatalf("GetOrCreateDMChannelGated = %v, want the injected failure", err)
 	}
 
@@ -194,7 +194,7 @@ func TestGetOrCreateDMChannelGated_UntrustedOpensCallerOnly(t *testing.T) {
 	caller := contentionSeedUser(t, database, "gated-untrusted-caller")
 	recipient := contentionSeedUser(t, database, "gated-untrusted-recipient")
 
-	ch, created, recipientOpened, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
+	ch, created, recipientOpened, _, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannelGated: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestGetOrCreateDMChannelGated_TrustedOpensBoth(t *testing.T) {
 		t.Fatalf("TrustSender: %v", err)
 	}
 
-	ch, created, recipientOpened, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
+	ch, created, recipientOpened, _, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannelGated: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestGetOrCreateDMChannelGated_TrustedOpensBoth(t *testing.T) {
 	// Existing-channel branch of the same gated path: recipientOpened is
 	// reported true unconditionally (untouched, matching GetOrCreateDMChannel's
 	// own existing-channel branch), created is false.
-	ch2, created2, recipientOpened2, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
+	ch2, created2, recipientOpened2, _, err := database.GetOrCreateDMChannelGated(ctx, caller, recipient)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannelGated (existing): %v", err)
 	}
@@ -252,4 +252,66 @@ func openStateCount(t *testing.T, database *DB, userID, channelID int64) int {
 		t.Fatalf("dm_open_state count: %v", err)
 	}
 	return n
+}
+
+// TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts: a recipient
+// holding a pending (or ignored) request from the other user who opens the DM
+// themselves (POST /dms) accepts it, atomically: trust row, open state and the
+// request's state all land together, and the accepted request is returned so
+// the caller can announce it.
+func TestGetOrCreateDMChannelGated_RecipientWithPendingRequestAccepts(t *testing.T) {
+	for _, preState := range []string{"pending", "ignored"} {
+		t.Run(preState, func(t *testing.T) {
+			database := contentionOpenMigrated(t)
+			ctx := context.Background()
+			sender := contentionSeedUser(t, database, "gated-pend-sender-"+preState)
+			recipient := contentionSeedUser(t, database, "gated-pend-recipient-"+preState)
+
+			ch, _, _, _, err := database.GetOrCreateDMChannelGated(ctx, sender, recipient)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			msgID, err := database.CreateMessage(ctx, ch.ID, sender, "hi", nil)
+			if err != nil {
+				t.Fatalf("CreateMessage: %v", err)
+			}
+			if _, err := database.CreateMessageRequest(ctx, sender, recipient, ch.ID, msgID); err != nil {
+				t.Fatalf("CreateMessageRequest: %v", err)
+			}
+			req, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+			if err != nil {
+				t.Fatalf("GetMessageRequestByPair: %v", err)
+			}
+			if preState != "pending" {
+				if _, err := database.TransitionMessageRequest(ctx, req.ID, recipient, preState); err != nil {
+					t.Fatalf("Transition: %v", err)
+				}
+			}
+
+			// The recipient opens the conversation themselves.
+			ch2, created, _, accepted, err := database.GetOrCreateDMChannelGated(ctx, recipient, sender)
+			if err != nil {
+				t.Fatalf("GetOrCreateDMChannelGated: %v", err)
+			}
+			if created || ch2.ID != ch.ID {
+				t.Fatalf("created=%v channel=%d, want existing channel %d", created, ch2.ID, ch.ID)
+			}
+			if accepted == nil || accepted.ID != req.ID || accepted.State != "accepted" {
+				t.Fatalf("accepted = %+v, want request %d in state accepted", accepted, req.ID)
+			}
+			got, err := database.GetMessageRequestByPair(ctx, sender, recipient)
+			if err != nil {
+				t.Fatalf("GetMessageRequestByPair: %v", err)
+			}
+			if got.State != "accepted" {
+				t.Errorf("request state = %q, want accepted", got.State)
+			}
+			if ok, _ := database.IsTrustedSender(ctx, recipient, sender); !ok {
+				t.Error("recipient does not trust sender after opening the DM")
+			}
+			if n := openStateCount(t, database, recipient, ch.ID); n != 1 {
+				t.Errorf("recipient's dm_open_state rows = %d, want 1", n)
+			}
+		})
+	}
 }
