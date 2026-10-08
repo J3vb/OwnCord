@@ -53,8 +53,6 @@ interface StatsTrack {
 export class RemoteTracks {
   onRemoteVideoCallback: RemoteVideoCallback | null = null;
   onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
-  /** The grid tile's views, by `type:userId`. */
-  private readonly gridViews = new Map<string, VideoView>();
 
   constructor(private readonly getRoom: () => Room | null) {}
 
@@ -106,7 +104,6 @@ export class RemoteTracks {
    *  layer is set before enabling, so a re-shown tile resumes at its own
    *  size. */
   setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
-    this.gridViews.set(`${type}:${userId}`, view);
     const pub = this.publication(userId, type);
     if (pub === undefined) return;
     if (view.size !== undefined) pub.setVideoDimensions(view.size);
