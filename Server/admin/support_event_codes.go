@@ -29,7 +29,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"CleanupVoiceForChannel LeaveIfMatch":                                                                     "cleanupvoiceforchannel_leaveifmatch",
 	"DMService.CreateDM":                                                                                      "dmservice_createdm",
 	"DMService.CreateGroupDM":                                                                                 "dmservice_creategroupdm",
-	"DMService.OpenForRing OpenDM":                                                                            "dmservice_openforring_opendm",
 	"DMService.CreateGroupDM: failed to read participants after commit":                                       "dmservice_creategroupdm_read_participants_failed",
 	"DeleteAccount failed":                                                                                    "deleteaccount_failed",
 	"DeleteAccount: files pending":                                                                            "deleteaccount_files_pending",
