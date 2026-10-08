@@ -30,8 +30,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pin:
+    # One dev revision for every shard and for the aggregation: dev can move
+    # during the up-to-90-minute matrix, and the score is only the full-surface
+    # score if the shard config and the reports come from the same commit.
+    name: Pin dev revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.dev.outputs.sha }}
+    steps:
+      - id: dev
+        env:
+          REPO: ${{ github.repository }}
+        run: echo "sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)" >> "$GITHUB_OUTPUT"
+
   mutation:
     name: Nightly mutation baseline (${{ matrix.shard }})
+    needs: pin
     runs-on: ubuntu-latest
     # The owner's ceiling is 90 min wall-clock per night. Shards run as parallel
     # jobs, so this bounds one shard's wall time; the longest measured shard
@@ -47,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: dev
+          ref: ${{ needs.pin.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -76,14 +92,14 @@ jobs:
     # report is missing, since a partial score is not the full-surface score.
     # Not a required status context; it only exists on the nightly.
     name: Nightly full-surface mutation score
-    needs: mutation
+    needs: [pin, mutation]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: dev
+          ref: ${{ needs.pin.outputs.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
