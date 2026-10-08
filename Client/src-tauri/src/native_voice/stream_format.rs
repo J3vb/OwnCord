@@ -43,20 +43,27 @@ macro_rules! typed {
 }
 pub(crate) use typed;
 
-/// The config to open at `want_rate`: the best of `FORMATS` any range covers
-/// it in, on `want_channels` (the device's default count) where that format
-/// offers it, else the first channel count it does. None when no range covers
-/// `want_rate` in one of `FORMATS`.
+/// The config to open at `want_rate`: on `want_channels` (the device's default
+/// count) the best of `FORMATS` any range covers it in; only when no such
+/// range has that count, the best format on the first channel count it
+/// does. None when no range covers `want_rate` in one of `FORMATS`.
 pub fn pick_config(
     supported: impl Iterator<Item = SupportedStreamConfigRange>,
     want_rate: SampleRate,
     want_channels: Option<ChannelCount>,
 ) -> Option<(StreamConfig, SampleFormat)> {
-    supported
+    let usable: Vec<_> = supported
         .filter(|r| r.min_sample_rate() <= want_rate && want_rate <= r.max_sample_rate())
         .filter_map(|r| Some((FORMATS.iter().position(|f| *f == r.sample_format())?, r)))
-        // The first of equal keys wins: the first count listed.
-        .min_by_key(|(rank, r)| (*rank, Some(r.channels()) != want_channels))
+        .collect();
+    let on_default =
+        |(_, r): &&(usize, SupportedStreamConfigRange)| Some(r.channels()) == want_channels;
+    let default_count = usable.iter().any(|c| on_default(&c));
+    usable
+        .iter()
+        .filter(|c| !default_count || on_default(c))
+        // The first of equal ranks wins: the first count listed.
+        .min_by_key(|(rank, _)| *rank)
         .map(|(_, r)| {
             let config = StreamConfig {
                 channels: r.channels(),
@@ -171,19 +178,26 @@ mod tests {
         assert_eq!(picked(ranges, Some(6)), Some((6, SampleFormat::F32)));
     }
 
-    /// A format offered only on other channel counts still beats a worse
-    /// format on the default count, and opens on the first count listed.
+    /// The default count is the primary constraint: a better format on
+    /// another count loses to the default count, and only a device with no
+    /// usable range on it opens the best format on the first count listed.
     #[test]
-    fn format_outranks_the_channel_count() {
+    fn the_default_channel_count_outranks_the_format() {
         let ranges = vec![
             range(SampleFormat::I16, 2, 48_000, 48_000),
             range(SampleFormat::F32, 1, 48_000, 48_000),
+        ];
+        assert_eq!(picked(ranges, Some(2)), Some((2, SampleFormat::I16)));
+
+        let ranges = vec![
+            range(SampleFormat::I16, 1, 48_000, 48_000),
             range(SampleFormat::F32, 4, 48_000, 48_000),
+            range(SampleFormat::F32, 1, 48_000, 48_000),
         ];
         assert_eq!(
             picked(ranges.clone(), Some(2)),
-            Some((1, SampleFormat::F32))
+            Some((4, SampleFormat::F32))
         );
-        assert_eq!(picked(ranges, None), Some((1, SampleFormat::F32)));
+        assert_eq!(picked(ranges, None), Some((4, SampleFormat::F32)));
     }
 }
