@@ -636,6 +636,12 @@ export function createVideoGrid(): VideoGridComponent {
       return;
     }
     if (focusedTileId !== tileId) setFocusedTile(tileId);
+    // A popped-out stream comes back for full screen (the picture-in-picture
+    // window cannot go full screen itself).
+    const video = entry.el.querySelector("video");
+    if (video !== null && document.pictureInPictureElement === video) {
+      void document.exitPictureInPicture().catch(() => {});
+    }
     const request = entry.el.requestFullscreen as (() => Promise<void>) | undefined;
     if (typeof request !== "function") {
       enterTheatre(tileId);
