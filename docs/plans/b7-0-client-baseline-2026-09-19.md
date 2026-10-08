@@ -4,6 +4,7 @@
 **Base commit:** `058fbabb` (`dev`, after PR #1625)
 **Branch:** `feat/b7-0-verify-and-baseline`
 **Plan:** `.claude/plans/b7-0-verify-and-baseline.plan.md`, Task 1
+**Startup and memory amendment (2026-09-20):** measured from `dev` at `d8dce49d`, not at the base commit above.
 **Supersedes, for the client only:** the client rows and the bundle table in
 [b0-baseline-2026-08-25.md](b0-baseline-2026-08-25.md)
 
@@ -28,34 +29,34 @@ B7-7 (budgets) and B7-8 (mutation) ratchet against.
 
 ## Measured results
 
-| Measure                                                 | Value                                                         | B0 (2026-08-25)                   | Provenance |
-| ------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------- | ---------- |
-| Unit + integration tests                                | **5501 passed / 205 files, 0 failed**                         | 5257 / 192                        | measured   |
-| All vitest suites (unit+int+contract)                   | **5524 passed / 212 files, 0 failed**                         | —                                 | measured   |
-| Coverage — statements                                   | **93.99 %** (15843/16855)                                     | never recorded                    | measured   |
-| Coverage — lines                                        | **95.55 %** (14891/15583)                                     | never recorded                    | measured   |
-| Coverage — functions                                    | **91.97 %** (2669/2902)                                       | never recorded                    | measured   |
-| Coverage — branches                                     | **86.49 %** (7003/8096)                                       | never recorded                    | measured   |
-| Coverage floor gate                                     | ok — statements 93.99 % against floor 70 %                    | —                                 | measured   |
-| oxlint warnings (`oxlint src/`)                         | **547**, exit 0                                               | 471                               | measured   |
-| knip hints                                              | **0** (empty output, exit 0)                                  | "four configuration hints" (C-05) | measured   |
-| Production import cycles (madge)                        | **22**                                                        | "four" (C-11, no tool)            | measured   |
-| Playwright — default config                             | 292 tests in 41 files                                         | 293 passed (full suite)           | measured   |
-| Playwright — `prod` config                              | 292 tests in 41 files                                         | —                                 | measured   |
-| Playwright — `native` config                            | 82 tests in 14 files                                          | —                                 | measured   |
-| Playwright — `fullstack` config                         | 16 tests in 5 files                                           | —                                 | measured   |
-| Playwright — `admin` config                             | 1 test in 1 file                                              | —                                 | measured   |
-| Stryker dry run                                         | 76 files, 12 822 mutants, initial run 5412 tests in 2 m 48 s  | 67.04 % score, stale (C-16)       | measured   |
-| Mutation score                                          | **not measured** — B7-8's milestone (PRD open question 5)     | 67.04 % (stale)                   | deferred   |
-| Files importing `@tauri-apps`                           | **21**                                                        | 20 claimed in `Client/CLAUDE.md`  | measured   |
-| Distinct `invoke` names                                 | **29**                                                        | 29                                | measured   |
-| `#[tauri::command]` attributes                          | **33** (34 before the `probe_credential_store` deletion)      | 34                                | measured   |
-| `generate_handler!` entries                             | **31** (30 unconditional + `open_devtools` behind `devtools`) | 32 before the deletion            | measured   |
-| Rust tests                                              | 152 passed, 0 failed; `cargo clippy --all-targets` clean      | 115, carried                      | measured   |
-| Colocated `src/**/*.test.ts`                            | 0 (glob already in `vitest.config.ts`)                        | —                                 | measured   |
-| Test files: unit / contract / int / browser / e2e specs | 203 / 7 / 2 / 1 / 61                                          | —                                 | measured   |
-| Startup time                                            | **not measurable here** — see "Startup and memory"            | never recorded                    | unverified |
-| Memory                                                  | **not measurable here** — see "Startup and memory"            | never recorded                    | unverified |
+| Measure                                                 | Value                                                                                 | B0 (2026-08-25)                   | Provenance |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------- | ---------- |
+| Unit + integration tests                                | **5501 passed / 205 files, 0 failed**                                                 | 5257 / 192                        | measured   |
+| All vitest suites (unit+int+contract)                   | **5524 passed / 212 files, 0 failed**                                                 | —                                 | measured   |
+| Coverage — statements                                   | **93.99 %** (15843/16855)                                                             | never recorded                    | measured   |
+| Coverage — lines                                        | **95.55 %** (14891/15583)                                                             | never recorded                    | measured   |
+| Coverage — functions                                    | **91.97 %** (2669/2902)                                                               | never recorded                    | measured   |
+| Coverage — branches                                     | **86.49 %** (7003/8096)                                                               | never recorded                    | measured   |
+| Coverage floor gate                                     | ok — statements 93.99 % against floor 70 %                                            | —                                 | measured   |
+| oxlint warnings (`oxlint src/`)                         | **547**, exit 0                                                                       | 471                               | measured   |
+| knip hints                                              | **0** (empty output, exit 0)                                                          | "four configuration hints" (C-05) | measured   |
+| Production import cycles (madge)                        | **22**                                                                                | "four" (C-11, no tool)            | measured   |
+| Playwright — default config                             | 292 tests in 41 files                                                                 | 293 passed (full suite)           | measured   |
+| Playwright — `prod` config                              | 292 tests in 41 files                                                                 | —                                 | measured   |
+| Playwright — `native` config                            | 82 tests in 14 files                                                                  | —                                 | measured   |
+| Playwright — `fullstack` config                         | 16 tests in 5 files                                                                   | —                                 | measured   |
+| Playwright — `admin` config                             | 1 test in 1 file                                                                      | —                                 | measured   |
+| Stryker dry run                                         | 76 files, 12 822 mutants, initial run 5412 tests in 2 m 48 s                          | 67.04 % score, stale (C-16)       | measured   |
+| Mutation score                                          | **not measured** — B7-8's milestone (PRD open question 5)                             | 67.04 % (stale)                   | deferred   |
+| Files importing `@tauri-apps`                           | **21**                                                                                | 20 claimed in `Client/CLAUDE.md`  | measured   |
+| Distinct `invoke` names                                 | **29**                                                                                | 29                                | measured   |
+| `#[tauri::command]` attributes                          | **33** (34 before the `probe_credential_store` deletion)                              | 34                                | measured   |
+| `generate_handler!` entries                             | **31** (30 unconditional + `open_devtools` behind `devtools`)                         | 32 before the deletion            | measured   |
+| Rust tests                                              | 152 passed, 0 failed; `cargo clippy --all-targets` clean                              | 115, carried                      | measured   |
+| Colocated `src/**/*.test.ts`                            | 0 (glob already in `vitest.config.ts`)                                                | —                                 | measured   |
+| Test files: unit / contract / int / browser / e2e specs | 203 / 7 / 2 / 1 / 61                                                                  | —                                 | measured   |
+| Startup time                                            | **598 ms** (2026-09-20 amendment, Windows 11, `tauri dev`) — see "Startup and memory" | never recorded                    | measured   |
+| Memory                                                  | **380 MB** WebView RSS (+42 MB host), same amendment — see "Startup and memory"       | never recorded                    | measured   |
 
 ### Bundle sizes (measured)
 
@@ -206,14 +207,18 @@ the now-unused `Backend` import from `credentials.rs`.
 
 **Amended 2026-09-20 (owner decision): startup and memory measured on a real desktop.**
 
-Measured on a Windows 11 developer desktop with `cd Client && npm run tauri dev`
+Measured from `dev` at `d8dce49decb4a59fbb332df3ff259db7819e7d4b` (#1638), not at
+this document's base commit `058fbabb`, on a Windows 11 developer desktop with `cd Client && npm run tauri dev`
 (Vite dev server, not a production build): time-to-connect-page was **598 ms**,
 navigation start to the connect form's first paint, read from the WebView2
 devtools Performance timeline. Largest contentful paint landed in the same frame
 (0.60 s), so the connect form is what paints first and no splash precedes it.
 The WebView held **380 MB** RSS across its six processes after 60 s idle on the
-connect page; `owncord-client.exe` itself, a seventh process, held 42 MB. One
-correction to the method above: `tauri dev` runs `cargo run
+connect page; `owncord-client.exe` itself, a seventh process, held 42 MB. Memory was read in a
+separate clean relaunch with DevTools **closed**, idled 60 s; with DevTools open
+the same process tree reads ~1,598 MB across nine processes (one ~926 MB process
+holds the trace recording), so the timeline run and the memory run must be
+separate. One correction to the method above: `tauri dev` runs `cargo run
 --no-default-features`, and the devtools entry point is the `open_devtools`
 command behind the `devtools` cargo feature, so `npm run tauri dev -- --features
 devtools` is required — without it F12, Ctrl+Shift+I and the in-app DevTools
@@ -230,8 +235,7 @@ half is recorded above.
 - **B7-8** owns the mutation score; the dry run proves the harness runs.
 - **B7-11** starts from 45 ad-hoc `AbortController` owners and 392/28
   listener add/remove sites.
-- **HP-7** cannot cite a startup or memory baseline until someone runs the
-  method above on a real desktop and appends the numbers to this file.
+- **HP-7** cites the 2026-09-20 startup/memory baseline above (598 ms, 380 MB).
 
 ## B7-7 bundle-budget baseline (2026-09-20)
 
