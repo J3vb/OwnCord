@@ -23,6 +23,7 @@ function harness(env = {}, vu = 1, files = {}) {
   const timeouts = [];
   const connects = [];
   const logins = [];
+  const sleeps = [];
   let closes = 0;
   let body = {};
   let dialMs = 0;
@@ -50,7 +51,7 @@ function harness(env = {}, vu = 1, files = {}) {
     },
     open: (path) => files[path],
     check: () => true,
-    sleep: () => {},
+    sleep: (seconds) => sleeps.push(seconds),
     crypto: globalThis.crypto,
     http: {
       post: (url, payload, params) => {
@@ -93,6 +94,7 @@ function harness(env = {}, vu = 1, files = {}) {
     connects,
     logins,
     closes: () => closes,
+    sleeps,
     evaluate,
     // How long the next ws.connect takes to open, on the harness clock.
     dialTakes: (ms) => {
@@ -107,6 +109,8 @@ function harness(env = {}, vu = 1, files = {}) {
       handlers.message('{"type":"ready"}');
     },
     receive: (frame) => handlers.message(JSON.stringify(frame)),
+    // The socket's `close` event, as k6 fires it when the connection ends.
+    close: () => handlers.close(),
     observe: (sample) => {
       body = sample;
       evaluate("observerScenario()");
@@ -923,4 +927,83 @@ test("scale thresholds: existing budgets per phase, D3 herd and login-burst gate
   assert.deepEqual(steady.acknowledgement, { p50_ms: 4, p95_ms: 9, p99_ms: 12, sample_count: 900 });
   assert.deepEqual(steady.delivery, { p50_ms: null, p95_ms: null, p99_ms: null, sample_count: 0 });
   assert.ok(Number.isFinite(summary.run_start_epoch_ms));
+});
+
+test("capacity gates: live peak, delivery floor and every voice join are thresholds", () => {
+  const voice = { K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "7" };
+  const capacity = harness({ K6_PROFILE: "capacity", K6_PEAK_VUS: "10", ...voice });
+  const t = (h, name) =>
+    JSON.parse(h.evaluate(`JSON.stringify(options.thresholds["${name}"] ?? null)`)) ?? undefined;
+  assert.deepEqual(t(capacity, "ws_ready"), ["count>=10"]);
+  assert.deepEqual(t(capacity, "ws_unexpected_closes"), ["count==0"]);
+  assert.deepEqual(t(capacity, "ws_deliveries"), [
+    `count>=${capacity.evaluate("minDeliveries(SUSTAIN_S)")}`,
+  ]);
+  assert.ok(capacity.evaluate("minDeliveries(SUSTAIN_S)") > 1);
+  assert.deepEqual(t(capacity, "voice_vus_joined"), ["count>=7"]);
+  assert.deepEqual(t(capacity, "voice_tokens"), ["count>0"]);
+  for (const env of [
+    { K6_PROFILE: "ceiling-search", K6_CEILING_CHANNELS: channels(11) },
+    scaleEnv(),
+  ]) {
+    const h = harness(env);
+    assert.deepEqual(t(h, "ws_ready"), ["count>0"]);
+    assert.deepEqual(t(h, "ws_deliveries"), ["count>0"]);
+    assert.equal(t(h, "ws_unexpected_closes"), undefined);
+  }
+});
+
+test("capacity counts a server-initiated close once ready, never its own hold-end close", () => {
+  const dropped = harness({ K6_PROFILE: "capacity" });
+  dropped.start();
+  dropped.close();
+  assert.equal(dropped.metrics.ws_unexpected_closes?.length ?? 0, 1);
+
+  const held = harness({ K6_PROFILE: "capacity" });
+  held.start();
+  held.timeouts.at(-1).callback(); // hold end: the script closes its own socket
+  held.close();
+  assert.equal(held.metrics.ws_unexpected_closes?.length ?? 0, 0);
+});
+
+test("capacity counts a VU's first voice_token once, however many arrive", () => {
+  const h = harness({ K6_PROFILE: "capacity", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "2" });
+  h.start();
+  h.receive({ type: "voice_token", payload: {} });
+  h.receive({ type: "voice_token", payload: {} });
+  assert.equal(h.metrics.voice_tokens.length, 2);
+  assert.equal(h.metrics.voice_vus_joined.length, 1);
+});
+
+test("capacity closes every socket itself before ramp-down, however late the VU dials in", () => {
+  const h = harness({ K6_PROFILE: "capacity" });
+  const sustainEndS = h.evaluate("RAMP_S + SUSTAIN_S");
+  h.at(h.evaluate("RAMP_S") - 1); // the last VU of the ramp
+  h.start();
+  const hold = h.timeouts.at(-1);
+  assert.ok(hold.ms <= (sustainEndS - h.evaluate("RAMP_S") + 1) * 1000, "hold ends by ramp-down");
+  hold.callback();
+  h.close();
+  assert.equal(h.metrics.ws_unexpected_closes?.length ?? 0, 0);
+});
+
+test("capacity VU keeps its slot to scenario end after its early close, so it cannot redial during ramp-down", () => {
+  const h = harness({ K6_PROFILE: "capacity" });
+  h.at(h.evaluate("RAMP_S") - 1);
+  h.start();
+  const endS = h.evaluate("RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN)");
+  const leftS = endS - (h.evaluate("RAMP_S") - 1);
+  assert.ok(Math.max(...h.sleeps) >= leftS, "sleeps through the rest of the scenario");
+});
+
+test("voice_vus_joined counts every VU that joins voice, including the one past VOICE_VUS the observer's slot widens", () => {
+  // The observer holds any one id, so the ws VUs that join are the first
+  // VOICE_VUS + 1 ids minus the observer's: ids 1..3 here, observer anywhere.
+  const env = { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "2" };
+  for (const vu of [1, 3]) {
+    const h = harness(env, vu);
+    h.start();
+    h.receive({ type: "voice_token", payload: {} });
+    assert.equal(h.metrics.voice_vus_joined.length, 1, `vu ${vu} counted`);
+  }
 });
