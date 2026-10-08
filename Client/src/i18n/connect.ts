@@ -66,6 +66,7 @@ export const connectText = defineCatalog("connect", {
   "servers.add.hostLabel": "Host Address",
   "servers.add.submit": "Add Server",
   "servers.add.invalidHost": "Invalid server address (expected host or host:port)",
+  "servers.add.duplicateHost": "This server is already in your list.",
 
   "incompatible.clientOlder":
     "{host}: this client speaks protocol epoch {clientEpoch} but the server needs {serverEpoch}; update the client.",

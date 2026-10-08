@@ -336,6 +336,10 @@ export function createProfileManager(backend: SettingsStore, fetchFn?: FetchFn):
     },
 
     addProfile(data: CreateProfileData): ServerProfile {
+      // One profile per host: credentials are keyed by host alone.
+      const host = data.host.toLowerCase();
+      const existing = currentProfiles().find((p) => p.host.toLowerCase() === host);
+      if (existing) return existing;
       const profile: ServerProfile = {
         ...data,
         id: crypto.randomUUID(),
