@@ -6,6 +6,7 @@
  */
 
 import {
+  AudioPresets,
   Track,
   VideoPreset,
   VideoPresets,
@@ -18,6 +19,7 @@ import {
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
   type AudioCaptureOptions,
+  type TrackPublishOptions,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
@@ -72,8 +74,27 @@ export function cameraSimulcastLayers(quality: StreamQuality): VideoPreset[] | u
  *  It only takes effect through the real picker: with
  *  `--use-fake-ui-for-media-stream` Chromium answers getDisplayMedia with the
  *  default microphone as the "screen audio" and never reads it, so the window
- *  must not pass that flag (see tauri.conf.json). */
-const SCREENSHARE_AUDIO: AudioCaptureOptions = { restrictOwnAudio: true };
+ *  must not pass that flag (see tauri.conf.json).
+ *
+ *  The captured track is game or music audio, not a voice: Chromium's voice
+ *  processing is switched off (it would duck, gate and compress it) and stereo
+ *  is requested. Published as music in `SCREENSHARE_AUDIO_PUBLISH`. */
+const SCREENSHARE_AUDIO: AudioCaptureOptions = {
+  restrictOwnAudio: true,
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 2,
+};
+
+/** Publish options for the screen-share audio track. Without them it inherits
+ *  the voice defaults: DTX (pumps quiet passages), mono, and the operator's
+ *  voice bitrate. */
+const SCREENSHARE_AUDIO_PUBLISH: TrackPublishOptions = {
+  dtx: false,
+  forceStereo: true,
+  audioPreset: AudioPresets.musicHighQualityStereo,
+};
 
 export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOptions> = {
   low: { audio: SCREENSHARE_AUDIO, resolution: ScreenSharePresets.h720fps5.resolution },
@@ -577,6 +598,7 @@ export async function enableScreenshare(
               },
             }
           : {}),
+        ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
         ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
       });
       if ((state.generation ?? 0) !== generation) {

@@ -37,6 +37,14 @@ import {
   type StreamQuality,
 } from "@lib/screenShare";
 
+const SCREENSHARE_AUDIO_CAPTURE = {
+  restrictOwnAudio: true,
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 2,
+};
+
 describe("screen share FPS", () => {
   beforeEach(() => {
     mockLoadPref.mockReset();
@@ -147,7 +155,7 @@ describe("screen share FPS", () => {
       const opts = getScreenShareCaptureOptions("high", 60);
       expect(opts.resolution?.frameRate).toBe(60);
       expect(opts.resolution?.width).toBe(SCREENSHARE_PRESETS.high.resolution?.width);
-      expect(opts.audio).toEqual({ restrictOwnAudio: true });
+      expect(opts.audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
     });
 
     it("keeps the per-quality fps at the default setting", () => {
@@ -159,15 +167,13 @@ describe("screen share FPS", () => {
       const opts = getScreenShareCaptureOptions("source", 30);
       expect(opts).not.toBe(SCREENSHARE_PRESETS.source);
       expect(opts.resolution).toBeUndefined();
-      expect(opts.audio).toEqual({ restrictOwnAudio: true });
+      expect(opts.audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
     });
 
-    it("captures screen audio with restrictOwnAudio so the call never echoes into the stream", () => {
+    it("captures screen audio unprocessed and stereo, excluding the call itself", () => {
       for (const quality of ["low", "medium", "high", "source"] as const) {
-        expect(getScreenShareCaptureOptions(quality, 30).audio).toEqual({
-          restrictOwnAudio: true,
-        });
-        expect(SCREENSHARE_PRESETS[quality].audio).toEqual({ restrictOwnAudio: true });
+        expect(getScreenShareCaptureOptions(quality, 30).audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
+        expect(SCREENSHARE_PRESETS[quality].audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
       }
     });
 

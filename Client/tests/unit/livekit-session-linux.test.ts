@@ -41,6 +41,7 @@ vi.mock("livekit-client", () => ({
   LogLevel: { warn: 3, error: 4 },
   setLogLevel: vi.fn(),
   setLogExtension: vi.fn(),
+  AudioPresets: { musicHighQualityStereo: { maxBitrate: 128_000 } },
   Room: vi.fn(function () {
     throw new Error("the web Room must not be built on Linux");
   }),
