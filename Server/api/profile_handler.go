@@ -671,7 +671,7 @@ func handleUploadAvatar(
 		if err != nil {
 			// The column never moved, so the file and its row are orphans;
 			// drop the row now so its charge does not wait for the sweep.
-			if unErr := svc.Uploads.Unrecord(r.Context(), fileID, user.ID); unErr != nil {
+			if unErr := svc.Uploads.Unrecord(context.WithoutCancel(r.Context()), fileID, user.ID); unErr != nil {
 				slog.Error("failed to remove orphaned avatar row", "stored_as", fileID, "error", unErr)
 			}
 			if delErr := store.Delete(fileID); delErr != nil {
