@@ -240,7 +240,7 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
   },
   {
     file: "lib/roomEventHandlers.ts",
-    fn: "handleDisconnected",
+    fn: "abandonRoomAndReconnect",
     category: "cancellation-token",
     reason: "owner: the next attempt, which aborts this one",
   },

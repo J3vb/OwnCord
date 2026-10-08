@@ -38,6 +38,10 @@ const DECRYPT_GRACE_MS = 3000;
  *  re-report cadence while a peer keeps failing. */
 const NATIVE_DECRYPT_QUIET_MS = 2500;
 
+/** How long the SDK may spend resuming a cut signal connection before the
+ *  widget abandons the room (see armStallTimer). */
+const SIGNAL_RESUME_BUDGET_MS = 10_000;
+
 /** Polish #21: how long without a remote decrypt failure before a decrypt
  *  degradation counts as recovered on the browser path (the native room
  *  re-reports every second while a peer fails, so its shorter quiet window
@@ -137,6 +141,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   // must not clear it.
   let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallRoom: import("livekit-client").Room | null = null;
   /** Room key installs so far. A decrypt streak continues only while this is
    *  unchanged, so event order never rests on clock resolution. */
   let keyInstalls = 0;
@@ -266,8 +272,35 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     document.addEventListener("click", autoplayUnlockHandler, { once: true });
   };
 
+  /** Drop the session room without leaving the call and run the app's own
+   *  reconnect loop with the stored token. False when there is nothing to
+   *  reconnect with (no token, channel or URL). */
+  function abandonRoomAndReconnect(): boolean {
+    const token = deps.getLatestToken();
+    const url = deps.getLastUrl();
+    const channelId = deps.getCurrentChannelId();
+    if (token === null || url === null || channelId === null) return false;
+    const directUrl = deps.getLastDirectUrl();
+    // Clean up current room without sending WS leave (we're reconnecting, not leaving).
+    deps.teardownForReconnect();
+    removeAutoplayUnlock();
+    deps.getAudioElements().cleanupAllAudioElements();
+    const room = deps.getRoom();
+    if (room !== null) {
+      deps.setRoom(null);
+      deps.syncModuleRooms();
+      detachRoom(room);
+      room.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
+    }
+    const ac = new AbortController();
+    deps.setReconnectAc(ac);
+    void deps.attemptAutoReconnect(token, url, channelId, directUrl, ac.signal);
+    return true;
+  }
+
   const handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
+    clearStallTimer();
     if (deps.isConnecting() || deps.isReconnecting()) {
       // The bundled livekit-client fires this event synchronously on every
       // failed reconnect attempt inside the retry loop's own room.connect()
@@ -278,36 +311,42 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
       return;
     }
     const isUnexpected = reason !== DisconnectReason.CLIENT_INITIATED;
-    if (
-      isUnexpected &&
-      deps.getLatestToken() !== null &&
-      deps.getCurrentChannelId() !== null &&
-      deps.getLastUrl() !== null
-    ) {
-      const token = deps.getLatestToken()!;
-      const url = deps.getLastUrl()!;
-      const channelId = deps.getCurrentChannelId()!;
-      const directUrl = deps.getLastDirectUrl();
-      // Clean up current room without sending WS leave (we're reconnecting, not leaving).
-      deps.teardownForReconnect();
-      removeAutoplayUnlock();
-      deps.getAudioElements().cleanupAllAudioElements();
-      const room = deps.getRoom();
-      if (room !== null) {
-        deps.setRoom(null);
-        deps.syncModuleRooms();
-        detachRoom(room);
-        room.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
-      }
-      const ac = new AbortController();
-      deps.setReconnectAc(ac);
-      void deps.attemptAutoReconnect(token, url, channelId, directUrl, ac.signal);
-      return;
-    }
+    if (isUnexpected && abandonRoomAndReconnect()) return;
     deps.leaveVoice(false);
     leaveVoiceChannel();
     if (isUnexpected) deps.getOnErrorCallback()?.(voiceText("event.voiceDisconnected"));
   };
+
+  /** The SDK resumes a cut signal socket up to 10 times, each allowed 15 s,
+   *  before it emits Disconnected, so a cut nobody answers freezes every stream
+   *  for minutes. Once the budget passes without Reconnected or Disconnected
+   *  the room is abandoned for the app's own loop, which also rejoins when the
+   *  server has released the membership. The first event arms it; the
+   *  Reconnecting that follows SignalReconnecting does not extend it. */
+  function clearStallTimer(): void {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer);
+      stallTimer = null;
+      stallRoom = null;
+    }
+  }
+
+  function armStallTimer(room: import("livekit-client").Room): void {
+    if (stallTimer !== null && stallRoom === room) return;
+    clearStallTimer();
+    stallRoom = room;
+    stallTimer = setTimeout(() => {
+      stallTimer = null;
+      stallRoom = null;
+      // Only the room that stalled: the user may have left or a newer attempt
+      // replaced it while the SDK was retrying.
+      if (deps.getRoom() !== room) return;
+      log.warn("LiveKit resume stalled — abandoning room for the reconnect loop", {
+        budgetMs: SIGNAL_RESUME_BUDGET_MS,
+      });
+      abandonRoomAndReconnect();
+    }, SIGNAL_RESUME_BUDGET_MS);
+  }
 
   /** RT-9: livekit-client (and the native room) retry a dropped signal socket
    *  on their own — RoomEvent.SignalReconnecting / Reconnecting — before they
@@ -316,10 +355,14 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  "connected" and "reconnecting", so a join still securing its key and the
    *  retry loop's own attempt rooms are left alone. */
   const handleSdkReconnecting = (): void => {
-    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "connected")
-      setVoiceStatus("reconnecting");
+    const room = deps.getRoom();
+    const status = voiceStore.getState().voiceStatus;
+    if (room === null || (status !== "connected" && status !== "reconnecting")) return;
+    if (status === "connected") setVoiceStatus("reconnecting");
+    armStallTimer(room);
   };
   const handleSdkReconnected = (): void => {
+    clearStallTimer();
     if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "reconnecting")
       setVoiceStatus("connected");
   };
