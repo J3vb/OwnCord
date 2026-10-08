@@ -469,7 +469,6 @@ export function buildTauriMockScript(opts: {
     roles?: unknown[];
     dm_channels?: unknown[];
     notices?: unknown[];
-    roles?: unknown[];
   };
   /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
    *  same init script, because Playwright does not order separate
