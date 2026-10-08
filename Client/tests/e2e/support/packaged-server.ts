@@ -102,13 +102,13 @@ export async function preparePackagedServer() {
       replacements[path] = destination;
     };
     const updater = await readFile(updaterPath, "utf8");
-    if (!updater.includes("&http.Client{Timeout: 30 * time.Second}"))
+    if (!updater.includes("u.httpClient = &http.Client{"))
       throw new Error("Updater constructor changed: review test transport overlay");
     await overlay(
       updaterPath,
       updater.replace(
-        "&http.Client{Timeout: 30 * time.Second}",
-        "&http.Client{Timeout: 30 * time.Second, Transport: e2eReleaseTransport{}}",
+        "u.httpClient = &http.Client{",
+        "u.httpClient = &http.Client{\n\t\tTransport: e2eReleaseTransport{},",
       ) +
         `
 // Upstream fixture transport, compiled only by this test's Go overlay.

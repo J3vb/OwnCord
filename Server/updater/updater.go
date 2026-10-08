@@ -102,14 +102,27 @@ type Updater struct {
 
 // NewUpdater creates an Updater for the given repository.
 func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Updater {
-	return &Updater{
+	u := &Updater{
 		currentVersion: currentVersion,
 		githubToken:    githubToken,
 		repoOwner:      repoOwner,
 		repoName:       repoName,
-		httpClient:     &http.Client{Timeout: 30 * time.Second},
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
+	// Each redirect hop passes the same host check as the first request.
+	u.httpClient = &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("stopped after %d redirects", len(via))
+			}
+			if !u.trustedURL(req.URL.String()) {
+				return fmt.Errorf("refusing redirect to %s: not a GitHub release host", req.URL.Host)
+			}
+			return nil
+		},
+	}
+	return u
 }
 
 // SetBaseURL overrides the GitHub API base URL (for testing).

@@ -712,3 +712,127 @@ func TestConfigOverridesSensitive_SelfSignedPartialPairMustBeTruncatable(t *test
 		t.Fatal("a refused self-signed PATCH wrote overrides")
 	}
 }
+
+// In a container a self-signed pair outside data_dir would vanish with the
+// container, and a missing half makes the next boot write the other path:
+// both files must live under data_dir, like every other path the server writes.
+func TestConfigOverridesSensitive_SelfSignedPairConfinedToDataDirInContainer(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	tlsKeys := []string{"tls.mode", "tls.cert_file", "tls.key_file"}
+	t.Setenv("OWNCORD_CONTAINER", "1")
+
+	outside := t.TempDir()
+	for _, tc := range []struct{ key, cert, keyFile string }{
+		{"tls.cert_file", filepath.Join(outside, "cert.pem"), filepath.Join(f.dataDir, "key.pem")},
+		{"tls.key_file", filepath.Join(f.dataDir, "cert.pem"), filepath.Join(outside, "key.pem")},
+	} {
+		body := map[string]any{"tls.mode": "self_signed", "tls.cert_file": tc.cert, "tls.key_file": tc.keyFile}
+		if w := patchConfig(t, f.handler, token, body, tlsKeys, ""); w.Code != http.StatusBadRequest ||
+			!strings.Contains(w.Body.String(), tc.key) {
+			t.Errorf("PATCH self_signed with %s outside data_dir in a container = %d %s, want 400 naming it", tc.key, w.Code, w.Body.String())
+		}
+	}
+	if len(savedOverrides(t, f.dataDir)) != 0 {
+		t.Fatal("a refused self-signed PATCH wrote overrides")
+	}
+	body := map[string]any{
+		"tls.mode":      "self_signed",
+		"tls.cert_file": filepath.Join(f.dataDir, "cert.pem"),
+		"tls.key_file":  filepath.Join(f.dataDir, "key.pem"),
+	}
+	if w := patchConfig(t, f.handler, token, body, tlsKeys, ""); w.Code != http.StatusOK {
+		t.Errorf("PATCH self_signed inside data_dir in a container = %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// plugins.directory is where a plugin install renames aside and removes
+// <directory>/<name>, so it must be a directory of its own: never
+// data_dir, the uploads directory or the backups directory, nor one holding
+// them, and in a container it must live under data_dir.
+func TestConfigOverridesSensitive_PluginsDirGuard(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	pluginsKey := []string{"plugins.directory"}
+	refused := func(dir, why string) {
+		t.Helper()
+		if w := patchConfig(t, f.handler, token, map[string]any{"plugins.directory": dir}, pluginsKey, ""); w.Code != http.StatusBadRequest ||
+			!strings.Contains(w.Body.String(), "plugins.directory") {
+			t.Errorf("PATCH plugins.directory %s = %d %s, want 400 naming plugins.directory", why, w.Code, w.Body.String())
+		}
+	}
+
+	backupParent := t.TempDir()
+	backup := filepath.Join(backupParent, "backups")
+	if err := os.Mkdir(backup, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if w := patchConfig(t, f.handler, token, map[string]any{"backup.dir": backup}, []string{"backup.dir"}, ""); w.Code != http.StatusOK {
+		t.Fatalf("PATCH backup.dir = %d; body: %s", w.Code, w.Body.String())
+	}
+	refused(backup, "equal to backup.dir")
+	refused(backupParent, "containing backup.dir")
+	refused(f.dataDir, "equal to data_dir")
+	refused(filepath.Dir(f.dataDir), "containing data_dir")
+
+	t.Setenv("OWNCORD_CONTAINER", "1")
+	refused(t.TempDir(), "outside data_dir in a container")
+	inside := filepath.Join(f.dataDir, "plugins2")
+	if err := os.MkdirAll(inside, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if w := patchConfig(t, f.handler, token, map[string]any{"plugins.directory": inside}, pluginsKey, ""); w.Code != http.StatusOK {
+		t.Errorf("PATCH plugins.directory inside data_dir in a container = %d; body: %s", w.Code, w.Body.String())
+	}
+}
+
+// A symlink below data_dir does not make a path outside it count as inside:
+// the boot would write through the link, out of the persistent volume.
+func TestConfigOverridesSensitive_SelfSignedPairSymlinkOutOfDataDirInContainer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	t.Setenv("OWNCORD_CONTAINER", "1")
+	link := filepath.Join(f.dataDir, "tls")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"tls.mode":      "self_signed",
+		"tls.cert_file": filepath.Join(link, "cert.pem"),
+		"tls.key_file":  filepath.Join(f.dataDir, "key.pem"),
+	}
+	if w := patchConfig(t, f.handler, token, body, []string{"tls.mode", "tls.cert_file", "tls.key_file"}, ""); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), "tls.cert_file") {
+		t.Errorf("PATCH self_signed with tls.cert_file through a symlink out of data_dir = %d %s, want 400 naming tls.cert_file", w.Code, w.Body.String())
+	}
+}
+
+// The plugins directory stays apart from the uploads directory whichever side
+// a PATCH moves: moving upload.storage_dir under, or around, the current
+// plugins directory is refused like the reverse.
+func TestConfigOverridesSensitive_StorageDirMustNotOverlapPluginsDir(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	parent := t.TempDir()
+	plugins := filepath.Join(parent, "plugins")
+	inside := filepath.Join(plugins, "uploads")
+	if err := os.MkdirAll(inside, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// Non-empty, so the empty-target check does not answer first.
+	if err := os.WriteFile(filepath.Join(inside, "a.bin"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w := patchConfig(t, f.handler, token, map[string]any{"plugins.directory": plugins}, []string{"plugins.directory"}, ""); w.Code != http.StatusOK {
+		t.Fatalf("PATCH plugins.directory = %d; body: %s", w.Code, w.Body.String())
+	}
+	for _, dir := range []string{inside, parent} {
+		if w := patchConfig(t, f.handler, token, map[string]any{"upload.storage_dir": dir}, []string{"upload.storage_dir"}, ""); w.Code != http.StatusBadRequest ||
+			!strings.Contains(w.Body.String(), "plugins.directory") {
+			t.Errorf("PATCH upload.storage_dir %s overlapping plugins.directory = %d %s, want 400 naming plugins.directory", dir, w.Code, w.Body.String())
+		}
+	}
+}

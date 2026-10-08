@@ -114,7 +114,7 @@ func TestFetchTextAsset_Error(t *testing.T) {
 	}
 }
 
-// ─── shouldSendToken ────────────────────────────────────────────────────────
+// ─── trustedURL ────────────────────────────────────────────────────────
 
 func TestShouldSendToken_GitHubHost(t *testing.T) {
 	u := NewUpdater("1.0.0", "tok", "J3vb", "OwnCord")
@@ -130,9 +130,9 @@ func TestShouldSendToken_GitHubHost(t *testing.T) {
 		{"https://notgithub.example.com/foo", false},
 	}
 	for _, tc := range tests {
-		got := u.shouldSendToken(tc.url)
+		got := u.trustedURL(tc.url)
 		if got != tc.want {
-			t.Errorf("shouldSendToken(%q) = %v, want %v", tc.url, got, tc.want)
+			t.Errorf("trustedURL(%q) = %v, want %v", tc.url, got, tc.want)
 		}
 	}
 }
@@ -141,10 +141,10 @@ func TestShouldSendToken_CustomBaseURL(t *testing.T) {
 	u := NewUpdater("1.0.0", "tok", "J3vb", "OwnCord")
 	u.baseURL = "http://localhost:9090"
 
-	if !u.shouldSendToken("http://localhost:9090/repos/foo/bar") {
+	if !u.trustedURL("http://localhost:9090/repos/foo/bar") {
 		t.Error("expected true for URL matching baseURL")
 	}
-	if u.shouldSendToken("http://localhost:8080/different") {
+	if u.trustedURL("http://localhost:8080/different") {
 		t.Error("expected false for URL not matching baseURL")
 	}
 }
@@ -289,7 +289,7 @@ func TestDownloadFile_NoTokenToExternalHost(t *testing.T) {
 	defer srv.Close()
 
 	u := NewUpdater("1.0.0", "my-secret-token", "J3vb", "OwnCord")
-	// baseURL is NOT set to srv.URL, so shouldSendToken returns false.
+	// baseURL is NOT set to srv.URL, so trustedURL returns false.
 
 	dest := t.TempDir() + "/download2.bin"
 	err := u.downloadFile(context.Background(), srv.URL+"/file", dest)
