@@ -301,13 +301,14 @@ pub async fn native_voice_set_microphone(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
     enabled: bool,
+    bitrate: Option<u64>,
 ) -> Result<(), String> {
     state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_microphone(enabled)
+        .set_microphone(enabled, bitrate)
         .await
 }
 

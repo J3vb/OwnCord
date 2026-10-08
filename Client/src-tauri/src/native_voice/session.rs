@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::{TrackPublishOptions, VideoEncoding};
+use livekit::options::{AudioEncoding, TrackPublishOptions, VideoEncoding};
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -507,6 +507,17 @@ pub struct NativeSession {
     forwarder: tokio::task::JoinHandle<()>,
 }
 
+/// The microphone's publish options: the channel's configured bitrate
+/// (`voice_config`, the web path's `audioPreset`), or the SDK's own default
+/// (48 kbps) when no config reached the client.
+fn mic_publish_options(bitrate: Option<u64>) -> TrackPublishOptions {
+    TrackPublishOptions {
+        source: TrackSource::Microphone,
+        audio_encoding: bitrate.map(|max_bitrate| AudioEncoding { max_bitrate }),
+        ..Default::default()
+    }
+}
+
 impl NativeSession {
     /// Connect with the room key already installed: the TS key exchange
     /// finishes before `room.connect()` on every platform, so a session with
@@ -622,7 +633,11 @@ impl NativeSession {
     /// new frame cryptor — rust-sdks #1408), and the OS capture is stopped
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
-    pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
+    pub async fn set_microphone(
+        &mut self,
+        enabled: bool,
+        bitrate: Option<u64>,
+    ) -> Result<(), String> {
         let was_withdrawn = enabled && self.mic_withdrawn.take();
         if was_withdrawn {
             // The SFU dropped the publication; the track is dead. Best effort
@@ -647,7 +662,9 @@ impl NativeSession {
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
             self.capture.start(source.clone())?;
             self.mic_source = Some(source.clone());
-            let published = self.publish_audio(RtcAudioSource::Native(source)).await;
+            let published = self
+                .publish_audio(RtcAudioSource::Native(source), bitrate)
+                .await;
             if published.is_err() {
                 self.capture.stop();
                 self.mic_source = None;
@@ -678,16 +695,17 @@ impl NativeSession {
 
     /// Publish any audio source as the microphone track. The app passes its
     /// capture's source; the interop example passes a synthetic sine.
-    pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {
+    pub async fn publish_audio(
+        &mut self,
+        source: RtcAudioSource,
+        bitrate: Option<u64>,
+    ) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
         self.room
             .local_participant()
             .publish_track(
                 LocalTrack::Audio(track.clone()),
-                TrackPublishOptions {
-                    source: TrackSource::Microphone,
-                    ..Default::default()
-                },
+                mic_publish_options(bitrate),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -1153,6 +1171,18 @@ mod tests {
             can_publish_sources: sources.iter().map(|s| *s as i32).collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn mic_publish_options_carry_the_configured_bitrate() {
+        let o = mic_publish_options(Some(96_000));
+        assert!(matches!(o.source, TrackSource::Microphone));
+        assert_eq!(o.audio_encoding.map(|e| e.max_bitrate), Some(96_000));
+    }
+
+    #[test]
+    fn mic_publish_options_keep_the_sdk_default_without_a_bitrate() {
+        assert!(mic_publish_options(None).audio_encoding.is_none());
     }
 
     #[test]

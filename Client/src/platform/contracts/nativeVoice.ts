@@ -211,7 +211,10 @@ export interface NativeVoice {
   ): Promise<NativeVoiceConnected>;
   /** Close `session` if it is still the live one; a stale id is a no-op. */
   disconnect(session: number): Promise<NativeVoiceResources>;
-  setMicrophone(session: number, enabled: boolean): Promise<void>;
+  /** `bitrate` (bits/s) is the channel's configured voice bitrate, applied
+   *  when this enable publishes the microphone; omitted, the host keeps its
+   *  default. */
+  setMicrophone(session: number, enabled: boolean, bitrate?: number): Promise<void>;
   /** Push-to-talk's gate: closed, the open capture sends silence (DP-30). */
   setPttGated(session: number, gated: boolean): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
