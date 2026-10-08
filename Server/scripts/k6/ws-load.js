@@ -731,7 +731,8 @@ const SCALE_STAGES = [
 // "100 simultaneous connections" is the claim under test: if each VU closed
 // its socket mid-run and re-iterated, the peak would only hold in the gaps
 // between iterations, and the number published would be a ceiling nobody
-// sustained. k6 closes whatever is still open during ramp-down.
+// sustained. Capacity VUs close their own socket at the start of ramp-down;
+// other profiles leave whatever is still open to k6 during ramp-down.
 const HOLD_MS = TOTAL_S * 1000;
 
 export const options = {
