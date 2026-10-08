@@ -494,11 +494,11 @@ test.describe("Per-user volume menu", () => {
     // Arrow keys are the honest way to drive a native range control.
     await slider.focus();
     for (let i = 0; i < 10; i++) {
-      await slider.press("ArrowRight");
+      await slider.press("ArrowLeft");
     }
-    await expect(menu.locator(".slider-val")).toHaveText("110%");
+    await expect(menu.locator(".slider-val")).toHaveText("90%");
     await expect(
-      menu.locator(".context-menu-item", { hasText: "User Volume: 110%" }),
+      menu.locator(".context-menu-item", { hasText: "User Volume: 90%" }),
     ).toBeVisible();
 
     // Dismiss, then reopen: the saved volume is what the menu reads back.
@@ -507,9 +507,9 @@ test.describe("Per-user volume menu", () => {
 
     await row.click({ button: "right" });
     await expect(page.locator(".user-vol-menu")).toBeVisible({ timeout: 3_000 });
-    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("110");
+    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("90");
     // The label was seeded from the saved volume too, not defaulted.
-    await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("110%");
+    await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("90%");
   });
 
   test("Reset Volume returns the slider and label to 100%", async ({ page }) => {
@@ -522,9 +522,9 @@ test.describe("Per-user volume menu", () => {
     const slider = menu.locator("input.settings-slider");
     await slider.focus();
     for (let i = 0; i < 5; i++) {
-      await slider.press("ArrowRight");
+      await slider.press("ArrowLeft");
     }
-    await expect(menu.locator(".slider-val")).toHaveText("105%");
+    await expect(menu.locator(".slider-val")).toHaveText("95%");
 
     await menu.locator(".context-menu-item", { hasText: "Reset Volume" }).click();
 
