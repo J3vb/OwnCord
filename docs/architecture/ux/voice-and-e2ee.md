@@ -127,7 +127,7 @@ headphone-slash badge for a muted or deafened user are on camera tiles. A
 **Show chat** control in the grid's header leaves the grid or focus view for
 the chat without leaving the call.
 A remote tile's volume slider is named for whose it is ("Otto stream volume"
-for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %) and
+for screen-share audio, 0–100 %; "Otto voice volume" for the mic, also 0–100 %) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
 `components/video-grid/tile-menu.ts`, loaded on first use) keeps the two
 volumes apart and offers Mute stream and **Stop watching**, which hides the
@@ -197,7 +197,7 @@ reflects their `speaking/muted/deafened/camera/screenshare`. **Target:**
 | `voice_leave`     | Remove the tile; if it's us (kick/disconnect), clear local voice state (already `handleVoiceLeave`, `features/voice/wsHandlers.ts`) |
 | key-holder change | Invisible to users (re-election is automatic on leave); no UI churn                                                                 |
 
-Per-user volume is adjustable and persisted (`userVolume_{id}` in the Rust store).
+Per-user volume is adjustable (0–100%; saved values above 100% are read as 100%) and persisted (`userVolume_{id}` in the Rust store).
 
 ---
 

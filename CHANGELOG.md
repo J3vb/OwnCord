@@ -54,6 +54,7 @@ and only when it changes something a contributor or fork holder must do
 ### Fixed
 
 - **Full screen for a popped-out stream**: full screen on a popped-out stream or camera showed an empty tile while the video stayed in the pop-out window — fullscreen from a popped-out stream moves it into the main window's fullscreen view; leaving fullscreen returns it to the grid (Pop out re-pops it).
+- **Voice join**: a saved per-user or output volume above 100% could make joining a voice channel fail. Volumes now top out at 100%: the sliders end there, and older saved values above it play at 100%.
 - **Nightly mutation score**: the nightly run now adds the six shard reports into one full-surface mutation score, published as a job summary and artifact, and fails when a shard report is missing.
 - **Release gate evidence**: the pre-release check now ignores results from pull request runs of the tagged commit and refuses a commit that has no push-to-main CI run, so only the full-matrix run counts.
 - **Channel order**: moving a channel's position in the admin panel now reorders the sidebar categories live, matching what a restart shows; equal positions fall back to channel id like the server.
