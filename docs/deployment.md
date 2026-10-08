@@ -1735,7 +1735,7 @@ gh attestation verify checksums.sha256 --repo J3vb/OwnCord \
 
 # 3. The image. Resolve the tag to the digest you are actually running first:
 #    a tag is mutable and a digest is not.
-DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:latest \
+DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:${TAG#v} \
   --format '{{index .RepoDigests 0}}')
 
 # 4. Verify the attestation the release run pushed beside that digest, then
@@ -1743,7 +1743,7 @@ DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:latest \
 gh attestation verify "oci://$DIGEST" --repo J3vb/OwnCord \
   --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
   --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
-docker buildx imagetools inspect ghcr.io/j3vb/owncord-server:latest \
+docker buildx imagetools inspect ghcr.io/j3vb/owncord-server:${TAG#v} \
   --format '{{json .SBOM}}'
 
 # 5. Windows binaries additionally carry a detached minisign signature, which is
