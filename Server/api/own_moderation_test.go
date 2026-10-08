@@ -285,3 +285,15 @@ func TestOwnModeration_ReturnsAtMostTheNewestLimitRows(t *testing.T) {
 		t.Fatalf("oldest returned = %q, want 2026-01-01 00:00:06 (oldest 5 dropped)", last)
 	}
 }
+
+// TestOwnModeration_RefusesAPIToken: the read is session-only, so an
+// API-token principal (no session) gets the same 401 as logout.
+func TestOwnModeration_RefusesAPIToken(t *testing.T) {
+	database := openFileTestDB(t, filepath.Join(t.TempDir(), "owncord.db"))
+	t.Cleanup(func() { _ = database.Close() })
+	h := buildOwnModerationRouter(database)
+	tok, _ := apiTokenFor(t, database, "own-mod-token")
+	if status, body := actJSON(t, h, http.MethodGet, "/api/v1/users/me/moderation", tok, ""); status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body = %s", status, body)
+	}
+}
