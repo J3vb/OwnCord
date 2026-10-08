@@ -212,11 +212,17 @@ export class NativeRoom {
     /** An enable sends the push-to-talk gate first, so the capture opens
      *  behind it: with the key up it sends silence, never the room. A
      *  disable (mute, deafen) stops the capture whatever the gate. */
-    setMicrophoneEnabled: async (enabled: boolean): Promise<void> => {
+    setMicrophoneEnabled: async (
+      enabled: boolean,
+      _captureOptions?: unknown,
+      publishOptions?: { audioPreset?: { maxBitrate: number } },
+    ): Promise<void> => {
       // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
       if (this.sessionId === null) throw new Error("native room is not connected");
       if (enabled) await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
-      await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
+      const bitrate = publishOptions?.audioPreset?.maxBitrate;
+      if (bitrate === undefined) await desktop.nativeVoice.setMicrophone(this.sessionId, enabled);
+      else await desktop.nativeVoice.setMicrophone(this.sessionId, enabled, bitrate);
     },
     /** Only the disable is reachable: the camera path publishes its own
      *  track (`publishTrack`), as on the web path. */

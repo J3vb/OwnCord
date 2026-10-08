@@ -355,7 +355,7 @@ mod linux {
 
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
         session
-            .publish_audio(RtcAudioSource::Native(source.clone()))
+            .publish_audio(RtcAudioSource::Native(source.clone()), None)
             .await?;
         let sine = tokio::spawn(play_sine(source));
 
@@ -446,9 +446,9 @@ mod linux {
                 serde_json::json!({ "event": { "type": "threads", "phase": "mute-before", "count": process_threads() } }),
             );
             for _ in 0..mute_cycles {
-                session.set_microphone(false).await?;
+                session.set_microphone(false, None).await?;
                 tokio::time::sleep(Duration::from_millis(50)).await;
-                session.set_microphone(true).await?;
+                session.set_microphone(true, None).await?;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
             tokio::time::sleep(Duration::from_millis(500)).await;

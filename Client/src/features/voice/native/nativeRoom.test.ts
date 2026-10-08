@@ -324,6 +324,15 @@ describe("NativeRoom room surface", () => {
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, false]]);
   });
 
+  it("forwards the channel's configured audio bitrate on an enable", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await room.localParticipant.setMicrophoneEnabled(true, undefined, {
+      audioPreset: { maxBitrate: 96_000 },
+    });
+    expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, true, 96_000]]);
+  });
+
   describe("push-to-talk gate", () => {
     // DP-30 / D5: while push-to-talk is armed the capture stays open and the
     // session's gate sends silence, so a press never reopens the device.
