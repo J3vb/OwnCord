@@ -51,6 +51,10 @@ and only when it changes something a contributor or fork holder must do
 
 - **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
 
+### Changed
+
+- **Camera defaults to 720p**: a new camera now sends 720p instead of 1080p, with half the CPU cost. Choosing 1080p in Voice settings still works and now also sends a 720p layer, so viewers on a slow link get a sharp 720p picture rather than a blurry 360p one. A quality you already chose is kept.
+
 ### Fixed
 
 - **Voice stuck on "reconnecting"**: when the voice connection dropped and did not come back, the badge stayed on "reconnecting" and streams stayed frozen for minutes until you rejoined by hand. After 10 seconds the app now drops that connection and reconnects (or rejoins) on its own.

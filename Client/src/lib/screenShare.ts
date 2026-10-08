@@ -55,6 +55,15 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
   source: 8_000_000,
 };
 
+/** A 1080p camera's lower layers (the SDK adds the full-resolution one on
+ *  top). Its default 180p/360p pair leaves a viewer on a 1-3 Mbps link a
+ *  blurry 360p picture with stalls when a 720p layer would fit. Only the high
+ *  preset needs it: the 720p preset's own default layers already end at 360p
+ *  below it. Mirrored by `camera_publish_options` in native_voice/session.rs. */
+export function cameraSimulcastLayers(quality: StreamQuality): VideoPreset[] | undefined {
+  return quality === "high" ? [VideoPresets.h360, VideoPresets.h720] : undefined;
+}
+
 /** Screen-share audio: capture it, but exclude OwnCord's own playback from the
  *  captured stream. Without `restrictOwnAudio` a screen share on Windows
  *  captures system loopback — the call itself — and echoes every other caller
@@ -94,10 +103,12 @@ function loadQuality(key: string, fallback: StreamQuality): StreamQuality {
   return fallback;
 }
 
-/** The camera's quality. It keeps the `streamQuality` key it shared with the
- *  screen share before the two were split, so a saved choice carries over. */
+/** The camera's quality: 720p by default (half the encode CPU of 1080p, and a
+ *  720p tile is what a grid shows). It keeps the `streamQuality` key it shared
+ *  with the screen share before the two were split, so a saved choice carries
+ *  over. */
 export function getCameraQuality(): StreamQuality {
-  return loadQuality("streamQuality", "high");
+  return loadQuality("streamQuality", "medium");
 }
 
 /** The screen share's quality. 720p30 by default: scrolling text at 1080p
@@ -385,9 +396,11 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       await disableCamera(state, deps);
       return;
     }
+    const simulcastLayers = cameraSimulcastLayers(quality);
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
       simulcast: quality !== "source",
+      ...(simulcastLayers ? { videoSimulcastLayers: simulcastLayers } : {}),
       videoEncoding: {
         maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
         maxFramerate: quality === "low" ? 15 : 30,
