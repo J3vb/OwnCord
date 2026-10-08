@@ -247,7 +247,7 @@ interface CellEntry {
   view?: string;
 }
 
-/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-100 %) volume
  *  of a remote tile: mute, a slider named for whose it is, and its value. */
 function buildVolumeControls(config: TileConfig): {
   overlay: HTMLDivElement;

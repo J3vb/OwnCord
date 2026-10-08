@@ -1,7 +1,7 @@
 /**
  * The context menu on a remote video tile (right-click, the Menu key or
  * Shift+F10): the stream's volume (screen-share audio, 0-100 %) and the
- * person's voice volume (mic, 0-200 %), kept apart and labelled apart, plus
+ * person's voice volume (mic, 0-100 %), kept apart and labelled apart, plus
  * Mute stream and Stop watching. Same keyboard model and dismissal as the
  * voice-roster volume menu (channel-sidebar/volume-menu.ts).
  */
