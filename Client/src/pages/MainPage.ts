@@ -456,13 +456,66 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       return;
     }
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
-    ringCallees(active.id);
+    ringAfterJoin(active.id);
   }
 
-  /** Send a ring and start (or restart) the caller's 30s window. The panel
-   *  is the caller's feedback: it shows "Calling…" from here on, unless the
-   *  call is already answered (a redial from inside a live call). */
-  function ringCallees(channelId: number): void {
+  /** The server allows one call_ring per user per 3s (Server/ws/handlers_call.go);
+   *  a refused ring's error frame would also roll back a join still in flight. */
+  const RING_SPACING_MS = 3000;
+  let lastRingAt = Number.NEGATIVE_INFINITY;
+  let ringTimer: ReturnType<typeof setTimeout> | null = null;
+  let ringJoinWatch: (() => void) | null = null;
+
+  function cancelPendingRing(): void {
+    if (ringTimer !== null) clearTimeout(ringTimer);
+    ringTimer = null;
+    ringJoinWatch?.();
+    ringJoinWatch = null;
+  }
+
+  /** Ring once the caller is actually in the channel; send nothing when the
+   *  join was refused or the caller left. */
+  function ringAfterJoin(channelId: number): void {
+    cancelPendingRing();
+    const settle = (): boolean => {
+      const v = voiceStore.getState();
+      if (v.currentChannelId !== channelId) {
+        cancelPendingRing();
+        return true;
+      }
+      if (v.voiceStatus === "joining") return false;
+      ringJoinWatch?.();
+      ringJoinWatch = null;
+      ringCallees(channelId, true);
+      return true;
+    };
+    if (settle()) return;
+    ringJoinWatch = voiceStore.subscribe(() => void settle());
+  }
+
+  /** Send a ring no sooner than the server's window allows, through one owned
+   *  timer, and start (or restart) the caller's 30s window when it goes out.
+   *  The panel is the caller's feedback: it shows "Calling…" from then on,
+   *  unless the call is already answered (a redial from inside a live call). */
+  function ringCallees(channelId: number, inCall = false): void {
+    cancelPendingRing();
+    const wait = lastRingAt + RING_SPACING_MS - Date.now();
+    if (wait > 0) {
+      ringTimer = setTimeout(() => {
+        ringTimer = null;
+        const v = voiceStore.getState();
+        // A ring that follows a join needs the caller still in it; Ring again
+        // can be pressed outside a call, where only a move elsewhere drops it.
+        const here = v.currentChannelId === channelId;
+        if (here || (!inCall && v.currentChannelId === null)) sendRing(channelId);
+      }, wait);
+      return;
+    }
+    sendRing(channelId);
+  }
+
+  function sendRing(channelId: number): void {
+    lastRingAt = Date.now();
     ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
@@ -1496,6 +1549,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function destroy(): void {
     log.info("MainPage destroying");
     tornDown = true;
+    cancelPendingRing();
     try {
       // closeSettings() is otherwise only ever called from the overlay's own
       // onClose — a non-user-initiated unmount (401, ban, server shutdown)
