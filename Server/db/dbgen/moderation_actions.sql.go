@@ -398,9 +398,8 @@ func (q *Queries) ListUnacknowledgedWarnings(ctx context.Context, targetID int64
 
 const retireRetiredCandidates = `-- name: RetireRetiredCandidates :execrows
 DELETE FROM moderation_actions
- WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < ?1)
-    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < ?1))
-   AND id NOT IN (SELECT server_muted_by FROM voice_states WHERE server_muted_by IS NOT NULL)
+ WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < ?1)
+    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < ?1)
 `
 
 // The maintenance-tick retention sweep, kept only as the pre-appeals
@@ -411,7 +410,8 @@ DELETE FROM moderation_actions
 // actually runs. Warnings retire moderation.action_retention_days after
 // acknowledged_at; timeouts the same number of days after expires_at, or
 // after lifted_at when lifted early. Ban, kick and removal rows are never
-// touched here.
+// touched here. It deliberately does not consult voice_states: a schema
+// without appeals is a bare fixture with no voice-mute owners.
 func (q *Queries) RetireRetiredCandidates(ctx context.Context, cutoff *string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retireRetiredCandidates, cutoff)
 	if err != nil {

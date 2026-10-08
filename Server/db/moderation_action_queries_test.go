@@ -875,3 +875,21 @@ func TestRetireModerationActions_KeepsActionThatOwnsAVoiceMute(t *testing.T) {
 		t.Fatalf("surviving ids = %v, want [%d] (the mute owner only)", got, ownerAction)
 	}
 }
+
+// TestRetireModerationActions_BareSchemaFallback: with no appeals table the
+// documented fallback query runs, and it must not need voice_states either.
+func TestRetireModerationActions_BareSchemaFallback(t *testing.T) {
+	database, ownerID, memberID := newModerationActionsTestDB(t)
+	ctx := context.Background()
+	if _, _, err := database.TimeoutUser(ctx, memberID, ownerID, nil, "old", time.Now().Add(-100*24*time.Hour)); err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	for _, tbl := range []string{"appeals", "voice_states"} {
+		if _, err := database.ExecContext(ctx, `DROP TABLE `+tbl); err != nil {
+			t.Fatalf("drop %s: %v", tbl, err)
+		}
+	}
+	if n, err := database.RetireModerationActions(ctx, 90); err != nil || n != 1 {
+		t.Fatalf("RetireModerationActions = (%d, %v), want (1, nil)", n, err)
+	}
+}

@@ -125,11 +125,11 @@ SELECT id, kind, target_id, actor_id, actor_token, report_id, reason,
 -- actually runs. Warnings retire moderation.action_retention_days after
 -- acknowledged_at; timeouts the same number of days after expires_at, or
 -- after lifted_at when lifted early. Ban, kick and removal rows are never
--- touched here.
+-- touched here. It deliberately does not consult voice_states: a schema
+-- without appeals is a bare fixture with no voice-mute owners.
 DELETE FROM moderation_actions
- WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
-    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff)))
-   AND id NOT IN (SELECT server_muted_by FROM voice_states WHERE server_muted_by IS NOT NULL);
+ WHERE (kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
+    OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff));
 
 -- name: ListOwnModerationActions :many
 -- GET /api/v1/users/me/moderation (B9 Q6): the caller's own warning,
