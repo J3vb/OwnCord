@@ -398,12 +398,19 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 	}
 	var reporterID, subjectID, assigneeID int64
 	var channelID sql.NullInt64
-	var subjectToken sql.NullString
-	var state, outcome, detail, targetRef string
+	var subjectToken, reporterToken sql.NullString
+	var publicID, targetType, reason, state, outcome, detail, targetRef string
 	if err := database.QueryRowContext(ctx,
-		`SELECT reporter_id, subject_id, subject_token, assignee_id, channel_id, state, outcome, detail, target_ref FROM reports WHERE id = 970`,
-	).Scan(&reporterID, &subjectID, &subjectToken, &assigneeID, &channelID, &state, &outcome, &detail, &targetRef); err != nil {
+		`SELECT public_id, reporter_id, reporter_token, subject_id, subject_token, assignee_id, channel_id, target_type, reason, state, outcome, detail, target_ref FROM reports WHERE id = 970`,
+	).Scan(&publicID, &reporterID, &reporterToken, &subjectID, &subjectToken, &assigneeID, &channelID, &targetType, &reason, &state, &outcome, &detail, &targetRef); err != nil {
 		t.Fatalf("read report 970: %v", err)
+	}
+	// ListReportsMine returns these to the reporter, so they must survive.
+	if publicID != "pub-970" || targetType != "user" || reason != "spam" {
+		t.Errorf("public_id/target_type/reason = %q/%q/%q, want pub-970/user/spam unchanged", publicID, targetType, reason)
+	}
+	if reporterToken.Valid {
+		t.Errorf("reporter_token = %q, want NULL (the reporter was not erased)", reporterToken.String)
 	}
 	if subjectID != 0 || !subjectToken.Valid || subjectToken.String != "marker-tok-columns" {
 		t.Errorf("subject columns = id=%d token=%v, want id 0 and the marker token", subjectID, subjectToken)
