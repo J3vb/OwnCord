@@ -1660,7 +1660,7 @@ describe("VideoGrid", () => {
         .requestPictureInPicture;
     });
 
-    it("brings a popped-out stream back into full screen, and pops it out again after", async () => {
+    it("brings a popped-out stream into full screen, and leaves it in the grid after", async () => {
       let pipElement: Element | null = null;
       const popOut = (el: Element): void => {
         pipElement = el;
@@ -1699,13 +1699,12 @@ describe("VideoGrid", () => {
         control(SCREEN, "fullscreen").click();
         await Promise.resolve();
         expect(fullscreenElement).toBeNull();
-        expect(requestPip).toHaveBeenCalledTimes(2);
-        expect(pipElement).toBe(cell(SCREEN).querySelector("video"));
+        expect(requestPip).toHaveBeenCalledTimes(1);
+        expect(pipElement).toBeNull();
+        expect(cell(SCREEN).isConnected).toBe(true);
 
-        // A tile that was not popped out stays in the grid after full screen.
         exitPip.mockClear();
         requestPip.mockClear();
-        pipElement = null;
         control(SCREEN, "fullscreen").click();
         await Promise.resolve();
         control(SCREEN, "fullscreen").click();

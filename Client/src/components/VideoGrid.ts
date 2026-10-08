@@ -371,9 +371,6 @@ export function createVideoGrid(): VideoGridComponent {
   /** The tile in HTML full screen, or in the theatre fallback. */
   let fullscreenTile: number | null = null;
   let theatreTile: number | null = null;
-  /** The popped-out tile brought back into full screen; it pops out again
-   *  when full screen ends. */
-  let poppedBackTile: number | null = null;
   let callState = { muted: false, deafened: false, listenOnly: false };
   let exitBtn: HTMLButtonElement | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
@@ -643,7 +640,6 @@ export function createVideoGrid(): VideoGridComponent {
     // window cannot go full screen itself).
     const video = entry.el.querySelector("video");
     if (video !== null && document.pictureInPictureElement === video) {
-      poppedBackTile = tileId;
       void document.exitPictureInPicture().catch(() => {});
     }
     const request = entry.el.requestFullscreen as (() => Promise<void>) | undefined;
@@ -678,26 +674,11 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   function leaveTheatre(): void {
-    const was = theatreTile;
-    const entry = was === null ? undefined : cells.get(was);
+    const entry = theatreTile === null ? undefined : cells.get(theatreTile);
     entry?.el.classList.remove("video-cell--theatre");
     theatreTile = null;
     syncFullscreenUi();
     void callbacks.setWindowFullscreen?.(false).catch(() => {});
-    if (was !== null) popBackOut(was);
-  }
-
-  /** Return a tile brought back from its pop-out to the pop-out window. */
-  function popBackOut(tileId: number): void {
-    if (poppedBackTile !== tileId) return;
-    poppedBackTile = null;
-    cells
-      .get(tileId)
-      ?.el.querySelector("video")
-      ?.requestPictureInPicture?.()
-      .catch((err: unknown) => {
-        log.debug("Pop out refused", { userId: tileId, err });
-      });
   }
 
   /** Escape or F leaves the theatre fallback wherever focus is: a click on the
@@ -720,7 +701,6 @@ export function createVideoGrid(): VideoGridComponent {
     if (was === next) return;
     syncFullscreenUi();
     void callbacks.setWindowFullscreen?.(next !== null).catch(() => {});
-    if (was !== null) popBackOut(was);
   }
 
   /** Label the full-screen buttons and give a full-screen tile the call
