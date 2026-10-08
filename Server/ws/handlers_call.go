@@ -47,8 +47,28 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
+	// "The ring is only truthful once the caller is actually there": a ring
+	// from someone who is not in this DM's voice channel would let the callee
+	// accept a call that does not exist (D-02). Checked after RingTargets so
+	// non-participant, block and timeout refusals keep their own codes.
+	if info.VoiceChannelID != ringCmd.ChannelID {
+		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "join the call before ringing"}}
+	}
+
 	payload := buildCallSignal(MsgTypeCallIncoming, ringCmd.ChannelID, info.UserID, info.Username)
-	events := make([]Event, 0, len(targets))
+	events := make([]Event, 0, 2*len(targets))
+	// A callee who had closed the DM gets it back before the ring, in the same
+	// order as a chat send, so the client already has the channel (D-04).
+	for _, pid := range d.DMSvc.OpenForRing(ctx, ringCmd.ChannelID, targets) {
+		summary, sErr := d.DMSvc.DMSummaryFor(ctx, pid, ringCmd.ChannelID)
+		if sErr != nil {
+			continue
+		}
+		events = append(events, DMChannelOpenEvent{
+			targetUserID: pid,
+			payload:      buildJSON(wsMsg{Type: MsgTypeDMChannelOpen, Payload: summary}),
+		})
+	}
 	for _, pid := range targets {
 		events = append(events, CallSignalEvent{
 			eventType:    MsgTypeCallIncoming,

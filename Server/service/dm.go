@@ -512,6 +512,28 @@ func (s *DMService) DeclineTargets(ctx context.Context, userID, channelID int64)
 	return s.callTargets(ctx, userID, channelID, false)
 }
 
+// OpenForRing reopens the DM for every ring target who had closed it and
+// returns the ids it actually reopened, so the caller can announce each with a
+// dm_channel_open ahead of the call_incoming. Without it a callee who closed
+// the DM accepts a call into a channel their client does not have (D-04).
+// OpenDM is idempotent and reports a genuine (re)open, so an already-open DM
+// returns nothing — see the OC-0106 note in SendMessage. A failed write is
+// logged and skipped: the ring itself must still go out.
+func (s *DMService) OpenForRing(ctx context.Context, channelID int64, targets []int64) []int64 {
+	var opened []int64
+	for _, pid := range targets {
+		ok, err := s.st.OpenDM(ctx, pid, channelID)
+		if err != nil {
+			slog.Warn("DMService.OpenForRing OpenDM", "err", err, "recipient_id", pid, "channel_id", channelID)
+			continue
+		}
+		if ok {
+			opened = append(opened, pid)
+		}
+	}
+	return opened
+}
+
 func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ring bool) ([]int64, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)

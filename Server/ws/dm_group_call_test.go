@@ -221,6 +221,7 @@ func TestCallRing_ForwardsToOtherParticipants(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
 	cCarol := ws.NewTestClientWithUser(hub, carol, chID, sendCarol)
 	hub.Register(cAlice)
+	ws.SetVoiceChIDForTest(cAlice, chID) // a ring comes from inside the call
 	hub.Register(cBob)
 	hub.Register(cCarol)
 	waitRegistered(t, hub, cCarol)
@@ -307,6 +308,7 @@ func TestCallRing_RateLimited(t *testing.T) {
 	sendAlice := make(chan []byte, 64)
 	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
 	hub.Register(cAlice)
+	ws.SetVoiceChIDForTest(cAlice, chID) // a ring comes from inside the call
 	waitRegistered(t, hub, cAlice)
 
 	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
@@ -385,6 +387,7 @@ func TestCallRing_UntrustedRecipientDoesNotRing(t *testing.T) {
 	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
 	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
 	hub.Register(cAlice)
+	ws.SetVoiceChIDForTest(cAlice, chID) // a ring comes from inside the call
 	hub.Register(cBob)
 	waitRegistered(t, hub, cBob)
 
@@ -417,6 +420,7 @@ func TestCallRing_GroupWithInternalBlockStillRings(t *testing.T) {
 	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
 	cCarol := ws.NewTestClientWithUser(hub, carol, chID, sendCarol)
 	hub.Register(cAlice)
+	ws.SetVoiceChIDForTest(cAlice, chID) // a ring comes from inside the call
 	hub.Register(cBob)
 	hub.Register(cCarol)
 	waitRegistered(t, hub, cCarol)
@@ -444,5 +448,134 @@ func TestCallRing_RejectsNonPositiveChannel(t *testing.T) {
 
 	if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "BAD_REQUEST" {
 		t.Errorf("expected BAD_REQUEST for channel_id 0, got %q", code)
+	}
+}
+
+// ─── ring reopens a closed DM; ring needs the caller in the call ────────────
+
+// D-04: a ring into a DM the callee had closed must put the DM back in their
+// sidebar, and the dm_channel_open must precede the call_incoming so the client
+// already has the channel when the banner renders.
+func TestCallRing_ReopensClosedDMBeforeIncoming(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "ring-reopen-alice")
+	bob := seedMemberUser(t, database, "ring-reopen-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+	if err := database.CloseDM(context.Background(), bob.ID, chID); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+	ws.SetVoiceChIDForTest(cAlice, chID)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+	var order []string
+	for _, m := range dmCollectAll(sendBob, absenceWindow) {
+		if m["type"] == "dm_channel_open" || m["type"] == "call_incoming" {
+			order = append(order, m["type"].(string))
+		}
+	}
+	if len(order) != 2 || order[0] != "dm_channel_open" || order[1] != "call_incoming" {
+		t.Fatalf("bob's frames = %v, want [dm_channel_open call_incoming]", order)
+	}
+	open, err := database.GetUserDMChannels(context.Background(), bob.ID)
+	if err != nil {
+		t.Fatalf("GetOpenDMChannels: %v", err)
+	}
+	if len(open) != 1 || open[0].ChannelID != chID {
+		t.Errorf("bob's open DMs = %v, want the rung channel %d", open, chID)
+	}
+}
+
+// An already-open DM must not emit a dm_channel_open per ring (OC-0106): each
+// one forces every other client's reconnect onto a full resync.
+func TestCallRing_OpenDMEmitsNoChannelOpen(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "ring-open-alice")
+	bob := seedMemberUser(t, database, "ring-open-bob")
+	chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+	ws.SetVoiceChIDForTest(cAlice, chID)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+	msgs := dmCollectAll(sendBob, absenceWindow)
+	if dmFindMsgType(msgs, "call_incoming") == nil {
+		t.Fatal("bob did not receive call_incoming")
+	}
+	if dmFindMsgType(msgs, "dm_channel_open") != nil {
+		t.Error("ringing an already-open DM emitted dm_channel_open")
+	}
+}
+
+// Untrusted recipients are neither reopened nor rung.
+func TestCallRing_UntrustedRecipientIsNotReopened(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "ring-untrust-reopen-alice")
+	bob := seedMemberUser(t, database, "ring-untrust-reopen-bob")
+	chID := untrustedDMChannel(t, database, alice.ID, bob.ID)
+	if err := database.CloseDM(context.Background(), bob.ID, chID); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, make(chan []byte, 64))
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+	ws.SetVoiceChIDForTest(cAlice, chID)
+
+	hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+	msgs := dmCollectAll(sendBob, absenceWindow)
+	if dmFindMsgType(msgs, "dm_channel_open") != nil || dmFindMsgType(msgs, "call_incoming") != nil {
+		t.Error("an untrusted recipient was reopened or rung")
+	}
+}
+
+// D-02 (server half): a ring from someone who is not in that DM's voice
+// channel is refused and nobody is rung.
+func TestCallRing_RefusedWhenCallerNotInCall(t *testing.T) {
+	for name, voiceCh := range map[string]func(chID int64) int64{
+		"in no voice channel":      func(int64) int64 { return 0 },
+		"in another voice channel": func(chID int64) int64 { return chID + 1000 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			hub, database := newHandlerHub(t)
+			alice := seedOwnerUser(t, database, "ring-notin-alice")
+			bob := seedMemberUser(t, database, "ring-notin-bob")
+			chID := seedDMChannel(t, database, alice.ID, bob.ID)
+
+			sendAlice := make(chan []byte, 64)
+			sendBob := make(chan []byte, 64)
+			cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
+			cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+			hub.Register(cAlice)
+			hub.Register(cBob)
+			waitRegistered(t, hub, cBob)
+			ws.SetVoiceChIDForTest(cAlice, voiceCh(chID))
+
+			hub.HandleMessageForTest(cAlice, callMsg("call_ring", chID))
+
+			if code := dmFindErrorCode(dmCollectAll(sendAlice, absenceWindow)); code != "VOICE_ERROR" {
+				t.Errorf("expected VOICE_ERROR ringing without being in the call, got %q", code)
+			}
+			if got := dmFindMsgType(dmDrainAll(sendBob), "call_incoming"); got != nil {
+				t.Error("a ring from outside the call reached bob")
+			}
+		})
 	}
 }

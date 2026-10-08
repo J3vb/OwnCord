@@ -2020,9 +2020,15 @@ to one ring every 3 seconds per user — per _user_, not per channel, because th
 abuse it prevents is spamming somebody with call banners.
 
 The client joins the DM's voice channel **before** ringing: the ring is only
-truthful once the caller is actually there. It sends the ring once the voice session
+truthful once the caller is actually there, and the server enforces it — a ring
+from a caller who is not in that DM's voice channel is refused with `VOICE_ERROR`
+and nobody is rung. The client sends the ring once the voice session
 is connected, not while it is still securing (none if the join is refused or the caller leaves first) and holds it
 back so it never goes out within 3 seconds of the previous ring.
+
+A callee who had closed the DM gets it reopened: the server sends them a
+`dm_channel_open` for the channel just before the `call_incoming`, so the DM is
+back in their sidebar when the banner appears. An already-open DM sends none.
 
 ### call_incoming (Server -> Client)
 
