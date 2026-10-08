@@ -481,3 +481,15 @@ test("other client and docs changes leave the mutation hotspot off", () => {
     assert.equal(runs(`M\t${path}`, "permissions"), false, path);
   }
 });
+
+test("the direct Stryker inputs select the mutation hotspot", () => {
+  for (const path of [
+    "Client/vitest.config.ts",
+    "Client/tests/setup.ts",
+    "Client/tsconfig.json",
+    "Client/package.json",
+    "Client/package-lock.json",
+  ]) {
+    assert.equal(runs(`M\t${path}`, "permissions"), true, path);
+  }
+});
