@@ -5,7 +5,7 @@
 // produced it, with the text it printed.
 //
 // tests/setup.ts installs this; tests never call installConsoleGuard directly.
-import { afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
 
 export type GuardedLevel = "warn" | "error";
 
@@ -83,6 +83,39 @@ export function assertNoUnclaimedConsole(): void {
   );
 }
 
+// One recorder per level for the whole run, so a spy restored by a test file's
+// own `vi.restoreAllMocks()` always lands back on this exact function and a
+// different function in console[level] means the test replaced it.
+const recorders: Readonly<Record<GuardedLevel, ConsoleFn>> = {
+  warn: (...args) => {
+    recorded.push({ level: "warn", args });
+  },
+  error: (...args) => {
+    recorded.push({ level: "error", args });
+  },
+};
+
+/**
+ * Fail the current test if it replaced console.warn/console.error with its own
+ * implementation: that swallows the output before the recorder sees it. A bare
+ * `vi.spyOn(console, level)` calls through to the recorder and is fine.
+ */
+export function assertConsoleNotReplaced(): void {
+  for (const level of ["warn", "error"] as const) {
+    const current = console[level] as ConsoleFn;
+    if (current === recorders[level]) continue;
+    const ownImpl = vi.isMockFunction(current)
+      ? (current as { getMockImplementation(): unknown }).getMockImplementation() !== undefined
+      : true;
+    if (ownImpl) {
+      throw new Error(
+        `console.${level} was replaced during the test, so its output bypasses the guard. ` +
+          `Drop the mockImplementation and claim the line with expectConsole("${level}", ...).`,
+      );
+    }
+  }
+}
+
 /** Install the guard. Called once, from tests/setup.ts. */
 export function installConsoleGuard(): void {
   beforeEach(() => {
@@ -95,16 +128,18 @@ export function installConsoleGuard(): void {
       // leave its console output unchecked. A test's own
       // `vi.spyOn(console, "warn")` wraps this function and restores back to
       // it, so the call still lands in `recorded` unless the test replaces the
-      // implementation.
-      console[level] = (...args: unknown[]) => {
-        recorded.push({ level, args });
-      };
+      // implementation, which assertConsoleNotReplaced turns into a failure.
+      console[level] = recorders[level];
     }
   });
 
   afterEach(() => {
     try {
-      assertNoUnclaimedConsole();
+      try {
+        assertConsoleNotReplaced();
+      } finally {
+        assertNoUnclaimedConsole();
+      }
     } finally {
       console.warn = realConsole.warn;
       console.error = realConsole.error;

@@ -42,8 +42,6 @@ vi.stubGlobal("crypto", {
 // Suppress console output
 vi.spyOn(console, "debug").mockImplementation(() => {});
 vi.spyOn(console, "info").mockImplementation(() => {});
-vi.spyOn(console, "warn").mockImplementation(() => {});
-vi.spyOn(console, "error").mockImplementation(() => {});
 
 /** Simulate Tauri emitting an event to JS */
 export function emitTauriEvent(event: string, payload: unknown): void {

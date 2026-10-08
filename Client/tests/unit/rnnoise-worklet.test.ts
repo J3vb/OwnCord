@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectConsole } from "../helpers/console";
 
 const REGISTERED_NAME = "rnnoise-processor";
 
@@ -112,7 +113,7 @@ describe("rnnoise-worklet", () => {
     };
     const port = (processor as unknown as { port: { postMessage: ReturnType<typeof vi.fn> } }).port;
     const emptyModule = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error");
 
     await processor._initWasm(emptyModule.buffer);
 
@@ -123,5 +124,6 @@ describe("rnnoise-worklet", () => {
       ),
     });
     expect(processor._ready).toBe(false);
+    expectConsole("error", "WASM module missing required RNNoise exports");
   });
 });

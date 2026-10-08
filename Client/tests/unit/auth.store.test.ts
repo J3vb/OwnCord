@@ -21,6 +21,7 @@ import { nsfwConsentRequired } from "../../src/features/content-consent/nsfw";
 import { addLogListener, type LogEntry } from "@lib/logger";
 import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
+import { expectConsole } from "../helpers/console";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
 // pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
@@ -346,7 +347,7 @@ describe("auth store", () => {
     });
 
     it("logs a warning tagged with this module's component name when leaveVoice rejects", async () => {
-      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(console, "warn");
       const entries: LogEntry[] = [];
       const unsub = addLogListener((e) => entries.push(e));
       vi.mocked(leaveVoice).mockRejectedValueOnce(new Error("boom"));
@@ -360,6 +361,7 @@ describe("auth store", () => {
       const warnEntry = entries.find((e) => e.level === "warn");
       expect(warnEntry?.component).toBe("auth.store");
       expect(warnEntry?.message).toBe("Failed to leave voice session during clearAuth");
+      expectConsole("warn", "Failed to leave voice session during clearAuth");
     });
   });
 
