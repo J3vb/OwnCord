@@ -583,12 +583,12 @@ describe("VideoGrid", () => {
       expect(overlay!.classList.contains("muted")).toBe(true);
     });
 
-    it("mic slider keeps the 0-200 boost range", () => {
+    it("mic slider tops out at 100%", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
       grid.addStream(77, "dave", fakeStream(), config);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
-      expect(slider.max).toBe("200");
+      expect(slider.max).toBe("100");
     });
 
     it("mute button unmutes with previous volume when currentVolume was non-zero", () => {
@@ -598,8 +598,8 @@ describe("VideoGrid", () => {
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
 
-      // Set volume to 150 via slider
-      slider.value = "150";
+      // Set volume to 70 via slider
+      slider.value = "70";
       slider.dispatchEvent(new Event("input"));
       mockSetUserVolume.mockClear();
 
@@ -608,10 +608,10 @@ describe("VideoGrid", () => {
       expect(mockSetUserVolume).toHaveBeenCalledWith(77, 0);
       expect(slider.value).toBe("0");
 
-      // Unmute via button — should restore to 150
+      // Unmute via button — should restore to 70
       muteBtn.click();
-      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 150);
-      expect(slider.value).toBe("150");
+      expect(mockSetUserVolume).toHaveBeenCalledWith(77, 70);
+      expect(slider.value).toBe("70");
     });
   });
 
@@ -1110,11 +1110,11 @@ describe("VideoGrid", () => {
       expect(stream.getAttribute("aria-label")).toBe("Otto stream volume");
       expect(stream.max).toBe("100");
       expect(voice.getAttribute("aria-label")).toBe("Otto voice volume");
-      expect(voice.max).toBe("200");
+      expect(voice.max).toBe("100");
 
-      voice.value = "150";
+      voice.value = "70";
       voice.dispatchEvent(new Event("input"));
-      expect(mockSetUserVolume).toHaveBeenCalledWith(2, 150);
+      expect(mockSetUserVolume).toHaveBeenCalledWith(2, 70);
       stream.value = "30";
       stream.dispatchEvent(new Event("input"));
       expect(mockSetScreenshareAudioVolume).toHaveBeenCalledWith(2, 0.3);
@@ -1326,17 +1326,17 @@ describe("VideoGrid", () => {
 
       const menu = document.querySelector<HTMLElement>(".video-tile-menu")!;
       const voice = menu.querySelector<HTMLInputElement>("[data-menu-volume='voice']")!;
-      voice.value = "150";
+      voice.value = "70";
       voice.dispatchEvent(new Event("input"));
 
-      expect(cell(2).querySelector("output")!.textContent).toBe("150%");
+      expect(cell(2).querySelector("output")!.textContent).toBe("70%");
       // The screen-share tile's own slider is the stream volume, not the voice.
       expect(cell(SCREEN).querySelector("output")!.textContent).toBe("100%");
-      // Mute then unmute on the camera tile keeps the 150, not a stale 100.
+      // Mute then unmute on the camera tile keeps the 70, not a stale 100.
       const mute = cell(2).querySelector<HTMLButtonElement>(".tile-mute-btn")!;
       mute.click();
       mute.click();
-      expect(mockSetUserVolume).toHaveBeenLastCalledWith(2, 150);
+      expect(mockSetUserVolume).toHaveBeenLastCalledWith(2, 70);
       menu.remove();
     });
 

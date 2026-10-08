@@ -375,7 +375,7 @@ function buildVoiceAudioTabInner(
     class: "settings-slider",
     type: "range",
     min: "0",
-    max: "200",
+    max: "100",
     step: "1",
     value: String(savedOutputVolume),
     "aria-label": t("voiceAudio.outputVolume"),

@@ -128,7 +128,7 @@ export function showTileMenu(opts: TileMenuOptions): void {
       t("tile.menuVoice", { name }),
       t("tile.voiceVolume", { name }),
       "voice",
-      200,
+      100,
       getUserVolume(id),
       (v) => {
         setUserVolume(id, v);

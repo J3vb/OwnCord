@@ -42,11 +42,20 @@ function userVolumeKey(userId: number): string {
   return currentHost === null ? `userVolume_${userId}` : `userVolume_${userId}:${currentHost}`;
 }
 
-// setUserVolume always clamps to 0-200, so -1 is safe as a "nothing saved" sentinel.
+// setUserVolume always clamps to 0-100, so -1 is safe as a "nothing saved" sentinel.
 const VOLUME_NOT_SET = -1;
 
-/** Get saved per-user volume (0-200 range, default 100). Applied via LiveKit's
- *  GainNode-backed setVolume(). On a miss at the host-scoped key, migrates
+/** 100% is the ceiling: without LiveKit's webAudioMix, setVolume writes
+ *  HTMLMediaElement.volume, which throws above 1 and failed voice joins. */
+const MAX_VOLUME_PERCENT = 100;
+
+/** Clamp a stored or requested percentage into 0-100 (NaN reads as 100). */
+function clampPercent(v: number): number {
+  return Number.isNaN(v) ? MAX_VOLUME_PERCENT : Math.max(0, Math.min(MAX_VOLUME_PERCENT, v));
+}
+
+/** Get saved per-user volume (0-100 range, default 100; a larger value saved
+ *  by an older build reads as 100). On a miss at the host-scoped key, migrates
  *  the pre-scoping unscoped value through `migrateLegacyValue`, which moves
  *  it under the scoped key of the FIRST host that misses and no other. User
  *  ids are per-server autoincrement integers: a legacy value left readable
@@ -54,6 +63,10 @@ const VOLUME_NOT_SET = -1;
  *  through to it and silence the unrelated user N there too (OC-0313) — the
  *  shape channel-mutes.ts fixed for OC-0288. */
 function getSavedUserVolume(userId: number): number {
+  return clampPercent(readSavedUserVolume(userId));
+}
+
+function readSavedUserVolume(userId: number): number {
   const scopedKey = userVolumeKey(userId);
   if (currentHost === null) return loadPref<number>(scopedKey, 100);
 
@@ -99,11 +112,11 @@ export class AudioElements {
    *  elements here (the Linux native room). */
   private screenshareGainListener: (() => void) | null = null;
 
-  /** Master output volume multiplier (0-2.0). Per-user volumes are scaled by this. */
+  /** Master output volume multiplier (0-1.0). Per-user volumes are scaled by this. */
   private outputVolumeMultiplier: number;
 
   constructor() {
-    this.outputVolumeMultiplier = loadPref<number>("outputVolume", 100) / 100;
+    this.outputVolumeMultiplier = clampPercent(loadPref<number>("outputVolume", 100)) / 100;
   }
 
   setRoom(room: Room | null): void {
@@ -118,7 +131,7 @@ export class AudioElements {
   /** Compute the effective volume for a participant: per-user volume * master output. */
   getEffectiveVolume(userId: number): number {
     const userVol = userId > 0 ? getSavedUserVolume(userId) : 100;
-    return (userVol / 100) * this.outputVolumeMultiplier;
+    return Math.min(1, (userVol / 100) * this.outputVolumeMultiplier);
   }
 
   /** Effective element volume for a user's screenshare audio: per-user volume
@@ -190,7 +203,7 @@ export class AudioElements {
       }
       log.debug("Screenshare audio track subscribed and attached", { userId, trackSid: track.sid });
     } else {
-      // Microphone audio: use LiveKit's GainNode-backed setVolume
+      // Microphone audio: LiveKit's setVolume (element volume, 0-1)
       // Detach any previous <audio> elements to prevent duplicate playback
       // on fast reconnects (new subscription fires before old unsubscription)
       for (const el of track.detach()) el.remove();
@@ -201,7 +214,7 @@ export class AudioElements {
       if (track.sid !== undefined) {
         this.remoteMicAudioElements.set(track.sid, audioEl);
       }
-      // Apply saved per-user volume via LiveKit's setVolume (supports 0-2.0 range)
+      // Apply saved per-user volume (getEffectiveVolume is already within 0-1)
       participant.setVolume(this.getEffectiveVolume(userId));
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput !== "" && typeof audioEl.setSinkId === "function") {
@@ -265,7 +278,7 @@ export class AudioElements {
   }
 
   setUserVolume(userId: number, volume: number): void {
-    const clamped = Math.max(0, Math.min(200, volume));
+    const clamped = clampPercent(volume);
     savePref(userVolumeKey(userId), clamped);
     if (this.room !== null) {
       for (const participant of this.room.remoteParticipants.values()) {
@@ -281,7 +294,7 @@ export class AudioElements {
   }
 
   setOutputVolume(volume: number): void {
-    const clamped = Math.max(0, Math.min(200, volume));
+    const clamped = clampPercent(volume);
     savePref("outputVolume", clamped);
     this.outputVolumeMultiplier = clamped / 100;
     this.applyAllVolumes();

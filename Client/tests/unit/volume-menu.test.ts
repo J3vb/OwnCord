@@ -51,19 +51,19 @@ afterEach(() => {
 // ── rendering ──────────────────────────────────────────────────────────────
 
 describe("showUserVolumeMenu rendering", () => {
-  it("renders the username, the current volume and a 0-200 slider", () => {
-    getUserVolume.mockReturnValue(140);
+  it("renders the username, the current volume and a 0-100 slider", () => {
+    getUserVolume.mockReturnValue(80);
 
     showUserVolumeMenu(7, "alice", 10, 20, new AbortController().signal);
 
     expect(menuEl()).not.toBeNull();
     expect(itemTexts()).toContain("alice");
-    expect(itemTexts()).toContain("User Volume: 140%");
+    expect(itemTexts()).toContain("User Volume: 80%");
 
     const slider = sliderEl();
-    expect(slider?.value).toBe("140");
+    expect(slider?.value).toBe("80");
     expect(slider?.min).toBe("0");
-    expect(slider?.max).toBe("200");
+    expect(slider?.max).toBe("100");
   });
 
   it("positions the menu at the supplied coordinates", () => {
@@ -110,10 +110,10 @@ describe("volume slider", () => {
     const slider = sliderEl();
     if (slider === null) throw new Error("no slider rendered");
 
-    slider.value = "200";
+    slider.value = "100";
     slider.dispatchEvent(new Event("input", { bubbles: true }));
 
-    expect(setUserVolume).toHaveBeenCalledWith(7, 200);
+    expect(setUserVolume).toHaveBeenCalledWith(7, 100);
   });
 
   it("supports muting to 0%", () => {

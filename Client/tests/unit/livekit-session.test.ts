@@ -818,16 +818,16 @@ describe("LiveKitSession", () => {
 
   describe("setUserVolume", () => {
     it("saves clamped volume to preferences", () => {
-      session.setUserVolume(42, 150);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 150);
+      session.setUserVolume(42, 70);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 70);
     });
 
-    it("clamps volume to 0-200 range", () => {
+    it("clamps volume to 0-100 range", () => {
       session.setUserVolume(42, -10);
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 0);
 
       session.setUserVolume(42, 300);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 200);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 100);
     });
   });
 
