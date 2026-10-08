@@ -59,6 +59,11 @@ func sanitizeFTSQuery(q string) string {
 			sb.WriteRune(r)
 			continue
 		}
+		// unicode61 keeps combining marks inside the token and strips them, so
+		// splitting on one would turn NFD "résumé" into "re sume".
+		if unicode.IsMark(r) {
+			continue
+		}
 		// Everything else -- the separators unicode61 tokenizes on, and every
 		// character of FTS5's own grammar (quotes, parens, '*', '^', ':') --
 		// becomes a separator here too, which is both what the index expects

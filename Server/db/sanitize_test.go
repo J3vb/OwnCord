@@ -73,3 +73,11 @@ func TestFTSMatchQuery_PrefixesLastTermOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeFTSQuery_CombiningMarksDoNotSplitTokens(t *testing.T) {
+	// NFD "résumé": unicode61 indexes "resume", so marks must be dropped, not
+	// turned into separators ("re sume").
+	if got := sanitizeFTSQuery("re\u0301sume\u0301"); got != "resume" {
+		t.Fatalf("sanitizeFTSQuery(NFD résumé) = %q, want %q", got, "resume")
+	}
+}
