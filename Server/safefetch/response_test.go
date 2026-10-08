@@ -1011,6 +1011,9 @@ func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
 		{"png declared, png body", "image/png", png, true},
 		{"octet-stream declared, png body", "application/octet-stream", png, true},
 		{"html declared, html body", "text/html", []byte("<html></html>"), true},
+		{"html declared, xml body", "text/html", []byte("<?xml version=\"1.0\"?><html/>"), true},
+		{"plain declared, xml body", "text/plain", []byte("<?xml version=\"1.0\"?><a/>"), true},
+		{"json declared, xml body", "application/json", []byte("<?xml version=\"1.0\"?><a/>"), false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

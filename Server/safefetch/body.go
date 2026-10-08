@@ -174,7 +174,7 @@ func compatible(declared, sniffed string) bool {
 	case sniffed == "text/plain":
 		return strings.HasPrefix(declared, "text/") || textual[declared]
 	case sniffed == "text/xml":
-		return declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
+		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
 	case sniffed == "text/html":
 		return declared == "application/xhtml+xml"
 	}
