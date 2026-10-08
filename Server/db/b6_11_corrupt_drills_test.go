@@ -55,8 +55,7 @@ func newestMigration(t *testing.T) (string, string) {
 	}
 	// A reversal marked "data-only" undoes no schema, so there is nothing for
 	// the drills to interrupt: they take the newest migration that has one.
-	for i := len(names) - 1; i >= 0; i-- {
-		migration := names[i]
+	for _, migration := range slices.Backward(names) {
 		reversal := strings.TrimSuffix(migration, ".sql") + ".down.sql"
 		raw, err := rollback.FS.ReadFile(reversal)
 		if err != nil {
