@@ -253,3 +253,8 @@ test("a stripped block scalar (`path: |-`) is audited too", () => {
   const src = pathList(["root.txt", "Server/nested.txt"]).join("\n").replace("path: |", "path: |-");
   assert.equal(auditArtifactPathLists(src).length, 1);
 });
+
+test("a folded scalar (`path: >`) is one string, not a path list", () => {
+  const src = pathList(["root.txt", "Server/nested.txt"]).join("\n").replace("path: |", "path: >");
+  assert.equal(auditArtifactPathLists(src).length, 0);
+});
