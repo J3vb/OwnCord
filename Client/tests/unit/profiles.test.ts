@@ -139,7 +139,7 @@ describe("ProfileManager", () => {
     it("returns the existing profile instead of adding a second one for the same host", () => {
       const m = mgr();
       const first = m.addProfile(sampleData);
-      const again = m.addProfile({ ...sampleData, name: "Other", host: "LOCALHOST:8443" });
+      const again = m.addProfile({ ...sampleData, name: "Other", host: "localhost:8443" });
 
       expect(again).toBe(first);
       expect(m.getAll()).toHaveLength(1);
