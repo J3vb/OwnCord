@@ -74,6 +74,15 @@ describe("the console guard notices a replaced console", () => {
     vi.restoreAllMocks();
   });
 
+  it("fails a test that swallows a call with mockImplementationOnce", () => {
+    vi.spyOn(console, "error").mockImplementationOnce(() => {});
+    console.error("hidden once");
+
+    expect(() => assertConsoleNotReplaced()).toThrow(/console\.error.*expectConsole/);
+
+    vi.restoreAllMocks();
+  });
+
   it("allows a bare spy that keeps the recorder underneath", () => {
     vi.spyOn(console, "warn");
     console.warn("spied warning");
