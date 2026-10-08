@@ -515,19 +515,54 @@ func TestLoadACME_IssuanceFailureLogIsBoundedAndIgnoresSNI(t *testing.T) {
 		return nil, errors.New("acme/autocert: unable to satisfy authorization")
 	}, "chat.example.com")
 
-	// A peer varying SNI on every connection must not extend the log.
+	// A peer varying SNI on every connection must not extend the log, and
+	// foreign names no longer log at all.
 	for i := range 500 {
 		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: fmt.Sprintf("attacker-%d.example.invalid", i)})
 	}
+	// Repeats for the configured domain (in varying case) stay one line.
+	for i := range 500 {
+		name := "chat.example.com"
+		if i%2 == 0 {
+			name = "CHAT.example.com"
+		}
+		_, _ = wrapped(&tls.ClientHelloInfo{ServerName: name})
+	}
 
 	if n := strings.Count(buf.String(), "TLS certificate issuance failed"); n != 1 {
-		t.Errorf("500 handshakes with distinct SNI produced %d log lines, want 1 — the throttle must not be per-name", n)
+		t.Errorf("1000 failing handshakes produced %d log lines, want 1 — the throttle must not be per-name", n)
 	}
 	if strings.Contains(buf.String(), "attacker-") {
 		t.Errorf("the log echoes the peer-supplied server name:\n%s", buf.String())
 	}
 	if !strings.Contains(buf.String(), "chat.example.com") {
 		t.Errorf("the log does not name the configured domain:\n%s", buf.String())
+	}
+}
+
+// TestLogCertificateFailures_ForeignSNIDoesNotConsumeThrottle — a scanner hello
+// for a name that is not the configured domain must neither log nor spend the
+// throttle window, or a real client's failure would be swallowed behind it.
+func TestLogCertificateFailures_ForeignSNIDoesNotConsumeThrottle(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	wrapped := auth.LogCertificateFailuresForTest(func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		return nil, errors.New("acme/autocert: host not configured")
+	}, "chat.example.com")
+
+	_, _ = wrapped(&tls.ClientHelloInfo{ServerName: "scanner.example"})
+	_, _ = wrapped(&tls.ClientHelloInfo{})
+	_, _ = wrapped(nil)
+	if buf.Len() != 0 {
+		t.Fatalf("a foreign or missing SNI logged:\n%s", buf.String())
+	}
+
+	_, _ = wrapped(&tls.ClientHelloInfo{ServerName: "Chat.Example.com."})
+	if n := strings.Count(buf.String(), "TLS certificate issuance failed"); n != 1 {
+		t.Errorf("the configured domain produced %d log lines after the scanner hellos, want 1", n)
 	}
 }
 
