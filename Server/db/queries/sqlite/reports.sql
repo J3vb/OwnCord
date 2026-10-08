@@ -111,9 +111,13 @@ UPDATE reports
 -- name: CloseReport :execrows
 -- open -> resolved|dismissed is close-without-assigning; assigned ->
 -- resolved|dismissed is the ordinary path. Nothing leaves a closed state.
+-- EXISTS(users) on the actor matches AssignReport and InsertReportNote: a
+-- moderator erased between requirePerm and this write cannot close a report
+-- (and so cannot leave an erased actor id in report_events).
 UPDATE reports
-   SET state = ?, outcome = ?, closed_at = datetime('now'), updated_at = datetime('now')
- WHERE id = ? AND state IN ('open', 'assigned');
+   SET state = sqlc.arg(state), outcome = sqlc.arg(outcome), closed_at = datetime('now'), updated_at = datetime('now')
+ WHERE reports.id = sqlc.arg(id) AND reports.state IN ('open', 'assigned')
+   AND EXISTS (SELECT 1 FROM users u WHERE u.id = sqlc.arg(actor_id));
 
 -- name: InsertReportEvidence :exec
 -- Guarded (Codex review, P1-4 widened): an evidence row's author erased

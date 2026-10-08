@@ -40,20 +40,30 @@ func (q *Queries) AssignReport(ctx context.Context, arg AssignReportParams) (int
 
 const closeReport = `-- name: CloseReport :execrows
 UPDATE reports
-   SET state = ?, outcome = ?, closed_at = datetime('now'), updated_at = datetime('now')
- WHERE id = ? AND state IN ('open', 'assigned')
+   SET state = ?1, outcome = ?2, closed_at = datetime('now'), updated_at = datetime('now')
+ WHERE reports.id = ?3 AND reports.state IN ('open', 'assigned')
+   AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?4)
 `
 
 type CloseReportParams struct {
 	State   string `json:"state"`
 	Outcome string `json:"outcome"`
 	ID      int64  `json:"id"`
+	ActorID int64  `json:"actorId"`
 }
 
 // open -> resolved|dismissed is close-without-assigning; assigned ->
 // resolved|dismissed is the ordinary path. Nothing leaves a closed state.
+// EXISTS(users) on the actor matches AssignReport and InsertReportNote: a
+// moderator erased between requirePerm and this write cannot close a report
+// (and so cannot leave an erased actor id in report_events).
 func (q *Queries) CloseReport(ctx context.Context, arg CloseReportParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, closeReport, arg.State, arg.Outcome, arg.ID)
+	result, err := q.db.ExecContext(ctx, closeReport,
+		arg.State,
+		arg.Outcome,
+		arg.ID,
+		arg.ActorID,
+	)
 	if err != nil {
 		return 0, err
 	}
