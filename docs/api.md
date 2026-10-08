@@ -822,7 +822,9 @@ picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
 attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
-it is replaced.
+it is replaced. If the profile update fails after the bytes were stored, the
+unlinked attachment row and the stored file are removed and the user's storage
+counter is recounted, so a failed avatar change does not leave a charge behind.
 
 Not registered when the server has no working storage backend.
 
