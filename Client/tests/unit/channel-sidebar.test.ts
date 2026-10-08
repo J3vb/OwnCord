@@ -45,6 +45,7 @@ import {
   setChannels,
   setActiveChannel,
   setRoles,
+  updateChannel,
   type Channel,
 } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
@@ -2910,6 +2911,21 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
     );
     expect(document.querySelector(".channel-ctx-menu")).not.toBeNull();
+  });
+
+  it("reorders rows live when a channel_update changes only a position", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const order = () =>
+      Array.from(container.querySelectorAll(".category-channels-container .channel-item"))
+        .map((el) => (el as HTMLElement).dataset.channelId)
+        .filter((id) => id === "1" || id === "2");
+    expect(order()).toEqual(["1", "2"]);
+
+    updateChannel({ id: 1, position: 5 });
+    channelsStore.flush();
+
+    expect(order()).toEqual(["2", "1"]);
   });
 
   it("disposes a replaced row so its context-menu listener cannot fire again", () => {

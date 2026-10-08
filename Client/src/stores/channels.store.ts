@@ -367,13 +367,20 @@ export function getKnownCategories(): string[] {
   });
 }
 
-/** Group channels by category, sorted by position within each group. */
+/**
+ * Group channels by category. Channels are sorted by (position, id) — the
+ * server's `ORDER BY position, id` — before grouping, so both the rows inside
+ * a category and the categories themselves keep the order a reload would show;
+ * Map insertion order alone is frozen at first load and ignores later edits.
+ */
 export function getChannelsByCategory(): Map<string | null, Channel[]> {
   return channelsStore.select((s) => {
-    const grouped = new Map<string | null, Channel[]>();
-    for (const channel of s.channels.values()) {
+    const sorted = [...s.channels.values()]
       // DM channels are shown in the DM sidebar, not the channel list
-      if (channel.type === "dm") continue;
+      .filter((channel) => channel.type !== "dm")
+      .toSorted((a, b) => a.position - b.position || a.id - b.id);
+    const grouped = new Map<string | null, Channel[]>();
+    for (const channel of sorted) {
       const category = displayCategoryOf(channel);
       const existing = grouped.get(category);
       if (existing !== undefined) {
@@ -381,9 +388,6 @@ export function getChannelsByCategory(): Map<string | null, Channel[]> {
       } else {
         grouped.set(category, [channel]);
       }
-    }
-    for (const channels of grouped.values()) {
-      channels.sort((a, b) => a.position - b.position);
     }
     return grouped;
   });

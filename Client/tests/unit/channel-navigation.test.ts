@@ -263,11 +263,11 @@ describe("channel-navigation", () => {
         makeChannel({ id: 2, name: "b", position: 0, category: "Two" }),
       ]);
 
-      // getChannelsByCategory groups by category insertion order, then position.
-      stepChannel(1);
-      expect(channelsStore.getState().activeChannelId).toBe(1);
+      // getChannelsByCategory orders categories by their first channel's position.
       stepChannel(1);
       expect(channelsStore.getState().activeChannelId).toBe(2);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
     });
 
     it("steps through the DM list in recency order while the DM view is open", () => {
