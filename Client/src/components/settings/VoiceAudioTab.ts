@@ -439,7 +439,7 @@ function buildVoiceAudioTabInner(
     // The defaults match getCameraQuality/getScreenShareQuality in
     // lib/screenShare, which this tab does not import (it pulls in the
     // voice store).
-    loadPref<string>("streamQuality", "high"),
+    loadPref<string>("streamQuality", "medium"),
     [
       ["low", t("voiceAudio.cameraQuality.low")],
       ["medium", t("voiceAudio.cameraQuality.medium")],

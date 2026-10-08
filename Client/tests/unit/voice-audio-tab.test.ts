@@ -598,7 +598,7 @@ describe("VoiceAudioTab UI structure", () => {
     const qualitySelect = el.querySelector(
       'select[aria-label="Camera Quality"]',
     ) as HTMLSelectElement;
-    expect(qualitySelect.value).toBe("high");
+    expect(qualitySelect.value).toBe("medium");
     qualitySelect.value = "low";
     qualitySelect.dispatchEvent(new Event("change"));
 
