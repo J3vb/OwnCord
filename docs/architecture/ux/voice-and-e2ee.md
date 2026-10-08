@@ -140,7 +140,8 @@ double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in
 WebView2 HTML full screen fills only the webview; if the API is refused, a CSS
 theatre view fills the window instead (Escape or F leaves it). A full-screen tile keeps mute, deafen and leave at hand. **Pop out**
-is the platform's picture-in-picture, hidden where it is unavailable. The
+is the platform's picture-in-picture, hidden where it is unavailable; full screen on a
+popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it). The
 stream you watch shows a quality chip ("1080p · 30 fps") with a stats popover
 (resolution, frame rate, bitrate, codec, packet loss), polled every 2 s from
 the receiver (`getRemoteVideoStats`); the Linux native room has no receiver
