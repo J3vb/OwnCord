@@ -803,8 +803,8 @@ function buildVoiceAudioTabInner(
   // (lib/micProcessor.ts: RNNoise when Enhanced Noise Suppression is on) over
   // a microphone opened with the call's capture settings, and the call's own
   // detector (lib/audioPipeline.ts startVadDetector, same attack and hold)
-  // at the same threshold. The bar is the loudest 128-sample block the
-  // detector saw, on the threshold handle's axis; green is the gate open. So
+  // at the same threshold. The bar is the loudest smoothed level (a ~10 ms
+  // running RMS, the one the gate compares) the detector saw, on the threshold handle's axis; green is the gate open. So
   // what the meter shows is what the gate does. Opening the microphone with
   // other settings would also fight the call for the device: the browser can
   // hand the call this stream's processing instead of its own.

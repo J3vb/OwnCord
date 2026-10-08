@@ -77,7 +77,7 @@ export interface VadDetector {
 export interface VadDetectorHandlers {
   /** The gate verdict: true = closed (silence). */
   onGate(gated: boolean): void;
-  /** The loudest quantum since the last report, for a level meter. */
+  /** The loudest smoothed level since the last report, for a level meter. */
   onRms?(rms: number): void;
   /** Which path is running once it has started. */
   onStarted?(usingWorklet: boolean): void;
@@ -86,7 +86,7 @@ export interface VadDetectorHandlers {
 /**
  * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
  * when it loads, otherwise a setTimeout poll with the same timing. Both apply
- * the same attack (~32 ms) and hold (~200 ms), so the settings meter and the
+ * the same attack (~32 ms) and hold (~320 ms), so the settings meter and the
  * live gate open and close alike.
  */
 export function startVadDetector(
@@ -108,7 +108,7 @@ export function startVadDetector(
     let silentFrames = 0;
     let speechFrames = 0;
     let gated = false;
-    const GATE_ON_FRAMES = 12;
+    const GATE_ON_FRAMES = 20; // ~320 ms of 16 ms polls, as vad-worklet.js holds
     const GATE_OFF_FRAMES = 2;
     let startupFrames = 0;
     const STARTUP_GRACE = 30;

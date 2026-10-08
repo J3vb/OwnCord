@@ -27,6 +27,8 @@ function micTrack(): LocalAudioTrack {
 
 const contextOf = (track: LocalAudioTrack): FakeAudioContext =>
   (track.getProcessor() as unknown as MicProcessor).context as unknown as FakeAudioContext;
+/** Input Volume rides on the first gain node, ahead of the detector's tap. */
+const inputGain = (ctx: FakeAudioContext) => ctx.nodes.filter((n) => n.kind === "gain")[0]!.gain;
 const outputGain = (ctx: FakeAudioContext) => ctx.nodes.filter((n) => n.kind === "gain")[1]!.gain;
 
 function roomWith(track: LocalAudioTrack | undefined) {
@@ -152,7 +154,7 @@ describe("AudioPipeline", () => {
 
       await pipeline.attach(track);
       const ctx = contextOf(track);
-      expect(outputGain(ctx).value).toBe(1.5);
+      expect(inputGain(ctx).value).toBe(1.5);
       // The detector fell back to polling (no worklet in jsdom) with the gate's lookahead on.
       await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(false));
       expect(ctx.node("delay").delayTime.value).toBe(0.05);
@@ -377,10 +379,13 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(onStarted).toHaveBeenCalledWith(false);
 
-    // Start-up grace (30 polls) then 12 quiet polls close the gate.
+    // Start-up grace (30 polls) then 20 quiet polls (~320 ms, the worklet's
+    // hold) close the gate.
     await vi.advanceTimersByTimeAsync(16 * 30);
     expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16 * 12);
+    await vi.advanceTimersByTimeAsync(16 * 19);
+    expect(onGate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(16);
     expect(onGate).toHaveBeenLastCalledWith(true);
 
     // A single loud poll is not speech; two are.

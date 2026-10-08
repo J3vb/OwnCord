@@ -278,11 +278,13 @@ trust action entirely (a blind accept is refused).
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
   (`startVadDetector`, with a setTimeout fallback of the same timing). It
   opens after about 32 ms of sustained level, so a mouse click does not open
-  it, and closes after about 200 ms; the lookahead delay means the start of a
-  word is not cut off. The settings meter runs the same processor over a
-  microphone opened with the call's capture settings and the same detector at
-  the same threshold: the bar is the loudest 128-sample block it saw, on the
-  threshold handle's axis, and it is green exactly while the gate is open.
+  it, and closes after about 320 ms below the threshold; the lookahead delay means
+  the start of a word is not cut off. Both read one level, a running RMS over
+  four 128-sample blocks (about 10 ms), taken after the Input Volume gain, so
+  turning a quiet microphone up lifts it over the gate. The settings meter runs
+  the same processor over a microphone opened with the call's capture settings
+  and the same detector at the same threshold: the bar is the loudest smoothed
+  level it saw, on the threshold handle's axis.
 - **Push-to-talk:** the key only opens and closes the processor's second gate
   (`livekitSession.setPttGated`; `pushToTalkService.ts`). The microphone
   stays published and its capture stays open across presses, the store's
