@@ -436,9 +436,10 @@ BPR-080 through BPR-083.
 
 1. Define explicit protocol-epoch negotiation. _(Reconciled 2026-09-06 to
    the owner-approved B2-2 decision of 2026-08-29 and amended BPR-032.)_
-   The server accepts the current epoch and rejects unsupported epochs with
-   a safe actionable response; legacy epoch-1 authentication follows the
-   captured fixture contract. Patch releases within an epoch remain
+   The server accepts current epoch 1 and the legacy handshake that sends no
+   epoch (absent/0, clients up to v1.2.0-alpha.4, `Server/ws/messages.go:379-385`
+   `minClientEpoch = 0`), and rejects any other epoch with a safe actionable
+   response; the epoch-1 fixtures captured in B2-1 are the contract. Patch releases within an epoch remain
    compatible, and prerelease/release metadata declares its epoch. A wider
    compatibility window is introduced only by a later explicit decision.
 2. Define server-first update ordering and signed update metadata contracts.

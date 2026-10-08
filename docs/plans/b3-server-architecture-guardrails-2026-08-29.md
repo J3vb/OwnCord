@@ -1649,7 +1649,7 @@ written.`, exit 1. The committed baseline's checksum was unchanged across the
   `BenchmarkReplaySelection-32 1 4000 ns/op`.
 - Numbers — benchstat medians over `-count=6` at ec8ef24a, go1.26.7
   windows/amd64, Ryzen 9 7950X3D. Full table in
-  [b3-bench-baseline-2026-08-30](b3-bench-baseline-2026-08-30.md):
+  [b3-bench-baseline-2026-08-30](https://github.com/J3vb/OwnCord/blob/2994caa404f87a45cc792cc692f042ad1745e447/docs/plans/b3-bench-baseline-2026-08-30.md) (superseded by [b3-bench-baseline-2026-09-01](b3-bench-baseline-2026-09-01.md)):
 
 | Benchmark              | sec/op       | B/op    | allocs/op |
 | ---------------------- | ------------ | ------- | --------- |
