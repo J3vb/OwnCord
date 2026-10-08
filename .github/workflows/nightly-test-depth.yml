@@ -63,8 +63,16 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ needs.pin.outputs.sha }}
+          ref: dev
           persist-credentials: false
+      # Detach to the pinned revision with git rather than a dynamic checkout
+      # ref, so the npm cache step below never follows a non-literal ref.
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
@@ -99,8 +107,16 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ needs.pin.outputs.sha }}
+          ref: dev
           persist-credentials: false
+      # Detach to the pinned revision with git rather than a dynamic checkout
+      # ref, so the npm cache step below never follows a non-literal ref.
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
