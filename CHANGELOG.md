@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 - **Linux voice after a moderator mute**: when a moderator lifts a server mute, your microphone is published again automatically instead of staying silent.
 - **Plugin and push fetches check the content type**: a response whose declared type disagrees with what its bytes look like (for example JSON declared, HTML body) is now refused.
 - **Message retention page for server managers**: a role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first channel rule.
+- **Your own moderation history**: the list of warnings, timeouts, removals and bans shown to you now returns the newest 200 entries instead of every row ever recorded. Reading it needs a signed-in session; an API token is refused.
 
 - **Permission checks**: asking whether a member holds an empty permission set now always answers no, administrators included, matching the other permission helpers.
 - **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.

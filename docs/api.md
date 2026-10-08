@@ -2647,8 +2647,9 @@ is recorded against the moderator but is not a sanction against them. A `ban` ro
 only reach a caller whose ban has lapsed or been reversed, since a currently
 banned caller cannot authenticate. A currently banned user still appeals out
 of band, as [Appeals](#appeals) describes. Rows leave this list when the
-retention sweep retires them (`moderation.action_retention_days`).
-**Auth:** Required (session). Rate-limited: 30 per minute per IP.
+retention sweep retires them (`moderation.action_retention_days`). Removal and
+ban rows never retire, so the list holds the newest 200 rows.
+**Auth:** Required (session); an API token gets 401. Rate-limited: 30 per minute per IP.
 
 #### Response 200 OK
 
