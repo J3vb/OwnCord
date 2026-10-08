@@ -23,7 +23,8 @@ the number below. B7-0 recorded the harness cost (a dry run), not a score
 reports with `Client/scripts/aggregate-mutation-shards.mjs` (same formula:
 `(killed + timeout) / (killed + timeout + survived + no coverage)`, errored
 mutants reported but excluded) and publishes the result as the step summary and
-the `mutation-score-summary` artifact. Use that number for any later headline;
+the `mutation-score-summary` artifact, both recording the pinned dev
+revision the shards ran on. Use that number for any later headline;
 never average the per-shard percentages.
 
 ## Honesty caveats — read these with the score
