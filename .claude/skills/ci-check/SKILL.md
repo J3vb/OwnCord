@@ -65,7 +65,7 @@ confusingly.** A build older than this module's Go target refuses outright:
 
 ```
 can't load config: the Go language version (go1.26) used to build
-golangci-lint is lower than the targeted Go version (1.27.1)
+golangci-lint is lower than the targeted Go version (1.27.2)
 ```
 
 That is the binary's age, not a missing gate — it reads like "cannot run
