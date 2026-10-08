@@ -422,6 +422,65 @@ export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
 }
 
 /**
+ * voiceWsHandlers plus a voice_token on join, so the session leaves "joining"
+ * (to "securing" once LiveKit is parked, see parkLiveKitSocket). A DM call
+ * rings only after its join has left "joining"; the stock handlers withhold
+ * the token and would never ring. is_key_holder skips the 15s key-exchange stall.
+ */
+export function voiceJoinWithTokenHandlers(): Array<{ type: string; handler: string }> {
+  return voiceWsHandlers().map((h) =>
+    h.type !== "voice_join"
+      ? h
+      : {
+          type: h.type,
+          handler:
+            h.handler +
+            `
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify({
+            type: "voice_token",
+            payload: { token: "mock-token", url: "ws://localhost:7880", channel_id: p.channel_id, direct_url: "", is_key_holder: true }
+          }));
+        }, 80);
+      `,
+        },
+  );
+}
+
+/**
+ * Park the LiveKit signal WebSocket forever: room.connect neither succeeds nor
+ * fails, so a session that was granted a voice_token sits stably in "securing"
+ * instead of self-destructing mid-test.
+ */
+export async function parkLiveKitSocket(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const RealWS = window.WebSocket;
+    function ParkedOrReal(url: string | URL, protocols?: string | string[]): WebSocket {
+      const s = String(url);
+      if (s.includes("localhost:7880") || s.includes("127.0.0.1:7880")) {
+        const parked = new EventTarget() as unknown as Record<string, unknown>;
+        parked.url = s;
+        parked.readyState = 0; // CONNECTING, forever
+        parked.binaryType = "arraybuffer";
+        parked.send = () => {};
+        parked.close = () => {
+          parked.readyState = 3;
+        };
+        parked.onopen = null;
+        parked.onmessage = null;
+        parked.onerror = null;
+        parked.onclose = null;
+        return parked as unknown as WebSocket;
+      }
+      return new RealWS(url, protocols);
+    }
+    ParkedOrReal.prototype = RealWS.prototype;
+    Object.assign(ParkedOrReal, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    (window as unknown as { WebSocket: unknown }).WebSocket = ParkedOrReal;
+  });
+}
+
+/**
  * Voice join failure handler for E2E testing.
  * Simulates a server error response when attempting to join a voice channel.
  */

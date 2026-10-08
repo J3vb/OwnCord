@@ -20,7 +20,8 @@ import {
   emitWsMessage,
   navigateToMainPage,
   waitForWsReady,
-  voiceWsHandlers,
+  voiceJoinWithTokenHandlers,
+  parkLiveKitSocket,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -75,13 +76,14 @@ async function mockSession(page: Page): Promise<void> {
         { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
       ],
       simulateWsFlow: true,
-      wsHandlers: voiceWsHandlers(),
+      wsHandlers: voiceJoinWithTokenHandlers(),
       readyOverrides: {
         members: READY_MEMBERS,
         dm_channels: MOCK_DM_CHANNELS,
       },
     }),
   );
+  await parkLiveKitSocket(page);
 }
 
 /**
@@ -528,7 +530,10 @@ test.describe("DM calls — call panel", () => {
     const ringsBefore = (await sentFrames(page)).filter((f) => f.type === "call_ring").length;
     await panel(page).locator("[data-testid='dcp-ring-again']").click();
     await expect
-      .poll(async () => (await sentFrames(page)).filter((f) => f.type === "call_ring").length)
+      .poll(async () => (await sentFrames(page)).filter((f) => f.type === "call_ring").length, {
+        // The server allows one ring per 3s; Ring again waits out the window.
+        timeout: 8_000,
+      })
       .toBe(ringsBefore + 1);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
     // Ring again puts the callee's ringing tile back.

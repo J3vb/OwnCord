@@ -23,7 +23,8 @@ import {
   emitWsMessage,
   navigateToMainPage,
   waitForWsReady,
-  voiceWsHandlers,
+  voiceJoinWithTokenHandlers,
+  parkLiveKitSocket,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -100,15 +101,16 @@ async function mockSession(page: Page): Promise<void> {
       ],
       simulateWsFlow: true,
       // The profile popup's Call action joins the DM's voice channel and rings
-      // (BUG-05); voiceWsHandlers answers voice_join with the self voice_state
+      // (BUG-05); voiceJoinWithTokenHandlers answers voice_join with the self voice_state
       // so the widget and call panel come up, exactly as dm-calls.spec.ts does.
-      wsHandlers: voiceWsHandlers(),
+      wsHandlers: voiceJoinWithTokenHandlers(),
       readyOverrides: {
         members: READY_MEMBERS,
         dm_channels: DM_CHANNELS,
       },
     }),
   );
+  await parkLiveKitSocket(page);
 }
 
 async function boot(page: Page): Promise<void> {
