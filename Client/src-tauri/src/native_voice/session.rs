@@ -611,7 +611,8 @@ impl NativeSession {
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
-        if enabled && self.mic_withdrawn.take() {
+        let was_withdrawn = enabled && self.mic_withdrawn.take();
+        if was_withdrawn {
             // The SFU dropped the publication; the track is dead. Best effort
             // unpublish, then fall through to a fresh first publish.
             if let Some(track) = self.mic.take() {
@@ -638,6 +639,9 @@ impl NativeSession {
             if published.is_err() {
                 self.capture.stop();
                 self.mic_source = None;
+                // The server may not have re-granted yet: stay withdrawn so
+                // the next enable tries a fresh publish again.
+                self.mic_withdrawn.keep_if_failed(was_withdrawn, &published);
             }
             return published;
         };
@@ -1085,6 +1089,13 @@ impl MicWithdrawn {
     fn set(&self) {
         self.0.store(true, Ordering::SeqCst);
     }
+    /// A republish that failed (the grant not restored yet) leaves the
+    /// withdrawal pending for the next enable.
+    fn keep_if_failed<T>(&self, was_withdrawn: bool, result: &Result<T, String>) {
+        if was_withdrawn && result.is_err() {
+            self.set();
+        }
+    }
     fn take(&self) -> bool {
         self.0.swap(false, Ordering::SeqCst)
     }
@@ -1148,6 +1159,17 @@ mod tests {
             true,
             &[proto::TrackSource::Microphone]
         )));
+    }
+
+    #[test]
+    fn failed_republish_keeps_the_withdrawal_pending() {
+        let w = MicWithdrawn::default();
+        w.keep_if_failed(true, &Ok::<(), String>(()));
+        assert!(!w.take());
+        w.keep_if_failed(false, &Err::<(), _>("denied".into()));
+        assert!(!w.take());
+        w.keep_if_failed(true, &Err::<(), _>("denied".into()));
+        assert!(w.take());
     }
 
     #[test]
