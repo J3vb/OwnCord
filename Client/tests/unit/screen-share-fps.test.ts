@@ -99,9 +99,9 @@ describe("screen share FPS", () => {
       expect(mockLoadPref).toHaveBeenCalledWith("screenShareQuality", "medium");
     });
 
-    it("keeps the camera on the streamQuality pref, defaulting to high", () => {
-      expect(getCameraQuality()).toBe("high");
-      expect(mockLoadPref).toHaveBeenCalledWith("streamQuality", "high");
+    it("keeps the camera on the streamQuality pref, defaulting to medium (720p)", () => {
+      expect(getCameraQuality()).toBe("medium");
+      expect(mockLoadPref).toHaveBeenCalledWith("streamQuality", "medium");
     });
 
     it("reads the two prefs independently and rejects garbage", () => {
@@ -112,7 +112,7 @@ describe("screen share FPS", () => {
       expect(getCameraQuality()).toBe("low");
       mockLoadPref.mockReturnValue("ultra");
       expect(getScreenShareQuality()).toBe("medium");
-      expect(getCameraQuality()).toBe("high");
+      expect(getCameraQuality()).toBe("medium");
     });
 
     it("simulcasts medium and high only", () => {

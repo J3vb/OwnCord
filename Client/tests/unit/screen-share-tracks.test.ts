@@ -850,6 +850,44 @@ describe("enableScreenshare", () => {
     });
   });
 
+  it("adds a 720p simulcast layer to a 1080p camera, so a 1-3 Mbps viewer gets 720p not 360p", async () => {
+    loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "high" : ""));
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    const opts = rig.publishTrack.mock.calls[0]?.[1] as {
+      videoSimulcastLayers: { width: number; height: number }[];
+    };
+    expect(opts.videoSimulcastLayers.map((l) => [l.width, l.height])).toEqual([
+      [640, 360],
+      [1280, 720],
+    ]);
+  });
+
+  it("leaves a 720p camera on the SDK's default layers", async () => {
+    loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "medium" : ""));
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.publishTrack.mock.calls[0]?.[1]).not.toHaveProperty("videoSimulcastLayers");
+  });
+
+  it("defaults the camera to 720p when no quality is saved", async () => {
+    loadPref.mockImplementation((_key: string, fallback: unknown) => fallback);
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(createLocalVideoTrack.mock.calls[0]?.[0]).toMatchObject({
+      resolution: { width: 1280, height: 720 },
+    });
+  });
+
   it("tears down when the OS stop-sharing button ends the track (BUG-101)", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
