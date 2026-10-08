@@ -657,7 +657,7 @@ stereo since the capture work, below), queued per track
 gain. `cpal` uses its pure-Rust PulseAudio host (PulseAudio and
 pipewire-pulse; no libpulse link) and falls back to ALSA. Mixing and capture
 processing stay f32 at 48 kHz; both streams open their device at 48 kHz in
-f32, i16, i32 or u16, in that order of preference
+f32, else i16, i32, u16, then any other 8- to 32-bit PCM format
 (`src-tauri/src/native_voice/stream_format.rs`), and convert at the callback
 edge, so a raw ALSA device without float samples still opens. A device with
 no 48 kHz format does not open (there is no resampler).

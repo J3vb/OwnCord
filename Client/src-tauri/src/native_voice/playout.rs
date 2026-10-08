@@ -16,7 +16,7 @@ use std::thread::JoinHandle as Thread;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample, SampleFormat, SizedSample};
+use cpal::{FromSample, Sample, SizedSample};
 use futures_util::StreamExt;
 use livekit::prelude::*;
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
@@ -24,7 +24,7 @@ use tokio::task::JoinHandle;
 
 use super::capture::{Apm, Reference};
 use super::session::{resolve_device, DeviceInfo};
-use super::stream_format::pick_config;
+use super::stream_format::{pick_config, typed};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 /// A queue starts (or restarts after running dry) only once it holds this
@@ -681,13 +681,7 @@ fn open_output(
             ..config
         };
         let (mixer, reference, dead) = (mixer.clone(), reference.clone(), dead.clone());
-        match format {
-            SampleFormat::I16 => build_output::<i16>(device, config, mixer, reference, dead),
-            SampleFormat::I32 => build_output::<i32>(device, config, mixer, reference, dead),
-            SampleFormat::U16 => build_output::<u16>(device, config, mixer, reference, dead),
-            // `pick_config` returns no other format.
-            _ => build_output::<f32>(device, config, mixer, reference, dead),
-        }
+        typed!(format, build_output(device, config, mixer, reference, dead))
     };
     let stream = build(cpal::BufferSize::Fixed(PERIOD_FRAMES))
         .or_else(|_| build(cpal::BufferSize::Default))

@@ -9,13 +9,39 @@ use cpal::{
     BufferSize, ChannelCount, SampleFormat, SampleRate, StreamConfig, SupportedStreamConfigRange,
 };
 
-/// The formats a stream converts from, best first.
-const FORMATS: [SampleFormat; 4] = [
+/// The formats a stream converts from, best first: every PCM format `cpal`
+/// builds a stream in, but 64-bit (no audio device offers it). `typed!`
+/// handles each.
+const FORMATS: [SampleFormat; 9] = [
     SampleFormat::F32,
     SampleFormat::I16,
     SampleFormat::I32,
     SampleFormat::U16,
+    SampleFormat::I24,
+    SampleFormat::U24,
+    SampleFormat::U32,
+    SampleFormat::I8,
+    SampleFormat::U8,
 ];
+
+/// `$build::<T>(..)` with `T` the sample type of `$format`, one of `FORMATS`
+/// (what `pick_config` returns).
+macro_rules! typed {
+    ($format:expr, $build:ident($($arg:expr),* $(,)?)) => {
+        match $format {
+            cpal::SampleFormat::I16 => $build::<i16>($($arg),*),
+            cpal::SampleFormat::I32 => $build::<i32>($($arg),*),
+            cpal::SampleFormat::U16 => $build::<u16>($($arg),*),
+            cpal::SampleFormat::I24 => $build::<cpal::I24>($($arg),*),
+            cpal::SampleFormat::U24 => $build::<cpal::U24>($($arg),*),
+            cpal::SampleFormat::U32 => $build::<u32>($($arg),*),
+            cpal::SampleFormat::I8 => $build::<i8>($($arg),*),
+            cpal::SampleFormat::U8 => $build::<u8>($($arg),*),
+            _ => $build::<f32>($($arg),*),
+        }
+    };
+}
+pub(crate) use typed;
 
 /// The config to open at `want_rate`: the best of `FORMATS` any range covers
 /// it in, on `want_channels` (the device's default count) where that format
@@ -104,9 +130,30 @@ mod tests {
             range(SampleFormat::F32, 2, 44_100, 44_100),
             range(SampleFormat::I16, 2, 8_000, 44_100),
             // A format no stream converts from.
-            range(SampleFormat::I8, 2, 48_000, 48_000),
+            range(SampleFormat::DsdU8, 2, 48_000, 48_000),
         ];
         assert_eq!(picked(ranges, Some(2)), None);
+    }
+
+    /// A device offering only 24-bit, 8-bit or u32 PCM at 48 kHz opens too.
+    #[test]
+    fn opens_every_integer_pcm_format() {
+        for format in [
+            SampleFormat::I24,
+            SampleFormat::U24,
+            SampleFormat::U32,
+            SampleFormat::I8,
+            SampleFormat::U8,
+        ] {
+            let ranges = vec![range(format, 2, 48_000, 48_000)];
+            assert_eq!(picked(ranges, Some(2)), Some((2, format)), "{format}");
+        }
+        // 24-bit before 8-bit.
+        let ranges = vec![
+            range(SampleFormat::U8, 2, 48_000, 48_000),
+            range(SampleFormat::I24, 2, 48_000, 48_000),
+        ];
+        assert_eq!(picked(ranges, Some(2)), Some((2, SampleFormat::I24)));
     }
 
     /// PulseAudio lists every format at every channel count; the default

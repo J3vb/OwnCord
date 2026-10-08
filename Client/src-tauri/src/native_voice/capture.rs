@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample, SampleFormat, SizedSample};
+use cpal::{FromSample, Sample, SizedSample};
 use futures_util::FutureExt;
 use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -23,7 +23,7 @@ use nnnoiseless::DenoiseState;
 
 use super::playout::{host_devices, pinned_listed, Selected, WatchedHost, Watcher, FOLLOW_EVERY};
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
-use super::stream_format::pick_config;
+use super::stream_format::{pick_config, typed};
 
 /// A lock helper mirroring playout's, for the shared input-stream slot.
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -463,13 +463,7 @@ fn open_input(
             ..config
         };
         let (state, dead) = (state.clone(), dead.clone());
-        match format {
-            SampleFormat::I16 => build_input::<i16>(device, config, state, dead),
-            SampleFormat::I32 => build_input::<i32>(device, config, state, dead),
-            SampleFormat::U16 => build_input::<u16>(device, config, state, dead),
-            // `pick_config` returns no other format.
-            _ => build_input::<f32>(device, config, state, dead),
-        }
+        typed!(format, build_input(device, config, state, dead))
     };
     let stream = build(cpal::BufferSize::Fixed(FRAME as u32))
         .or_else(|_| build(cpal::BufferSize::Default))
@@ -749,6 +743,9 @@ mod tests {
         assert_eq!(to_mono(&u16s, 2).collect::<Vec<_>>(), want);
         let i32s = [1i32 << 30, -(1 << 30), i32::MIN, 0, 1 << 29, 1 << 29];
         assert_eq!(to_mono(&i32s, 2).collect::<Vec<_>>(), want);
+        let i24s = [1 << 22, -(1 << 22), -(1 << 23), 0, 1 << 21, 1 << 21]
+            .map(|s| cpal::I24::new(s).unwrap());
+        assert_eq!(to_mono(&i24s, 2).collect::<Vec<_>>(), want);
     }
 
     /// Not a gate: the CPU cost the task asked to report. Run with
