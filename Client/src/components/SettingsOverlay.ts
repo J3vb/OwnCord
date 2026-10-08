@@ -348,7 +348,8 @@ export function createSettingsOverlay(
         else next = order.length - 1;
         const name = order[next]!;
         setActiveTab(name);
-        tabButtons.get(name)?.focus();
+        // A blocked switch keeps focus on the selected tab (activate-on-focus).
+        if (secretRequests === 0) tabButtons.get(name)?.focus();
       },
       { signal: disposable.signal },
     );

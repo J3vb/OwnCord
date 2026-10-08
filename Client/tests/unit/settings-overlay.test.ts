@@ -240,6 +240,10 @@ describe("SettingsOverlay", () => {
       submit(prefix);
 
       tryToLeave();
+      const accountTab = getTab(container, 0);
+      accountTab.focus();
+      accountTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect(document.activeElement).toBe(accountTab);
       expect(defaultOptions.onClose).not.toHaveBeenCalled();
       expect(getTab(container, 0).classList.contains("active")).toBe(true);
 
