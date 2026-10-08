@@ -119,8 +119,8 @@ func (f *Fetcher) readError(ctx context.Context, err error) error {
 
 // checkContentType judges the media type twice: as the response declares it,
 // and as the bytes actually read sniff. A body that declares one type and
-// sniffs as an incompatible one is refused — that mismatch is how a caller expecting JSON
-// is handed an HTML page or an image decoder is handed a script.
+// sniffs as an incompatible one is refused — that mismatch is how a caller
+// expecting JSON is handed an HTML page or an image decoder is handed a script.
 //
 // An empty body has nothing to sniff, so only the declared type is checked.
 // A response with an empty body AND no declared Content-Type passes: there
