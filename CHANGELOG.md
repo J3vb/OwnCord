@@ -64,6 +64,7 @@ and only when it changes something a contributor or fork holder must do
 - **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
 - **Recovery kit and codes**: Settings now stays open until a new recovery kit or set of recovery codes is shown, so the one-time secret is never lost by closing Settings mid-request.
 - **New channels after a reconnect**: a client that reconnects while a channel is being created now always gets that channel in its sidebar, instead of occasionally missing it until the next restart.
+- **Release smoke drill (Docker)**: a disk-full copy that had already written part of its filler file now has that file shrunk again before setup continues, instead of running setup on a full tmpfs.
 
 ### Login & connection
 
