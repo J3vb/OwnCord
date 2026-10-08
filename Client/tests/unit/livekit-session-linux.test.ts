@@ -37,6 +37,10 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
 
 const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
 vi.mock("livekit-client", () => ({
+  // installLivekitLogging runs when livekitSession loads.
+  LogLevel: { warn: 3, error: 4 },
+  setLogLevel: vi.fn(),
+  setLogExtension: vi.fn(),
   Room: vi.fn(function () {
     throw new Error("the web Room must not be built on Linux");
   }),

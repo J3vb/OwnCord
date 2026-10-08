@@ -10,11 +10,13 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { RoomEvent } from "livekit-client";
+import { LoggerNames, RoomEvent, getLogger } from "livekit-client";
+import { addLogListener, type LogEntry } from "@lib/logger";
 import type { Room } from "livekit-client";
 
 import {
   attachDiagnosticListeners,
+  installLivekitLogging,
   buildSessionDebugInfo,
   getIceConnectionState,
   logIceConnectionInfo,
@@ -391,6 +393,29 @@ describe("buildSessionDebugInfo", () => {
     expect(got.voiceJoin).toMatchObject({ lastJoins: expect.any(Array) });
   });
 
+  it("records the settings the browser applied to the microphone capture", () => {
+    const room = {
+      name: "r",
+      state: "connected",
+      remoteParticipants: new Map(),
+      localParticipant: {
+        identity: "user-1",
+        trackPublications: new Map(),
+        getTrackPublication: () => undefined,
+      },
+      engine: {},
+    } as unknown as Room;
+    const micSettings = { deviceId: "default", autoGainControl: false, voiceIsolation: false };
+
+    const got = buildSessionDebugInfo({
+      ...baseDeps,
+      room,
+      audioPipeline: fakePipeline({ micSettings }),
+    });
+
+    expect(got.localMicSettings).toEqual(micSettings);
+  });
+
   it("reports hasRNNoiseProcessor when the mic track carries a processor", () => {
     const room = {
       name: "r",
@@ -498,5 +523,33 @@ describe("buildSessionDebugInfo", () => {
     const got = buildSessionDebugInfo({ ...baseDeps, room: null, currentChannelId: null });
 
     expect(got.currentChannelId).toBeNull();
+  });
+});
+
+// ── installLivekitLogging ──────────────────────────────────────────────────
+
+describe("installLivekitLogging", () => {
+  // Owner's report 2026-10-08: a stalled signal resume left no trace in the
+  // support bundle, because livekit-client logged its reconnect attempts and
+  // their errors only to the console.
+  it("routes livekit-client's warnings and errors into the OwnCord log, not its chatter", () => {
+    installLivekitLogging();
+    const entries: LogEntry[] = [];
+    const off = addLogListener((entry) => entries.push(entry));
+    const sdk = getLogger(LoggerNames.Engine);
+
+    sdk.info("websocket connected");
+    sdk.warn("could not resume signal connection", { attempt: 3 });
+    off();
+
+    expect(entries.filter((e) => e.component === "livekit")).toEqual([
+      expect.objectContaining({
+        level: "warn",
+        message: "could not resume signal connection",
+        data: { attempt: 3 },
+      }),
+    ]);
+    expectConsole("warn", /\[livekit\] could not resume signal connection/);
+    expectConsole("warn", /could not resume signal connection/);
   });
 });

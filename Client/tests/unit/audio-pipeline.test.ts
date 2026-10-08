@@ -294,6 +294,7 @@ describe("AudioPipeline", () => {
         echoCancellation: true,
         noiseSuppression: false,
         autoGainControl: true,
+        voiceIsolation: false,
         deviceId: { exact: "usb-mic" },
       });
       expect(contextOf(track)).toBe(ctx);
@@ -317,6 +318,47 @@ describe("AudioPipeline", () => {
         expect.objectContaining({ deviceId: "default", echoCancellation: true }),
       );
       expect(onError).not.toHaveBeenCalled();
+    });
+
+    // Owner's report 2026-10-08: an unplugged mic ends the capture and
+    // livekit-client's handleTrackEnded restarts it on `{deviceId: "default"}`
+    // with no processing flags, so the browser's defaults (AGC on) replace
+    // the saved toggles until the next settings change.
+    it("re-applies the saved processing after the SDK restarts the capture without it", async () => {
+      prefs.set("autoGainControl", false);
+      // The browser applies its defaults to any flag a request leaves out.
+      vi.mocked(navigator.mediaDevices.getUserMedia).mockImplementation(async (constraints) => {
+        const audio = (constraints as { audio: MediaTrackConstraints }).audio;
+        const track = fakeMediaStreamTrack("mic-2");
+        track.getSettings = () =>
+          ({
+            deviceId: "default",
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            ...audio,
+          }) as MediaTrackSettings;
+        return new FakeMediaStream([track]) as unknown as MediaStream;
+      });
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      pipeline.setRoom(roomWith(track));
+      const restartTrack = vi.spyOn(track, "restartTrack");
+
+      await track.restartTrack({ deviceId: "default" });
+
+      await vi.waitFor(() => expect(restartTrack).toHaveBeenCalledTimes(2));
+      expect(restartTrack).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+          voiceIsolation: false,
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+      expect(restartTrack, "the corrected capture is not restarted again").toHaveBeenCalledTimes(2);
     });
 
     it("reports a failed restart", async () => {

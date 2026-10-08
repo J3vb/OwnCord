@@ -7,6 +7,7 @@ const mockSetInputVolume = vi.fn();
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
+const mockGetLocalMicSettings = vi.fn((): MediaTrackSettings | null => null);
 
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
@@ -17,6 +18,7 @@ vi.mock("@lib/livekitSession", () => ({
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
   reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
     mockReapplyEnhancedNoiseSuppression(...args),
+  getLocalMicSettings: () => mockGetLocalMicSettings(),
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
@@ -196,8 +198,9 @@ describe("VoiceAudioTab UI structure", () => {
   /** Fires the `devicechange` listeners registered on the stubbed MediaDevices. */
   let emitDeviceChange: () => void = () => {};
 
-  function stubNavigator(devices: Array<{ kind: string; deviceId: string; label: string }> = []): {
-    setDevices(next: Array<{ kind: string; deviceId: string; label: string }>): void;
+  type FakeDevice = { kind: string; deviceId: string; label: string; groupId?: string };
+  function stubNavigator(devices: FakeDevice[] = []): {
+    setDevices(next: FakeDevice[]): void;
   } {
     const audioStream = {
       getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
@@ -472,6 +475,80 @@ describe("VoiceAudioTab UI structure", () => {
     // Default + 1 speaker = 2 options
     expect(outputSelect.querySelectorAll("option").length).toBe(2);
 
+    ac.abort();
+  });
+
+  // Owner's report 2026-10-08: after an unplug and replug the call kept the
+  // webcam mic while the list said only "Default".
+  it("names the device the call captures next to a saved Default microphone", async () => {
+    mockGetLocalMicSettings.mockReturnValue({ deviceId: "default", groupId: "g-webcam" });
+    stubNavigator([
+      { kind: "audioinput", deviceId: "default", label: "Default - USB Mic", groupId: "g-usb" },
+      { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+      { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
+    ]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)"));
+    mockGetLocalMicSettings.mockReturnValue(null);
+    ac.abort();
+  });
+
+  it("shows a plain Default while a named microphone is saved", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("usb-mic"));
+    mockGetLocalMicSettings.mockReturnValue({ deviceId: "usb-mic", groupId: "g-usb" });
+    stubNavigator([
+      { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+    ]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+    expect(inputSelect.options[0]!.text).toBe("Default");
+    mockGetLocalMicSettings.mockReturnValue(null);
+    ac.abort();
+  });
+
+  it("refreshes the Default label once the session has moved the capture", async () => {
+    vi.useFakeTimers();
+    try {
+      mockGetLocalMicSettings.mockReturnValue({ deviceId: "webcam-mic", groupId: "g-webcam" });
+      stubNavigator([
+        { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+        { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
+      ]);
+      const ac = new AbortController();
+      const el = createVoiceAudioTab(ac.signal).build();
+      document.body.appendChild(el);
+      const inputSelect = el.querySelectorAll("select")[0]!;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)");
+
+      emitDeviceChange();
+      mockGetLocalMicSettings.mockReturnValue({ deviceId: "usb-mic", groupId: "g-usb" });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(inputSelect.options[0]!.text).toBe("Default (USB Mic)");
+      mockGetLocalMicSettings.mockReturnValue(null);
+      ac.abort();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a plain Default label when no call captures the microphone", async () => {
+    stubNavigator([{ kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g" }]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+    expect(inputSelect.options[0]!.text).toBe("Default");
     ac.abort();
   });
 
@@ -852,6 +929,7 @@ describe("VoiceAudioTab UI structure", () => {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: true,
+          voiceIsolation: false,
           deviceId: { exact: "mic-2" },
         },
         video: false,

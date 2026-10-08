@@ -60,6 +60,10 @@ const mockRoom = vi.hoisted(() => ({
 }));
 
 vi.mock("livekit-client", () => ({
+  // installLivekitLogging runs when livekitSession loads.
+  LogLevel: { warn: 3, error: 4 },
+  setLogLevel: vi.fn(),
+  setLogExtension: vi.fn(),
   // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
   Room: vi.fn(function () {
     return mockRoom;
