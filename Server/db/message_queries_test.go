@@ -599,6 +599,22 @@ func TestSearchMessages_FindsMatch(t *testing.T) {
 	}
 }
 
+func TestSearchMessages_NFDQueryFindsNFCMessage(t *testing.T) {
+	database := openMigratedMemory(t)
+	userID := seedUser(t, database, "zara")
+	chID := seedChannel(t, database, "searchch")
+
+	_, _ = database.CreateMessage(context.Background(), chID, userID, "my r\u00e9sum\u00e9 draft", nil)
+
+	results, err := database.SearchMessages(context.Background(), "re\u0301sume\u0301", nil, db.SearchPage{Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchMessages: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("NFD query found %d NFC messages, want 1", len(results))
+	}
+}
+
 func TestSearchMessages_FilterByChannel(t *testing.T) {
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "adam")

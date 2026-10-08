@@ -396,6 +396,13 @@ func logCertificateFailures(
 			return cert, nil
 		}
 
+		// Only a hello for the configured domain says issuance is broken for
+		// real clients; scanner hellos with a missing or foreign name must not
+		// log or spend the throttle. hello.ServerName is compared, never logged.
+		if hello == nil || !strings.EqualFold(strings.TrimSuffix(hello.ServerName, "."), domain) {
+			return cert, err
+		}
+
 		mu.Lock()
 		report := lastReported.IsZero() || time.Since(lastReported) >= certFailureLogInterval
 		if report {
