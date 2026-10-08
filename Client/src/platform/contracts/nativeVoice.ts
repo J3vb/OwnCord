@@ -67,6 +67,10 @@ export type NativeVoiceEvent =
   | { type: "trackUnsubscribed"; identity: string; sid: string }
   | { type: "trackMuted"; identity: string; sid: string; muted: boolean }
   | { type: "activeSpeakers"; identities: string[] }
+  /** The server's grant for the local participant changed: whether it still
+   *  lets this client publish the microphone (a moderator server-mute
+   *  withdraws it, lifting the mute restores it). */
+  | { type: "microphonePermission"; allowed: boolean }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
   /** Screen capture `capture` ended on its own after it started: stopped
    *  from the desktop's sharing indicator, or the shared window closed. */

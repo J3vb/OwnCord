@@ -152,6 +152,12 @@ pub enum Event {
     ActiveSpeakers {
         identities: Vec<String>,
     },
+    /// The server's grant for the local participant changed: whether it still
+    /// lets this client publish the microphone. The webview defers an unmute
+    /// that arrives while it is false and republishes when it turns true.
+    MicrophonePermission {
+        allowed: bool,
+    },
     EncryptionStatus {
         identity: String,
         encrypted: bool,
@@ -269,6 +275,12 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
             identity: participant.identity().to_string(),
             sid: publication.sid().to_string(),
             muted: false,
+        },
+        RoomEvent::ParticipantPermissionChanged {
+            participant: Participant::Local(_),
+            permission: Some(permission),
+        } => Event::MicrophonePermission {
+            allowed: mic_allowed(&permission),
         },
         RoomEvent::ActiveSpeakersChanged { speakers } => Event::ActiveSpeakers {
             identities: speakers.iter().map(|s| s.identity().to_string()).collect(),
@@ -1141,6 +1153,12 @@ mod tests {
             can_publish_sources: sources.iter().map(|s| *s as i32).collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn microphone_permission_event_serializes_for_the_webview() {
+        let json = serde_json::to_string(&Event::MicrophonePermission { allowed: false }).unwrap();
+        assert_eq!(json, r#"{"type":"microphonePermission","allowed":false}"#);
     }
 
     #[test]

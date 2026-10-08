@@ -11,6 +11,7 @@ vi.mock("livekit-client", () => ({
     ParticipantConnected: "participantConnected",
     ParticipantDisconnected: "participantDisconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
+    ParticipantPermissionsChanged: "participantPermissionsChanged",
     EncryptionError: "encryptionError",
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
@@ -469,6 +470,27 @@ describe("NativeRoom room surface", () => {
     host.calls.length = 0;
     emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
     expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
+  });
+
+  it("tracks the microphone grant and announces a restored one after the unmute", async () => {
+    const room = createNativeRoom(audio);
+    const changed = vi.fn();
+    room.on("participantPermissionsChanged", changed);
+    await room.connect("u", "t");
+    expect(room.localParticipant.permissions).toBeUndefined();
+    // A moderator mute withdraws the grant; the unmute reaches the webview
+    // over the OwnCord socket before the SFU's restored grant arrives.
+    emit({ session: 1, event: { type: "microphonePermission", allowed: false } });
+    expect(room.localParticipant.permissions).toEqual({
+      canPublish: false,
+      canPublishSources: [],
+    });
+    expect(changed).toHaveBeenLastCalledWith(undefined, room.localParticipant);
+    changed.mockClear();
+    emit({ session: 1, event: { type: "microphonePermission", allowed: true } });
+    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [] });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledWith(undefined, room.localParticipant);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {
