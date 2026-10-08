@@ -29,6 +29,7 @@ vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "../../lib/toast";
+import { setLiveTailInView } from "../../lib/read-state";
 import { expectConsole } from "../../../tests/helpers/console";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {
@@ -578,5 +579,41 @@ describe("handleChatMessage counts the active channel while the window is unfocu
     handleChatMessage(createReconnectClock(), live(10));
 
     expect(dm().unreadCount).toBe(0);
+  });
+});
+
+describe("handleChatMessage counts the active channel while its live tail is out of view", () => {
+  beforeEach(() => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "me", avatar: null, role: "member" },
+    }));
+  });
+  afterEach(() => {
+    setLiveTailInView(1, true);
+    vi.restoreAllMocks();
+    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  });
+
+  it("counts a message and a mention while the list is scrolled up", () => {
+    seedActiveChannel();
+    setLiveTailInView(1, false);
+
+    handleChatMessage(createReconnectClock(), live(10));
+    handleChatMessage(createReconnectClock(), { ...live(11), content: "hey @me", mentions: [1] });
+
+    expect(channel().unreadCount).toBe(2);
+    expect(channel().mentionCount).toBe(1);
+  });
+
+  it("does not count once the live tail is back in view", () => {
+    seedActiveChannel();
+    setLiveTailInView(1, false);
+    setLiveTailInView(1, true);
+
+    handleChatMessage(createReconnectClock(), live(10));
+
+    expect(channel().unreadCount).toBe(0);
   });
 });

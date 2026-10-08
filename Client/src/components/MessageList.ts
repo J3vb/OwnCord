@@ -52,7 +52,7 @@ import {
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
-import { markChannelRead, hasUnread, isChannelAway } from "@lib/read-state";
+import { markChannelRead, hasUnread, isChannelAway, setLiveTailInView } from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -1214,6 +1214,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Update floating scroll-to-bottom button visibility
     updateScrollToBottomBtn();
+    // Before markReadIfSeen, which asks isChannelAway. The 100 px auto-scroll
+    // threshold on purpose: inside it a new message is scrolled into view.
+    setLiveTailInView(options.channelId, isNearBottom());
     // Reaching the bottom counts as seeing it (P4-03 step A).
     markReadIfSeen();
 
@@ -1357,6 +1360,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // A deferred divider still moves the view later, so only the bottom
     // scrolls are skipped when the open already landed on it.
     if (!openedAtDivider) scrollToBottom();
+    setLiveTailInView(options.channelId, isNearBottom());
     const initialScrollRaf = requestAnimationFrame(() => {
       if (!openedAtDivider) scrollToBottom();
     });
@@ -1588,6 +1592,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver = null;
     }
     disposable.destroy();
+    setLiveTailInView(options.channelId, true);
     beginRowRender();
     if (scrollRafId !== 0) {
       cancelAnimationFrame(scrollRafId);
