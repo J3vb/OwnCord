@@ -145,7 +145,9 @@ adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 identity; the backend reports each transition once, so a remote peer's failure
 is re-raised every second until its `Ok`, as the web worker does, and the
 shared 3 s decrypt grace in `lib/roomEventHandlers.ts` decides when it degrades
-the call — participant join/leave).
+the call; the grace restarts only when a room key was installed since the
+peer's last failure, which `E2EEWorker` reports on both paths — participant
+join/leave).
 No audio `TrackSubscribed` is raised: there is no browser track. Capture and
 playout run in the Rust process on the session's own streams, with
 libwebrtc's APM (AEC/NS/AGC from the same preferences the web path uses) and

@@ -730,9 +730,10 @@ describe("handleEncryptionError", () => {
       };
 
       reportFor(180);
-      // Three bursts: each restarts a streak (3 tolerated, 3 past the grace).
-      for (let i = 0; i < 9; i++) {
-        expectConsole("warn", /receive-side decrypt failure/);
+      // Three bursts, one streak: no key install between them, so only the
+      // first burst's first 3 reports are tolerated.
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      for (let i = 0; i < 15; i++) {
         expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
       }
     });
@@ -755,7 +756,9 @@ describe("handleEncryptionError", () => {
       vi.advanceTimersByTime(5000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
 
-      // A later decrypt streak and its quiet gap do not clear it either.
+      // A later decrypt streak (after a fresh key install) and its quiet gap
+      // do not clear it either.
+      h.handlers.noteRoomKeyInstalled();
       for (let i = 0; i < 4; i++) {
         h.handlers.handleEncryptionError(decryptFailed(), bob);
         vi.advanceTimersByTime(1000);
@@ -793,6 +796,8 @@ describe("handleEncryptionError", () => {
 
       h.handlers.handleEncryptionError(decryptFailed(), bob);
       vi.advanceTimersByTime(5000);
+      // Each rotation race comes with its own key install.
+      h.handlers.noteRoomKeyInstalled();
       h.handlers.handleEncryptionError(decryptFailed(), bob);
 
       expectConsole("warn", /receive-side decrypt failure/);
@@ -805,9 +810,72 @@ describe("handleEncryptionError", () => {
 
       h.handlers.handleEncryptionError(decryptFailed(), bob);
       vi.advanceTimersByTime(5 * 60_000);
+      h.handlers.noteRoomKeyInstalled();
       h.handlers.handleEncryptionError(decryptFailed(), bob);
 
       expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("intermittent bursts with a wrong key degrade the call", () => {
+      const h = build();
+
+      // Bursts shorter than the grace window, separated by a quiet gap: the
+      // gap is not evidence the peer's frames decrypt again.
+      // Errors at t = 0, 1, 2 s, silence, then t = 5, 6 s.
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      vi.advanceTimersByTime(2000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(1000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("a key install starts a fresh grace window", () => {
+      const h = build();
+
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      vi.advanceTimersByTime(7000);
+      h.handlers.noteRoomKeyInstalled();
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+
+      for (let i = 0; i < 6; i++) expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("a key install in the same millisecond as the last failure still starts a fresh window", () => {
+      const h = build();
+
+      // A streak already past the grace window.
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      setEncryptionDegraded(false);
+
+      // The next rotation installs its key without the clock moving.
+      h.handlers.noteRoomKeyInstalled();
+      vi.advanceTimersByTime(1000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
       expectConsole("warn", /receive-side decrypt failure/);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
     });

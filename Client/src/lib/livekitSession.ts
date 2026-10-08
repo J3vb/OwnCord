@@ -119,6 +119,7 @@ export class LiveKitSession {
     getWs: () => this.ws,
     getServerHost: () => this.serverHost,
     getCurrentChannelId: () => this._currentChannelId,
+    onRoomKeyInstalled: () => this._eventHandlers.noteRoomKeyInstalled(),
   });
 
   // --- Test-visibility proxies (E2EE state lives in E2EEManager; unit tests
