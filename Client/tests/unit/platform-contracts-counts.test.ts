@@ -181,6 +181,53 @@ describe("platform invoke map parser", () => {
     ).toEqual(actual);
   });
 
+  it("follows lazy factories written as arrows, function expressions and methods", () => {
+    const source = `
+      const loadArrow = async () => {
+        const { invoke: n } = await import("@tauri-apps/api/core");
+        return n;
+      };
+      const loadConcise = async () => (await import("@tauri-apps/api/core")).invoke;
+      const loadExpr = async function () {
+        const { invoke: n } = await import("@tauri-apps/api/core");
+        return n;
+      };
+      const svc = {
+        async load() {
+          const { invoke: n } = await import("@tauri-apps/api/core");
+          return n;
+        },
+      };
+      async function run() {
+        (await loadArrow())("arrow_cmd");
+        (await loadConcise())("concise_cmd");
+        (await loadExpr())("expr_cmd");
+        (await svc.load())("method_cmd");
+      }
+    `;
+    expect([...invokeFixture(source).commands].sort()).toEqual([
+      "arrow_cmd",
+      "concise_cmd",
+      "expr_cmd",
+      "method_cmd",
+    ]);
+  });
+
+  it("ignores returns that belong to a nested function inside the factory", () => {
+    const source = `
+      import { invoke } from "@tauri-apps/api/core";
+      const factory = () => {
+        const nested = () => {
+          return invoke;
+        };
+        void nested;
+        return (cmd: string) => cmd;
+      };
+      factory()("not_a_command");
+    `;
+    expect(invokeFixture(source).commands.size).toBe(0);
+  });
+
   it("ignores commented-out imports, calls, strings and unrelated functions named invoke", () => {
     const source = `
       // import { invoke } from "@tauri-apps/api/core";
