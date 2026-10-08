@@ -604,7 +604,9 @@ jobs:
       # seconds, and belongs on the PR that adds the file rather than in a
       # nightly report nobody reads until it fails.
       - name: Mutation shards cover the configured surface
-        run: node scripts/check-mutation-shards.mjs
+        run: |
+          node --test scripts/aggregate-mutation-shards.test.mjs
+          node scripts/check-mutation-shards.mjs
 
       # D1: `tests/e2e/quarantine.json` is what keeps a known-flaky required test
       # out of the run. This is the guard that keeps the list honest — a

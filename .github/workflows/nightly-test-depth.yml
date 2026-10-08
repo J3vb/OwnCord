@@ -30,8 +30,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pin:
+    # One dev revision for every shard and for the aggregation: dev can move
+    # during the up-to-90-minute matrix, and the score is only the full-surface
+    # score if the shard config and the reports come from the same commit.
+    name: Pin dev revision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.dev.outputs.sha }}
+    steps:
+      - id: dev
+        env:
+          REPO: ${{ github.repository }}
+        run: echo "sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)" >> "$GITHUB_OUTPUT"
+
   mutation:
     name: Nightly mutation baseline (${{ matrix.shard }})
+    needs: pin
     runs-on: ubuntu-latest
     # The owner's ceiling is 90 min wall-clock per night. Shards run as parallel
     # jobs, so this bounds one shard's wall time; the longest measured shard
@@ -49,6 +65,14 @@ jobs:
         with:
           ref: dev
           persist-credentials: false
+      # Detach to the pinned revision with git rather than a dynamic checkout
+      # ref, so the npm cache step below never follows a non-literal ref.
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
@@ -68,6 +92,45 @@ jobs:
         with:
           name: mutation-report-${{ matrix.shard }}
           path: Client/reports/mutation/${{ matrix.shard }}/
+          retention-days: 7
+
+  mutation-score:
+    # The one full-surface score (docs/plans/b7-8-mutation-baseline-2026-09-20.md):
+    # statuses are summed across shards, never averaged. Fails when a shard
+    # report is missing, since a partial score is not the full-surface score.
+    # Not a required status context; it only exists on the nightly.
+    name: Nightly full-surface mutation score
+    needs: [pin, mutation]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          persist-credentials: false
+      # Detach to the pinned revision with git rather than a dynamic checkout
+      # ref, so the npm cache step below never follows a non-literal ref.
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: mutation-report-*
+          merge-multiple: false
+          path: Client/reports/mutation-shards
+      - run: node scripts/aggregate-mutation-shards.mjs reports/mutation-shards
+        working-directory: Client
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-score-summary
+          path: Client/reports/mutation/summary.json
           retention-days: 7
 
   mutation-permissions:

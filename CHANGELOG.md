@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- **Nightly mutation score**: the nightly run now adds the six shard reports into one full-surface mutation score, published as a job summary and artifact, and fails when a shard report is missing.
 - **Release gate evidence**: the pre-release check now ignores results from pull request runs of the tagged commit and refuses a commit that has no push-to-main CI run, so only the full-matrix run counts.
 - **Channel order**: moving a channel's position in the admin panel now reorders the sidebar categories live, matching what a restart shows; equal positions fall back to channel id like the server.
 - **Bundle budgets**: the Settings, pop-out window and screen-share lazy chunks now have their own size budgets in `Client/bundle-budgets.json`, so growth in them fails CI instead of going unnoticed.
