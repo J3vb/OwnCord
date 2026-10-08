@@ -159,6 +159,7 @@ const IS_OPERATIONAL = PROFILE === "operational";
 const IS_RESTART = PROFILE === "restart";
 const IS_CEILING = PROFILE === "ceiling-search";
 const IS_SCALE = PROFILE === "scale";
+const IS_CAPACITY = PROFILE === "capacity";
 // The B6-10 profiles. A metric registered under this flag must not exist on a
 // capacity run: that summary's metric key set is B6-9's, byte for byte.
 const IS_B6_10 = PROFILE !== "capacity";
@@ -210,6 +211,12 @@ const deliveries = new Counter("ws_deliveries");
 // carries it and docs/capacity.md publishes the two halves separately.
 const voiceJoinTime = new Trend("voice_join_time", true);
 const voiceTokens = new Counter("voice_tokens");
+// One per VU, on its first voice_token: voice_tokens alone cannot say that
+// every VU joined (operational churn re-joins, and one VU can emit many).
+const voiceVUsJoined = new Counter("voice_vus_joined");
+// A ready socket that closed without this script closing it. Capacity-only:
+// restart and operational close sockets by design (the drill, the storm).
+const unexpectedCloses = new Counter("ws_unexpected_closes");
 
 // B6-10 additions. Registered only on non-capacity profiles: a capacity
 // run's summary metric key set stays byte-identical to the B6-9 script's.
@@ -671,7 +678,7 @@ if (
     "restart requires nonempty pre-restart, recovery and post-restart windows, at least two VUs and a positive send interval",
   );
 }
-function restartMinSamples(durationS) {
+function minDeliveries(durationS) {
   return Math.max(
     1,
     Math.floor(PEAK_VUS * (1000 / SEND_INTERVAL_MS) * (PEAK_VUS - 1) * 0.3 * durationS),
@@ -840,8 +847,11 @@ export const options = {
     // looks — this is the assertion that was missing when the script drifted
     // off the wire protocol. A percentile over an empty sample passes.
     ws_authed: ["count>0"],
-    ws_ready: ["count>0"],
-    ws_deliveries: ["count>0"],
+    // Capacity gates the live peak, not "one socket": PEAK_VUS went ready, none
+    // dropped (it never resumes), and deliveries reached the fan-out floor.
+    ws_ready: [IS_CAPACITY ? `count>=${PEAK_VUS}` : "count>0"],
+    ws_deliveries: [IS_CAPACITY ? `count>=${minDeliveries(SUSTAIN_S)}` : "count>0"],
+    ...(IS_CAPACITY ? { ws_unexpected_closes: ["count==0"] } : {}),
     // ...and a run where the VUs that logged in did so is not enough on its
     // own. Under a simultaneous login burst the admission budget refuses most
     // of it (4 concurrent bcrypts on the constrained leg), and a VU that gives
@@ -867,6 +877,7 @@ export const options = {
             ? {}
             : { voice_join_time: ["p(95)<250", "p(99)<500"] }),
           voice_tokens: ["count>0"],
+          voice_vus_joined: [`count>=${VOICE_VUS}`],
           // The churn's cross-VU voice_state delivery only happens when the
           // voice leg does — an operational run without K6_VOICE_CHANNEL_ID
           // has no voice VUs and must not fail on a leg it never ran.
@@ -947,9 +958,9 @@ export const options = {
           // workload. A window that stalled, or that the generator never
           // filled, fails here instead of publishing a percentile computed
           // from whatever few frames happened to arrive.
-          "ws_deliveries{phase:pre-restart}": [`count>=${restartMinSamples(RESTART_AT - RAMP_S)}`],
+          "ws_deliveries{phase:pre-restart}": [`count>=${minDeliveries(RESTART_AT - RAMP_S)}`],
           "ws_deliveries{phase:post-restart}": [
-            `count>=${restartMinSamples(RUN_S - RESTART_AT - RESTART_RECOVERY_S)}`,
+            `count>=${minDeliveries(RUN_S - RESTART_AT - RESTART_RECOVERY_S)}`,
           ],
         }
       : {}),
@@ -1140,7 +1151,7 @@ function scaleThresholds() {
   };
 }
 
-// A deliberately loose floor on a send window's samples, as restartMinSamples:
+// A deliberately loose floor on a send window's samples, as minDeliveries:
 // 30% of the planned sends, and of their deliveries to the smallest channel's
 // other members.
 function scaleMinSamples(durationS, sendMs) {
@@ -1416,6 +1427,7 @@ function phasedInterval(socket, name, periodMs, fn) {
     socket.setInterval(fn, periodMs);
   }, delay);
 }
+let vuVoiceCounted = false; // this VU already counted into voice_vus_joined
 let vuInVoice = false; // this VU believes it holds a voice session
 // Restart drill: contents of this VU's drain sends that got neither an ack
 // nor an error before the socket closed. VU scope on purpose — the socket
@@ -1517,6 +1529,7 @@ export default function () {
 
     let authed = false;
     let ready = false;
+    let selfClosed = false; // this script closed the socket (not a drop)
     let msgCount = 0;
     let voiceJoinSent = 0;
     let pendingSends = {}; // send-id -> Date.now() at send
@@ -1615,6 +1628,7 @@ export default function () {
             break;
           case "auth_error":
             wsErrors.add(1);
+            selfClosed = true;
             socket.close();
             break;
           case "ready":
@@ -1712,6 +1726,10 @@ export default function () {
               voiceJoinSent = 0;
             }
             voiceTokens.add(1);
+            if (!vuVoiceCounted) {
+              vuVoiceCounted = true;
+              voiceVUsJoined.add(1);
+            }
             break;
           case "server_restart":
             // Sequenced broadcast, protocol.md:1815-1826 (reason +
@@ -1770,6 +1788,7 @@ export default function () {
     // earlier; the rest are unanswered, their contents kept for the next
     // iteration's history check.
     socket.on("close", function () {
+      if (IS_CAPACITY && ready && !selfClosed) unexpectedCloses.add(1);
       if (RESUMES_ON) recordGap();
       if (IS_RESTART && restartReceivedAt) {
         serverRestartLead.add(Date.now() - restartReceivedAt);
@@ -1792,6 +1811,7 @@ export default function () {
       if (inMs > 30000) {
         socket.setTimeout(function () {
           vuStormDone = true;
+          selfClosed = true;
           socket.close();
         }, inMs);
       }
@@ -1806,6 +1826,7 @@ export default function () {
         function () {
           vuHerdDropped = true;
           herdDrops.add(1, scaleTags());
+          selfClosed = true;
           socket.close();
         },
         // A dial that opened after its slot drops on the next tick: k6
@@ -1945,6 +1966,7 @@ export default function () {
     // Hold the connection for the whole run (see HOLD_MS); a resumed
     // connection holds to the original hold end.
     socket.setTimeout(function () {
+      selfClosed = true;
       socket.close();
     }, closeIn);
   });
