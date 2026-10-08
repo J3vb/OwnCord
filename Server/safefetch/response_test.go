@@ -991,3 +991,36 @@ func TestFetch_HTTPSRedirectToHTTPSIsFollowed(t *testing.T) {
 		t.Fatalf("body=%q finalURL=%q", resp.Body, resp.FinalURL)
 	}
 }
+
+// TestCheckContentType_DeclaredAndSniffedMustBeCompatible: both types pass the
+// allowlist on their own in every row, so only the pairing is under test.
+func TestCheckContentType_DeclaredAndSniffedMustBeCompatible(t *testing.T) {
+	f := newFetcher(t, stub(t, func(http.ResponseWriter, *http.Request) {}), func(p *Policy) {
+		p.ContentTypes = []string{"application/json", "application/octet-stream", "text/plain", "text/html", "text/xml", "image/png", "image/svg+xml"}
+	})
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	tests := []struct {
+		name, declared string
+		body           []byte
+		ok             bool
+	}{
+		{"json declared, html body", "application/json", []byte("<!DOCTYPE html><html></html>"), false},
+		{"json declared, png body", "application/json", png, false},
+		{"json declared, json body", "application/json; charset=utf-8", []byte(`{"a":1}`), true},
+		{"svg declared, xml body", "image/svg+xml", []byte("<?xml version=\"1.0\"?><svg/>"), true},
+		{"png declared, png body", "image/png", png, true},
+		{"octet-stream declared, png body", "application/octet-stream", png, true},
+		{"html declared, html body", "text/html", []byte("<html></html>"), true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := f.checkContentType(tc.declared, tc.body)
+			if tc.ok && err != nil {
+				t.Fatalf("want accepted, got %v", err)
+			}
+			if !tc.ok && !errors.Is(err, ErrContentType) {
+				t.Fatalf("want ErrContentType, got %v", err)
+			}
+		})
+	}
+}
