@@ -127,7 +127,7 @@ a connect bound to those validated addresses with no second lookup, automatic
 redirects off with each hop re-checked and scheme downgrades refused, a total
 deadline, a streaming byte ceiling and a separate decompressed-size ceiling,
 a content-type allowlist checked against the sniffed type as well as the
-declared one, and a per-process concurrency cap. Their gates did not move:
+declared one, with the two required to be compatible, and a per-process concurrency cap. Their gates did not move:
 with no `gif.api_key` the route is not mounted, and with an empty
 `plugins.http_allowlist` every host is denied. B5-11's push dispatch joined
 them behind `push.dispatch_enabled` and `push.enabled`, both false by default,
