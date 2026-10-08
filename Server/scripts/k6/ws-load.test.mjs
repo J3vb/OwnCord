@@ -984,3 +984,15 @@ test("capacity closes every socket itself before ramp-down, however late the VU 
   h.close();
   assert.equal(h.metrics.ws_unexpected_closes?.length ?? 0, 0);
 });
+
+test("voice_vus_joined counts real voice VUs, not the slot widened for the observer", () => {
+  const env = { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "2" };
+  const extra = harness(env, 3);
+  extra.start();
+  extra.receive({ type: "voice_token", payload: {} });
+  assert.equal(extra.metrics.voice_vus_joined.length, 0);
+  const real = harness(env, 2);
+  real.start();
+  real.receive({ type: "voice_token", payload: {} });
+  assert.equal(real.metrics.voice_vus_joined.length, 1);
+});

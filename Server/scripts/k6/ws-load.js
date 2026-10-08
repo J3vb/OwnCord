@@ -1734,7 +1734,7 @@ export default function () {
               voiceJoinSent = 0;
             }
             voiceTokens.add(1);
-            if (!vuVoiceCounted) {
+            if (!vuVoiceCounted && vuId <= VOICE_VUS) {
               vuVoiceCounted = true;
               voiceVUsJoined.add(1);
             }
