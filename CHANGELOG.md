@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- **Message requests**: opening a conversation with someone whose message request you have not answered now accepts that request, and blocking someone removes your trust in them so their messages arrive as a request again after an unblock.
 - **First-run setup**: the owner's own setup login no longer shows up as an unreviewed new login, and setting up shares the same limit on simultaneous password checks as sign-in, answering "try again later" when the server is busy.
 - **Linux voice after a moderator mute**: when a moderator lifts a server mute, your microphone is published again automatically instead of staying silent.
 - **Message retention page for server managers**: a role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first channel rule.

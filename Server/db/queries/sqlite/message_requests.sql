@@ -46,3 +46,11 @@ ORDER BY mr.id DESC;
 UPDATE message_requests
 SET state = ?, decided_at = datetime('now')
 WHERE id = ? AND recipient_id = ? AND state = 'pending';
+
+-- name: UntrustSender :exec
+DELETE FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?;
+
+-- name: AcceptUndecidedMessageRequest :execrows
+UPDATE message_requests
+SET state = 'accepted', decided_at = datetime('now')
+WHERE id = ? AND recipient_id = ? AND state IN ('pending', 'ignored');

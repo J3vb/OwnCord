@@ -10,14 +10,34 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// BlockUser adds a block from blocker to blocked. Idempotent — re-blocking
-// a user that is already blocked is a no-op (INSERT OR IGNORE).
+// BlockUser adds a block from blocker to blocked and, in the same
+// transaction, drops the blocker's standing trust in the blocked user — so an
+// unblock later does not silently reinstate it and the blocked user's next
+// message lands in Message Requests. Only the blocker→blocked direction is
+// revoked. Idempotent — re-blocking a user that is already blocked changes
+// nothing (INSERT OR IGNORE).
 func (d *DB) BlockUser(ctx context.Context, blockerID, blockedID int64) error {
-	if err := d.q.BlockUser(ctx, dbgen.BlockUserParams{
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("BlockUser begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	q := d.q.WithTx(tx)
+
+	if err := q.BlockUser(ctx, dbgen.BlockUserParams{
 		BlockerID: blockerID,
 		BlockedID: blockedID,
 	}); err != nil {
 		return fmt.Errorf("BlockUser: %w", err)
+	}
+	if err := q.UntrustSender(ctx, dbgen.UntrustSenderParams{
+		RecipientID: blockerID,
+		SenderID:    blockedID,
+	}); err != nil {
+		return fmt.Errorf("BlockUser untrust: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("BlockUser commit: %w", err)
 	}
 	return nil
 }
