@@ -2042,7 +2042,7 @@ Upload a file as multipart form data.
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
-**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB").
+**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB"). The parts after `file` are read to the end too: a body padded past the cap is refused with `413 PAYLOAD_TOO_LARGE` and a malformed tail with `400 BAD_REQUEST`, and the stored file is deleted.
 **Content-Type:** `multipart/form-data`
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
