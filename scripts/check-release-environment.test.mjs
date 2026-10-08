@@ -241,3 +241,15 @@ test("a subject-path block is skipped, not parsed as a path list", () => {
 test("release.yml itself has no mixed path list", () => {
   assert.deepEqual(auditArtifactPathLists(realReleaseWorkflow), []);
 });
+
+test("a blank line inside a path list does not end it", () => {
+  const src = [...pathList(["root.txt"]), "", "            Server/nested.txt"].join("\n");
+  const found = auditArtifactPathLists(src);
+  assert.equal(found.length, 1);
+  assert.deepEqual(found[0].paths, ["root.txt", "Server/nested.txt"]);
+});
+
+test("a stripped block scalar (`path: |-`) is audited too", () => {
+  const src = pathList(["root.txt", "Server/nested.txt"]).join("\n").replace("path: |", "path: |-");
+  assert.equal(auditArtifactPathLists(src).length, 1);
+});

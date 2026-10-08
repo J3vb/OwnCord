@@ -213,6 +213,10 @@ updates:
       # Patch updates within 0.16.x still flow through.
       - dependency-name: "rfd"
         update-types: ["version-update:semver-minor"]
+      # Held at =2.7.0 with its npm half (see the @tauri-apps/plugin-http entry in
+      # the npm block and Client/patches/README.md); one side alone fails
+      # check-tauri-versions.
+      - dependency-name: "tauri-plugin-http"
 
   # Tauri Rust toolchain pin (Client/src-tauri/rust-toolchain.toml). Separate
   # from the `cargo` block above: that one reviews crate versions, this one
