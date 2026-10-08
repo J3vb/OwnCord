@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 180 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 181 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -80,6 +80,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/registrations/{id}/deny`                                 |
 | POST    | `/admin/api/restart`                                                 |
 | GET     | `/admin/api/retention`                                               |
+| GET     | `/admin/api/retention/channels`                                      |
 | GET     | `/admin/api/retention/preview`                                       |
 | POST    | `/admin/api/retention/preview`                                       |
 | GET     | `/admin/api/roles`                                                   |
@@ -3155,29 +3156,29 @@ Authorization is two-layered:
    `>= 100`) instead of on a bit, so not even `ADMINISTRATOR` substitutes for
    being the owner.
 
-| Route                                                                                                           | Requires                                                                                     |
-| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /admin/api/me`                                                                                             | perimeter only                                                                               |
-| `GET /admin/api/stats`                                                                                          | perimeter only                                                                               |
-| `GET /admin/api/users`                                                                                          | perimeter only                                                                               |
-| `PATCH /admin/api/users/{id}`                                                                                   | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
-| `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
-| `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)        | `MANAGE_CHANNELS`                                                                            |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
-| `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
-| `GET /admin/api/config`                                                                                         | `MANAGE_SERVER`                                                                              |
-| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                               | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
-| `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
-| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
-| `GET/PATCH/DELETE /admin/api/logs/level`                                                                        | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
-| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
-| `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
-| `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
+| Route                                                                                                                                                | Requires                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /admin/api/me`                                                                                                                                  | perimeter only                                                                               |
+| `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                               |
+| `GET /admin/api/users`                                                                                                                               | perimeter only                                                                               |
+| `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                               |
+| `DELETE /admin/api/users/{id}`                                                                                                                       | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
+| `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
+| `GET/PATCH /admin/api/settings`                                                                                                                      | `MANAGE_SERVER`                                                                              |
+| `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
+| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
+| `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
+| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                              |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `ADMINISTRATOR`                                                                              |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
+| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `ADMINISTRATOR`                                                                              |
+| `GET /admin/api/attention`                                                                                                                           | `ADMINISTRATOR` — RI-07                                                                      |
+| `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                              |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                                                                 | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -3643,6 +3644,25 @@ override.
 
 `days` on a channel overrides the server window in either direction; `0`
 keeps that channel forever.
+
+---
+
+### GET /admin/api/retention/channels
+
+The channels a retention policy can target, so the page works for a
+`MANAGE_SERVER` role that cannot read `GET /admin/api/channels`
+(`MANAGE_CHANNELS`). DMs are never in retention scope and are omitted.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 4, "name": "general" },
+  { "id": 7, "name": "announcements" }
+]
+```
 
 ---
 

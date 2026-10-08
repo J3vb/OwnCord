@@ -93,6 +93,7 @@ func mountRetentionRoutes(r chi.Router, retention *service.RetentionService) {
 	r.Group(func(r chi.Router) {
 		r.Use(requirePerm(permissions.ManageServer))
 		r.Get("/retention", handleGetRetention(retention))
+		r.Get("/retention/channels", handleGetRetentionChannels(retention))
 		r.Get("/retention/preview", handleGetRetentionPreview(retention))
 		r.Post("/retention/preview", handlePostRetentionPreview(retention))
 		r.Put("/channels/{id}/retention", handlePutChannelRetention(retention))
