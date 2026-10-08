@@ -72,17 +72,8 @@ func TestTrustedURL(t *testing.T) {
 	}
 }
 
-// The updater dials GitHub directly: a proxy named in the environment is not
-// used for release metadata or assets.
-func TestNewUpdater_IgnoresEnvironmentProxy(t *testing.T) {
+func TestNewUpdater_SetsRedirectHostCheck(t *testing.T) {
 	u := NewUpdater("1.0.0", "", "J3vb", "OwnCord")
-	tr, ok := u.httpClient.Transport.(*http.Transport)
-	if !ok {
-		t.Fatalf("httpClient.Transport = %T, want *http.Transport", u.httpClient.Transport)
-	}
-	if tr.Proxy != nil {
-		t.Error("httpClient.Transport.Proxy is set, want nil")
-	}
 	if u.httpClient.CheckRedirect == nil {
 		t.Error("httpClient.CheckRedirect is nil, want the host check")
 	}

@@ -109,15 +109,9 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		repoName:       repoName,
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
-	// GitHub is dialled directly, never through a proxy named in the
-	// environment, and each redirect hop passes the same host check as the
-	// first request. Fetches are a few an hour, so no connection is kept idle.
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DisableKeepAlives = true
+	// Each redirect hop passes the same host check as the first request.
 	u.httpClient = &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: transport,
+		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return fmt.Errorf("stopped after %d redirects", len(via))
