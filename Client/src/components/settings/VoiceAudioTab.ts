@@ -190,6 +190,8 @@ function buildVoiceAudioTabInner(
   micCard.appendChild(inputVolumeHeader);
   const inputVolumeRow = createElement("div", { class: "slider-row" });
   const savedInputVolume = loadPref<number>("inputVolume", 100);
+  /** The slider's current value, for a meter processor started after it moved. */
+  let inputVolumePercent = savedInputVolume;
   const inputVolumeSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
@@ -206,6 +208,9 @@ function buildVoiceAudioTabInner(
       const val = Number(inputVolumeSlider.value);
       setText(inputVolumeLabel, `${val}%`);
       setInputVolume(val);
+      // The meter's own processor measures after the same gain as the call's.
+      inputVolumePercent = val;
+      meterProcessor?.setInputGain(val / 100);
     },
     { signal },
   );
@@ -841,6 +846,7 @@ function buildVoiceAudioTabInner(
         const options = { kind: Track.Kind.Audio, track: stream.getAudioTracks()[0]! };
         await processor.init(options as AudioProcessorOptions);
         meterProcessor = processor;
+        processor.setInputGain(inputVolumePercent / 100);
         await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
         if (signal.aborted || thisRequest !== micRequestId) {
           if (meterProcessor === processor) meterProcessor = null;

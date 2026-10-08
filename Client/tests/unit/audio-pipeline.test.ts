@@ -364,6 +364,24 @@ describe("startVadDetector", () => {
     expect(onGate).not.toHaveBeenCalled();
   });
 
+  it("holds the fallback gate for elapsed time, not poll count, when timers are throttled", async () => {
+    vi.useFakeTimers();
+    const ctx = new FakeAudioContext();
+    const analyser = ctx.createAnalyser();
+    analyser.getFloatTimeDomainData.mockImplementation((arr: Float32Array) => arr.fill(0));
+    const onGate = vi.fn();
+    const detector = startVadDetector(ctx as never, analyser as never, 0.05, { onGate });
+    await vi.advanceTimersByTimeAsync(16 * 30);
+    await vi.advanceTimersByTimeAsync(16); // the first quiet poll starts the hold
+    expect(onGate).not.toHaveBeenCalled();
+    // A hidden window runs the next poll a second later, not 16 ms: it is
+    // already past the 320 ms hold.
+    vi.setSystemTime(Date.now() + 1000);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(onGate).toHaveBeenLastCalledWith(true);
+    void detector.stop();
+  });
+
   it("falls back to polling with the same attack and hold when the worklet is unavailable", async () => {
     vi.useFakeTimers();
     const ctx = new FakeAudioContext();
@@ -379,13 +397,13 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(onStarted).toHaveBeenCalledWith(false);
 
-    // Start-up grace (30 polls) then 20 quiet polls (~320 ms, the worklet's
-    // hold) close the gate.
+    // Start-up grace (30 polls) then 320 ms below the threshold (the
+    // worklet's hold) close the gate.
     await vi.advanceTimersByTimeAsync(16 * 30);
     expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16 * 19);
+    await vi.advanceTimersByTimeAsync(16 * 20);
     expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16);
+    await vi.advanceTimersByTimeAsync(16 * 2);
     expect(onGate).toHaveBeenLastCalledWith(true);
 
     // A single loud poll is not speech; two are.

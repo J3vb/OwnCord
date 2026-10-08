@@ -105,10 +105,10 @@ export function startVadDetector(
     // backgrounded, which freezes the VAD gate. setTimeout continues firing
     // (throttled ~1Hz when hidden), still fast enough for VAD gate timing.
     const dataArray = new Float32Array(analyser.fftSize);
-    let silentFrames = 0;
+    let quietSince = 0; // Date.now() of the first poll below the threshold, 0 = none
     let speechFrames = 0;
     let gated = false;
-    const GATE_ON_FRAMES = 20; // ~320 ms of 16 ms polls, as vad-worklet.js holds
+    const GATE_HOLD_MS = 320; // as vad-worklet.js holds; elapsed time, as timers throttle
     const GATE_OFF_FRAMES = 2;
     let startupFrames = 0;
     const STARTUP_GRACE = 30;
@@ -131,13 +131,14 @@ export function startVadDetector(
         startupFrames++;
       } else if (rms < threshold) {
         speechFrames = 0;
-        silentFrames++;
-        if (!gated && silentFrames >= GATE_ON_FRAMES) {
+        const now = Date.now();
+        if (quietSince === 0) quietSince = now;
+        if (!gated && now - quietSince >= GATE_HOLD_MS) {
           gated = true;
           handlers.onGate(true);
         }
       } else {
-        silentFrames = 0;
+        quietSince = 0;
         speechFrames++;
         if (gated && speechFrames >= GATE_OFF_FRAMES) {
           gated = false;
