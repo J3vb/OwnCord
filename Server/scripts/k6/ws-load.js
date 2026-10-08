@@ -1966,9 +1966,12 @@ export default function () {
     // rather than relying on disconnect cleanup to tidy up 25 voice states.
     // Capacity-only: under operational the churn timer owns every leave.
     if (joinsVoice && !IS_OPERATIONAL) {
-      socket.setTimeout(function () {
-        socket.send(envelope("voice_leave", {}));
-      }, Math.max(1, closeIn - 2000));
+      socket.setTimeout(
+        function () {
+          socket.send(envelope("voice_leave", {}));
+        },
+        Math.max(1, closeIn - 2000),
+      );
     }
 
     // Hold the connection for the whole run (see HOLD_MS); a resumed
