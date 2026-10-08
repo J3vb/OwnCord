@@ -556,8 +556,21 @@ issuance and renewal, which is the part this project does not qualify (see
 [Let's Encrypt (ACME)](#lets-encrypt-acme)). Caddy obtains and renews
 certificates with no configuration beyond the hostname; nginx and Traefik do
 the same with certbot or their own ACME support. Set `tls.mode: "off"` on
-OwnCord when the proxy terminates TLS, and keep OwnCord bound to a private
-interface.
+OwnCord when the proxy terminates TLS.
+
+The server listens on every interface and has no bind-address setting, so with
+`tls.mode: "off"` you must make port 8443 reachable only from the proxy:
+
+- **Docker:** publish the port on loopback only (`127.0.0.1:8443:8443`), or put
+  the proxy on the compose network and drop the `ports:` entry. The supplied
+  `Server/docker-compose.yml` publishes `8443:8443` on all interfaces and must
+  be changed for this setup.
+- **Bare metal or VM:** add a host firewall rule that admits 8443 only from the
+  proxy (loopback for a same-host proxy), and do not port-forward 8443 on your
+  router.
+- **Check:** with `tls.mode: "off"` the port speaks plain HTTP, so from another
+  machine run `curl --max-time 5 http://<host>:8443/api/v1/health`; it must
+  fail to connect. A reply means the port is still exposed.
 
 One consequence worth knowing before you choose: with a proxy terminating TLS,
 desktop clients pin the _proxy's_ certificate. When the proxy uses a public CA,
@@ -1711,19 +1724,27 @@ sha256sum --check --ignore-missing checksums.sha256
 # 2. Provenance. This proves the file was built by this repository's release
 #    workflow at the commit the tag points to, not merely uploaded by whoever
 #    holds the release. Run it on the asset you downloaded, and again on
-#    checksums.sha256 and on the source snapshot.
-gh attestation verify chatserver-linux-amd64.tar.gz --repo J3vb/OwnCord
-gh attestation verify checksums.sha256 --repo J3vb/OwnCord
+#    checksums.sha256 and on the source snapshot. Set TAG to the release you
+#    downloaded, e.g. TAG=v2.2.0-beta.1; the signer-workflow and source-ref
+#    flags reject a build from any other workflow or ref, such as a dry run.
+gh attestation verify chatserver-linux-amd64.tar.gz --repo J3vb/OwnCord \
+  --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
+  --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+gh attestation verify checksums.sha256 --repo J3vb/OwnCord \
+  --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
+  --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
 
 # 3. The image. Resolve the tag to the digest you are actually running first:
 #    a tag is mutable and a digest is not.
-DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:latest \
+DIGEST=$(docker image inspect ghcr.io/j3vb/owncord-server:${TAG#v} \
   --format '{{index .RepoDigests 0}}')
 
 # 4. Verify the attestation the release run pushed beside that digest, then
 #    read the inventory BuildKit attached to the image.
-gh attestation verify "oci://$DIGEST" --repo J3vb/OwnCord
-docker buildx imagetools inspect ghcr.io/j3vb/owncord-server:latest \
+gh attestation verify "oci://$DIGEST" --repo J3vb/OwnCord \
+  --signer-workflow J3vb/OwnCord/.github/workflows/release.yml \
+  --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+docker buildx imagetools inspect ghcr.io/j3vb/owncord-server:${TAG#v} \
   --format '{{json .SBOM}}'
 
 # 5. Windows binaries additionally carry a detached minisign signature, which is
@@ -1793,7 +1814,7 @@ choose one: [TLS Setup](#tls-setup).
 
 - [ ] **Set a strong Owner password at setup** -- there is no default password to change; the first-run wizard creates the Owner account
 - [ ] **Set `admin_allowed_cidrs`** -- restrict admin access to specific IPs if needed
-- [ ] **Serve TLS end to end** -- keep the qualified default (`self_signed`) or, for a public domain, front the server with a reverse proxy that owns certificate renewal; built-in `acme` works but is not qualified ([TLS Setup](#tls-setup)). Never expose `tls.mode: off` directly
+- [ ] **Serve TLS end to end** -- keep the qualified default (`self_signed`) or, for a public domain, front the server with a reverse proxy that owns certificate renewal; built-in `acme` works but is not qualified ([TLS Setup](#tls-setup)). Never expose `tls.mode: off` directly: publish 8443 on loopback (`127.0.0.1:8443:8443`) or firewall it to the proxy only
 - [ ] **Set `trusted_proxies`** -- only if behind a reverse proxy, list the proxy's own addresses so client IPs come from `X-Forwarded-For`
 - [ ] **Leave `allowed_origins` empty unless you know why** -- empty denies cross-origin WebSocket connections, which is what a desktop-only deployment wants; set it only to admit browser clients from your own domain
 - [ ] **Set stable voice credentials** -- set `livekit_api_key` and `livekit_api_secret` to avoid token breakage on restart

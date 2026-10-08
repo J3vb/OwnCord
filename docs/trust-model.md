@@ -201,8 +201,14 @@ Desktop pinning details, each with its test:
   `decide_prompts_when_web_pki_record_is_for_another_leaf`,
   `capture_verifier_never_marks_an_ip_host_web_pki_valid`. The updater's
   `HostScopedVerifier` also uses web-PKI, for the GitHub download.
-- All three native tunnels (WebSocket, HTTP, LiveKit) use the same verifier:
-  `ws_proxy.rs:154`, `http_proxy.rs:218`, `livekit_proxy.rs:339`.
+- The three native tunnels share one TOFU module (`tofu.rs`) and one pin store
+  keyed by `tofu::cert_store_key`. The WebSocket and HTTP tunnels connect
+  through `tofu::CaptureVerifier` and decide after the handshake with
+  `tofu::evaluate`, so first use prompts and pins (`ws_proxy.rs:150,196`,
+  `http_proxy.rs:351,391`); the pooled HTTP path re-uses the stored pin
+  (`http_proxy.rs:265-273`). The LiveKit tunnel never pins on first use: it
+  requires an existing pin and verifies inside the handshake with
+  `tofu::PinnedVerifier` (`livekit_proxy.rs:203-204,339`).
 - The session token travels inside the first WebSocket frame, never in the
   URL: server `Server/ws/serve_auth.go:26-61`, client `Client/src/lib/ws.ts:546`
   (path only) and `:447-455` (auth frame). Test: `ws-lifecycle.test.ts`
