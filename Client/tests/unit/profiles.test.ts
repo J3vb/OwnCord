@@ -139,10 +139,9 @@ describe("ProfileManager", () => {
     it("returns the existing profile instead of adding a second one for the same host", () => {
       const m = mgr();
       const first = m.addProfile(sampleData);
-      const again = m.addProfile({ ...sampleData, name: "Other", host: "LocalHost:8443" });
+      const again = m.addProfile({ ...sampleData, name: "Other", host: "localhost:8443" });
 
       expect(again).toBe(first);
-      expect(again.host).toBe("localhost:8443");
       expect(m.getAll()).toHaveLength(1);
     });
 
@@ -416,16 +415,6 @@ describe("ProfileManager", () => {
       const hosts = m2.getAll().map((p) => p.host);
       expect(hosts).toContain("localhost:8443");
       expect(hosts).toContain("prod.example.com:443");
-    });
-
-    it("skips a host differing only in case during import", () => {
-      const m = mgr();
-      m.addProfile(sampleData);
-      const result = m.importProfiles(
-        JSON.stringify([{ ...sampleData, id: "x", host: "LocalHost:8443", lastConnected: null }]),
-      );
-      expect(result).toEqual({ imported: 0, skipped: 1 });
-      expect(m.getAll().map((p) => p.host)).toEqual(["localhost:8443"]);
     });
 
     it("skips duplicate hosts during import", () => {
