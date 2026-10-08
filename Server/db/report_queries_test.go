@@ -832,7 +832,7 @@ func TestReportQueries_MutationsRecordTheirEventInTheSameTransaction(t *testing.
 	if err != nil {
 		t.Fatalf("ListReportEvents: %v", err)
 	}
-	var got []string
+	got := make([]string, 0, len(events))
 	for _, e := range events {
 		got = append(got, e.Action)
 	}
