@@ -16,6 +16,8 @@ export interface NativeControl {
   centered(): number;
   /** Every full-screen state the window was set to, in order. */
   fullscreenCalls(): readonly boolean[];
+  /** Every full-screen state another window was set to, by its label. */
+  labelledFullscreenCalls(): readonly (readonly [string, boolean])[];
 }
 
 export interface WindowControlSubject {
@@ -68,6 +70,16 @@ export function describeWindowControlSuite(
       await ctx.subject.setFullscreen(true);
       await ctx.subject.setFullscreen(false);
       expect(ctx.native.fullscreenCalls()).toEqual([true, false]);
+    });
+
+    check("puts another window (a stream pop-out) in full screen by its label", async () => {
+      await ctx.subject.setFullscreen(true, "owncord-popout-7");
+      await ctx.subject.setFullscreen(false, "owncord-popout-7");
+      expect(ctx.native.labelledFullscreenCalls()).toEqual([
+        ["owncord-popout-7", true],
+        ["owncord-popout-7", false],
+      ]);
+      expect(ctx.native.fullscreenCalls()).toEqual([]);
     });
   });
 }

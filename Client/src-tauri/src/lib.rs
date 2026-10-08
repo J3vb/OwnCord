@@ -25,6 +25,8 @@ mod livekit_proxy;
 // action callback.
 #[cfg(desktop)]
 mod message_notification;
+#[cfg(desktop)]
+mod popout;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
 #[cfg(target_os = "linux")]
 pub mod native_voice;
@@ -141,7 +143,13 @@ pub fn run() {
     // the "launch on login" toggle; deep-link registers the owncord:// scheme.
     #[cfg(desktop)]
     let builder = builder
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                // A pop-out opens where window.open places it, never restored
+                // full screen.
+                .with_filter(|label| label == "main")
+                .build(),
+        )
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None::<Vec<&'static str>>,
@@ -275,6 +283,20 @@ pub fn run() {
             // Record the credential backend first: if this build has no
             // persistent store, every later credential symptom follows from it.
             secret_store::log_compiled_backend();
+            // The main window is built here, not from tauri.conf.json alone
+            // ("create": false): only a code-built webview takes a new-window
+            // handler, which stream pop-outs need (popout.rs).
+            if let Some(config) = app.config().app.windows.first().cloned() {
+                let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
+                #[cfg(desktop)]
+                let builder = {
+                    let handle = app.handle().clone();
+                    builder.on_new_window(move |url, features| {
+                        popout::on_new_window(&handle, url, features)
+                    })
+                };
+                builder.build()?;
+            }
             diagnostics::spawn_frontend_watchdog(app.handle());
             tray::create_tray(app.handle())?;
             // WebKitGTK denies mic/camera access by default — grant it so

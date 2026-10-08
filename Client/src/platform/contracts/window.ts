@@ -23,6 +23,7 @@ export interface WindowControl {
   outerSize(): Promise<{ readonly width: number; readonly height: number }>;
   center(): Promise<void>;
   /** Put the window in full screen, or take it out. A full-screen video tile
-   *  uses it: HTML full screen fills only the webview in WebView2. */
-  setFullscreen(on: boolean): Promise<void>;
+   *  uses it: HTML full screen fills only the webview in WebView2. With a
+   *  label, the window of that label instead (a stream pop-out). */
+  setFullscreen(on: boolean, label?: string): Promise<void>;
 }

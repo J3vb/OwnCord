@@ -223,6 +223,42 @@
 .video-watch-btn:hover {
   background: var(--bg-hover);
 }
+/* Popped out to a window of its own: the tile says where the stream went. */
+.video-popped {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+/* The pop-out window's page: the video fills it, the control on hover. */
+.video-popout {
+  position: fixed;
+  inset: 0;
+  background: #000; /* intentional: letterbox bars, as on a tile */
+}
+.video-popout video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.video-popout__fullscreen {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.video-popout:hover .video-popout__fullscreen,
+.video-popout__fullscreen:focus-visible {
+  opacity: 1;
+}
 /* Your own screen share: what is going out, never a hall of mirrors. */
 .video-self-cover {
   position: absolute;

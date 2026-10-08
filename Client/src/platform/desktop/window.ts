@@ -21,7 +21,9 @@ export const windowControl: WindowControl = {
   async center() {
     await (await import("@tauri-apps/api/window")).getCurrentWindow().center();
   },
-  async setFullscreen(on: boolean) {
-    await (await import("@tauri-apps/api/window")).getCurrentWindow().setFullscreen(on);
+  async setFullscreen(on: boolean, label?: string) {
+    const { getCurrentWindow, Window } = await import("@tauri-apps/api/window");
+    const win = label === undefined ? getCurrentWindow() : await Window.getByLabel(label);
+    await win?.setFullscreen(on);
   },
 };

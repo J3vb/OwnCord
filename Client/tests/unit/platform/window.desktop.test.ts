@@ -15,6 +15,7 @@ const h = vi.hoisted(() => ({
   size: { width: 0, height: 0 },
   centered: 0,
   fullscreen: [] as boolean[],
+  labelledFullscreen: [] as [string, boolean][],
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -31,6 +32,15 @@ vi.mock("@tauri-apps/api/window", () => ({
       return Promise.resolve();
     },
   }),
+  Window: {
+    getByLabel: (label: string) =>
+      Promise.resolve({
+        setFullscreen: (on: boolean) => {
+          h.labelledFullscreen.push([label, on]);
+          return Promise.resolve();
+        },
+      }),
+  },
   availableMonitors: () =>
     h.monitorsError !== null ? Promise.reject(h.monitorsError) : Promise.resolve(h.monitors),
 }));
@@ -47,6 +57,7 @@ describeWindowControlSuite(async () => {
     size: { width: 0, height: 0 },
     centered: 0,
     fullscreen: [],
+    labelledFullscreen: [],
   });
   const mod = await import("../../../src/platform/desktop/window");
   const desktopBinding: WindowControl = mod.windowControl;
@@ -68,6 +79,7 @@ describeWindowControlSuite(async () => {
       },
       centered: () => h.centered,
       fullscreenCalls: () => h.fullscreen,
+      labelledFullscreenCalls: () => h.labelledFullscreen,
     },
   };
 });

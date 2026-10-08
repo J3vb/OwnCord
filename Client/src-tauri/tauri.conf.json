@@ -11,6 +11,8 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "OwnCord",
         "width": 1280,
         "height": 720,
