@@ -28,8 +28,9 @@ version: 2
 # — `@dependabot rebase` recreates the PR against the configured target.
 #
 # `target-branch` covers version updates only. Dependabot *security* updates
-# always open against the default branch (`main`); close them, and the fix
-# reaches `dev` through the weekly grouped update or a manual bump.
+# always open against the default branch (`main`). Before closing one, open an
+# equivalent PR against `dev` and track it: the weekly grouped update ignores
+# semver-major updates and some packages entirely, so it may never ship the fix.
 
 updates:
   # Go server dependencies
