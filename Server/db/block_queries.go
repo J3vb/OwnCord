@@ -42,14 +42,33 @@ func (d *DB) BlockUser(ctx context.Context, blockerID, blockedID int64) error {
 	return nil
 }
 
-// UnblockUser removes a block. Idempotent — unblocking a non-blocked user is
-// a no-op.
+// UnblockUser removes a block and, in the same transaction, clears any
+// already-decided message request from the unblocked user: message_requests
+// keeps one row per pair forever, so a decided row would swallow their next
+// first message instead of letting a fresh request form. A still-pending
+// request is kept. Idempotent — unblocking a non-blocked user is a no-op.
 func (d *DB) UnblockUser(ctx context.Context, blockerID, blockedID int64) error {
-	if err := d.q.UnblockUser(ctx, dbgen.UnblockUserParams{
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("UnblockUser begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	q := d.q.WithTx(tx)
+
+	if err := q.UnblockUser(ctx, dbgen.UnblockUserParams{
 		BlockerID: blockerID,
 		BlockedID: blockedID,
 	}); err != nil {
 		return fmt.Errorf("UnblockUser: %w", err)
+	}
+	if err := q.DeleteDecidedMessageRequestByPair(ctx, dbgen.DeleteDecidedMessageRequestByPairParams{
+		SenderID:    blockedID,
+		RecipientID: blockerID,
+	}); err != nil {
+		return fmt.Errorf("UnblockUser reset request: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("UnblockUser commit: %w", err)
 	}
 	return nil
 }

@@ -54,3 +54,6 @@ DELETE FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?;
 UPDATE message_requests
 SET state = 'accepted', decided_at = datetime('now')
 WHERE id = ? AND recipient_id = ? AND state IN ('pending', 'ignored');
+
+-- name: DeleteDecidedMessageRequestByPair :exec
+DELETE FROM message_requests WHERE sender_id = ? AND recipient_id = ? AND state <> 'pending';

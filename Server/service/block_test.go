@@ -208,3 +208,36 @@ func TestBlockUser_RevokesBlockersTrustInTarget(t *testing.T) {
 		t.Errorf("RequestCreatedFor = %v, want one pending request", res.RequestCreatedFor)
 	}
 }
+
+// A request the blocker already decided (here: accepted) must not swallow the
+// sender's first message after block + unblock: the pair gets a fresh request.
+func TestBlockUser_ResetsDecidedRequestSoNextSendIsARequestAgain(t *testing.T) {
+	_, svc := newMessageRequestFixture(t)
+	ctx := context.Background()
+	first, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+	})
+	if err != nil || len(first.RequestCreatedFor) != 1 {
+		t.Fatalf("first send: %v, RequestCreatedFor=%v", err, first.RequestCreatedFor)
+	}
+	if _, err := svc.MessageRequests.Accept(ctx, 2, first.RequestCreatedFor[0].ID); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+
+	if err := svc.Blocks.BlockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("BlockUser: %v", err)
+	}
+	if err := svc.Blocks.UnblockUser(ctx, 2, 1); err != nil {
+		t.Fatalf("UnblockUser: %v", err)
+	}
+
+	again, err := svc.Messages.SendMessage(ctx, SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi again",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage after unblock: %v", err)
+	}
+	if len(again.RequestCreatedFor) != 1 {
+		t.Errorf("RequestCreatedFor = %v, want a fresh request", again.RequestCreatedFor)
+	}
+}

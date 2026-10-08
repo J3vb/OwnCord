@@ -28,6 +28,20 @@ func (q *Queries) AcceptUndecidedMessageRequest(ctx context.Context, arg AcceptU
 	return result.RowsAffected()
 }
 
+const deleteDecidedMessageRequestByPair = `-- name: DeleteDecidedMessageRequestByPair :exec
+DELETE FROM message_requests WHERE sender_id = ? AND recipient_id = ? AND state <> 'pending'
+`
+
+type DeleteDecidedMessageRequestByPairParams struct {
+	SenderID    int64 `json:"senderId"`
+	RecipientID int64 `json:"recipientId"`
+}
+
+func (q *Queries) DeleteDecidedMessageRequestByPair(ctx context.Context, arg DeleteDecidedMessageRequestByPairParams) error {
+	_, err := q.db.ExecContext(ctx, deleteDecidedMessageRequestByPair, arg.SenderID, arg.RecipientID)
+	return err
+}
+
 const getMessageRequestByPair = `-- name: GetMessageRequestByPair :one
 SELECT id, sender_id, recipient_id, channel_id, first_message_id, state, created_at, decided_at
 FROM message_requests
