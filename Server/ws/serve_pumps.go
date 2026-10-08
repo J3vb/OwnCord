@@ -53,10 +53,13 @@ type writeDeadline struct {
 	cancel  context.CancelFunc
 	timer   *time.Timer
 	timeout time.Duration
+	// writeFn is the frame writer; a field so a test can interleave the timer
+	// with a write. A stored func value costs nothing per frame.
+	writeFn func(context.Context, *websocket.Conn, []byte) error
 }
 
 func newWriteDeadline(parent context.Context, timeout time.Duration) *writeDeadline {
-	d := &writeDeadline{parent: parent, timeout: timeout}
+	d := &writeDeadline{parent: parent, timeout: timeout, writeFn: writeFragmented}
 	d.reset()
 	return d
 }
@@ -78,7 +81,7 @@ func (d *writeDeadline) write(conn *websocket.Conn, msg []byte) error {
 		d.reset()
 	}
 	d.timer.Reset(d.timeout)
-	err := writeFragmented(d.ctx, conn, msg)
+	err := d.writeFn(d.ctx, conn, msg)
 	if !d.timer.Stop() && err == nil {
 		d.reset()
 	}
