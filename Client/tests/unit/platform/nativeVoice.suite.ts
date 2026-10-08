@@ -173,7 +173,13 @@ export function describeNativeVoiceSuite(
         sources: [{ id: "screen:1", kind: "screen", title: "DP-1", thumbnail: null }],
       };
       const capture = { fps: 30, maxWidth: 1920, maxHeight: 1080 };
-      const publish = { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 };
+      const publish = {
+        width: 1920,
+        height: 1080,
+        maxBitrate: 6_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      };
       ctx.native.sharesScreenAs(sources, { capture: 2, width: 1920, height: 1080 }, "TR_screen");
       await expect(ctx.subject.screenSources()).resolves.toEqual(sources);
       await expect(ctx.subject.startScreen(7, "screen:1", capture)).resolves.toEqual({

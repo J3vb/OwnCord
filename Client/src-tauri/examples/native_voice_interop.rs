@@ -281,6 +281,7 @@ mod linux {
                     height: h,
                     max_bitrate: 3_000_000,
                     max_framerate: 15.0,
+                    simulcast: false,
                 },
             )
             .await?;

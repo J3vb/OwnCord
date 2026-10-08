@@ -188,12 +188,14 @@ export interface NativeVoiceScreenStarted {
 }
 
 /** How the screen share is published: the capture's size and the web
- *  path's `publishTrack` encoding for it. */
+ *  path's `publishTrack` encoding for it. `simulcast` adds the web path's
+ *  720p 15 fps layer (`SCREENSHARE_SIMULCAST_LAYERS`). */
 export interface NativeVoiceScreenOptions {
   width: number;
   height: number;
   maxBitrate: number;
   maxFramerate: number;
+  simulcast: boolean;
 }
 
 /** A simulcast layer, as `native_voice_set_video_view` names it. */

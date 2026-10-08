@@ -69,7 +69,8 @@ vi.mock("livekit-client", () => ({
     Kind: { Audio: "audio", Video: "video" },
   },
   VideoPresets: { h360: {}, h720: {}, h1080: {} },
-  ScreenSharePresets: { h720fps5: {}, h1080fps15: {}, h1080fps30: {} },
+  ScreenSharePresets: { h720fps5: {}, h720fps30: {}, h1080fps30: {} },
+  VideoPreset: vi.fn(),
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
   ExternalE2EEKeyProvider: vi.fn(function () {
     return webKeyProvider;
@@ -522,10 +523,17 @@ describe("LiveKitSession on the Linux native backend", () => {
     // Wayland here: the portal picks, so no source list is shown.
     expect(host.commands).toEqual([
       ["screenSources", []],
+      // The default (medium) share: 3 Mbps at 30 fps with the simulcast
+      // layer. This file's livekit mock presets carry no resolution, so the
+      // capture keeps its 1080p fallback.
       ["startScreen", [1, "portal", { fps: 30, maxWidth: 1920, maxHeight: 1080 }]],
       [
         "publishScreen",
-        [1, 3, { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 }],
+        [
+          1,
+          3,
+          { width: 1920, height: 1080, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+        ],
       ],
     ]);
     expect(ws.send).toHaveBeenLastCalledWith({

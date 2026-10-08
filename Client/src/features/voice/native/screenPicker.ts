@@ -19,7 +19,8 @@ import {
   getScreenShareCaptureOptions,
   getScreenShareFps,
   getScreenShareMaxBitrate,
-  getStreamQuality,
+  getScreenShareQuality,
+  isScreenShareSimulcast,
 } from "@lib/screenShare";
 import type { NativeVoiceScreenCapture } from "../../../platform/contracts/nativeVoice";
 import { getScreenSourcePicker } from "./screenPickerSlot";
@@ -34,6 +35,8 @@ export interface ScreenSharePick {
   capture: NativeVoiceScreenCapture;
   maxBitrate: number;
   maxFramerate: number;
+  /** Publish with the 720p 15 fps simulcast layer. */
+  simulcast: boolean;
 }
 
 /** Resolve the source to share and its settings, or null when the user closed
@@ -45,7 +48,7 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
   const pick = await showPicker({
     sources: listed.sources,
     portal: listed.portal,
-    defaultQuality: getStreamQuality(),
+    defaultQuality: getScreenShareQuality(),
     defaultFps: getScreenShareFps(),
   });
   if (pick === null) return null;
@@ -54,5 +57,6 @@ export async function pickScreenSource(): Promise<ScreenSharePick | null> {
     capture: captureOptions(getScreenShareCaptureOptions(pick.quality, pick.fps)),
     maxBitrate: getScreenShareMaxBitrate(pick.quality, pick.fps),
     maxFramerate: getEffectiveScreenShareFps(pick.quality, pick.fps),
+    simulcast: isScreenShareSimulcast(pick.quality),
   };
 }

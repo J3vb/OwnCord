@@ -7,6 +7,7 @@
 
 import {
   Track,
+  VideoPreset,
   VideoPresets,
   ScreenSharePresets,
   createLocalScreenTracks,
@@ -69,7 +70,7 @@ export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOption
   low: { audio: SCREENSHARE_AUDIO, resolution: ScreenSharePresets.h720fps5.resolution },
   medium: {
     audio: SCREENSHARE_AUDIO,
-    resolution: ScreenSharePresets.h1080fps15.resolution,
+    resolution: ScreenSharePresets.h720fps30.resolution,
     contentHint: "detail",
   },
   high: {
@@ -87,18 +88,48 @@ export const SCREENSHARE_PUBLISH_BITRATES: Record<StreamQuality, number> = {
   source: 10_000_000,
 };
 
-export function getStreamQuality(): StreamQuality {
-  const saved = loadPref<string>("streamQuality", "high");
+function loadQuality(key: string, fallback: StreamQuality): StreamQuality {
+  const saved = loadPref<string>(key, fallback);
   if (saved === "low" || saved === "medium" || saved === "high" || saved === "source") return saved;
-  return "high";
+  return fallback;
 }
+
+/** The camera's quality. It keeps the `streamQuality` key it shared with the
+ *  screen share before the two were split, so a saved choice carries over. */
+export function getCameraQuality(): StreamQuality {
+  return loadQuality("streamQuality", "high");
+}
+
+/** The screen share's quality. 720p30 by default: scrolling text at 1080p
+ *  needs about 5 Mbps to stay fluid, and slides to 1-2 fps below that. */
+export function getScreenShareQuality(): StreamQuality {
+  return loadQuality("screenShareQuality", "medium");
+}
+
+/** Whether a screen share at `quality` is published with
+ *  SCREENSHARE_SIMULCAST_LAYERS. Without a lower layer the SFU can only send
+ *  a viewer whose link cannot carry the share the full stream, which they
+ *  cannot decode at all (a frozen frame), while their keyframe requests raise
+ *  the bitrate for every other viewer. Low is already a small stream, and
+ *  Source is meant to arrive untouched. */
+export function isScreenShareSimulcast(quality: StreamQuality): boolean {
+  return quality === "medium" || quality === "high";
+}
+
+/** The screen share's one lower layer (the SDK adds the full-resolution one
+ *  on top): 720p keeps text readable, and 15 fps at 1.2 Mbps leaves most of
+ *  the budget to the top layer. */
+export const SCREENSHARE_SIMULCAST_LAYERS: readonly VideoPreset[] = [
+  new VideoPreset(1280, 720, 1_200_000, 15),
+];
 
 // ---------------------------------------------------------------------------
 // Screen share frame rate
 // ---------------------------------------------------------------------------
 
-/** Saved screen share FPS preference. 30 is the default and preserves the
- *  historical per-quality caps (5/15/30); 60/120 are explicit overrides. */
+/** Saved screen share FPS preference. 30 is the default and keeps each
+ *  quality's own cap (5 for low, 30 otherwise); 60/120 are explicit
+ *  overrides. */
 export function getScreenShareFps(): number {
   const saved = loadPref<number>("screenShareFps", 30);
   return saved === 60 || saved === 120 ? saved : 30;
@@ -107,7 +138,7 @@ export function getScreenShareFps(): number {
 /** Effective capture/publish frame rate for a quality + fps preference. */
 export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number): number {
   if (fps !== 60 && fps !== 120) {
-    return quality === "low" ? 5 : quality === "medium" ? 15 : 30;
+    return quality === "low" ? 5 : 30;
   }
   return fps;
 }
@@ -279,7 +310,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
   }
   const generation = state.generation ?? 0;
   setLocalCamera(true);
-  const quality = getStreamQuality();
+  const quality = getCameraQuality();
   let cameraEndedCleanup: (() => void) | undefined;
   try {
     // Linux captures in the backend, which needs GStreamer's camera elements:
@@ -463,7 +494,7 @@ export async function enableScreenshare(
     return;
   }
   setLocalScreenshare(true);
-  const quality = getStreamQuality();
+  const quality = getScreenShareQuality();
   const fps = getScreenShareFps();
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
@@ -518,18 +549,22 @@ export async function enableScreenshare(
     }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
+      const simulcast = isVideo && isScreenShareSimulcast(quality);
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
         source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
-        simulcast: false,
+        simulcast,
+        // livekit-client takes a screen share's encoding from
+        // screenShareEncoding; it ignores videoEncoding for that source.
         ...(isVideo
           ? {
-              videoEncoding: {
+              screenShareEncoding: {
                 maxBitrate,
                 maxFramerate: effectiveFps,
               },
             }
           : {}),
+        ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
       });
       if ((state.generation ?? 0) !== generation) {
         removeEndedListener?.();

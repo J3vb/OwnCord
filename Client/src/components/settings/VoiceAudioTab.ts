@@ -393,43 +393,64 @@ function buildVoiceAudioTabInner(
   appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
   speakersCard.appendChild(outputVolumeRow);
 
-  // Stream quality selector
-  const qualityHeader = createElement(
-    "div",
-    { class: "settings-field-label" },
-    t("voiceAudio.streamQuality"),
-  );
-  const qualityDesc = createElement(
-    "p",
-    { class: "setting-desc" },
-    t("voiceAudio.streamQualityDesc"),
-  );
-  const qualitySelect = createElement("select", {
-    class: "form-input",
-    style: "width:100%;margin-bottom:16px",
-    "aria-label": t("voiceAudio.streamQuality"),
-  });
-  const qualityOptions: Array<[string, string]> = [
-    ["low", t("voiceAudio.quality.low")],
-    ["medium", t("voiceAudio.quality.medium")],
-    ["high", t("voiceAudio.quality.high")],
-    ["source", t("voiceAudio.quality.source")],
-  ];
-  const savedQuality = loadPref<string>("streamQuality", "high");
-  for (const [value, label] of qualityOptions) {
-    const opt = createElement("option", { value }, label);
-    if (value === savedQuality) opt.setAttribute("selected", "");
-    qualitySelect.appendChild(opt);
+  // Camera and screen share quality selectors: separate prefs, because a
+  // screen share is mostly text and a camera is mostly motion.
+  function qualityGroup(
+    label: string,
+    desc: string,
+    pref: string,
+    saved: string,
+    options: Array<[string, string]>,
+  ): HTMLElement[] {
+    const header = createElement("div", { class: "settings-field-label" }, label);
+    const description = createElement("p", { class: "setting-desc" }, desc);
+    const select = createElement("select", {
+      class: "form-input",
+      style: "width:100%;margin-bottom:16px",
+      "aria-label": label,
+    });
+    for (const [value, text] of options) {
+      const opt = createElement("option", { value }, text);
+      if (value === saved) opt.setAttribute("selected", "");
+      select.appendChild(opt);
+    }
+    select.value = saved;
+    select.addEventListener(
+      "change",
+      () => {
+        savePref(pref, select.value);
+      },
+      { signal },
+    );
+    return [header, description, select];
   }
-  qualitySelect.value = savedQuality;
-  qualitySelect.addEventListener(
-    "change",
-    () => {
-      savePref("streamQuality", qualitySelect.value);
-    },
-    { signal },
+  const cameraQualityGroup = qualityGroup(
+    t("voiceAudio.cameraQuality"),
+    t("voiceAudio.cameraQualityDesc"),
+    "streamQuality",
+    // The defaults match getCameraQuality/getScreenShareQuality in
+    // lib/screenShare, which this tab does not import (it pulls in the
+    // voice store).
+    loadPref<string>("streamQuality", "high"),
+    [
+      ["low", t("voiceAudio.cameraQuality.low")],
+      ["medium", t("voiceAudio.cameraQuality.medium")],
+      ["high", t("voiceAudio.cameraQuality.high")],
+      ["source", t("voiceAudio.cameraQuality.source")],
+    ],
   );
-  const qualityGroup = [qualityHeader, qualityDesc, qualitySelect];
+  const screenQualityGroup = qualityGroup(
+    t("voiceAudio.screenQuality"),
+    t("voiceAudio.screenQualityDesc"),
+    "screenShareQuality",
+    loadPref<string>("screenShareQuality", "medium"),
+    [
+      ["low", t("voiceAudio.screenQuality.low")],
+      ["medium", t("voiceAudio.screenQuality.medium")],
+      ["high", t("voiceAudio.screenQuality.high")],
+      ["source", t("voiceAudio.screenQuality.source")],
+    ],
+  );
 
   // Screen share FPS selector
   const fpsHeader = createElement(
@@ -494,7 +515,7 @@ function buildVoiceAudioTabInner(
   previewVideo.playsInline = true;
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
-  cameraCard.append(...qualityGroup, ...fpsGroup);
+  cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
 
   // Device names seen while this tab is open, to name one that is unplugged.
   const deviceLabels = new Map<string, string>();

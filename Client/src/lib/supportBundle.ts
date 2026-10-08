@@ -155,6 +155,7 @@ const SETTINGS_ALLOWLIST = [
   "pttVk",
   "pttReleaseDelayMs",
   "screenShareFps",
+  "screenShareQuality",
   "streamQuality",
   "developerMode",
   "logs_min_level",

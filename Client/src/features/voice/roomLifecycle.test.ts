@@ -38,7 +38,8 @@ vi.mock("../../lib/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.f
 vi.mock("../../lib/screenShare", () => ({
   CAMERA_PRESETS: { high: {} },
   CAMERA_PUBLISH_BITRATES: { high: 1 },
-  getStreamQuality: () => "high",
+  getCameraQuality: () => "high",
+  getScreenShareQuality: () => "medium",
   getScreenShareFps: () => 30,
   getEffectiveScreenShareFps: () => 30,
   getScreenShareMaxBitrate: () => 1,

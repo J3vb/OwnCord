@@ -293,7 +293,7 @@ export function showScreenSharePicker(
         class: "ssp-select",
         "aria-label": t("picker.frameRate"),
       });
-      // 30 is the saved-prefs "default": each quality's own rate (5/15/30).
+      // 30 is the saved-prefs "default": each quality's own rate (5 for low, 30 otherwise).
       const defaultFpsLabel = (): string =>
         t("picker.fpsDefault", { fps: getEffectiveScreenShareFps(selectedQuality, 30) });
       const defaultFpsOption = createElement("option", { value: "30" }, defaultFpsLabel());
