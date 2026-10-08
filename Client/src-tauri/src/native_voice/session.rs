@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::{AudioEncoding, TrackPublishOptions, VideoEncoding};
+use livekit::options::{AudioEncoding, TrackPublishOptions, VideoEncoding, VideoPreset};
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -403,7 +403,7 @@ impl DeviceKind {
 
 /// How the screen share is published: the capture's size and the web
 /// path's `publishTrack` options for it (`getScreenShareMaxBitrate`, the
-/// effective frame rate).
+/// effective frame rate, `isScreenShareSimulcast`).
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenOptions {
@@ -411,6 +411,34 @@ pub struct ScreenOptions {
     pub height: u32,
     pub max_bitrate: u64,
     pub max_framerate: f64,
+    pub simulcast: bool,
+}
+
+/// The screen share's publish options. With simulcast it adds the web path's
+/// one lower layer (`SCREENSHARE_SIMULCAST_LAYERS`): 720p at 15 fps and at
+/// most 1.2 Mbps, so a viewer who cannot take the full stream still gets
+/// readable text instead of a frozen frame, and the top layer keeps most of
+/// the budget.
+fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
+    TrackPublishOptions {
+        source: TrackSource::Screenshare,
+        simulcast: opts.simulcast,
+        simulcast_layers: opts.simulcast.then(|| {
+            vec![VideoPreset {
+                width: 1280,
+                height: 720,
+                encoding: VideoEncoding {
+                    max_bitrate: 1_200_000,
+                    max_framerate: 15.0,
+                },
+            }]
+        }),
+        video_encoding: Some(VideoEncoding {
+            max_bitrate: opts.max_bitrate,
+            max_framerate: opts.max_framerate,
+        }),
+        ..Default::default()
+    }
 }
 
 /// How the camera is published, from the same presets the web path hands
@@ -891,18 +919,7 @@ impl NativeSession {
         let publication = self
             .room
             .local_participant()
-            .publish_track(
-                LocalTrack::Video(track),
-                TrackPublishOptions {
-                    source: TrackSource::Screenshare,
-                    simulcast: false,
-                    video_encoding: Some(VideoEncoding {
-                        max_bitrate: opts.max_bitrate,
-                        max_framerate: opts.max_framerate,
-                    }),
-                    ..Default::default()
-                },
-            )
+            .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
@@ -1171,6 +1188,38 @@ mod tests {
             can_publish_sources: sources.iter().map(|s| *s as i32).collect(),
             ..Default::default()
         }
+    }
+
+    fn screen(simulcast: bool) -> ScreenOptions {
+        ScreenOptions {
+            width: 1920,
+            height: 1080,
+            max_bitrate: 6_000_000,
+            max_framerate: 30.0,
+            simulcast,
+        }
+    }
+
+    #[test]
+    fn screen_share_simulcasts_with_a_text_friendly_720p_layer() {
+        let opts = screen_publish_options(&screen(true));
+        assert_eq!(opts.source, TrackSource::Screenshare);
+        assert!(opts.simulcast);
+        let encoding = opts.video_encoding.expect("top layer encoding");
+        assert_eq!(encoding.max_bitrate, 6_000_000);
+        assert_eq!(encoding.max_framerate, 30.0);
+        let layers = opts.simulcast_layers.expect("custom simulcast layers");
+        assert_eq!(layers.len(), 1);
+        assert_eq!((layers[0].width, layers[0].height), (1280, 720));
+        assert!(layers[0].encoding.max_bitrate <= 1_200_000);
+        assert_eq!(layers[0].encoding.max_framerate, 15.0);
+    }
+
+    #[test]
+    fn screen_share_without_simulcast_is_one_layer() {
+        let opts = screen_publish_options(&screen(false));
+        assert!(!opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
     }
 
     #[test]

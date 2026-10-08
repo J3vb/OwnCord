@@ -142,7 +142,8 @@ describe("showScreenSharePicker", () => {
     expect(fps!.selectedOptions[0]!.textContent).toBe("Default (5 fps)");
     quality!.value = "medium";
     quality!.dispatchEvent(new Event("change"));
-    expect(fps!.selectedOptions[0]!.textContent).toBe("Default (15 fps)");
+    expect(fps!.selectedOptions[0]!.textContent).toBe("Default (30 fps)");
+    expect(quality!.selectedOptions[0]!.textContent).toBe("Medium (720p)");
     root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
     await expect(picking).resolves.toMatchObject({ quality: "medium", fps: 30 });
   });

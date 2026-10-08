@@ -19,7 +19,8 @@ import {
   type ScreenTrackState,
   CAMERA_PRESETS,
   CAMERA_PUBLISH_BITRATES,
-  getStreamQuality,
+  getCameraQuality,
+  getScreenShareQuality,
   getScreenShareFps,
   getEffectiveScreenShareFps,
   getScreenShareMaxBitrate,
@@ -145,7 +146,8 @@ export class RoomLifecycle {
     this._e2ee.keyProvider.removeAllListeners();
     this._e2eeWorker?.terminate();
     this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
-    const quality = getStreamQuality();
+    const quality = getCameraQuality();
+    const screenQuality = getScreenShareQuality();
     const isSource = quality === "source";
     // OC-0438: publish with the channel's configured audio bitrate — spreading
     // undefined omits audioPreset, leaving LiveKit's own default in place.
@@ -184,8 +186,8 @@ export class RoomLifecycle {
         // Fallback for setScreenShareEnabled paths — the manual publish in
         // screenShare.ts passes explicit per-track encoding that overrides this.
         screenShareEncoding: {
-          maxBitrate: getScreenShareMaxBitrate(quality, getScreenShareFps()),
-          maxFramerate: getEffectiveScreenShareFps(quality, getScreenShareFps()),
+          maxBitrate: getScreenShareMaxBitrate(screenQuality, getScreenShareFps()),
+          maxFramerate: getEffectiveScreenShareFps(screenQuality, getScreenShareFps()),
         },
         // Mute must stop the OS capture, not merely mute the publication:
         // otherwise the microphone stays open and the OS in-use indicator

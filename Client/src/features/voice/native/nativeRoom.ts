@@ -534,7 +534,7 @@ export class NativeRoom {
       started,
       `${this.frames}/screen`,
       (t) => this.stopScreen(session, t),
-      { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate },
+      { maxBitrate: pick.maxBitrate, maxFramerate: pick.maxFramerate, simulcast: pick.simulcast },
     );
     this.screen?.stop();
     this.screen = track;
@@ -569,6 +569,7 @@ export class NativeRoom {
       height: track.height,
       maxBitrate: encoding.maxBitrate,
       maxFramerate: encoding.maxFramerate,
+      simulcast: encoding.simulcast,
     });
     if (this.sessionId !== session)
       // i18n-exempt: internal native-room state guard, never rendered

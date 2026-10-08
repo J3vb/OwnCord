@@ -329,13 +329,20 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.sensitivityValue": "Sensitivity {value}%",
   "voiceAudio.outputDevice": "Output Device",
   "voiceAudio.outputVolume": "Output Volume",
-  "voiceAudio.streamQuality": "Stream Quality",
-  "voiceAudio.streamQualityDesc":
-    "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.",
-  "voiceAudio.quality.low": "Low (360p cam / 720p screen)",
-  "voiceAudio.quality.medium": "Medium (720p)",
-  "voiceAudio.quality.high": "High (1080p)",
-  "voiceAudio.quality.source": "Source (1080p max bitrate)",
+  "voiceAudio.cameraQuality": "Camera Quality",
+  "voiceAudio.cameraQualityDesc":
+    "Higher quality uses more bandwidth and CPU. Changes take effect on next voice join.",
+  "voiceAudio.cameraQuality.low": "Low (360p)",
+  "voiceAudio.cameraQuality.medium": "Medium (720p)",
+  "voiceAudio.cameraQuality.high": "High (1080p)",
+  "voiceAudio.cameraQuality.source": "Source (1080p max bitrate)",
+  "voiceAudio.screenQuality": "Screen Share Quality",
+  "voiceAudio.screenQualityDesc":
+    "Medium stays smooth on slower connections; High sends sharper text but needs a fast one. Viewers on a weak connection get a lighter 720p copy. Changes take effect on your next screen share.",
+  "voiceAudio.screenQuality.low": "Low (720p, 5 fps)",
+  "voiceAudio.screenQuality.medium": "Medium (720p)",
+  "voiceAudio.screenQuality.high": "High (1080p)",
+  "voiceAudio.screenQuality.source": "Source (native resolution)",
   "voiceAudio.screenFps": "Screen Share FPS",
   "voiceAudio.screenFpsDesc":
     "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",

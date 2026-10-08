@@ -65,7 +65,18 @@ describe("pickScreenSource", () => {
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 6_000_000,
       maxFramerate: 30,
+      simulcast: true,
     });
+  });
+
+  it("defaults the dialog to the screen share's own quality (720p30)", async () => {
+    let seen: unknown;
+    host.pick = (opts) => {
+      seen = (opts as { defaultQuality?: unknown }).defaultQuality;
+      return null;
+    };
+    await pickScreenSource();
+    expect(seen).toBe("medium");
   });
 
   it("lets the dialog's per-share quality override the saved prefs", async () => {
@@ -75,6 +86,7 @@ describe("pickScreenSource", () => {
       capture: { fps: 5, maxWidth: 1280, maxHeight: 720 },
       maxBitrate: 1_500_000,
       maxFramerate: 5,
+      simulcast: false,
     });
   });
 
@@ -85,6 +97,7 @@ describe("pickScreenSource", () => {
       capture: { fps: 60, maxWidth: 0, maxHeight: 0 },
       maxBitrate: 15_000_000,
       maxFramerate: 60,
+      simulcast: false,
     });
     host.pick = () => ({ source: "screen:277", quality: "source", fps: 120 });
     await expect(pickScreenSource()).resolves.toMatchObject({

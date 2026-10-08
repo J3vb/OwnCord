@@ -194,6 +194,7 @@ beforeEach(() => {
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 1_500_000,
       maxFramerate: 5,
+      simulcast: false,
     });
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
   nativeCounters.screenTracks = 0;
@@ -991,7 +992,11 @@ describe("NativeRoom screen share", () => {
     const pub = await room.localParticipant.publishTrack(screen, screenOptions);
     expect(host.calls.at(-1)).toEqual([
       "publishScreen",
-      [1, 4, { width: 1280, height: 720, maxBitrate: 1_500_000, maxFramerate: 5 }],
+      [
+        1,
+        4,
+        { width: 1280, height: 720, maxBitrate: 1_500_000, maxFramerate: 5, simulcast: false },
+      ],
     ]);
     expect(pub).toMatchObject({ trackSid: "TR_screen", source: "screen_share" });
     // getLocalScreenshareStream reads it by source.
@@ -1004,6 +1009,29 @@ describe("NativeRoom screen share", () => {
     screen.stop();
     expect(host.calls.filter(([n]) => n === "stopScreen")).toHaveLength(1);
     expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("publishes with simulcast when the picked quality asks for it", async () => {
+    host.pick = () =>
+      Promise.resolve({
+        source: "screen:7",
+        capture: { fps: 30, maxWidth: 1280, maxHeight: 720 },
+        maxBitrate: 3_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      });
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [
+        1,
+        4,
+        { width: 1280, height: 720, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+      ],
+    ]);
   });
 
   it("maps a closed picker to a dismissed picker and a portal that never started to its own outcome", async () => {

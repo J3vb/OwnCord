@@ -141,7 +141,7 @@ export const voiceText = defineCatalog("voice", {
   "picker.fpsDefault": "Default ({fps} fps)",
   "picker.goLive": "Go Live",
   "picker.quality.low": "Low (720p)",
-  "picker.quality.medium": "Medium (1080p)",
+  "picker.quality.medium": "Medium (720p)",
   "picker.quality.high": "High (1080p)",
   "picker.quality.source": "Source",
 

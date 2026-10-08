@@ -66,6 +66,7 @@ export function isDeviceFallback(err: unknown): boolean {
 export interface ScreenPublishEncoding {
   readonly maxBitrate: number;
   readonly maxFramerate: number;
+  readonly simulcast: boolean;
 }
 
 export class NativeScreenTrack {

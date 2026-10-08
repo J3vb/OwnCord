@@ -255,8 +255,9 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const selects = el.querySelectorAll("select");
-    // Input, output, stream quality, screen share fps, video = 5 selects
-    expect(selects.length).toBe(5);
+    // Input, output, camera quality, screen share quality, screen share fps,
+    // video = 6 selects
+    expect(selects.length).toBe(6);
     ac.abort();
   });
 
@@ -510,22 +511,42 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("stream quality select saves to preferences on change", () => {
+  it("camera quality select saves to preferences on change", () => {
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
     const el = tab.build();
     document.body.appendChild(el);
 
-    // Stream quality is the 3rd select (index 2)
     const qualitySelect = el.querySelector(
-      'select[aria-label="Stream Quality"]',
+      'select[aria-label="Camera Quality"]',
     ) as HTMLSelectElement;
+    expect(qualitySelect.value).toBe("high");
     qualitySelect.value = "low";
     qualitySelect.dispatchEvent(new Event("change"));
 
     const saved = localStorage.getItem("owncord:settings:streamQuality");
     expect(saved).toBe('"low"');
+    expect(localStorage.getItem("owncord:settings:screenShareQuality")).toBeNull();
+    ac.abort();
+  });
+
+  it("screen share quality select defaults to medium and saves its own pref", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const qualitySelect = el.querySelector(
+      'select[aria-label="Screen Share Quality"]',
+    ) as HTMLSelectElement;
+    expect(qualitySelect.value).toBe("medium");
+    qualitySelect.value = "high";
+    qualitySelect.dispatchEvent(new Event("change"));
+
+    expect(localStorage.getItem("owncord:settings:screenShareQuality")).toBe('"high"');
+    expect(localStorage.getItem("owncord:settings:streamQuality")).toBeNull();
     ac.abort();
   });
 
@@ -579,7 +600,12 @@ describe("VoiceAudioTab UI structure", () => {
       expect(speakers.querySelector('select[aria-label="Output Device"]')).not.toBeNull();
       expect(speakers.querySelector('input[aria-label="Output Volume"]')).not.toBeNull();
       const camera = cardNamed(el, "Camera & screen share");
-      for (const name of ["Video Device", "Stream Quality", "Screen Share FPS"]) {
+      for (const name of [
+        "Video Device",
+        "Camera Quality",
+        "Screen Share Quality",
+        "Screen Share FPS",
+      ]) {
         expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
       }
       expect(camera.querySelector("video")).not.toBeNull();
@@ -1363,8 +1389,9 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("restores saved stream quality selection", () => {
+  it("restores saved camera and screen share quality selections", () => {
     localStorage.setItem("owncord:settings:streamQuality", '"low"');
+    localStorage.setItem("owncord:settings:screenShareQuality", '"source"');
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
@@ -1372,9 +1399,13 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const qualitySelect = el.querySelector(
-      'select[aria-label="Stream Quality"]',
+      'select[aria-label="Camera Quality"]',
     ) as HTMLSelectElement;
     expect(qualitySelect.value).toBe("low");
+    const screenSelect = el.querySelector(
+      'select[aria-label="Screen Share Quality"]',
+    ) as HTMLSelectElement;
+    expect(screenSelect.value).toBe("source");
     ac.abort();
   });
 
