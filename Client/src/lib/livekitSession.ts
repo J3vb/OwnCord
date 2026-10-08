@@ -25,7 +25,7 @@ import {
   stopManualScreenTracks,
   bumpGeneration,
 } from "@lib/screenShare";
-import { buildSessionDebugInfo } from "@lib/livekitDiagnostics";
+import { buildSessionDebugInfo, installLivekitLogging } from "@lib/livekitDiagnostics";
 import { createRoomEventHandlers, type RoomEventHandlers } from "@lib/roomEventHandlers";
 import { VoiceTokenManager } from "@lib/voiceTokenManager";
 import { LiveKitUrlResolver } from "@lib/livekitUrlResolver";
@@ -914,6 +914,11 @@ export class LiveKitSession {
     return this._state.type !== "idle";
   }
 
+  /** The live microphone capture's settings, for Settings to name it. */
+  getLocalMicSettings(): MediaTrackSettings | null {
+    return this._audioPipeline.micSettings;
+  }
+
   getSessionDebugInfo(): Record<string, unknown> {
     const info = buildSessionDebugInfo({
       room: this._room,
@@ -937,6 +942,7 @@ export class LiveKitSession {
 
 // --- Singleton instance + re-exported bound methods ---
 
+installLivekitLogging();
 const session = new LiveKitSession();
 
 // Expose debug info on window under __owncord namespace for DevTools console access
@@ -986,6 +992,7 @@ export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(se
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
+export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);

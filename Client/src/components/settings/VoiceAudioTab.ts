@@ -13,6 +13,7 @@ import {
   setOutputVolume,
   reapplyAudioProcessing,
   reapplyEnhancedNoiseSuppression,
+  getLocalMicSettings,
 } from "@lib/livekitSession";
 import {
   VAD_MAX_THRESHOLD,
@@ -35,6 +36,11 @@ import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
 
 const log = createLogger("VoiceAudioTab");
+
+/** A microphone itself, not the browser's "default"/"communications" alias. */
+function isRealInput(d: MediaDeviceInfo): boolean {
+  return d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications";
+}
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
 const MIC_NOISE_FLOOR = 0.005;
@@ -580,6 +586,21 @@ function buildVoiceAudioTabInner(
         }
         select.value = keepSaved ? saved : "";
       }
+      // "Default" is a preference; name the device the call really captures,
+      // which can lag the system default after an unplug and replug. Only a
+      // web room has a mic track to read, so the list is the webview's.
+      const live = getLocalMicSettings();
+      const liveDevice =
+        live === null
+          ? undefined
+          : (all.find((d) => isRealInput(d) && d.deviceId === live.deviceId) ??
+            all.find((d) => isRealInput(d) && d.groupId !== "" && d.groupId === live.groupId));
+      setText(
+        defaultInputOpt,
+        liveDevice?.label
+          ? t("voiceAudio.defaultLive", { device: liveDevice.label })
+          : t("voiceAudio.default"),
+      );
     } catch {
       const errOpt = createElement(
         "option",
