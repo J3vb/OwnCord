@@ -36,14 +36,19 @@
 // always run and gate their STEPS instead — and a leg that ran no step still
 // reports `success`. A green `Server Build & Test` on a dev PR therefore means
 // "the server legs were not selected for this diff" just as often as it means
-// "the server was tested". Do not extend this gate to trust dev-PR evidence
-// for those two contexts without changing how they report.
+// "the server was tested".
+//
+// The gate enforces that rather than assuming it: main() drops every check run
+// that belongs to a pull_request workflow run of the same SHA, and refuses a
+// commit that has no push-to-main ci.yml run at all. Do not relax this to trust
+// dev-PR evidence for those two contexts without changing how they report.
 
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const CI_WORKFLOW = ".github/workflows/ci.yml";
 const PROTECTION_SCRIPT = "docs/plans/b0-dev-branch-protection.sh";
 
 // The contexts array in the protection script is the single source of truth for
@@ -74,11 +79,19 @@ export function strictUpToDate(scriptSrc) {
 }
 
 // checkRuns is the API's check_runs array, already collected across pages.
+// excludedSuites: check_suite ids whose runs are not trusted (pull request runs).
+// mainRunFound: whether a push-to-main ci.yml run exists for the commit.
 // Returns the reasons this commit is not releasable; empty means it is.
-export function evaluate(required, checkRuns) {
+export function evaluate(
+  required,
+  checkRuns,
+  { excludedSuites = new Set(), mainRunFound = true } = {},
+) {
   const problems = [];
+  if (!mainRunFound) problems.push("no push-to-main CI run for this commit");
   const byName = new Map();
   for (const run of checkRuns) {
+    if (excludedSuites.has(run.check_suite?.id)) continue;
     // A context can report more than once (a re-run). The latest attempt wins,
     // which is what the branch-protection UI shows and what a human would read.
     const prev = byName.get(run.name);
@@ -129,6 +142,47 @@ async function fetchCheckRuns(repo, sha, token) {
   return runs;
 }
 
+// A ci.yml run counts only as the push-to-main one; every other ci.yml suite
+// (pull request, workflow_dispatch, schedule) is distrusted, as is any pull
+// request run. CodeQL default-setup suites are not ci.yml, so they stay eligible.
+export function classifyRuns(workflowRuns) {
+  // The API may report `path` with a ref suffix (`ci.yml@refs/heads/main`).
+  const isCi = (r) => r.path?.split("@")[0] === CI_WORKFLOW;
+  const isMainPush = (r) => r.event === "push" && r.head_branch === "main";
+  return {
+    excludedSuites: new Set(
+      workflowRuns
+        .filter(
+          (r) =>
+            r.event === "pull_request" ||
+            r.event === "pull_request_target" ||
+            (isCi(r) && !isMainPush(r)),
+        )
+        .map((r) => r.check_suite_id),
+    ),
+    mainRunFound: workflowRuns.some((r) => isCi(r) && isMainPush(r)),
+  };
+}
+
+async function fetchRunTrust(repo, sha, token) {
+  const runs = [];
+  for (let page = 1; ; page++) {
+    const url = `https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=100&page=${page}`;
+    const res = await fetch(url, {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    const body = await res.json();
+    runs.push(...body.workflow_runs);
+    if (runs.length >= body.total_count || body.workflow_runs.length === 0) break;
+  }
+  return classifyRuns(runs);
+}
+
 async function main() {
   const sha = process.argv[2];
   if (!sha) {
@@ -150,7 +204,7 @@ async function main() {
   const required = requiredContexts(readFileSync(p, "utf8"));
 
   const runs = await fetchCheckRuns(repo, sha, token);
-  const problems = evaluate(required, runs);
+  const problems = evaluate(required, runs, await fetchRunTrust(repo, sha, token));
 
   console.log(`commit ${sha}: ${runs.length} check run(s), ${required.length} required`);
   if (problems.length) {
