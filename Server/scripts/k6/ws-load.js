@@ -1734,7 +1734,9 @@ export default function () {
               voiceJoinSent = 0;
             }
             voiceTokens.add(1);
-            if (!vuVoiceCounted && vuId <= VOICE_VUS) {
+            // joinsVoice, not vuId <= VOICE_VUS: the observer holds any one id
+            // (see OBS_VUS), so the joining ws VUs are not always the first ones.
+            if (!vuVoiceCounted) {
               vuVoiceCounted = true;
               voiceVUsJoined.add(1);
             }
@@ -1994,7 +1996,14 @@ export default function () {
     if (!IS_RESTART) wsMessageRate.add(false, scaleTags());
   }
 
-  sleep(1);
+  // Capacity closes early (see closeIn); keep the VU occupied to the scenario's
+  // end, or ramping-vus starts a new iteration that redials during ramp-down.
+  if (IS_CAPACITY) {
+    const endMs = exec.scenario.startTime + (RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN)) * 1000;
+    sleep(Math.max(1, (endMs - Date.now()) / 1000));
+  } else {
+    sleep(1);
+  }
 } // The observer: one VU, the whole run, /api/v1/metrics every 5 s. It records
 // the DELTA of the server's counters since the previous poll, tagged
 // phase=<ramp|sustain|storm|upload>, so the document can publish per-phase

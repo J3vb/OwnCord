@@ -23,6 +23,7 @@ function harness(env = {}, vu = 1, files = {}) {
   const timeouts = [];
   const connects = [];
   const logins = [];
+  const sleeps = [];
   let closes = 0;
   let body = {};
   let dialMs = 0;
@@ -50,7 +51,7 @@ function harness(env = {}, vu = 1, files = {}) {
     },
     open: (path) => files[path],
     check: () => true,
-    sleep: () => {},
+    sleep: (seconds) => sleeps.push(seconds),
     crypto: globalThis.crypto,
     http: {
       post: (url, payload, params) => {
@@ -93,6 +94,7 @@ function harness(env = {}, vu = 1, files = {}) {
     connects,
     logins,
     closes: () => closes,
+    sleeps,
     evaluate,
     // How long the next ws.connect takes to open, on the harness clock.
     dialTakes: (ms) => {
@@ -985,14 +987,23 @@ test("capacity closes every socket itself before ramp-down, however late the VU 
   assert.equal(h.metrics.ws_unexpected_closes?.length ?? 0, 0);
 });
 
-test("voice_vus_joined counts real voice VUs, not the slot widened for the observer", () => {
+test("capacity VU keeps its slot to scenario end after its early close, so it cannot redial during ramp-down", () => {
+  const h = harness({ K6_PROFILE: "capacity" });
+  h.at(h.evaluate("RAMP_S") - 1);
+  h.start();
+  const endS = h.evaluate("RAMP_S + SUSTAIN_S + seconds(RAMP_DOWN)");
+  const leftS = endS - (h.evaluate("RAMP_S") - 1);
+  assert.ok(Math.max(...h.sleeps) >= leftS, "sleeps through the rest of the scenario");
+});
+
+test("voice_vus_joined counts every VU that joins voice, including the one past VOICE_VUS the observer's slot widens", () => {
+  // The observer holds any one id, so the ws VUs that join are the first
+  // VOICE_VUS + 1 ids minus the observer's: ids 1..3 here, observer anywhere.
   const env = { K6_PROFILE: "operational", K6_VOICE_CHANNEL_ID: "9", K6_VOICE_VUS: "2" };
-  const extra = harness(env, 3);
-  extra.start();
-  extra.receive({ type: "voice_token", payload: {} });
-  assert.equal(extra.metrics.voice_vus_joined.length, 0);
-  const real = harness(env, 2);
-  real.start();
-  real.receive({ type: "voice_token", payload: {} });
-  assert.equal(real.metrics.voice_vus_joined.length, 1);
+  for (const vu of [1, 3]) {
+    const h = harness(env, vu);
+    h.start();
+    h.receive({ type: "voice_token", payload: {} });
+    assert.equal(h.metrics.voice_vus_joined.length, 1, `vu ${vu} counted`);
+  }
 });
