@@ -655,7 +655,12 @@ stereo since the capture work, below), queued per track
 (played once 30 ms is queued, oldest audio dropped past 200 ms), and a
 `cpal` output stream (20 ms periods) mixes the queues with each participant's
 gain. `cpal` uses its pure-Rust PulseAudio host (PulseAudio and
-pipewire-pulse; no libpulse link) and falls back to ALSA.
+pipewire-pulse; no libpulse link) and falls back to ALSA. Mixing and capture
+processing stay f32 at 48 kHz; both streams open their device at 48 kHz in
+f32, else i16, i32, u16, then any other 8- to 32-bit PCM format
+(`src-tauri/src/native_voice/stream_format.rs`), and convert at the callback
+edge, so a raw ALSA device without float samples still opens. A device with
+no 48 kHz format does not open (there is no resampler).
 
 **What follows the gain.** `native_voice_set_volume(session, identity,
 volume)` sets the gain for that participant's microphone tracks (1 is unity;

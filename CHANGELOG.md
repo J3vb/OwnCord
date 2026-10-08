@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 - **Reply previews follow edits**: editing a message now updates the quoted text in replies to it, even when the original is scrolled out of view.
 - **Unread count while scrolled back**: messages that arrive while you are scrolled up in the open channel now count as unread (the channel shows a badge) until you reach the bottom.
 - **Voice behind a reverse proxy**: joining voice failed with 403 when the proxy forwarded the host without its `:443` port — the server now accepts the connection.
+- **Linux voice on plain ALSA**: a microphone or speaker that offers no float audio format (common without PipeWire or PulseAudio) now opens; a device with no 48 kHz format reports that instead of a generic error.
 - **Unread bar** stays until you reach the very bottom of the live channel, is announced to screen readers, and the mention badge now drops while you're away from the open channel when a mention is removed.
 - **Recovery kit and codes**: Settings now stays open until a new recovery kit or set of recovery codes is shown, so the one-time secret is never lost by closing Settings mid-request.
 
