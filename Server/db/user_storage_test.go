@@ -127,3 +127,29 @@ func TestUserStorage_RowSurvivesRetentionAtZeroAndDiesWithTheAccount(t *testing.
 		t.Fatalf("ListUserStorageIDs after erasure = %v, %v; want none", ids, err)
 	}
 }
+
+// A counter row created after attachments already exist (rows inserted
+// outside UploadService: seed, restore) starts from those rows, so the quota
+// guard sees them on the first charge.
+func TestChargeUserStorage_NewCounterStartsFromExistingAttachments(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	for _, q := range []string{
+		`INSERT INTO users (id, username, password, role_id) VALUES (10, 'alice', 'x', 4)`,
+		`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('a1', 'a', 'a1', 'x', 100, 10)`,
+	} {
+		if _, err := database.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	ok, err := database.ChargeUserStorage(ctx, 10, 50, 120)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("100 existing + 50 charged is over a 120 quota, but the charge was admitted")
+	}
+	if used, err := database.UserStorageUsed(ctx, 10); err != nil || used != 100 {
+		t.Fatalf("used = %d, %v; want 100", used, err)
+	}
+}

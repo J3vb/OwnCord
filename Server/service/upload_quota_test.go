@@ -611,3 +611,28 @@ func TestRecount_RepairsAnEnvelopeSizedChargeAfterRestart(t *testing.T) {
 		t.Fatalf("counter = %d after the recount, want 4096 (the row total)", got)
 	}
 }
+
+func TestUploadUnrecord_RemovesUnlinkedRowAndRecountsCounter(t *testing.T) {
+	svc, database := newQuotaFixture(t, 0, 0, nil)
+	ctx := context.Background()
+	seedCountedAttachment(t, database, "kept", quotaTestUser, 30)
+	res, err := svc.Reserve(ctx, quotaTestUser, 70)
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if err := svc.Record(ctx, AttachmentRecord{ID: "gone", UploaderID: quotaTestUser, Filename: "a.png", MimeType: "image/png", Size: 70}, res); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if got := used(t, svc, quotaTestUser); got != 100 {
+		t.Fatalf("used after Record = %d, want 100", got)
+	}
+	if err := svc.Unrecord(ctx, "gone", quotaTestUser); err != nil {
+		t.Fatalf("Unrecord: %v", err)
+	}
+	if row, _ := database.GetAttachmentByID(ctx, "gone"); row != nil {
+		t.Errorf("row still present after Unrecord: %+v", row)
+	}
+	if got := used(t, svc, quotaTestUser); got != 30 {
+		t.Errorf("used after Unrecord = %d, want 30", got)
+	}
+}

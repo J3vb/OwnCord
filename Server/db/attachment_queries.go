@@ -53,6 +53,16 @@ func (d *DB) CreateAttachment(ctx context.Context, id string, uploaderID int64, 
 	return nil
 }
 
+// DeleteUnlinkedAttachment removes userID's attachment row for id while it is
+// still unlinked to a message, reporting whether a row was removed.
+func (d *DB) DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error) {
+	n, err := d.q.DeleteUnlinkedAttachment(ctx, dbgen.DeleteUnlinkedAttachmentParams{ID: id, UploaderID: &userID})
+	if err != nil {
+		return false, fmt.Errorf("DeleteUnlinkedAttachment: %w", err)
+	}
+	return n > 0, nil
+}
+
 // GetAttachmentByID returns the attachment with the given ID, or nil if not found.
 func (d *DB) GetAttachmentByID(ctx context.Context, id string) (*Attachment, error) {
 	r, err := d.q.GetAttachmentByID(ctx, id)
