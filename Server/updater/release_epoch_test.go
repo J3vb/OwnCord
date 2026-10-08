@@ -30,6 +30,7 @@ func TestReleaseProtocolEpoch(t *testing.T) {
 	t.Run("signed manifest declares the epoch", func(t *testing.T) {
 		manifest := []byte(`{"version":"v2.0.0","asset":"chatserver.exe","sha256":"` + testHash("exe") + `","protocol_epoch":2}`)
 		srv := manifestServer(t, manifest, signTestAsset(t, key, manifest))
+		u.baseURL = srv.URL // stands in for the GitHub host the asset fetch requires
 		info := UpdateInfo{Latest: "v2.0.0", ManifestURL: srv.URL + "/m.json", ManifestSignatureURL: srv.URL + "/m.json.sig"}
 
 		got, err := u.ReleaseProtocolEpoch(context.Background(), info)
@@ -44,6 +45,7 @@ func TestReleaseProtocolEpoch(t *testing.T) {
 	t.Run("manifest without the field is epoch 0", func(t *testing.T) {
 		manifest := []byte(`{"version":"v1.2.0","asset":"chatserver.exe","sha256":"` + testHash("exe") + `"}`)
 		srv := manifestServer(t, manifest, signTestAsset(t, key, manifest))
+		u.baseURL = srv.URL // stands in for the GitHub host the asset fetch requires
 		info := UpdateInfo{Latest: "v1.2.0", ManifestURL: srv.URL + "/m.json", ManifestSignatureURL: srv.URL + "/m.json.sig"}
 
 		got, err := u.ReleaseProtocolEpoch(context.Background(), info)

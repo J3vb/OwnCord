@@ -622,6 +622,38 @@ server {
 }
 ```
 
+### A CDN in front of the proxy
+
+With a CDN such as Cloudflare in front of your reverse proxy, a request
+crosses two hops, and `server.trusted_proxies` must list every hop. OwnCord
+reads `X-Forwarded-For` from the right and takes the first address that is not
+a trusted proxy. If only the reverse proxy is listed, that address is the CDN
+edge that connected to it, which many users share: per-IP rate limits and
+lockouts then apply to everyone arriving through the same edge. Do one of the
+following:
+
+- **List the CDN's ranges in OwnCord.** Add Cloudflare's published IPv4 and
+  IPv6 ranges ([cloudflare.com/ips](https://www.cloudflare.com/ips/)) next to
+  the proxy hop, and update them when Cloudflare changes the list:
+
+  ```yaml
+  server:
+    trusted_proxies:
+      - 172.17.0.1/32 # the reverse proxy (here Docker's bridge gateway)
+      - 173.245.48.0/20 # ...then one entry per Cloudflare range
+  ```
+
+- **Let the proxy restore the client address.** In nginx (in Nginx Proxy
+  Manager, the proxy host's Advanced tab), take the address from Cloudflare's
+  header only when the connection comes from a Cloudflare range, and keep
+  `trusted_proxies` at the proxy hop alone. `$proxy_add_x_forwarded_for` then
+  appends the real client address:
+
+  ```nginx
+  real_ip_header CF-Connecting-IP;
+  set_real_ip_from 173.245.48.0/20;   # one line per Cloudflare range
+  ```
+
 ## Backup Strategy
 
 The built-in backup endpoint covers the **database only**. What a restore

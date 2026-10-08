@@ -160,6 +160,12 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 }
 
 func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
+	// The boot writes a missing half, so in a container both live under
+	// data_dir like every other path the server writes.
+	if containerOutsideDataDir(g, g.next.TLS.CertFile, "tls.cert_file", w) ||
+		containerOutsideDataDir(g, g.next.TLS.KeyFile, "tls.key_file", w) {
+		return false
+	}
 	if sameFile(g.next.TLS.CertFile, g.next.TLS.KeyFile) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file and tls.key_file must be different paths")
 		return false
@@ -269,12 +275,22 @@ func guardPluginsDir(w http.ResponseWriter, g guardContext) bool {
 		return true
 	}
 	dir := g.next.Plugins.Directory
-	if !dirExists(dir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing directory")
+	if containerOutsideDataDir(g, dir, "plugins.directory", w) {
+		return false
+	}
+	if !dirExists(dir) || !dirWritable(dir) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing writable directory")
 		return false
 	}
 	if pathWithin(dir, g.next.Upload.StorageDir) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must not live inside the uploads directory")
+		return false
+	}
+	// A plugin install replaces <dir>/<name> wholesale, so dir must not be,
+	// or hold, a directory whose subdirectories are server data.
+	if pathWithin(g.next.Server.DataDir, dir) || pathWithin(g.next.Upload.StorageDir, dir) || pathWithin(g.next.Backup.Dir, dir) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+			"plugins.directory must not be or contain server.data_dir, upload.storage_dir or backup.dir")
 		return false
 	}
 	return true
