@@ -343,7 +343,7 @@ type Store interface {
 	// before the transaction opened) — ErrForbidden means the caller does
 	// not outrank the current assignee.
 	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
-	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
+	CloseReport(ctx context.Context, id int64, state, outcome string, actorID int64) (bool, error)
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
 	// InsertReportNote is guarded on EXISTS(users) and the report's state
 	// (Codex review widened); false means the caller answers 409 — either
@@ -351,10 +351,10 @@ type Store interface {
 	// the write.
 	InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error)
 	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
-	// InsertReportEvent and ListReportEvents are report_events (second Codex
-	// review): this feature's own immutable history, never the shared
-	// audit_log — exposed only inside the queue detail.
-	InsertReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) error
+	// ListReportEvents reads report_events (second Codex review): this
+	// feature's own immutable history, never the shared audit_log — exposed
+	// only inside the queue detail. The mutations above write their own
+	// event in the same transaction.
 	ListReportEvents(ctx context.Context, reportID int64) ([]db.ReportEvent, error)
 	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
 

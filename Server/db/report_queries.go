@@ -334,11 +334,9 @@ func (d *DB) ListReportsMine(ctx context.Context, reporterID int64) ([]ReportSum
 // whether a row was affected; zero means CONFLICT for any of the three
 // reasons.
 func (d *DB) AssignReport(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error) {
-	n, err := d.q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
-	if err != nil {
-		return false, fmt.Errorf("AssignReport: %w", err)
-	}
-	return n == 1, nil
+	return d.reportMutation(ctx, "AssignReport", id, assigneeID, "assigned", "", func(q *dbgen.Queries) (int64, error) {
+		return q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
+	})
 }
 
 // forceReassignGuarded is the shared machinery behind AssignReportForced and
@@ -448,19 +446,22 @@ func forceReassignGuarded(ctx context.Context, writer *sql.DB, actorID, observed
 // forceReassignGuarded for the shared mechanics.
 func (d *DB) AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error) {
 	return forceReassignGuarded(ctx, d.writer, actorID, observedAssigneeID, nil, nil, func(q *dbgen.Queries) (int64, error) {
-		return q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
+		n, err := q.AssignReport(ctx, dbgen.AssignReportParams{AssigneeID: assigneeID, ID: id, ObservedAssigneeID: observedAssigneeID})
+		if err != nil || n != 1 {
+			return n, err
+		}
+		return n, q.InsertReportEvent(ctx, dbgen.InsertReportEventParams{ReportID: id, ActorID: actorID, Action: "assigned"})
 	})
 }
 
 // CloseReport closes report id with outcome, guarded to open/assigned
-// states. state must be "resolved" or "dismissed". Returns whether a row
-// was affected; zero means CONFLICT.
-func (d *DB) CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error) {
-	n, err := d.q.CloseReport(ctx, dbgen.CloseReportParams{State: state, Outcome: outcome, ID: id})
-	if err != nil {
-		return false, fmt.Errorf("CloseReport: %w", err)
-	}
-	return n == 1, nil
+// states and on EXISTS(users) for actorID, and records the "closed" event in
+// the same transaction. state must be "resolved" or "dismissed". Returns
+// whether a row was affected; zero means CONFLICT.
+func (d *DB) CloseReport(ctx context.Context, id int64, state, outcome string, actorID int64) (bool, error) {
+	return d.reportMutation(ctx, "CloseReport", id, actorID, "closed", outcome, func(q *dbgen.Queries) (int64, error) {
+		return q.CloseReport(ctx, dbgen.CloseReportParams{State: state, Outcome: outcome, ID: id, ActorID: actorID})
+	})
 }
 
 // InsertReportEvidence writes one snapshot row. attachmentsJSON is a JSON
@@ -498,11 +499,9 @@ func (d *DB) ListReportEvidence(ctx context.Context, reportID int64) ([]ReportEv
 // note's author. Returns whether the row was inserted; false means the
 // caller answers 409.
 func (d *DB) InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error) {
-	n, err := d.q.InsertReportNote(ctx, dbgen.InsertReportNoteParams{ReportID: reportID, AuthorID: authorID, Body: body})
-	if err != nil {
-		return false, fmt.Errorf("InsertReportNote: %w", err)
-	}
-	return n == 1, nil
+	return d.reportMutation(ctx, "InsertReportNote", reportID, authorID, "noted", "", func(q *dbgen.Queries) (int64, error) {
+		return q.InsertReportNote(ctx, dbgen.InsertReportNoteParams{ReportID: reportID, AuthorID: authorID, Body: body})
+	})
 }
 
 // ListReportNotes returns a report's internal notes, oldest first.

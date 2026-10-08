@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -210,7 +211,7 @@ func TestReportQueries_QueueFilters(t *testing.T) {
 		t.Fatalf("AssignReport = %v, %v, want true, nil", ok, err)
 	}
 	closedID := fileReport(t, database, reporter, subject, "user", "3", nil, "spam", "")
-	if ok, err := database.CloseReport(ctx, closedID, "dismissed", "no_action"); err != nil || !ok {
+	if ok, err := database.CloseReport(ctx, closedID, "dismissed", "no_action", reporter); err != nil || !ok {
 		t.Fatalf("CloseReport = %v, %v, want true, nil", ok, err)
 	}
 
@@ -289,14 +290,14 @@ func TestReportQueries_AssignAndCloseAreGuarded(t *testing.T) {
 	mod := seedUser(t, database, "rq-guard-mod")
 
 	id := fileReport(t, database, reporter, subject, "user", "9", nil, "spam", "")
-	if ok, err := database.CloseReport(ctx, id, "dismissed", "no_action"); err != nil || !ok {
+	if ok, err := database.CloseReport(ctx, id, "dismissed", "no_action", mod); err != nil || !ok {
 		t.Fatalf("CloseReport = %v, %v, want true, nil", ok, err)
 	}
 	// Guarded: a closed report accepts no further assign or close.
 	if ok, err := database.AssignReport(ctx, id, mod, 0); err != nil || ok {
 		t.Errorf("AssignReport on a closed report = %v, %v, want false, nil", ok, err)
 	}
-	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned"); err != nil || ok {
+	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned", mod); err != nil || ok {
 		t.Errorf("CloseReport on an already-closed report = %v, %v, want false, nil", ok, err)
 	}
 	// A nonexistent id is the same guarded zero-rows path.
@@ -444,7 +445,7 @@ func TestReportQueries_InsertReportNoteRefusesOnClosedReport(t *testing.T) {
 	mod := seedUser(t, database, "rq-note-closed-mod")
 
 	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
-	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned"); err != nil || !ok {
+	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned", mod); err != nil || !ok {
 		t.Fatalf("CloseReport: %v, %v", ok, err)
 	}
 	ok, err := database.InsertReportNote(ctx, id, mod, "too late")
@@ -562,7 +563,7 @@ func TestReportQueries_AssignReportForcedZeroRowsWhenReportClosed(t *testing.T) 
 	if ok, err := database.AssignReport(ctx, id, lowMod, 0); err != nil || !ok {
 		t.Fatalf("first assign: %v, %v", ok, err)
 	}
-	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned"); err != nil || !ok {
+	if ok, err := database.CloseReport(ctx, id, "resolved", "actioned", highMod); err != nil || !ok {
 		t.Fatalf("close: %v, %v", ok, err)
 	}
 	if ok, err := database.AssignReportForced(ctx, id, highMod, lowMod, highMod); err != nil || ok {
@@ -724,7 +725,7 @@ func TestReportQueries_ErrorsPropagateOnClosedDB(t *testing.T) {
 	if _, err := database.AssignReport(ctx, id, reporter, 0); err == nil {
 		t.Error("AssignReport on a closed db: want an error")
 	}
-	if _, err := database.CloseReport(ctx, id, "resolved", "actioned"); err == nil {
+	if _, err := database.CloseReport(ctx, id, "resolved", "actioned", reporter); err == nil {
 		t.Error("CloseReport on a closed db: want an error")
 	}
 	if _, err := database.ListReportEvidence(ctx, id); err == nil {
@@ -754,7 +755,7 @@ func TestReportQueries_PruneContentOlderThan(t *testing.T) {
 	if ok, err := database.InsertReportNote(ctx, id, reporter, "a note"); err != nil || !ok {
 		t.Fatalf("InsertReportNote: %v, %v", ok, err)
 	}
-	if ok, err := database.CloseReport(ctx, id, "dismissed", "no_action"); err != nil || !ok {
+	if ok, err := database.CloseReport(ctx, id, "dismissed", "no_action", reporter); err != nil || !ok {
 		t.Fatalf("CloseReport: %v, %v", ok, err)
 	}
 	if _, err := database.ExecContext(ctx, `UPDATE reports SET closed_at = datetime('now', '-200 days') WHERE id = ?`, id); err != nil {
@@ -802,5 +803,66 @@ func TestReportQueries_PruneContentOlderThan(t *testing.T) {
 	}
 	if openReport.Detail != "still open" {
 		t.Errorf("open report detail after prune = %q, want unchanged", openReport.Detail)
+	}
+}
+
+// TestReportQueries_MutationsRecordTheirEventInTheSameTransaction pins that
+// assign, force-assign and note each write their report_events row inside the
+// mutation itself, so a caller can no longer lose or reorder the history.
+func TestReportQueries_MutationsRecordTheirEventInTheSameTransaction(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-evtx-reporter")
+	subject := seedUser(t, database, "rq-evtx-subject")
+	mod := seedUser(t, database, "rq-evtx-mod")
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	if ok, err := database.AssignReport(ctx, id, mod, 0); err != nil || !ok {
+		t.Fatalf("AssignReport = %v, %v", ok, err)
+	}
+	if ok, err := database.InsertReportNote(ctx, id, mod, "a note"); err != nil || !ok {
+		t.Fatalf("InsertReportNote = %v, %v", ok, err)
+	}
+	// A refused write leaves no event behind.
+	if ok, err := database.AssignReport(ctx, id, mod+1000, mod); err != nil || ok {
+		t.Fatalf("AssignReport to an erased moderator = %v, %v, want false, nil", ok, err)
+	}
+
+	events, err := database.ListReportEvents(ctx, id)
+	if err != nil {
+		t.Fatalf("ListReportEvents: %v", err)
+	}
+	got := make([]string, 0, len(events))
+	for _, e := range events {
+		got = append(got, e.Action)
+	}
+	if want := []string{"created", "assigned", "noted"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("event actions = %v, want %v", got, want)
+	}
+}
+
+// TestReportQueries_CloseReportRefusesAnErasedModerator is AssignReport's
+// sibling for closing, and pins the "closed" event rides the same write.
+func TestReportQueries_CloseReportRefusesAnErasedModerator(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	reporter := seedUser(t, database, "rq-close-ghost-reporter")
+	subject := seedUser(t, database, "rq-close-ghost-subject")
+	mod := seedUser(t, database, "rq-close-mod")
+
+	id := fileReport(t, database, reporter, subject, "user", "1", nil, "spam", "")
+	if ok, err := database.CloseReport(ctx, id, "dismissed", "no_action", 999999); err != nil || ok {
+		t.Fatalf("CloseReport by a nonexistent moderator = %v, %v, want false, nil", ok, err)
+	}
+	if ok, err := database.CloseReport(ctx, id, "dismissed", "no_action", mod); err != nil || !ok {
+		t.Fatalf("CloseReport = %v, %v, want true, nil", ok, err)
+	}
+	events, err := database.ListReportEvents(ctx, id)
+	if err != nil {
+		t.Fatalf("ListReportEvents: %v", err)
+	}
+	last := events[len(events)-1]
+	if len(events) != 2 || last.Action != "closed" || last.Detail != "no_action" || last.ActorID != mod {
+		t.Fatalf("events = %+v, want created then closed/no_action by the moderator", events)
 	}
 }

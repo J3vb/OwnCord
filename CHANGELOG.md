@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+- **Moderation queue ordering**: a new appeal is announced to moderators before it can be assigned, and a report's history entries (assigned, noted, closed) are now saved together with the change itself, so none is lost, reordered or credited to an account that no longer exists.
 - **Message requests**: opening a conversation with someone whose message request you have not answered now accepts that request, and blocking someone removes your trust in them so their messages arrive as a request again after an unblock (unblocking also clears a decided request so a new one can form).
 - **Plugins that fail to start**: a plugin whose command list traps or times out while enabling now fails to enable, and the memory it compiled is released instead of staying held until restart.
 - **First-run setup**: the owner's own setup login no longer shows up as an unreviewed new login, and setting up shares the same limit on simultaneous password checks as sign-in, answering "try again later" when the server is busy.

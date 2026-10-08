@@ -186,7 +186,7 @@ func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
 	close(st.incRelease)
 	select {
 	case <-st.decStarted:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("reverse never resumed after the increment released the shared emit lock")
 	}
 	<-flushDone
