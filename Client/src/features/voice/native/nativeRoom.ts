@@ -205,7 +205,7 @@ export class NativeRoom {
   private readonly decryptTimers = new Map<string, ReturnType<typeof setInterval>>();
   readonly localParticipant = {
     identity: "",
-    permissions: undefined,
+    permissions: undefined as { canPublish: boolean; canPublishSources: number[] } | undefined,
     trackPublications: new Map<string, NativeLocalPublication>(),
     getTrackPublication: (source: string): NativeLocalPublication | undefined =>
       this.localParticipant.trackPublications.get(source),
@@ -771,6 +771,15 @@ export class NativeRoom {
         if (pub !== undefined) pub.isMuted = event.muted;
         break;
       }
+      case "microphonePermission":
+        // The shape `MediaControl.microphonePublishingAllowed` reads; an empty
+        // source list means every source.
+        this.localParticipant.permissions = {
+          canPublish: event.allowed,
+          canPublishSources: [],
+        };
+        this.emit(RoomEvent.ParticipantPermissionsChanged, undefined, this.localParticipant);
+        break;
       case "activeSpeakers":
         this.emit(
           RoomEvent.ActiveSpeakersChanged,
