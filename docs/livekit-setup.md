@@ -158,7 +158,7 @@ For LAN-only setups, ensure these ports are open on Windows Firewall. For remote
 
 When `livekit_binary` is set, OwnCord manages LiveKit as a companion process:
 
-1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000 (or the single `voice.udp_port` when set). To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
+1. **Config generation**: OwnCord auto-generates `data/livekit.yaml` with the API key/secret, port 7880, and UDP range 50000-60000 (or the single `voice.udp_port` when set), plus an `audio:` block that tunes speaker detection so the speaking ring lights promptly (copy it from `livekit.yaml.example` into a hand-managed file). To manage the file yourself (custom `rtc` options, multiple interfaces, ...), delete the header line containing the auto-generated marker — OwnCord then leaves the file untouched on future starts. Your `keys:` entry must still match `voice.livekit_api_key` / `voice.livekit_api_secret`.
 2. **Process launch**: `livekit-server --config data/livekit.yaml`
 3. **Crash recovery**: Exponential backoff restart (3s -> 6s -> 12s ... up to 60s), gives up after 10 consecutive rapid failures
 4. **Health checks**: `GET http://localhost:7880/` verifies LiveKit is responding

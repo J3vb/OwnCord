@@ -48,5 +48,14 @@ keys:
 #   urls:
 #     - https://chat.example.com/api/v1/livekit/webhook
 
+# Speaking-ring detection. These match what OwnCord writes for its own
+# generated config; LiveKit's defaults (400ms interval, 2 smoothing intervals,
+# active_level 35) light the ring late and only for loud speech.
+audio:
+  active_level: 45
+  min_percentile: 30
+  update_interval: 200
+  smooth_intervals: 1
+
 logging:
   level: info

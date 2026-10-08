@@ -138,6 +138,12 @@ rtc:
     mid_quality: 1s
     high_quality: 1s
 
+audio:
+  active_level: 45
+  min_percentile: 30
+  update_interval: 200
+  smooth_intervals: 1
+
 keys:
   "%s": "%s"
 

@@ -737,6 +737,31 @@ func TestWebhook_ParticipantLeft_SurvivesCancelledRequestContext(t *testing.T) {
 // livekit_process.go – generateConfig tests
 // ---------------------------------------------------------------------------
 
+func TestGenerateConfig_TunesSpeakerDetection(t *testing.T) {
+	t.Parallel()
+
+	proc := ws.NewLiveKitProcess(&config.VoiceConfig{
+		LiveKitAPIKey: "k", LiveKitAPISecret: "s", LiveKitURL: "ws://localhost:7880",
+	}, &config.TLSConfig{}, t.TempDir())
+	cfgPath, err := proc.GenerateConfigForTest()
+	if err != nil {
+		t.Fatalf("generateConfig: %v", err)
+	}
+	content, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// LiveKit's defaults (400ms interval, 2 smoothing intervals, active_level 35)
+	// light the speaking ring ~0.8s late and only for loud speech.
+	for _, want := range []string{
+		"audio:\n  active_level: 45\n  min_percentile: 30\n  update_interval: 200\n  smooth_intervals: 1\n",
+	} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("config missing %q.\nGot:\n%s", want, content)
+		}
+	}
+}
+
 func TestGenerateConfig_WritesYAML(t *testing.T) {
 	t.Parallel()
 
