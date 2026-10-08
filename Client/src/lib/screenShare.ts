@@ -637,23 +637,3 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
     return new MediaStream([screenPub.track.mediaStreamTrack]);
   return null;
 }
-
-export function getRemoteVideoStream(
-  room: Room | null,
-  userId: number,
-  type: "camera" | "screenshare",
-): MediaStream | null {
-  if (room === null) return null;
-  const source = type === "screenshare" ? Track.Source.ScreenShare : Track.Source.Camera;
-  // Iterate remote participants — identity may include a ":token" suffix
-  // (e.g. "user-42:abc123") so exact getParticipantByIdentity won't match.
-  for (const participant of room.remoteParticipants.values()) {
-    const match = participant.identity.match(/^user-(\d+)(?::|$)/);
-    if (match !== null && parseInt(match[1]!, 10) === userId) {
-      const pub = participant.getTrackPublication(source);
-      if (pub?.track?.mediaStreamTrack) return new MediaStream([pub.track.mediaStreamTrack]);
-      return null;
-    }
-  }
-  return null;
-}

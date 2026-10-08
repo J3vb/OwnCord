@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Removed
+
+- **Stream hover preview**: hovering or focusing a streaming or camera-on user in the voice channel sidebar no longer opens a live video preview. The stream and camera indicators and click-to-watch are unchanged.
+
 ### Fixed
 
 - **Nightly mutation score**: the nightly run now adds the six shard reports into one full-surface mutation score, published as a job summary and artifact, and fails when a shard report is missing.

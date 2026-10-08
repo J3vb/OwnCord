@@ -11,8 +11,6 @@ const mockSetUserVolume = vi.fn();
 const mockGetScreenshareAudioMuted = vi.fn((_userId?: unknown) => false);
 const mockGetScreenshareAudioVolume = vi.fn((_userId?: unknown) => 1);
 const mockGetUserVolume = vi.fn((_userId?: unknown) => 100);
-const mockGetRemoteVideoStream = vi.fn((..._args: unknown[]): MediaStream | null => null);
-const mockSetRemoteVideoView = vi.fn();
 
 vi.mock("@lib/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
@@ -21,8 +19,6 @@ vi.mock("@lib/livekitSession", () => ({
   getScreenshareAudioMuted: (userId: unknown) => mockGetScreenshareAudioMuted(userId),
   getScreenshareAudioVolume: (userId: unknown) => mockGetScreenshareAudioVolume(userId),
   getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
-  getRemoteVideoStream: (...args: unknown[]) => mockGetRemoteVideoStream(...args),
-  setRemoteVideoView: (...args: unknown[]) => mockSetRemoteVideoView(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -35,8 +31,7 @@ import {
   type VideoGridComponent,
   type TileConfig,
 } from "../../src/components/VideoGrid";
-import { RemoteTracks, type VideoView } from "../../src/features/voice/remoteTracks";
-import { attachStreamPreview } from "../../src/lib/streamPreview";
+import { RemoteTracks } from "../../src/features/voice/remoteTracks";
 import { VideoQuality, type Room } from "livekit-client";
 
 /** Minimal MediaStream stub for testing. */
@@ -1787,11 +1782,6 @@ describe("VideoGrid", () => {
       Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
 
       const tracks = new RemoteTracks(room);
-      // The sidebar hover preview reports through the session to the same tracks.
-      mockSetRemoteVideoView.mockImplementation(
-        (uid: number, type: "camera" | "screenshare", view: VideoView, preview?: boolean) =>
-          tracks.setRemoteVideoView(uid, type, view, preview),
-      );
       grid = createVideoGrid();
       grid.mount(container);
       grid.setCallbacks({
@@ -1857,43 +1847,6 @@ describe("VideoGrid", () => {
       document.dispatchEvent(new Event("visibilitychange"));
       expect(enabled(2)).toBe(true);
       expect(enabled(3)).toBe(true);
-    });
-
-    it("an open hover preview stops its video too while the app is hidden, and resumes at its size when shown", () => {
-      addCameras();
-      const { stream } = fakeStreamWithTrack();
-      mockGetRemoteVideoStream.mockReturnValue(stream);
-      vi.spyOn(HTMLVideoElement.prototype, "play").mockResolvedValue(undefined);
-      const row = document.createElement("div");
-      row.dataset["userId"] = "voice-row";
-      sizes.set("voice-row", { width: 240, height: 40 });
-      document.body.appendChild(row);
-      const previews = new AbortController();
-      attachStreamPreview(row, 2, "Otto", false, true, previews.signal);
-      row.dispatchEvent(new MouseEvent("mouseenter"));
-      vi.advanceTimersByTime(300);
-      const width = Math.round(240 * devicePixelRatio);
-      const previewSize = { width, height: Math.round((width * 9) / 16) };
-
-      hidden = true;
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(enabled(2)).toBe(false);
-
-      hidden = false;
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(enabled(2)).toBe(true);
-
-      // The grid closes while the preview stays open: the preview's layer.
-      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
-      hidden = true;
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(enabled(2)).toBe(false);
-      hidden = false;
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(enabled(2)).toBe(true);
-      expect(pub(2).setVideoDimensions).toHaveBeenLastCalledWith(previewSize);
-      previews.abort();
-      row.remove();
     });
 
     it("a 160-px tile requests a lower quality than a focused tile", () => {
