@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { aggregate, writeSummary } from "./aggregate-mutation-shards.mjs";
+import { aggregate, jobSummary, writeSummary } from "./aggregate-mutation-shards.mjs";
 
 /** A parsed Stryker report: `{ "src/a.ts": ["Killed", "Survived"] }`. */
 const report = (files) => ({
@@ -59,4 +59,17 @@ test("writeSummary creates a missing parent directory", () => {
   } finally {
     rmSync(dir, { recursive: true });
   }
+});
+
+test("the pinned dev revision is recorded in the job summary", () => {
+  const md = jobSummary({
+    pct: "50.00",
+    configured: 3,
+    files: 2,
+    shards: 2,
+    scored: 4,
+    totals: { Killed: 2 },
+    revision: "abc123",
+  });
+  assert.match(md, /abc123/);
 });
