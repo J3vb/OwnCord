@@ -137,8 +137,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   // must not clear it.
   let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
-  /** When the last room key was installed (0: none this session). */
-  let keyInstalledAt = 0;
+  /** Room key installs so far. A decrypt streak continues only while this is
+   *  unchanged, so event order never rests on clock resolution. */
+  let keyInstalls = 0;
 
   function clearDecryptQuietTimer(): void {
     if (decryptQuietTimer !== null) {
@@ -164,13 +165,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   }
 
   function noteRoomKeyInstalled(): void {
-    keyInstalledAt = Date.now();
+    keyInstalls++;
   }
 
   function resetEncryptionRecovery(): void {
     clearDecryptQuietTimer();
     degradedBy = null;
-    keyInstalledAt = 0;
   }
 
   function removeAutoplayUnlock(): void {
@@ -341,7 +341,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  worker re-reports once a second) is a real failure and still degrades.
    *  Only a key install since the streak's last failure starts a new one.
    */
-  const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
+  const decryptStreaks = new WeakMap<Participant, { start: number; keyInstalls: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
     // SRE-M2: every receive-side decrypt failure (any error attributed to a
     // remote sender, native or web) counts toward the diagnostics total — a
@@ -351,8 +351,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
       const now = Date.now();
       const prev = decryptStreaks.get(participant);
-      const start = prev && keyInstalledAt <= prev.last ? prev.start : now;
-      decryptStreaks.set(participant, { start, last: now });
+      const start = prev && prev.keyInstalls === keyInstalls ? prev.start : now;
+      decryptStreaks.set(participant, { start, keyInstalls });
       if (now - start < DECRYPT_GRACE_MS) {
         log.warn("LiveKit E2EE receive-side decrypt failure — tolerating key rotation race", {
           error,

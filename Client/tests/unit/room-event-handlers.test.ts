@@ -857,6 +857,29 @@ describe("handleEncryptionError", () => {
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
     });
 
+    it("a key install in the same millisecond as the last failure still starts a fresh window", () => {
+      const h = build();
+
+      // A streak already past the grace window.
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      setEncryptionDegraded(false);
+
+      // The next rotation installs its key without the clock moving.
+      h.handlers.noteRoomKeyInstalled();
+      vi.advanceTimersByTime(1000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
     it("degrades immediately on a sender-side missing key, even with a participant attributed", () => {
       const h = build();
       const me = { identity: "me", isLocal: true } as Participant;
