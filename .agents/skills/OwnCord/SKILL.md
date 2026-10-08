@@ -3,6 +3,8 @@ name: owncord-conventions
 description: Development conventions and patterns for OwnCord. TypeScript project with conventional commits.
 ---
 
+Hand-corrected 2026-10-08; regenerate only after re-checking the Testing section against `Client/vitest.config.ts` and `Client/playwright.config.ts`.
+
 # Owncord Conventions
 
 > Generated from [J3vb/OwnCord](https://github.com/J3vb/OwnCord) on 2026-09-08
@@ -16,7 +18,7 @@ This skill teaches Claude the development patterns and conventions used in OwnCo
 - **Primary Language**: TypeScript
 - **Architecture**: hybrid module organization
 - **Test Location**: mixed
-- **Test Framework**: playwright
+- **Test Framework**: Vitest (unit, integration, contract); Playwright (E2E only)
 
 ## When to Use This Skill
 
@@ -88,7 +90,7 @@ This project uses **hybrid** module organization.
 
 ### Import Style: Relative Imports
 
-### Export Style: Default Exports
+### Export Style: Named Exports
 
 _Preferred import style_
 
@@ -101,15 +103,19 @@ import { useAuth } from "./hooks/useAuth";
 _Preferred export style_
 
 ```typescript
-// Use default exports for main component/function
-export default function UserProfile() { ... }
+// Use named exports
+export function UserProfile() { ... }
 ```
 
 ## Testing
 
-### Test Framework: playwright
+### Test Framework: Vitest and Playwright
 
-### File Pattern: `*.spec.ts`
+- **Unit, integration and contract tests**: Vitest, `*.test.ts`. They live in `Client/tests/unit`, `Client/tests/integration` and `Client/tests/contract`, and colocated as `Client/src/**/*.test.ts` (`Client/vitest.config.ts` includes only `*.test.ts`).
+- **E2E tests**: Playwright, `*.spec.ts`, only under `Client/tests/e2e/**` (`Client/playwright.config.ts`).
+- **Go tests**: `*_test.go` in `Server/`.
+
+### File Pattern: `*.test.ts` (Vitest), `*.spec.ts` (Playwright E2E only)
 
 ### Test Types
 
@@ -140,10 +146,10 @@ Based on analysis of the codebase, follow these practices:
 ### Do
 
 - Use conventional commit format (feat:, fix:, etc.)
-- Write tests using playwright
-- Follow *.spec.ts naming pattern
+- Write unit, integration and contract tests with Vitest; write E2E tests with Playwright
+- Name Vitest files `*.test.ts` and Playwright E2E files `*.spec.ts`
 - Use kebab-case for file names
-- Prefer default exports
+- Use named exports
 
 ### Don't
 
