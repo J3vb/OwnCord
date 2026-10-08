@@ -405,7 +405,8 @@ path closes it. The #1408 fix (a vendored `webrtc-sys`, above) is the
 follow-up.
 
 **Simulcast camera, interop (CI).** The app publishes its camera simulcast at
-every quality but "source", at 1280×720 for the default "high" preset; the
+every quality but "source", at 1280×720 for the default 720p ("medium")
+preset (a 1080p camera adds a 720p layer, `cameraSimulcastLayers`); the
 case above covers a single-layer 640×360 camera. A third case publishes the
 example's camera with `--video 1280x720 --simulcast` and requires the browser
 to decode more than 10 frames in every one of 8 consecutive seconds, so a
