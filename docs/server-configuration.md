@@ -209,13 +209,13 @@ Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contri
 
 Controls the Wazero WASM plugin runtime. Requires building with `-tags wazero`. When disabled, no plugins are loaded; plugin admin lifecycle endpoints return `503 Service Unavailable` and the plugin list endpoint returns an empty list.
 
-| Key                      | Type     | Default          | Description                                                                                                                                                                                         |
-| ------------------------ | -------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plugins.enabled`        | bool     | `false`          | Enable plugin loading at startup                                                                                                                                                                    |
+| Key                      | Type     | Default          | Description                                                                                                                                                                       |
+| ------------------------ | -------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plugins.enabled`        | bool     | `false`          | Enable plugin loading at startup                                                                                                                                                  |
 | `plugins.directory`      | string   | `"data/plugins"` | Directory scanned for plugin packages on startup. Must not be or contain `server.data_dir`, `upload.storage_dir` or `backup.dir`, and in a container sits under `server.data_dir` |
-| `plugins.max_memory_mb`  | int      | `64`             | Maximum WASM linear memory per plugin (megabytes)                                                                                                                                                   |
-| `plugins.cpu_budget_ms`  | int      | `100`            | Maximum CPU time per plugin invocation (milliseconds)                                                                                                                                               |
-| `plugins.http_allowlist` | string[] | `[]`             | Host suffixes plugins may reach via the `host_http` capability (e.g. `["api.steampowered.com"]`). Empty = no outbound HTTP.                                                                         |
+| `plugins.max_memory_mb`  | int      | `64`             | Maximum WASM linear memory per plugin (megabytes)                                                                                                                                 |
+| `plugins.cpu_budget_ms`  | int      | `100`            | Maximum CPU time per plugin invocation (milliseconds)                                                                                                                             |
+| `plugins.http_allowlist` | string[] | `[]`             | Host suffixes plugins may reach via the `host_http` capability (e.g. `["api.steampowered.com"]`). Empty = no outbound HTTP.                                                       |
 
 ### GIF Picker (`gif`)
 
