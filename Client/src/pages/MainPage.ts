@@ -483,7 +483,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         cancelPendingRing();
         return true;
       }
-      if (v.voiceStatus === "joining") return false;
+      // "securing" is E2EE setup and room.connect(): not yet in the room.
+      if (v.voiceStatus === "joining" || v.voiceStatus === "securing") return false;
       ringJoinWatch?.();
       ringJoinWatch = null;
       ringCallees(channelId, true);
@@ -499,15 +500,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  unless the call is already answered (a redial from inside a live call). */
   function ringCallees(channelId: number, inCall = false): void {
     cancelPendingRing();
+    const wasHere = voiceStore.getState().currentChannelId === channelId;
     const wait = lastRingAt + RING_SPACING_MS - Date.now();
     if (wait > 0) {
       ringTimer = setTimeout(() => {
         ringTimer = null;
         const v = voiceStore.getState();
-        // A ring that follows a join needs the caller still in it; Ring again
-        // can be pressed outside a call, where only a move elsewhere drops it.
+        // A ring that follows a join, or a redial from inside the call, needs
+        // the caller still in it; Ring again pressed outside a call stays
+        // valid until the caller moves to another channel.
         const here = v.currentChannelId === channelId;
-        if (here || (!inCall && v.currentChannelId === null)) sendRing(channelId);
+        if (here || (!inCall && !wasHere && v.currentChannelId === null)) sendRing(channelId);
       }, wait);
       return;
     }

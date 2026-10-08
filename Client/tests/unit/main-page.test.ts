@@ -1309,6 +1309,43 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       page.destroy?.();
     });
 
+    it("does not ring while the join is still securing or connecting", async () => {
+      const { ws } = await mountCaller();
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "securing" as const }));
+      voiceStore.flush();
+      expect(rings(ws)).toHaveLength(0);
+
+      finishCallJoin();
+      expect(rings(ws)).toHaveLength(1);
+      page.destroy?.();
+    });
+
+    it("drops a delayed Ring again when the caller leaves the call", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        mockCreateChatArea.mock.calls[0]![0].onStartCall();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        // The callee declines; Ring again inside the spacing window.
+        ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+        (document.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
+        voiceStore.setState((prev) => ({
+          ...prev,
+          currentChannelId: null,
+          voiceStatus: "idle" as const,
+        }));
+        voiceStore.flush();
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("sends no ring and shows no Calling… when the join is refused", async () => {
       const { ws, panel } = await mountCaller();
       mockCreateChatArea.mock.calls[0]![0].onStartCall();
