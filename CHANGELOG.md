@@ -53,6 +53,7 @@ and only when it changes something a contributor or fork holder must do
 - **Linux voice after a moderator mute**: when a moderator lifts a server mute, your microphone is published again automatically instead of staying silent.
 - **Message retention page for server managers**: a role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first channel rule.
 
+- **Permission checks**: asking whether a member holds an empty permission set now always answers no, administrators included, matching the other permission helpers.
 - **Support bundle wording**: the README no longer says secrets are "never read" and now warns that the unredacted log files can contain anything the app logged.
 - **Support bundle logs**: exporting a bundle waits for a log write already in progress, so the newest lines are included.
 - **Deleting your account**: the "account deleted" message appears only after the cached images are gone from disk.
