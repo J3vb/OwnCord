@@ -136,6 +136,8 @@ type HttpRoute = {
   status: number;
   body: unknown;
   method?: string;
+  bodyBytes?: number[];
+  contentType?: string;
 };
 
 async function bootAccountSettings(page: Page, extraRoutes: HttpRoute[]): Promise<void> {
@@ -276,7 +278,13 @@ test.describe("Settings > Account — avatar upload", () => {
     await bootAccountSettings(page, [
       meRoute(false),
       AVATAR_UPLOAD,
-      { pattern: "/api/v1/files/abc", status: 200, body: {} },
+      {
+        pattern: "/api/v1/files/abc",
+        status: 200,
+        body: null,
+        bodyBytes: [...PNG_1X1],
+        contentType: "image/png",
+      },
     ]);
 
     await page
@@ -284,11 +292,13 @@ test.describe("Settings > Account — avatar upload", () => {
       .setInputFiles({ name: "avatar.png", mimeType: "image/png", buffer: PNG_1X1 });
 
     // The server's URL is fetched and drawn into the big avatar as an object URL.
-    await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toBeAttached();
-    await expect(page.locator("[data-testid='account-avatar'] img.avatar-img")).toHaveAttribute(
-      "src",
-      /^blob:/,
-    );
+    const img = page.locator("[data-testid='account-avatar'] img.avatar-img");
+    await expect(img).toBeAttached();
+    await expect(img).toHaveAttribute("src", /^blob:/);
+    // The served bytes are a real image: the browser decodes them.
+    await expect
+      .poll(() => img.evaluate((el: HTMLImageElement) => (el.complete ? el.naturalWidth : 0)))
+      .toBeGreaterThan(0);
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Avatar updated" }),
     ).toBeVisible();
