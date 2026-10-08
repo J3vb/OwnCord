@@ -1257,7 +1257,7 @@ describe("Server/admin/static — panel behaviour", () => {
             },
           ],
         };
-      if (p === "/channels")
+      if (p === "/retention/channels")
         return {
           json: [
             { id: 5, name: "general", type: "text" },
@@ -1333,7 +1333,7 @@ describe("Server/admin/static — panel behaviour", () => {
           },
         };
       if (p === "/retention/preview") return { json: [] };
-      if (p === "/channels")
+      if (p === "/retention/channels")
         return channelsReadable
           ? {
               json: [
