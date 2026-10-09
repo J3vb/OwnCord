@@ -305,6 +305,12 @@ function renderVoiceChannelItem(
       if (uiStore.getState().connectionStatus !== "connected") return;
       if (!isJoined && safetyStore.getState().timeout !== null) return;
       if (isJoined) {
+        // A repeat click while this join is still in progress (a double-click,
+        // or retrying a slow "securing") must not cancel it: toggling here
+        // cycled voice_join/voice_leave several times a second. The voice
+        // widget's Disconnect still ends a join in progress.
+        const status = voiceStore.getState().voiceStatus;
+        if (status === "joining" || status === "securing") return;
         onVoiceLeave();
       } else {
         onVoiceJoin(channel.id);

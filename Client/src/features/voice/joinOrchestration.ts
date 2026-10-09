@@ -278,7 +278,7 @@ export class JoinOrchestration {
         // pendingJoin itself by transitioning to idle before the drain loop
         // ever reads it. Only run the give-up cleanup when nothing is queued.
         if (this._state.pendingJoin === null) {
-          this._onError?.("e2ee_timeout");
+          this._onError?.(voiceText("join.securingTimeout"));
           // The exchange timed out BEFORE room.connect(): no SFU participant
           // exists, so no LiveKit webhook will ever clean up, and the server
           // registered the join when it sent voice_token. Send voice_leave and

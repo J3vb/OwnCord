@@ -502,6 +502,25 @@ describe("ChannelSidebar", () => {
     expect(onVoiceJoin).not.toHaveBeenCalled();
   });
 
+  it("a repeat click on the voice channel being joined does not leave it", () => {
+    // Every click toggled, so clicking the row again while a join was still
+    // joining/securing (a double-click, or retrying a slow join) sent
+    // voice_leave before the SFU was ever reached: rapid clicks cycled
+    // voice_join/voice_leave on the server several times a second.
+    setChannels(testChannels);
+    sidebar.mount(container);
+    for (const voiceStatus of ["joining", "securing"] as const) {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3, voiceStatus }));
+      voiceStore.flush();
+      (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
+      expect(onVoiceLeave).not.toHaveBeenCalled();
+    }
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    voiceStore.flush();
+    (container.querySelector('[data-channel-id="3"]') as HTMLElement).click();
+    expect(onVoiceLeave).toHaveBeenCalledOnce();
+  });
+
   // ── Voice join/leave freeze while the WS socket is not connected (§3) ──
 
   it("disables voice channel join with a 'Reconnecting…' reason while reconnecting", () => {

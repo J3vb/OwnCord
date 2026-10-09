@@ -81,7 +81,9 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
-- After a failed voice join the next one now waits 2 s, doubling up to 30 s, and says so, so a failing join can no longer be retried several times a second. This contains a join/leave loop reported on a server (stuck at "securing", then leaving); its trigger is not yet identified and needs a client support bundle.
+- Clicking a voice channel again while it was still connecting or securing left it at once, so repeated clicks cycled join/leave on the server several times a second — a repeat click now leaves the join running (Disconnect still ends it).
+- After a failed voice join the next one now waits 2 s, doubling up to 30 s, and says so.
+- A join that gave up while securing showed a raw "e2ee_timeout" toast; it now says the call could not be secured.
 
 **Linux desktop**
 
