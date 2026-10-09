@@ -286,8 +286,8 @@ func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
 	}
 }
 
-// A registered name made only of structural characters ("[]", "::") is
-// masked where it stands alone, not split into kept separators.
+// A one-character separator name follows the boundary rule, so it cannot
+// mask every colon in a detail string.
 func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
 	known := newSupportKnown([]string{":"})
 	in := "dial tcp [x]:7880: connect: connection refused"
@@ -296,6 +296,8 @@ func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
 	}
 }
 
+// A registered name made only of structural characters ("[]", "::") is
+// masked wherever it occurs, not split into kept separators.
 func TestSupportScrub_RedactsStructuralNames(t *testing.T) {
 	known := newSupportKnown([]string{"[]", "::"})
 	cases := []struct{ in, want string }{

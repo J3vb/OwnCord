@@ -202,8 +202,9 @@ func (k *supportKnown) scrub(s string) string {
 
 // scrubLiterals masks the names with no letters or digits. One is masked only
 // between structural separators or the ends of s, so it never splits a
-// compound (a name of only separators is masked anywhere): a name "." or "/" cannot unjoin a host or path, and a name "[]" or
-// "::" is masked before supportAllowlist splits it into kept separators.
+// compound: a name "." or "/" cannot unjoin a host or path. A name of two or
+// more separators ("[]", "::") is masked anywhere, before supportAllowlist
+// splits it into kept separators.
 func (k *supportKnown) scrubLiterals(s string) string {
 	bounded := func(i int) bool {
 		r, _ := utf8.DecodeRuneInString(s[i:])
