@@ -310,6 +310,29 @@ describe("enableCamera", () => {
     expect(voiceStore.getState().localCamera).toBe(true);
   });
 
+  it("passes the default 720p preset's size to the native capture", async () => {
+    const rig = fakeNativeRoom();
+    rig.createCameraTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.createCameraTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1280, height: 720 }),
+      }),
+    );
+  });
+
+  it("leaves the native capture uncapped for the source quality", async () => {
+    loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "source" : ""));
+    const rig = fakeNativeRoom();
+    rig.createCameraTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.createCameraTracks.mock.calls[0]?.[0]).not.toHaveProperty("resolution");
+  });
+
   it("does not re-enable the camera when a disable lands during the support check", async () => {
     const rig = fakeNativeRoom();
     const deps = fakeDeps(rig.room);
