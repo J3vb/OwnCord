@@ -882,7 +882,7 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
             .map_err(|e| {
-                self.camera.lock().unwrap().take();
+                self.camera_stale = self.camera.lock().unwrap().take().and_then(|c| c.stale);
                 e.to_string()
             })?;
         let sid = publication.sid();
@@ -913,8 +913,8 @@ impl NativeSession {
 
     /// Unpublish the camera track without stopping the capture (the self-view
     /// stays live).
-    /// Returns the sid it unpublished, so a replacing publish can tell that
-    /// publication's delayed republish from its own.
+    /// Records the sid it unpublished in `camera_stale`, so the next publish
+    /// can tell that publication's delayed republish from its own.
     async fn release_camera_publication(&mut self) {
         let Some(camera) = take_publication(&self.camera, &mut self.camera_stale) else {
             return;
@@ -1006,7 +1006,12 @@ impl NativeSession {
             .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
             .await
             .map_err(|e| {
-                self.screen_publication.lock().unwrap().take();
+                self.screen_stale = self
+                    .screen_publication
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .and_then(|p| p.stale);
                 e.to_string()
             })?;
         let sid = publication.sid();
