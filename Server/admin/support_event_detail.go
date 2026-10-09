@@ -190,13 +190,13 @@ func supportScrub(s string, known supportKnown) string {
 	})
 	s = supportCredentialPattern.ReplaceAllString(s, "${1}${2}[x]")
 	s = supportSchemePattern.ReplaceAllString(s, "${1} [x]")
+	s = supportIPv4Pattern.ReplaceAllString(s, "[x]")
 	s = supportIPv6Pattern.ReplaceAllStringFunc(s, func(m string) string {
 		if strings.Trim(m, ":") == "" {
 			return m
 		}
 		return "[x]"
 	})
-	s = supportIPv4Pattern.ReplaceAllString(s, "[x]")
 	return supportAllowlist(known.scrub(s), known[""])
 }
 

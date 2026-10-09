@@ -62,6 +62,7 @@ func TestSupportScrub(t *testing.T) {
 		{"open /srv/Private Project: permission denied", "open [x]: permission denied"},
 		{"dial tcp 203.0.113.5:7880: connect: connection refused", "dial tcp [x]:7880: connect: connection refused"},
 		{"dial tcp [2001:db8::1]:7880: i/o timeout", "dial tcp [[x]]:7880: i/o timeout"},
+		{"dial tcp [::ffff:203.0.113.5]:7880: i/o timeout", "dial tcp [[x]:[x]]:7880: i/o timeout"},
 		{"lookup turn.example.com: no such host", "lookup [x]: no such host"},
 		{"mkdir /backup: permission denied", "mkdir [x]: permission denied"},
 		{`open "/srv/ab cd": permission denied`, `open "[x]": permission denied`},
