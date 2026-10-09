@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
 )
@@ -282,5 +283,90 @@ func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
 
 	if want := map[string]any{"err": "not found"}; !reflect.DeepEqual(detail, want) {
 		t.Fatalf("detail = %v, want %v", detail, want)
+	}
+}
+
+// A one-rune name that is not a separator, such as an emoji, is still masked
+// under the boundary rule.
+func TestSupportScrub_SingleSymbolNameStillMasked(t *testing.T) {
+	for _, name := range []string{"😀", "★"} {
+		known := newSupportKnown([]string{name})
+		if got, want := supportScrub("call from "+name+" dropped", known), "call from [x] dropped"; got != want {
+			t.Errorf("name %q: got %q, want %q", name, got, want)
+		}
+	}
+}
+
+// A one-character separator name identifies no one, so it is never masked and
+// cannot damage prose or embedded JSON detail.
+func TestSupportScrub_SingleSeparatorNameKeepsDetailReadable(t *testing.T) {
+	for _, name := range []string{":", ",", `"`} {
+		known := newSupportKnown([]string{name})
+		for _, c := range []struct{ in, want string }{
+			{"dial tcp [x]:7880: connect: connection refused", "dial tcp [x]:7880: connect: connection refused"},
+			{`kick {"participant_ids":[1],"error":"ice failed"}`, `kick {"participant_ids":"[x]","error":"ice failed"}`},
+		} {
+			if got := supportScrub(c.in, known); got != c.want {
+				t.Errorf("name %q: supportScrub(%q)\n got %q\nwant %q", name, c.in, got, c.want)
+			}
+		}
+	}
+}
+
+// A registered name made only of structural characters ("[]", "::") is
+// masked wherever it occurs, not split into kept separators.
+func TestSupportScrub_RedactsStructuralNames(t *testing.T) {
+	known := newSupportKnown([]string{"[]", "::"})
+	cases := []struct{ in, want string }{
+		{"user [] not found", "user [x] not found"},
+		{`user "::" not found`, `user "[x]" not found`},
+		{"user []: not found", "user [x]: not found"},
+		{"dial tcp [x]:7880: i/o timeout", "dial tcp [x]:7880: i/o timeout"},
+		{"mention @:: not resolved", "mention [x][x] not resolved"},
+	}
+	for _, c := range cases {
+		if got := supportScrub(c.in, known); got != c.want {
+			t.Errorf("supportScrub(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
+// An identifying key's embedded JSON array or object is masked whole.
+func TestSupportScrub_MasksCompositeJSONValues(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`kick {"participant_ids":[12,34,56],"error":"ice failed"}`, `kick {"participant_ids":"[x]","error":"ice failed"}`},
+		{`kick {"room":{"id":7,"n":[1,2]},"error":"ice failed"}`, `kick {"room":"[x]","error":"ice failed"}`},
+		{`kick {"error":{"room":"b","code":5}}`, `kick {"error":{"room":"[x]","code":5}}`},
+		{`kick {"name": 加藤}`, `kick {"name": "[x]"}`},
+		{`kick {"participant_ids":[12,"a]",34`, `kick {"participant_ids":"[x]"`},
+	}
+	for _, c := range cases {
+		if got := supportScrub(c.in, nil); got != c.want {
+			t.Errorf("supportScrub(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
+// Many names sharing a first word must not make each occurrence of that word
+// scan them all, or a preview overruns its 3 s timeout: 10,000 names starting
+// "User" cost about what one does.
+func TestSupportKnown_ManySamePrefixNamesStayFast(t *testing.T) {
+	names := make([]string, 0, 10000)
+	for i := range 10000 {
+		names = append(names, fmt.Sprintf("User %d", i))
+	}
+	value := strings.Repeat("user ", 1000)
+	timeScrub := func(known *supportKnown) time.Duration {
+		start := time.Now()
+		for range 100 {
+			known.scrub(value)
+		}
+		return time.Since(start)
+	}
+
+	one, many := timeScrub(newSupportKnown(names[:1])), timeScrub(newSupportKnown(names))
+
+	if many > 5*one+100*time.Millisecond {
+		t.Fatalf("10,000 same-prefix names took %v, one name %v", many, one)
 	}
 }
