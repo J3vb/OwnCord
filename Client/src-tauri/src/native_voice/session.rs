@@ -158,6 +158,11 @@ pub enum Event {
     MicrophonePermission {
         allowed: bool,
     },
+    /// The input-sensitivity gate opened (speech) or closed (silence). It
+    /// lights the local speaking ring, as the web path's detector does.
+    VoiceGate {
+        open: bool,
+    },
     EncryptionStatus {
         identity: String,
         encrypted: bool,
@@ -677,8 +682,12 @@ impl NativeSession {
         }
         let apm = Apm::new(&opts);
         self.playout.set_reference(apm.clone());
-        self.capture
-            .configure(apm.clone(), opts.enhanced_noise_suppression);
+        let on_event = self.on_event.clone();
+        self.capture.configure(
+            apm.clone(),
+            opts.enhanced_noise_suppression,
+            Arc::new(move |open| on_event(Event::VoiceGate { open })),
+        );
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
             log::warn!("[native_voice] playout unavailable: {e}");
@@ -748,6 +757,11 @@ impl NativeSession {
     /// stay as they are, and a closed gate sends silence (DP-30).
     pub fn set_ptt_gated(&self, gated: bool) {
         self.capture.set_ptt_gated(gated);
+    }
+
+    /// Set the input-sensitivity gate's threshold (0: no gate).
+    pub fn set_voice_gate(&self, threshold: f32) {
+        self.capture.set_voice_gate(threshold);
     }
 
     /// Publish any audio source as the microphone track. The app passes its

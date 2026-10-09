@@ -240,6 +240,28 @@ describe("AudioPipeline", () => {
       pipeline.setVoiceSensitivity(100);
       expect(verdicts.at(-1)).toBeNull();
     });
+
+    it("drives the room's own gate on the slider's scale where the room has no web processor (the native room)", () => {
+      prefs.set("voiceSensitivity", 70);
+      const pipeline = new AudioPipeline();
+      const verdicts: Array<boolean | null> = [];
+      pipeline.onGateSpeaking = (speaking) => verdicts.push(speaking);
+      const setVoiceGate = vi.fn();
+      pipeline.setRoom({
+        localParticipant: { getTrackPublication: () => undefined },
+        setVoiceGate,
+      } as never);
+
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+      pipeline.setVoiceSensitivity(40);
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(40), expect.any(Function));
+
+      const report = setVoiceGate.mock.calls.at(-1)![1] as (speaking: boolean | null) => void;
+      verdicts.length = 0;
+      report(false);
+      report(true);
+      expect(verdicts).toEqual([false, true]);
+    });
   });
 
   describe("reapplyEnhancedNoiseSuppression", () => {

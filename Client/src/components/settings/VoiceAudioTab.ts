@@ -841,7 +841,7 @@ function buildVoiceAudioTabInner(
   // other settings would also fight the call for the device: the browser can
   // hand the call this stream's processing instead of its own.
   // The meter previews the webview's microphone; on the native engine the
-  // saved device id is the engine's, and the meter is hidden anyway.
+  // saved device id is the engine's, so it does not run there.
   function startMicMeter(): void {
     if (nativeAudio || signal.aborted) return;
     const thisRequest = ++micRequestId;
@@ -1011,8 +1011,9 @@ function buildVoiceAudioTabInner(
   }
 
   if (nativeAudio) {
-    for (const control of [inputVolumeHeader, inputVolumeRow, sensitivityHeader, meterWrap])
-      control.remove();
+    // The sensitivity slider stays: the engine's capture gates on it. Its
+    // bar shows no level, as the meter reads only the webview's microphone.
+    for (const control of [inputVolumeHeader, inputVolumeRow]) control.remove();
     const note = createElement(
       "p",
       { class: "setting-desc", "data-testid": "native-audio-note" },

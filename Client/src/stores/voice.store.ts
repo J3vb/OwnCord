@@ -125,7 +125,7 @@ export interface VoiceState {
    *  voice session. Optional for the same fixture reason as peerVerifications. */
   readonly localSessionFingerprint?: string | null;
   /** The input-sensitivity gate's verdict (true = open = above the slider's
-   *  threshold), or null when no gate runs (sensitivity 100, native voice).
+   *  threshold), or null when no gate runs (sensitivity 100).
    *  When set it, not LiveKit, drives the local speaking ring, so the ring,
    *  the slider and what transmits agree. Optional for the fixture reason above. */
   readonly localGateSpeaking?: boolean | null;
