@@ -52,7 +52,13 @@ import {
 import { isAudioMime, isVideoMime } from "./message-list/attachments";
 import { FenwickTree } from "./message-list/fenwick";
 import { messagingText } from "../i18n/messaging";
-import { markChannelRead, hasUnread, isChannelAway, setLiveTailInView } from "@lib/read-state";
+import {
+  markChannelRead,
+  hasUnread,
+  isChannelAway,
+  noteLiveMessageSeen,
+  setLiveTailInView,
+} from "@lib/read-state";
 
 // -- Options ------------------------------------------------------------------
 
@@ -603,6 +609,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     dismissUnreadBar();
     if (!hasUnread(options.channelId)) return;
     markChannelRead(options.channelId);
+  }
+
+  /**
+   * A live message was appended while the reader had the live tail in view. The
+   * dispatcher does not count it unread, so markReadIfSeen (gated on a local
+   * unread count) never sends for it; tell the server it was seen, throttled
+   * (lib/read-state.ts). Same away and deferred-divider checks as above.
+   */
+  function markLiveArrivalSeen(): void {
+    if (root === null) return;
+    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (isChannelAway(options.channelId)) return;
+    if (newDividerDeferred) return;
+    noteLiveMessageSeen(options.channelId, disposable.signal);
   }
 
   // ---------------------------------------------------------------------------
@@ -1387,8 +1407,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (!patchRows()) {
             renderAll();
           }
-          if (!wasBottom && prevLast > 0 && allMessages.some((m) => m.id === prevLast)) {
-            // Only an append counts: a window swap drops the previous last row.
+          // Only an append counts: a window swap drops the previous last row.
+          const appended = prevLast > 0 && allMessages.some((m) => m.id === prevLast);
+          if (!wasBottom && appended) {
             // Older ids (a prepend) and the reader's own rows never count.
             for (const m of allMessages) {
               if (m.id > prevLast && m.user.id !== options.currentUserId) newBelowCount++;
@@ -1396,6 +1417,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           }
           updateScrollToBottomBtn();
           settleUnreadNav();
+          if (wasBottom && appended && allMessages.some((m) => m.id > prevLast)) {
+            markLiveArrivalSeen();
+          }
         },
       ),
     );

@@ -3,16 +3,23 @@
  * rather than `channel_focus` — the local badge clearing is the easy half; not
  * moving the connection's focused channel is the reason this exists.
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import {
+  markActiveChannelReadOnUnload,
   markAllRead,
   markChannelRead,
   hasUnread,
+  noteLiveMessageSeen,
   setMarkReadSender,
   unreadChannelIds,
 } from "@lib/read-state";
-import { channelsStore, setChannels, incrementUnread } from "@stores/channels.store";
+import {
+  channelsStore,
+  setChannels,
+  setActiveChannel,
+  incrementUnread,
+} from "@stores/channels.store";
 import { dmStore, setDmChannels } from "@stores/dm.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
@@ -274,5 +281,172 @@ describe("mark_read wiring", () => {
     markChannelRead(7);
 
     expect(sender).toHaveBeenCalledExactlyOnceWith(7);
+  });
+});
+
+describe("noteLiveMessageSeen", () => {
+  let controller: AbortController;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    controller = new AbortController();
+  });
+
+  afterEach(() => {
+    controller.abort();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("sends one trailing mark_read, not one per arrival", () => {
+    setChannels([channel(1, 0)]);
+
+    noteLiveMessageSeen(1, controller.signal);
+    vi.advanceTimersByTime(300);
+    noteLiveMessageSeen(1, controller.signal);
+    vi.advanceTimersByTime(300);
+    noteLiveMessageSeen(1, controller.signal);
+    expect(sent).toEqual([]);
+
+    vi.advanceTimersByTime(1000);
+    expect(sent).toEqual([1]);
+
+    // Nothing is left armed once it has fired.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps sends for one channel at least a second apart and channels independent", () => {
+    setChannels([channel(1, 0), channel(2, 0)]);
+
+    noteLiveMessageSeen(1, controller.signal);
+    noteLiveMessageSeen(2, controller.signal);
+    vi.advanceTimersByTime(1000);
+    expect([...sent].sort()).toEqual([1, 2]);
+
+    noteLiveMessageSeen(1, controller.signal);
+    vi.advanceTimersByTime(999);
+    expect(sent).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(sent).toHaveLength(3);
+  });
+
+  it("clears its timer when the owning signal aborts", () => {
+    setChannels([channel(1, 0)]);
+
+    noteLiveMessageSeen(1, controller.signal);
+    expect(vi.getTimerCount()).toBe(1);
+    controller.abort();
+
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(2000);
+    expect(sent).toEqual([]);
+
+    // The channel is free to arm again for the next list.
+    const next = new AbortController();
+    noteLiveMessageSeen(1, next.signal);
+    vi.advanceTimersByTime(1000);
+    expect(sent).toEqual([1]);
+    next.abort();
+  });
+
+  it("arms nothing for a signal that has already aborted", () => {
+    setChannels([channel(1, 0)]);
+    controller.abort();
+
+    noteLiveMessageSeen(1, controller.signal);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("skips the send when an unseen message was counted meanwhile", () => {
+    setChannels([channel(1, 0)]);
+
+    noteLiveMessageSeen(1, controller.signal);
+    incrementUnread(1);
+    vi.advanceTimersByTime(1000);
+
+    expect(sent).toEqual([]);
+    expect(hasUnread(1)).toBe(true);
+  });
+
+  it("drops a pending send when a new connection registers its sender", () => {
+    setChannels([channel(1, 0)]);
+
+    noteLiveMessageSeen(1, controller.signal);
+    const next: number[] = [];
+    setMarkReadSender((id) => next.push(id));
+    vi.advanceTimersByTime(2000);
+
+    expect(sent).toEqual([]);
+    expect(next).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("markActiveChannelReadOnUnload", () => {
+  let hasFocus: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    hasFocus.mockRestore();
+  });
+
+  it("marks the active channel read", () => {
+    setChannels([channel(1, 0), channel(2, 0)]);
+    setActiveChannel(2);
+
+    markActiveChannelReadOnUnload();
+
+    expect(sent).toEqual([2]);
+  });
+
+  it("sends nothing with no active channel", () => {
+    setChannels([channel(1, 0)]);
+
+    markActiveChannelReadOnUnload();
+
+    expect(sent).toEqual([]);
+  });
+
+  it("sends nothing while the reader is away from the channel", () => {
+    setChannels([channel(1, 0)]);
+    setActiveChannel(1);
+    hasFocus.mockReturnValue(false);
+
+    markActiveChannelReadOnUnload();
+
+    expect(sent).toEqual([]);
+  });
+
+  it("leaves an unseen unread alone", () => {
+    setChannels([channel(1, 2)]);
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+
+    markActiveChannelReadOnUnload();
+
+    expect(sent).toEqual([]);
+    expect(hasUnread(1)).toBe(true);
+  });
+
+  it("supersedes a pending live-seen send instead of sending twice", () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    try {
+      setChannels([channel(1, 0)]);
+      setActiveChannel(1);
+      noteLiveMessageSeen(1, controller.signal);
+
+      markActiveChannelReadOnUnload();
+      vi.advanceTimersByTime(2000);
+
+      expect(sent).toEqual([1]);
+    } finally {
+      controller.abort();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });

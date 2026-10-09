@@ -233,6 +233,9 @@ import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { ApiClientError, createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { setMarkReadSender } from "@lib/read-state";
+import type { ReadyChannel } from "@lib/types";
+import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
 import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
@@ -296,6 +299,57 @@ async function loginAndReachAuthOk(
 describe("main.ts startup", () => {
   it("tells the native host once that the first page rendered", () => {
     expect(startupInvokes.filter((cmd) => cmd === "frontend_ready")).toHaveLength(1);
+  });
+});
+
+describe("main.ts beforeunload", () => {
+  const readChannel: ReadyChannel = {
+    id: 5,
+    name: "general",
+    type: "text",
+    category: null,
+    position: 0,
+    unread_count: 0,
+    mention_count: 0,
+  };
+
+  let hasFocus: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    hasFocus.mockRestore();
+    setMarkReadSender(null);
+    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  });
+
+  it("marks the active channel read, so messages read live do not return as unread", () => {
+    const sendMarkRead = vi.fn<(channelId: number) => void>();
+    setMarkReadSender(sendMarkRead);
+    setChannels([readChannel]);
+    setActiveChannel(5);
+
+    window.dispatchEvent(new Event("beforeunload"));
+
+    expect(sendMarkRead).toHaveBeenCalledExactlyOnceWith(5);
+  });
+
+  it("sends no mark_read when no channel is active", () => {
+    const sendMarkRead = vi.fn<(channelId: number) => void>();
+    setMarkReadSender(sendMarkRead);
+    setChannels([readChannel]);
+
+    window.dispatchEvent(new Event("beforeunload"));
+
+    expect(sendMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("still runs the existing teardown", () => {
+    window.dispatchEvent(new Event("beforeunload"));
+
+    expect(deactivatePendingMessages).toHaveBeenCalled();
   });
 });
 

@@ -695,4 +695,161 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expect(unreadCount()).toBe(0);
     });
   });
+
+  // A message watched arriving at the bottom of the active, focused channel is
+  // read, but wsHandlers deliberately does not count it unread, so nothing
+  // else tells the server: after a restart the channel came back as "N new".
+  describe("live arrivals the reader watches", () => {
+    const liveMessage = (id: number) => ({
+      id,
+      channel_id: CHANNEL_ID,
+      user: { id: 2, username: "user2", avatar: null },
+      content: `Message ${id}`,
+      reply_to: null,
+      attachments: [],
+      timestamp: new Date().toISOString(),
+    });
+
+    function arrive(id: number): void {
+      handleChatMessage(createReconnectClock(), liveMessage(id));
+      messagesStore.flush();
+    }
+
+    function mountAtBottom(): void {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollToEnd();
+      // After mount: mount() queues animation frames the fake clock must not own.
+      vi.useFakeTimers();
+    }
+
+    afterEach(() => {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    });
+
+    it("sends exactly one mark_read for a message landing at the bottom", () => {
+      mountAtBottom();
+
+      arrive(51);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).toHaveBeenCalledTimes(1);
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+    });
+
+    it("coalesces three messages within 500 ms into one trailing send", () => {
+      mountAtBottom();
+
+      arrive(51);
+      vi.advanceTimersByTime(200);
+      arrive(52);
+      vi.advanceTimersByTime(200);
+      arrive(53);
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends again for a later message once the window has elapsed", () => {
+      mountAtBottom();
+
+      arrive(51);
+      vi.advanceTimersByTime(2000);
+      arrive(52);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends nothing for a message landing while scrolled up", () => {
+      mountAtBottom();
+      scrollUp();
+
+      arrive(51);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      expect(unreadCount()).toBe(1);
+    });
+
+    it("sends nothing while the window is not focused", () => {
+      mountAtBottom();
+      hasFocus.mockReturnValue(false);
+
+      arrive(51);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      expect(unreadCount()).toBe(1);
+    });
+
+    it("sends nothing for a detached history window", () => {
+      mountAtBottom();
+      setDetached(true);
+
+      arrive(51);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+    });
+
+    it("sends nothing for a channel that is not the active one", () => {
+      mountAtBottom();
+      setChannels([
+        {
+          id: CHANNEL_ID,
+          name: "general",
+          type: "text",
+          category: null,
+          position: 0,
+          unread_count: 0,
+          mention_count: 0,
+        },
+        {
+          id: 2,
+          name: "other",
+          type: "text",
+          category: null,
+          position: 1,
+          unread_count: 0,
+          mention_count: 0,
+        },
+      ]);
+      setActiveChannel(2);
+
+      arrive(51);
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+    });
+
+    it("does not mark read a message that arrived after the reader looked away", () => {
+      mountAtBottom();
+      arrive(51);
+      vi.advanceTimersByTime(500);
+      hasFocus.mockReturnValue(false);
+      arrive(52);
+      expect(unreadCount()).toBe(1);
+
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      expect(unreadCount()).toBe(1);
+    });
+
+    it("drops the pending send when the list is destroyed", () => {
+      mountAtBottom();
+
+      arrive(51);
+      msgList?.destroy?.();
+      msgList = null;
+      vi.advanceTimersByTime(2000);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+    });
+  });
 });
