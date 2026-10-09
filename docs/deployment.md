@@ -1519,10 +1519,9 @@ push a failure out of the bundle) and
 What it deliberately does not hold: no message content, no attachments or
 avatars, no backups, no raw log lines, and no names, paths, addresses, URLs
 or credentials — the configuration item structurally omits every one of
-those, log detail drops identifying attributes and masks addresses, hosts,
-paths, URLs and token-like strings in the rest, and table counts are counts,
-never rows. Skim `events.json` before you share it: a name written as a plain
-word inside an error text is not recognised.
+those, log detail drops identifying attributes and keeps only error vocabulary
+from the rest (every other word, path, host and address becomes `[x]`), and
+table counts are counts, never rows.
 
 Nothing uploads: the bundle is a local download, and sharing that file
 remains your decision. Confirming a download writes a `support_bundle_create`

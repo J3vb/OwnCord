@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/config"
@@ -15,22 +16,23 @@ import (
 // reason. Two rules apply, keys first:
 //
 //   - An attribute whose key names an identifier, a person, an address, a
-//     location or a credential (supportIdentifyingKey) is dropped whatever its
-//     value. Only string, number and boolean values survive; groups and lists
-//     (resolved LogValuers such as db.User) are dropped.
-//   - Every surviving string is scrubbed (supportScrub): URLs, emails, paths,
-//     IP addresses, token-like runs, credentials after an auth scheme or a
-//     password/token label, and hostnames are replaced by a fixed
-//     placeholder, and identifying keys embedded in the text as JSON or
-//     key=value pairs (LiveKit's own log fields) are redacted by the same key
-//     rule.
+//     location, a credential or request data (supportIdentifyingKey) is
+//     dropped whatever its value. Only string, number and boolean values
+//     survive; groups and lists (resolved LogValuers such as db.User) are
+//     dropped.
+//   - Every surviving string is reduced to an allowlist (supportScrub): only
+//     words in supportVocabulary, single characters, short numbers and
+//     punctuation are kept, and every run of other words, with the path or
+//     host punctuation joining them, becomes one [x]. Before that, values
+//     that a kept word could otherwise expose are masked whole: identifying
+//     keys embedded in the text as JSON or key=value pairs (LiveKit's own log
+//     fields), credentials after a label or auth scheme, IP addresses, and
+//     the values the server knows to be identifying (registered usernames and
+//     display names, the server name, the hosts of configured addresses).
 //
-// Values the server already knows to be identifying (registered usernames and
-// display names, the server name, the hosts of configured addresses) are also
-// redacted wherever they appear in text. An unregistered bare word in free text
-// (a name that is not an account, a hostname without a dot or port) cannot be
-// told apart from other text and is not caught. The free-form message itself is
-// still never kept: only its fixed event code.
+// What remains readable is error vocabulary, so a path, host, name or secret
+// survives only where every word of it is itself an error-message word. The
+// free-form message itself is still never kept: only its fixed event code.
 
 const (
 	supportDetailMaxKeys  = 8
@@ -72,32 +74,27 @@ func supportIdentifyingKey(key string) bool {
 }
 
 var (
-	supportURLPattern    = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>]+`)
-	supportEmailPattern  = regexp.MustCompile(`[^\s@"'<>(){}\[\],;:]+@[^\s@"'<>(){}\[\],;:]+`)
 	supportJSONKVPattern = regexp.MustCompile(`"([A-Za-z0-9_.-]+)"(\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\s]+)`)
 	supportKVPattern     = regexp.MustCompile(`\b([A-Za-z0-9_.-]+)=("(?:[^"\\]|\\.)*"|[^\s,]+)`)
-	// A path starts at the beginning, after whitespace, a quote, "=" or an
-	// opening bracket: an absolute or drive path of one or more components, a
-	// UNC path, or a relative path with at least one separator. A relative one
-	// followed by ":<line>" is a source reference ("rtc/participant.go:12") and
-	// survives, as do the few slash words in error text ("i/o").
-	supportPathPattern = regexp.MustCompile(`(^|[\s"'=(\[])((?:[A-Za-z]:|\\\\[^\s\\/:"'<>,;()\[\]{}]+)?(?:[\\/][^\s\\/:"'<>,;()\[\]{}]+)+[\\/]?|[\w.-]+(?:[\\/][\w.-]+)+)`)
-	supportSlashWords  = []string{"i/o", "n/a", "and/or", "tcp/ip"}
+	// A credential after its label runs to the next "," or ";", so a
+	// password with spaces is masked whole; after an auth scheme it is the
+	// next word.
+	supportCredentialPattern = regexp.MustCompile(`(?i)\b(authorization|password|passwd|pwd|secret|token|api[_-]?key|credentials?)(\s*[:=]\s*)("[^"]*"|[^,;\r\n]+)`)
+	supportSchemePattern     = regexp.MustCompile(`(?i)\b(bearer|basic|digest)\s+[^\s,;]+`)
+	// Short numbers are kept, so addresses are masked before the allowlist.
 	supportIPv6Pattern = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?`)
 	supportIPv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
-	// A run long enough to be a credential, session id, UUID or JWT.
-	supportTokenPattern = regexp.MustCompile(`[A-Za-z0-9_\-+/=.]{20,}`)
-	// Everything after a home directory root up to a quote or the end, so a
-	// space in a name cannot leave a fragment.
-	supportHomePattern = regexp.MustCompile(`(?i)(?:/home/|/Users/|[A-Za-z]:\\Users\\)[^"'\r\n]*`)
-	// "nas:7880": a single-label host with a port. A leading "." or "/" is
-	// excluded so "participant.go:12" stays a source reference.
-	supportHostPortPattern = regexp.MustCompile(`(^|[^\w./-])([A-Za-z][\w-]*):(\d{2,5})\b`)
-	supportLocalhost       = regexp.MustCompile(`(?i)\blocalhost\b`)
-	supportHostPattern     = regexp.MustCompile(`(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24})\b`)
-	// Dotted names ending in these are source or data files, not hosts.
-	supportFileExtensions = []string{"go", "ts", "js", "mjs", "json", "yaml", "yml", "toml", "txt", "log", "sql", "db", "html", "css", "exe", "dll", "sock", "pem", "crt"}
+	// A port, status code or duration: up to five digits and an optional unit.
+	supportNumberPattern = regexp.MustCompile(`^\d{1,5}(?:ns|us|µs|ms|s|m|h|b|kb|mb|gb)?$`)
 )
+
+var supportVocabularySet = func() map[string]bool {
+	set := map[string]bool{}
+	for _, w := range strings.Fields(supportVocabulary) {
+		set[w] = true
+	}
+	return set
+}()
 
 // supportKnownValues lists the identifying values the server holds: the given
 // registered names plus the name and addresses in its configuration.
@@ -118,10 +115,14 @@ func supportKnownValues(cfg *config.Config, names []string) []string {
 // supportKnown holds the identifying values to redact, each split into
 // lowercase word tokens and indexed by its first token, so any number of names
 // costs O(words) per value. Matching is by whole words, so a name of any
-// length is redacted without mangling the words that contain it.
+// length is redacted without mangling the words that contain it. It catches a
+// name that is also a vocabulary word, which the allowlist would keep.
 type supportKnown map[string][][]string
 
-var supportWordPattern = regexp.MustCompile(`[\p{L}\p{N}_]+`)
+var (
+	supportWordPattern  = regexp.MustCompile(`[\p{L}\p{N}_]+`)
+	supportAlnumPattern = regexp.MustCompile(`[\p{L}\p{N}]+`)
+)
 
 // newSupportKnown returns nil when no value is left.
 func newSupportKnown(values []string) supportKnown {
@@ -129,7 +130,7 @@ func newSupportKnown(values []string) supportKnown {
 	for _, v := range values {
 		words := supportWordPattern.FindAllString(strings.ToLower(v), -1)
 		// A name with no letters or digits ("!!", an emoji) is kept whole
-		// under "" and replaced literally.
+		// under "" and masked by supportAllowlist when it is a whole compound.
 		if v = strings.TrimSpace(v); len(words) == 0 && v != "" {
 			k[""] = append(k[""], []string{v})
 		} else if len(words) > 0 {
@@ -145,9 +146,6 @@ func newSupportKnown(values []string) supportKnown {
 func (k supportKnown) scrub(s string) string {
 	if len(k) == 0 {
 		return s
-	}
-	for _, literal := range k[""] {
-		s = strings.ReplaceAll(s, literal[0], "[name]")
 	}
 	spans := supportWordPattern.FindAllStringIndex(s, -1)
 	words := make([]string, len(spans))
@@ -167,7 +165,7 @@ func (k supportKnown) scrub(s string) string {
 			continue
 		}
 		b.WriteString(s[last:spans[i][0]])
-		b.WriteString("[name]")
+		b.WriteString("[x]")
 		last = spans[i+n-1][1]
 		i += n - 1
 	}
@@ -175,83 +173,97 @@ func (k supportKnown) scrub(s string) string {
 	return b.String()
 }
 
-func supportScrubPaths(s string) string {
-	var b strings.Builder
-	last := 0
-	for _, m := range supportPathPattern.FindAllStringSubmatchIndex(s, -1) {
-		start, end := m[4], m[5]
-		path := s[start:end]
-		relative := !strings.ContainsAny(path[:1], `/\`) && (len(path) <= 1 || path[1] != ':')
-		if slices.Contains(supportSlashWords, strings.ToLower(path)) ||
-			relative && end+1 < len(s) && s[end] == ':' && s[end+1] >= '0' && s[end+1] <= '9' {
-			continue
-		}
-		b.WriteString(s[last:start])
-		b.WriteString("[path]")
-		last = end
-	}
-	b.WriteString(s[last:])
-	return b.String()
-}
-
-// A credential following its scheme or label: "Bearer x", "password: x",
-// "token Xy9q". After a bare label (no ":" or "="), only a word that looks
-// like a token (a digit, an upper-case letter or a symbol) is taken, so
-// "token expired" stays readable.
-var (
-	supportCredentialPattern = regexp.MustCompile(`(?i)\b(authorization|password|passwd|pwd|secret|token|api[_-]?key|credentials?)(\s*[:=]\s*|\s+)((?:(?:bearer|basic|digest)\s+)?(?:"[^"]*"|[^\s,;]+))`)
-	supportSchemePattern     = regexp.MustCompile(`(?i)\b(bearer|basic|digest)\s+([^\s,;\[]\S*)`)
-)
-
-func supportScrubCredentials(s string) string {
-	s = supportCredentialPattern.ReplaceAllStringFunc(s, func(m string) string {
-		sub := supportCredentialPattern.FindStringSubmatch(m)
-		value := sub[3]
-		if strings.HasPrefix(value, "[") || strings.TrimSpace(sub[2]) == "" && strings.IndexFunc(value, func(r rune) bool { return r < 'a' || r > 'z' }) < 0 {
-			return m
-		}
-		return sub[1] + sub[2] + "[redacted]"
-	})
-	return supportSchemePattern.ReplaceAllString(s, "${1} [redacted]")
-}
-
 func supportScrub(s string, known supportKnown) string {
-	s = supportURLPattern.ReplaceAllString(s, "[url]")
-	s = supportEmailPattern.ReplaceAllString(s, "[email]")
 	s = supportJSONKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportJSONKVPattern.FindStringSubmatch(m)
 		if !supportIdentifyingKey(sub[1]) {
 			return m
 		}
-		return `"` + sub[1] + `"` + sub[2] + `"[redacted]"`
+		return `"` + sub[1] + `"` + sub[2] + `"[x]"`
 	})
 	s = supportKVPattern.ReplaceAllStringFunc(s, func(m string) string {
 		sub := supportKVPattern.FindStringSubmatch(m)
 		if !supportIdentifyingKey(sub[1]) {
 			return m
 		}
-		return sub[1] + "=[redacted]"
+		return sub[1] + "=[x]"
 	})
-	s = supportHomePattern.ReplaceAllString(s, "[path]")
-	s = supportScrubPaths(s)
+	s = supportCredentialPattern.ReplaceAllString(s, "${1}${2}[x]")
+	s = supportSchemePattern.ReplaceAllString(s, "${1} [x]")
 	s = supportIPv6Pattern.ReplaceAllStringFunc(s, func(m string) string {
 		if strings.Trim(m, ":") == "" {
 			return m
 		}
-		return "[ip]"
+		return "[x]"
 	})
-	s = supportIPv4Pattern.ReplaceAllString(s, "[ip]")
-	s = supportTokenPattern.ReplaceAllString(s, "[token]")
-	s = supportScrubCredentials(s)
-	s = supportHostPortPattern.ReplaceAllString(s, "${1}[host]:${3}")
-	s = supportLocalhost.ReplaceAllString(s, "[host]")
-	s = supportHostPattern.ReplaceAllStringFunc(s, func(m string) string {
-		if slices.Contains(supportFileExtensions, strings.ToLower(m[strings.LastIndexByte(m, '.')+1:])) {
-			return m
+	s = supportIPv4Pattern.ReplaceAllString(s, "[x]")
+	return supportAllowlist(known.scrub(s), known[""])
+}
+
+// supportStructural separators, like spaces, split a value into compounds;
+// they stay visible and shape an error ("dial tcp [x]:7880: connect"). A
+// compound ("nas", "not_found", "i/o") is kept only when every word in it is.
+func supportStructural(r rune) bool {
+	return unicode.IsSpace(r) || strings.ContainsRune(`:,;"'()[]{}=<>`, r)
+}
+
+func supportKeepWord(w string) bool {
+	return utf8.RuneCountInString(w) == 1 || supportVocabularySet[strings.ToLower(w)] || supportNumberPattern.MatchString(strings.ToLower(w))
+}
+
+// A compound joined by a path, host or address separator ("/backup",
+// "backups/archive.zip", "chat.example.rs", "a@b") is masked whole even when
+// its words are vocabulary, except the few slash words of error text.
+var (
+	supportJoinedPattern = regexp.MustCompile(`[/\\@]|\pL\.\pL`)
+	supportSlashWords    = []string{"i/o", "n/a", "and/or"}
+)
+
+func supportKeepCompound(c string, literals [][]string) bool {
+	if slices.ContainsFunc(literals, func(l []string) bool { return l[0] == c }) {
+		return false
+	}
+	if supportJoinedPattern.MatchString(c) && !slices.Contains(supportSlashWords, strings.ToLower(c)) {
+		return false
+	}
+	return !slices.ContainsFunc(supportAlnumPattern.FindAllString(c, -1), func(w string) bool { return !supportKeepWord(w) })
+}
+
+// supportAllowlist replaces each compound that is not kept with [x]; masked
+// compounds separated only by spaces ("Private Project") become one [x].
+func supportAllowlist(s string, literals [][]string) string {
+	var b strings.Builder
+	spaces := ""    // spaces after a masked compound, written only if a kept one follows
+	masked := false // the last compound written was [x]
+	for s != "" {
+		if r, size := utf8.DecodeRuneInString(s); supportStructural(r) {
+			if masked && unicode.IsSpace(r) {
+				spaces += s[:size]
+			} else {
+				b.WriteString(spaces + s[:size])
+				spaces, masked = "", false
+			}
+			s = s[size:]
+			continue
 		}
-		return "[host]"
-	})
-	return known.scrub(s)
+		end := strings.IndexFunc(s, supportStructural)
+		if end < 0 {
+			end = len(s)
+		}
+		compound := s[:end]
+		s = s[end:]
+		switch {
+		case supportKeepCompound(compound, literals):
+			b.WriteString(spaces + compound)
+			masked = false
+		case !masked:
+			b.WriteString(spaces + "[x]")
+			masked = true
+		}
+		spaces = ""
+	}
+	b.WriteString(spaces)
+	return b.String()
 }
 
 // supportDetail returns the kept attributes of one record's attrs JSON, or nil

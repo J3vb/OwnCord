@@ -3,8 +3,9 @@ package admin
 // A live v2.2.0-beta.1 bundle showed nine livekit_remove_participant_failed
 // records and a run of livekit_companion_log WARNs, but no reason for any of
 // them: events.json dropped every attribute. Each event now carries a detail
-// object with its non-identifying attributes, string values scrubbed of
-// addresses, hosts, URLs, emails, paths and tokens.
+// object with its non-identifying attributes. Free text is reduced to an
+// allowlist of error vocabulary: every other word, with the path or host
+// punctuation around it, becomes [x].
 
 import (
 	"encoding/json"
@@ -50,40 +51,81 @@ func TestSupportIdentifyingKey(t *testing.T) {
 	}
 }
 
+// Error vocabulary, punctuation, single characters and short numbers stay;
+// every other word, with the path or host punctuation joining it, is one [x].
 func TestSupportScrub(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"context deadline exceeded", "context deadline exceeded"},
-		{"dial tcp 203.0.113.5:7880: connect: connection refused", "dial tcp [ip]:7880: connect: connection refused"},
-		{"dial tcp [2001:db8::1]:7880: i/o timeout", "dial tcp [[ip]]:7880: i/o timeout"},
-		{"lookup turn.example.com: no such host", "lookup [host]: no such host"},
-		{"Post \"https://lk.example.org/twirp/livekit.RoomService/RemoveParticipant\": EOF", "Post \"[url]\": EOF"},
-		{"mail to alice@example.com bounced", "mail to [email] bounced"},
-		{"open /home/alice/owncord/data/chat.db: permission denied", "open [path]"},
-		{`open C:\Users\alice\AppData\owncord.db: access is denied`, "open [path]"},
-		{"invalid token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiJ9.c2lnbmF0dXJl", "invalid token [token]"},
-		{"mkdir /backup: permission denied", "mkdir [path]: permission denied"},
-		{"open backups/archive.zip: no such file", "open [path]: no such file"},
-		{`open \\nas\share\db: access is denied`, "open [path]: access is denied"},
+		{"twirp error not_found: participant does not exist", "twirp error not_found: participant does not exist"},
 		{"read tcp: i/o timeout", "read tcp: i/o timeout"},
-		{"rtc/participant.go:123 track published", "rtc/participant.go:123 track published"},
-		{`could not restart {"room": "channel-3", "participant": "alice", "pID": "PA_x", "error": "ice failed"}`, `could not restart {"room": "[redacted]", "participant": "[redacted]", "pID": "[redacted]", "error": "ice failed"}`},
-		{"join refused user=alice reason=full", "join refused user=[redacted] reason=full"},
-		{"dial tcp nas:7880: connect: connection refused", "dial tcp [host]:7880: connect: connection refused"},
-		{"dial tcp localhost:7880: i/o timeout", "dial tcp [host]:7880: i/o timeout"},
-		{"bad secret abcdefghijklmnopqrstuvwx rejected", "bad secret [token] rejected"},
-		{"open /home/alice smith/x", "open [path]"},
-		{"lookup chat.example.rs: no such host", "lookup [host]: no such host"},
-		{"lookup chat.example.md: no such host", "lookup [host]: no such host"},
-		{"auth failed: Bearer private-token", "auth failed: Bearer [redacted]"},
-		{"Authorization: Basic dXNlcjpwYXNz", "Authorization: [redacted]"},
-		{"password: hunter2 rejected", "password: [redacted] rejected"},
-		{"bad token Xy9q rejected", "bad token [redacted] rejected"},
+		{"dial tcp nas:7880: connect: connection refused", "dial tcp [x]:7880: connect: connection refused"},
+		{"open /srv/Private Project: permission denied", "open [x]: permission denied"},
+		{"dial tcp 203.0.113.5:7880: connect: connection refused", "dial tcp [x]:7880: connect: connection refused"},
+		{"dial tcp [2001:db8::1]:7880: i/o timeout", "dial tcp [[x]]:7880: i/o timeout"},
+		{"lookup turn.example.com: no such host", "lookup [x]: no such host"},
+		{"mkdir /backup: permission denied", "mkdir [x]: permission denied"},
+		{`open "/srv/ab cd": permission denied`, `open "[x]": permission denied`},
+		{`could not restart {"room": "channel-3", "participant": "alice", "pID": "PA_x", "error": "ice failed"}`, `could not restart {"room": "[x]", "participant": "[x]", "[x]": "[x]", "error": "ice failed"}`},
+		{"join refused user=alice reason=full", "join refused user=[x] reason=full"},
+		{"auth failed: Bearer private-token", "auth failed: Bearer [x]"},
+		{"Authorization: Basic dXNlcjpwYXNz", "Authorization: [x]"},
+		{"password: correct horse battery staple", "password: [x]"},
 		{"token expired", "token expired"},
-		{"server v2.2.0-beta.1 at 2026-10-08T12:00:00.5Z", "server v2.2.0-beta.1 at 2026-10-08T12:00:00.5Z"},
+		{"retry after 250ms, status 503", "retry after 250ms, status 503"},
+		{"session 1234567 not found", "session [x] not found"},
 	}
 	for _, c := range cases {
 		if got := supportScrub(c.in, nil); got != c.want {
 			t.Errorf("supportScrub(%q)\n got %q\nwant %q", c.in, got, c.want)
+		}
+	}
+}
+
+// Every example raised in review (seven Codex findings and the pipeline's own)
+// must not reach events.json.
+func TestSupportScrub_ReviewExamplesDoNotLeak(t *testing.T) {
+	known := newSupportKnown([]string{"alice", "ab", "!!", "😀😀", "Alice Smith"})
+	cases := []struct {
+		in    string
+		leaks []string
+	}{
+		{"auth failed: Bearer private-token", []string{"private-token"}},
+		{"bad token Xy9q rejected", []string{"Xy9q"}},
+		{"user ab left the call", []string{" ab "}},
+		{"user !! not found", []string{"!!"}},
+		{"call from 😀😀 dropped", []string{"😀😀"}},
+		{"user alice not found", []string{"alice"}},
+		{"Alice  Smith joined", []string{"Alice", "Smith"}},
+		{"mkdir /backup: permission denied", []string{"backup"}},
+		{"open backups/archive.zip: no such file", []string{"backups", "archive"}},
+		{`open \\nas\share\db: access is denied`, []string{"nas", "share"}},
+		{"password: correct horse battery staple", []string{"correct", "horse", "battery", "staple"}},
+		{"open /srv/Private Project: permission denied", []string{"srv", "Private", "Project"}},
+		{"open /home/alice smith/x: permission denied", []string{"alice", "smith"}},
+		{"dial tcp nas:7880: connect: connection refused", []string{"nas"}},
+		{"dial tcp localhost:7880: i/o timeout", []string{"localhost"}},
+		{"bad secret abcdefghijklmnopqrstuvwx rejected", []string{"abcdefghijklmnopqrstuvwx"}},
+		{"lookup chat.example.rs: no such host", []string{"chat", "example"}},
+		{"mail to alice@example.com bounced", []string{"alice", "example"}},
+		{`Post "https://lk.example.org/twirp/livekit.RoomService/RemoveParticipant": EOF`, []string{"lk.example", "example.org"}},
+		{"invalid token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiJ9.c2lnbmF0dXJl", []string{"eyJ"}},
+		{"bad token 123e4567-e89b-12d3-a456-426614174000", []string{"e89b", "426614174000"}},
+	}
+	for _, c := range cases {
+		got := supportScrub(c.in, known)
+		for _, leak := range c.leaks {
+			if strings.Contains(got, leak) {
+				t.Errorf("supportScrub(%q) = %q leaks %q", c.in, got, leak)
+			}
+		}
+	}
+}
+
+// The vocabulary holds error words, never words that name a place or person.
+func TestSupportVocabulary_HoldsNoIdentifyingWords(t *testing.T) {
+	for _, w := range []string{"private", "project", "home", "users", "example", "com", "org", "localhost", "admin", "root", "alice", "correct", "horse", "battery", "staple", "srv", "nas"} {
+		if supportVocabularySet[w] {
+			t.Errorf("vocabulary contains %q", w)
 		}
 	}
 }
@@ -147,25 +189,21 @@ func TestSupportEvents_DetailStaysWithinItemLimit(t *testing.T) {
 	}
 }
 
+// Known values catch a name that is also an error word, which the allowlist
+// alone would keep.
 func TestSupportScrub_KnownValues(t *testing.T) {
 	cfg := &config.Config{}
-	cfg.Server.Name = "Bunker Chat"
-	cfg.Voice.LiveKitURL = "ws://lkbox:7880"
-	known := newSupportKnown(supportKnownValues(cfg, []string{"alice", "Alice Smith", "ab", "!!", "😀😀"}))
+	cfg.Server.Name = "Timeout Club"
+	cfg.Voice.LiveKitURL = "ws://connect:7880"
+	known := newSupportKnown(supportKnownValues(cfg, []string{"refused", "ab"}))
 
 	cases := []struct{ in, want string }{
-		{"user alice not found", "user [name] not found"},
-		{"user ALICE not found", "user [name] not found"},
-		{"user Alice Smith not found", "user [name] not found"},
-		{"alicetown is fine", "alicetown is fine"},
-		{"ab left the call", "[name] left the call"},
-		{"cab is not ab", "cab is not [name]"},
-		{"Alice  smith joined", "[name] joined"},
-		{"malice smithy", "malice smithy"},
-		{"user !! not found", "user [name] not found"},
-		{"call from 😀😀 dropped", "call from [name] dropped"},
-		{"welcome to bunker chat", "welcome to [name]"},
-		{"dial lkbox failed", "dial [name] failed"},
+		{"user refused not found", "user [x] not found"},
+		{"user REFUSED not found", "user [x] not found"},
+		{"welcome to timeout club", "welcome to [x]"},
+		{"dial connect failed", "dial [x] failed"},
+		{"ab left the call", "[x] left the call"},
+		{"context deadline exceeded", "context deadline exceeded"},
 	}
 	for _, c := range cases {
 		if got := supportScrub(c.in, known); got != c.want {
@@ -177,11 +215,11 @@ func TestSupportScrub_KnownValues(t *testing.T) {
 func TestSupportEvents_RedactsKnownNames(t *testing.T) {
 	rb := NewRingBuffer(10)
 	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "RemoveParticipant failed (may already be gone)",
-		Attrs: `{"err":"user alice not found"}`})
+		Attrs: `{"err":"user timeout not found"}`})
 
-	got, _ := supportEvents(rb, "alice")[0].Detail["err"].(string)
+	got, _ := supportEvents(rb, "timeout")[0].Detail["err"].(string)
 
-	if got != "user [name] not found" {
+	if got != "user [x] not found" {
 		t.Fatalf("err = %q", got)
 	}
 }
@@ -191,13 +229,14 @@ func TestSupportEvents_RedactsNamePastTenThousand(t *testing.T) {
 	for i := range 10100 {
 		names = append(names, fmt.Sprintf("user%05d", i))
 	}
+	names = append(names, "timeout")
 	rb := NewRingBuffer(10)
 	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "RemoveParticipant failed (may already be gone)",
-		Attrs: `{"err":"user user10099 not found"}`})
+		Attrs: `{"err":"user timeout not found"}`})
 
 	got, _ := supportEvents(rb, names...)[0].Detail["err"].(string)
 
-	if got != "user [name] not found" {
+	if got != "user [x] not found" {
 		t.Fatalf("err = %q", got)
 	}
 }
@@ -221,7 +260,7 @@ func TestSupportScrub_KnownNamesCannotBreakStructuralRedaction(t *testing.T) {
 
 func TestSupportEvents_LongLiveKitLineKeepsTrailingError(t *testing.T) {
 	line := `2026-10-08T12:00:00.000Z	WARN	livekit	rtc/transport.go:88	failed to negotiate	{"room": "[redacted]", "roomID": "[redacted]", "participant": "[redacted]", "pID": "[redacted]", "remote": "[redacted]", "transport": "SUBSCRIBER", "trackID": "[redacted]", "kind": "video", "error": "no candidate pairs"}`
-	line = strings.Replace(line, "failed to negotiate", strings.Repeat("negotiation detail ", 60), 1)
+	line = strings.Replace(line, "failed to negotiate", strings.Repeat("connection refused ", 60), 1)
 	attrs, _ := json.Marshal(map[string]any{"line": line})
 	rb := NewRingBuffer(10)
 	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "livekit companion output", Attrs: string(attrs)})

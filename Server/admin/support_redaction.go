@@ -174,7 +174,7 @@ func supportRedactions() []supportRedaction {
 	return []supportRedaction{
 		{"configuration.json", "structural allowlist", "all credentials, tokens, TOTP/environment values, keys, names, paths, addresses, URLs, contacts, plugin allowlists and live database settings omitted; unrecognized enum values replaced with unspecified"},
 		{"database.json", "counts and compiled names only", "all row contents, SQL definitions/defaults, custom schema names, unknown migration names, plugin storage and search index excluded"},
-		{"events.json", "fixed event codes plus non-identifying attribute detail; up to 200 records, Warn/Error kept in preference to lower levels", "free-form messages, source paths, nested attributes and every attribute keyed as an identifier, user, name, address, host, path, URL, token, key or other credential omitted; URLs, emails, paths, IP addresses, hostnames, token-like strings and the server's registered usernames, display names, server name and configured hosts inside kept values replaced by placeholders; invalid timestamps excluded"},
+		{"events.json", "fixed event codes plus non-identifying attribute detail; up to 200 records, Warn/Error kept in preference to lower levels", "free-form messages, source paths, nested attributes and every attribute keyed as an identifier, user, name, address, host, path, URL, token, key or other credential omitted; kept text reduced to a fixed error-word vocabulary, short numbers and punctuation, with every other word, path, host, address, credential and the server's registered usernames, display names, server name and configured hosts replaced by [x]; invalid timestamps excluded"},
 		{"health.json", "aggregate numeric metrics only", "no per-user, session, channel or host labels"},
 	}
 }
