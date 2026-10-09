@@ -2040,6 +2040,10 @@ Forwarded to every other participant that is connected. An offline addressee is
 a no-op by construction — a ring that arrives after the fact is worse than no
 ring.
 
+A ring (and a `call_declined`) is delivered in order behind any earlier
+`voice_leave`/`voice_state` the server sent to that client, so a stale leave
+never lands after, and cancels, the new ring.
+
 ```json
 {
   "type": "call_incoming",
