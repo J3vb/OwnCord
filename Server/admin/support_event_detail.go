@@ -90,7 +90,7 @@ var (
 
 var supportVocabularySet = func() map[string]bool {
 	set := map[string]bool{}
-	for _, w := range strings.Fields(supportVocabulary) {
+	for w := range strings.FieldsSeq(supportVocabulary) {
 		set[w] = true
 	}
 	return set
