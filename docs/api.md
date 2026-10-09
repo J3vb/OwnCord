@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 180 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 181 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -80,6 +80,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/registrations/{id}/deny`                                 |
 | POST    | `/admin/api/restart`                                                 |
 | GET     | `/admin/api/retention`                                               |
+| GET     | `/admin/api/retention/channels`                                      |
 | GET     | `/admin/api/retention/preview`                                       |
 | POST    | `/admin/api/retention/preview`                                       |
 | GET     | `/admin/api/roles`                                                   |
@@ -821,7 +822,9 @@ picture readable: `GET /api/v1/files/{id}` normally serves an unlinked
 attachment only to its uploader (administrators included), and additionally admits one that some user's
 avatar currently points at — so an avatar is readable by every authenticated
 user for exactly as long as it is in use, and stops being readable the moment
-it is replaced.
+it is replaced. If the profile update fails after the bytes were stored, the
+unlinked attachment row and the stored file are removed and the user's storage
+counter is recounted, so a failed avatar change does not leave a charge behind.
 
 Not registered when the server has no working storage backend.
 
@@ -1511,7 +1514,7 @@ credential.
 There is no user id in the body — the row's owner is always the
 authenticated session's. `endpoint` must be an `https://` URL with a host, no
 embedded credentials, at most 2048 characters. `p256dh` must decode (standard or unpadded base64url)
-to a 65-byte uncompressed P-256 point (`0x04` prefix); `auth` must decode to
+to a 65-byte uncompressed P-256 point (`0x04` prefix) that lies on the curve; `auth` must decode to
 16 bytes. `device_name` is at most 64 runes and must not contain control
 characters. A user may hold at most 10 subscriptions; the 11th evicts the
 oldest by `last_seen_at`.
@@ -1579,6 +1582,11 @@ On a newly created channel (`201`, `"created": true`) the recipient also
 receives a `dm_channel_open`. Re-opening an existing DM (`200`) emits nothing —
 it only touches the caller's own open state. The creator is not sent the event
 on either path; it learns the channel from the response body above.
+
+If the caller holds a `pending` or `ignored` message request from the other
+user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
+conversation and marks the request `accepted`, and sends the caller's other
+devices the `dm_channel_open` and `dm_request` frames `accept` sends.
 
 ---
 
@@ -1780,6 +1788,10 @@ Transitions are **recipient-only** and legal **only from `pending`**:
 - `block` — blocks the sender (`PUT /api/v1/blocks/{userId}`'s existing
   effects) and only then marks the request blocked.
 
+Blocking a user also revokes the blocker's trust in them (the blocked user's
+trust in the blocker is untouched), so after an unblock their next message is a
+request again.
+
 A transition attempted on a row that is not pending returns **409
 CONFLICT** if the row exists for the caller (a race, including the loser of
 two simultaneous decisions) or **404 NOT_FOUND** if it does not — including
@@ -1933,7 +1945,9 @@ Block a user.
 
 ### DELETE /api/v1/blocks/{userId}
 
-Unblock a user.
+Unblock a user. Also clears any already-decided (accepted, ignored, deleted or
+blocked) message request from that user to the caller, so their next first
+message forms a fresh request; a still-pending request is kept.
 
 **Auth:** Required
 
@@ -2030,7 +2044,7 @@ Upload a file as multipart form data.
 
 **Auth:** Required
 **Rate limit:** 10 requests/minute, and at most 10 uploads in flight per user (`429 RATE_LIMITED` beyond that)
-**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB").
+**Body size limit:** 100 MiB, or `upload.max_size_mb` plus 1 MiB of multipart framing when that is larger. A file over `upload.max_size_mb` is refused with `400 BAD_REQUEST` ("file exceeds maximum size of N MB"). The parts after `file` are read to the end too: a body padded past the cap is refused with `413 PAYLOAD_TOO_LARGE` and a malformed tail with `400 BAD_REQUEST`, and the stored file is deleted.
 **Content-Type:** `multipart/form-data`
 
 Files are validated against blocked magic bytes (PE executables, ELF binaries, Mach-O binaries, shell scripts). Files are stored with UUID filenames.
@@ -2635,8 +2649,9 @@ is recorded against the moderator but is not a sanction against them. A `ban` ro
 only reach a caller whose ban has lapsed or been reversed, since a currently
 banned caller cannot authenticate. A currently banned user still appeals out
 of band, as [Appeals](#appeals) describes. Rows leave this list when the
-retention sweep retires them (`moderation.action_retention_days`).
-**Auth:** Required (session). Rate-limited: 30 per minute per IP.
+retention sweep retires them (`moderation.action_retention_days`). Removal and
+ban rows never retire, so the list holds the newest 200 rows.
+**Auth:** Required (session); an API token gets 401. Rate-limited: 30 per minute per IP.
 
 #### Response 200 OK
 
@@ -3155,29 +3170,29 @@ Authorization is two-layered:
    `>= 100`) instead of on a bit, so not even `ADMINISTRATOR` substitutes for
    being the owner.
 
-| Route                                                                                                           | Requires                                                                                     |
-| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /admin/api/me`                                                                                             | perimeter only                                                                               |
-| `GET /admin/api/stats`                                                                                          | perimeter only                                                                               |
-| `GET /admin/api/users`                                                                                          | perimeter only                                                                               |
-| `PATCH /admin/api/users/{id}`                                                                                   | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `DELETE /admin/api/users/{id}/sessions`                                                                         | `KICK_MEMBERS`                                                                               |
-| `DELETE /admin/api/users/{id}`                                                                                  | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
-| `POST /admin/api/users/{id}/recovery-credential`                                                                | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)        | `MANAGE_CHANNELS`                                                                            |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                              | `MANAGE_ROLES`                                                                               |
-| `GET /admin/api/audit-log`                                                                                      | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                                                 | `MANAGE_SERVER`                                                                              |
-| `GET /admin/api/config`                                                                                         | `MANAGE_SERVER`                                                                              |
-| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                               | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
-| `GET /admin/api/retention`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
-| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                      | `MANAGE_SERVER`                                                                              |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                     | `ADMINISTRATOR`                                                                              |
-| `GET/PATCH/DELETE /admin/api/logs/level`                                                                        | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
-| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                           | `ADMINISTRATOR`                                                                              |
-| `GET /admin/api/attention`                                                                                      | `ADMINISTRATOR` — RI-07                                                                      |
-| `/api/v1/admin/plugins…`                                                                                        | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                            | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
+| Route                                                                                                                                                | Requires                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /admin/api/me`                                                                                                                                  | perimeter only                                                                               |
+| `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                               |
+| `GET /admin/api/users`                                                                                                                               | perimeter only                                                                               |
+| `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                               |
+| `DELETE /admin/api/users/{id}`                                                                                                                       | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
+| `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
+| `GET/PATCH /admin/api/settings`                                                                                                                      | `MANAGE_SERVER`                                                                              |
+| `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
+| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
+| `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
+| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                              |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `ADMINISTRATOR`                                                                              |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
+| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `ADMINISTRATOR`                                                                              |
+| `GET /admin/api/attention`                                                                                                                           | `ADMINISTRATOR` — RI-07                                                                      |
+| `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                              |
+| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                                                                 | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -3257,6 +3272,13 @@ reopen the wizard; afterwards the endpoint returns an error.
 
 `setup_token` must equal the token the server printed in its start-up output;
 a missing or different value is `403 FORBIDDEN`. The server makes a fresh token each time it starts.
+
+Once setup is done the endpoint answers `403 FORBIDDEN` before hashing the
+password. The hash waits in the same process-wide password-check queue as login
+and registration; when that queue is full or the wait runs out, the response is
+`429 AUTH_BUSY` with `Retry-After` set and no account is created. The owner's
+session in the response is created already seen, so it does not show as an
+unreviewed new login.
 
 #### Request
 
@@ -3636,6 +3658,25 @@ override.
 
 `days` on a channel overrides the server window in either direction; `0`
 keeps that channel forever.
+
+---
+
+### GET /admin/api/retention/channels
+
+The channels a retention policy can target, so the page works for a
+`MANAGE_SERVER` role that cannot read `GET /admin/api/channels`
+(`MANAGE_CHANNELS`). DMs are never in retention scope and are omitted.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 4, "name": "general" },
+  { "id": 7, "name": "announcements" }
+]
+```
 
 ---
 

@@ -66,6 +66,7 @@ jobs:
       harness: ${{ steps.select.outputs.harness }}
       workflows: ${{ steps.select.outputs.workflows }}
       deps: ${{ steps.select.outputs.deps }}
+      permissions: ${{ steps.select.outputs.permissions }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -208,7 +209,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13.2
+          version: v2.14.0
           working-directory: Server/
           verify: false
 
@@ -560,7 +561,7 @@ jobs:
         if: env.RUN_SERVER != 'false'
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13.2
+          version: v2.14.0
           working-directory: Server/
           verify: false
 
@@ -603,7 +604,9 @@ jobs:
       # seconds, and belongs on the PR that adds the file rather than in a
       # nightly report nobody reads until it fails.
       - name: Mutation shards cover the configured surface
-        run: node scripts/check-mutation-shards.mjs
+        run: |
+          node --test scripts/aggregate-mutation-shards.test.mjs
+          node scripts/check-mutation-shards.mjs
 
       # D1: `tests/e2e/quarantine.json` is what keeps a known-flaky required test
       # out of the run. This is the guard that keeps the list honest — a
@@ -682,6 +685,17 @@ jobs:
       # chunk is exit 2, over-budget is exit 1.
       - name: Bundle budgets
         run: npm run build:budget && npm run check:budgets
+
+      # B7-8: the permissions.ts mutation hotspot was recorded as a PR check
+      # but only ever ran nightly. A step inside this already-required job, so
+      # no new status context; it runs only when ci-select's `permissions`
+      # capability is true (permissions.ts, its unit test, the Stryker
+      # configs, or any non-PR event, which selects everything). The config
+      # mutates one file but Stryker's dry run executes the full Vitest suite
+      # once. Wall time: about 3m40s on ubuntu-latest (first PR run, 2026-10-08).
+      - name: Permissions mutation hotspot
+        if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.permissions == 'true') }}
+        run: npx stryker run stryker.ci.config.mjs
 
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
@@ -769,6 +783,9 @@ jobs:
       # rather than silently weakening the gate.
       - name: Self-test the release gate
         run: node --test scripts/verify-gate-evidence.test.mjs
+
+      - name: Self-test the Claude Code Bash hook
+        run: node --test scripts/claude-hook.test.mjs
 
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation

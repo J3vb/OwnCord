@@ -191,6 +191,7 @@ type Store interface {
 
 	// ── Sessions ──
 	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
+	CreateFirstSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
 	GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*db.SessionWithBanStatus, error)
 	TouchAPIToken(ctx context.Context, tokenHash string) error
@@ -267,11 +268,12 @@ type Store interface {
 
 	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
-	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, err error)
+	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, accepted *db.MessageRequest, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
 	OpenDM(ctx context.Context, userID, channelID int64) (bool, error)
+	OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
@@ -308,6 +310,7 @@ type Store interface {
 	// ── Attachments ──
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
+	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
 	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
 	// IsMessageDeleted backs the tombstone half of attachment access; the
 	// avatar check backs the "public exactly while in use" half.
@@ -342,7 +345,7 @@ type Store interface {
 	// before the transaction opened) — ErrForbidden means the caller does
 	// not outrank the current assignee.
 	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
-	CloseReport(ctx context.Context, id int64, state, outcome string) (bool, error)
+	CloseReport(ctx context.Context, id int64, state, outcome string, actorID int64) (bool, error)
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
 	// InsertReportNote is guarded on EXISTS(users) and the report's state
 	// (Codex review widened); false means the caller answers 409 — either
@@ -350,10 +353,10 @@ type Store interface {
 	// the write.
 	InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error)
 	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
-	// InsertReportEvent and ListReportEvents are report_events (second Codex
-	// review): this feature's own immutable history, never the shared
-	// audit_log — exposed only inside the queue detail.
-	InsertReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) error
+	// ListReportEvents reads report_events (second Codex review): this
+	// feature's own immutable history, never the shared audit_log — exposed
+	// only inside the queue detail. The mutations above write their own
+	// event in the same transaction.
 	ListReportEvents(ctx context.Context, reportID int64) ([]db.ReportEvent, error)
 	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
 
@@ -382,7 +385,7 @@ type Store interface {
 	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
-	ListOwnModerationActions(ctx context.Context, userID int64) ([]db.OwnModerationAction, error)
+	ListOwnModerationActions(ctx context.Context, userID, limit int64) ([]db.OwnModerationAction, error)
 	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
 	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser
 	// plus a ledger row, in one transaction (plan item 2) — the ...WithReport

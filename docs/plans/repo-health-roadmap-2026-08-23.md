@@ -436,9 +436,10 @@ BPR-080 through BPR-083.
 
 1. Define explicit protocol-epoch negotiation. _(Reconciled 2026-09-06 to
    the owner-approved B2-2 decision of 2026-08-29 and amended BPR-032.)_
-   The server accepts the current epoch and rejects unsupported epochs with
-   a safe actionable response; legacy epoch-1 authentication follows the
-   captured fixture contract. Patch releases within an epoch remain
+   The server accepts current epoch 1 and the legacy handshake that sends no
+   epoch (absent/0, clients up to v1.2.0-alpha.4, `Server/ws/messages.go:379-385`
+   `minClientEpoch = 0`), and rejects any other epoch with a safe actionable
+   response; the epoch-1 fixtures captured in B2-1 are the contract. Patch releases within an epoch remain
    compatible, and prerelease/release metadata declares its epoch. A wider
    compatibility window is introduced only by a later explicit decision.
 2. Define server-first update ordering and signed update metadata contracts.
@@ -1381,6 +1382,7 @@ beta.
 | 13    | moved (with item 2) | Exists only to make item 2 countable; moves with it.                                                                                                                                                                                                                                                                                                            |
 | 14    | moved (with item 3) | Soak hosts; moves with item 3.                                                                                                                                                                                                                                                                                                                                  |
 | 15    | keep as written     | BPR-051's non-developer comprehension read. Confirmed at HP-9 (2026-09-25): run against the release PR's CI artifacts before the tag (see Q11), and record it on the R-08 release scorecard.                                                                                                                                                                    |
+| 16    | keep                | Decoded audio on the four shipped artifacts in the RC artifact smoke, meeting the bar `expectDecodedMedia` enforces (not inbound RTP bytes alone). Added 2026-10-08.                                                                                                                                                                                            |
 | HP-10 | keep                | Owner go/no-go.                                                                                                                                                                                                                                                                                                                                                 |
 
 **Objective:** prove one immutable release candidate satisfies the complete
@@ -1469,6 +1471,14 @@ re-verifies every BPR.
     the HP-2 Q3 blanks (and the B2-7 evidence block — both must agree).
     Owner decision 2026-08-31: tracked as a release-gate row so a missing
     reader blocks the beta, not B3–B9 work.
+16. _(added 2026-10-08)_ Add decoded media to the
+    release-candidate artifact smoke. The artifact smoke proves a join and
+    working controls only (BPR-010). On each of the four shipped artifacts,
+    add a second participant and assert decoded audio after the join: audio
+    energy and decoded sample counts must advance, as `expectDecodedMedia`
+    requires, not only inbound RTP bytes. Decoded
+    media stays proven in `client-fullstack` and the native-voice interop until
+    this item lands.
 
 ### Hold point HP-10 — Human go/no-go
 

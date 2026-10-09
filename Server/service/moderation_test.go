@@ -1,9 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -264,5 +267,21 @@ func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
 	target, _ := database.GetUserByID(context.Background(), 3)
 	if target.Banned {
 		t.Fatal("target should be unbanned")
+	}
+}
+
+func TestBanUser_LogOmitsFreeTextReason(t *testing.T) {
+	svc, _ := newTestModerationService(t)
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if err := svc.BanUser(context.Background(), 2, 3, "posted 'meet me at 12 Oak St'", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if out := buf.String(); !strings.Contains(out, "user banned") || strings.Contains(out, "Oak St") {
+		t.Fatalf("ban log = %s", out)
 	}
 }

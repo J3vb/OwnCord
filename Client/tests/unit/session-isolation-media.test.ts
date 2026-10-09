@@ -8,7 +8,7 @@
  * false in between. The harness is livekit-session.test.ts's, except that
  * every `new Room()` is a distinct object so live rooms can be counted.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // --- Mocks must be declared before imports ---
 
@@ -77,6 +77,11 @@ function makeRoom() {
 }
 
 vi.mock("livekit-client", () => ({
+  // installLivekitLogging runs when livekitSession loads.
+  LogLevel: { warn: 3, error: 4 },
+  setLogLevel: vi.fn(),
+  setLogExtension: vi.fn(),
+  AudioPresets: { musicHighQualityStereo: { maxBitrate: 128_000 } },
   // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
   Room: vi.fn(function () {
     return makeRoom();
@@ -108,9 +113,10 @@ vi.mock("livekit-client", () => ({
   },
   ScreenSharePresets: {
     h720fps5: { resolution: { width: 1280, height: 720 } },
-    h1080fps15: { resolution: { width: 1920, height: 1080 } },
+    h720fps30: { resolution: { width: 1280, height: 720 } },
     h1080fps30: { resolution: { width: 1920, height: 1080 } },
   },
+  VideoPreset: vi.fn(),
   DisconnectReason: { CLIENT_INITIATED: 0 },
   // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
   ExternalE2EEKeyProvider: vi.fn(function () {
@@ -152,6 +158,7 @@ vi.mock("@stores/voice.store", () => ({
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setLocalGateSpeaking: vi.fn(),
   setVoiceStatus: vi.fn(),
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),

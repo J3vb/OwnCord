@@ -45,15 +45,16 @@ status area. Settings are reachable unauthenticated (for appearance/advanced).
 
 ### 2.1 Server profiles & health
 
-| State               | Trigger                                                         | Target reaction                                                             |
-| ------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `loading`           | Profile list resolving from the Rust store (`owncord:profiles`) | Skeleton rows; no flash of "no servers"                                     |
-| `ready`             | Profiles loaded                                                 | List with per-profile health dot                                            |
-| `empty`             | No saved profiles                                               | "Add a server to get started" with an inline add affordance                 |
-| health: reachable   | `GET /api/v1/health` ok within 3 s                              | Green dot + server name/MOTD preview                                        |
-| health: unreachable | timeout/opaque error                                            | Amber "unreachable" dot; **do not** block selecting it (user may still try) |
-| epoch: compatible   | `server-info.protocol_epoch == PROTOCOL_EPOCH`                  | No badge, no notice — Connect behaves as before                             |
-| epoch: mismatch     | `server-info.protocol_epoch != PROTOCOL_EPOCH` (B7-12)          | Advisory row badge only; Connect stays enabled                              |
+| State               | Trigger                                                                 | Target reaction                                                                                                                                                          |
+| ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `loading`           | Profile list resolving from the Rust store (`owncord:profiles`)         | Skeleton rows; no flash of "no servers"                                                                                                                                  |
+| `ready`             | Profiles loaded                                                         | List with per-profile health dot                                                                                                                                         |
+| `empty`             | No saved profiles                                                       | "Add a server to get started" with an inline add affordance                                                                                                              |
+| add: duplicate host | Add-server address matches a saved profile's host (dialog ignores case) | Refused inline (`servers.add.duplicateHost`); `addProfile` returns the existing profile for an identical host. One profile per host, since credentials are keyed by host |
+| health: reachable   | `GET /api/v1/health` ok within 3 s                                      | Green dot + server name/MOTD preview                                                                                                                                     |
+| health: unreachable | timeout/opaque error                                                    | Amber "unreachable" dot; **do not** block selecting it (user may still try)                                                                                              |
+| epoch: compatible   | `server-info.protocol_epoch == PROTOCOL_EPOCH`                          | No badge, no notice — Connect behaves as before                                                                                                                          |
+| epoch: mismatch     | `server-info.protocol_epoch != PROTOCOL_EPOCH` (B7-12)                  | Advisory row badge only; Connect stays enabled                                                                                                                           |
 
 Health and `server-info` poll every 15 s (interval wired in `main.ts`, profile
 data via `profiles.ts`); auto-connect, if enabled for the active profile,
@@ -62,8 +63,9 @@ drives the login form's `auto-connecting` state.
 **Incompatible epoch state (B7-12).** A mismatch is shown in two places, never
 as a bare badge:
 
-- The 15 s preflight (`GET /api/v1/server-info`, `api.getServerInfo`) only
-  **badges** the row — "Client update needed" / "Server update needed". The
+- The 15 s preflight (`GET /api/v1/server-info`, `api.getServerInfo`; it also
+  runs when the health call fails, since a degraded 503 server still answers it)
+  only **badges** the row — "Client update needed" / "Server update needed". The
   badge is **advisory**: it never disables Connect, and the WebSocket
   `auth_error` (`protocol_epoch_unsupported`) is the authority.
 - Selecting the row, or a WS refusal, raises the `IncompatibleNotice`
@@ -71,7 +73,8 @@ as a bare badge:
   the server's own terms — which side updates, with both epoch numbers. It is
   exitable: "Update client" mounts the existing updater (client-older only; an
   older server needs operator guidance, not a client install) and "Choose
-  another server" dismisses it, leaving the list usable. The notice never
+  another server" dismisses it and clears the refusal error from the login form,
+  leaving the list usable. The notice never
   appears for a background-probe profile the user has not selected.
 
 ### 2.2 Login form — state machine
@@ -107,7 +110,7 @@ field for the recovery kit secret or a recovery credential from the server
 owner, and a new password (≥ 8). It calls `POST /auth/recover` with the secret
 in `kit_secret` (the server tells a kit from an owner credential by shape), and
 the returned session is signed in through the same `completeLogin` tail as a
-login. A refusal keeps the overlay and shows the server's message; success or
+login. A refusal keeps the overlay and shows the server's message; Cancel is disabled while the request is in flight; success or
 Cancel wipes the secret and the new password from the inputs.
 
 ### 2.3 Login sequence
@@ -155,7 +158,9 @@ sequenceDiagram
 
 Same form; register mode adapts to the host's `registration_mode`, read from the
 per-host `server-info` snapshot the 15 s preflight keeps (`serverInfoByHost` in
-`main.ts`, re-derived on host edit, mode toggle, invite link, and each probe):
+`main.ts`, re-derived on host edit, mode toggle, invite link, and each probe; a typed host
+with no health row is probed once, debounced 500 ms, when register mode is
+entered or the host settles):
 
 | Mode                     | Register affordances                                                      |
 | ------------------------ | ------------------------------------------------------------------------- |
@@ -306,19 +311,19 @@ not a mismatch. This is correct today; the spec locks it.
 
 ## 6. Logout & session lifecycle
 
-| Trigger      | Target behavior                                                                                                                                                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page                                                                             |
-| Quick switch | `clearAuth("server_switch")` from the server overlay (switch or Add server) → leave voice, disconnect WS, **keep** the host's stored credential and server session, → connect page; a switch target resumes from its stored token |
-| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                                                                                                      |
-| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                                                                                                      |
-| Cert reject  | Disconnect → connect page                                                                                                                                                                                                         |
+| Trigger      | Target behavior                                                                                                                                                                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| User logout  | best-effort `POST /auth/logout` (fire-and-forget) → `clearAuth()` → leave voice, disconnect WS, delete stored credential for the host, → connect page                                                                                                                                                              |
+| Quick switch | `clearAuth("server_switch")` from the server overlay (switch or Add server) → leave voice, disconnect WS, **keep** the host's stored credential and server session, → connect page; a switch target resumes from its stored token, only if its profile remembers its sign-in and no manual login has started since |
+| 401 anywhere | Same as logout, with "Your session expired — sign in again."                                                                                                                                                                                                                                                       |
+| WS `BANNED`  | Transient-error → connect page, no reconnect                                                                                                                                                                                                                                                                       |
+| Cert reject  | Disconnect → connect page                                                                                                                                                                                                                                                                                          |
 
 > **✓ Resolved 2026-07-20 — server session revoked on logout.** User-initiated
 > logout now calls `api.logout()` (`POST /auth/logout`) via the `logout()` helper
 > (`src/lib/logout.ts`), wired into the settings Log Out button
 > (`MainPage.ts` → `logout(api)`). The revocation is strictly best-effort:
-> fire-and-forget with its rejection swallowed, so a slow/offline/rejecting
+> fire-and-forget with its rejection swallowed and the request aborted after 10 s, so a slow/offline/rejecting
 > server never blocks or delays the local teardown — `clearAuth()` always runs
 > synchronously. The credential is still deleted locally (`main.ts`), and the
 > server token is now invalidated too.

@@ -410,6 +410,8 @@ let currentPage: { destroy?(): void } | null = null;
  * same snapshot for `registration_mode` and the retention notice.
  */
 const serverInfoByHost = new Map<string, ServerInfoResponse>();
+/** Hosts with a `server-info` probe in flight, so a typed host is not probed twice. */
+const serverInfoInFlight = new Set<string>();
 
 /** The connect page's per-server health readouts. */
 interface HealthReadout {
@@ -432,6 +434,40 @@ function runHealthChecks(
   owner: SessionScope,
 ): void {
   for (const profile of profiles) void checkHealth(connectPage, profile.host, owner);
+}
+
+/**
+ * Advisory epoch preflight, beside the health probe and sharing its
+ * timeout/dispose shape. Resolves whether `server-info` answered; a failed
+ * probe is `unreachable` — no badge, never an error banner (the WebSocket
+ * refusal stays authoritative). A degraded server (health 503) still answers it.
+ */
+async function probeServerInfo(
+  connectPage: HealthReadout,
+  host: string,
+  owner: SessionScope,
+): Promise<boolean> {
+  let serverEpoch: number | null = null;
+  let compatibility: Compatibility = "unreachable";
+  serverInfoInFlight.add(host);
+  try {
+    const info = await api.getServerInfo(host, 3000, owner.signal);
+    owner.assertCurrent();
+    serverInfoByHost.set(host, info);
+    serverEpoch = info.protocol_epoch;
+    compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
+  } catch (infoErr) {
+    if (!owner.isCurrent()) return false;
+    serverInfoByHost.delete(host);
+    log.debug("server-info preflight failed", {
+      host,
+      error: String(infoErr),
+    });
+  } finally {
+    serverInfoInFlight.delete(host);
+  }
+  connectPage.updateCompatibility(host, compatibility, serverEpoch);
+  return compatibility !== "unreachable";
 }
 
 /** Probe one server and update its row; resolves whether it answered. */
@@ -458,31 +494,10 @@ async function checkHealth(
       version: health.version ?? null,
       onlineUsers: health.online_users ?? null,
     });
-
-    // Advisory epoch preflight, beside the health probe and sharing its
-    // timeout/dispose shape. A failed probe is `unreachable` — no badge,
-    // never an error banner (the WebSocket refusal stays authoritative).
-    let serverEpoch: number | null = null;
-    let compatibility: Compatibility = "unreachable";
-    try {
-      const info = await api.getServerInfo(host, 3000, owner.signal);
-      owner.assertCurrent();
-      serverInfoByHost.set(host, info);
-      serverEpoch = info.protocol_epoch;
-      compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
-    } catch (infoErr) {
-      if (!owner.isCurrent()) return false;
-      serverInfoByHost.delete(host);
-      log.debug("server-info preflight failed", {
-        host,
-        error: String(infoErr),
-      });
-    }
-    connectPage.updateCompatibility(host, compatibility, serverEpoch);
+    await probeServerInfo(connectPage, host, owner);
     return true;
   } catch (err) {
     if (!owner.isCurrent()) return false;
-    serverInfoByHost.delete(host);
     // Record why the check failed (TLS/cert-pin/network) — otherwise a
     // "can't connect" report has no logged cause to diagnose.
     log.warn("health check failed", { host, error: String(err) });
@@ -492,7 +507,9 @@ async function checkHealth(
       version: null,
       onlineUsers: null,
     });
-    connectPage.updateCompatibility(host, "unreachable", null);
+    // A degraded server (503) fails the health call but may still answer
+    // server-info; the probe clears the badge itself when it fails too.
+    await probeServerInfo(connectPage, host, owner);
     return false;
   }
 }
@@ -760,11 +777,14 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       host: string;
       id?: string;
       username?: string;
+      synthetic?: boolean;
     }[] {
       const saved = profileManager.getAll();
       if (saved.length > 0) return saved;
       // Fallback: show a default local server entry
-      return [{ name: connectText("profiles.defaultName"), host: "localhost:8443" }];
+      return [
+        { name: connectText("profiles.defaultName"), host: "localhost:8443", synthetic: true },
+      ];
     }
 
     // Persist a profile mutation, surfacing a failure instead of letting it
@@ -850,6 +870,11 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           return parseRegistrationMode(info?.registration_mode);
         },
         getRetentionNotice: (host) => retentionNotice(serverInfoByHost.get(host)),
+        // A typed host has no health row; probe it so register mode can read its mode.
+        onHostSettled(host) {
+          if (!serverInfoByHost.has(host) && !serverInfoInFlight.has(host))
+            void probeServerInfo(connectPage, host, pageOwner);
+        },
         async onLogin(host, username, password) {
           api.endSession();
           api.setConfig({ host });
@@ -1070,6 +1095,9 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
       profile: ResumableProfile,
       waitIfDown = true,
     ): Promise<void> {
+      // The stored token outlives an opt-out whose delete failed, so the
+      // profile's own setting decides, not the credential's presence.
+      if (profile.rememberPassword !== true) return;
       const attempt = api.getSession();
       try {
         const cred = await loadCredential(profile.host);
@@ -1217,11 +1245,14 @@ async function renderPage(pageId: "connect" | "main"): Promise<void> {
           quickSwitchTarget,
           targetProfile?.username ?? undefined,
           targetProfile?.autoConnect === true,
+          targetProfile?.rememberPassword,
         );
         // A quick switch keeps each server's saved sign-in (B7-13), so
         // switching back resumes with the stored token exactly as auto-login
         // does. Without a stored credential the prefilled form stays up.
-        if (targetProfile !== undefined) await resumeStoredSession(targetProfile);
+        if (targetProfile !== undefined && startupAttempt.isCurrent()) {
+          await resumeStoredSession(targetProfile);
+        }
         return; // Skip auto-login when switching servers
       }
 

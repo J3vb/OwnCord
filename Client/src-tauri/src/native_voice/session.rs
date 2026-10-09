@@ -7,11 +7,12 @@
 //! (`video.rs`), screen share (`screen.rs`), and a stream of room events for
 //! the webview. No Tauri types here so the interop example
 //! (`examples/native_voice_interop.rs`) drives exactly the code the app runs.
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::{TrackPublishOptions, VideoEncoding};
+use livekit::options::{AudioEncoding, TrackPublishOptions, VideoEncoding, VideoPreset};
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -151,6 +152,17 @@ pub enum Event {
     ActiveSpeakers {
         identities: Vec<String>,
     },
+    /// The server's grant for the local participant changed: whether it still
+    /// lets this client publish the microphone. The webview defers an unmute
+    /// that arrives while it is false and republishes when it turns true.
+    MicrophonePermission {
+        allowed: bool,
+    },
+    /// The input-sensitivity gate opened (speech) or closed (silence). It
+    /// lights the local speaking ring, as the web path's detector does.
+    VoiceGate {
+        open: bool,
+    },
     EncryptionStatus {
         identity: String,
         encrypted: bool,
@@ -268,6 +280,12 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
             identity: participant.identity().to_string(),
             sid: publication.sid().to_string(),
             muted: false,
+        },
+        RoomEvent::ParticipantPermissionChanged {
+            participant: Participant::Local(_),
+            permission: Some(permission),
+        } => Event::MicrophonePermission {
+            allowed: mic_allowed(&permission),
         },
         RoomEvent::ActiveSpeakersChanged { speakers } => Event::ActiveSpeakers {
             identities: speakers.iter().map(|s| s.identity().to_string()).collect(),
@@ -390,7 +408,7 @@ impl DeviceKind {
 
 /// How the screen share is published: the capture's size and the web
 /// path's `publishTrack` options for it (`getScreenShareMaxBitrate`, the
-/// effective frame rate).
+/// effective frame rate, `isScreenShareSimulcast`).
 #[derive(Debug, Clone, Copy, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScreenOptions {
@@ -398,6 +416,34 @@ pub struct ScreenOptions {
     pub height: u32,
     pub max_bitrate: u64,
     pub max_framerate: f64,
+    pub simulcast: bool,
+}
+
+/// The screen share's publish options. With simulcast it adds the web path's
+/// one lower layer (`SCREENSHARE_SIMULCAST_LAYERS`): 720p at 15 fps and at
+/// most 1.2 Mbps, so a viewer who cannot take the full stream still gets
+/// readable text instead of a frozen frame, and the top layer keeps most of
+/// the budget.
+fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
+    TrackPublishOptions {
+        source: TrackSource::Screenshare,
+        simulcast: opts.simulcast,
+        simulcast_layers: opts.simulcast.then(|| {
+            vec![VideoPreset {
+                width: 1280,
+                height: 720,
+                encoding: VideoEncoding {
+                    max_bitrate: 1_200_000,
+                    max_framerate: 15.0,
+                },
+            }]
+        }),
+        video_encoding: Some(VideoEncoding {
+            max_bitrate: opts.max_bitrate,
+            max_framerate: opts.max_framerate,
+        }),
+        ..Default::default()
+    }
 }
 
 /// How the camera is published, from the same presets the web path hands
@@ -410,6 +456,35 @@ pub struct CameraOptions {
     pub max_bitrate: u64,
     pub max_framerate: f64,
     pub simulcast: bool,
+}
+
+/// The camera's publish options. A 1080p camera adds the web path's
+/// `cameraSimulcastLayers` (360p and 720p) so a viewer on a 1-3 Mbps link gets
+/// 720p rather than the SDK default's 360p; 720p and below keep the defaults.
+fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
+    let layer = |width, height, max_bitrate, max_framerate| VideoPreset {
+        width,
+        height,
+        encoding: VideoEncoding {
+            max_bitrate,
+            max_framerate,
+        },
+    };
+    TrackPublishOptions {
+        source: TrackSource::Camera,
+        simulcast: opts.simulcast,
+        simulcast_layers: (opts.simulcast && opts.height > 720).then(|| {
+            vec![
+                layer(640, 360, 450_000, 20.0),
+                layer(1280, 720, 1_700_000, 30.0),
+            ]
+        }),
+        video_encoding: Some(VideoEncoding {
+            max_bitrate: opts.max_bitrate,
+            max_framerate: opts.max_framerate,
+        }),
+        ..Default::default()
+    }
 }
 
 pub fn process_threads() -> usize {
@@ -476,6 +551,9 @@ pub struct NativeSession {
     /// The published microphone's source, fed by `capture` (none when the
     /// interop example published a synthetic one).
     mic_source: Option<NativeAudioSource>,
+    /// Set when the server withdrew the microphone publication (a moderator
+    /// mute); the next enable republishes instead of unmuting a dead track.
+    mic_withdrawn: MicWithdrawn,
     camera: VideoSlot,
     /// The running native camera capture, independent of publication: the
     /// self-view preview reads it back over the frame socket's `camera` route.
@@ -489,6 +567,17 @@ pub struct NativeSession {
     playout: Playout,
     capture: Capture,
     forwarder: tokio::task::JoinHandle<()>,
+}
+
+/// The microphone's publish options: the channel's configured bitrate
+/// (`voice_config`, the web path's `audioPreset`), or the SDK's own default
+/// (48 kbps) when no config reached the client.
+fn mic_publish_options(bitrate: Option<u64>) -> TrackPublishOptions {
+    TrackPublishOptions {
+        source: TrackSource::Microphone,
+        audio_encoding: bitrate.map(|max_bitrate| AudioEncoding { max_bitrate }),
+        ..Default::default()
+    }
 }
 
 impl NativeSession {
@@ -520,12 +609,14 @@ impl NativeSession {
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
         let playout = Playout::default();
+        let mic_withdrawn = MicWithdrawn::default();
         let forwarder = tokio::spawn(forward_events(
             events,
             on_event.clone(),
             frames.observer(),
             playout.listener(),
             [camera.clone(), screen_publication.clone()],
+            mic_withdrawn.clone(),
         ));
         Ok(Self {
             room,
@@ -533,6 +624,7 @@ impl NativeSession {
             apm: None,
             mic: None,
             mic_source: None,
+            mic_withdrawn,
             camera,
             camera_capture: None,
             screen: None,
@@ -590,8 +682,12 @@ impl NativeSession {
         }
         let apm = Apm::new(&opts);
         self.playout.set_reference(apm.clone());
-        self.capture
-            .configure(apm.clone(), opts.enhanced_noise_suppression);
+        let on_event = self.on_event.clone();
+        self.capture.configure(
+            apm.clone(),
+            opts.enhanced_noise_suppression,
+            Arc::new(move |open| on_event(Event::VoiceGate { open })),
+        );
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
             log::warn!("[native_voice] playout unavailable: {e}");
@@ -603,7 +699,25 @@ impl NativeSession {
     /// new frame cryptor — rust-sdks #1408), and the OS capture is stopped
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
-    pub async fn set_microphone(&mut self, enabled: bool) -> Result<(), String> {
+    pub async fn set_microphone(
+        &mut self,
+        enabled: bool,
+        bitrate: Option<u64>,
+    ) -> Result<(), String> {
+        let was_withdrawn = enabled && self.mic_withdrawn.take();
+        if was_withdrawn {
+            // The SFU dropped the publication; the track is dead. Best effort
+            // unpublish, then fall through to a fresh first publish.
+            if let Some(track) = self.mic.take() {
+                let _ = self
+                    .room
+                    .local_participant()
+                    .unpublish_track(&track.sid())
+                    .await;
+            }
+            self.capture.stop();
+            self.mic_source = None;
+        }
         let Some(track) = &self.mic else {
             if !enabled {
                 return Ok(());
@@ -614,10 +728,15 @@ impl NativeSession {
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
             self.capture.start(source.clone())?;
             self.mic_source = Some(source.clone());
-            let published = self.publish_audio(RtcAudioSource::Native(source)).await;
+            let published = self
+                .publish_audio(RtcAudioSource::Native(source), bitrate)
+                .await;
             if published.is_err() {
                 self.capture.stop();
                 self.mic_source = None;
+                // The server may not have re-granted yet: stay withdrawn so
+                // the next enable tries a fresh publish again.
+                self.mic_withdrawn.keep_if_failed(was_withdrawn, &published);
             }
             return published;
         };
@@ -640,18 +759,24 @@ impl NativeSession {
         self.capture.set_ptt_gated(gated);
     }
 
+    /// Set the input-sensitivity gate's threshold (0: no gate).
+    pub fn set_voice_gate(&self, threshold: f32) {
+        self.capture.set_voice_gate(threshold);
+    }
+
     /// Publish any audio source as the microphone track. The app passes its
     /// capture's source; the interop example passes a synthetic sine.
-    pub async fn publish_audio(&mut self, source: RtcAudioSource) -> Result<(), String> {
+    pub async fn publish_audio(
+        &mut self,
+        source: RtcAudioSource,
+        bitrate: Option<u64>,
+    ) -> Result<(), String> {
         let track = LocalAudioTrack::create_audio_track("microphone", source);
         self.room
             .local_participant()
             .publish_track(
                 LocalTrack::Audio(track.clone()),
-                TrackPublishOptions {
-                    source: TrackSource::Microphone,
-                    ..Default::default()
-                },
+                mic_publish_options(bitrate),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -711,18 +836,7 @@ impl NativeSession {
         let publication = self
             .room
             .local_participant()
-            .publish_track(
-                LocalTrack::Video(track),
-                TrackPublishOptions {
-                    source: TrackSource::Camera,
-                    simulcast: opts.simulcast,
-                    video_encoding: Some(VideoEncoding {
-                        max_bitrate: opts.max_bitrate,
-                        max_framerate: opts.max_framerate,
-                    }),
-                    ..Default::default()
-                },
-            )
+            .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
@@ -837,18 +951,7 @@ impl NativeSession {
         let publication = self
             .room
             .local_participant()
-            .publish_track(
-                LocalTrack::Video(track),
-                TrackPublishOptions {
-                    source: TrackSource::Screenshare,
-                    simulcast: false,
-                    video_encoding: Some(VideoEncoding {
-                        max_bitrate: opts.max_bitrate,
-                        max_framerate: opts.max_framerate,
-                    }),
-                    ..Default::default()
-                },
-            )
+            .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
             .await
             .map_err(|e| e.to_string())?;
         let sid = publication.sid();
@@ -988,6 +1091,7 @@ async fn forward_events(
     frames: Observer,
     playout: playout::Listener,
     published: [VideoSlot; 2],
+    mic_withdrawn: MicWithdrawn,
 ) {
     while let Some(ev) = events.recv().await {
         if let RoomEvent::LocalTrackRepublished {
@@ -1026,6 +1130,15 @@ async fn forward_events(
                 });
             }
         }
+        if let RoomEvent::ParticipantPermissionChanged {
+            participant: Participant::Local(_),
+            permission: Some(permission),
+        } = &ev
+        {
+            if !mic_allowed(permission) {
+                mic_withdrawn.set();
+            }
+        }
         // Before the webview hears of a video track, so its frame socket
         // finds it.
         frames.observe(&ev);
@@ -1033,6 +1146,37 @@ async fn forward_events(
         if let Some(mapped) = map_event(ev) {
             on_event(mapped);
         }
+    }
+}
+
+/// Whether the server's grant lets this participant publish the microphone:
+/// an empty source list means every source (LiveKit's rule).
+fn mic_allowed(permission: &livekit_protocol::ParticipantPermission) -> bool {
+    permission.can_publish
+        && (permission.can_publish_sources.is_empty()
+            || permission
+                .can_publish_sources
+                .contains(&(livekit_protocol::TrackSource::Microphone as i32)))
+}
+
+/// Shared between `forward_events` (sets it on a revocation) and
+/// `set_microphone` (consumes it on the next enable).
+#[derive(Clone, Default)]
+struct MicWithdrawn(Arc<AtomicBool>);
+
+impl MicWithdrawn {
+    fn set(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+    /// A republish that failed (the grant not restored yet) leaves the
+    /// withdrawal pending for the next enable.
+    fn keep_if_failed<T>(&self, was_withdrawn: bool, result: &Result<T, String>) {
+        if was_withdrawn && result.is_err() {
+            self.set();
+        }
+    }
+    fn take(&self) -> bool {
+        self.0.swap(false, Ordering::SeqCst)
     }
 }
 
@@ -1065,6 +1209,140 @@ fn apply_republish(
 mod tests {
     use super::*;
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
+    use livekit_protocol as proto;
+
+    fn permission(
+        can_publish: bool,
+        sources: &[proto::TrackSource],
+    ) -> proto::ParticipantPermission {
+        proto::ParticipantPermission {
+            can_publish,
+            can_publish_sources: sources.iter().map(|s| *s as i32).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn screen(simulcast: bool) -> ScreenOptions {
+        ScreenOptions {
+            width: 1920,
+            height: 1080,
+            max_bitrate: 6_000_000,
+            max_framerate: 30.0,
+            simulcast,
+        }
+    }
+
+    #[test]
+    fn screen_share_simulcasts_with_a_text_friendly_720p_layer() {
+        let opts = screen_publish_options(&screen(true));
+        assert_eq!(opts.source, TrackSource::Screenshare);
+        assert!(opts.simulcast);
+        let encoding = opts.video_encoding.expect("top layer encoding");
+        assert_eq!(encoding.max_bitrate, 6_000_000);
+        assert_eq!(encoding.max_framerate, 30.0);
+        let layers = opts.simulcast_layers.expect("custom simulcast layers");
+        assert_eq!(layers.len(), 1);
+        assert_eq!((layers[0].width, layers[0].height), (1280, 720));
+        assert!(layers[0].encoding.max_bitrate <= 1_200_000);
+        assert_eq!(layers[0].encoding.max_framerate, 15.0);
+    }
+
+    #[test]
+    fn screen_share_without_simulcast_is_one_layer() {
+        let opts = screen_publish_options(&screen(false));
+        assert!(!opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+    }
+
+    fn camera(height: u32, simulcast: bool) -> CameraOptions {
+        CameraOptions {
+            width: height * 16 / 9,
+            height,
+            max_bitrate: 4_000_000,
+            max_framerate: 30.0,
+            simulcast,
+        }
+    }
+
+    #[test]
+    fn a_1080p_camera_gets_360p_and_720p_simulcast_layers() {
+        let opts = camera_publish_options(&camera(1080, true));
+        assert_eq!(opts.source, TrackSource::Camera);
+        assert!(opts.simulcast);
+        let layers = opts.simulcast_layers.expect("custom simulcast layers");
+        let sizes: Vec<_> = layers.iter().map(|l| (l.width, l.height)).collect();
+        assert_eq!(sizes, [(640, 360), (1280, 720)]);
+    }
+
+    #[test]
+    fn a_720p_camera_keeps_the_sdk_default_layers() {
+        let opts = camera_publish_options(&camera(720, true));
+        assert!(opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+    }
+
+    #[test]
+    fn a_camera_without_simulcast_has_no_layers() {
+        assert!(camera_publish_options(&camera(1080, false))
+            .simulcast_layers
+            .is_none());
+    }
+
+    #[test]
+    fn mic_publish_options_carry_the_configured_bitrate() {
+        let o = mic_publish_options(Some(96_000));
+        assert!(matches!(o.source, TrackSource::Microphone));
+        assert_eq!(o.audio_encoding.map(|e| e.max_bitrate), Some(96_000));
+    }
+
+    #[test]
+    fn mic_publish_options_keep_the_sdk_default_without_a_bitrate() {
+        assert!(mic_publish_options(None).audio_encoding.is_none());
+    }
+
+    #[test]
+    fn microphone_permission_event_serializes_for_the_webview() {
+        let json = serde_json::to_string(&Event::MicrophonePermission { allowed: false }).unwrap();
+        assert_eq!(json, r#"{"type":"microphonePermission","allowed":false}"#);
+    }
+
+    #[test]
+    fn mic_revoked_when_sources_exclude_microphone() {
+        assert!(!mic_allowed(&permission(
+            true,
+            &[proto::TrackSource::Camera]
+        )));
+        assert!(!mic_allowed(&permission(false, &[])));
+    }
+
+    #[test]
+    fn mic_allowed_when_sources_empty_or_listed() {
+        assert!(mic_allowed(&permission(true, &[])));
+        assert!(mic_allowed(&permission(
+            true,
+            &[proto::TrackSource::Microphone]
+        )));
+    }
+
+    #[test]
+    fn failed_republish_keeps_the_withdrawal_pending() {
+        let w = MicWithdrawn::default();
+        w.keep_if_failed(true, &Ok::<(), String>(()));
+        assert!(!w.take());
+        w.keep_if_failed(false, &Err::<(), _>("denied".into()));
+        assert!(!w.take());
+        w.keep_if_failed(true, &Err::<(), _>("denied".into()));
+        assert!(w.take());
+    }
+
+    #[test]
+    fn withdrawn_flag_is_consumed_once() {
+        let w = MicWithdrawn::default();
+        assert!(!w.take());
+        w.set();
+        assert!(w.take());
+        assert!(!w.take());
+    }
 
     /// The Windows client derives from the UTF-8 bytes of the base64 text
     /// (`ExternalE2EEKeyProvider.setKey(string)`), never from the decoded key.

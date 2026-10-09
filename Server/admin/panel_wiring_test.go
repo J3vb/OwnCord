@@ -93,6 +93,7 @@ func TestAdminPanelRetentionIsWired(t *testing.T) {
 	}
 	for _, call := range []string{
 		`api('GET','/retention')`,
+		`api('GET','/retention/channels')`,
 		`api('GET','/retention/preview')`,
 		`api('POST','/retention/preview',`,
 		`api('PUT','/channels/'+change.channel_id+'/retention'`,

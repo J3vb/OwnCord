@@ -107,8 +107,6 @@ import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenSha
 
 // Suppress console output
 vi.spyOn(console, "info").mockImplementation(() => {});
-vi.spyOn(console, "warn").mockImplementation(() => {});
-vi.spyOn(console, "error").mockImplementation(() => {});
 
 /**
  * Create a mock WsClient that stores listener registrations

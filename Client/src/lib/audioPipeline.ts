@@ -9,9 +9,10 @@
 // sensitivity, push-to-talk) and re-applies them to whichever processor is
 // live, runs the VAD worklet on the processor's tap, and mirrors the
 // Enhanced Noise Suppression preference into it. The Linux native room has
-// no web mic track and so no processor: push-to-talk goes to its own gate.
+// no web mic track and so no processor: push-to-talk and the sensitivity
+// threshold go to its own gates.
 
-import { Track, type Room, type LocalAudioTrack } from "livekit-client";
+import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import {
@@ -35,7 +36,29 @@ export function vadThreshold(sensitivity: number): number {
 }
 
 /**
- * The microphone capture request: the processing toggles and the chosen input
+ * The browser processing every microphone capture asks for: the three saved
+ * toggles, and voice isolation explicitly off. The room passes this as its
+ * audioCaptureDefaults, so a join, rejoin or unmute asks for exactly what a
+ * settings toggle does; without the explicit `false` livekit-client's own
+ * capture defaults add `voiceIsolation: true`, a platform voice effect
+ * (Windows, macOS) that Settings never shows and that a toggle then drops.
+ */
+export function micProcessingOptions(): {
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+  autoGainControl: boolean;
+  voiceIsolation: boolean;
+} {
+  return {
+    echoCancellation: loadPref("echoCancellation", true),
+    noiseSuppression: loadPref("noiseSuppression", true),
+    autoGainControl: loadPref("autoGainControl", true),
+    voiceIsolation: false,
+  };
+}
+
+/**
+ * The microphone capture request: the processing and the chosen input
  * device. A restart takes the whole request, so one that names no device
  * reopens the system default; the settings meter uses the same request so it
  * measures what the call captures. The device is `exact`, as in
@@ -43,17 +66,12 @@ export function vadThreshold(sensitivity: number): number {
  * default device. `onDefault` swaps a saved device for the system default,
  * for a retry while that device is unplugged (the pref keeps it, DP-31).
  */
-export function micCaptureOptions(onDefault = false): {
-  echoCancellation: boolean;
-  noiseSuppression: boolean;
-  autoGainControl: boolean;
+export function micCaptureOptions(onDefault = false): ReturnType<typeof micProcessingOptions> & {
   deviceId?: { exact: string } | string;
 } {
   const deviceId = loadPref<string>("audioInputDevice", "");
   return {
-    echoCancellation: loadPref("echoCancellation", true),
-    noiseSuppression: loadPref("noiseSuppression", true),
-    autoGainControl: loadPref("autoGainControl", true),
+    ...micProcessingOptions(),
     ...(deviceId === "" ? {} : { deviceId: onDefault ? "default" : { exact: deviceId } }),
   };
 }
@@ -77,7 +95,7 @@ export interface VadDetector {
 export interface VadDetectorHandlers {
   /** The gate verdict: true = closed (silence). */
   onGate(gated: boolean): void;
-  /** The loudest quantum since the last report, for a level meter. */
+  /** The loudest smoothed level since the last report, for a level meter. */
   onRms?(rms: number): void;
   /** Which path is running once it has started. */
   onStarted?(usingWorklet: boolean): void;
@@ -86,7 +104,7 @@ export interface VadDetectorHandlers {
 /**
  * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
  * when it loads, otherwise a setTimeout poll with the same timing. Both apply
- * the same attack (~32 ms) and hold (~200 ms), so the settings meter and the
+ * the same attack (~32 ms) and hold (~320 ms), so the settings meter and the
  * live gate open and close alike.
  */
 export function startVadDetector(
@@ -105,10 +123,10 @@ export function startVadDetector(
     // backgrounded, which freezes the VAD gate. setTimeout continues firing
     // (throttled ~1Hz when hidden), still fast enough for VAD gate timing.
     const dataArray = new Float32Array(analyser.fftSize);
-    let silentFrames = 0;
+    let quietSince = 0; // Date.now() of the first poll below the threshold, 0 = none
     let speechFrames = 0;
     let gated = false;
-    const GATE_ON_FRAMES = 12;
+    const GATE_HOLD_MS = 320; // as vad-worklet.js holds; elapsed time, as timers throttle
     const GATE_OFF_FRAMES = 2;
     let startupFrames = 0;
     const STARTUP_GRACE = 30;
@@ -131,13 +149,14 @@ export function startVadDetector(
         startupFrames++;
       } else if (rms < threshold) {
         speechFrames = 0;
-        silentFrames++;
-        if (!gated && silentFrames >= GATE_ON_FRAMES) {
+        const now = Date.now();
+        if (quietSince === 0) quietSince = now;
+        if (!gated && now - quietSince >= GATE_HOLD_MS) {
           gated = true;
           handlers.onGate(true);
         }
       } else {
-        silentFrames = 0;
+        quietSince = 0;
         speechFrames++;
         if (gated && speechFrames >= GATE_OFF_FRAMES) {
           gated = false;
@@ -211,6 +230,12 @@ interface PttGatedRoom {
   setPttGated(gated: boolean): void;
 }
 
+/** A room that runs the sensitivity gate on its own capture (NativeRoom),
+ *  reporting its verdicts as the detector's `onGate` would. */
+interface VoiceGatedRoom {
+  setVoiceGate(threshold: number, onSpeaking: (speaking: boolean | null) => void): void;
+}
+
 export class AudioPipeline {
   private room: Room | null = null;
   private processor: MicProcessor | null = null;
@@ -224,9 +249,28 @@ export class AudioPipeline {
   private currentInputGain = loadPref<number>("inputVolume", 100) / 100;
   /** Last value passed to setVoiceSensitivity, so a repeat does not rebuild VAD. */
   private voiceSensitivity: number | null = null;
+  /** The track whose SDK restarts are watched, see onMicRestarted. */
+  private watchedTrack: LocalAudioTrack | null = null;
+  /** Set while this pipeline's own corrective restart runs. */
+  private correctingCapture = false;
+
+  /** The local speaking verdict straight from the sensitivity gate: true while
+   *  it is open, false while closed, null when no gate runs. Drives the local
+   *  ring so it matches the slider and what transmits. */
+  onGateSpeaking: ((speaking: boolean | null) => void) | null = null;
 
   setRoom(room: Room | null): void {
     this.room = room;
+    this.applyRoomVoiceGate();
+  }
+
+  /** Hand the saved sensitivity to a room that gates its own capture. */
+  private applyRoomVoiceGate(): void {
+    const sensitivity = loadPref<number>("voiceSensitivity", 50);
+    (this.room as Partial<VoiceGatedRoom> | null)?.setVoiceGate?.(
+      vadThreshold(sensitivity),
+      (speaking) => this.onGateSpeaking?.(speaking),
+    );
   }
 
   /** Whether a mic processor is live. */
@@ -269,6 +313,12 @@ export class AudioPipeline {
     return this._vadUsingWorklet;
   }
 
+  /** What the browser applied to the call's microphone capture (device,
+   *  processing), read behind the processor; null without a web mic track. */
+  get micSettings(): MediaTrackSettings | null {
+    return this.micTrack?.getSourceTrackSettings() ?? null;
+  }
+
   private get micTrack(): LocalAudioTrack | undefined {
     const pub = this.room?.localParticipant.getTrackPublication(Track.Source.Microphone);
     return pub?.track as LocalAudioTrack | undefined;
@@ -296,6 +346,8 @@ export class AudioPipeline {
       return;
     }
     this.processor = processor;
+    this.watchedTrack = track;
+    track.on(TrackEvent.Restarted, this.onMicRestarted);
     log.info("Mic processor attached", { inputGain: this.currentInputGain });
     this.startVadPolling();
     await this.applyEnhancedPreference();
@@ -314,6 +366,8 @@ export class AudioPipeline {
    *  until reattached. */
   teardownAudioPipeline(): void {
     this.generation++;
+    this.watchedTrack?.off(TrackEvent.Restarted, this.onMicRestarted);
+    this.watchedTrack = null;
     const vadStopped = this.stopVadPolling();
     const processor = this.processor;
     if (processor !== null) {
@@ -321,6 +375,29 @@ export class AudioPipeline {
       void vadStopped.then(() => processor.destroy());
     }
   }
+
+  /**
+   * The SDK restarts the capture on its own when it ends (an unplugged mic:
+   * handleTrackEnded asks for `{deviceId: "default"}` and no processing), and
+   * every later unmute reuses that request. Read back what the browser
+   * applied and re-capture with the saved processing when it differs. A flag
+   * the browser does not report counts as matching, so an engine that cannot
+   * honour one is not restarted in a loop.
+   */
+  private onMicRestarted = (track: LocalAudioTrack): void => {
+    if (this.correctingCapture) return;
+    const applied = track.getSourceTrackSettings() as Record<string, unknown>;
+    const wanted = micProcessingOptions();
+    const drifted = Object.entries(wanted)
+      .filter(([key, value]) => applied[key] !== undefined && applied[key] !== value)
+      .map(([key]) => key);
+    if (drifted.length === 0) return;
+    log.info("Mic capture restarted without the saved processing — reapplying", { drifted });
+    this.correctingCapture = true;
+    void this.reapplyAudioProcessing().finally(() => {
+      this.correctingCapture = false;
+    });
+  };
 
   // --- Enhanced Noise Suppression ---
 
@@ -372,6 +449,7 @@ export class AudioPipeline {
     this.voiceSensitivity = clamped;
     savePref("voiceSensitivity", clamped);
     this.startVadPolling();
+    this.applyRoomVoiceGate();
     log.debug("Voice sensitivity updated", { sensitivity: clamped });
   }
 
@@ -388,11 +466,13 @@ export class AudioPipeline {
       return;
     }
     processor.setLookahead(GATE_LOOKAHEAD_S);
+    this.onGateSpeaking?.(true);
     this.vad = startVadDetector(processor.context, processor.analyser, vadThreshold(sensitivity), {
       onGate: (gated) => {
         if (this.processor !== processor) return;
         this.vadGated = gated;
         processor.setGate("vad", gated);
+        this.onGateSpeaking?.(!gated);
       },
       onRms: (rms) => {
         this._lastVadRms = rms;
@@ -412,6 +492,7 @@ export class AudioPipeline {
     this._lastVadRms = 0;
     this.vadGated = false;
     this.processor?.setGate("vad", false);
+    this.onGateSpeaking?.(null);
     return stopped;
   }
 

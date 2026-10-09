@@ -47,6 +47,96 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+## v2.2.0-beta.2
+
+**OwnCord 2.2 beta 2** is a fix-heavy follow-up to beta 1 for the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It makes voice clearer and calls steadier, adds a Discord-style pop-out window for streams and cameras, and fixes a long list of Linux voice problems.
+
+It is still a **beta and a hobby project** — don't use it for anything sensitive. Update the server and the desktop app together.
+
+### Highlights
+
+- **Clearer voice**: the robot-voice and chopped-quiet-mic problems are fixed, and the speaking ring lights up at normal speaking volume.
+- **Pop-out window for streams and cameras**, like Discord's, with full screen.
+- **Steadier DM calls**: rings arrive in order, cancel cleanly and no longer show a false "Missed call".
+- **Screen share you can pick and trust**: a source picker on Windows, and a share that lowers quality on a weak link instead of freezing.
+- **Linux voice** keeps working through odd audio devices, moderator mutes and quiet mics, and the Linux camera now captures at the resolution you picked.
+
+### Added
+
+**Voice and video**
+
+- **Pop-out window**: Pop out opens a stream or camera in a window of its own that you can move, maximise or put in full screen (its own button, F or a double-click). Closing it, or Bring back on the tile, returns the stream to the grid. Linux gets Pop out for the first time.
+- A screen and window picker when you share your screen on Windows.
+- The camera defaults to 720p, and a 1080p camera also sends a 720p layer so viewers on slower links still get video.
+- Screen-share audio is encoded for music instead of as a voice microphone.
+
+### Changed
+
+- The stream and camera hover preview in the voice sidebar is removed. The indicators and click-to-watch are unchanged.
+- Per-user and output volume are capped at 100%, so joining a voice channel cannot fail on an out-of-range level.
+- Linux: the camera is captured at the resolution of the preset you picked.
+- The voice sidebar's channel categories reorder live when an admin moves them.
+- Add Server creates your first saved profile on a fresh install.
+- **For server owners:** `.html`, `.svg`, `.sh`, `.docm`, `.xlsm`, `.desktop` and `.command` uploads are refused by default (edit `upload.blocked_extensions` to allow them).
+- **For server owners:** `plugins.directory` must be a folder that neither is nor holds your data, uploads or backups folder. In a container, `plugins.directory`, `tls.cert_file` and `tls.key_file` must all sit under the data folder, so move them before upgrading.
+- **For server owners:** the generated LiveKit config (and `livekit.yaml.example`) detects speakers faster, which is what lights the speaking ring sooner. A hand-managed `livekit.yaml` needs the same change.
+- Update checks fetch release files only from GitHub over https, redirects included.
+- Adding a server whose address is already in your list is refused with a message; profiles you already have are left as they are.
+
+### Fixed
+
+**Voice**
+
+- Robot-sounding or choppy voice: the input-sensitivity gate no longer chops quiet microphones.
+- The "Secured" badge degrades on repeated decrypt failures even in short bursts; its grace window restarts only after a new key is installed.
+- Rejoining voice no longer switches on the browser's voice isolation, which Settings never showed and could make a voice sound robotic; your saved microphone processing settings are applied every time.
+- With the microphone set to Default, unplugging and replugging it moves the call back to the system default instead of staying on the device it fell back to.
+- The speaking ring lights up at normal speaking volume.
+- Screen share degrades instead of freezing on a weak link.
+- A stalled voice connection that fails to resume now escalates to a full reconnect.
+- Linux: audio devices open in any sample format at 48 kHz, the mic is republished after a moderator unmutes you, the server's voice-quality bitrate applies, and the sensitivity gate works on the native path.
+- Voice sockets behind a reverse proxy are accepted when the origin names port `:443`.
+
+**Direct-message calls**
+
+- A call now rings the callee only after the caller's voice session is connected.
+- A stale hang-up could cancel a new ring and show a false "Missed call"; call signals now arrive in order with voice events.
+- A first-contact call tells the caller at once, and the callee is told if the caller hangs up early.
+- A closed DM reopens on a ring, and a ring from someone who is not in the call is refused.
+- Queued rings are dropped when you disconnect, and redialling has a little slack.
+- Fixes for ring cancel, connect gating and the caption after leaving a call.
+
+**Messages, servers and accounts**
+
+- A reply's snippet refreshes when the original message is edited.
+- The unread bar stays until you reach the real bottom, announces its count, and arrivals while scrolled away are counted.
+- Typing a server address probes the server correctly, and a stale refusal error clears when you leave.
+- Logout is time-limited, Cancel locks during recovery, and Settings stays open while a recovery key is requested.
+- Opening a DM accepts a pending request; blocking someone revokes trust and unblocking clears old requests.
+- A role with Manage Server but not Manage Channels now sees the channel list on the retention page and can add the first rule. Each member's own moderation history (warnings, timeouts, removals, bans) shows the newest 200 entries.
+- Link and image previews have a fetch deadline and a length limit on image URLs.
+- Server hardening: stricter upload type checks, updater download hosts, TLS and plugin paths, push delivery, and failed-login counting.
+
+**Support bundles**
+
+- Support bundles keep the redacted detail of error events, and their wording and log writes are cleaner.
+
+### Known issues
+
+- **Not yet tested on a real machine:** the Windows screen-share picker, the pop-out window on Windows and Linux, and how Linux voice handles device changes.
+- **Linux camera with screen share:** the crash seen in beta 1 when both are on has not been retested. If the app closes without warning, send the support bundle.
+- **Linux voice sounds play on the system default speaker**, because the desktop webview cannot route them to the device you picked.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **There is no browser client yet.** The desktop app is the only supported client.
+
+### Under the hood
+
+- Go toolchain 1.27.2 and `golang.org/x/net` 0.60.0; the auth and database coverage floors are restored.
+- A large batch of new client tests: soak runs that hold media counters flat, stricter mocked end-to-end assertions, a console guard, and a tray menu mapping test.
+- CI and repository guards are tighter: the npm audit gate, release gate, per-chunk size budgets, nightly mutation scores, and the Claude shell hook.
+- Docs and plans are corrected, including data-lifecycle restore, operator guidance and Dependabot notes; no-mistakes review instructions were added.
+
 ## v2.2.0-beta.1
 
 **OwnCord 2.2 beta 1** is the next public beta of OwnCord — a self-hosted chat app with channels, direct messages, voice and video, and file sharing, on a server you run yourself. It adds an unread bar that opens each channel where you left off, camera capture that keeps working while the window is hidden on Linux, voice sounds, and an admin page that edits almost every server setting. The Docker image now carries voice too, so one container is the whole server.

@@ -71,7 +71,8 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 			}
 		}
 
-		// Validate Origin header (mirrors WS OriginPatterns).
+		// Validate Origin header. This is the proxy's only origin decision:
+		// proxyWebSocket's Accept skips its own check.
 		if !isOriginAllowed(r, allowedOrigins) {
 			slog.Warn("livekit proxy: origin rejected",
 				"origin", r.Header.Get("Origin"), "path", r.URL.Path, "remote", r.RemoteAddr)
@@ -81,7 +82,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 
 		// Detect WebSocket upgrade requests.
 		if isWebSocketUpgrade(r) {
-			proxyWebSocket(w, r, &wsTarget, allowedOrigins)
+			proxyWebSocket(w, r, &wsTarget)
 			return
 		}
 
@@ -176,7 +177,7 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 
 // proxyWebSocket opens a backend WS connection and shovels data in both
 // directions until either side closes.
-func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, allowedOrigins []string) {
+func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	// Build backend URL preserving the request path and query.
 	backendURL := *target
 	backendURL.Path = r.URL.Path
@@ -222,10 +223,14 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL, all
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
 
-	// Accept the frontend WebSocket.
+	// Accept the frontend WebSocket. The Origin was already decided by
+	// isOriginAllowed before this handler was reached; letting Accept run its
+	// own check would apply a second, different policy (a literal Host
+	// comparison with no default-port equivalence and no first-party client
+	// origins) and refuse requests the proxy has admitted.
 	frontConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		Subprotocols:   []string{backConn.Subprotocol()},
-		OriginPatterns: allowedOrigins,
+		Subprotocols:       []string{backConn.Subprotocol()},
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		slog.Warn("livekit proxy: frontend accept failed", "err", err)

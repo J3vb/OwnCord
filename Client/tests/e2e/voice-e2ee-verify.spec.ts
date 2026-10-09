@@ -8,6 +8,7 @@ import {
   MOCK_MEMBERS_MULTI_ROLE,
   MOCK_VOICE_STATE,
   navigateToMainPageReady,
+  parkLiveKitSocket,
   joinVoiceChannelByName,
   emitWsMessage,
 } from "./helpers";
@@ -135,34 +136,7 @@ async function mockE2EEVoiceSession(
       identityPinError: opts.identityPinError,
     }),
   );
-  // Park the LiveKit signal WebSocket forever: room.connect neither succeeds
-  // nor fails during the test, so the voice session stays in "securing" and
-  // never tears down the verification state mid-assertion.
-  await page.addInitScript(() => {
-    const RealWS = window.WebSocket;
-    function ParkedOrReal(url: string | URL, protocols?: string | string[]): WebSocket {
-      const s = String(url);
-      if (s.includes("localhost:7880") || s.includes("127.0.0.1:7880")) {
-        const parked = new EventTarget() as unknown as Record<string, unknown>;
-        parked.url = s;
-        parked.readyState = 0; // CONNECTING, forever
-        parked.binaryType = "arraybuffer";
-        parked.send = () => {};
-        parked.close = () => {
-          parked.readyState = 3;
-        };
-        parked.onopen = null;
-        parked.onmessage = null;
-        parked.onerror = null;
-        parked.onclose = null;
-        return parked as unknown as WebSocket;
-      }
-      return new RealWS(url, protocols);
-    }
-    ParkedOrReal.prototype = RealWS.prototype;
-    Object.assign(ParkedOrReal, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
-    (window as unknown as { WebSocket: unknown }).WebSocket = ParkedOrReal;
-  });
+  await parkLiveKitSocket(page);
 }
 
 async function emitPeerAnnounce(

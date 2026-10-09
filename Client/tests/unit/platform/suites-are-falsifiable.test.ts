@@ -329,6 +329,7 @@ describeWindowControlSuite(async () => {
     placedAt: () => undefined,
     centered: () => 0,
     fullscreenCalls: () => [],
+    labelledFullscreenCalls: () => [],
   };
   return { subject, native };
 }, failEveryTest);

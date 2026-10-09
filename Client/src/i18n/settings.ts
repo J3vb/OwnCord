@@ -245,7 +245,7 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleSaved": "Support bundle saved.",
   "logs.exportFailed": "Export failed: {error}",
   "logs.bundleReadme":
-    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nPasswords, session tokens, recovery kits, recovery codes and 2FA secrets are\nnever read into this bundle: settings are copied from a fixed allowlist and the\nOS keychain is not touched. The log files are NOT redacted: they are exported\nexactly as written. Read them before sharing this bundle, and share it only\nwith someone you trust.\n",
+    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
 
   "diagnostics.short.connection": "Server",
   "diagnostics.short.authentication": "Sign-in",
@@ -324,18 +324,26 @@ export const settingsText = defineCatalog("settings", {
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "voiceAudio.inputDevice": "Input Device",
   "voiceAudio.default": "Default",
+  "voiceAudio.defaultLive": "Default ({device})",
   "voiceAudio.inputVolume": "Input Volume",
   "voiceAudio.inputSensitivity": "Input Sensitivity",
   "voiceAudio.sensitivityValue": "Sensitivity {value}%",
   "voiceAudio.outputDevice": "Output Device",
   "voiceAudio.outputVolume": "Output Volume",
-  "voiceAudio.streamQuality": "Stream Quality",
-  "voiceAudio.streamQualityDesc":
-    "Applies to camera and screenshare. Higher quality uses more bandwidth. Changes take effect on next voice join.",
-  "voiceAudio.quality.low": "Low (360p cam / 720p screen)",
-  "voiceAudio.quality.medium": "Medium (720p)",
-  "voiceAudio.quality.high": "High (1080p)",
-  "voiceAudio.quality.source": "Source (1080p max bitrate)",
+  "voiceAudio.cameraQuality": "Camera Quality",
+  "voiceAudio.cameraQualityDesc":
+    "Higher quality uses more bandwidth and CPU. Changes take effect on next voice join.",
+  "voiceAudio.cameraQuality.low": "Low (360p)",
+  "voiceAudio.cameraQuality.medium": "Medium (720p)",
+  "voiceAudio.cameraQuality.high": "High (1080p)",
+  "voiceAudio.cameraQuality.source": "Source (1080p max bitrate)",
+  "voiceAudio.screenQuality": "Screen Share Quality",
+  "voiceAudio.screenQualityDesc":
+    "Medium stays smooth on slower connections; High sends sharper text but needs a fast one. Viewers on a weak connection get a lighter 720p copy. Changes take effect on your next screen share.",
+  "voiceAudio.screenQuality.low": "Low (720p, 5 fps)",
+  "voiceAudio.screenQuality.medium": "Medium (720p)",
+  "voiceAudio.screenQuality.high": "High (1080p)",
+  "voiceAudio.screenQuality.source": "Source (native resolution)",
   "voiceAudio.screenFps": "Screen Share FPS",
   "voiceAudio.screenFpsDesc":
     "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
@@ -360,5 +368,5 @@ export const settingsText = defineCatalog("settings", {
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
   "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
   "voiceAudio.nativeNote":
-    "On Linux, audio runs in the app's native engine. Your microphone level and voice sensitivity are handled by the engine's automatic gain control and silence detection, so the input volume and input sensitivity controls are not available here. Use your system mixer to adjust your microphone level.",
+    "On Linux, audio runs in the app's native engine. Your microphone level is handled by the engine's automatic gain control, so the input volume control is not available here and the level bar stays empty. Use your system mixer to adjust your microphone level.",
 });

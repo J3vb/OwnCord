@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+// Sums the nightly mutation shards into the one full-surface score the B7-8
+// baseline records (docs/plans/b7-8-mutation-baseline-2026-09-20.md). Averaging
+// shard percentages would be wrong: shards differ in size and errored mutants
+// leave the denominator.
+//
+//   node scripts/aggregate-mutation-shards.mjs              # reads reports/mutation/<shard>/mutation.json
+//   node scripts/aggregate-mutation-shards.mjs <artifacts>  # reads <artifacts>/mutation-report-<shard>/mutation.json
+//                                                           # (the layout download-artifact gives per-name artifacts)
+//   node --test scripts/aggregate-mutation-shards.test.mjs
+//
+// Exits 1 when any shard's report is missing: a partial score is not the
+// full-surface score.
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const SCORED = ["Killed", "Timeout", "Survived", "NoCoverage"];
+const DETECTED = ["Killed", "Timeout"];
+
+/** Pools parsed Stryker reports; throws if a file appears in more than one. */
+export function aggregate(reports) {
+  if (reports.length === 0) throw new Error("no reports to aggregate");
+  const totals = {};
+  const seen = new Set();
+  for (const { files } of reports) {
+    for (const [path, { mutants }] of Object.entries(files)) {
+      if (seen.has(path)) throw new Error(`${path} appears in more than one shard`);
+      seen.add(path);
+      for (const { status } of mutants) totals[status] = (totals[status] ?? 0) + 1;
+    }
+  }
+  const sum = (statuses) => statuses.reduce((n, s) => n + (totals[s] ?? 0), 0);
+  const scored = sum(SCORED);
+  return { totals, files: seen.size, scored, score: scored ? sum(DETECTED) / scored : 0 };
+}
+
+/** Writes the summary JSON, creating the parent directory (a fresh CI checkout has none). */
+export function writeSummary(path, summary) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(summary, null, 2) + "\n");
+}
+
+/** The job-summary markdown. `revision` is the pinned dev SHA the shards ran on (the workflow run's own SHA is main's). */
+export function jobSummary({ pct, configured, files, shards, scored, totals, revision }) {
+  const rows = Object.entries(totals).map(([s, n]) => `| ${s} | ${n} |`);
+  return `## Full-surface mutation score: ${pct} %\n\nRevision: ${revision}\n\n${configured} configured files (${files} with mutants) across ${shards} shards, ${scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n`;
+}
+
+function main() {
+  const clientDir = fileURLToPath(new URL("..", import.meta.url));
+  const reportsDir = join(clientDir, "reports/mutation");
+  return import(join(clientDir, "stryker.shard.config.mjs")).then(({ shards }) => {
+    const names = Object.keys(shards);
+    const artifacts = process.argv[2];
+    const paths = names.map((n) =>
+      artifacts
+        ? join(artifacts, `mutation-report-${n}`, "mutation.json")
+        : join(reportsDir, n, "mutation.json"),
+    );
+    const missing = names.filter((_, i) => !existsSync(paths[i]));
+    if (missing.length) {
+      console.error(`missing mutation.json for shard(s): ${missing.join(", ")}`);
+      process.exit(1);
+    }
+    // The pinned dev SHA (needs.pin.outputs.sha); empty when run by hand.
+    const revision = process.env.PIN_SHA ?? "";
+    const result = aggregate(paths.map((p) => JSON.parse(readFileSync(p, "utf8"))));
+    // Configured files that emit no mutants (constants.ts, protocolTypes.ts) appear in no report.
+    const configured = Object.values(shards).flat().length;
+    writeSummary(join(reportsDir, "summary.json"), {
+      shards: names,
+      configuredFiles: configured,
+      revision,
+      ...result,
+    });
+    const pct = (result.score * 100).toFixed(2);
+    const lines = [
+      `Full-surface mutation score: ${pct} % over ${configured} configured files (${result.files} with mutants, ${result.scored} scored mutants)`,
+      ...Object.entries(result.totals).map(([s, n]) => `  ${s}: ${n}`),
+    ];
+    console.log(lines.join("\n"));
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        jobSummary({
+          pct,
+          configured,
+          files: result.files,
+          shards: names.length,
+          scored: result.scored,
+          totals: result.totals,
+          revision,
+        }),
+      );
+    }
+  });
+}
+
+// The shard config throws without STRYKER_SHARD; any valid name satisfies it.
+process.env.STRYKER_SHARD ||= "livekit";
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();

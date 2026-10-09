@@ -87,6 +87,7 @@ export function describeNativeVoiceSuite(
     check("scopes microphone, subscription, volume and disconnect to a session id", async () => {
       await ctx.subject.setMicrophone(7, true);
       await ctx.subject.setPttGated(7, true);
+      await ctx.subject.setVoiceGate(7, 0.05);
       await ctx.subject.setSubscribed(7, "user-9", "TR_1", false);
       await ctx.subject.setVideoView(7, "user-9", "TR_2", true, "low");
       await ctx.subject.setVolume(7, "user-9", 0.5);
@@ -96,6 +97,7 @@ export function describeNativeVoiceSuite(
       expect(ctx.native.commands()).toEqual([
         ["native_voice_set_microphone", { session: 7, enabled: true }],
         ["native_voice_set_ptt_gated", { session: 7, gated: true }],
+        ["native_voice_set_voice_gate", { session: 7, threshold: 0.05 }],
         [
           "native_voice_set_subscribed",
           { session: 7, identity: "user-9", sid: "TR_1", subscribed: false },
@@ -173,7 +175,13 @@ export function describeNativeVoiceSuite(
         sources: [{ id: "screen:1", kind: "screen", title: "DP-1", thumbnail: null }],
       };
       const capture = { fps: 30, maxWidth: 1920, maxHeight: 1080 };
-      const publish = { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 };
+      const publish = {
+        width: 1920,
+        height: 1080,
+        maxBitrate: 6_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      };
       ctx.native.sharesScreenAs(sources, { capture: 2, width: 1920, height: 1080 }, "TR_screen");
       await expect(ctx.subject.screenSources()).resolves.toEqual(sources);
       await expect(ctx.subject.startScreen(7, "screen:1", capture)).resolves.toEqual({

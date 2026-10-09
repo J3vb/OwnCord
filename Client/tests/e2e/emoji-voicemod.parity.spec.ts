@@ -35,9 +35,8 @@ import {
 
 // ---------------------------------------------------------------------------
 // Call capture — records ws_send invocations (same pattern as
-// social.parity.spec.ts). Installed as a second init script, after the Tauri
-// mock sets up `invoke`, so it can see every outgoing call without touching
-// the shared helper file.
+// social.parity.spec.ts). Passed as a `wrappers` entry, so it runs in the
+// mock's init script after `invoke` is set up and sees every outgoing call.
 // ---------------------------------------------------------------------------
 
 interface CapturedCall {
@@ -206,12 +205,14 @@ async function mockVoiceSession(
   page: Page,
   verdict: boolean | null,
   roles: readonly unknown[] = MOCK_ROLES,
+  wrappers: Array<() => void> = [],
 ): Promise<void> {
   const channels = MOCK_CHANNELS_WITH_CATEGORIES.map((ch) =>
     ch.id === 10 && verdict !== null ? { ...ch, can_moderate_voice: verdict } : ch,
   );
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers,
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -223,11 +224,8 @@ async function mockVoiceSession(
         channels,
         members: MOCK_MEMBERS_MULTI_ROLE,
         voice_states: MOCK_VOICE_STATE,
-        // buildTauriMockScript's typed `readyOverrides` doesn't list `roles`,
-        // but buildReadyPayload (its implementation) does support it — this
-        // cast bridges that gap without touching the shared helper file.
-        roles,
-      } as unknown as Parameters<typeof buildTauriMockScript>[0]["readyOverrides"],
+        roles: [...roles],
+      },
     }),
   );
 }
@@ -244,8 +242,7 @@ async function openMenu(page: Page, uid = 2) {
 
 test.describe("@parity Voice moderation menu — the server says this user can moderate here", () => {
   test.beforeEach(async ({ page }) => {
-    await mockVoiceSession(page, true);
-    await page.addInitScript(captureScript);
+    await mockVoiceSession(page, true, MOCK_ROLES, [captureScript]);
     await page.goto("/");
     await navigateToMainPageReady(page);
   });

@@ -46,7 +46,7 @@ type ModerationConfig struct {
 	// ActionRetentionDays retires warning rows this many days after
 	// acknowledged_at and timeout rows the same number of days after
 	// expires_at/lifted_at (B5-9, scorecard decision 5), unless an appeal
-	// references them. Ban, kick and removal rows stay with the account —
+	// references them or one still owns a voice mute. Ban, kick and removal rows stay with the account —
 	// they are not on this clock. 0 means never retire.
 	ActionRetentionDays int `yaml:"action_retention_days"`
 }

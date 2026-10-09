@@ -7,8 +7,8 @@
  *   - Group DM leave:   DELETE /api/v1/dms/{id}  (SidebarArea.closeOrLeaveDm → api.closeDm)
  *   - Change Role:      PATCH /admin/api/users/{id} { role_id }  (SidebarMemberSection.onChangeRole)
  *
- * A second init script wraps window.__TAURI_INTERNALS__.invoke (installed
- * *after* the one buildTauriMockScript installs) to record every HTTP fetch
+ * A `wrappers` entry wraps window.__TAURI_INTERNALS__.invoke (run inside the
+ * init script buildTauriMockScript installs) to record every HTTP fetch
  * and ws_send call into window.__capturedCalls, so tests can assert the exact
  * outgoing request/method/body instead of only the resulting DOM state.
  */
@@ -38,7 +38,7 @@ interface CapturedCall {
   readonly message?: string;
 }
 
-/** Installed as a second init script, after the Tauri mock sets up `invoke`. */
+/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
 function captureScript(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -138,6 +138,7 @@ const CREATED_GROUP_DM = {
 async function mockSocialSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -157,7 +158,6 @@ async function mockSocialSession(page: Page): Promise<void> {
       },
     }),
   );
-  await page.addInitScript(captureScript);
 }
 
 test.describe("@parity Group DM create + leave", () => {
@@ -253,6 +253,7 @@ test.describe("@parity Group DM create + leave", () => {
 async function mockRoleChangeSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -266,7 +267,6 @@ async function mockRoleChangeSession(page: Page): Promise<void> {
       },
     }),
   );
-  await page.addInitScript(captureScript);
 }
 
 test.describe("@parity Change Role via member context menu", () => {

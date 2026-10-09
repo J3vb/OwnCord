@@ -19,11 +19,13 @@ import * as appLogger from "../../lib/logger";
 
 function setup() {
   const state = { generation: 0, roomKey: null as Uint8Array | null };
+  const onKeyInstalled = vi.fn();
   const worker = new E2EEWorker({
     getSessionGeneration: () => state.generation,
     getRoomKey: () => state.roomKey,
+    onKeyInstalled,
   });
-  return { state, worker };
+  return { state, worker, onKeyInstalled };
 }
 
 function deferred() {
@@ -90,6 +92,23 @@ describe("E2EEWorker.applyRoomKey", () => {
     expect(setKey.mock.calls.map((c) => c[0])).toEqual(["b64:1", "b64:2"]);
   });
 
+  it("reports a key install only for a key still owned once it landed", async () => {
+    const { state, worker, onKeyInstalled } = setup();
+    state.roomKey = new Uint8Array([1]);
+    await worker.applyRoomKey(state.roomKey);
+    expect(onKeyInstalled).toHaveBeenCalledTimes(1);
+
+    setKey.mockImplementationOnce(async () => {
+      state.generation++;
+    });
+    await worker.applyRoomKey(state.roomKey);
+    expect(onKeyInstalled).toHaveBeenCalledTimes(1);
+
+    setKey.mockRejectedValueOnce(new Error("import failed"));
+    await expect(worker.applyRoomKey(state.roomKey)).rejects.toThrow("import failed");
+    expect(onKeyInstalled).toHaveBeenCalledTimes(1);
+  });
+
   it("a failed import rejects its caller without blocking later writes", async () => {
     const { state, worker } = setup();
     state.roomKey = new Uint8Array([1]);
@@ -128,9 +147,15 @@ describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
     vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { setRoomKey } } }));
     const { E2EEWorker: LinuxWorker } = await import("./e2eeWorker");
     const roomKey = new Uint8Array([9]);
-    const worker = new LinuxWorker({ getSessionGeneration: () => 0, getRoomKey: () => roomKey });
+    const onKeyInstalled = vi.fn();
+    const worker = new LinuxWorker({
+      getSessionGeneration: () => 0,
+      getRoomKey: () => roomKey,
+      onKeyInstalled,
+    });
     await expect(worker.applyRoomKey(roomKey)).resolves.toBe(true);
     expect(setRoomKey).toHaveBeenCalledWith("b64:9");
+    expect(onKeyInstalled).toHaveBeenCalledTimes(1);
     expect(setKey).not.toHaveBeenCalled();
     vi.doUnmock("./native/platform");
     vi.doUnmock("../../platform/desktop");

@@ -511,43 +511,6 @@
   flex-shrink: 0;
 }
 
-/* ── Inline stream preview (voice channel sidebar hover) ── */
-.vu-preview {
-  margin: 2px 0;
-  height: 0;
-  overflow: hidden;
-  transition: height var(--transition-slow) ease;
-}
-.vu-preview video {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
-  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 8%, transparent);
-  display: block;
-}
-.vu-preview video.preview-camera {
-  object-fit: cover;
-}
-.vu-preview video.preview-screen {
-  object-fit: cover;
-}
-.vu-preview-placeholder {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  border: 1px solid color-mix(in srgb, var(--accent) 8%, transparent);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  color: var(--text-faint);
-  font-size: var(--font-size-xxs);
-  cursor: pointer;
-}
 .sr-only {
   position: absolute;
   width: 1px;

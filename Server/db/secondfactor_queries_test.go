@@ -66,6 +66,51 @@ func TestPartialAuthPersistence_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestIncrementPartialAuthFailures(t *testing.T) {
+	ctx := context.Background()
+	database, uid := secondFactorTestDB(t)
+	now := time.Now()
+	count := func() int {
+		var n int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM partial_auth_challenges`).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return n
+	}
+
+	// A missing row is reported gone and never created.
+	if n, found, err := database.IncrementPartialAuthFailures(ctx, "missing", now); err != nil || found || n != 0 {
+		t.Fatalf("Increment(missing) = %d, %v, %v; want 0, false, nil", n, found, err)
+	}
+	if got := count(); got != 0 {
+		t.Fatalf("rows after incrementing a missing challenge = %d, want 0", got)
+	}
+
+	// An expired row is reported gone and left as it was.
+	if err := database.UpsertPartialAuth(ctx, "old", uid, "", "", 2, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if n, found, err := database.IncrementPartialAuthFailures(ctx, "old", now); err != nil || found || n != 0 {
+		t.Fatalf("Increment(expired) = %d, %v, %v; want 0, false, nil", n, found, err)
+	}
+	if _, _, _, failures, _, _, err := database.GetPartialAuth(ctx, "old"); err != nil || failures != 2 {
+		t.Fatalf("expired row failures = %d, err %v; want 2", failures, err)
+	}
+
+	// A live row counts up and reports the new total.
+	if err := database.UpsertPartialAuth(ctx, "live", uid, "", "", 0, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	for want := 1; want <= 2; want++ {
+		if n, found, err := database.IncrementPartialAuthFailures(ctx, "live", now); err != nil || !found || n != want {
+			t.Fatalf("Increment(live) = %d, %v, %v; want %d, true, nil", n, found, err, want)
+		}
+	}
+	if got := count(); got != 2 {
+		t.Fatalf("rows = %d, want 2", got)
+	}
+}
+
 func TestPendingTOTPPersistence_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)

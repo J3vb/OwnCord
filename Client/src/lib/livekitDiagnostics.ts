@@ -1,6 +1,6 @@
 // LiveKit diagnostics — ICE connection logging and session debug info
 import type { Room } from "livekit-client";
-import { RoomEvent, Track } from "livekit-client";
+import { LogLevel, RoomEvent, Track, setLogExtension, setLogLevel } from "livekit-client";
 import { createLogger } from "@lib/logger";
 import { parseUserId } from "../features/voice/sessionState";
 import { onRoom } from "../features/voice/releaseRoom";
@@ -9,6 +9,19 @@ import type { AudioPipeline } from "@lib/audioPipeline";
 import type { AudioElements } from "@lib/audioElements";
 
 const log = createLogger("livekitDiagnostics");
+
+const sdkLog = createLogger("livekit");
+
+/** Route livekit-client's own warnings and errors (reconnect attempts and why
+ *  they failed, capture restarts) into the OwnCord log so a support bundle
+ *  carries them; below warn the SDK is too chatty to keep. */
+export function installLivekitLogging(): void {
+  setLogLevel(LogLevel.warn);
+  setLogExtension((level, msg, context) => {
+    if (level >= LogLevel.error) sdkLog.error(msg, context);
+    else if (level === LogLevel.warn) sdkLog.warn(msg, context);
+  });
+}
 
 /** Attach lightweight diagnostic-only event listeners to a Room. */
 export function attachDiagnosticListeners(room: Room): void {
@@ -185,6 +198,7 @@ export function buildSessionDebugInfo(deps: SessionDebugDeps): Record<string, un
     audioPipelineCtxState: audioPipeline.ctxState,
     vadGated: audioPipeline.isVadGated,
     currentInputGain: audioPipeline.inputGain,
+    localMicSettings: audioPipeline.micSettings,
     localParticipant: room.localParticipant.identity,
     localTracks,
     remoteParticipants,

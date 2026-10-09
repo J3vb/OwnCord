@@ -21,6 +21,8 @@ const log = createLogger("server-panel");
 export interface SimpleProfile {
   readonly name: string;
   readonly host: string;
+  /** An unsaved placeholder (fresh install); it never blocks adding the same host. */
+  readonly synthetic?: boolean;
 }
 
 /** Color palette for server icons. */
@@ -83,6 +85,8 @@ export function createServerPanel(
   opts: ServerPanelOptions,
   initialProfiles: readonly SimpleProfile[],
 ): ServerPanelApi {
+  // The list last rendered; the add-server guard checks it for a duplicate host.
+  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
   // Monotonic token: only the newest credential load may apply.
   let credentialLoadSeq = 0;
   const {
@@ -151,6 +155,7 @@ export function createServerPanel(
   }
 
   function renderServerProfiles(profiles: readonly SimpleProfile[]): void {
+    knownProfiles = profiles;
     renderOwner?.destroy();
     const currentRender = new Disposable();
     renderOwner = currentRender;
@@ -518,6 +523,13 @@ export function createServerPanel(
       if (!isValidHost(addr)) {
         // Show inline validation error via the host input
         hostAddrInput.setCustomValidity(connectText("servers.add.invalidHost"));
+        hostAddrInput.reportValidity();
+        return;
+      }
+      // Credentials are stored per host, so a second profile for the same host
+      // would share (and overwrite) the first one's saved sign-in.
+      if (knownProfiles.some((p) => !p.synthetic && p.host.toLowerCase() === addr.toLowerCase())) {
+        hostAddrInput.setCustomValidity(connectText("servers.add.duplicateHost"));
         hostAddrInput.reportValidity();
         return;
       }

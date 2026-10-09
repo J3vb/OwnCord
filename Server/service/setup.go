@@ -30,12 +30,15 @@ var ErrSetupAlreadyDone = errors.New("setup has already been completed")
 // become warnings instead, and run detached from the request context so a
 // client that disconnects right after the commit cannot take them down.
 type SetupService struct {
-	st Store
+	st      Store
+	limiter *auth.RateLimiter
 }
 
-// NewSetupService creates a SetupService.
-func NewSetupService(st Store) *SetupService {
-	return &SetupService{st: st}
+// NewSetupService creates a SetupService. limiter is the process-wide one
+// whose admission budget Bootstrap's password hash queues on; nil skips the
+// budget (the admin mux's standalone fallback has no shared limiter).
+func NewSetupService(st Store, limiter *auth.RateLimiter) *SetupService {
+	return &SetupService{st: st, limiter: limiter}
 }
 
 // ownerRoleID is the role the first account is created with.
@@ -118,9 +121,19 @@ func (s *SetupService) NeedsSetup(ctx context.Context) (bool, error) {
 // if the account could not be created; after that point it always succeeds,
 // reporting partial failures in Warnings — see the type's doc comment.
 func (s *SetupService) Bootstrap(ctx context.Context, in BootstrapInput) (*BootstrapResult, error) {
-	hash, err := auth.HashPassword(in.Password)
+	// Refuse a finished server before spending a hash on it. The advisory read
+	// is not the gate: CreateOwnerIfEmpty below still is.
+	needs, err := s.NeedsSetup(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to hash password: %w", ErrInternal, err)
+		return nil, err
+	}
+	if !needs {
+		return nil, ErrSetupAlreadyDone
+	}
+
+	hash, err := s.hashPassword(ctx, in.Password)
+	if err != nil {
+		return nil, err
 	}
 
 	// Atomic check-and-create (BUG-119): a UserCount followed by an insert
@@ -144,6 +157,23 @@ func (s *SetupService) Bootstrap(ctx context.Context, in BootstrapInput) (*Boots
 		res.RecoveryKitSecret = s.issueRecoveryKitAtSetup(ctx, uid, &res.Warnings)
 	}
 	return res, nil
+}
+
+// hashPassword hashes under the process-wide admission budget the login and
+// registration paths share, so setup cannot add bcrypt work beside it.
+func (s *SetupService) hashPassword(ctx context.Context, password string) (string, error) {
+	if s.limiter != nil {
+		release, retryAfter, ok := s.limiter.Admission().Acquire(ctx, auth.AdmissionWait)
+		defer release()
+		if !ok {
+			return "", &authBusyError{retryAfter}
+		}
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return "", fmt.Errorf("%w: failed to hash password: %w", ErrInternal, err)
+	}
+	return hash, nil
 }
 
 // issueRecoveryKitAtSetup generates the owner's recovery kit and stores its
@@ -194,7 +224,7 @@ func (s *SetupService) issueSetupSession(ctx context.Context, uid int64, device,
 	if len(device) > maxDeviceLen {
 		device = device[:maxDeviceLen]
 	}
-	if _, err := s.st.CreateSession(ctx, uid, auth.HashToken(token), device, host); err != nil {
+	if _, err := s.st.CreateFirstSession(ctx, uid, auth.HashToken(token), device, host); err != nil {
 		slog.Error("setup: failed to create session", "error", err)
 		*warnings = append(*warnings, noSessionWarning)
 		return ""

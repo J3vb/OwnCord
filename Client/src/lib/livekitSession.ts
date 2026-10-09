@@ -10,6 +10,7 @@ import {
   isPttPollingLive,
   setListenOnly,
   setVoiceStatus,
+  setLocalGateSpeaking,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
@@ -24,7 +25,7 @@ import {
   stopManualScreenTracks,
   bumpGeneration,
 } from "@lib/screenShare";
-import { buildSessionDebugInfo } from "@lib/livekitDiagnostics";
+import { buildSessionDebugInfo, installLivekitLogging } from "@lib/livekitDiagnostics";
 import { createRoomEventHandlers, type RoomEventHandlers } from "@lib/roomEventHandlers";
 import { VoiceTokenManager } from "@lib/voiceTokenManager";
 import { LiveKitUrlResolver } from "@lib/livekitUrlResolver";
@@ -119,6 +120,7 @@ export class LiveKitSession {
     getWs: () => this.ws,
     getServerHost: () => this.serverHost,
     getCurrentChannelId: () => this._currentChannelId,
+    onRoomKeyInstalled: () => this._eventHandlers.noteRoomKeyInstalled(),
   });
 
   // --- Test-visibility proxies (E2EE state lives in E2EEManager; unit tests
@@ -326,6 +328,7 @@ export class LiveKitSession {
   private _screenState: ScreenTrackState = { manualScreenTracks: [] };
 
   constructor() {
+    this._audioPipeline.onGateSpeaking = setLocalGateSpeaking;
     this._eventHandlers = createRoomEventHandlers({
       getRoom: () => this._room,
       setRoom: (r) => {
@@ -885,11 +888,6 @@ export class LiveKitSession {
     );
   }
 
-  /** Get a remote participant's video MediaStream by userId and track type. Returns null if not available. */
-  getRemoteVideoStream(userId: number, type: "camera" | "screenshare"): MediaStream | null {
-    return this._remoteTracks.getRemoteVideoStream(userId, type);
-  }
-
   /** One receiver sample of a remote camera or screen share (video tile chip). */
   getRemoteVideoStats(
     userId: number,
@@ -898,14 +896,9 @@ export class LiveKitSession {
     return this._remoteTracks.getRemoteVideoStats(userId, type);
   }
 
-  /** Ask for only what a remote video tile, or the hover preview, shows (P3-07). */
-  setRemoteVideoView(
-    userId: number,
-    type: "camera" | "screenshare",
-    view: VideoView,
-    preview?: boolean,
-  ): void {
-    this._remoteTracks.setRemoteVideoView(userId, type, view, preview);
+  /** Ask for only what a remote video tile shows (P3-07). */
+  setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
+    this._remoteTracks.setRemoteVideoView(userId, type, view);
   }
 
   getRoom(): Room | null {
@@ -919,6 +912,11 @@ export class LiveKitSession {
    *  wants to know "should we tear anything down" must not miss those. */
   hasActiveSession(): boolean {
     return this._state.type !== "idle";
+  }
+
+  /** The live microphone capture's settings, for Settings to name it. */
+  getLocalMicSettings(): MediaTrackSettings | null {
+    return this._audioPipeline.micSettings;
   }
 
   getSessionDebugInfo(): Record<string, unknown> {
@@ -944,6 +942,7 @@ export class LiveKitSession {
 
 // --- Singleton instance + re-exported bound methods ---
 
+installLivekitLogging();
 const session = new LiveKitSession();
 
 // Expose debug info on window under __owncord namespace for DevTools console access
@@ -953,6 +952,10 @@ const owncordNs = ((window as unknown as Record<string, unknown>).__owncord ??= 
   unknown
 >;
 owncordNs.lkDebug = session.getSessionDebugInfo.bind(session);
+// Status seam for the production-build e2e suite, which cannot import stores:
+// it stands in for room.connect() succeeding (no real LiveKit server there).
+owncordNs.voiceStatus = () => voiceStore.getState().voiceStatus;
+owncordNs.setVoiceStatus = setVoiceStatus;
 
 export const setWsClient = session.setWsClient.bind(session);
 export const setServerHost = session.setServerHost.bind(session);
@@ -990,10 +993,10 @@ export const reapplyEnhancedNoiseSuppression =
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
-export const getRemoteVideoStream = session.getRemoteVideoStream.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
+export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);
 export const muteScreenshareAudio = session.muteScreenshareAudio.bind(session);

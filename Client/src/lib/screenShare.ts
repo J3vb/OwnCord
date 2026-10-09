@@ -6,7 +6,9 @@
  */
 
 import {
+  AudioPresets,
   Track,
+  VideoPreset,
   VideoPresets,
   ScreenSharePresets,
   createLocalScreenTracks,
@@ -17,6 +19,7 @@ import {
   type VideoCaptureOptions,
   type ScreenShareCaptureOptions,
   type AudioCaptureOptions,
+  type TrackPublishOptions,
 } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
@@ -54,18 +57,50 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
   source: 8_000_000,
 };
 
+/** A 1080p camera's lower layers (the SDK adds the full-resolution one on
+ *  top). Its default 180p/360p pair leaves a viewer on a 1-3 Mbps link a
+ *  blurry 360p picture with stalls when a 720p layer would fit. Only the high
+ *  preset needs it: the 720p preset's own default layers already end at 360p
+ *  below it. Mirrored by `camera_publish_options` in native_voice/session.rs. */
+export function cameraSimulcastLayers(quality: StreamQuality): VideoPreset[] | undefined {
+  return quality === "high" ? [VideoPresets.h360, VideoPresets.h720] : undefined;
+}
+
 /** Screen-share audio: capture it, but exclude OwnCord's own playback from the
  *  captured stream. Without `restrictOwnAudio` a screen share on Windows
  *  captures system loopback — the call itself — and echoes every other caller
  *  back into the stream the viewers hear. Chromium-only (WebView2 included);
- *  other browsers ignore the constraint and keep their current behaviour. */
-const SCREENSHARE_AUDIO: AudioCaptureOptions = { restrictOwnAudio: true };
+ *  other browsers ignore the constraint and keep their current behaviour.
+ *  It only takes effect through the real picker: with
+ *  `--use-fake-ui-for-media-stream` Chromium answers getDisplayMedia with the
+ *  default microphone as the "screen audio" and never reads it, so the window
+ *  must not pass that flag (see tauri.conf.json).
+ *
+ *  The captured track is game or music audio, not a voice: Chromium's voice
+ *  processing is switched off (it would duck, gate and compress it) and stereo
+ *  is requested. Published as music in `SCREENSHARE_AUDIO_PUBLISH`. */
+const SCREENSHARE_AUDIO: AudioCaptureOptions = {
+  restrictOwnAudio: true,
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 2,
+};
+
+/** Publish options for the screen-share audio track. Without them it inherits
+ *  the voice defaults: DTX (pumps quiet passages), mono, and the operator's
+ *  voice bitrate. */
+const SCREENSHARE_AUDIO_PUBLISH: TrackPublishOptions = {
+  dtx: false,
+  forceStereo: true,
+  audioPreset: AudioPresets.musicHighQualityStereo,
+};
 
 export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOptions> = {
   low: { audio: SCREENSHARE_AUDIO, resolution: ScreenSharePresets.h720fps5.resolution },
   medium: {
     audio: SCREENSHARE_AUDIO,
-    resolution: ScreenSharePresets.h1080fps15.resolution,
+    resolution: ScreenSharePresets.h720fps30.resolution,
     contentHint: "detail",
   },
   high: {
@@ -83,18 +118,50 @@ export const SCREENSHARE_PUBLISH_BITRATES: Record<StreamQuality, number> = {
   source: 10_000_000,
 };
 
-export function getStreamQuality(): StreamQuality {
-  const saved = loadPref<string>("streamQuality", "high");
+function loadQuality(key: string, fallback: StreamQuality): StreamQuality {
+  const saved = loadPref<string>(key, fallback);
   if (saved === "low" || saved === "medium" || saved === "high" || saved === "source") return saved;
-  return "high";
+  return fallback;
 }
+
+/** The camera's quality: 720p by default (half the encode CPU of 1080p, and a
+ *  720p tile is what a grid shows). It keeps the `streamQuality` key it shared
+ *  with the screen share before the two were split, so a saved choice carries
+ *  over. */
+export function getCameraQuality(): StreamQuality {
+  return loadQuality("streamQuality", "medium");
+}
+
+/** The screen share's quality. 720p30 by default: scrolling text at 1080p
+ *  needs about 5 Mbps to stay fluid, and slides to 1-2 fps below that. */
+export function getScreenShareQuality(): StreamQuality {
+  return loadQuality("screenShareQuality", "medium");
+}
+
+/** Whether a screen share at `quality` is published with
+ *  SCREENSHARE_SIMULCAST_LAYERS. Without a lower layer the SFU can only send
+ *  a viewer whose link cannot carry the share the full stream, which they
+ *  cannot decode at all (a frozen frame), while their keyframe requests raise
+ *  the bitrate for every other viewer. Low is already a small stream, and
+ *  Source is meant to arrive untouched. */
+export function isScreenShareSimulcast(quality: StreamQuality): boolean {
+  return quality === "medium" || quality === "high";
+}
+
+/** The screen share's one lower layer (the SDK adds the full-resolution one
+ *  on top): 720p keeps text readable, and 15 fps at 1.2 Mbps leaves most of
+ *  the budget to the top layer. */
+export const SCREENSHARE_SIMULCAST_LAYERS: readonly VideoPreset[] = [
+  new VideoPreset(1280, 720, 1_200_000, 15),
+];
 
 // ---------------------------------------------------------------------------
 // Screen share frame rate
 // ---------------------------------------------------------------------------
 
-/** Saved screen share FPS preference. 30 is the default and preserves the
- *  historical per-quality caps (5/15/30); 60/120 are explicit overrides. */
+/** Saved screen share FPS preference. 30 is the default and keeps each
+ *  quality's own cap (5 for low, 30 otherwise); 60/120 are explicit
+ *  overrides. */
 export function getScreenShareFps(): number {
   const saved = loadPref<number>("screenShareFps", 30);
   return saved === 60 || saved === 120 ? saved : 30;
@@ -103,7 +170,7 @@ export function getScreenShareFps(): number {
 /** Effective capture/publish frame rate for a quality + fps preference. */
 export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number): number {
   if (fps !== 60 && fps !== 120) {
-    return quality === "low" ? 5 : quality === "medium" ? 15 : 30;
+    return quality === "low" ? 5 : 30;
   }
   return fps;
 }
@@ -230,6 +297,7 @@ interface NativeCameraParticipant {
   createCameraTracks(options: {
     source?: string;
     simulcast?: boolean;
+    resolution?: { width: number; height: number };
     videoEncoding?: { maxBitrate: number; maxFramerate?: number };
   }): Promise<NativeCameraTrack[]>;
 }
@@ -275,7 +343,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
   }
   const generation = state.generation ?? 0;
   setLocalCamera(true);
-  const quality = getStreamQuality();
+  const quality = getCameraQuality();
   let cameraEndedCleanup: (() => void) | undefined;
   try {
     // Linux captures in the backend, which needs GStreamer's camera elements:
@@ -307,6 +375,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
             await room.localParticipant.createCameraTracks({
               source: Track.Source.Camera,
               simulcast: quality !== "source",
+              ...(quality === "source" ? {} : { resolution: CAMERA_PRESETS[quality].resolution }),
               videoEncoding: {
                 maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
                 maxFramerate: quality === "low" ? 15 : 30,
@@ -350,9 +419,11 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       await disableCamera(state, deps);
       return;
     }
+    const simulcastLayers = cameraSimulcastLayers(quality);
     await room.localParticipant.publishTrack(videoTrack, {
       source: Track.Source.Camera,
       simulcast: quality !== "source",
+      ...(simulcastLayers ? { videoSimulcastLayers: simulcastLayers } : {}),
       videoEncoding: {
         maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
         maxFramerate: quality === "low" ? 15 : 30,
@@ -459,7 +530,7 @@ export async function enableScreenshare(
     return;
   }
   setLocalScreenshare(true);
-  const quality = getStreamQuality();
+  const quality = getScreenShareQuality();
   const fps = getScreenShareFps();
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
@@ -514,18 +585,23 @@ export async function enableScreenshare(
     }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
+      const simulcast = isVideo && isScreenShareSimulcast(quality);
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
         source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
-        simulcast: false,
+        simulcast,
+        // livekit-client takes a screen share's encoding from
+        // screenShareEncoding; it ignores videoEncoding for that source.
         ...(isVideo
           ? {
-              videoEncoding: {
+              screenShareEncoding: {
                 maxBitrate,
                 maxFramerate: effectiveFps,
               },
             }
           : {}),
+        ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
+        ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
       });
       if ((state.generation ?? 0) !== generation) {
         removeEndedListener?.();
@@ -635,25 +711,5 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
   const screenPub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
   if (screenPub?.track?.mediaStreamTrack)
     return new MediaStream([screenPub.track.mediaStreamTrack]);
-  return null;
-}
-
-export function getRemoteVideoStream(
-  room: Room | null,
-  userId: number,
-  type: "camera" | "screenshare",
-): MediaStream | null {
-  if (room === null) return null;
-  const source = type === "screenshare" ? Track.Source.ScreenShare : Track.Source.Camera;
-  // Iterate remote participants — identity may include a ":token" suffix
-  // (e.g. "user-42:abc123") so exact getParticipantByIdentity won't match.
-  for (const participant of room.remoteParticipants.values()) {
-    const match = participant.identity.match(/^user-(\d+)(?::|$)/);
-    if (match !== null && parseInt(match[1]!, 10) === userId) {
-      const pub = participant.getTrackPublication(source);
-      if (pub?.track?.mediaStreamTrack) return new MediaStream([pub.track.mediaStreamTrack]);
-      return null;
-    }
-  }
   return null;
 }

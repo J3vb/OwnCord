@@ -98,7 +98,7 @@ export function showUserVolumeMenu(
     type: "range",
     class: "settings-slider",
     min: "0",
-    max: "200",
+    max: "100",
     value: String(currentVol),
     style: "flex:1",
   });

@@ -37,6 +37,11 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
 
 const webKeyProvider = vi.hoisted(() => ({ setKey: vi.fn(), removeAllListeners: vi.fn() }));
 vi.mock("livekit-client", () => ({
+  // installLivekitLogging runs when livekitSession loads.
+  LogLevel: { warn: 3, error: 4 },
+  setLogLevel: vi.fn(),
+  setLogExtension: vi.fn(),
+  AudioPresets: { musicHighQualityStereo: { maxBitrate: 128_000 } },
   Room: vi.fn(function () {
     throw new Error("the web Room must not be built on Linux");
   }),
@@ -69,7 +74,8 @@ vi.mock("livekit-client", () => ({
     Kind: { Audio: "audio", Video: "video" },
   },
   VideoPresets: { h360: {}, h720: {}, h1080: {} },
-  ScreenSharePresets: { h720fps5: {}, h1080fps15: {}, h1080fps30: {} },
+  ScreenSharePresets: { h720fps5: {}, h720fps30: {}, h1080fps30: {} },
+  VideoPreset: vi.fn(),
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
   ExternalE2EEKeyProvider: vi.fn(function () {
     return webKeyProvider;
@@ -93,6 +99,7 @@ vi.mock("@stores/voice.store", () => ({
   setSpeakers: vi.fn(),
   leaveVoiceChannel: vi.fn(),
   setListenOnly: vi.fn(),
+  setLocalGateSpeaking: vi.fn(),
   setVoiceStatus: vi.fn(),
   setPeerVerification: vi.fn(),
   clearPeerVerification: vi.fn(),
@@ -139,6 +146,10 @@ vi.mock("../../src/platform/desktop", () => ({
       },
       setPttGated: (...args: unknown[]) => {
         host.commands.push(["setPttGated", args]);
+        return Promise.resolve();
+      },
+      setVoiceGate: (...args: unknown[]) => {
+        host.commands.push(["setVoiceGate", args]);
         return Promise.resolve();
       },
       setSubscribed: (...args: unknown[]) => {
@@ -297,7 +308,13 @@ describe("LiveKitSession on the Linux native backend", () => {
   it("installs the room key natively before connecting, then publishes the mic", async () => {
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
     // The push-to-talk gate is set before the capture opens behind it.
-    expect(names()).toEqual(["setRoomKey", "connect", "setPttGated", "setMicrophone"]);
+    expect(names()).toEqual([
+      "setRoomKey",
+      "connect",
+      "setPttGated",
+      "setVoiceGate",
+      "setMicrophone",
+    ]);
     expect(host.commands[0]).toEqual(["setRoomKey", ["mock-room-key-base64"]]);
     expect(host.commands[1]).toEqual([
       "connect",
@@ -313,7 +330,8 @@ describe("LiveKitSession on the Linux native backend", () => {
       ],
     ]);
     expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
-    expect(host.commands[3]).toEqual(["setMicrophone", [1, true]]);
+    expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05]]);
+    expect(host.commands[4]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
     expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
     expect(setListenOnly).toHaveBeenCalledWith(false);
@@ -425,9 +443,9 @@ describe("LiveKitSession on the Linux native backend", () => {
     session.setUserVolume(4, 150);
     session.setOutputVolume(50);
     expect(host.commands.filter(([n]) => n === "setVolume")).toEqual([
-      ["setVolume", [1, "user-4", 1.5]],
+      ["setVolume", [1, "user-4", 1]],
       ["setVolume", [1, "user-3", 0.25]],
-      ["setVolume", [1, "user-4", 0.75]],
+      ["setVolume", [1, "user-4", 0.5]],
     ]);
   });
 
@@ -436,7 +454,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     host.commands.length = 0;
     const sent = () => host.commands.filter(([n]) => n === "setScreenshareVolume");
-    // Per-user stream volume x master output, clamped to 0-1; muted is 0.
+    // Per-user stream volume x master output, clamped to 0-1 (output volume caps at 100%); muted is 0.
     session.setScreenshareAudioVolume(3, 0.8);
     session.setOutputVolume(50);
     session.muteScreenshareAudio(3, true);
@@ -447,7 +465,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       ["setScreenshareVolume", [1, "user-3", 0.4]],
       ["setScreenshareVolume", [1, "user-3", 0]],
       ["setScreenshareVolume", [1, "user-3", 0.4]],
-      ["setScreenshareVolume", [1, "user-3", 1]],
+      ["setScreenshareVolume", [1, "user-3", 0.8]],
     ]);
   });
 
@@ -481,10 +499,11 @@ describe("LiveKitSession on the Linux native backend", () => {
         "setRoomKey",
         "connect",
         "setPttGated",
+        "setVoiceGate",
         "setMicrophone",
       ]);
       expect(host.commands[0]).toEqual(["disconnect", [1]]);
-      expect(host.commands[4]).toEqual(["setMicrophone", [2, true]]);
+      expect(host.commands[5]).toEqual(["setMicrophone", [2, true]]);
       expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
       // The old session's subscription is gone; only the new room listens.
       expect(host.handlers.size).toBe(1);
@@ -504,10 +523,11 @@ describe("LiveKitSession on the Linux native backend", () => {
       "setRoomKey",
       "connect",
       "setPttGated",
+      "setVoiceGate",
       "setMicrophone",
     ]);
     expect(host.commands[0]).toEqual(["disconnect", [1]]);
-    expect(host.commands[5]).toEqual(["setMicrophone", [2, true]]);
+    expect(host.commands[6]).toEqual(["setMicrophone", [2, true]]);
   });
 
   it("screen share captures natively and stops when the desktop ends it", async () => {
@@ -521,10 +541,17 @@ describe("LiveKitSession on the Linux native backend", () => {
     // Wayland here: the portal picks, so no source list is shown.
     expect(host.commands).toEqual([
       ["screenSources", []],
+      // The default (medium) share: 3 Mbps at 30 fps with the simulcast
+      // layer. This file's livekit mock presets carry no resolution, so the
+      // capture keeps its 1080p fallback.
       ["startScreen", [1, "portal", { fps: 30, maxWidth: 1920, maxHeight: 1080 }]],
       [
         "publishScreen",
-        [1, 3, { width: 1920, height: 1080, maxBitrate: 6_000_000, maxFramerate: 30 }],
+        [
+          1,
+          3,
+          { width: 1920, height: 1080, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+        ],
       ],
     ]);
     expect(ws.send).toHaveBeenLastCalledWith({

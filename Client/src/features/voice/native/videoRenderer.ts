@@ -8,7 +8,7 @@
 // latest frame instead of queueing them.
 //
 // The canvas is exposed as a `MediaStreamTrack` (`canvas.captureStream()`),
-// so the video grid, stream previews and track lifecycle keep consuming
+// so the video grid and track lifecycle keep consuming
 // MediaStreams exactly as they do for browser LiveKit tracks.
 //
 // Lifecycle (B7-11): the owner (`NativeRoom`) disposes it when the track is

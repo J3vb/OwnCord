@@ -43,6 +43,10 @@ type SecondFactorPersister interface {
 	// DeletePartialAuth reports whether a row was deleted, which is what makes
 	// Consume single-winner across concurrent verifications.
 	DeletePartialAuth(ctx context.Context, tokenHash string) (deleted bool, err error)
+	// IncrementPartialAuthFailures counts a failure against a live challenge
+	// and returns the new total; found is false when it is gone or expired.
+	// It never creates a row.
+	IncrementPartialAuthFailures(ctx context.Context, tokenHash string, now time.Time) (failures int, found bool, err error)
 
 	UpsertPendingTOTP(ctx context.Context, userID int64, encryptedSecret string, expiresAt time.Time) error
 	GetPendingTOTP(ctx context.Context, userID int64) (encryptedSecret string, expiresAt time.Time, found bool, err error)
@@ -214,30 +218,31 @@ func (s *PartialAuthStore) Restore(ctx context.Context, token string, challenge 
 }
 
 // RegisterFailure counts a wrong code against the challenge and reports
-// whether it is still alive. The read-increment-write runs under the lock,
-// so concurrent failures in one process never lose an increment.
+// whether it is still alive. With a persister the count is one conditional
+// update, so it never loses an increment and never recreates a challenge a
+// concurrent Consume has already deleted; without one the map
+// read-increment-write runs under the lock.
 func (s *PartialAuthStore) RegisterFailure(ctx context.Context, token string, maxFailures int) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.persist != nil {
-		entry, ok := s.load(ctx, token)
-		if !ok {
+		failures, found, err := s.persist.IncrementPartialAuthFailures(ctx, HashToken(token), time.Now())
+		if err != nil {
+			slog.Warn("partial-auth: persisting a failure count failed", "err", err)
+			return true
+		}
+		if !found {
 			return false
 		}
-		entry.Failures++
-		if entry.Failures >= maxFailures {
+		if failures >= maxFailures {
 			if _, err := s.persist.DeletePartialAuth(ctx, HashToken(token)); err != nil {
 				slog.Warn("partial-auth: deleting an exhausted challenge failed", "err", err)
 			}
 			return false
 		}
-		if err := s.persist.UpsertPartialAuth(ctx, HashToken(token), entry.UserID, entry.Device, entry.IP, entry.Failures, entry.ExpiresAt); err != nil {
-			slog.Warn("partial-auth: persisting a failure count failed", "err", err)
-		}
 		return true
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cleanupExpiredLocked()
 	entry, ok := s.entries[token]
 	if !ok {

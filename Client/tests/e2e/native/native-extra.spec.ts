@@ -247,7 +247,9 @@ async function storedStatus(server: TestServer): Promise<string | undefined> {
 }
 
 /** The tray menu is native OS UI that CDP cannot click; this is the event
- *  src-tauri/src/tray.rs emits for each Status item. */
+ *  src-tauri/src/tray.rs emits for each Status item. The menu id → payload
+ *  mapping is unit-tested in tray.rs (`menu_action`); this helper only covers
+ *  the renderer half. */
 function trayPick(page: Page, status: string): Promise<unknown> {
   return invoke(page, "plugin:event|emit", { event: "status-change", payload: status });
 }

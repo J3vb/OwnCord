@@ -29,21 +29,43 @@ function redactReplies(
   );
 }
 
+/** The server caps a reply snippet at 100 code points (Server/db/referenced_message.go). */
+const SNIPPET_MAX_CODE_POINTS = 100;
+
+/** Refresh the snippet text of every reply to `parentId`; `list` itself when none. */
+function refreshReplies(
+  list: readonly Message[],
+  parentId: number,
+  content: string,
+): readonly Message[] {
+  if (!list.some((m) => m.referencedMessage?.id === parentId)) return list;
+  const snippet = Array.from(content).slice(0, SNIPPET_MAX_CODE_POINTS).join("");
+  return list.map((m) =>
+    m.referencedMessage?.id === parentId
+      ? { ...m, referencedMessage: { ...m.referencedMessage, content: snippet } }
+      : m,
+  );
+}
+
 /** editMessage's reducer. */
 export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
 
-  const updatedList = channelMessages.map((msg) =>
-    msg.id === payload.message_id
-      ? {
-          ...msg,
-          content: payload.content,
-          editedAt: payload.edited_at,
-          mentions: payload.mentions,
-          mentionsEveryone: payload.mentions_everyone,
-        }
-      : msg,
+  const updatedList = refreshReplies(
+    channelMessages.map((msg) =>
+      msg.id === payload.message_id
+        ? {
+            ...msg,
+            content: payload.content,
+            editedAt: payload.edited_at,
+            mentions: payload.mentions,
+            mentionsEveryone: payload.mentions_everyone,
+          }
+        : msg,
+    ),
+    payload.message_id,
+    payload.content,
   );
 
   const updatedMessages = new Map(prev.messagesByChannel);

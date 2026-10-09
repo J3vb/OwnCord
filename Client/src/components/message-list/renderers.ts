@@ -84,7 +84,11 @@ export function renderDayDivider(iso: string): HTMLDivElement {
 export function renderUnreadBar(
   onMarkRead: () => void,
   signal: AbortSignal,
-): { readonly bar: HTMLDivElement; readonly label: HTMLSpanElement } {
+): {
+  readonly bar: HTMLDivElement;
+  readonly label: HTMLSpanElement;
+  readonly announcer: HTMLDivElement;
+} {
   const bar = createElement("div", { class: "unread-bar", "data-testid": "unread-bar" });
   bar.hidden = true;
   const label = createElement("span", { "data-testid": "unread-bar-label" });
@@ -95,7 +99,14 @@ export function renderUnreadBar(
   );
   markRead.addEventListener("click", onMarkRead, { signal });
   appendChildren(bar, label, markRead);
-  return { bar, label };
+  // A persistent live region outside the hidden bar: changes inside a hidden
+  // region are not announced.
+  const announcer = createElement("div", {
+    class: "sr-only",
+    role: "status",
+    "data-testid": "unread-bar-announcer",
+  });
+  return { bar, label, announcer };
 }
 
 /**

@@ -552,6 +552,7 @@ DELETE FROM moderation_actions
  WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < ?1)
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < ?1))
    AND id NOT IN (SELECT action_id FROM appeals)
+   AND id NOT IN (SELECT server_muted_by FROM voice_states WHERE server_muted_by IS NOT NULL)
 `
 
 // B5-10's completion of the // B5-10: comment RetireModerationActions left

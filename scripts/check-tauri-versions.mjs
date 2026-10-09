@@ -44,6 +44,8 @@ export function checkTauriVersions(npmLock, cargoLock) {
   const roots = packages.filter((pkg) => pkg.name === npmLock.packages[""].name);
   if (roots.length !== 1) throw new Error("Cannot identify the application package in Cargo.lock");
   const direct = roots[0].dependencies;
+  const root = npmLock.packages[""];
+  const directNpm = new Set(Object.keys({ ...root.dependencies, ...root.devDependencies }));
   const mismatches = [];
   let checked = 0;
   for (const [path, npmPackage] of Object.entries(npmLock.packages)) {
@@ -54,7 +56,9 @@ export function checkTauriVersions(npmLock, cargoLock) {
         : /^@tauri-apps\/plugin-[\w-]+$/.test(name)
           ? name.replace("@tauri-apps/", "tauri-")
           : undefined;
-    if (!crate) continue;
+    // A hoisted transitive plugin sits at the top level too; only the app's
+    // own npm dependencies pair with its Rust crates.
+    if (!crate || !directNpm.has(name)) continue;
     const dependency = direct.find((item) => item.split(" ")[0] === crate);
     // Rust-only and JS-only plugins are not version pairs in Tauri CLI.
     if (!dependency) continue;

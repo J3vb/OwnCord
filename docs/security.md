@@ -79,7 +79,7 @@ OwnCord supports TOTP-based 2FA:
 - A session expires 30 days after its last use: an authenticated REST request, the WebSocket handshake and the WebSocket heartbeat each slide `expires_at`, at most once a minute per session; the slide is written in a batch up to a minute later ([schema.md](schema.md#sessions) owns the bound and its edge). It never outlives 365 days from sign-in, and a touch never revives a session that has already expired or been revoked
 - Login flow returns `requires_2fa: true` with a `partial_token` (10-min TTL, 5-attempt limit)
 - Auth challenges are rate-limited to 10 req/min per IP
-- Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); login, registration and recovery-code checks over it wait in a bounded FIFO queue (up to 10 s), and an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no bcrypt and counts as no failed attempt
+- Every bcrypt computation on an authentication route — password checks and hashes, recovery-code matching — is admitted through one process-wide concurrency budget (`security.expensive_auth_concurrency`, default twice the core count); login, registration, first-run setup and recovery-code checks over it wait in a bounded FIFO queue (up to 10 s), and an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no bcrypt and counts as no failed attempt
 - TOTP code verification uses constant-time comparison (`subtle.ConstantTimeCompare`) to prevent timing side-channel attacks
 
 ## Account Recovery
@@ -339,7 +339,7 @@ The Tauri desktop client implements the following security measures:
 - The WebSocket proxy (`ws_proxy`) pins the server certificate fingerprint on first connection
 - The HTTP proxy (`http_proxy`) carrying REST traffic pins against the same store
 - The LiveKit proxy (`livekit_proxy`) reuses the pinned fingerprint from the WS proxy
-- All three native tunnels share one TOFU verifier — see [trust-model.md](trust-model.md)
+- All three native tunnels share one TOFU module and pin store; the WebSocket and HTTP tunnels pin on first use, the LiveKit tunnel only verifies an existing pin — see [trust-model.md](trust-model.md)
 - Certificate mismatch triggers a modal requiring user acknowledgment. Saving a pin that changes what is trusted is additionally gated by a native OS confirmation dialog in `accept_cert_fingerprint` — the only user-confirmed writer of a pin — naming the host and fingerprint, so a renderer compromise cannot silently pin a host. The artifact smoke seeds the pin in the profile instead of answering the dialog; test-only builds use the `e2e-auto-confirm` feature, which no shipped build enables
 - **First-contact defence is comparison out of band.** The fingerprint is what
   the trust decision rests on, so read it from the server's start-up banner

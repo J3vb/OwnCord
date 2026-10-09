@@ -395,6 +395,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64, supersededIDs []int64) bool {
 	auth, ok := s.actorCanModerateVoiceFor(ctx, actorID, targetID)
 	if !ok || s.voiceMuter == nil {
+		s.releaseSupersededMute(ctx, targetID, supersededIDs)
 		return false
 	}
 	if timeoutPreMuteHook != nil {
@@ -700,7 +701,7 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 	// second, unbounded copy of free text that could quote a message.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "user_ban", "user", targetID, "user banned")
 
-	slog.Info("user banned", "actor_id", actorID, "target_id", targetID, "reason", reason)
+	slog.Info("user banned", "actor_id", actorID, "target_id", targetID)
 	return nil
 }
 
@@ -909,12 +910,16 @@ type OwnModerationAction struct {
 	Appealable bool
 }
 
+// ownModerationListLimit caps ListOwnActions: removal and ban rows never
+// retire, so an unbounded read would grow with the member's whole history.
+const ownModerationListLimit = 200
+
 // ListOwnActions is the caller's own restart-safe sanctions read (B9 Q6):
 // userID's own ledger rows, read from storage, with no permission bit —
 // the query is scoped to target_id = userID and selects no field a member
 // may not see.
 func (s *ModerationService) ListOwnActions(ctx context.Context, userID int64) ([]OwnModerationAction, error) {
-	rows, err := s.st.ListOwnModerationActions(ctx, userID)
+	rows, err := s.st.ListOwnModerationActions(ctx, userID, ownModerationListLimit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}

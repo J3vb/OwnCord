@@ -256,7 +256,10 @@ test.describe("Server profiles — row actions", () => {
     await expect
       .poll(async () => (await lastSavedProfiles(page)).find((p) => p.host === A)?.autoConnect)
       .toBe(true);
-    expect((await lastSavedProfiles(page)).find((p) => p.host === B)?.autoConnect).toBe(false);
+    // C was the initial target; A must now be the only one left.
+    expect((await lastSavedProfiles(page)).filter((p) => p.autoConnect).map((p) => p.host)).toEqual(
+      [A],
+    );
   });
 
   test("enabling auto-login on one profile clears it from the other", async ({ page }) => {

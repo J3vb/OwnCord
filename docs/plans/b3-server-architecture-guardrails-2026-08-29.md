@@ -1377,12 +1377,12 @@ db`). No control file is committed.
   every B2-5 predicate against the raw two-layer bit formula written out
   longhand, plus the two definitional identities (`CanAdmitSession` ≡
   `CanViewChannel`, `CanType` ≡ `CanSendMessage`). Writing the formula out
-  surfaced one ordering worth stating: `Subject.Has` applies the Administrator
-  bypass **before** the zero-permission refusal, so an administrator holds the
-  empty mask while `HasPerm(_, 0)` is false. Parity is the target's purpose, so
-  the oracle keeps that ordering and
-  `TestSubjectHasZeroPermIsAdminBypassed` records the divergence as observed
-  behaviour. **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
+  surfaced one ordering worth stating: `Subject.Has` once applied the
+  Administrator bypass **before** the zero-permission refusal, so an
+  administrator held the empty mask while `HasPerm(_, 0)` was false. That
+  divergence has since been closed: the zero mask is refused first, the oracle
+  agrees, and `TestSubjectHasZeroPermIsNeverHeld` pins it.
+  **Call-site survey at HEAD: nothing can reach it.** `Subject.Has`
   is called from `permissions/predicates.go` (five fixed masks) and from
   `Checker.HasChannelPerm` / `HasChannelPermBatch`; every leaf caller across
   `api/`, `service/` and `ws/` names a `permissions.*` constant or an OR of
@@ -1649,7 +1649,7 @@ written.`, exit 1. The committed baseline's checksum was unchanged across the
   `BenchmarkReplaySelection-32 1 4000 ns/op`.
 - Numbers — benchstat medians over `-count=6` at ec8ef24a, go1.26.7
   windows/amd64, Ryzen 9 7950X3D. Full table in
-  [b3-bench-baseline-2026-08-30](b3-bench-baseline-2026-08-30.md):
+  [b3-bench-baseline-2026-08-30](https://github.com/J3vb/OwnCord/blob/2994caa404f87a45cc792cc692f042ad1745e447/docs/plans/b3-bench-baseline-2026-08-30.md) (superseded by [b3-bench-baseline-2026-09-01](b3-bench-baseline-2026-09-01.md)):
 
 | Benchmark              | sec/op       | B/op    | allocs/op |
 | ---------------------- | ------------ | ------- | --------- |

@@ -9,7 +9,7 @@ import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "../../lib/logger";
-import type { AudioPipeline } from "../../lib/audioPipeline";
+import { micProcessingOptions, type AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import type { E2EEManager } from "../../lib/livekitE2EE";
@@ -19,7 +19,8 @@ import {
   type ScreenTrackState,
   CAMERA_PRESETS,
   CAMERA_PUBLISH_BITRATES,
-  getStreamQuality,
+  getCameraQuality,
+  getScreenShareQuality,
   getScreenShareFps,
   getEffectiveScreenShareFps,
   getScreenShareMaxBitrate,
@@ -145,7 +146,8 @@ export class RoomLifecycle {
     this._e2ee.keyProvider.removeAllListeners();
     this._e2eeWorker?.terminate();
     this._e2eeWorker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url));
-    const quality = getStreamQuality();
+    const quality = getCameraQuality();
+    const screenQuality = getScreenShareQuality();
     const isSource = quality === "source";
     // OC-0438: publish with the channel's configured audio bitrate — spreading
     // undefined omits audioPreset, leaving LiveKit's own default in place.
@@ -170,11 +172,9 @@ export class RoomLifecycle {
       // Dynacast stops publishing unused simulcast layers — off for "source"
       // quality to keep full resolution.
       dynacast: !isSource,
-      audioCaptureDefaults: {
-        echoCancellation: loadPref("echoCancellation", true),
-        noiseSuppression: loadPref("noiseSuppression", true),
-        autoGainControl: loadPref("autoGainControl", true),
-      },
+      // The device is not here: the join points capture at the saved input
+      // itself (joinOrchestration RT-6), non-exact so a missing one degrades.
+      audioCaptureDefaults: micProcessingOptions(),
       videoCaptureDefaults: CAMERA_PRESETS[quality],
       publishDefaults: {
         videoEncoding: {
@@ -184,8 +184,8 @@ export class RoomLifecycle {
         // Fallback for setScreenShareEnabled paths — the manual publish in
         // screenShare.ts passes explicit per-track encoding that overrides this.
         screenShareEncoding: {
-          maxBitrate: getScreenShareMaxBitrate(quality, getScreenShareFps()),
-          maxFramerate: getEffectiveScreenShareFps(quality, getScreenShareFps()),
+          maxBitrate: getScreenShareMaxBitrate(screenQuality, getScreenShareFps()),
+          maxFramerate: getEffectiveScreenShareFps(screenQuality, getScreenShareFps()),
         },
         // Mute must stop the OS capture, not merely mute the publication:
         // otherwise the microphone stays open and the OS in-use indicator

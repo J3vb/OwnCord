@@ -16,6 +16,8 @@ const log = createLogger("e2eeWorker");
 export interface E2EEWorkerHost {
   getSessionGeneration(): number;
   getRoomKey(): Uint8Array | null;
+  /** A room key landed in the key provider and is still the session's. */
+  onKeyInstalled?(): void;
 }
 
 export class E2EEWorker {
@@ -46,7 +48,9 @@ export class E2EEWorker {
     const run = this._keyApplyChain.then(async () => {
       if (!ownsKey()) return false;
       await this.installKey(roomKeyToBase64(roomKey));
-      return ownsKey();
+      if (!ownsKey()) return false;
+      this.host.onKeyInstalled?.();
+      return true;
     });
     this._keyApplyChain = run.then(
       () => undefined,

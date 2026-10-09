@@ -12,15 +12,29 @@ import { channelsStore, clearUnread } from "@stores/channels.store";
 import { dmStore, clearDmUnread } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 
+/** Channels whose mounted list is scrolled away from the live tail. */
+const liveTailOutOfView = new Set<number>();
+
+/**
+ * Record whether the mounted list for a channel shows its live tail. The list
+ * calls this from its scroll handler, before the new-message path runs, so the
+ * flag describes the position a new arrival lands against.
+ */
+export function setLiveTailInView(channelId: number, inView: boolean): void {
+  if (inView) liveTailOutOfView.delete(channelId);
+  else liveTailOutOfView.add(channelId);
+}
+
 /**
  * Whether the reader is away from a channel: its loaded window is detached from
- * the live tail, or the app window is not focused (P4-03). "Active" only means
- * "the reader is watching" when this is false, so a message landing while away
- * counts as unread and a `ready` resync must not mark the channel read. The
- * focus source is `document.hasFocus()`, as in `lib/notifications.ts`.
+ * the live tail, the list is scrolled away from the tail, or the app window is
+ * not focused (P4-03). "Active" only means "the reader is watching" when this
+ * is false, so a message landing while away counts as unread and a `ready`
+ * resync must not mark the channel read. The focus source is
+ * `document.hasFocus()`, as in `lib/notifications.ts`.
  */
 export function isChannelAway(channelId: number): boolean {
-  return !document.hasFocus() || isWindowDetached(channelId);
+  return !document.hasFocus() || isWindowDetached(channelId) || liveTailOutOfView.has(channelId);
 }
 
 /** Sends one `mark_read` over the socket. */

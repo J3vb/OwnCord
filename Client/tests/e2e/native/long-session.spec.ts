@@ -170,6 +170,7 @@ test("the desktop shell does not grow its lifecycle footprint within a session",
   const bars = evaluateBars(samples);
   console.log(`native lifecycle soak (${CYCLES} cycles):\n${formatBars(bars)}`);
   expect(pageErrors, "no page errors across the run").toEqual([]);
+  expect(bars.length, "at least one metric was asserted").toBeGreaterThan(0);
   expect(
     bars.filter((bar) => !bar.pass).map((bar) => `${bar.metric}: ${bar.bar}`),
     "metric bars",

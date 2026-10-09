@@ -14,6 +14,7 @@
 
 import { test, expect } from "./fixtures";
 import type { TestServer } from "../support/server";
+import { rawSocket } from "../support/raw-socket";
 
 interface ChannelRow {
   readonly id: number;
@@ -122,11 +123,28 @@ test.describe("Composer gating agreement (real server)", () => {
     await expect(sendBtn).toHaveAttribute("title", /^Slow mode — \d+s$/);
     await expect(composer(bob)).toBeEnabled();
 
+    // The gate above is the client's own mirror. Bypass it with a second frame
+    // on a raw socket so the server's limiter is what refuses. (bob's second
+    // session supersedes the page's, so nothing is asserted on the UI after it.)
+    const socket = await rawSocket(server, "bob");
+    try {
+      const refused = await socket.request("chat_send", {
+        channel_id: general.id,
+        content: "second via socket",
+        reply_to: null,
+      });
+      expect(refused.type).toBe("error");
+      expect(refused.payload?.code).toBe("SLOW_MODE");
+    } finally {
+      socket.close();
+    }
+
     const history = (await server.api(
       `/api/v1/channels/${general.id}/messages`,
       undefined,
       owner,
     )) as { messages: Array<{ content: string }> };
     expect(history.messages.filter((m) => m.content === "first and only")).toHaveLength(1);
+    expect(history.messages.filter((m) => m.content === "second via socket")).toHaveLength(0);
   });
 });

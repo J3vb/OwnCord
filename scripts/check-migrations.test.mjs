@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { auditNameStatus, auditNumbering, renumber } from "./check-migrations.mjs";
+import { auditNameStatus, baseRefs, auditNumbering, renumber } from "./check-migrations.mjs";
 
 const MIGRATIONS = "Server/migrations";
 const names = (out) => auditNameStatus(out).map((v) => `${v.path}:${v.what}`);
@@ -115,4 +115,20 @@ test("the first migration in an empty repository is 001", () => {
 
 test("a non-.sql file added beside the migrations is not numbered", () => {
   assert.equal(auditNumbering(base037, [`${MIGRATIONS}/migrations.go`]).length, 0);
+});
+
+test("baseRefs puts the PR's real base first, and keeps dev first otherwise", () => {
+  assert.deepEqual(baseRefs({ GITHUB_BASE_REF: "main" }), [
+    "origin/main",
+    "origin/dev",
+    "dev",
+    "main",
+  ]);
+  assert.deepEqual(baseRefs({ GITHUB_BASE_REF: "dev" }), [
+    "origin/dev",
+    "origin/main",
+    "dev",
+    "main",
+  ]);
+  assert.deepEqual(baseRefs({}), ["origin/dev", "origin/main", "dev", "main"]);
 });

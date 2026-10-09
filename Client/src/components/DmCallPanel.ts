@@ -28,14 +28,14 @@ import { createAvatarElement } from "@components/message-list/avatar";
 import type { MountableComponent } from "@lib/safe-render";
 import type { RingState, OutgoingCallState } from "@lib/call-ring";
 import { voiceStore, isSelfMuted } from "@stores/voice.store";
-import type { VoiceState, VoiceUser } from "@stores/voice.store";
+import type { VoiceState, VoiceStatus, VoiceUser } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
-import { formatElapsed, headerStatusText } from "@components/VoiceWidget";
+import { formatElapsed, headerStatusText, isConnecting } from "@components/VoiceWidget";
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
@@ -61,7 +61,13 @@ export type DmCallView =
       readonly dm: DmChannel;
       readonly reason: "declined" | "no-answer";
     }
-  | { readonly kind: "connected"; readonly dm: DmChannel; readonly inRoom: readonly number[] };
+  | {
+      readonly kind: "connected";
+      readonly dm: DmChannel;
+      readonly inRoom: readonly number[];
+      /** Someone was in the call and you are now alone in it. */
+      readonly peerLeft: boolean;
+    };
 
 export interface DmCallViewInput {
   readonly activeChannelId: number | null;
@@ -70,6 +76,8 @@ export interface DmCallViewInput {
   readonly selfId: number;
   readonly incoming: RingState | null;
   readonly outgoing: OutgoingCallState | null;
+  /** Someone else has been in this call's room since you joined. */
+  readonly peerWasHere?: boolean;
 }
 
 /** Which panel, if any, the open channel shows. Pure: the whole decision. */
@@ -97,7 +105,12 @@ export function deriveCallView(input: DmCallViewInput): DmCallView {
         reason: out.phase === "declined" ? "declined" : "no-answer",
       };
     }
-    return { kind: "connected", dm, inRoom: [selfId, ...others] };
+    return {
+      kind: "connected",
+      dm,
+      inRoom: [selfId, ...others],
+      peerLeft: !dm.isGroup && others.length === 0 && input.peerWasHere === true,
+    };
   }
   if (others.length > 0) {
     return { kind: "live", dm, inRoom: others, otherChannelId: voice.currentChannelId };
@@ -279,14 +292,30 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   let speakingEl: HTMLElement | null = null;
   let timerInterval: ReturnType<typeof setInterval> | null = null;
 
+  /** The call room someone else has been in since you joined, to tell "bob
+   *  left" from "nobody has come yet" (D-11). */
+  let peerRoom: number | null = null;
+
   function computeView(): DmCallView {
+    const voice = voiceStore.getState();
+    const room = voice.currentChannelId;
+    if (room !== peerRoom) peerRoom = null;
+    const roster = room === null ? undefined : voice.voiceUsers.get(room);
+    if (
+      room !== null &&
+      roster !== undefined &&
+      [...roster.keys()].some((id) => id !== currentUserId())
+    ) {
+      peerRoom = room;
+    }
     return deriveCallView({
       activeChannelId: channelsStore.getState().activeChannelId,
       dms: dmStore.getState().channels,
-      voice: voiceStore.getState(),
+      voice,
       selfId: currentUserId(),
       incoming,
       outgoing,
+      peerWasHere: peerRoom !== null,
     });
   }
 
@@ -301,7 +330,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       case "unanswered":
         return `unanswered|${v.dm.channelId}|${v.reason}|${String(videoActive)}`;
       case "connected":
-        return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(collapsed)}|${String(videoActive)}`;
+        return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(v.peerLeft)}|${String(collapsed)}|${String(videoActive)}`;
       default:
         return "none";
     }
@@ -632,6 +661,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     );
   }
 
+  /** The header status: who left once alone in a live call, else the voice state. */
+  function connectedStatus(
+    v: Extract<DmCallView, { kind: "connected" }>,
+    status: VoiceStatus,
+  ): string {
+    return v.peerLeft && status !== "reconnecting"
+      ? d("leftStatus", { name: callName(v.dm, currentUserId()) })
+      : headerStatusText(status);
+  }
+
   function renderConnected(v: Extract<DmCallView, { kind: "connected" }>): void {
     const status = headerStatusText(voiceStore.getState().voiceStatus);
     if (collapsed) {
@@ -646,7 +685,21 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       stage = createElement("div", { class: "dcp-stage" });
       for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
     }
-    fill(topBar(status, "", true, true), stage, callControls(false));
+    if (!v.peerLeft) {
+      fill(topBar(status, "", true, true), stage, callControls(false));
+      return;
+    }
+    // The other person hung up: say so and offer the redial, as for an unanswered ring.
+    const ringAgain = textButton(d("ringAgain"), "btn-primary dcp-pill", "dcp-ring-again", () =>
+      options.onRingAgain(v.dm.channelId),
+    );
+    const controlsEl = callControls(false);
+    controlsEl.prepend(ringAgain);
+    fill(
+      topBar(connectedStatus(v, voiceStore.getState().voiceStatus), "", true, true),
+      stage,
+      controlsEl,
+    );
   }
 
   function renderCollapsed(dm: DmChannel, ids: readonly number[], status: string): void {
@@ -776,7 +829,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     }
 
     if (view.kind === "connected" && statusEl !== null) {
-      setText(statusEl, headerStatusText(voice.voiceStatus));
+      setText(statusEl, connectedStatus(view, voice.voiceStatus));
     }
     if (securedEl !== null) {
       const connected = voice.voiceStatus === "connected";
@@ -791,6 +844,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     // controls (Leave stays live); a moderator mute is not ours to lift.
     const frozen = uiStore.getState().connectionStatus !== "connected";
     const reason = frozen ? t("status.notConnected") : "";
+    // No room to attach a camera or screen to until the join has connected (D-08).
+    const connecting = isConnecting(voice.voiceStatus);
     const { mute, deafen, camera, share } = controls;
     if (mute !== null) {
       const selfMuted = isSelfMuted(voice);
@@ -816,14 +871,14 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (camera !== null) {
       camera.setAttribute("aria-pressed", String(voice.localCamera));
       swapIcon(camera, voice.localCamera ? "camera-off" : "camera", 20);
-      camera.disabled = frozen;
-      camera.title = reason || t("widget.control.camera");
+      camera.disabled = frozen || connecting;
+      camera.title = reason || (connecting ? t("status.joining") : t("widget.control.camera"));
     }
     if (share !== null) {
       share.setAttribute("aria-pressed", String(voice.localScreenshare));
       swapIcon(share, voice.localScreenshare ? "monitor-off" : "monitor", 20);
-      share.disabled = frozen;
-      share.title = reason || d("share");
+      share.disabled = frozen || connecting;
+      share.title = reason || (connecting ? t("status.joining") : d("share"));
     }
     tick();
   }

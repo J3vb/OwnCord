@@ -26,7 +26,7 @@ func TestListOwnModerationActions(t *testing.T) {
 		t.Fatalf("InsertAppeal: %v", err)
 	}
 
-	rows, err := database.ListOwnModerationActions(ctx, memberID)
+	rows, err := database.ListOwnModerationActions(ctx, memberID, 200)
 	if err != nil {
 		t.Fatalf("ListOwnModerationActions: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestListOwnModerationActions(t *testing.T) {
 		t.Fatalf("appeal linkage = %+v", rows)
 	}
 
-	if own, err := database.ListOwnModerationActions(ctx, ownerID); err != nil || len(own) != 0 {
+	if own, err := database.ListOwnModerationActions(ctx, ownerID, 200); err != nil || len(own) != 0 {
 		t.Fatalf("actor's own rows = %+v, %v; want none", own, err)
 	}
 }

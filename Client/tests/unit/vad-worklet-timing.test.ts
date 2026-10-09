@@ -94,16 +94,16 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     return proc;
   }
 
-  it("does not close the gate until ~200ms of silence (≈75 render quanta), not ~32ms (12 quanta)", () => {
+  it("does not close the gate until ~320ms below the threshold (120 render quanta), not ~32ms (12 quanta)", () => {
     const proc = freshUngatedProcessor();
 
     const calls = callsUntilMessageOfType(proc, SILENT, "gate", 200);
     const elapsedMs = calls * FRAME_MS;
 
-    // 12 quanta (the current, wrong constant) is ~32ms — well under 150ms.
-    // 75 quanta (~200ms) is the intended timing.
-    expect(elapsedMs).toBeGreaterThan(150);
-    expect(elapsedMs).toBeLessThan(260);
+    // 12 quanta (the wrong constant) is ~32ms — well under 150ms. The hold is
+    // ~320ms (120 quanta) plus the 4-quantum smoothing window draining.
+    expect(elapsedMs).toBeGreaterThan(280);
+    expect(elapsedMs).toBeLessThan(380);
   });
 
   it("does not reopen the gate until ~32ms of speech (≈12 render quanta), not ~5ms (2 quanta)", () => {
@@ -116,10 +116,10 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     const calls = callsUntilMessageOfType(proc, LOUD, "gate", 200);
     const elapsedMs = calls * FRAME_MS;
 
-    // 2 quanta (current) is ~5.3ms. 12 quanta (~32ms, matching the
-    // setTimeout fallback's GATE_OFF_FRAMES=2 @ 16ms poll) is intended.
+    // 2 quanta (current) is ~5.3ms. 12 quanta (~32ms) plus the smoothing
+    // window filling is intended.
     expect(elapsedMs).toBeGreaterThan(20);
-    expect(elapsedMs).toBeLessThan(45);
+    expect(elapsedMs).toBeLessThan(55);
   });
 
   it("suppresses all messages for close to 500ms of startup grace (≈188 quanta), not ~80ms (30 quanta)", () => {

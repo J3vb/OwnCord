@@ -11,6 +11,7 @@ vi.mock("livekit-client", () => ({
     ParticipantConnected: "participantConnected",
     ParticipantDisconnected: "participantDisconnected",
     ActiveSpeakersChanged: "activeSpeakersChanged",
+    ParticipantPermissionsChanged: "participantPermissionsChanged",
     EncryptionError: "encryptionError",
     TrackSubscribed: "trackSubscribed",
     TrackUnsubscribed: "trackUnsubscribed",
@@ -93,6 +94,10 @@ vi.mock("../../../platform/desktop", () => ({
       },
       setPttGated: (...args: unknown[]) => {
         host.calls.push(["setPttGated", args]);
+        return Promise.resolve();
+      },
+      setVoiceGate: (...args: unknown[]) => {
+        host.calls.push(["setVoiceGate", args]);
         return Promise.resolve();
       },
       setSubscribed: (...args: unknown[]) => {
@@ -193,6 +198,7 @@ beforeEach(() => {
       capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
       maxBitrate: 1_500_000,
       maxFramerate: 5,
+      simulcast: false,
     });
   host.startScreen = () => Promise.resolve({ capture: 4, width: 1280, height: 720 });
   nativeCounters.screenTracks = 0;
@@ -323,6 +329,25 @@ describe("NativeRoom room surface", () => {
     expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, false]]);
   });
 
+  it("forwards the channel's configured audio bitrate on an enable", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await room.localParticipant.setMicrophoneEnabled(true, undefined, {
+      audioPreset: { maxBitrate: 96_000 },
+    });
+    expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, true, 96_000]]);
+  });
+
+  it("reuses the last configured bitrate for an enable that carries no options", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await room.localParticipant.setMicrophoneEnabled(true, undefined, {
+      audioPreset: { maxBitrate: 96_000 },
+    });
+    await room.localParticipant.setMicrophoneEnabled(true);
+    expect(host.calls.at(-1)).toEqual(["setMicrophone", [1, true, 96_000]]);
+  });
+
   describe("push-to-talk gate", () => {
     // DP-30 / D5: while push-to-talk is armed the capture stays open and the
     // session's gate sends silence, so a press never reopens the device.
@@ -368,6 +393,50 @@ describe("NativeRoom room surface", () => {
         ["setPttGated", [1, false]],
         ["setMicrophone", [1, true]],
       ]);
+    });
+  });
+
+  describe("input-sensitivity gate", () => {
+    // The web path's detector runs in the mic processor, which the native
+    // room has none of: the session's capture gates on the same threshold.
+    it("sends the threshold to the session, ahead of the capture on an enable", async () => {
+      const room = createNativeRoom(audio);
+      room.setVoiceGate(0.05, () => {});
+      await room.connect("u", "t");
+      host.calls.length = 0;
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      expect(host.calls).toEqual([
+        ["setPttGated", [1, false]],
+        ["setVoiceGate", [1, 0.05]],
+        ["setMicrophone", [1, true]],
+      ]);
+      host.calls.length = 0;
+
+      room.setVoiceGate(0.02, () => {});
+      expect(host.calls).toEqual([["setVoiceGate", [1, 0.02]]]);
+    });
+
+    it("reports the session's verdicts as the local speaking verdict", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const verdicts: Array<boolean | null> = [];
+      room.setVoiceGate(0.05, (speaking) => verdicts.push(speaking));
+      // The gate starts open, as the web detector does.
+      expect(verdicts).toEqual([true]);
+
+      emit({ session: 1, event: { type: "voiceGate", open: false } });
+      emit({ session: 1, event: { type: "voiceGate", open: true } });
+      expect(verdicts).toEqual([true, false, true]);
+    });
+
+    it("a zero threshold runs no gate: no verdict, LiveKit decides", async () => {
+      const room = createNativeRoom(audio);
+      await room.connect("u", "t");
+      const verdicts: Array<boolean | null> = [];
+      room.setVoiceGate(0, (speaking) => verdicts.push(speaking));
+      emit({ session: 1, event: { type: "voiceGate", open: true } });
+      expect(verdicts).toEqual([null]);
     });
   });
 
@@ -469,6 +538,27 @@ describe("NativeRoom room surface", () => {
     host.calls.length = 0;
     emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
     expect(sent()).toEqual([["setScreenshareVolume", [1, "user-2", 1]]]);
+  });
+
+  it("tracks the microphone grant and announces a restored one after the unmute", async () => {
+    const room = createNativeRoom(audio);
+    const changed = vi.fn();
+    room.on("participantPermissionsChanged", changed);
+    await room.connect("u", "t");
+    expect(room.localParticipant.permissions).toBeUndefined();
+    // A moderator mute withdraws the grant; the unmute reaches the webview
+    // over the OwnCord socket before the SFU's restored grant arrives.
+    emit({ session: 1, event: { type: "microphonePermission", allowed: false } });
+    expect(room.localParticipant.permissions).toEqual({
+      canPublish: false,
+      canPublishSources: [],
+    });
+    expect(changed).toHaveBeenLastCalledWith(undefined, room.localParticipant);
+    changed.mockClear();
+    emit({ session: 1, event: { type: "microphonePermission", allowed: true } });
+    expect(room.localParticipant.permissions).toEqual({ canPublish: true, canPublishSources: [] });
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledWith(undefined, room.localParticipant);
   });
 
   it("maps native events onto livekit RoomEvents", async () => {
@@ -629,7 +719,6 @@ describe("NativeRoom remote video", () => {
     });
     expect(pub).toMatchObject({ source: "camera", track: raised });
     expect(participant).toBe(room.remoteParticipants.get("user-2"));
-    // screenShare.getRemoteVideoStream looks the track up by source.
     expect(room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!.track).toBe(
       raised,
     );
@@ -832,6 +921,18 @@ describe("NativeRoom camera", () => {
     expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
   });
 
+  it("caps the host capture at the selected preset's resolution", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await room.localParticipant.createCameraTracks({
+      ...cameraOptions,
+      resolution: { width: 1280, height: 720 },
+    });
+    expect(host.calls.filter(([n]) => n === "startCamera")).toEqual([
+      ["startCamera", [1, "", { fps: 30, maxWidth: 1280, maxHeight: 720 }]],
+    ]);
+  });
+
   it("refuses a browser camera track and a capture without a session", async () => {
     const room = createNativeRoom(audio);
     await expect(room.localParticipant.createCameraTracks(cameraOptions)).rejects.toThrow(
@@ -951,7 +1052,11 @@ describe("NativeRoom screen share", () => {
     const pub = await room.localParticipant.publishTrack(screen, screenOptions);
     expect(host.calls.at(-1)).toEqual([
       "publishScreen",
-      [1, 4, { width: 1280, height: 720, maxBitrate: 1_500_000, maxFramerate: 5 }],
+      [
+        1,
+        4,
+        { width: 1280, height: 720, maxBitrate: 1_500_000, maxFramerate: 5, simulcast: false },
+      ],
     ]);
     expect(pub).toMatchObject({ trackSid: "TR_screen", source: "screen_share" });
     // getLocalScreenshareStream reads it by source.
@@ -964,6 +1069,29 @@ describe("NativeRoom screen share", () => {
     screen.stop();
     expect(host.calls.filter(([n]) => n === "stopScreen")).toHaveLength(1);
     expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("publishes with simulcast when the picked quality asks for it", async () => {
+    host.pick = () =>
+      Promise.resolve({
+        source: "screen:7",
+        capture: { fps: 30, maxWidth: 1280, maxHeight: 720 },
+        maxBitrate: 3_000_000,
+        maxFramerate: 30,
+        simulcast: true,
+      });
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(host.calls.at(-1)).toEqual([
+      "publishScreen",
+      [
+        1,
+        4,
+        { width: 1280, height: 720, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+      ],
+    ]);
   });
 
   it("maps a closed picker to a dismissed picker and a portal that never started to its own outcome", async () => {

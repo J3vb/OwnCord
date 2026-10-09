@@ -94,7 +94,9 @@ up — and "Create"/"Replace recovery kit" behind a password confirm →
 one reveal (`buildShownOnce()` in `components/settings/RecoverySections.ts`):
 never logged, never written to any storage, and wiped from the DOM on Done, on
 a tab switch and on closing the overlay (closing aborts the tab's build
-signal). `tests/unit/recovery-secrets.test.ts` plants these values and proves
+signal). While a kit or regenerated-codes request is in flight, close (Escape,
+button, backdrop) and tab switches are ignored so the only copy is shown first
+(`holdOpen()` in `components/SettingsOverlay.ts`). `tests/unit/recovery-secrets.test.ts` plants these values and proves
 none reaches a log entry, the console or browser storage.
 
 ### 2.4 Sessions & delete account

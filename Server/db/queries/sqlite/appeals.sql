@@ -186,4 +186,5 @@ UPDATE moderation_actions
 DELETE FROM moderation_actions
  WHERE ((kind = 'warning' AND acknowledged_at IS NOT NULL AND acknowledged_at < sqlc.arg(cutoff))
     OR (kind = 'timeout' AND COALESCE(lifted_at, expires_at) < sqlc.arg(cutoff)))
-   AND id NOT IN (SELECT action_id FROM appeals);
+   AND id NOT IN (SELECT action_id FROM appeals)
+   AND id NOT IN (SELECT server_muted_by FROM voice_states WHERE server_muted_by IS NOT NULL);

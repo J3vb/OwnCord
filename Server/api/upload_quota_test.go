@@ -237,7 +237,7 @@ func TestUploadQuota_ChargeReleasedWhenTheWriteFails(t *testing.T) {
 func TestUploadQuota_ChargeReleasedWhenTheRowFails(t *testing.T) {
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 1<<20, 0, nil)
-	if _, err := h.database.ExecContext(context.Background(), `DROP TABLE attachments`); err != nil {
+	if _, err := h.database.ExecContext(context.Background(), `CREATE TRIGGER fail_attachment_insert BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'forced'); END`); err != nil {
 		t.Fatal(err)
 	}
 	rr := doUpload(t, h.router, h.token, "file", "f.bin", []byte("payload"))

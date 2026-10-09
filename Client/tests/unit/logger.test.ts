@@ -8,6 +8,7 @@ import {
   getLogBuffer,
   clearLogBuffer,
 } from "../../src/lib/logger";
+import { expectConsole } from "../helpers/console";
 
 describe("logger", () => {
   beforeEach(() => {
@@ -18,14 +19,16 @@ describe("logger", () => {
   it("logs to console at each level", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn");
+    const errorSpy = vi.spyOn(console, "error");
 
     const log = createLogger("test");
     log.debug("debug msg");
     log.info("info msg");
     log.warn("warn msg");
     log.error("error msg");
+    expectConsole("warn", "warn msg");
+    expectConsole("error", "error msg");
 
     expect(debugSpy).toHaveBeenCalledTimes(1);
     expect(infoSpy).toHaveBeenCalledTimes(1);
@@ -35,12 +38,13 @@ describe("logger", () => {
 
   it("respects log level filtering", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn");
 
     setLogLevel("warn");
     const log = createLogger("test");
     log.debug("should not appear");
     log.warn("should appear");
+    expectConsole("warn", "should appear");
 
     expect(debugSpy).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledTimes(1);
@@ -87,7 +91,7 @@ describe("logger", () => {
   });
 
   it("unsubscribe removes listener", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "warn");
     const listener = vi.fn();
     const unsubscribe = addLogListener(listener);
 
@@ -95,17 +99,19 @@ describe("logger", () => {
 
     const log = createLogger("test");
     log.warn("should not reach listener");
+    expectConsole("warn", "should not reach listener");
     expect(listener).not.toHaveBeenCalled();
   });
 
   it("serializes Error objects in data parameter", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error");
     const listener = vi.fn();
     const unsub = addLogListener(listener);
 
     const log = createLogger("test");
     const err = new Error("something broke");
     log.error("fail", err);
+    expectConsole("error", "fail");
 
     expect(listener).toHaveBeenCalledTimes(1);
     const entry = listener.mock.calls[0]?.[0];
@@ -116,13 +122,14 @@ describe("logger", () => {
   });
 
   it("serializes nested Error objects within data objects", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "warn");
     const listener = vi.fn();
     const unsub = addLogListener(listener);
 
     const log = createLogger("test");
     const err = new Error("inner error");
     log.warn("context", { reason: err, count: 3 });
+    expectConsole("warn", "context");
 
     const entry = listener.mock.calls[0]?.[0];
     expect(entry.data.reason).toEqual(expect.objectContaining({ error: "inner error" }));
@@ -205,14 +212,15 @@ describe("applyStoredLogLevel", () => {
   });
 
   it("honors the saved logs_min_level pref over the fallback", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn");
+    const errorSpy = vi.spyOn(console, "error");
     localStorage.setItem("owncord:settings:logs_min_level", JSON.stringify("error"));
 
     applyStoredLogLevel("debug");
     const log = createLogger("test");
     log.warn("filtered");
     log.error("kept");
+    expectConsole("error", "kept");
 
     expect(warnSpy).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledTimes(1);
@@ -220,7 +228,7 @@ describe("applyStoredLogLevel", () => {
 
   it("migrates a legacy unprefixed logs_min_level key and honors it", () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn");
     // Legacy values were stored raw under the unprefixed key.
     localStorage.setItem("logs_min_level", "warn");
 
@@ -228,6 +236,7 @@ describe("applyStoredLogLevel", () => {
     const log = createLogger("test");
     log.info("filtered");
     log.warn("kept");
+    expectConsole("warn", "kept");
 
     expect(infoSpy).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledTimes(1);
@@ -261,7 +270,7 @@ describe("log level pref-change live updates", () => {
 
   it("applies a new logs_min_level when owncord:pref-change fires", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error");
     localStorage.setItem("owncord:settings:logs_min_level", JSON.stringify("error"));
 
     window.dispatchEvent(
@@ -271,6 +280,7 @@ describe("log level pref-change live updates", () => {
     const log = createLogger("test");
     log.debug("filtered");
     log.error("kept");
+    expectConsole("error", "kept");
 
     expect(debugSpy).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledTimes(1);

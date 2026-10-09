@@ -29,17 +29,23 @@ import { voiceText } from "../i18n/voice";
 const log = createLogger("roomEventHandlers");
 
 /** OC-0452: how long a remote sender's decrypt failures may last before they
- *  count as a real E2EE failure, and the quiet gap that ends a streak. The gap
- *  sits above the worker's 1 s per-participant error throttle, so a persistent
- *  failure stays one streak, but below the grace window, so separate rotation
- *  races a few seconds apart each start a fresh streak. */
+ *  count as a real E2EE failure. A streak starts fresh only after a room key
+ *  install: a quiet gap alone is no evidence the peer's frames decrypt again,
+ *  while every rotation race comes with its own install. */
 const DECRYPT_GRACE_MS = 3000;
-const DECRYPT_STREAK_RESET_MS = 2500;
+/** How long without a remote decrypt failure before a native room's decrypt
+ *  degradation counts as recovered. It sits above the native room's 1 s
+ *  re-report cadence while a peer keeps failing. */
+const NATIVE_DECRYPT_QUIET_MS = 2500;
+
+/** How long the SDK may spend resuming a cut signal connection before the
+ *  widget abandons the room (see armStallTimer). */
+const SIGNAL_RESUME_BUDGET_MS = 10_000;
 
 /** Polish #21: how long without a remote decrypt failure before a decrypt
  *  degradation counts as recovered on the browser path (the native room
- *  re-reports every second while a peer fails, so its streak reset is
- *  enough). livekit-client's ErrorRateLimiter lets the worker report a
+ *  re-reports every second while a peer fails, so its shorter quiet window
+ *  is enough). livekit-client's ErrorRateLimiter lets the worker report a
  *  failing peer at most 5 times per 60 s window, so a failure that persists
  *  goes quiet for most of each minute; only a gap longer than that window
  *  means the frames decrypt again. */
@@ -117,6 +123,9 @@ export interface RoomEventHandlers {
   readonly handleSdkReconnected: () => void;
   readonly handleEncryptionError: (error: Error, participant?: Participant) => void;
   readonly removeAutoplayUnlock: () => void;
+  /** A room key was installed into the E2EE worker: the next remote decrypt
+   *  failure starts a fresh grace window. */
+  readonly noteRoomKeyInstalled: () => void;
   /** Forget the session's encryption-recovery state (leave). */
   readonly resetEncryptionRecovery: () => void;
 }
@@ -132,6 +141,11 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   // must not clear it.
   let degradedBy: "decrypt" | "other" | null = null;
   let decryptQuietTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallTimer: ReturnType<typeof setTimeout> | null = null;
+  let stallRoom: import("livekit-client").Room | null = null;
+  /** Room key installs so far. A decrypt streak continues only while this is
+   *  unchanged, so event order never rests on clock resolution. */
+  let keyInstalls = 0;
 
   function clearDecryptQuietTimer(): void {
     if (decryptQuietTimer !== null) {
@@ -152,8 +166,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
           setEncryptionDegraded(false);
         }
       },
-      deps.isNativeRoom() ? DECRYPT_STREAK_RESET_MS : DECRYPT_QUIET_MS,
+      deps.isNativeRoom() ? NATIVE_DECRYPT_QUIET_MS : DECRYPT_QUIET_MS,
     );
+  }
+
+  function noteRoomKeyInstalled(): void {
+    keyInstalls++;
   }
 
   function resetEncryptionRecovery(): void {
@@ -254,8 +272,35 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     document.addEventListener("click", autoplayUnlockHandler, { once: true });
   };
 
+  /** Drop the session room without leaving the call and run the app's own
+   *  reconnect loop with the stored token. False when there is nothing to
+   *  reconnect with (no token, channel or URL). */
+  function abandonRoomAndReconnect(): boolean {
+    const token = deps.getLatestToken();
+    const url = deps.getLastUrl();
+    const channelId = deps.getCurrentChannelId();
+    if (token === null || url === null || channelId === null) return false;
+    const directUrl = deps.getLastDirectUrl();
+    // Clean up current room without sending WS leave (we're reconnecting, not leaving).
+    deps.teardownForReconnect();
+    removeAutoplayUnlock();
+    deps.getAudioElements().cleanupAllAudioElements();
+    const room = deps.getRoom();
+    if (room !== null) {
+      deps.setRoom(null);
+      deps.syncModuleRooms();
+      detachRoom(room);
+      room.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
+    }
+    const ac = new AbortController();
+    deps.setReconnectAc(ac);
+    void deps.attemptAutoReconnect(token, url, channelId, directUrl, ac.signal);
+    return true;
+  }
+
   const handleDisconnected = (reason?: DisconnectReason): void => {
     log.info("LiveKit room disconnected", { reason });
+    clearStallTimer();
     if (deps.isConnecting() || deps.isReconnecting()) {
       // The bundled livekit-client fires this event synchronously on every
       // failed reconnect attempt inside the retry loop's own room.connect()
@@ -266,36 +311,42 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
       return;
     }
     const isUnexpected = reason !== DisconnectReason.CLIENT_INITIATED;
-    if (
-      isUnexpected &&
-      deps.getLatestToken() !== null &&
-      deps.getCurrentChannelId() !== null &&
-      deps.getLastUrl() !== null
-    ) {
-      const token = deps.getLatestToken()!;
-      const url = deps.getLastUrl()!;
-      const channelId = deps.getCurrentChannelId()!;
-      const directUrl = deps.getLastDirectUrl();
-      // Clean up current room without sending WS leave (we're reconnecting, not leaving).
-      deps.teardownForReconnect();
-      removeAutoplayUnlock();
-      deps.getAudioElements().cleanupAllAudioElements();
-      const room = deps.getRoom();
-      if (room !== null) {
-        deps.setRoom(null);
-        deps.syncModuleRooms();
-        detachRoom(room);
-        room.disconnect().catch((err) => log.warn("Failed to disconnect stale room", err));
-      }
-      const ac = new AbortController();
-      deps.setReconnectAc(ac);
-      void deps.attemptAutoReconnect(token, url, channelId, directUrl, ac.signal);
-      return;
-    }
+    if (isUnexpected && abandonRoomAndReconnect()) return;
     deps.leaveVoice(false);
     leaveVoiceChannel();
     if (isUnexpected) deps.getOnErrorCallback()?.(voiceText("event.voiceDisconnected"));
   };
+
+  /** The SDK resumes a cut signal socket up to 10 times, each allowed 15 s,
+   *  before it emits Disconnected, so a cut nobody answers freezes every stream
+   *  for minutes. Once the budget passes without Reconnected or Disconnected
+   *  the room is abandoned for the app's own loop, which also rejoins when the
+   *  server has released the membership. The first event arms it; the
+   *  Reconnecting that follows SignalReconnecting does not extend it. */
+  function clearStallTimer(): void {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer);
+      stallTimer = null;
+      stallRoom = null;
+    }
+  }
+
+  function armStallTimer(room: import("livekit-client").Room): void {
+    if (stallTimer !== null && stallRoom === room) return;
+    clearStallTimer();
+    stallRoom = room;
+    stallTimer = setTimeout(() => {
+      stallTimer = null;
+      stallRoom = null;
+      // Only the room that stalled: the user may have left or a newer attempt
+      // replaced it while the SDK was retrying.
+      if (deps.getRoom() !== room) return;
+      log.warn("LiveKit resume stalled — abandoning room for the reconnect loop", {
+        budgetMs: SIGNAL_RESUME_BUDGET_MS,
+      });
+      abandonRoomAndReconnect();
+    }, SIGNAL_RESUME_BUDGET_MS);
+  }
 
   /** RT-9: livekit-client (and the native room) retry a dropped signal socket
    *  on their own — RoomEvent.SignalReconnecting / Reconnecting — before they
@@ -304,10 +355,14 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  "connected" and "reconnecting", so a join still securing its key and the
    *  retry loop's own attempt rooms are left alone. */
   const handleSdkReconnecting = (): void => {
-    if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "connected")
-      setVoiceStatus("reconnecting");
+    const room = deps.getRoom();
+    const status = voiceStore.getState().voiceStatus;
+    if (room === null || (status !== "connected" && status !== "reconnecting")) return;
+    if (status === "connected") setVoiceStatus("reconnecting");
+    armStallTimer(room);
   };
   const handleSdkReconnected = (): void => {
+    clearStallTimer();
     if (deps.getRoom() !== null && voiceStore.getState().voiceStatus === "reconnecting")
       setVoiceStatus("connected");
   };
@@ -327,8 +382,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  has it, so a short streak of these is expected; the frames are dropped,
    *  never played in clear. A streak that outlasts the grace window (the
    *  worker re-reports once a second) is a real failure and still degrades.
+   *  Only a key install since the streak's last failure starts a new one.
    */
-  const decryptStreaks = new WeakMap<Participant, { start: number; last: number }>();
+  const decryptStreaks = new WeakMap<Participant, { start: number; keyInstalls: number }>();
   const handleEncryptionError = (error: Error, participant?: Participant): void => {
     // SRE-M2: every receive-side decrypt failure (any error attributed to a
     // remote sender, native or web) counts toward the diagnostics total — a
@@ -338,8 +394,8 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (participant && !participant.isLocal && error.message.startsWith("InvalidKey:")) {
       const now = Date.now();
       const prev = decryptStreaks.get(participant);
-      const start = prev && now - prev.last <= DECRYPT_STREAK_RESET_MS ? prev.start : now;
-      decryptStreaks.set(participant, { start, last: now });
+      const start = prev && prev.keyInstalls === keyInstalls ? prev.start : now;
+      decryptStreaks.set(participant, { start, keyInstalls });
       if (now - start < DECRYPT_GRACE_MS) {
         log.warn("LiveKit E2EE receive-side decrypt failure — tolerating key rotation race", {
           error,
@@ -378,6 +434,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleSdkReconnected,
     handleEncryptionError,
     removeAutoplayUnlock,
+    noteRoomKeyInstalled,
     resetEncryptionRecovery,
   };
 }

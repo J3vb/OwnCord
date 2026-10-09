@@ -252,3 +252,48 @@ func TestOwnModeration_OmitsOwnPurge(t *testing.T) {
 		t.Fatalf("moderator's own rows = %v, want only warning %d (purge row %d must not appear)", rows, warnID, ledger[0].ID)
 	}
 }
+
+// TestOwnModeration_ReturnsAtMostTheNewestLimitRows: removal rows never
+// retire, so the read is bounded to the newest 200 instead of serializing
+// the member's whole history.
+func TestOwnModeration_ReturnsAtMostTheNewestLimitRows(t *testing.T) {
+	database := openFileTestDB(t, filepath.Join(t.TempDir(), "owncord.db"))
+	t.Cleanup(func() { _ = database.Close() })
+	h := buildOwnModerationRouter(database)
+	modID := mintModerator(t, database, "cap-mod", 90, permissions.ModerateMembers)
+	victimID := mintUser(t, database, "cap-victim")
+	victimToken, _ := mintSession(t, database, victimID)
+
+	const seeded, limit = 205, 200
+	for i := 1; i <= seeded; i++ {
+		if _, err := database.ExecContext(context.Background(),
+			`INSERT INTO moderation_actions (kind, target_id, actor_id, reason, created_at) VALUES ('removal', ?, ?, 'r', datetime('2026-01-01 00:00:00', ?))`,
+			victimID, modID, "+"+itoa(int64(i))+" seconds"); err != nil {
+			t.Fatalf("seed removal %d: %v", i, err)
+		}
+	}
+
+	rows := getOwnModeration(t, h, victimToken)
+	if len(rows) != limit {
+		t.Fatalf("rows = %d, want %d", len(rows), limit)
+	}
+	// Newest first: the oldest seeded-limit rows (the first 5 inserted) are the ones dropped.
+	if first, last := field[string](t, rows[0], "created_at"), field[string](t, rows[limit-1], "created_at"); first <= last {
+		t.Fatalf("created_at %q .. %q, want newest first", first, last)
+	}
+	if last := field[string](t, rows[limit-1], "created_at"); last != "2026-01-01 00:00:06" {
+		t.Fatalf("oldest returned = %q, want 2026-01-01 00:00:06 (oldest 5 dropped)", last)
+	}
+}
+
+// TestOwnModeration_RefusesAPIToken: the read is session-only, so an
+// API-token principal (no session) gets the same 401 as logout.
+func TestOwnModeration_RefusesAPIToken(t *testing.T) {
+	database := openFileTestDB(t, filepath.Join(t.TempDir(), "owncord.db"))
+	t.Cleanup(func() { _ = database.Close() })
+	h := buildOwnModerationRouter(database)
+	tok, _ := apiTokenFor(t, database, "own-mod-token")
+	if status, body := actJSON(t, h, http.MethodGet, "/api/v1/users/me/moderation", tok, ""); status != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body = %s", status, body)
+	}
+}

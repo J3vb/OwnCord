@@ -164,12 +164,11 @@ async function renderRetention(){
   let policy,preview;
   try{policy=await api('GET','/retention');preview=await api('GET','/retention/preview')}
   catch(e){return'<div class="page-title">Message retention</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
-  /* The channel list is MANAGE_CHANNELS while this page is MANAGE_SERVER, so
-     a principal holding only the latter cannot read it. Degrade to the
-     channels the policy and the preview already name rather than failing the
-     whole page over an affordance. */
+  /* /channels is MANAGE_CHANNELS while this page is MANAGE_SERVER, so the
+     list comes from the retention route (id and name, no DMs). Still degrade
+     to the channels the policy and the preview name if it fails. */
   let channels=null;
-  try{channels=await api('GET','/channels')}catch(e){}
+  try{channels=await api('GET','/retention/channels')}catch(e){}
   const serverDays=(policy&&policy.server_days)||0;
   state.retentionRevision=policy&&policy.revision;
   state.retentionPolicyChannels=(policy&&policy.channels)||[];

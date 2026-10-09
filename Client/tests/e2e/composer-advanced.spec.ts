@@ -481,6 +481,8 @@ test.describe("Composer — paste-upload", () => {
       (c) => c.method === "POST" && c.url.includes("/api/v1/uploads"),
     );
     expect(decodeBody(call) ?? "").toContain('filename="clipboard.png"');
+    // The upload finished: the spinner/uploading state is gone.
+    await expect(previewItem(page)).not.toHaveClass(/uploading/);
   });
 });
 

@@ -63,6 +63,24 @@ func (d *DB) GetPartialAuth(ctx context.Context, tokenHash string) (userID int64
 	return row.UserID, row.Device, row.IpAddress, int(row.Failures), exp, true, nil
 }
 
+// IncrementPartialAuthFailures counts one failure against a live challenge
+// and returns the new total. found is false when the challenge is gone or
+// expired; the conditional update never creates a row, so a failure racing
+// a Consume cannot bring the consumed challenge back.
+func (d *DB) IncrementPartialAuthFailures(ctx context.Context, tokenHash string, now time.Time) (failures int, found bool, err error) {
+	n, err := d.q.IncrementPartialAuthFailures(ctx, dbgen.IncrementPartialAuthFailuresParams{
+		TokenHash: tokenHash,
+		ExpiresAt: secondFactorTime(now),
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("IncrementPartialAuthFailures: %w", err)
+	}
+	return int(n), true, nil
+}
+
 // DeletePartialAuth removes a challenge and reports whether a row went —
 // the single-winner decision behind PartialAuthStore.Consume.
 func (d *DB) DeletePartialAuth(ctx context.Context, tokenHash string) (bool, error) {

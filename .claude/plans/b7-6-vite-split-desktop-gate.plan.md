@@ -32,18 +32,20 @@ which is what makes a browser overlay cheap later, without building one.
 Checked at `8cb03344`. If a row is false at your HEAD, **stop that task and
 record it**.
 
-| #   | Claim                                                                                                                | How to re-check                                     | Verified |
-| --- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------- |
-| 1   | `Client/vite.config.ts` is a single 56-line config; no split exists                                                  | `wc -l Client/vite.config.ts`                       | yes      |
-| 2   | `build` is `tsc -p tsconfig.build.json && vite build`; there is no `build:desktop` or `build:web` script             | `Client/package.json` scripts block                 | yes      |
-| 3   | `tauri.conf.json` has `"beforeBuildCommand": "npm run build"` and `"frontendDist": "../dist"`                        | `grep beforeBuild Client/src-tauri/tauri.conf.json` | yes      |
-| 4   | Three settings are desktop-only: `stripCrossOrigin()`, `server.watch.ignored: ["**/src-tauri/**"]`, `TAURI_DEV_HOST` | read `vite.config.ts`                               | yes      |
-| 5   | `manualChunks` keeps `livekit-client` out of the entry chunk, and Rolldown (Vite 8) supports only the function form  | the comment at `vite.config.ts:22-24`               | yes      |
-| 6   | `tauri-build` runs on PRs to `dev` when `Client/vite.config.ts` changes (owner decision 2026-09-19)                  | B7 PRD open questions                               | yes      |
+| #   | Claim                                                                                                                 | How to re-check                                     | Verified |
+| --- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------- |
+| 1   | `Client/vite.config.ts` is a single 56-line config; no split exists                                                   | `wc -l Client/vite.config.ts`                       | yes      |
+| 2   | `build` is `tsc -p tsconfig.build.json && vite build`; there is no `build:desktop` or `build:web` script              | `Client/package.json` scripts block                 | yes      |
+| 3   | `tauri.conf.json` has `"beforeBuildCommand": "npm run build"` and `"frontendDist": "../dist"`                         | `grep beforeBuild Client/src-tauri/tauri.conf.json` | yes      |
+| 4   | Three settings are desktop-only: `stripCrossOrigin()`, `server.watch.ignored: ["**/src-tauri/**"]`, `TAURI_DEV_HOST`  | read `vite.config.ts`                               | yes      |
+| 5   | `manualChunks` keeps `livekit-client` out of the entry chunk, and Rolldown (Vite 8) supports only the function form   | the comment at `vite.config.ts:22-24`               | yes      |
+| 6   | `tauri-build` runs only on PRs to `main` (`github.base_ref == 'main'` in `ci.yml`); a PR to `dev` does not trigger it | `grep -n "base_ref" .github/workflows/ci.yml`       | yes      |
 
-**Row 6 means this branch will trigger the full Tauri build in CI.** That is
-intended — it is the gate this milestone adds value to. Do not attempt
-`npm run tauri build` locally; `ci-check` says so explicitly.
+**Row 6 means this branch will not trigger the Tauri build in CI.** The owner
+decision (2026-09-19) was to run it on `dev` PRs that change
+`Client/vite.config.ts`, but `ci.yml` does not implement that trigger yet, so
+the full desktop build only runs on the `main` release PR. Do not attempt `npm run tauri build` locally; `ci-check`
+says so explicitly.
 
 ## Patterns to Mirror
 
@@ -152,7 +154,7 @@ commit, no `Co-Authored-By` trailer.
 npm --prefix Client run typecheck:build
 npm --prefix Client test          # count not lower
 npm run check:hygiene             # prettier + actionlint
-# → then the ci-check skill; expect tauri-build to run on this PR (row 6)
+# → then the ci-check skill; tauri-build does not run on a dev PR (row 6)
 ```
 
 ## Risks
@@ -194,4 +196,4 @@ npm run check:hygiene             # prettier + actionlint
       deliberately broken config before being trusted green
 - [ ] No application code changed — `git diff --stat origin/dev...` touches no
       `Client/src/**` file
-- [ ] `ci-check` green, including the `tauri-build` job this branch triggers
+- [ ] `ci-check` green (`tauri-build` runs only on PRs to `main`, row 6)

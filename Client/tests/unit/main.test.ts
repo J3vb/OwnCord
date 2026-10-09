@@ -116,6 +116,8 @@ const mockServerInfo: { value: unknown } = {
   value: { name: "Test Server", protocol_epoch: 1, browser_client_enabled: false },
 };
 const mockHealthFails = { value: false };
+// When set, a failing health probe rejects with this instead of a network error.
+const mockHealthError: { value: (() => Error) | null } = { value: null };
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {
@@ -134,10 +136,16 @@ vi.mock("@lib/api", async (importOriginal) => {
         register: (...args: unknown[]) => mockRegister(...args),
         getHealth: vi.fn(() =>
           mockHealthFails.value
-            ? Promise.reject(new Error("offline"))
+            ? Promise.reject(mockHealthError.value ? mockHealthError.value() : new Error("offline"))
             : Promise.resolve({ version: null, online_users: null }),
         ),
-        getServerInfo: vi.fn(() => Promise.resolve(mockServerInfo.value)),
+        // A server that is down (plain network failure) answers neither probe;
+        // a degraded one (health error with a status) still serves server-info.
+        getServerInfo: vi.fn(() =>
+          mockHealthFails.value && !mockHealthError.value
+            ? Promise.reject(new Error("offline"))
+            : Promise.resolve(mockServerInfo.value),
+        ),
       };
     }),
   };
@@ -163,6 +171,7 @@ const capturedConnectCallbacks: {
   onTotpSubmit?: (code: string) => Promise<void>;
   getRegistrationMode?: (host: string) => string | null;
   getRetentionNotice?: (host: string) => string | null;
+  onHostSettled?: (host: string) => void;
   onDeleteProfile?: (profileId: string) => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
@@ -222,7 +231,7 @@ import { mockInvoke, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { createApiClient } from "@lib/api";
+import { ApiClientError, createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { deleteCredential, loadCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
@@ -903,6 +912,83 @@ describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
   });
 });
 
+describe("main.ts quick-switch resume", () => {
+  const target = "server-b.example:8443";
+  const profile = {
+    id: "p-b",
+    name: "Server B",
+    host: target,
+    username: "alex",
+    autoConnect: false,
+    rememberPassword: true,
+  };
+
+  afterEach(() => {
+    sessionStorage.clear();
+    mockProfileManager.getAll.mockReturnValue([]);
+    vi.mocked(loadCredential).mockResolvedValue(null);
+    mockProfileManager.loadProfiles.mockResolvedValue(undefined);
+  });
+
+  /** Sign in on server A, then leave it the way the quick-switch overlay does. */
+  async function quickSwitchAway(profiles: Array<typeof profile>): Promise<void> {
+    await loginAndReachAuthOk("server-a.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Server A",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    mockProfileManager.getAll.mockReturnValue(profiles);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "stored-token",
+      hasPassword: false,
+    });
+    sessionStorage.setItem("owncord:quick-switch-target", target);
+    clearAuth();
+  }
+  const flush = async () => {
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+  };
+  const lastPage = () =>
+    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showAutoConnecting: ReturnType<typeof vi.fn>;
+    };
+
+  it("resumes a profile that remembers its sign-in", async () => {
+    await quickSwitchAway([profile]);
+    await flush();
+    expect(lastPage().showAutoConnecting).toHaveBeenCalledWith("Server B");
+  });
+
+  it("does not resume a profile whose remember-password is off", async () => {
+    await quickSwitchAway([{ ...profile, rememberPassword: false }]);
+    await flush();
+    expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
+  });
+
+  it("is not replaced by a resume once a manual login started while profiles load", async () => {
+    let release!: () => void;
+    mockProfileManager.loadProfiles.mockReturnValue(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    await quickSwitchAway([profile]);
+    await flush();
+    mockLogin.mockResolvedValue({ token: "manual-token", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!(target, "alex", "hunter2");
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    vi.mocked(loadCredential).mockClear();
+    release();
+    await flush();
+    expect(loadCredential).not.toHaveBeenCalled();
+    expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
+  });
+});
+
 describe("main.ts invite deep link keeps the current server's credential (F7)", () => {
   afterEach(() => {
     mockOnOpenUrl.mockClear();
@@ -1144,6 +1230,86 @@ describe("main.ts session ownership", () => {
     };
     await vi.advanceTimersByTimeAsync(15_000);
     expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBeNull();
+  });
+
+  it("a degraded (503) health still runs the server-info probe", async () => {
+    // Round-trip through the main page so a fresh connect page (and its
+    // health interval) is mounted, as the snapshot test above does.
+    await loginAndReachAuthOk("localhost:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Local",
+      motd: "",
+    });
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    clearAuth();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(50);
+    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    connectPage.updateCompatibility.mockClear();
+    mockHealthFails.value = true;
+    mockHealthError.value = () => new ApiClientError(503, "DEGRADED", "degraded");
+    mockServerInfo.value = {
+      name: "Test Server",
+      protocol_epoch: 999,
+      browser_client_enabled: false,
+      registration_mode: "open",
+    };
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+    } finally {
+      mockHealthFails.value = false;
+      mockHealthError.value = null;
+    }
+    expectConsole("warn", /health check failed/);
+    expect(connectPage.updateCompatibility).toHaveBeenCalledWith(
+      "localhost:8443",
+      "client-older",
+      999,
+    );
+    expect(capturedConnectCallbacks.getRegistrationMode!("localhost:8443")).toBe("open");
+    expect(connectPage.updateHealthStatus).toHaveBeenCalledWith(
+      "localhost:8443",
+      expect.objectContaining({ status: "offline" }),
+    );
+  });
+
+  it("probes server-info for a typed host that is not a saved profile", async () => {
+    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    connectPage.updateCompatibility.mockClear();
+    mockServerInfo.value = {
+      name: "Typed",
+      protocol_epoch: 1,
+      browser_client_enabled: false,
+      registration_mode: "open",
+    };
+    expect(capturedConnectCallbacks.getRegistrationMode!("typed.example:8443")).toBeNull();
+    capturedConnectCallbacks.onHostSettled!("typed.example:8443");
+    await vi.advanceTimersByTimeAsync(50);
+    expect(capturedConnectCallbacks.getRegistrationMode!("typed.example:8443")).toBe("open");
+    expect(connectPage.updateCompatibility).toHaveBeenCalledWith(
+      "typed.example:8443",
+      expect.any(String),
+      1,
+    );
+  });
+
+  it("does not start a second server-info probe for a host already being probed", async () => {
+    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
+      typeof createApiClient
+    >;
+    const calls = vi.mocked(api.getServerInfo).mock.calls.length;
+    let release!: () => void;
+    vi.mocked(api.getServerInfo).mockImplementationOnce(
+      () => new Promise((resolve) => (release = () => resolve(mockServerInfo.value as never))),
+    );
+    capturedConnectCallbacks.onHostSettled!("slow.example:8443");
+    capturedConnectCallbacks.onHostSettled!("slow.example:8443");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(vi.mocked(api.getServerInfo).mock.calls.length).toBe(calls + 1);
+    release();
+    await vi.advanceTimersByTimeAsync(10);
   });
 
   it("signs a recovered session in exactly as a login does (B7-15b)", async () => {

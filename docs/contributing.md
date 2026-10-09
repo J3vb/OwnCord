@@ -102,7 +102,8 @@ test`, `cargo clippy`, `tauri build`):
 eval "$(Client/scripts/linux-webrtc-toolchain.sh)"
 ```
 
-It uses `CC`/`CXX` if both are already set, else an installed `clang++-21` or
+It uses `CC`/`CXX` if both are already set (they must both be clang >= 21,
+else it exits with an error), else an installed `clang++-21` or
 `clang++` reporting version 21 or newer; only if neither exists does it install
 clang-21 from apt.llvm.org (once, system-wide, on the Debian/Ubuntu releases
 apt.llvm.org publishes — elsewhere install clang >= 21 yourself). It downloads
@@ -151,7 +152,8 @@ same Linux Rust legs as `webrtc-sys`.
 | `npm run test:browser`      | Vitest browser-mode tests                  |
 
 PR CI runs only the narrow mutation subset (`Client/stryker.ci.config.mjs`,
-`src/lib/permissions.ts`). The full-client mutation baseline (the base config's
+`src/lib/permissions.ts`), as a step in Client Static Checks that runs only when
+a PR touches that file, its unit test or the Stryker configs. The full-client mutation baseline (the base config's
 configured surface, 146 files today) is the sharded `mutation` job in
 `.github/workflows/nightly-test-depth.yml`, driven locally with `cd Client &&
 STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores|safety-moderation>
@@ -533,6 +535,11 @@ closing audit findings 2026-04-07 #8 / DC-11):
   ignored across the board — majors are adopted deliberately, by a human,
   reading the changelog. Peer-coupled groups (`vitest`/`@vitest/*`,
   `@stryker-mutator/*`) update as one PR so exact peer pins cannot wedge.
+  `target-branch` covers version updates only. Dependabot _security_ updates
+  always open against the default branch (`main`). Before closing one, open an
+  equivalent PR against `dev` and track it: the weekly grouped update ignores
+  semver-major updates and some packages entirely, so it may never ship the
+  fix.
 - **Security gates run on every PR:** `npm audit --omit=dev
 --audit-level=high` (shipped deps only — dev-tooling advisories are
   triaged in the workflow comment instead of blocking on unfixable pins),

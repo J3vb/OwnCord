@@ -458,6 +458,35 @@ describe("channels store", () => {
       expect(voiceChannels?.[0]?.name).toBe("voice-lobby");
     });
 
+    // The server lists channels ORDER BY position, id, so after a restart a
+    // category sits where its lowest-position channel does. A live position
+    // change must give the same answer, not keep the first-load group order.
+    it("reorders categories live when a position change moves a category's first channel", () => {
+      setChannels(readyChannels);
+      expect(Array.from(getChannelsByCategory().keys())).toEqual(["Text", "Voice"]);
+
+      updateChannel({ id: 1, position: 5 });
+      updateChannel({ id: 3, position: 6 });
+
+      expect(Array.from(getChannelsByCategory().keys())).toEqual(["Voice", "Text"]);
+    });
+
+    it("breaks position ties by channel id, as the server does", () => {
+      setChannels([
+        { id: 1, name: "a", type: "text", category: "Text", position: 0 },
+        { id: 3, name: "c", type: "text", category: "Text", position: 1 },
+        { id: 2, name: "b", type: "text", category: "Text", position: 2 },
+      ]);
+      updateChannel({ id: 2, position: 3 });
+      updateChannel({ id: 3, position: 3 });
+
+      expect(
+        getChannelsByCategory()
+          .get("Text")
+          ?.map((c) => c.id),
+      ).toEqual([1, 2, 3]);
+    });
+
     it("handles null category", () => {
       setChannels([{ id: 1, name: "uncategorized", type: "text", category: null, position: 0 }]);
 

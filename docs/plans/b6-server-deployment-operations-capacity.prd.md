@@ -46,7 +46,7 @@ machine and fails, silently or confusingly, on everyone else's.
 `docs/plans/hp-6-scorecard-*.md` exists on `dev`), so this pass edits only the
 rows the ledger has already closed; the traceability landings, the README
 status lines, the roadmap's exit/evidence amendments, and this PRD's own
-`:298-304` B6-1 wording wait for the final pass at HP-6's signature.
+the B6-1 wording in [Open Questions](#open-questions) wait for the final pass at HP-6's signature.
 
 **Reconciled — final pass (2026-09-25, B6-16).** The owner approved every
 recommended R0 answer (D-01..D-18) on 2026-09-25 and deferred HP-6 to run
@@ -113,7 +113,7 @@ them). Nothing here claims a signed HP-6.
 | BPR-053                                                        | pending             | B6-15's PR not yet open                                       | no           | B6-15's sentence, copied verbatim                                              | no — final pass, B6-15 open         |
 | `README.md:22`                                                 | pending             | needs post-HP-6 state                                         | no           | B6 complete, B7 next, TLS deferred                                             | no — final pass                     |
 | `README.md:36`                                                 | pending             | needs HP-6 date and PR list                                   | no           | `**B6 ACCEPTED at HP-6 <date>**` sentence                                      | no — final pass                     |
-| `prd.md:211` vs `:298-304`                                     | pending             | needs RC tag run id                                           | no           | "proved by tag `<tag>` run `<id>`"                                             | no — final pass                     |
+| the B6-1 milestone row vs the B6-1 entry in Open Questions     | pending             | needs RC tag run id                                           | no           | "proved by tag `<tag>` run `<id>`"                                             | no — final pass                     |
 | `quick-start.md:13-18`                                         | pending             | B6-12 Task 6 owns it; RC tag not yet run                      | no           | flips when the tag publishes                                                   | no — B6-12's row                    |
 | `hp-4-scorecard-*.md:437-439` (stale support-bundle statement) | n/a                 | —                                                             | no           | not edited — signed document; BG-15's register row corrects the reader instead | no — never edited                   |
 
@@ -245,7 +245,7 @@ B6-15 must land _before_ HP-6 (workstreams 17 and 18 both say so). Packaging
 (B6-1, B6-2), TLS (B6-3 – B6-5), capacity (B6-9, B6-10), failure drills (B6-11)
 and supply chain (B6-12) can run in parallel once configuration and storage
 contracts are frozen — but HP-6 must be reached with **one** release candidate
-and **one** data-fixture set.
+and **one** data-fixture set. B6-16 follows HP-6 only to record HP-6's signature in the register and roadmap; HP-6 is still the phase's acceptance point and does not wait on B6-16, and B6-16's final pass ran 2026-09-25 ahead of the deferred HP-6 (D-02).
 
 ### TLS block deferred to the release (owner decision, 2026-09-11)
 

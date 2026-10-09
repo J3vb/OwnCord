@@ -21,6 +21,7 @@ import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
+import { openPopout, type Popout } from "../features/voice/popout";
 
 /** How often a watched stream's quality chip refreshes. */
 const STATS_POLL_MS = 2000;
@@ -49,8 +50,9 @@ export interface VideoGridCallbacks {
   readonly onStopSharing?: () => void;
   /** Keep the app window's full-screen state in step with a tile's. In a
    *  Tauri window, HTML full screen may fill only the webview (WebView2), so
-   *  the window itself goes full screen too. */
-  readonly setWindowFullscreen?: (on: boolean) => Promise<void>;
+   *  the window itself goes full screen too. With a label, a stream pop-out
+   *  window's state in step with its page's. */
+  readonly setWindowFullscreen?: (on: boolean, label?: string) => Promise<void>;
   /** The call controls a full-screen tile keeps at hand. */
   readonly callControls?: {
     readonly onMuteToggle: () => void;
@@ -233,6 +235,10 @@ function callButton(
 
 interface CellEntry {
   el: HTMLDivElement;
+  /** The tile's video, in the tile or in its pop-out window. */
+  video: HTMLVideoElement;
+  /** The pop-out window the video is in, if any. */
+  popout?: Popout;
   config?: TileConfig;
   trackCleanup?: () => void;
   /** Owns the tile's menu listeners and its open menu; goes with the tile. */
@@ -247,7 +253,7 @@ interface CellEntry {
   view?: string;
 }
 
-/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-200 %) volume
+/** The stream (screen-share audio, 0-100 %) or voice (mic, 0-100 %) volume
  *  of a remote tile: mute, a slider named for whose it is, and its value. */
 function buildVolumeControls(config: TileConfig): {
   overlay: HTMLDivElement;
@@ -255,9 +261,8 @@ function buildVolumeControls(config: TileConfig): {
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Screenshare
-  // sliders are 0-100 (HTMLAudioElement.volume caps at 1.0); mic sliders
-  // keep 0-200 (LiveKit setVolume supports boost up to 2.0).
+  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Both sliders
+  // are 0-100 (HTMLAudioElement.volume caps at 1.0).
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
     : getUserVolume(config.audioUserId);
@@ -273,7 +278,7 @@ function buildVolumeControls(config: TileConfig): {
   const volumeSlider = createElement("input", {
     type: "range",
     min: "0",
-    max: config.isScreenshare ? "100" : "200",
+    max: "100",
     value: String(currentVolume),
     class: "tile-volume-slider",
     // Lets a tile rebuild or removal put focus back on the same control
@@ -451,6 +456,13 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** Attach ended/mute/unmute listeners on the first video track to handle stale tiles. */
+  /** On the tile and on its video, so a video in its pop-out window hides
+   *  its stalled frame too. */
+  function setTrackMuted(entry: CellEntry, muted: boolean): void {
+    entry.el.classList.toggle("track-muted", muted);
+    entry.video.classList.toggle("track-muted", muted);
+  }
+
   function attachTrackLifecycle(userId: number, stream: MediaStream): void {
     // Clean up previous listeners for this tile
     const prev = cells.get(userId);
@@ -462,7 +474,7 @@ export function createVideoGrid(): VideoGridComponent {
     const track = stream.getVideoTracks()[0];
     // A replacement can already be live without ever emitting `unmute`.
     // Reset the old track's CSS state and seed it from this track instead.
-    prev?.el.classList.toggle("track-muted", track?.muted === true);
+    if (prev !== undefined) setTrackMuted(prev, track?.muted === true);
     if (track === undefined) return;
 
     const onTrackEnded = (): void => {
@@ -471,11 +483,11 @@ export function createVideoGrid(): VideoGridComponent {
     const onTrackMute = (): void => {
       // Temporarily hide video — track may unmute after network recovery
       const cell = cells.get(userId);
-      if (cell !== undefined) cell.el.classList.add("track-muted");
+      if (cell !== undefined) setTrackMuted(cell, true);
     };
     const onTrackUnmute = (): void => {
       const cell = cells.get(userId);
-      if (cell !== undefined) cell.el.classList.remove("track-muted");
+      if (cell !== undefined) setTrackMuted(cell, false);
     };
     track.addEventListener("ended", onTrackEnded);
     track.addEventListener("mute", onTrackMute);
@@ -636,6 +648,9 @@ export function createVideoGrid(): VideoGridComponent {
       return;
     }
     if (focusedTileId !== tileId) setFocusedTile(tileId);
+    // A popped-out stream comes back for full screen in the app window (its
+    // own window has a full-screen control of its own).
+    entry.popout?.close();
     const request = entry.el.requestFullscreen as (() => Promise<void>) | undefined;
     if (typeof request !== "function") {
       enterTheatre(tileId);
@@ -795,11 +810,10 @@ export function createVideoGrid(): VideoGridComponent {
     infoModule ??= await import("./video-grid/stream-info");
     const { chipText, renderStats, streamInfo } = infoModule;
     if (statsTile !== tileId || cells.get(tileId) !== entry) return;
-    const video = entry.el.querySelector("video");
     const info =
       sample !== null
         ? streamInfo(sample, entry.prevSample)
-        : { width: video?.videoWidth, height: video?.videoHeight };
+        : { width: entry.video.videoWidth, height: entry.video.videoHeight };
     if (sample !== null) entry.prevSample = sample;
     const chip = entry.el.querySelector<HTMLButtonElement>(".video-quality");
     const text = chipText(info);
@@ -858,8 +872,9 @@ export function createVideoGrid(): VideoGridComponent {
    *  minimised, stopped); the top layer for the stream you are watching
    *  (focused, full screen or popped out); otherwise its rendered size. */
   function viewOf(id: number, entry: CellEntry): VideoView {
-    const video = entry.el.querySelector("video");
-    if (video !== null && document.pictureInPictureElement === video) return { enabled: true };
+    if (entry.popout !== undefined) {
+      return { enabled: true };
+    }
     const { width, height } = entry.el.getBoundingClientRect();
     if (document.hidden || width === 0 || entry.el.classList.contains("video-cell--stopped")) {
       return { enabled: false };
@@ -898,6 +913,71 @@ export function createVideoGrid(): VideoGridComponent {
     }, VIEW_RESIZE_MS);
   }
 
+  // --- Pop out ---------------------------------------------------------------
+
+  /** Move the tile's video into a window of its own, or bring it back. Where
+   *  no window opens, the video stays in the grid. */
+  function togglePopout(tileId: number): void {
+    const entry = cells.get(tileId);
+    if (entry === undefined) return;
+    if (entry.popout !== undefined) {
+      entry.popout.close();
+      return;
+    }
+    if (isFullscreen(tileId)) leaveFullscreen();
+    // Popping out a stopped tile means watching it: its video is hidden.
+    if (entry.el.classList.contains("video-cell--stopped")) setStopped(tileId, false);
+    const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
+    const popout = openPopout({
+      title: voiceText("tile.popoutTitle", { name: username }),
+      video: entry.video,
+      onClosed: (byUser) => bringBack(entry, byUser),
+      setWindowFullscreen: (on, label) =>
+        callbacks.setWindowFullscreen?.(on, label) ?? Promise.resolve(),
+    });
+    if (popout === null) {
+      log.warn("Pop out window refused", { tileId });
+      return;
+    }
+    entry.popout = popout;
+    const cover = createElement("div", { class: "video-popped" });
+    const back = createElement(
+      "button",
+      { type: "button", class: "video-watch-btn", "data-tile-control": "pop-in" },
+      voiceText("tile.popIn"),
+    );
+    back.addEventListener("click", (e) => {
+      e.stopPropagation();
+      entry.popout?.close();
+    });
+    appendChildren(cover, createElement("div", {}, voiceText("tile.poppedOut")), back);
+    // The cover hides the tile's own controls: out of the tab order and
+    // inactive until the stream comes back, Bring back the one way in.
+    for (const child of entry.el.children) child.toggleAttribute("inert", true);
+    entry.el.appendChild(cover);
+    entry.el.querySelector("[data-tile-control='pip']")?.setAttribute("aria-pressed", "true");
+    syncViews();
+  }
+
+  /** The pop-out window closed: the video goes back into its tile. */
+  function bringBack(entry: CellEntry, byUser: boolean): void {
+    entry.popout = undefined;
+    const cover = entry.el.querySelector(".video-popped");
+    // Keep a keyboard user on the tile: Bring back goes with its cover, and a
+    // window the user closed leaves focus nowhere (Pop out was inert).
+    const active = document.activeElement;
+    const lost = active === null || active === document.body;
+    const hadFocus = cover?.contains(active) === true || (byUser && lost);
+    cover?.remove();
+    for (const child of entry.el.children) child.removeAttribute("inert");
+    const pip = entry.el.querySelector<HTMLElement>("[data-tile-control='pip']");
+    pip?.setAttribute("aria-pressed", "false");
+    if (hadFocus) pip?.focus();
+    entry.el.insertBefore(entry.video, entry.el.firstChild);
+    entry.video.play()?.catch(() => {});
+    syncViews();
+  }
+
   function getFocusedTileIdFn(): number | null {
     return focusedTileId;
   }
@@ -908,10 +988,10 @@ export function createVideoGrid(): VideoGridComponent {
     const entry = cells.get(tileId);
     if (entry === undefined) return;
     const cell = entry.el;
+    if (stopped) entry.popout?.close();
     cell.classList.toggle("video-cell--stopped", stopped);
     syncViews();
-    const video = cell.querySelector("video");
-    if (video !== null) video.hidden = stopped;
+    entry.video.hidden = stopped;
     cell.querySelector(".video-stopped")?.remove();
     const self = entry.config?.isSelf === true;
     if (!stopped) {
@@ -996,24 +1076,22 @@ export function createVideoGrid(): VideoGridComponent {
     // If a cell already exists for this user, update it in place
     const existing = cells.get(userId);
     if (existing !== undefined) {
-      const video = existing.el.querySelector("video");
-      if (video !== null) {
-        // Only replace srcObject if the underlying tracks changed
-        const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
-        const newTracks = stream.getTracks();
-        const tracksMatch =
-          oldTracks.length === newTracks.length &&
-          oldTracks.every((t, i) => t.id === newTracks[i]?.id);
-        if (!tracksMatch) {
-          video.srcObject = stream;
-          video.play()?.catch((err) => {
-            log.debug("Video autoplay rejected (track replacement)", { userId, err });
-          });
-          attachTrackLifecycle(userId, stream);
-          // A new track can come with a new publication (a reconnect): tell it too.
-          existing.view = undefined;
-          syncViews();
-        }
+      const video = existing.video;
+      // Only replace srcObject if the underlying tracks changed
+      const oldTracks = (video.srcObject as MediaStream | null)?.getTracks() ?? [];
+      const newTracks = stream.getTracks();
+      const tracksMatch =
+        oldTracks.length === newTracks.length &&
+        oldTracks.every((t, i) => t.id === newTracks[i]?.id);
+      if (!tracksMatch) {
+        video.srcObject = stream;
+        video.play()?.catch((err) => {
+          log.debug("Video autoplay rejected (track replacement)", { userId, err });
+        });
+        attachTrackLifecycle(userId, stream);
+        // A new track can come with a new publication (a reconnect): tell it too.
+        existing.view = undefined;
+        syncViews();
       }
       applyNames(existing, username, config?.name ?? username);
       // Sync stream type attribute in case it changed
@@ -1073,21 +1151,12 @@ export function createVideoGrid(): VideoGridComponent {
       setFocusedTile(null),
     );
     back.hidden = true;
-    // Pop out is the platform's picture-in-picture: no second window and no
-    // second subscription. Hidden where it is unavailable (WebKitGTK).
-    const pip = tileButton(voiceText("tile.popOut"), "picture-in-picture-2", "pip", () => {
-      if (document.pictureInPictureElement === video) {
-        void document.exitPictureInPicture().catch(() => {});
-        return;
-      }
-      video.requestPictureInPicture?.().catch((err: unknown) => {
-        log.debug("Pop out refused", { userId, err });
-      });
-    });
-    pip.hidden = !(
-      document.pictureInPictureEnabled === true &&
-      typeof video.requestPictureInPicture === "function"
+    // Pop out: the stream in a window of its own (togglePopout), and the
+    // same control brings it back.
+    const pip = tileButton(voiceText("tile.popOut"), "picture-in-picture-2", "pip", () =>
+      togglePopout(userId),
     );
+    pip.setAttribute("aria-pressed", "false");
     const fullscreen = tileButton(voiceText("tile.fullscreen"), "maximize", "fullscreen", () =>
       toggleFullscreen(userId),
     );
@@ -1101,7 +1170,7 @@ export function createVideoGrid(): VideoGridComponent {
       if (focusedTileId !== null && focusedTileId !== userId) setFocusedTile(userId);
     });
 
-    const entry: CellEntry = { el: cell, config, listeners: new Disposable(), name: "" };
+    const entry: CellEntry = { el: cell, video, config, listeners: new Disposable(), name: "" };
     // F toggles full screen from anywhere in the tile (not while typing), a
     // double-click too. The theatre fallback's own keys are on the document
     // (onTheatreKey).
@@ -1160,9 +1229,6 @@ export function createVideoGrid(): VideoGridComponent {
         { signal: entry.listeners.signal },
       );
       openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
-      for (const type of ["enterpictureinpicture", "leavepictureinpicture"]) {
-        video.addEventListener(type, syncViews, { signal: entry.listeners.signal });
-      }
       resizeObserver?.observe(cell);
     }
 
@@ -1233,6 +1299,7 @@ export function createVideoGrid(): VideoGridComponent {
     // through the overlay keeps a focus target when this tile leaves (Q1).
     const savedFocus = captureFocusedControl();
 
+    entry.popout?.close();
     if (entry.trackCleanup) {
       entry.trackCleanup();
       entry.trackCleanup = undefined;
@@ -1242,8 +1309,7 @@ export function createVideoGrid(): VideoGridComponent {
     if (theatreTile === userId) leaveTheatre();
     lastInfo.delete(userId);
 
-    const video = entry.el.querySelector("video");
-    if (video !== null) video.srcObject = null;
+    entry.video.srcObject = null;
 
     entry.el.remove();
     cells.delete(userId);
@@ -1398,13 +1464,13 @@ export function createVideoGrid(): VideoGridComponent {
     }
 
     for (const [, entry] of cells) {
+      entry.popout?.close();
       if (entry.trackCleanup) {
         entry.trackCleanup();
         entry.trackCleanup = undefined;
       }
       entry.listeners.destroy();
-      const video = entry.el.querySelector("video");
-      if (video !== null) video.srcObject = null;
+      entry.video.srcObject = null;
     }
     cells.clear();
     focusedTileId = null;

@@ -5,6 +5,7 @@ import {
   type MountableComponent,
 } from "../../src/lib/safe-render";
 import { setLogLevel } from "../../src/lib/logger";
+import { expectConsole } from "../helpers/console";
 
 // The unhandledrejection test below asserts on the logger's debug line, so
 // this file raises the level the global setup lowered (C-04) and puts it back
@@ -20,7 +21,7 @@ describe("safeMount", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     // Suppress console output during tests
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error");
     vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -47,6 +48,7 @@ describe("safeMount", () => {
     safeMount(component, container);
     expect(container.textContent).toContain("Something went wrong");
     expect(container.textContent).toContain("Render failed");
+    expectConsole("error", "Component mount failed");
   });
 
   it("shows fallback without error details for non-Error throws", () => {
@@ -59,6 +61,7 @@ describe("safeMount", () => {
 
     safeMount(component, container);
     expect(container.textContent).toContain("Something went wrong");
+    expectConsole("error", "Component mount failed");
   });
 
   it("clears container before showing fallback", () => {
@@ -73,6 +76,7 @@ describe("safeMount", () => {
 
     safeMount(component, container);
     expect(container.textContent).not.toContain("existing content");
+    expectConsole("error", "Component mount failed");
   });
 });
 
@@ -81,7 +85,7 @@ describe("installGlobalErrorHandlers", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error");
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "debug").mockImplementation(() => {});
 
@@ -112,6 +116,7 @@ describe("installGlobalErrorHandlers", () => {
     });
 
     expect(errorSpy).toHaveBeenCalled();
+    expectConsole("error", "Uncaught error");
   });
 
   it("error handler logs non-Error values as strings", () => {
@@ -126,6 +131,7 @@ describe("installGlobalErrorHandlers", () => {
     });
 
     expect(errorSpy).toHaveBeenCalled();
+    expectConsole("error", "Uncaught error");
   });
 
   it("unhandledrejection handler logs Error reason", () => {
@@ -134,6 +140,7 @@ describe("installGlobalErrorHandlers", () => {
     handler({ reason: new Error("promise failed") });
 
     expect(errorSpy).toHaveBeenCalled();
+    expectConsole("error", "Unhandled promise rejection");
   });
 
   it("unhandledrejection handler logs non-Error reason as string", () => {
@@ -142,6 +149,7 @@ describe("installGlobalErrorHandlers", () => {
     handler({ reason: "string rejection" });
 
     expect(errorSpy).toHaveBeenCalled();
+    expectConsole("error", "Unhandled promise rejection");
   });
 
   it("unhandledrejection handler downgrades Tauri resource cleanup to debug", () => {
@@ -165,6 +173,7 @@ describe("installGlobalErrorHandlers", () => {
     const handler = errorHandlers.get("unhandledrejection")!;
     handler({ reason: err });
     expect(errorSpy).toHaveBeenCalled();
+    expectConsole("error", "Unhandled promise rejection");
   });
 
   it("unhandledrejection handler falls back to message when no stack", () => {
@@ -174,5 +183,6 @@ describe("installGlobalErrorHandlers", () => {
     const handler = errorHandlers.get("unhandledrejection")!;
     handler({ reason: err });
     expect(errorSpy).toHaveBeenCalled();
+    expectConsole("error", "Unhandled promise rejection");
   });
 });

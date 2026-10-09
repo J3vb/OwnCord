@@ -464,3 +464,32 @@ test("every capability is a key of the result, so a missing output cannot skip a
     assert.equal(typeof sel[cap], "boolean", `${cap} must be present and boolean`);
   }
 });
+
+test("permissions.ts and the files that kill its mutants select the mutation hotspot", () => {
+  for (const path of [
+    "Client/src/lib/permissions.ts",
+    "Client/tests/unit/permissions.test.ts",
+    "Client/stryker.ci.config.mjs",
+    "Client/stryker.config.mjs",
+  ]) {
+    assert.equal(runs(`M\t${path}`, "permissions"), true, path);
+  }
+});
+
+test("other client and docs changes leave the mutation hotspot off", () => {
+  for (const path of ["Client/src/lib/api.ts", "Client/tests/unit/api.test.ts", "docs/api.md"]) {
+    assert.equal(runs(`M\t${path}`, "permissions"), false, path);
+  }
+});
+
+test("the direct Stryker inputs select the mutation hotspot", () => {
+  for (const path of [
+    "Client/vitest.config.ts",
+    "Client/tests/setup.ts",
+    "Client/tsconfig.json",
+    "Client/package.json",
+    "Client/package-lock.json",
+  ]) {
+    assert.equal(runs(`M\t${path}`, "permissions"), true, path);
+  }
+});

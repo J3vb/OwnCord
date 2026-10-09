@@ -10,8 +10,8 @@
  *   - the per-user volume menu on a voice roster row (slider + reset).
  *
  * Assertions are on rendered UI, on the app's outgoing HTTP traffic captured
- * from `__TAURI_INTERNALS__.invoke` (a second init script, installed after the
- * mock's), and on localStorage only where persistence is the named behaviour.
+ * from `__TAURI_INTERNALS__.invoke` (a `wrappers` entry, run inside the
+ * mock's init script), and on localStorage only where persistence is the named behaviour.
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
@@ -38,7 +38,7 @@ interface CapturedCall {
   readonly body?: string | null;
 }
 
-/** Installed as a second init script, after the Tauri mock sets up `invoke`. */
+/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
 function captureScript(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -142,6 +142,7 @@ const BANNED_USER = {
 async function mockDmSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -163,7 +164,6 @@ async function mockDmSession(page: Page): Promise<void> {
       },
     }),
   );
-  await page.addInitScript(captureScript);
 }
 
 /** Boot to the full DM sidebar (dms mode) from the channels-mode preview row. */
@@ -494,12 +494,10 @@ test.describe("Per-user volume menu", () => {
     // Arrow keys are the honest way to drive a native range control.
     await slider.focus();
     for (let i = 0; i < 10; i++) {
-      await slider.press("ArrowRight");
+      await slider.press("ArrowLeft");
     }
-    await expect(menu.locator(".slider-val")).toHaveText("110%");
-    await expect(
-      menu.locator(".context-menu-item", { hasText: "User Volume: 110%" }),
-    ).toBeVisible();
+    await expect(menu.locator(".slider-val")).toHaveText("90%");
+    await expect(menu.locator(".context-menu-item", { hasText: "User Volume: 90%" })).toBeVisible();
 
     // Dismiss, then reopen: the saved volume is what the menu reads back.
     await page.mouse.click(5, 5);
@@ -507,9 +505,9 @@ test.describe("Per-user volume menu", () => {
 
     await row.click({ button: "right" });
     await expect(page.locator(".user-vol-menu")).toBeVisible({ timeout: 3_000 });
-    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("110");
+    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("90");
     // The label was seeded from the saved volume too, not defaulted.
-    await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("110%");
+    await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("90%");
   });
 
   test("Reset Volume returns the slider and label to 100%", async ({ page }) => {
@@ -522,9 +520,9 @@ test.describe("Per-user volume menu", () => {
     const slider = menu.locator("input.settings-slider");
     await slider.focus();
     for (let i = 0; i < 5; i++) {
-      await slider.press("ArrowRight");
+      await slider.press("ArrowLeft");
     }
-    await expect(menu.locator(".slider-val")).toHaveText("105%");
+    await expect(menu.locator(".slider-val")).toHaveText("95%");
 
     await menu.locator(".context-menu-item", { hasText: "Reset Volume" }).click();
 
@@ -533,5 +531,13 @@ test.describe("Per-user volume menu", () => {
     await expect(
       menu.locator(".context-menu-item", { hasText: "User Volume: 100%" }),
     ).toBeVisible();
+
+    // The reset was saved, not just painted: the reopened menu reads 100.
+    await page.mouse.click(5, 5);
+    await expect(menu).not.toBeVisible();
+    await row.click({ button: "right" });
+    await expect(page.locator(".user-vol-menu")).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator(".user-vol-menu input.settings-slider")).toHaveValue("100");
+    await expect(page.locator(".user-vol-menu .slider-val")).toHaveText("100%");
   });
 });

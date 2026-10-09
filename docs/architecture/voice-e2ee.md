@@ -145,7 +145,9 @@ adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 identity; the backend reports each transition once, so a remote peer's failure
 is re-raised every second until its `Ok`, as the web worker does, and the
 shared 3 s decrypt grace in `lib/roomEventHandlers.ts` decides when it degrades
-the call — participant join/leave).
+the call; the grace restarts only when a room key was installed since the
+peer's last failure, which `E2EEWorker` reports on both paths — participant
+join/leave).
 No audio `TrackSubscribed` is raised: there is no browser track. Capture and
 playout run in the Rust process on the session's own streams, with
 libwebrtc's APM (AEC/NS/AGC from the same preferences the web path uses) and
@@ -231,14 +233,15 @@ alone).
 device switch during a slow join proceeds, and a connect that a newer one
 superseded closes its own room and reports it.
 
-**Still out, by owner decision (2026-09-22).** Input volume and the
-sensitivity (VAD) gate: the phase-1 device-module track was a plain libwebrtc
-`LocalAudioSource`, which never hands capture frames to a sink, so neither
-could be applied there. The audio-parity capture path (below) now has such a
-stage, but input volume and the gate were not in its scope: Linux relies on the
-engine's automatic gain control and Opus DTX, and the settings tab hides the
-Input Volume and Input Sensitivity controls there with a note pointing at the
-system mixer; the processing toggles, Enhanced Noise Suppression included,
+**Still out, by owner decision (2026-09-22).** Input volume: the phase-1
+device-module track was a plain libwebrtc `LocalAudioSource`, which never
+hands capture frames to a sink, so it could not be applied there. The
+audio-parity capture path (below) now has such a stage, but input volume was
+not in its scope: Linux relies on the engine's automatic gain control, and the
+settings tab hides the Input Volume control there with a note pointing at the
+system mixer. The sensitivity gate has since landed on that stage (below), so
+the Input Sensitivity slider shows on Linux too, without a live level in its
+bar; the processing toggles, Enhanced Noise Suppression included,
 apply at the next join. Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
 screen share phase 3. rust-sdks #1408
@@ -282,7 +285,7 @@ the call. Three routes:
 frame with a WebGL2 I420→RGB shader (BT.601 limited range) and exposes the
 canvas as a `MediaStreamTrack` (`canvas.captureStream()`). The adapter raises
 `RoomEvent.TrackSubscribed` with that track, so `roomEventHandlers`, the video
-grid, stream previews and `getRemoteVideoStream` consume a MediaStream exactly
+grid consumes a MediaStream exactly
 as they do on Windows. `trackUnsubscribed`, `trackUnpublished` and a
 participant leaving dispose the renderer and raise `TrackUnsubscribed`
 (before `ParticipantDisconnected`, as livekit-client does); `disconnect()`
@@ -297,7 +300,9 @@ below). `NativeRoom.localParticipant.createCameraTracks` is the stand-in for
 the room exposes it, so Windows and macOS keep the web path. It starts a
 `GstDeviceMonitor`-listed `Video/Source` (V4L2 or PipeWire) through
 `v4l2src`/`pipewiresrc` (or the monitor's own element for the id) →
-`decodebin` → `videoconvert` → an I420 `appsink`, and returns a
+`decodebin` → `videoconvert` → an I420 `appsink`, capped at the selected
+preset's resolution (720p for the default "medium", 1080p when chosen; "source"
+is uncapped, `createCameraTracks`' `resolution` option), and returns a
 `NativeCameraTrack` whose `mediaStreamTrack` is the capture's local preview
 (the frame socket's `camera` route, drawn by the same WebGL renderer as remote
 video). The track is captured and independent of the window: the settings
@@ -403,7 +408,8 @@ path closes it. The #1408 fix (a vendored `webrtc-sys`, above) is the
 follow-up.
 
 **Simulcast camera, interop (CI).** The app publishes its camera simulcast at
-every quality but "source", at 1280×720 for the default "high" preset; the
+every quality but "source", at 1280×720 for the default 720p ("medium")
+preset (a 1080p camera adds a 720p layer, `cameraSimulcastLayers`); the
 case above covers a single-layer 640×360 camera. A third case publishes the
 example's camera with `--video 1280x720 --simulcast` and requires the browser
 to decode more than 10 frames in every one of 8 consecutive seconds, so a
@@ -655,7 +661,12 @@ stereo since the capture work, below), queued per track
 (played once 30 ms is queued, oldest audio dropped past 200 ms), and a
 `cpal` output stream (20 ms periods) mixes the queues with each participant's
 gain. `cpal` uses its pure-Rust PulseAudio host (PulseAudio and
-pipewire-pulse; no libpulse link) and falls back to ALSA.
+pipewire-pulse; no libpulse link) and falls back to ALSA. Mixing and capture
+processing stay f32 at 48 kHz; both streams open their device at 48 kHz in
+f32, else i16, i32, u16, then any other 8- to 32-bit PCM format
+(`src-tauri/src/native_voice/stream_format.rs`), and convert at the callback
+edge, so a raw ALSA device without float samples still opens. A device with
+no 48 kHz format does not open (there is no resampler).
 
 **What follows the gain.** `native_voice_set_volume(session, identity,
 volume)` sets the gain for that participant's microphone tracks (1 is unity;
@@ -741,7 +752,13 @@ publication; unmute reopens it on the device it last resolved, without
 enumerating devices. Push-to-talk never closes it: with the key up
 (`native_voice_set_ptt_gated`) each processed frame is zeroed after the APM
 and RNNoise ran, so the stream and their state stay up and the indicator
-stays lit while PTT is armed. The capture shares the
+stays lit while PTT is armed. The input-sensitivity gate
+(`native_voice_set_voice_gate`, `VoiceGate` in `capture.rs`) zeroes frames the
+same way: it is the web detector (`vad-worklet.js`) on the same scale, the RMS
+of each processed 10 ms frame against `vadThreshold`, with its ~32 ms attack,
+~320 ms hold, ~500 ms start-up grace and a 50 ms lookahead, and its
+`voiceGate` events drive the local speaking ring as the web detector's
+verdicts do. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

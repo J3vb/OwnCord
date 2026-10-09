@@ -27,6 +27,8 @@ function micTrack(): LocalAudioTrack {
 
 const contextOf = (track: LocalAudioTrack): FakeAudioContext =>
   (track.getProcessor() as unknown as MicProcessor).context as unknown as FakeAudioContext;
+/** Input Volume rides on the first gain node, ahead of the detector's tap. */
+const inputGain = (ctx: FakeAudioContext) => ctx.nodes.filter((n) => n.kind === "gain")[0]!.gain;
 const outputGain = (ctx: FakeAudioContext) => ctx.nodes.filter((n) => n.kind === "gain")[1]!.gain;
 
 function roomWith(track: LocalAudioTrack | undefined) {
@@ -152,7 +154,7 @@ describe("AudioPipeline", () => {
 
       await pipeline.attach(track);
       const ctx = contextOf(track);
-      expect(outputGain(ctx).value).toBe(1.5);
+      expect(inputGain(ctx).value).toBe(1.5);
       // The detector fell back to polling (no worklet in jsdom) with the gate's lookahead on.
       await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(false));
       expect(ctx.node("delay").delayTime.value).toBe(0.05);
@@ -218,6 +220,50 @@ describe("AudioPipeline", () => {
     });
   });
 
+  describe("local speaking verdict", () => {
+    it("reports the sensitivity gate itself, so the ring follows the slider", async () => {
+      FakeAudioContext.workletsLoad = true;
+      const pipeline = new AudioPipeline();
+      const verdicts: Array<boolean | null> = [];
+      pipeline.onGateSpeaking = (speaking) => verdicts.push(speaking);
+      await pipeline.attach(micTrack());
+      await vi.waitFor(() => expect(pipeline.vadUsingWorklet).toBe(true));
+      const vad = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
+      expect(verdicts.at(-1)).toBe(true);
+      verdicts.length = 0;
+
+      vad.emit({ type: "gate", gated: false });
+      vad.emit({ type: "gate", gated: true });
+      expect(verdicts).toEqual([true, false]);
+
+      // Sensitivity 100 runs no gate: LiveKit decides again.
+      pipeline.setVoiceSensitivity(100);
+      expect(verdicts.at(-1)).toBeNull();
+    });
+
+    it("drives the room's own gate on the slider's scale where the room has no web processor (the native room)", () => {
+      prefs.set("voiceSensitivity", 70);
+      const pipeline = new AudioPipeline();
+      const verdicts: Array<boolean | null> = [];
+      pipeline.onGateSpeaking = (speaking) => verdicts.push(speaking);
+      const setVoiceGate = vi.fn();
+      pipeline.setRoom({
+        localParticipant: { getTrackPublication: () => undefined },
+        setVoiceGate,
+      } as never);
+
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+      pipeline.setVoiceSensitivity(40);
+      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(40), expect.any(Function));
+
+      const report = setVoiceGate.mock.calls.at(-1)![1] as (speaking: boolean | null) => void;
+      verdicts.length = 0;
+      report(false);
+      report(true);
+      expect(verdicts).toEqual([false, true]);
+    });
+  });
+
   describe("reapplyEnhancedNoiseSuppression", () => {
     it("routes the live processor through RNNoise without restarting the capture", async () => {
       FakeAudioContext.workletsLoad = true;
@@ -270,6 +316,7 @@ describe("AudioPipeline", () => {
         echoCancellation: true,
         noiseSuppression: false,
         autoGainControl: true,
+        voiceIsolation: false,
         deviceId: { exact: "usb-mic" },
       });
       expect(contextOf(track)).toBe(ctx);
@@ -293,6 +340,47 @@ describe("AudioPipeline", () => {
         expect.objectContaining({ deviceId: "default", echoCancellation: true }),
       );
       expect(onError).not.toHaveBeenCalled();
+    });
+
+    // Owner's report 2026-10-08: an unplugged mic ends the capture and
+    // livekit-client's handleTrackEnded restarts it on `{deviceId: "default"}`
+    // with no processing flags, so the browser's defaults (AGC on) replace
+    // the saved toggles until the next settings change.
+    it("re-applies the saved processing after the SDK restarts the capture without it", async () => {
+      prefs.set("autoGainControl", false);
+      // The browser applies its defaults to any flag a request leaves out.
+      vi.mocked(navigator.mediaDevices.getUserMedia).mockImplementation(async (constraints) => {
+        const audio = (constraints as { audio: MediaTrackConstraints }).audio;
+        const track = fakeMediaStreamTrack("mic-2");
+        track.getSettings = () =>
+          ({
+            deviceId: "default",
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            ...audio,
+          }) as MediaTrackSettings;
+        return new FakeMediaStream([track]) as unknown as MediaStream;
+      });
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      pipeline.setRoom(roomWith(track));
+      const restartTrack = vi.spyOn(track, "restartTrack");
+
+      await track.restartTrack({ deviceId: "default" });
+
+      await vi.waitFor(() => expect(restartTrack).toHaveBeenCalledTimes(2));
+      expect(restartTrack).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: false,
+          voiceIsolation: false,
+        }),
+      );
+      await new Promise((r) => setTimeout(r, 0));
+      expect(restartTrack, "the corrected capture is not restarted again").toHaveBeenCalledTimes(2);
     });
 
     it("reports a failed restart", async () => {
@@ -340,6 +428,24 @@ describe("startVadDetector", () => {
     expect(onGate).not.toHaveBeenCalled();
   });
 
+  it("holds the fallback gate for elapsed time, not poll count, when timers are throttled", async () => {
+    vi.useFakeTimers();
+    const ctx = new FakeAudioContext();
+    const analyser = ctx.createAnalyser();
+    analyser.getFloatTimeDomainData.mockImplementation((arr: Float32Array) => arr.fill(0));
+    const onGate = vi.fn();
+    const detector = startVadDetector(ctx as never, analyser as never, 0.05, { onGate });
+    await vi.advanceTimersByTimeAsync(16 * 30);
+    await vi.advanceTimersByTimeAsync(16); // the first quiet poll starts the hold
+    expect(onGate).not.toHaveBeenCalled();
+    // A hidden window runs the next poll a second later, not 16 ms: it is
+    // already past the 320 ms hold.
+    vi.setSystemTime(Date.now() + 1000);
+    await vi.advanceTimersByTimeAsync(16);
+    expect(onGate).toHaveBeenLastCalledWith(true);
+    void detector.stop();
+  });
+
   it("falls back to polling with the same attack and hold when the worklet is unavailable", async () => {
     vi.useFakeTimers();
     const ctx = new FakeAudioContext();
@@ -355,10 +461,13 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(onStarted).toHaveBeenCalledWith(false);
 
-    // Start-up grace (30 polls) then 12 quiet polls close the gate.
+    // Start-up grace (30 polls) then 320 ms below the threshold (the
+    // worklet's hold) close the gate.
     await vi.advanceTimersByTimeAsync(16 * 30);
     expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16 * 12);
+    await vi.advanceTimersByTimeAsync(16 * 20);
+    expect(onGate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(16 * 2);
     expect(onGate).toHaveBeenLastCalledWith(true);
 
     // A single loud poll is not speech; two are.

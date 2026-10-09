@@ -201,6 +201,8 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeNotFound, Message: err.Error()}}
 	case errors.Is(err, service.ErrTimedOut):
 		return Result{Error: ClientError{Code: ErrCodeTimedOut, Message: err.Error()}}
+	case errors.Is(err, service.ErrCallNeedsAcceptance):
+		return Result{Error: ClientError{Code: ErrCodeCallRequiresAcceptance, Message: err.Error()}}
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		return Result{Error: ClientError{Code: ErrCodeForbidden, Message: err.Error()}}
 	case errors.Is(err, service.ErrDeletedMessage):

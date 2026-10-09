@@ -16,6 +16,7 @@ use std::thread::JoinHandle as Thread;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{FromSample, Sample, SizedSample};
 use futures_util::StreamExt;
 use livekit::prelude::*;
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
@@ -23,6 +24,7 @@ use tokio::task::JoinHandle;
 
 use super::capture::{Apm, Reference};
 use super::session::{resolve_device, DeviceInfo};
+use super::stream_format::{pick_config, typed};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 /// A queue starts (or restarts after running dry) only once it holds this
@@ -665,38 +667,21 @@ fn open_output(
     reference: Option<Reference>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
-    let channels = device
-        .default_output_config()
-        .map_err(|e| format!("playout device config: {e}"))?
-        .channels();
+    let supported = device
+        .supported_output_configs()
+        .map_err(|e| format!("playout device configs: {e}"))?;
+    let channels = device.default_output_config().ok().map(|c| c.channels());
+    let (config, format) = pick_config(supported, SAMPLE_RATE, channels)
+        .ok_or("the playout device offers no 48 kHz format")?;
     // Shared by the two build attempts; only the one that succeeds runs.
     let reference = Arc::new(Mutex::new(reference));
     let build = |buffer_size| {
-        let mixer = mixer.clone();
-        let reference = reference.clone();
-        let dead = dead.clone();
-        device.build_output_stream::<f32, _, _>(
-            cpal::StreamConfig {
-                channels,
-                sample_rate: SAMPLE_RATE,
-                buffer_size,
-            },
-            move |out, _| {
-                mixer.mix(out, channels as usize);
-                if let Some(r) = lock(&reference).as_mut() {
-                    r.feed(out, channels as usize);
-                }
-            },
-            // A stream the sound server tore down (suspend/resume, a
-            // pulseaudio restart) is only reported here: flag it so the
-            // watcher reopens it, or the call goes silently dead in this
-            // direction (voice #3).
-            move |e| {
-                log::warn!("[native_voice] playout stream: {e}");
-                dead.store(true, Ordering::Relaxed);
-            },
-            None,
-        )
+        let config = cpal::StreamConfig {
+            buffer_size,
+            ..config
+        };
+        let (mixer, reference, dead) = (mixer.clone(), reference.clone(), dead.clone());
+        typed!(format, build_output(device, config, mixer, reference, dead))
     };
     let stream = build(cpal::BufferSize::Fixed(PERIOD_FRAMES))
         .or_else(|_| build(cpal::BufferSize::Default))
@@ -705,6 +690,62 @@ fn open_output(
         .play()
         .map_err(|e| format!("starting the playout stream: {e}"))?;
     Ok(stream)
+}
+
+/// The most of one device pull mixed at once: 100 ms. A larger pull is mixed
+/// in pieces, so the mix buffer is allocated when the stream is built, never
+/// in its callback.
+const MIX_FRAMES: usize = SAMPLE_RATE as usize / 10;
+
+/// Fill device buffer `out` (`channels` wide) with the mix, made in f32 in
+/// `mixed` (a whole number of frames) and converted to the device's format;
+/// the echo canceller's reference is fed what is played.
+fn fill<T>(
+    out: &mut [T],
+    mixed: &mut [f32],
+    channels: usize,
+    mixer: &Mixer,
+    reference: &Mutex<Option<Reference>>,
+) where
+    T: Sample + FromSample<f32>,
+{
+    for out in out.chunks_mut(mixed.len()) {
+        let mixed = &mut mixed[..out.len()];
+        mixer.mix(mixed, channels);
+        if let Some(r) = lock(reference).as_mut() {
+            r.feed(mixed, channels);
+        }
+        for (o, s) in out.iter_mut().zip(mixed.iter()) {
+            *o = s.to_sample();
+        }
+    }
+}
+
+fn build_output<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    mixer: Arc<Mixer>,
+    reference: Arc<Mutex<Option<Reference>>>,
+    dead: Arc<AtomicBool>,
+) -> Result<cpal::Stream, cpal::Error>
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let channels = usize::from(config.channels.max(1));
+    let mut mixed = vec![0.0; MIX_FRAMES * channels];
+    device.build_output_stream::<T, _, _>(
+        config,
+        move |out, _| fill(out, &mut mixed, channels, &mixer, &reference),
+        // A stream the sound server tore down (suspend/resume, a
+        // pulseaudio restart) is only reported here: flag it so the
+        // watcher reopens it, or the call goes silently dead in this
+        // direction (voice #3).
+        move |e| {
+            log::warn!("[native_voice] playout stream: {e}");
+            dead.store(true, Ordering::Relaxed);
+        },
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -1260,5 +1301,36 @@ mod tests {
         m.remove("TR_a");
         m.push("TR_a", &[1000; PRIME]);
         assert!(mixed(&m, PRIME).iter().all(|&s| s == 0.0));
+    }
+
+    /// An integer device gets the f32 mix converted, and a pull larger than
+    /// the mix buffer is mixed in pieces with nothing lost between them.
+    #[test]
+    fn an_integer_device_plays_the_f32_mix_converted() {
+        let frames = MIX_FRAMES + 30;
+        let source = sine(8000.0, PRIME + frames);
+        let (float, int) = (Mixer::default(), Mixer::default());
+        for m in [&float, &int] {
+            m.add("TR_a", "user-1", Some(Volume::Microphone), 1);
+            m.push("TR_a", &source);
+        }
+        let mut want = vec![0.0; frames * 2];
+        float.mix(&mut want, 2);
+        let mut out = vec![0i16; frames * 2];
+        let mut scratch = vec![0.0; MIX_FRAMES * 2];
+        fill(&mut out, &mut scratch, 2, &int, &Mutex::new(None));
+        let want: Vec<i16> = want.iter().map(|s| s.to_sample()).collect();
+        assert_eq!(out, want);
+        assert!(out.iter().any(|&s| s != 0), "the sine plays");
+        // An unsigned device's silence is its midpoint, not zero.
+        let mut out = vec![0u16; 4];
+        fill(
+            &mut out,
+            &mut scratch,
+            2,
+            &Mixer::default(),
+            &Mutex::new(None),
+        );
+        assert_eq!(out, [32768; 4]);
     }
 }

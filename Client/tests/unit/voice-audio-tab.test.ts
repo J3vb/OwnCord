@@ -7,6 +7,7 @@ const mockSetInputVolume = vi.fn();
 const mockSetOutputVolume = vi.fn();
 const mockReapplyAudioProcessing = vi.fn().mockResolvedValue(undefined);
 const mockReapplyEnhancedNoiseSuppression = vi.fn().mockResolvedValue(undefined);
+const mockGetLocalMicSettings = vi.fn((): MediaTrackSettings | null => null);
 
 vi.mock("@lib/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
@@ -17,6 +18,7 @@ vi.mock("@lib/livekitSession", () => ({
   reapplyAudioProcessing: (...args: unknown[]) => mockReapplyAudioProcessing(...args),
   reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
     mockReapplyEnhancedNoiseSuppression(...args),
+  getLocalMicSettings: () => mockGetLocalMicSettings(),
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
@@ -27,7 +29,11 @@ import { vadThreshold } from "@lib/audioPipeline";
 // so the singleton stays one.
 import * as appLogger from "@lib/logger";
 import { expectConsole } from "../helpers/console";
-import { FakeAudioWorkletNode, installFakeAudio } from "../helpers/fakeAudioContext";
+import {
+  FakeAudioContext,
+  FakeAudioWorkletNode,
+  installFakeAudio,
+} from "../helpers/fakeAudioContext";
 
 describe("VoiceAudioTab camera preview", () => {
   beforeEach(() => {
@@ -192,8 +198,9 @@ describe("VoiceAudioTab UI structure", () => {
   /** Fires the `devicechange` listeners registered on the stubbed MediaDevices. */
   let emitDeviceChange: () => void = () => {};
 
-  function stubNavigator(devices: Array<{ kind: string; deviceId: string; label: string }> = []): {
-    setDevices(next: Array<{ kind: string; deviceId: string; label: string }>): void;
+  type FakeDevice = { kind: string; deviceId: string; label: string; groupId?: string };
+  function stubNavigator(devices: FakeDevice[] = []): {
+    setDevices(next: FakeDevice[]): void;
   } {
     const audioStream = {
       getTracks: () => [{ stop: vi.fn(), kind: "audio" }],
@@ -255,8 +262,9 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const selects = el.querySelectorAll("select");
-    // Input, output, stream quality, screen share fps, video = 5 selects
-    expect(selects.length).toBe(5);
+    // Input, output, camera quality, screen share quality, screen share fps,
+    // video = 6 selects
+    expect(selects.length).toBe(6);
     ac.abort();
   });
 
@@ -470,6 +478,80 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  // Owner's report 2026-10-08: after an unplug and replug the call kept the
+  // webcam mic while the list said only "Default".
+  it("names the device the call captures next to a saved Default microphone", async () => {
+    mockGetLocalMicSettings.mockReturnValue({ deviceId: "default", groupId: "g-webcam" });
+    stubNavigator([
+      { kind: "audioinput", deviceId: "default", label: "Default - USB Mic", groupId: "g-usb" },
+      { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+      { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
+    ]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)"));
+    mockGetLocalMicSettings.mockReturnValue(null);
+    ac.abort();
+  });
+
+  it("shows a plain Default while a named microphone is saved", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("usb-mic"));
+    mockGetLocalMicSettings.mockReturnValue({ deviceId: "usb-mic", groupId: "g-usb" });
+    stubNavigator([
+      { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+    ]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+    expect(inputSelect.options[0]!.text).toBe("Default");
+    mockGetLocalMicSettings.mockReturnValue(null);
+    ac.abort();
+  });
+
+  it("refreshes the Default label once the session has moved the capture", async () => {
+    vi.useFakeTimers();
+    try {
+      mockGetLocalMicSettings.mockReturnValue({ deviceId: "webcam-mic", groupId: "g-webcam" });
+      stubNavigator([
+        { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
+        { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
+      ]);
+      const ac = new AbortController();
+      const el = createVoiceAudioTab(ac.signal).build();
+      document.body.appendChild(el);
+      const inputSelect = el.querySelectorAll("select")[0]!;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)");
+
+      emitDeviceChange();
+      mockGetLocalMicSettings.mockReturnValue({ deviceId: "usb-mic", groupId: "g-usb" });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(inputSelect.options[0]!.text).toBe("Default (USB Mic)");
+      mockGetLocalMicSettings.mockReturnValue(null);
+      ac.abort();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a plain Default label when no call captures the microphone", async () => {
+    stubNavigator([{ kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g" }]);
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+
+    const inputSelect = el.querySelectorAll("select")[0]!;
+    await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
+    expect(inputSelect.options[0]!.text).toBe("Default");
+    ac.abort();
+  });
+
   it("input device change calls switchInputDevice and saves pref", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "mic-1", label: "Mic 1" }]);
     const ac = new AbortController();
@@ -510,22 +592,42 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("stream quality select saves to preferences on change", () => {
+  it("camera quality select saves to preferences on change", () => {
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
     const el = tab.build();
     document.body.appendChild(el);
 
-    // Stream quality is the 3rd select (index 2)
     const qualitySelect = el.querySelector(
-      'select[aria-label="Stream Quality"]',
+      'select[aria-label="Camera Quality"]',
     ) as HTMLSelectElement;
+    expect(qualitySelect.value).toBe("medium");
     qualitySelect.value = "low";
     qualitySelect.dispatchEvent(new Event("change"));
 
     const saved = localStorage.getItem("owncord:settings:streamQuality");
     expect(saved).toBe('"low"');
+    expect(localStorage.getItem("owncord:settings:screenShareQuality")).toBeNull();
+    ac.abort();
+  });
+
+  it("screen share quality select defaults to medium and saves its own pref", () => {
+    stubNavigator();
+    const ac = new AbortController();
+    const tab = createVoiceAudioTab(ac.signal);
+    const el = tab.build();
+    document.body.appendChild(el);
+
+    const qualitySelect = el.querySelector(
+      'select[aria-label="Screen Share Quality"]',
+    ) as HTMLSelectElement;
+    expect(qualitySelect.value).toBe("medium");
+    qualitySelect.value = "high";
+    qualitySelect.dispatchEvent(new Event("change"));
+
+    expect(localStorage.getItem("owncord:settings:screenShareQuality")).toBe('"high"');
+    expect(localStorage.getItem("owncord:settings:streamQuality")).toBeNull();
     ac.abort();
   });
 
@@ -579,7 +681,12 @@ describe("VoiceAudioTab UI structure", () => {
       expect(speakers.querySelector('select[aria-label="Output Device"]')).not.toBeNull();
       expect(speakers.querySelector('input[aria-label="Output Volume"]')).not.toBeNull();
       const camera = cardNamed(el, "Camera & screen share");
-      for (const name of ["Video Device", "Stream Quality", "Screen Share FPS"]) {
+      for (const name of [
+        "Video Device",
+        "Camera Quality",
+        "Screen Share Quality",
+        "Screen Share FPS",
+      ]) {
         expect(camera.querySelector(`select[aria-label="${name}"]`), name).not.toBeNull();
       }
       expect(camera.querySelector("video")).not.toBeNull();
@@ -679,6 +786,20 @@ describe("VoiceAudioTab UI structure", () => {
           type: "config",
           threshold: vadThreshold(30),
         });
+        ac.abort();
+      });
+
+      it("meters the microphone after Input Volume, as the live gate does", async () => {
+        localStorage.setItem("owncord:settings:inputVolume", "150");
+        const { el, ac } = await meter();
+        const entry = () =>
+          FakeAudioContext.instances.at(-1)!.nodes.find((n) => n.kind === "gain")!.gain;
+        await vi.waitFor(() => expect(entry().value).toBe(1.5));
+
+        const slider = el.querySelector<HTMLInputElement>('input[aria-label="Input Volume"]')!;
+        slider.value = "50";
+        slider.dispatchEvent(new Event("input"));
+        expect(entry().value).toBe(0.5);
         ac.abort();
       });
 
@@ -808,6 +929,7 @@ describe("VoiceAudioTab UI structure", () => {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: true,
+          voiceIsolation: false,
           deviceId: { exact: "mic-2" },
         },
         video: false,
@@ -1363,8 +1485,9 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("restores saved stream quality selection", () => {
+  it("restores saved camera and screen share quality selections", () => {
     localStorage.setItem("owncord:settings:streamQuality", '"low"');
+    localStorage.setItem("owncord:settings:screenShareQuality", '"source"');
     stubNavigator();
     const ac = new AbortController();
     const tab = createVoiceAudioTab(ac.signal);
@@ -1372,9 +1495,13 @@ describe("VoiceAudioTab UI structure", () => {
     document.body.appendChild(el);
 
     const qualitySelect = el.querySelector(
-      'select[aria-label="Stream Quality"]',
+      'select[aria-label="Camera Quality"]',
     ) as HTMLSelectElement;
     expect(qualitySelect.value).toBe("low");
+    const screenSelect = el.querySelector(
+      'select[aria-label="Screen Share Quality"]',
+    ) as HTMLSelectElement;
+    expect(screenSelect.value).toBe("source");
     ac.abort();
   });
 
@@ -1505,13 +1632,12 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     return select!;
   }
 
-  it("hides the input volume and sensitivity controls and explains why", async () => {
+  it("hides the input volume control and explains why", async () => {
     const tab = await mount();
     const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
       (h) => h.textContent,
     );
     expect(headings).not.toContain("Input Volume");
-    expect(headings).not.toContain("Input Sensitivity");
     // The engine's playout mixer applies output volume.
     expect(headings).toEqual(
       expect.arrayContaining(["Input Device", "Output Device", "Output Volume"]),
@@ -1528,13 +1654,29 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     );
     const note = tab.element.querySelector('[data-testid="native-audio-note"]');
     expect(note?.textContent).toContain("system mixer");
-    expect(tab.element.querySelector(".mic-meter-wrap")).toBeNull();
+    expect(note?.textContent).not.toMatch(/sensitivity/i);
     // The native engine acquires no audio through the webview. The camera
     // preview may still call getUserMedia (video only) since voice #22 starts
     // it on the default device; no audio request may occur.
     for (const call of getUserMedia.mock.calls) {
       expect((call[0] as MediaStreamConstraints).audio).toBe(false);
     }
+  });
+
+  // The engine's capture runs the sensitivity gate on the web path's scale;
+  // there is no webview microphone to meter, so the bar shows no level.
+  it("shows the input sensitivity slider and applies it to the call", async () => {
+    mockSetVoiceSensitivity.mockClear();
+    const tab = await mount();
+    const headings = [...tab.element.querySelectorAll(".settings-field-label")].map(
+      (h) => h.textContent,
+    );
+    expect(headings).toContain("Input Sensitivity");
+    const handle = tab.element.querySelector<HTMLElement>(".mic-meter-threshold")!;
+    handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
+    expect(localStorage.getItem("owncord:settings:voiceSensitivity")).toBe("45");
+    expect(tab.element.querySelector<HTMLElement>(".mic-meter-level")!.style.width).toBe("");
   });
 
   it("tells the user the processing toggles apply on the next join", async () => {

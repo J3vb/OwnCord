@@ -10,7 +10,7 @@
  *
  * The frames come from the Tauri mock's own IPC log (`window.__invokeLog`),
  * which records every `ws_send` envelope the client handed to the transport, and
- * from a second init script that records `plugin:http|fetch` calls (the block
+ * from a `wrappers` entry that records `plugin:http|fetch` calls (the block
  * PUT/DELETE). A send is proven by its frame, and "gated" is proven by the
  * absence of a frame plus the disabled control that would have produced it.
  */
@@ -21,6 +21,7 @@ import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
+  MOCK_ROLES,
   MOCK_PINNED_MESSAGES,
   emitWsMessage,
   emitWsEvent,
@@ -131,7 +132,7 @@ interface CapturedCall {
   readonly url?: string;
 }
 
-/** Installed as a second init script, after the Tauri mock sets up `invoke`. */
+/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
 function captureScript(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -233,12 +234,14 @@ function chatSendErrorHandler(code: string): { type: string; handler: string } {
 interface MockOpts {
   channels?: unknown[];
   dmChannels?: unknown[];
+  roles?: unknown[];
   wsHandlers?: Array<{ type: string; handler: string }>;
 }
 
 async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -255,11 +258,11 @@ async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
       wsHandlers: opts.wsHandlers,
       readyOverrides: {
         channels: opts.channels ?? [SLOW_CHANNEL],
+        roles: opts.roles,
         dm_channels: opts.dmChannels ?? [],
       },
     }),
   );
-  await page.addInitScript(captureScript);
   await page.goto("/");
   await navigateToMainPage(page);
   await waitForWsReady(page);
@@ -436,11 +439,15 @@ test.describe("Composer gating — slow mode", () => {
   });
 
   test("a moderator holding MANAGE_MESSAGES is not gated by slow mode", async ({ page }) => {
+    // A role holding MANAGE_MESSAGES | SEND | READ and nothing else: the
+    // exemption must come from that bit, not from the ADMINISTRATOR override
+    // the fixture admin would otherwise pass through.
     await boot(page, {
       channels: [SLOW_CHANNEL],
+      roles: [...MOCK_ROLES, { id: 4, name: "slowmod", color: null, permissions: 0x10000 | 0x3 }],
       wsHandlers: [chatSendOkHandler({ messageId: 9001, echoMessage: false })],
     });
-    // The admin fixture role holds ADMINISTRATOR, which implies MANAGE_MESSAGES.
+    await demoteSelf(page, "slowmod");
 
     await sendMessage(page, "mod message");
 
@@ -450,6 +457,9 @@ test.describe("Composer gating — slow mode", () => {
     const confirmed = page.locator("[data-testid='message-9001']");
     await expect(confirmed).toBeVisible({ timeout: 5_000 });
     await expect(confirmed).not.toHaveClass(/pending/);
+    // Slow mode gates the send button (the draft stays editable), so that is
+    // where a missing bypass shows.
+    await expect(page.locator("[data-testid='send-btn']")).not.toHaveClass(/send-gated/);
     await expect(textarea(page)).toBeEnabled();
     await expect(textarea(page)).toHaveAttribute("placeholder", "Message #general");
     await expect(composer(page)).not.toHaveClass(/composer-disabled/);

@@ -624,6 +624,9 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 		_ = r.cfg.Store.DisablePlugin(ctx, id)
 		r.mu.Lock()
 		inst.Enabled = false
+		// Drop bindings and free any compile activation retained, as
+		// DisablePlugin does.
+		r.teardownLocked(ctx, inst)
 		r.mu.Unlock()
 		return err
 	}
@@ -640,15 +643,22 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	// with live command bindings routing DispatchCommand into it.
 	r.mu.Lock()
 	if !inst.Enabled {
-		for cmd, owner := range r.commands {
-			if owner == inst {
-				delete(r.commands, cmd)
-			}
-		}
-		r.platformDeactivate(ctx, inst)
+		r.teardownLocked(ctx, inst)
 	}
 	r.mu.Unlock()
 	return nil
+}
+
+// teardownLocked drops inst's command bindings and frees its compiled module
+// (wazero build; a no-op in the default build, and safe on a never-activated
+// instance). Caller holds r.mu.
+func (r *Registry) teardownLocked(ctx context.Context, inst *Instance) {
+	for cmd, owner := range r.commands {
+		if owner == inst {
+			delete(r.commands, cmd)
+		}
+	}
+	r.platformDeactivate(ctx, inst)
 }
 
 // DisablePlugin marks a plugin disabled and tears its module down. The
@@ -663,15 +673,7 @@ func (r *Registry) DisablePlugin(ctx context.Context, id int64) error {
 	if inst, ok := r.plugins[id]; ok {
 		inst.Enabled = false
 		// Drop command bindings owned by this plugin.
-		for cmd, owner := range r.commands {
-			if owner == inst {
-				delete(r.commands, cmd)
-			}
-		}
-		// Free the wazero module so memory is returned to the runtime
-		// immediately rather than waiting for registry Close. Safe to call
-		// on an instance that was never activated.
-		r.platformDeactivate(ctx, inst)
+		r.teardownLocked(ctx, inst)
 	}
 	return nil
 }

@@ -67,6 +67,12 @@ export type NativeVoiceEvent =
   | { type: "trackUnsubscribed"; identity: string; sid: string }
   | { type: "trackMuted"; identity: string; sid: string; muted: boolean }
   | { type: "activeSpeakers"; identities: string[] }
+  /** The server's grant for the local participant changed: whether it still
+   *  lets this client publish the microphone (a moderator server-mute
+   *  withdraws it, lifting the mute restores it). */
+  | { type: "microphonePermission"; allowed: boolean }
+  /** The input-sensitivity gate opened (speech) or closed (silence). */
+  | { type: "voiceGate"; open: boolean }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
   /** Screen capture `capture` ended on its own after it started: stopped
    *  from the desktop's sharing indicator, or the shared window closed. */
@@ -184,12 +190,14 @@ export interface NativeVoiceScreenStarted {
 }
 
 /** How the screen share is published: the capture's size and the web
- *  path's `publishTrack` encoding for it. */
+ *  path's `publishTrack` encoding for it. `simulcast` adds the web path's
+ *  720p 15 fps layer (`SCREENSHARE_SIMULCAST_LAYERS`). */
 export interface NativeVoiceScreenOptions {
   width: number;
   height: number;
   maxBitrate: number;
   maxFramerate: number;
+  simulcast: boolean;
 }
 
 /** A simulcast layer, as `native_voice_set_video_view` names it. */
@@ -207,9 +215,16 @@ export interface NativeVoice {
   ): Promise<NativeVoiceConnected>;
   /** Close `session` if it is still the live one; a stale id is a no-op. */
   disconnect(session: number): Promise<NativeVoiceResources>;
-  setMicrophone(session: number, enabled: boolean): Promise<void>;
+  /** `bitrate` (bits/s) is the channel's configured voice bitrate, applied
+   *  when this enable publishes the microphone; omitted, the host keeps its
+   *  default. */
+  setMicrophone(session: number, enabled: boolean, bitrate?: number): Promise<void>;
   /** Push-to-talk's gate: closed, the open capture sends silence (DP-30). */
   setPttGated(session: number, gated: boolean): Promise<void>;
+  /** The input-sensitivity gate: the level (`vadThreshold`'s scale) the
+   *  capture must reach to send, 0 for no gate. Its verdicts arrive as
+   *  `voiceGate` events. */
+  setVoiceGate(session: number, threshold: number): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */

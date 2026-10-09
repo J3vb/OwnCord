@@ -326,8 +326,14 @@ function resetStores(): void {
 
 type FakeWsClient = WsClient & {
   /** Test-only: drive a registered `ws.on(type, ...)` listener directly. */
-  emit: (type: ServerMessage["type"], payload: unknown) => void;
+  emit: (type: ServerMessage["type"], payload: unknown, id?: string) => void;
 };
+
+/** The caller's voice join succeeding: startCall rings only after that. */
+function finishCallJoin(): void {
+  voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+  voiceStore.flush();
+}
 
 function fakeWs(): FakeWsClient {
   const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
@@ -343,9 +349,9 @@ function fakeWs(): FakeWsClient {
         listeners.get(type)?.delete(listener as unknown as WsListener<ServerMessage["type"]>);
       };
     },
-    emit(type: ServerMessage["type"], payload: unknown) {
+    emit(type: ServerMessage["type"], payload: unknown, id?: string) {
       for (const listener of listeners.get(type) ?? []) {
-        (listener as (p: unknown, id?: string) => void)(payload);
+        (listener as (p: unknown, id?: string) => void)(payload, id);
       }
     },
     onStateChange: vi.fn(() => () => {}),
@@ -1256,6 +1262,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     await vi.dynamicImportSettled();
 
     mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
     const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
     expect(panel.dataset.state).toBe("outgoing");
 
@@ -1265,11 +1272,284 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(container.querySelector('[data-testid="toast"]')).toBeNull();
 
     vi.mocked(ws.send).mockClear();
+    // Past the server's 3s ring window plus slack, so the redial goes out at once.
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 4000);
     (panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
+    now.mockRestore();
     expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
     expect(panel.dataset.state).toBe("outgoing");
 
     // The call timer is the page's to stop.
+    page.destroy?.();
+  });
+
+  it("a group call is declined once every online callee declined; offline members are not waited on (D-12)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        isGroup: true,
+        participants: [
+          ...c.participants,
+          { id: 12, username: "dan", avatar: "", status: "offline" as const },
+        ],
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+    expect(panel.dataset.state).toBe("unanswered");
+    page.destroy?.();
+  });
+
+  describe("ringing the callee (D-01, D-02, D-05)", () => {
+    const rings = (ws: FakeWsClient): unknown[] =>
+      vi.mocked(ws.send).mock.calls.filter(([m]) => (m as { type: string }).type === "call_ring");
+
+    async function mountCaller(): Promise<{ ws: FakeWsClient; panel: HTMLElement }> {
+      const ws = fakeWs();
+      uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+      openOneToOneDm(50);
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.dynamicImportSettled();
+      return { ws, panel: document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement };
+    }
+
+    it("rings only once the caller's join has left joining, and keeps the join", async () => {
+      const { ws } = await mountCaller();
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      expect(voiceStore.getState().voiceStatus).toBe("joining");
+      expect(rings(ws)).toHaveLength(0);
+
+      finishCallJoin();
+      expect(rings(ws)).toHaveLength(1);
+      expect(voiceStore.getState().currentChannelId).toBe(50);
+      page.destroy?.();
+    });
+
+    it("does not ring while the join is still securing or connecting", async () => {
+      const { ws } = await mountCaller();
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "securing" as const }));
+      voiceStore.flush();
+      expect(rings(ws)).toHaveLength(0);
+
+      finishCallJoin();
+      expect(rings(ws)).toHaveLength(1);
+      page.destroy?.();
+    });
+
+    it("drops a delayed Ring again when the caller leaves the call", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        mockCreateChatArea.mock.calls[0]![0].onStartCall();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        // The callee declines; Ring again inside the spacing window.
+        ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
+        (document.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement).click();
+        voiceStore.setState((prev) => ({
+          ...prev,
+          currentChannelId: null,
+          voiceStatus: "idle" as const,
+        }));
+        voiceStore.flush();
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("sends no ring and shows no Calling… when the join is refused", async () => {
+      const { ws, panel } = await mountCaller();
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      // The dispatcher's join rollback.
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: null,
+        voiceStatus: "idle" as const,
+      }));
+      voiceStore.flush();
+
+      expect(rings(ws)).toHaveLength(0);
+      expect(panel.dataset.state).not.toBe("outgoing");
+      page.destroy?.();
+    });
+
+    it("a second Call 1 s after a ring waits for the server's 3 s window", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws, panel } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        expect(rings(ws)).toHaveLength(1);
+
+        vi.advanceTimersByTime(1000);
+        start();
+        expect(rings(ws)).toHaveLength(1);
+
+        // Held back the server's 3 s window plus transport slack.
+        vi.advanceTimersByTime(2249);
+        expect(rings(ws)).toHaveLength(1);
+        vi.advanceTimersByTime(1);
+        expect(rings(ws)).toHaveLength(2);
+        expect(panel.dataset.state).toBe("outgoing");
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a waiting ring when the socket drops before it fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+        // An unplanned drop keeps the voice channel, so only the status says so.
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a waiting ring across a drop that reconnects before it fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
+        uiStore.flush();
+        uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+        uiStore.flush();
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a margin over the server's 3 s window for transport jitter", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+
+        vi.advanceTimersByTime(2000);
+        expect(rings(ws)).toHaveLength(1);
+        vi.advanceTimersByTime(500);
+        expect(rings(ws)).toHaveLength(2);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a ring the server rate-limits ends the outgoing call", async () => {
+      const { ws, panel } = await mountCaller();
+      vi.mocked(ws.send).mockImplementation((m) =>
+        (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
+      );
+      mockCreateChatArea.mock.calls[0]![0].onStartCall();
+      finishCallJoin();
+      expect(panel.dataset.state).toBe("outgoing");
+
+      ws.emit("error", { code: "RATE_LIMITED", message: "too many call attempts" }, "other-id");
+      expect(panel.dataset.state).toBe("outgoing");
+      ws.emit("error", { code: "RATE_LIMITED", message: "too many call attempts" }, "ring-id");
+      expect(panel.dataset.state).not.toBe("outgoing");
+      page.destroy?.();
+    });
+
+    it("drops a waiting ring when the caller leaves before it fires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { ws } = await mountCaller();
+        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+        start();
+        finishCallJoin();
+        vi.advanceTimersByTime(1000);
+        start();
+        voiceStore.setState((prev) => ({
+          ...prev,
+          currentChannelId: null,
+          voiceStatus: "idle" as const,
+        }));
+        voiceStore.flush();
+
+        vi.advanceTimersByTime(5000);
+        expect(rings(ws)).toHaveLength(1);
+        page.destroy?.();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it("a ring refused because the callee has not accepted ends the outgoing call at once (D-03)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    vi.mocked(stopRingback).mockClear();
+
+    vi.mocked(ws.send).mockImplementation((m) =>
+      (m as { type: string }).type === "call_ring" ? "ring-id" : "id",
+    );
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("outgoing");
+
+    const refusal = {
+      code: "CALL_REQUIRES_ACCEPTANCE",
+      message: "calls work after the other person accepts your message request",
+    };
+    // A refusal answering an earlier ring (another envelope id) leaves this
+    // newer outgoing call alone.
+    ws.emit("error", refusal, "an-earlier-ring");
+    expect(stopRingback).not.toHaveBeenCalled();
+    expect(panel.dataset.state).toBe("outgoing");
+
+    ws.emit("error", refusal, "ring-id");
+
+    expect(stopRingback).toHaveBeenCalledTimes(1);
+    expect(panel.dataset.state).not.toBe("outgoing");
+    expect(panel.dataset.state).not.toBe("unanswered");
     page.destroy?.();
   });
 
@@ -1284,6 +1564,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     vi.mocked(stopRingback).mockClear();
 
     mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
     expect(startRingback).toHaveBeenCalledTimes(1);
     // The caller moves on to another channel while the callee decides.
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
@@ -1319,6 +1600,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       return 0;
     }) as unknown as typeof setTimeout);
     mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    finishCallJoin();
     timers.mockRestore();
 
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
@@ -1453,7 +1735,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).toBe("none");
   });
 
-  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer (OC-0011)", () => {
+  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer (OC-0011)", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
@@ -1463,6 +1745,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     // Alice (10) rings this client's DM (channel 50).
     ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
 
+    vi.mocked(alertMissedCall).mockClear();
     const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
     expect(banner.style.display).not.toBe("none");
 
@@ -1478,6 +1761,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).toBe("none");
+    // The ringer hanging up first is a missed call, same notice as a timeout (D-07).
+    await vi.waitFor(() => expect(alertMissedCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertMissedCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
   });
 
   it("does not cancel a group-DM ring when the ringer leaves voice but another callee is still in the call (OC-0235)", () => {
@@ -1527,6 +1813,41 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
 
     expect(banner.style.display).not.toBe("none");
+  });
+
+  it("stops a group ring when the last person leaves after the ringer did (D-06)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    const banner = document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+
+    const carol = {
+      userId: 11,
+      username: "carol",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    };
+    const roster = (users: (typeof carol)[]) => {
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([[50, new Map(users.map((u) => [u.userId, u]))]]),
+      }));
+      voiceStore.flush();
+    };
+    // alice leaves while carol stays: the ring stays (OC-0235).
+    roster([carol]);
+    ws.emit("voice_leave", { channel_id: 50, user_id: 10 });
+    expect(banner.style.display).not.toBe("none");
+
+    // carol, not the ringer, empties the room: the ring is over.
+    roster([]);
+    ws.emit("voice_leave", { channel_id: 50, user_id: 11 });
+    expect(banner.style.display).toBe("none");
   });
 
   it("silently ends an incoming ring once this client is in the ringing channel by any path", () => {
@@ -1670,12 +1991,12 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
-    const preview = vi.spyOn(desktop.externalContent!, "preview").mockResolvedValue({
+    const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
       ok: true,
       value: { title: "T", description: null, siteName: null, image: null },
     });
     const image = vi
-      .spyOn(desktop.externalContent!, "image")
+      .spyOn(desktop.externalContent, "image")
       .mockResolvedValue({ ok: true, value: new Blob(["x"]) });
     const createObjectURL = URL.createObjectURL;
     const revokeObjectURL = URL.revokeObjectURL;
@@ -2442,6 +2763,22 @@ describe("MainPage — account deletion", () => {
       expect(mockPruneAttachmentCacheScope).toHaveBeenCalledWith("chat.example#1"),
     );
     expect(authStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it("account deletion awaits the cache purge before reporting success", async () => {
+    let release!: () => void;
+    mockPruneAttachmentCacheScope.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    const api = Object.assign(fakeApi("chat.example"), {
+      deleteAccount: vi.fn(async () => {}),
+    }) as ApiClient;
+    await deleteAccount(api);
+    await vi.waitFor(() => expect(mockPruneAttachmentCacheScope).toHaveBeenCalled());
+
+    expect(container.querySelector(".toast-success")).toBeNull();
+    release();
+    await vi.waitFor(() => expect(container.querySelector(".toast-success")).not.toBeNull());
   });
 
   it("prunes nothing when the server refuses the deletion", async () => {

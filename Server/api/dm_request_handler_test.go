@@ -153,7 +153,7 @@ func TestDMRequestHandler_Accept_OpensChannelAndNotifies(t *testing.T) {
 	recipientTok := dmCreateToken(t, database, "bob", 4)
 	senderID := mustUserID(t, database, "alice")
 	recipientID := mustUserID(t, database, "bob")
-	ch, created, recipientOpened, err := database.GetOrCreateDMChannelGated(context.Background(), senderID, recipientID)
+	ch, created, recipientOpened, _, err := database.GetOrCreateDMChannelGated(context.Background(), senderID, recipientID)
 	if err != nil {
 		t.Fatalf("GetOrCreateDMChannelGated: %v", err)
 	}

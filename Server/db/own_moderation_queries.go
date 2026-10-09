@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"fmt"
+
+	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
 // OwnModerationAction is one row of the caller's own ledger read (GET
@@ -21,9 +23,9 @@ type OwnModerationAction struct {
 }
 
 // ListOwnModerationActions returns userID's own warning, timeout, removal
-// and ban rows, newest first.
-func (d *DB) ListOwnModerationActions(ctx context.Context, userID int64) ([]OwnModerationAction, error) {
-	rows, err := d.q.ListOwnModerationActions(ctx, userID)
+// and ban rows, newest first, at most limit of them.
+func (d *DB) ListOwnModerationActions(ctx context.Context, userID, limit int64) ([]OwnModerationAction, error) {
+	rows, err := d.q.ListOwnModerationActions(ctx, dbgen.ListOwnModerationActionsParams{TargetID: userID, RowLimit: limit})
 	if err != nil {
 		return nil, fmt.Errorf("ListOwnModerationActions: %w", err)
 	}

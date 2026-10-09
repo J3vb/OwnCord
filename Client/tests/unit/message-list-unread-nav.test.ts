@@ -30,6 +30,8 @@ import {
   incrementUnread,
 } from "@stores/channels.store";
 import { setMarkReadSender } from "@lib/read-state";
+import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
+import { createReconnectClock } from "../../src/features/connection/dispatchContext";
 import { formatMessageTimestamp } from "@lib/formatting";
 
 const CHANNEL_ID = 1;
@@ -227,6 +229,23 @@ describe("MessageList — unread navigation (P4-03)", () => {
 
       hasFocus.mockReturnValue(true);
       window.dispatchEvent(new Event("focus"));
+
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+    });
+
+    it("does not mark read while 50px above the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      incrementUnread(CHANNEL_ID, true);
+
+      scrollTo(SCROLL_HEIGHT - CLIENT_HEIGHT - 50);
+
+      expect(sendMarkRead).not.toHaveBeenCalled();
+      expect(unreadCount()).toBe(1);
+
+      scrollToEnd();
 
       expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
       expect(unreadCount()).toBe(0);
@@ -454,6 +473,70 @@ describe("MessageList — unread navigation (P4-03)", () => {
       expectDividerInView(DIVIDER_PX + 50 * ROW_PX);
     });
 
+    function loadRevisit(): void {
+      setMessages(range(1, 50));
+      messagesStore.setState((prev) => ({
+        ...prev,
+        historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
+      }));
+      openChannelWithUnread(10);
+    }
+
+    function settleHistory(state: "error" | null): void {
+      messagesStore.setState((prev) => {
+        const next = new Map(prev.messagesByChannel);
+        next.set(CHANNEL_ID, range(1, 60));
+        const load = new Map(prev.historyLoadState);
+        if (state === null) load.delete(CHANNEL_ID);
+        else load.set(CHANNEL_ID, state);
+        return { ...prev, messagesByChannel: next, historyLoadState: load };
+      });
+      messagesStore.flush();
+    }
+
+    it("a revisit's cached-bottom scroll does not dismiss the unread bar before the refetch lands", () => {
+      loadRevisit();
+      mount();
+      scrollToEnd();
+
+      settleHistory(null);
+
+      expect(barShown()).toBe(true);
+      expect(barLabel()).not.toBe("");
+    });
+
+    it("a failed refetch leaves the bar dismissable", () => {
+      loadRevisit();
+      mount();
+      settleHistory("error");
+      expect(barShown()).toBe(true);
+
+      scrollToEnd();
+
+      expect(barShown()).toBe(false);
+    });
+
+    it("announces the unread count once when the deferred divider resolves", () => {
+      loadRevisit();
+      mount();
+      const announcer = container.querySelector('[role="status"]');
+      expect(announcer).not.toBeNull();
+      expect(announcer!.textContent).toBe("");
+
+      settleHistory(null);
+      expect(announcer!.textContent).toBe(barLabel());
+      expect(announcer!.textContent).not.toBe("");
+
+      // A refresh with the same text does not rewrite the live region.
+      const rewrite = vi.fn();
+      new MutationObserver(rewrite).observe(announcer!, { childList: true, characterData: true });
+      setMessages(range(1, 61));
+      expect(rewrite).not.toHaveBeenCalled();
+
+      markReadButton()!.click();
+      expect(announcer!.textContent).toBe("");
+    });
+
     it("keeps following new messages at the bottom once the reader has scrolled down", async () => {
       setMessages(range(1, 50));
       openChannelWithUnread(5);
@@ -570,6 +653,46 @@ describe("MessageList — unread navigation (P4-03)", () => {
       setMessages(range(1, 150));
 
       expect(countText()).toBe("99+");
+    });
+  });
+
+  describe("arrivals while the live tail is out of view", () => {
+    const liveMessage = (id: number) => ({
+      id,
+      channel_id: CHANNEL_ID,
+      user: { id: 2, username: "user2", avatar: null },
+      content: `Message ${id}`,
+      reply_to: null,
+      attachments: [],
+      timestamp: new Date().toISOString(),
+    });
+
+    it("counts a live message while scrolled up, and clears it at the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+
+      handleChatMessage(createReconnectClock(), liveMessage(51));
+      expect(unreadCount()).toBe(1);
+
+      scrollToEnd();
+
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+    });
+
+    it("stops counting once the list is destroyed", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollUp();
+      msgList?.destroy?.();
+      msgList = null;
+
+      handleChatMessage(createReconnectClock(), liveMessage(51));
+
+      expect(unreadCount()).toBe(0);
     });
   });
 });

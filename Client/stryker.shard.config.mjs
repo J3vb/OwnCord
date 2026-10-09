@@ -36,6 +36,7 @@ export const shards = {
     "src/features/voice/native/screenTrack.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/uiSounds.ts",
+    "src/features/voice/popout.ts",
   ], // 2901 mutants (before the D6 additions)
   "audio-media": [
     "src/lib/audioPipeline.ts",
@@ -45,7 +46,6 @@ export const shards = {
     "src/lib/deviceManager.ts",
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
-    "src/lib/streamPreview.ts",
     "src/lib/media-visibility.ts",
   ], // 1954 mutants
   "transport-auth": [
@@ -208,6 +208,8 @@ if (!Object.prototype.hasOwnProperty.call(shards, shard)) {
 export default {
   ...base,
   mutate: shards[shard],
+  // The base list has no "json", so jsonReporter.fileName alone writes nothing.
+  reporters: [...base.reporters, "json"],
   // Per-shard report paths: parallel shard jobs (and a local serial run) each
   // keep their own report, so the workflow can upload one artifact per shard.
   htmlReporter: {

@@ -8,6 +8,9 @@ const { fetchMock, putSpy, brokerImageMock, idbData } = vi.hoisted(() => ({
   idbData: new Map<string, unknown>(),
 }));
 
+/** When set, a transaction completes only when the test calls `fire()`. */
+const holdTx: { fire: (() => void) | null; hold: boolean } = { fire: null, hold: false };
+
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
@@ -76,10 +79,12 @@ vi.stubGlobal("indexedDB", {
             };
           },
         };
-        Promise.resolve().then(() => {
+        const complete = (): void => {
           const fn = tx.oncomplete as ((ev: Event) => void) | null;
           fn?.(new Event("complete"));
-        });
+        };
+        if (holdTx.hold) holdTx.fire = complete;
+        else Promise.resolve().then(complete);
         return tx;
       },
     };
@@ -447,6 +452,27 @@ describe("attachment cache profile isolation (B7-13)", () => {
         "other.example#1|https://other.example/api/v1/files/3",
       ]),
     );
+  });
+
+  it("pruneAttachmentCacheScope resolves only after the transaction completes", async () => {
+    idbData.set("example.com#1|https://example.com/api/v1/files/1", "data:a");
+    holdTx.hold = true;
+    try {
+      let done = false;
+      const pruning = pruneAttachmentCacheScope("example.com#1").then(() => {
+        done = true;
+      });
+      await vi.waitFor(() => expect(holdTx.fire).not.toBeNull());
+      await new Promise((r) => setTimeout(r, 0));
+      expect(done).toBe(false);
+
+      holdTx.fire!();
+      await pruning;
+      expect(done).toBe(true);
+    } finally {
+      holdTx.hold = false;
+      holdTx.fire = null;
+    }
   });
 
   it("keeps the same account's entries across a sign-out and back in", async () => {

@@ -148,7 +148,7 @@ served, so a CDP soak proves the runtime half
 nodes, documents, live `AbortController`s, live intervals and timeouts, open
 sockets and peer connections, live tracks and `AudioContext`s, and heap. The bar
 is no growth after warm-up: every count's slope is at most 0.05 per cycle
-(documents and intervals exactly flat), both across pages at the same page age
+(documents, intervals and `AudioContext`s exactly flat, the one context being the page-lifetime notification sound; sockets, peer connections and tracks exactly 0 at every sample), both across pages at the same page age
 and within one page (cycles 6 and 9, after that page's reconnect). A nodes
 series also passes on a net move of at most 2 (listeners, abort controllers and
 timeouts: 1) in either series, because a

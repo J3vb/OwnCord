@@ -39,6 +39,20 @@ func TestFileTypePolicy_DefaultsBlockWindowsScripts(t *testing.T) {
 	}
 }
 
+// Files that run, or run macros, when opened from a download: web pages and
+// SVG in a browser, shell scripts, macro-enabled Office documents, and Linux
+// and macOS launchers.
+func TestFileTypePolicy_DefaultsBlockOpenToRunFiles(t *testing.T) {
+	p := storage.FileTypePolicy{Blocked: storage.DefaultBlockedExtensions}
+	for _, name := range []string{
+		"page.html", "logo.svg", "install.sh", "report.docm", "budget.xlsm", "app.desktop", "run.command",
+	} {
+		if err := p.Check(name); err == nil {
+			t.Errorf("Check(%q) = nil, want a blocked file type", name)
+		}
+	}
+}
+
 func TestFileTypePolicy_CaseAndDoubleExtensions(t *testing.T) {
 	p := storage.FileTypePolicy{Blocked: []string{"bat", "js"}}
 	for _, name := range []string{

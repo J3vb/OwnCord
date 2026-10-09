@@ -128,6 +128,8 @@ const ALLOWED_SUFFIX: &[&str] = &[
 ];
 
 fn host_is_allowed(host: &str) -> bool {
+    // `example.com.` is the same name as `example.com`.
+    let host = host.strip_suffix('.').unwrap_or(host);
     if ALLOWED_EXACT.contains(&host)
         || ALLOWED_SUFFIX.iter().any(|s| host.ends_with(s))
         // 2001:db8::/32 is the IPv6 documentation range (RFC 3849) -- the
@@ -157,7 +159,9 @@ fn is_registrable(host: &str) -> bool {
     let Some((_, tld)) = host.rsplit_once('.') else {
         return false;
     };
-    tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic())
+    tld.starts_with("xn--")
+        || !tld.is_ascii()
+        || (tld.len() >= 2 && tld.chars().all(|c| c.is_ascii_alphabetic()))
 }
 
 /// Collect `.rs` files under `dir`, recursively, unsorted. Panics rather than
@@ -203,7 +207,9 @@ fn hosts_in(line: &str) -> Vec<String> {
         let authority: String = rest[scheme.len()..]
             .chars()
             .take_while(|c| {
-                c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '@' | '[' | ']')
+                c.is_ascii_alphanumeric()
+                    || !c.is_ascii()
+                    || matches!(c, '.' | '-' | '_' | ':' | '@' | '[' | ']')
             })
             .collect();
         i += authority.len();
@@ -229,7 +235,7 @@ fn host_of(authority: &str) -> Option<String> {
     if host.is_empty() {
         return None;
     }
-    Some(host.to_ascii_lowercase())
+    Some(host.to_lowercase())
 }
 
 /// The extractor and the allowlist are the whole gate; if either stops seeing
@@ -266,6 +272,16 @@ fn host_extraction_and_allowlist_hold() {
         hosts_in("// an em-dash \u{2014} then https://x.test"),
         ["x.test"]
     );
+
+    // IDN, punycode and trailing-dot hosts.
+    assert_eq!(
+        hosts_in("\"https://\u{4f8b}\u{5b50}.\u{4e2d}\u{56fd}/x\""),
+        ["\u{4f8b}\u{5b50}.\u{4e2d}\u{56fd}"]
+    );
+    assert!(!host_is_allowed("\u{4f8b}\u{5b50}.\u{4e2d}\u{56fd}"));
+    assert!(!host_is_allowed("telemetry.xn--p1ai"));
+    assert!(!host_is_allowed("telemetry.example.io."));
+    assert!(host_is_allowed("example.com."));
 
     // Allowlist. These are the calls the gate would have to get wrong to let a
     // real remote through, or to red the build over a fixture.

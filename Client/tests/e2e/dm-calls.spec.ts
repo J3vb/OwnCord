@@ -20,7 +20,9 @@ import {
   emitWsMessage,
   navigateToMainPage,
   waitForWsReady,
-  voiceWsHandlers,
+  voiceJoinWithTokenHandlers,
+  parkLiveKitSocket,
+  connectVoiceSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -75,13 +77,14 @@ async function mockSession(page: Page): Promise<void> {
         { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },
       ],
       simulateWsFlow: true,
-      wsHandlers: voiceWsHandlers(),
+      wsHandlers: voiceJoinWithTokenHandlers(),
       readyOverrides: {
         members: READY_MEMBERS,
         dm_channels: MOCK_DM_CHANNELS,
       },
     }),
   );
+  await parkLiveKitSocket(page);
 }
 
 /**
@@ -426,6 +429,7 @@ test.describe("DM calls — starting a call", () => {
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
 
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
 
     // Joining first, then ringing — the caller must actually be in the room.
     const join = await sentTo(page, "voice_join", DM_CHANNEL_ID);
@@ -496,6 +500,7 @@ test.describe("DM calls — call panel", () => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
     await expect(panel(page)).toHaveAttribute("aria-label", "Call with Otto");
 
@@ -528,7 +533,10 @@ test.describe("DM calls — call panel", () => {
     const ringsBefore = (await sentFrames(page)).filter((f) => f.type === "call_ring").length;
     await panel(page).locator("[data-testid='dcp-ring-again']").click();
     await expect
-      .poll(async () => (await sentFrames(page)).filter((f) => f.type === "call_ring").length)
+      .poll(async () => (await sentFrames(page)).filter((f) => f.type === "call_ring").length, {
+        // The server allows one ring per 3s; Ring again waits out the window.
+        timeout: 8_000,
+      })
       .toBe(ringsBefore + 1);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
     // Ring again puts the callee's ringing tile back.
@@ -548,6 +556,7 @@ test.describe("DM calls — call panel", () => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
 
     await panel(page).locator("[data-testid='dcp-leave']").click();
@@ -564,6 +573,7 @@ test.describe("DM calls — call panel", () => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
 
     // Move to the other DM: the call panel and its "Calling…" are gone.

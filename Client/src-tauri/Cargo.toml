@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.2.0-beta.1"
+version = "2.2.0-beta.2"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -189,6 +189,10 @@ dbus = "0.9"
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
 livekit = "=0.9.3"
+# Names the SDK's permission/track-source protobuf types (its `proto` module
+# does not re-export them). Same version livekit 0.9.3 already resolves, so no
+# new crate enters the tree.
+livekit-protocol = "=0.8.0"
 # Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
 # the tree via tauri's tray-icon, so this costs no extra build.
 png = "0.18"

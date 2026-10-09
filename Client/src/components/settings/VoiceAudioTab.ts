@@ -2,7 +2,7 @@
  * Voice & Audio settings tab — input/output device, sensitivity, audio processing.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
+import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
 import { createLogger } from "@lib/logger";
 import {
@@ -13,6 +13,7 @@ import {
   setOutputVolume,
   reapplyAudioProcessing,
   reapplyEnhancedNoiseSuppression,
+  getLocalMicSettings,
 } from "@lib/livekitSession";
 import {
   VAD_MAX_THRESHOLD,
@@ -36,10 +37,17 @@ import { setStatusIcon, statusIcon } from "../../features/settings/status";
 
 const log = createLogger("VoiceAudioTab");
 
+/** A microphone itself, not the browser's "default"/"communications" alias. */
+function isRealInput(d: MediaDeviceInfo): boolean {
+  return d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications";
+}
+
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
 const MIC_NOISE_FLOOR = 0.005;
 /** How long the pill keeps saying "Hearing you" after the last frame above the floor. */
 const MIC_HEARD_HOLD_MS = 1000;
+/** DeviceManager debounces a devicechange by 500 ms, then moves the capture. */
+const DEVICE_MANAGER_SETTLE_MS = 1000;
 
 export interface VoiceAudioTabHandle {
   /**
@@ -190,6 +198,8 @@ function buildVoiceAudioTabInner(
   micCard.appendChild(inputVolumeHeader);
   const inputVolumeRow = createElement("div", { class: "slider-row" });
   const savedInputVolume = loadPref<number>("inputVolume", 100);
+  /** The slider's current value, for a meter processor started after it moved. */
+  let inputVolumePercent = savedInputVolume;
   const inputVolumeSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
@@ -206,6 +216,9 @@ function buildVoiceAudioTabInner(
       const val = Number(inputVolumeSlider.value);
       setText(inputVolumeLabel, `${val}%`);
       setInputVolume(val);
+      // The meter's own processor measures after the same gain as the call's.
+      inputVolumePercent = val;
+      meterProcessor?.setInputGain(val / 100);
     },
     { signal },
   );
@@ -370,12 +383,12 @@ function buildVoiceAudioTabInner(
   );
   speakersCard.appendChild(outputVolumeHeader);
   const outputVolumeRow = createElement("div", { class: "slider-row" });
-  const savedOutputVolume = loadPref<number>("outputVolume", 100);
+  const savedOutputVolume = Math.min(100, loadPref<number>("outputVolume", 100));
   const outputVolumeSlider = createElement("input", {
     class: "settings-slider",
     type: "range",
     min: "0",
-    max: "200",
+    max: "100",
     step: "1",
     value: String(savedOutputVolume),
     "aria-label": t("voiceAudio.outputVolume"),
@@ -393,43 +406,64 @@ function buildVoiceAudioTabInner(
   appendChildren(outputVolumeRow, outputVolumeSlider, outputVolumeLabel);
   speakersCard.appendChild(outputVolumeRow);
 
-  // Stream quality selector
-  const qualityHeader = createElement(
-    "div",
-    { class: "settings-field-label" },
-    t("voiceAudio.streamQuality"),
-  );
-  const qualityDesc = createElement(
-    "p",
-    { class: "setting-desc" },
-    t("voiceAudio.streamQualityDesc"),
-  );
-  const qualitySelect = createElement("select", {
-    class: "form-input",
-    style: "width:100%;margin-bottom:16px",
-    "aria-label": t("voiceAudio.streamQuality"),
-  });
-  const qualityOptions: Array<[string, string]> = [
-    ["low", t("voiceAudio.quality.low")],
-    ["medium", t("voiceAudio.quality.medium")],
-    ["high", t("voiceAudio.quality.high")],
-    ["source", t("voiceAudio.quality.source")],
-  ];
-  const savedQuality = loadPref<string>("streamQuality", "high");
-  for (const [value, label] of qualityOptions) {
-    const opt = createElement("option", { value }, label);
-    if (value === savedQuality) opt.setAttribute("selected", "");
-    qualitySelect.appendChild(opt);
+  // Camera and screen share quality selectors: separate prefs, because a
+  // screen share is mostly text and a camera is mostly motion.
+  function qualityGroup(
+    label: string,
+    desc: string,
+    pref: string,
+    saved: string,
+    options: Array<[string, string]>,
+  ): HTMLElement[] {
+    const header = createElement("div", { class: "settings-field-label" }, label);
+    const description = createElement("p", { class: "setting-desc" }, desc);
+    const select = createElement("select", {
+      class: "form-input",
+      style: "width:100%;margin-bottom:16px",
+      "aria-label": label,
+    });
+    for (const [value, text] of options) {
+      const opt = createElement("option", { value }, text);
+      if (value === saved) opt.setAttribute("selected", "");
+      select.appendChild(opt);
+    }
+    select.value = saved;
+    select.addEventListener(
+      "change",
+      () => {
+        savePref(pref, select.value);
+      },
+      { signal },
+    );
+    return [header, description, select];
   }
-  qualitySelect.value = savedQuality;
-  qualitySelect.addEventListener(
-    "change",
-    () => {
-      savePref("streamQuality", qualitySelect.value);
-    },
-    { signal },
+  const cameraQualityGroup = qualityGroup(
+    t("voiceAudio.cameraQuality"),
+    t("voiceAudio.cameraQualityDesc"),
+    "streamQuality",
+    // The defaults match getCameraQuality/getScreenShareQuality in
+    // lib/screenShare, which this tab does not import (it pulls in the
+    // voice store).
+    loadPref<string>("streamQuality", "medium"),
+    [
+      ["low", t("voiceAudio.cameraQuality.low")],
+      ["medium", t("voiceAudio.cameraQuality.medium")],
+      ["high", t("voiceAudio.cameraQuality.high")],
+      ["source", t("voiceAudio.cameraQuality.source")],
+    ],
   );
-  const qualityGroup = [qualityHeader, qualityDesc, qualitySelect];
+  const screenQualityGroup = qualityGroup(
+    t("voiceAudio.screenQuality"),
+    t("voiceAudio.screenQualityDesc"),
+    "screenShareQuality",
+    loadPref<string>("screenShareQuality", "medium"),
+    [
+      ["low", t("voiceAudio.screenQuality.low")],
+      ["medium", t("voiceAudio.screenQuality.medium")],
+      ["high", t("voiceAudio.screenQuality.high")],
+      ["source", t("voiceAudio.screenQuality.source")],
+    ],
+  );
 
   // Screen share FPS selector
   const fpsHeader = createElement(
@@ -494,7 +528,7 @@ function buildVoiceAudioTabInner(
   previewVideo.playsInline = true;
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
-  cameraCard.append(...qualityGroup, ...fpsGroup);
+  cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
 
   // Device names seen while this tab is open, to name one that is unplugged.
   const deviceLabels = new Map<string, string>();
@@ -559,6 +593,21 @@ function buildVoiceAudioTabInner(
         }
         select.value = keepSaved ? saved : "";
       }
+      // "Default" is a preference; name the device the call really captures,
+      // which can lag the system default after an unplug and replug. Only a
+      // web room has a mic track to read, so the list is the webview's.
+      const live = loadPref<string>("audioInputDevice", "") === "" ? getLocalMicSettings() : null;
+      const liveDevice =
+        live === null
+          ? undefined
+          : (all.find((d) => isRealInput(d) && d.deviceId === live.deviceId) ??
+            all.find((d) => isRealInput(d) && d.groupId !== "" && d.groupId === live.groupId));
+      setText(
+        defaultInputOpt,
+        liveDevice?.label
+          ? t("voiceAudio.defaultLive", { device: liveDevice.label })
+          : t("voiceAudio.default"),
+      );
     } catch {
       const errOpt = createElement(
         "option",
@@ -579,6 +628,8 @@ function buildVoiceAudioTabInner(
       "devicechange",
       () => {
         void populateDevices();
+        // The session moves the capture after its own debounce; re-read then.
+        setOwnedTimeout(signal, () => void populateDevices(), DEVICE_MANAGER_SETTLE_MS);
       },
       { signal },
     );
@@ -588,7 +639,9 @@ function buildVoiceAudioTabInner(
     "change",
     () => {
       savePref("audioInputDevice", inputSelect.value);
-      restartMeterAfter(switchInputDevice(inputSelect.value));
+      const switched = switchInputDevice(inputSelect.value);
+      restartMeterAfter(switched);
+      void switched.then(populateDevices, populateDevices);
     },
     { signal },
   );
@@ -782,13 +835,13 @@ function buildVoiceAudioTabInner(
   // (lib/micProcessor.ts: RNNoise when Enhanced Noise Suppression is on) over
   // a microphone opened with the call's capture settings, and the call's own
   // detector (lib/audioPipeline.ts startVadDetector, same attack and hold)
-  // at the same threshold. The bar is the loudest 128-sample block the
-  // detector saw, on the threshold handle's axis; green is the gate open. So
+  // at the same threshold. The bar is the loudest smoothed level (a ~10 ms
+  // running RMS, the one the gate compares) the detector saw, on the threshold handle's axis; green is the gate open. So
   // what the meter shows is what the gate does. Opening the microphone with
   // other settings would also fight the call for the device: the browser can
   // hand the call this stream's processing instead of its own.
   // The meter previews the webview's microphone; on the native engine the
-  // saved device id is the engine's, and the meter is hidden anyway.
+  // saved device id is the engine's, so it does not run there.
   function startMicMeter(): void {
     if (nativeAudio || signal.aborted) return;
     const thisRequest = ++micRequestId;
@@ -820,6 +873,7 @@ function buildVoiceAudioTabInner(
         const options = { kind: Track.Kind.Audio, track: stream.getAudioTracks()[0]! };
         await processor.init(options as AudioProcessorOptions);
         meterProcessor = processor;
+        processor.setInputGain(inputVolumePercent / 100);
         await processor.setEnhanced(loadPref<boolean>("enhancedNoiseSuppression", false));
         if (signal.aborted || thisRequest !== micRequestId) {
           if (meterProcessor === processor) meterProcessor = null;
@@ -957,8 +1011,9 @@ function buildVoiceAudioTabInner(
   }
 
   if (nativeAudio) {
-    for (const control of [inputVolumeHeader, inputVolumeRow, sensitivityHeader, meterWrap])
-      control.remove();
+    // The sensitivity slider stays: the engine's capture gates on it. Its
+    // bar shows no level, as the meter reads only the webview's microphone.
+    for (const control of [inputVolumeHeader, inputVolumeRow]) control.remove();
     const note = createElement(
       "p",
       { class: "setting-desc", "data-testid": "native-audio-note" },

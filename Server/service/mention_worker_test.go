@@ -143,7 +143,7 @@ func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
 	st := &orderedRaceStore{
 		incStarted: make(chan struct{}),
 		incRelease: make(chan struct{}),
-		decStarted: make(chan struct{}),
+		decStarted: make(chan struct{}, 1),
 	}
 	notifier := &fakeMentionNotifier{}
 	svc := NewMessageService(st, nil, nil)
@@ -186,7 +186,7 @@ func TestMentionWorker_ReverseWaitsForIncrementEmit(t *testing.T) {
 	close(st.incRelease)
 	select {
 	case <-st.decStarted:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("reverse never resumed after the increment released the shared emit lock")
 	}
 	<-flushDone

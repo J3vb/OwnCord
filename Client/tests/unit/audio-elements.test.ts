@@ -105,6 +105,43 @@ describe("AudioElements", () => {
     });
   });
 
+  describe("volume ceiling of 100%", () => {
+    afterEach(() => {
+      mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+    });
+
+    it("applies a saved 161% per-user volume as 1.0 so the join does not throw", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "userVolume_42" ? 161 : def,
+      );
+      const { track } = createMockTrack("audio", "track-1");
+      const participant = {
+        identity: "user-42",
+        // LiveKit without webAudioMix sets HTMLMediaElement.volume, which throws above 1.
+        setVolume: vi.fn((v: number) => {
+          if (v > 1) throw new DOMException("volume out of range", "IndexSizeError");
+        }),
+      };
+
+      expect(() =>
+        elements.handleTrackSubscribedAudio(
+          track as any,
+          { source: "microphone" } as any,
+          participant as any,
+        ),
+      ).not.toThrow();
+      expect(participant.setVolume).toHaveBeenCalledWith(1);
+      expect(elements.getUserVolume(42)).toBe(100);
+    });
+
+    it("clamps a saved output volume above 100% when read", () => {
+      mockLoadPref.mockImplementation((key: string, def: unknown) =>
+        key === "outputVolume" ? 150 : def,
+      );
+      expect(new AudioElements().getEffectiveVolume(42)).toBe(1);
+    });
+  });
+
   describe("handleTrackSubscribedAudio — screenshare", () => {
     it("attaches screenshare audio element to DOM", () => {
       const { track, audioEl } = createMockTrack("audio", "track-ss-1");
@@ -183,16 +220,16 @@ describe("AudioElements", () => {
 
   describe("setUserVolume", () => {
     it("saves clamped volume to preferences", () => {
-      elements.setUserVolume(42, 150);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 150);
+      elements.setUserVolume(42, 70);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 70);
     });
 
-    it("clamps to 0-200 range", () => {
+    it("clamps to 0-100 range", () => {
       elements.setUserVolume(42, -10);
       expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 0);
 
       elements.setUserVolume(42, 250);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 200);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 100);
     });
 
     it("applies volume to matching remote participant", () => {
@@ -224,14 +261,14 @@ describe("AudioElements", () => {
     });
 
     it("falls back to the legacy unscoped key when no host is set", () => {
-      elements.setUserVolume(42, 150);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 150);
+      elements.setUserVolume(42, 70);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 70);
     });
 
     it("scopes the saved-volume key to the current host", () => {
       setAudioVolumeHost("a.example.com");
-      elements.setUserVolume(42, 150);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42:a.example.com", 150);
+      elements.setUserVolume(42, 70);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42:a.example.com", 70);
     });
 
     it("reads the volume back under the scoped key, not the unscoped one", () => {
@@ -371,12 +408,12 @@ describe("AudioElements", () => {
       expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 80);
     });
 
-    it("clamps to 0-200 range", () => {
+    it("clamps to 0-100 range", () => {
       elements.setOutputVolume(-10);
       expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 0);
 
       elements.setOutputVolume(250);
-      expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 200);
+      expect(mockSavePref).toHaveBeenCalledWith("outputVolume", 100);
     });
 
     it("updates screenshare audio element volumes", () => {
@@ -739,8 +776,8 @@ describe("AudioElements", () => {
 
   describe("setUserVolume — without room", () => {
     it("saves volume even when no room is set", () => {
-      elements.setUserVolume(42, 120);
-      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 120);
+      elements.setUserVolume(42, 80);
+      expect(mockSavePref).toHaveBeenCalledWith("userVolume_42", 80);
     });
   });
 
@@ -748,7 +785,7 @@ describe("AudioElements", () => {
     it("does not attach mic audio when locally deafened", () => {
       mockVoiceStoreState.localDeafened = true;
 
-      const { track, audioEl } = createMockTrack("audio", "track-deaf-1");
+      const { track } = createMockTrack("audio", "track-deaf-1");
       const publication = { source: "microphone", setSubscribed: vi.fn() };
       const participant = { identity: "user-42", setVolume: vi.fn() };
 

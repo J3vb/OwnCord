@@ -119,8 +119,8 @@ func (f *Fetcher) readError(ctx context.Context, err error) error {
 
 // checkContentType judges the media type twice: as the response declares it,
 // and as the bytes actually read sniff. A body that declares one type and
-// sniffs as another is refused — that mismatch is how a caller expecting JSON
-// is handed an HTML page or an image decoder is handed a script.
+// sniffs as an incompatible one is refused — that mismatch is how a caller
+// expecting JSON is handed an HTML page or an image decoder is handed a script.
 //
 // An empty body has nothing to sniff, so only the declared type is checked.
 // A response with an empty body AND no declared Content-Type passes: there
@@ -148,7 +148,39 @@ func (f *Fetcher) checkContentType(declared string, body []byte) (string, string
 	if !f.typeAllowed(sniffed) {
 		return "", "", fmt.Errorf("%w: declared %s but the body sniffs as %s", ErrContentType, media, sniffed)
 	}
+	if !compatible(media, sniffed) {
+		return "", "", fmt.Errorf("%w: declared %s but the body sniffs as %s", ErrContentType, media, sniffed)
+	}
 	return media, sniffed, nil
+}
+
+// textual lists the declared types whose bytes http.DetectContentType reports
+// as text/plain.
+var textual = map[string]bool{
+	"application/json":                  true,
+	"application/xml":                   true,
+	"application/xhtml+xml":             true,
+	"application/javascript":            true,
+	"application/x-www-form-urlencoded": true,
+	"image/svg+xml":                     true,
+}
+
+// compatible reports whether a sniffed type can be what the response declared.
+// Each type passing the allowlist alone is not enough: the pair must agree.
+func compatible(declared, sniffed string) bool {
+	switch {
+	case declared == sniffed, declared == "application/octet-stream":
+		return true
+	case sniffed == "text/plain":
+		return strings.HasPrefix(declared, "text/") || textual[declared]
+	case sniffed == "text/xml":
+		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
+	case sniffed == "text/html":
+		// A leading "<!--" sniffs as HTML but is equally a valid XML/SVG/CSS
+		// comment, so the markup and stylesheet types stay compatible.
+		return strings.HasPrefix(declared, "text/") || declared == "application/xml" || declared == "application/xhtml+xml" || declared == "image/svg+xml"
+	}
+	return false
 }
 
 // normaliseType strips parameters and folds case, so "Application/JSON;

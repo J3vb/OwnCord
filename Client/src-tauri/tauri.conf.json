@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "2.2.0-beta.1",
+  "version": "2.2.0-beta.2",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
@@ -11,6 +11,8 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "OwnCord",
         "width": 1280,
         "height": 720,
@@ -19,7 +21,7 @@
         "decorations": true,
         "resizable": true,
         "center": true,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --auto-accept-camera-and-microphone-capture"
       }
     ],
     "withGlobalTauri": false,

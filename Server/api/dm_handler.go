@@ -155,6 +155,10 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 			broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, []int64{result.Recipient.ID})
 		}
 
+		if result.AcceptedRequest != nil {
+			notifyDMRequestTransition(r.Context(), svc, broadcaster, user.ID, result.AcceptedRequest, true)
+		}
+
 		avatarStr := ""
 		if result.Recipient.Avatar != nil {
 			avatarStr = *result.Recipient.Avatar

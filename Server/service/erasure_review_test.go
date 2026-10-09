@@ -633,7 +633,7 @@ func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testin
 	if _, err := restored.CreateOwnerIfEmpty(ctx, "takeover", "hash", 1); !errors.Is(err, db.ErrConflict) {
 		t.Errorf("CreateOwnerIfEmpty after the replay = %v, want ErrConflict", err)
 	}
-	setup := NewSetupService(restored)
+	setup := NewSetupService(restored, nil)
 	if needs, err := setup.NeedsSetup(ctx); err != nil || needs {
 		t.Errorf("NeedsSetup after the replay = %v, %v; want false", needs, err)
 	}

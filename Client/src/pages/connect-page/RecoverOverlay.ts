@@ -159,6 +159,8 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
     }
     setText(error, "");
     submit.disabled = true;
+    // The request cannot be taken back once sent, so leaving mid-flight would hide its outcome.
+    cancel.disabled = true;
     setText(submit, recoverText("recover.submitting"));
     try {
       await ctx.onRecover(host, user, key, pw);
@@ -172,6 +174,7 @@ function createRecoverOverlay(ctx: RecoverContext): (username: string) => void {
       setText(error, message.length > 200 ? message.slice(0, 200) + "..." : message);
     } finally {
       submit.disabled = false;
+      cancel.disabled = false;
       setText(submit, recoverText("recover.submit"));
       if (!element.classList.contains("totp-overlay--hidden") && focusIsOurs(submit)) {
         submit.focus();

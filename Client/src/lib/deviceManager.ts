@@ -3,13 +3,14 @@
 // Delegates to Room.switchActiveDevice and rebuilds the audio pipeline
 // after a device switch so the new source track flows through the GainNode.
 // Monitors navigator.mediaDevices.ondevicechange for hot-swap: an unplugged
-// saved device falls back to the default and is switched back to on replug.
+// saved device falls back to the default and is switched back to on replug,
+// and with "Default" saved the capture follows the system default.
 
-import { Room } from "livekit-client";
+import { Room, Track, type LocalAudioTrack } from "livekit-client";
 import { voiceStore } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
-import type { AudioPipeline } from "@lib/audioPipeline";
+import { micCaptureOptions, type AudioPipeline } from "@lib/audioPipeline";
 import { nativeAudioDevices } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 
@@ -189,6 +190,9 @@ export class DeviceManager {
           await this.fallBackToDefaultInput(room);
           if (this.room !== room) return;
         }
+      } else if (savedInput === "" && nativeInputs === null) {
+        await this.followDefaultInput(room, devices);
+        if (this.room !== room) return;
       }
 
       // Check output device
@@ -259,6 +263,37 @@ export class DeviceManager {
       }
     } catch (err) {
       log.warn("Failed to enumerate devices after change", err);
+    }
+  }
+
+  /**
+   * With "Default" saved, move the live capture to the system default when it
+   * captures another device. An unplug ends the capture and livekit-client
+   * reopens the default of that moment (the webcam mic, say); a replug makes
+   * the unplugged device the default again, but that capture never ends and
+   * the SDK does not switch microphones on a device change. The browser's
+   * `default` entry shares its groupId with the device it stands for.
+   */
+  private async followDefaultInput(
+    room: Room,
+    devices: ReadonlyArray<{ deviceId: string; label: string; groupId?: string }>,
+  ): Promise<void> {
+    try {
+      const osDefault = devices.find((d) => d.deviceId === "default");
+      const track = room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track as
+        LocalAudioTrack | undefined;
+      if (osDefault === undefined || track === undefined || track.isMuted) return;
+      const live = track.getSourceTrackSettings();
+      if (!osDefault.groupId || !live.groupId || live.groupId === osDefault.groupId) return;
+      log.info("Microphone is not on the system default — moving it there", {
+        default: osDefault.label,
+      });
+      // The request names no device, so the restart reopens the default.
+      await track.restartTrack(micCaptureOptions());
+      if (this.room !== room) return;
+      this.setupPipelineAfterSwitch();
+    } catch (err) {
+      log.warn("Failed to move the microphone to the system default", err);
     }
   }
 

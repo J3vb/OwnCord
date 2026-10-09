@@ -109,3 +109,10 @@ JOIN dm_participants dp2 ON dp1.channel_id = dp2.channel_id
 JOIN channels c ON c.id = dp1.channel_id
 WHERE dp1.user_id = ? AND dp2.user_id = ? AND c.type = 'dm' AND c.is_group = 0
 ORDER BY dp1.channel_id ASC;
+
+-- Reopen only for a current participant, in the one statement, so a member who
+-- leaves between a membership check and this write cannot get the DM back.
+-- name: OpenDMIfParticipant :execrows
+INSERT OR IGNORE INTO dm_open_state (user_id, channel_id)
+SELECT ?1, ?2
+WHERE EXISTS (SELECT 1 FROM dm_participants WHERE user_id = ?1 AND channel_id = ?2);

@@ -25,6 +25,7 @@ pub mod capture;
 pub mod playout;
 pub mod screen;
 pub mod session;
+pub mod stream_format;
 pub mod video;
 
 use serde::Serialize;
@@ -300,13 +301,14 @@ pub async fn native_voice_set_microphone(
     state: tauri::State<'_, NativeVoiceState>,
     session: u64,
     enabled: bool,
+    bitrate: Option<u64>,
 ) -> Result<(), String> {
     state
         .inner
         .lock()
         .await
         .current(session)?
-        .set_microphone(enabled)
+        .set_microphone(enabled, bitrate)
         .await
 }
 
@@ -323,6 +325,23 @@ pub async fn native_voice_set_ptt_gated(
         .await
         .current(session)?
         .set_ptt_gated(gated);
+    Ok(())
+}
+
+/// Set the input-sensitivity gate on `session`'s microphone: the RMS level
+/// (web path's `vadThreshold` scale) that counts as speech, 0 for no gate.
+#[tauri::command]
+pub async fn native_voice_set_voice_gate(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    threshold: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_voice_gate(threshold);
     Ok(())
 }
 

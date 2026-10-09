@@ -422,6 +422,65 @@ export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
 }
 
 /**
+ * voiceWsHandlers plus a voice_token on join, so the session leaves "joining"
+ * (to "securing" once LiveKit is parked, see parkLiveKitSocket). A DM call
+ * rings only after its join has left "joining"; the stock handlers withhold
+ * the token and would never ring. is_key_holder skips the 15s key-exchange stall.
+ */
+export function voiceJoinWithTokenHandlers(): Array<{ type: string; handler: string }> {
+  return voiceWsHandlers().map((h) =>
+    h.type !== "voice_join"
+      ? h
+      : {
+          type: h.type,
+          handler:
+            h.handler +
+            `
+        setTimeout(function() {
+          __tauriEmitEvent("ws-message", JSON.stringify({
+            type: "voice_token",
+            payload: { token: "mock-token", url: "ws://localhost:7880", channel_id: p.channel_id, direct_url: "", is_key_holder: true }
+          }));
+        }, 80);
+      `,
+        },
+  );
+}
+
+/**
+ * Park the LiveKit signal WebSocket forever: room.connect neither succeeds nor
+ * fails, so a session that was granted a voice_token sits stably in "securing"
+ * instead of self-destructing mid-test.
+ */
+export async function parkLiveKitSocket(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const RealWS = window.WebSocket;
+    function ParkedOrReal(url: string | URL, protocols?: string | string[]): WebSocket {
+      const s = String(url);
+      if (s.includes("localhost:7880") || s.includes("127.0.0.1:7880")) {
+        const parked = new EventTarget() as unknown as Record<string, unknown>;
+        parked.url = s;
+        parked.readyState = 0; // CONNECTING, forever
+        parked.binaryType = "arraybuffer";
+        parked.send = () => {};
+        parked.close = () => {
+          parked.readyState = 3;
+        };
+        parked.onopen = null;
+        parked.onmessage = null;
+        parked.onerror = null;
+        parked.onclose = null;
+        return parked as unknown as WebSocket;
+      }
+      return new RealWS(url, protocols);
+    }
+    ParkedOrReal.prototype = RealWS.prototype;
+    Object.assign(ParkedOrReal, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    (window as unknown as { WebSocket: unknown }).WebSocket = ParkedOrReal;
+  });
+}
+
+/**
  * Voice join failure handler for E2E testing.
  * Simulates a server error response when attempting to join a voice channel.
  */
@@ -447,7 +506,17 @@ export function voiceJoinFailureHandler(): { type: string; handler: string } {
 export function buildTauriMockScript(opts: {
   /** `method`, when set, restricts a route to that HTTP method — for one path
    *  that answers GET and DELETE differently. */
-  httpRoutes: Array<{ pattern: string; status: number; body: unknown; method?: string }>;
+  httpRoutes: Array<{
+    pattern: string;
+    status: number;
+    body: unknown;
+    method?: string;
+    /** Raw response bytes, served instead of the JSON-encoded `body` — for a
+     *  route the app must decode (an image), not parse. */
+    bodyBytes?: number[];
+    /** Content type for `bodyBytes`; JSON routes keep application/json. */
+    contentType?: string;
+  }>;
   simulateWsFlow: boolean;
   deferReady?: boolean;
   echoChatSend?: boolean;
@@ -456,9 +525,15 @@ export function buildTauriMockScript(opts: {
     channels?: unknown[];
     members?: unknown[];
     voice_states?: unknown[];
+    roles?: unknown[];
     dm_channels?: unknown[];
     notices?: unknown[];
   };
+  /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
+   *  same init script, because Playwright does not order separate
+   *  `addInitScript` registrations. Each is serialised with `toString()`, so it
+   *  must be self-contained (no closure variables). */
+  wrappers?: Array<() => void>;
   /** Pinned peer identity keys served by get_identity_pin, keyed by userId
    *  (string). Absent key = null = "never pinned". */
   identityPins?: Record<string, string>;
@@ -615,9 +690,10 @@ export function buildTauriMockScript(opts: {
           const responseRid = __nextRid++;
 
           if (pending?.route) {
-            const bodyStr = JSON.stringify(pending.route.body);
-            const encoder = new TextEncoder();
-            const bodyBytes = encoder.encode(bodyStr);
+            const rawBytes = pending.route.bodyBytes;
+            const bodyBytes = rawBytes
+              ? new Uint8Array(rawBytes)
+              : new TextEncoder().encode(JSON.stringify(pending.route.body));
             __pendingBody[responseRid] = bodyBytes;
             __bodyRead[responseRid] = false;
 
@@ -625,7 +701,7 @@ export function buildTauriMockScript(opts: {
               status: pending.route.status,
               statusText: pending.route.status === 200 ? "OK" : "Error",
               url: pending.url,
-              headers: [["content-type", "application/json"]],
+              headers: [["content-type", rawBytes ? pending.route.contentType : "application/json"]],
               rid: responseRid,
             };
           }
@@ -846,6 +922,7 @@ export function buildTauriMockScript(opts: {
 
       convertFileSrc: (path) => path,
     };
+    ${(opts.wrappers ?? []).map((fn) => `;(${fn.toString()})();`).join("\n")}
   `;
 }
 
@@ -1218,4 +1295,26 @@ export async function emitWsMessageAndWait(
 ): Promise<void> {
   await emitWsMessage(page, message);
   await expect(confirmLocator).toBeVisible({ timeout });
+}
+
+/**
+ * Stand in for room.connect() succeeding: wait for the parked join to reach
+ * "securing", then mark the session "connected" (the real status writer's
+ * transition). A DM call rings only from there. Goes through the
+ * `__owncord` status seam, which the production build exposes too.
+ */
+export async function connectVoiceSession(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    const ns = (
+      window as unknown as {
+        __owncord: { voiceStatus(): string; setVoiceStatus(s: string): void };
+      }
+    ).__owncord;
+    const deadline = Date.now() + 5000;
+    while (ns.voiceStatus() !== "securing") {
+      if (Date.now() > deadline) throw new Error("voice join never reached securing");
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    ns.setVoiceStatus("connected");
+  });
 }

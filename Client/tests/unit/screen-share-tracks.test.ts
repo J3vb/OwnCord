@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import process from "node:process";
-import { Track } from "livekit-client";
+import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
@@ -52,7 +52,6 @@ const {
   enableScreenshare,
   getLocalCameraStream,
   getLocalScreenshareStream,
-  getRemoteVideoStream,
   stopManualCameraTrack,
   stopManualScreenTracks,
   rollbackPendingVideo,
@@ -309,6 +308,29 @@ describe("enableCamera", () => {
     expect(rig.createCameraTracks).toHaveBeenCalled();
     expect(deps.onError).not.toHaveBeenCalled();
     expect(voiceStore.getState().localCamera).toBe(true);
+  });
+
+  it("passes the default 720p preset's size to the native capture", async () => {
+    const rig = fakeNativeRoom();
+    rig.createCameraTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.createCameraTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1280, height: 720 }),
+      }),
+    );
+  });
+
+  it("leaves the native capture uncapped for the source quality", async () => {
+    loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "source" : ""));
+    const rig = fakeNativeRoom();
+    rig.createCameraTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.createCameraTracks.mock.calls[0]?.[0]).not.toHaveProperty("resolution");
   });
 
   it("does not re-enable the camera when a disable lands during the support check", async () => {
@@ -752,6 +774,26 @@ describe("enableScreenshare", () => {
     expect(voiceStore.getState().localScreenshare).toBe(true);
   });
 
+  it("publishes the screen audio as music: no DTX, stereo, music preset", async () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+    expect(audioOpts).toMatchObject({
+      source: Track.Source.ScreenShareAudio,
+      dtx: false,
+      forceStereo: true,
+      audioPreset: AudioPresets.musicHighQualityStereo,
+    });
+    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    expect(videoOpts).not.toHaveProperty("dtx");
+    expect(videoOpts).not.toHaveProperty("forceStereo");
+  });
+
   it("sets a video encoding on the video track only", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
@@ -768,8 +810,125 @@ describe("enableScreenshare", () => {
       string,
       unknown
     >;
-    expect(videoOpts).toHaveProperty("videoEncoding");
-    expect(audioOpts).not.toHaveProperty("videoEncoding");
+    // livekit-client reads a screen share's encoding from screenShareEncoding
+    // and ignores videoEncoding for that source.
+    expect(videoOpts).toHaveProperty("screenShareEncoding");
+    expect(audioOpts).not.toHaveProperty("screenShareEncoding");
+  });
+
+  it("publishes the default (medium) share as 720p30 with a 720p 15 fps simulcast layer", async () => {
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    const audio = fakeAudioTrack();
+    createLocalScreenTracks.mockResolvedValue([video, audio]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(createLocalScreenTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1280, height: 720, frameRate: 30 }),
+      }),
+    );
+    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    expect(videoOpts).toMatchObject({
+      source: Track.Source.ScreenShare,
+      simulcast: true,
+      screenShareEncoding: { maxBitrate: 3_000_000, maxFramerate: 30 },
+      screenShareSimulcastLayers: [
+        { width: 1280, height: 720, encoding: { maxBitrate: 1_200_000, maxFramerate: 15 } },
+      ],
+    });
+    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(audioOpts).toMatchObject({ simulcast: false });
+    expect(audioOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
+  it("publishes the high share at 1080p with the 720p layer", async () => {
+    loadPref.mockImplementation((key: string) => (key === "screenShareQuality" ? "high" : ""));
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(createLocalScreenTracks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resolution: expect.objectContaining({ width: 1920, height: 1080, frameRate: 30 }),
+      }),
+    );
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      simulcast: true,
+      screenShareEncoding: { maxBitrate: 6_000_000, maxFramerate: 30 },
+      screenShareSimulcastLayers: [{ width: 1280, height: 720 }],
+    });
+  });
+
+  it("keeps the source share as a single full-resolution layer", async () => {
+    loadPref.mockImplementation((key: string) => (key === "screenShareQuality" ? "source" : ""));
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(videoOpts).toMatchObject({ simulcast: false });
+    expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
+  it("takes the camera quality from streamQuality, not the screen share pref", async () => {
+    loadPref.mockImplementation((key: string) =>
+      key === "streamQuality" ? "medium" : key === "screenShareQuality" ? "high" : "",
+    );
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      videoEncoding: { maxBitrate: 1_700_000 },
+    });
+  });
+
+  it("adds a 720p simulcast layer to a 1080p camera, so a 1-3 Mbps viewer gets 720p not 360p", async () => {
+    loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "high" : ""));
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    const opts = rig.publishTrack.mock.calls[0]?.[1] as {
+      videoSimulcastLayers: { width: number; height: number }[];
+    };
+    expect(opts.videoSimulcastLayers.map((l) => [l.width, l.height])).toEqual([
+      [640, 360],
+      [1280, 720],
+    ]);
+  });
+
+  it("leaves a 720p camera on the SDK's default layers", async () => {
+    loadPref.mockImplementation((key: string) => (key === "streamQuality" ? "medium" : ""));
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(rig.publishTrack.mock.calls[0]?.[1]).not.toHaveProperty("videoSimulcastLayers");
+  });
+
+  it("defaults the camera to 720p when no quality is saved", async () => {
+    loadPref.mockImplementation((_key: string, fallback: unknown) => fallback);
+    const rig = fakeRoom();
+    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(createLocalVideoTrack.mock.calls[0]?.[0]).toMatchObject({
+      resolution: { width: 1280, height: 720 },
+    });
   });
 
   it("tears down when the OS stop-sharing button ends the track (BUG-101)", async () => {
@@ -1168,65 +1327,6 @@ describe("stream getters", () => {
 
   it("getLocalScreenshareStream returns null when nothing is published", () => {
     expect(getLocalScreenshareStream(fakeRoom().room)).toBeNull();
-  });
-});
-
-describe("getRemoteVideoStream", () => {
-  function roomWithRemote(identity: string, source: Track.Source, track: unknown): Room {
-    return {
-      localParticipant: { getTrackPublication: () => undefined },
-      remoteParticipants: new Map([
-        [
-          identity,
-          {
-            identity,
-            getTrackPublication: (s: Track.Source) => (s === source ? { track } : undefined),
-          },
-        ],
-      ]),
-    } as unknown as Room;
-  }
-
-  it("returns null without a room", () => {
-    expect(getRemoteVideoStream(null, 7, "camera")).toBeNull();
-  });
-
-  it("matches an identity carrying a join-token suffix", () => {
-    // getParticipantByIdentity would miss this, which is why the module scans.
-    const room = roomWithRemote("user-42:abc123", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "camera")).not.toBeNull();
-  });
-
-  it("matches a bare identity", () => {
-    const room = roomWithRemote("user-42", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "camera")).not.toBeNull();
-  });
-
-  it("selects the screenshare source when asked", () => {
-    const room = roomWithRemote("user-42:tok", Track.Source.ScreenShare, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "screenshare")).not.toBeNull();
-    expect(getRemoteVideoStream(room, 42, "camera")).toBeNull();
-  });
-
-  it("returns null for a user who is not in the room", () => {
-    const room = roomWithRemote("user-42:tok", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 99, "camera")).toBeNull();
-  });
-
-  it("does not confuse user 4 with user 42", () => {
-    const room = roomWithRemote("user-42:tok", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 4, "camera")).toBeNull();
-  });
-
-  it("ignores participants with an unparseable identity", () => {
-    const room = roomWithRemote("anonymous", Track.Source.Camera, { mediaStreamTrack: {} });
-
-    expect(getRemoteVideoStream(room, 42, "camera")).toBeNull();
   });
 });
 

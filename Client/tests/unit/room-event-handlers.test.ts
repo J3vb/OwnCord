@@ -730,9 +730,10 @@ describe("handleEncryptionError", () => {
       };
 
       reportFor(180);
-      // Three bursts: each restarts a streak (3 tolerated, 3 past the grace).
-      for (let i = 0; i < 9; i++) {
-        expectConsole("warn", /receive-side decrypt failure/);
+      // Three bursts, one streak: no key install between them, so only the
+      // first burst's first 3 reports are tolerated.
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      for (let i = 0; i < 15; i++) {
         expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
       }
     });
@@ -755,7 +756,9 @@ describe("handleEncryptionError", () => {
       vi.advanceTimersByTime(5000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
 
-      // A later decrypt streak and its quiet gap do not clear it either.
+      // A later decrypt streak (after a fresh key install) and its quiet gap
+      // do not clear it either.
+      h.handlers.noteRoomKeyInstalled();
       for (let i = 0; i < 4; i++) {
         h.handlers.handleEncryptionError(decryptFailed(), bob);
         vi.advanceTimersByTime(1000);
@@ -793,6 +796,8 @@ describe("handleEncryptionError", () => {
 
       h.handlers.handleEncryptionError(decryptFailed(), bob);
       vi.advanceTimersByTime(5000);
+      // Each rotation race comes with its own key install.
+      h.handlers.noteRoomKeyInstalled();
       h.handlers.handleEncryptionError(decryptFailed(), bob);
 
       expectConsole("warn", /receive-side decrypt failure/);
@@ -805,9 +810,72 @@ describe("handleEncryptionError", () => {
 
       h.handlers.handleEncryptionError(decryptFailed(), bob);
       vi.advanceTimersByTime(5 * 60_000);
+      h.handlers.noteRoomKeyInstalled();
       h.handlers.handleEncryptionError(decryptFailed(), bob);
 
       expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("intermittent bursts with a wrong key degrade the call", () => {
+      const h = build();
+
+      // Bursts shorter than the grace window, separated by a quiet gap: the
+      // gap is not evidence the peer's frames decrypt again.
+      // Errors at t = 0, 1, 2 s, silence, then t = 5, 6 s.
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      vi.advanceTimersByTime(2000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(1000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    });
+
+    it("a key install starts a fresh grace window", () => {
+      const h = build();
+
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      vi.advanceTimersByTime(7000);
+      h.handlers.noteRoomKeyInstalled();
+      for (let i = 0; i < 3; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+
+      for (let i = 0; i < 6; i++) expectConsole("warn", /receive-side decrypt failure/);
+      expect(voiceStore.getState().encryptionDegraded).toBe(false);
+    });
+
+    it("a key install in the same millisecond as the last failure still starts a fresh window", () => {
+      const h = build();
+
+      // A streak already past the grace window.
+      for (let i = 0; i < 4; i++) {
+        h.handlers.handleEncryptionError(decryptFailed(), bob);
+        vi.advanceTimersByTime(1000);
+      }
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      for (let i = 0; i < 3; i++) expectConsole("warn", /receive-side decrypt failure/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      setEncryptionDegraded(false);
+
+      // The next rotation installs its key without the clock moving.
+      h.handlers.noteRoomKeyInstalled();
+      vi.advanceTimersByTime(1000);
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+
       expectConsole("warn", /receive-side decrypt failure/);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
     });
@@ -1025,5 +1093,129 @@ describe("handleSdkReconnecting / handleSdkReconnected", () => {
     h.handlers.handleSdkReconnected();
 
     expect(voiceStore.getState().voiceStatus).toBe("reconnecting");
+  });
+});
+
+// ── stalled signal resume ──────────────────────────────────────────────────
+
+// livekit-client resumes a cut signal socket up to 10 times, each allowed 15 s
+// to open, before it emits Disconnected, so a cut the SFU never answers leaves
+// the badge on "reconnecting" and every stream frozen for minutes while a
+// manual rejoin takes ~150 ms. The widget gives the SDK a short budget, then
+// abandons that room and runs its own reconnect loop.
+describe("a stalled signal resume", () => {
+  const BUDGET_MS = 10_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("drops the stuck room and starts the reconnect loop once the budget is spent", () => {
+    const h = build();
+    onRoom(h.room as unknown as Room, RoomEvent.Disconnected, h.handlers.handleDisconnected);
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS - 1);
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.teardownForReconnect).toHaveBeenCalled();
+    expect(h.spies.setRoom).toHaveBeenCalledWith(null);
+    expect(h.room.off).toHaveBeenCalledWith(RoomEvent.Disconnected, h.handlers.handleDisconnected);
+    expect(h.room.disconnect).toHaveBeenCalled();
+    expect(h.spies.setReconnectAc).toHaveBeenCalledWith(expect.any(AbortController));
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalledWith(
+      "tok",
+      "wss://lk.example",
+      12,
+      undefined,
+      expect.any(AbortSignal),
+    );
+    // A recovery, not a leave: no error toast and the channel is kept.
+    expect(h.spies.leaveVoice).not.toHaveBeenCalled();
+    expect(h.spies.onError).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the SDK reconnects within the budget", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS - 1);
+    h.handlers.handleSdkReconnected();
+    vi.advanceTimersByTime(BUDGET_MS);
+
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the SDK gives up on its own within the budget", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnecting();
+    h.handlers.handleDisconnected(DisconnectReason.CLIENT_INITIATED);
+    vi.advanceTimersByTime(BUDGET_MS * 2);
+
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+  });
+
+  it("counts the budget from the first event when Reconnecting follows SignalReconnecting", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS / 2);
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS / 2);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a room that is no longer the connected session room alone", () => {
+    let current: Room | null = {} as Room;
+    const h = build({ getRoom: () => current });
+
+    h.handlers.handleSdkReconnecting();
+    current = null; // the user left, or another attempt replaced the room
+    vi.advanceTimersByTime(BUDGET_MS);
+
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(h.spies.setRoom).not.toHaveBeenCalled();
+  });
+
+  it("re-arms for a rejoined room when a stale timer from the left room is pending", () => {
+    let current: Room = {} as Room;
+    const h = build({ getRoom: () => current });
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(3000);
+    current = h.room as unknown as Room; // left, then rejoined into a new room
+    vi.advanceTimersByTime(2000);
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS - 1);
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalled();
+  });
+
+  it("stays out of the way when there is no token to reconnect with", () => {
+    const h = build({ getLatestToken: () => null });
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(BUDGET_MS);
+
+    expectConsole("warn", /LiveKit resume stalled/);
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+    expect(h.spies.leaveVoice).not.toHaveBeenCalled();
   });
 });

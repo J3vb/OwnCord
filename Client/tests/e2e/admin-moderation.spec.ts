@@ -10,8 +10,8 @@
  *   - Block: two-click confirm, PUT /api/v1/blocks/{id}; Unblock: one click,
  *     DELETE /api/v1/blocks/{id}.
  *
- * A second init script wraps `__TAURI_INTERNALS__.invoke` (installed after the
- * mock's) so tests assert the exact outgoing HTTP request/method/body rather
+ * A wrapper (passed to the mock via `wrappers`, so it runs inside the mock's own
+ * init script) wraps `__TAURI_INTERNALS__.invoke` so tests assert the exact outgoing HTTP request/method/body rather
  * than only the resulting DOM.
  */
 
@@ -30,7 +30,7 @@ interface CapturedCall {
   readonly body?: string | null;
 }
 
-/** Installed as a second init script, after the Tauri mock sets up `invoke`. */
+/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
 function captureScript(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -109,11 +109,11 @@ const ADMIN_ROUTES = [
 async function mockModerationSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: ADMIN_ROUTES,
       simulateWsFlow: true,
     }),
   );
-  await page.addInitScript(captureScript);
 }
 
 /** Open the context menu on a member row and return the menu locator.

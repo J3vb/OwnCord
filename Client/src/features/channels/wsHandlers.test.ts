@@ -12,10 +12,12 @@ import {
   resetChannelsStore,
   setActiveChannel,
   setChannels,
+  setMentionCount,
 } from "../../stores/channels.store";
 import { messagesStore } from "../../stores/messages.store";
 import { dmStore } from "../../stores/dm.store";
 import { authStore } from "../../stores/auth.store";
+import { setLiveTailInView } from "../../lib/read-state";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
 
@@ -149,6 +151,15 @@ describe("markReadyActiveChannelRead", () => {
 
     expect(markChannelRead).not.toHaveBeenCalled();
   });
+
+  it("does not mark an active channel read while its list is scrolled up", () => {
+    setLiveTailInView(5, false);
+
+    markReadyActiveChannelRead(5);
+    setLiveTailInView(5, true);
+
+    expect(markChannelRead).not.toHaveBeenCalled();
+  });
 });
 
 describe("handleChannelDelete", () => {
@@ -202,6 +213,31 @@ describe("handleMentionCount", () => {
     handleMentionCount({ channel_id: 2, count: 3 });
 
     expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
+  });
+
+  it("lowers the active channel's mention badge while the window is unfocused", () => {
+    hasFocus.mockReturnValue(false);
+    setChannels([channel(2, "text", 0)]);
+    setActiveChannel(2);
+    // Activating clears the badge; a mention then lands while away or focused.
+    setMentionCount(2, 1);
+
+    handleMentionCount({ channel_id: 2, count: 2 });
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(1);
+
+    handleMentionCount({ channel_id: 2, count: 0 });
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(0);
+  });
+
+  it("leaves the active channel's mention badge alone while focused", () => {
+    setChannels([channel(2, "text", 0)]);
+    setActiveChannel(2);
+    // Activating clears the badge; a mention then lands while away or focused.
+    setMentionCount(2, 1);
+
+    handleMentionCount({ channel_id: 2, count: 0 });
+
+    expect(channelsStore.getState().channels.get(2)?.mentionCount).toBe(1);
   });
 
   it("ignores a frame for a channel this client does not know", () => {

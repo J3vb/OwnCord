@@ -671,8 +671,8 @@ func TestUpload_DBCreateAttachmentFailureDeletesStoredFile(t *testing.T) {
 	router := buildUploadRouter(database, store, nil)
 	token := uploadCreateToken(t, database, "dbfailupload", 1)
 
-	if _, err := database.ExecContext(context.Background(), `DROP TABLE attachments`); err != nil {
-		t.Fatalf("drop attachments table: %v", err)
+	if _, err := database.ExecContext(context.Background(), `CREATE TRIGGER fail_attachment_insert BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'forced'); END`); err != nil {
+		t.Fatalf("fail attachment inserts: %v", err)
 	}
 
 	content := []byte("content that will save to disk before attachment insert fails")
@@ -1772,6 +1772,25 @@ func TestServeThumb_Large16BitPNGIsNotDecoded(t *testing.T) {
 	}
 }
 
+// A 4500x4500 16-bit PNG, about 160 KB on disk, would take over 150 MiB to
+// decode and more again to scale: it is over the cap and passed through.
+func TestServeThumb_16BitPNG4500IsNotDecoded(t *testing.T) {
+	database := newUploadTestDB(t)
+	store := newUploadTestStorage(t)
+	router := buildUploadRouter(database, store, nil)
+	token := uploadCreateToken(t, database, "thumb16b", 4)
+	content := encodePNG(t, image.NewGray16(image.Rect(0, 0, 4500, 4500)))
+	id := uploadForThumb(t, router, token, "deep4500.png", content)
+
+	rr := doServeThumb(t, router, id, token)
+	if rr.Code != http.StatusOK || !bytes.Equal(rr.Body.Bytes(), content) {
+		t.Errorf("4500x4500 16-bit PNG: %d, %d bytes; want the original passed through", rr.Code, rr.Body.Len())
+	}
+	if _, err := store.OpenThumb(id); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a thumbnail was made of the 4500x4500 16-bit PNG: %v", err)
+	}
+}
+
 // A baseline JPEG is counted at its decoded image alone, so a 24-megapixel
 // camera photo gets a real thumbnail.
 func TestServeThumb_LargeBaselineJPEGFitsTheBox(t *testing.T) {
@@ -1914,5 +1933,82 @@ func TestServeThumb_MemberWithoutReadForbidden(t *testing.T) {
 	}
 	if rr := doServeThumb(t, router, id, uploaderToken); rr.Code != http.StatusOK {
 		t.Errorf("thumb for a reader: %d, want 200", rr.Code)
+	}
+}
+
+// ─── multipart tail ─────────────────────────────────────────────────────────
+
+func rawUpload(t *testing.T, h *quotaHarness, contentType string, body io.Reader) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	h.router.ServeHTTP(rr, req)
+	return rr
+}
+
+func attachmentCount(t *testing.T, h *quotaHarness) int {
+	t.Helper()
+	var n int
+	if err := h.database.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM attachments`).Scan(&n); err != nil {
+		t.Fatalf("count attachments: %v", err)
+	}
+	return n
+}
+
+// A part after the file is still request body: bytes past the body cap are
+// refused with 413 and nothing is recorded or kept.
+func TestUpload_TrailingPartBeyondBodyCapIs413(t *testing.T) {
+	if testing.Short() {
+		t.Skip("streams a 100 MiB tail")
+	}
+	h := cappedHarness(t, 10)
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		part, err := mw.CreateFormFile("file", "a.txt")
+		if err == nil {
+			_, err = part.Write([]byte("hello world this is a text file"))
+		}
+		if err == nil {
+			part, err = mw.CreateFormField("pad")
+		}
+		if err == nil {
+			_, err = io.CopyN(part, zeroReader{}, 101<<20)
+		}
+		if err == nil {
+			err = mw.Close()
+		}
+		pw.CloseWithError(err)
+	}()
+	rr := rawUpload(t, h, mw.FormDataContentType(), pr)
+	_ = pr.CloseWithError(io.ErrClosedPipe)
+	assertErrorCode(t, rr, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE")
+	if n := attachmentCount(t, h); n != 0 {
+		t.Fatalf("attachments = %d, want 0", n)
+	}
+	if h.filesOnDisk(t) != 0 {
+		t.Fatal("a refused upload left a file on disk")
+	}
+	if got := h.used(t); got != 0 {
+		t.Fatalf("storage used = %d, want 0", got)
+	}
+}
+
+// A tail that stops mid-part is a malformed body, not a finished upload.
+func TestUpload_MalformedTailIs400(t *testing.T) {
+	h := cappedHarness(t, 10)
+	body := "--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n\r\n" +
+		"hello world this is a text file\r\n" +
+		"--B\r\nContent-Disposition: form-data; name=\"x\"\r\n\r\nvalue-without-closing-boundary"
+	rr := rawUpload(t, h, "multipart/form-data; boundary=B", strings.NewReader(body))
+	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
+	if n := attachmentCount(t, h); n != 0 {
+		t.Fatalf("attachments = %d, want 0", n)
+	}
+	if h.filesOnDisk(t) != 0 {
+		t.Fatal("a refused upload left a file on disk")
 	}
 }

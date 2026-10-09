@@ -9,9 +9,9 @@
  *   - Delete:  right-click a channel → "Delete Channel" (DeleteChannelModal)
  *   - Purge:   right-click a channel → "Purge Messages…" (purge-prompt)
  *
- * Outgoing traffic is captured at the IPC boundary by a second init script
- * that wraps window.__TAURI_INTERNALS__.invoke (installed after the base Tauri
- * mock), recording every plugin:http|fetch call with its method, URL and JSON
+ * Outgoing traffic is captured at the IPC boundary by a `wrappers` entry
+ * that wraps window.__TAURI_INTERNALS__.invoke (run inside the base Tauri
+ * mock's init script), recording every plugin:http|fetch call with its method, URL and JSON
  * body. Tests assert those exact requests, not mock internals:
  *   - create: POST   /admin/api/channels
  *   - edit:   PATCH  /admin/api/channels/{id}
@@ -41,7 +41,7 @@ interface CapturedCall {
   readonly body?: string | null;
 }
 
-/** Installed as a second init script, after the Tauri mock sets up `invoke`. */
+/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
 function captureScript(): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -145,6 +145,7 @@ interface MockOpts {
 async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
+      wrappers: [captureScript],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
@@ -168,7 +169,6 @@ async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
       },
     }),
   );
-  await page.addInitScript(captureScript);
   await page.goto("/");
   await navigateToMainPageReady(page);
 }

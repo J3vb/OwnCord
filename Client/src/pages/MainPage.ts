@@ -456,19 +456,91 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       return;
     }
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
-    ringCallees(active.id);
+    ringAfterJoin(active.id);
   }
 
-  /** Send a ring and start (or restart) the caller's 30s window. The panel
-   *  is the caller's feedback: it shows "Calling…" from here on, unless the
-   *  call is already answered (a redial from inside a live call). */
-  function ringCallees(channelId: number): void {
-    ws.send({ type: "call_ring", payload: { channel_id: channelId } });
+  /** The server allows one call_ring per user per 3s (Server/ws/handlers_call.go);
+   *  a refused ring's error frame would also roll back a join still in flight.
+   *  The extra 250ms covers transport jitter: lastRingAt is stamped before the
+   *  async send, so two rings exactly 3s apart here can land under the window. */
+  const RING_SPACING_MS = 3250;
+  let lastRingAt = Number.NEGATIVE_INFINITY;
+  /** Envelope id of the newest call_ring, so a refusal answering an earlier
+   *  ring cannot clear a newer outgoing call. */
+  let lastRingId: string | null = null;
+  let ringTimer: ReturnType<typeof setTimeout> | null = null;
+  let ringJoinWatch: (() => void) | null = null;
+
+  function cancelPendingRing(): void {
+    if (ringTimer !== null) clearTimeout(ringTimer);
+    ringTimer = null;
+    ringJoinWatch?.();
+    ringJoinWatch = null;
+  }
+
+  /** Ring once the caller is actually in the channel; send nothing when the
+   *  join was refused or the caller left. */
+  function ringAfterJoin(channelId: number): void {
+    cancelPendingRing();
+    const settle = (): boolean => {
+      const v = voiceStore.getState();
+      if (v.currentChannelId !== channelId) {
+        cancelPendingRing();
+        return true;
+      }
+      // "securing" is E2EE setup and room.connect(): not yet in the room.
+      if (v.voiceStatus === "joining" || v.voiceStatus === "securing") return false;
+      ringJoinWatch?.();
+      ringJoinWatch = null;
+      ringCallees(channelId, true);
+      return true;
+    };
+    if (settle()) return;
+    ringJoinWatch = voiceStore.subscribe(() => void settle());
+  }
+
+  /** Send a ring no sooner than the server's window allows, through one owned
+   *  timer, and start (or restart) the caller's 30s window when it goes out.
+   *  The panel is the caller's feedback: it shows "Calling…" from then on,
+   *  unless the call is already answered (a redial from inside a live call). */
+  function ringCallees(channelId: number, inCall = false): void {
+    cancelPendingRing();
+    const wasHere = voiceStore.getState().currentChannelId === channelId;
+    const wait = lastRingAt + RING_SPACING_MS - Date.now();
+    if (wait > 0) {
+      ringTimer = setTimeout(() => {
+        ringTimer = null;
+        const v = voiceStore.getState();
+        // A ring that follows a join, or a redial from inside the call, needs
+        // the caller still in it; Ring again pressed outside a call stays
+        // valid until the caller moves to another channel.
+        const here = v.currentChannelId === channelId;
+        if (here || (!inCall && !wasHere && v.currentChannelId === null)) sendRing(channelId);
+      }, wait);
+      return;
+    }
+    sendRing(channelId);
+  }
+
+  function sendRing(channelId: number): void {
+    // An unplanned drop keeps the voice channel, so a ring queued before it
+    // would otherwise show "Calling…" for 30s with nobody notified.
+    if (uiStore.getState().connectionStatus !== "connected") return;
+    lastRingAt = Date.now();
+    lastRingId = ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-    outgoingCall?.start(channelId, dm?.participants.map((p) => p.id) ?? []);
+    // The server drops rings to offline members, so waiting on them would
+    // hold "Calling…" to the 30s timeout after every online callee declined
+    // (D-12). Keep them when nobody is online: nothing else to wait on.
+    const all = dm?.participants ?? [];
+    const online = all.filter((p) => p.status !== "offline");
+    outgoingCall?.start(
+      channelId,
+      (online.length > 0 ? online : all).map((p) => p.id),
+    );
   }
 
   /**
@@ -848,7 +920,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         clearAuth();
         // The account is gone, so its cached server images go too (B7-15c).
         // clearAuth has already disarmed the scope, so no late write follows.
-        if (cacheScope !== null) void pruneAttachmentCacheScope(cacheScope);
+        if (cacheScope !== null) await pruneAttachmentCacheScope(cacheScope);
         showToast(account("toast.accountDeleted"), "success");
       },
       onEnableTotp: async (password) => {
@@ -1103,6 +1175,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         (s) => s.activeView === null && !s.settingsOpen,
         () => syncRingSurfaces(),
       ),
+      // A queued ring must not outlive a drop, even one that reconnects before
+      // the timer fires: voice has not rejoined yet, so it would ring an empty room.
+      uiStore.subscribeSelector(
+        (s) => s.connectionStatus !== "connected",
+        (down) => {
+          if (down) cancelPendingRing();
+        },
+      ),
     );
 
     // The outgoing ring is over once anyone else is in the room, or once
@@ -1177,25 +1257,37 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       }),
     );
-    // The ringer hanging up before anyone answered: their voice_leave is the
-    // only signal there is that the call is over, because there is no call
-    // record to close. Ringing for a room with nobody in it is worse than a
+    // Anyone leaving the ringing room: when it has emptied there is no call
+    // left to answer, and no call record to close, so the voice_leave is the
+    // only signal. Ringing for a room with nobody in it is worse than a
     // missed call, so a leave stops the ring for that channel — but only
-    // when the ringer leaving actually emptied it. A group DM can still hold
-    // other callees who already accepted (voiceStore.voiceUsers answers
-    // that), and the ringer hanging up must not silence a call that is
-    // still live for them (OC-0235).
+    // when it actually emptied the room. A group DM can still hold other
+    // callees who already accepted (voiceStore.voiceUsers answers that), and
+    // the ringer hanging up must not silence a call that is still live for
+    // them (OC-0235); the last one out, ringer or not, ends it (D-06).
     unsubscribers.push(
       ws.on("voice_leave", (payload) => {
         const ringing = ringCtrl?.current();
         if (ringing === null || ringing === undefined) return;
-        if (payload.user_id !== ringing.fromUserId) return;
+        if (payload.channel_id !== ringing.channelId) return;
         const roster = voiceStore.getState().voiceUsers.get(payload.channel_id);
         const othersStillIn =
           roster !== undefined && [...roster.keys()].some((id) => id !== payload.user_id);
         if (!othersStillIn) {
-          ringCtrl?.cancel(payload.channel_id);
+          ringCtrl?.cancel(payload.channel_id, "ringer-left");
         }
+      }),
+    );
+    // A first-contact 1:1 ring is refused at once and never delivered (D-03),
+    // as is one the server rate-limits: end the caller's "Calling…" now. The
+    // dispatcher shows the server's explanation as the toast; the caller stays
+    // in the room.
+    unsubscribers.push(
+      ws.on("error", (payload, id) => {
+        // RATE_LIMITED: the server dropped this ring too, nobody was notified.
+        const refused =
+          payload.code === "CALL_REQUIRES_ACCEPTANCE" || payload.code === "RATE_LIMITED";
+        if (refused && id === lastRingId) outgoingCall?.clear();
       }),
     );
     unsubscribers.push(() => {
@@ -1304,8 +1396,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         if (voiceStore.getState().localScreenshare) voiceKeybindActions.onScreenshareToggle();
       },
       // HTML full screen fills only the webview in WebView2: take the window
-      // along (a no-op where the webview already filled it).
-      setWindowFullscreen: (on) => desktop.window.setFullscreen(on),
+      // along (a no-op where the webview already filled it), or a stream
+      // pop-out window by its label.
+      setWindowFullscreen: (...args) => desktop.window.setFullscreen(...args),
       callControls: {
         onMuteToggle: () => voiceKeybindActions.onMuteToggle(),
         onDeafenToggle: () => voiceKeybindActions.onDeafenToggle(),
@@ -1496,6 +1589,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   function destroy(): void {
     log.info("MainPage destroying");
     tornDown = true;
+    cancelPendingRing();
     try {
       // closeSettings() is otherwise only ever called from the overlay's own
       // onClose — a non-user-initiated unmount (401, ban, server shutdown)

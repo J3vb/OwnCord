@@ -286,10 +286,16 @@ SELECT m.id, m.kind, m.reason, m.created_at, m.expires_at, m.lifted_at,
        m.acknowledged_at, a.public_id AS appeal_id, a.state AS appeal_state
   FROM moderation_actions m
   LEFT JOIN appeals a ON a.action_id = m.id
- WHERE m.target_id = ? AND m.kind IN ('warning', 'timeout', 'removal', 'ban')
+ WHERE m.target_id = ?1 AND m.kind IN ('warning', 'timeout', 'removal', 'ban')
    AND m.actor_id IS NOT m.target_id
  ORDER BY m.created_at DESC, m.id DESC
+ LIMIT ?2
 `
+
+type ListOwnModerationActionsParams struct {
+	TargetID int64 `json:"targetId"`
+	RowLimit int64 `json:"rowLimit"`
+}
 
 type ListOwnModerationActionsRow struct {
 	ID             int64   `json:"id"`
@@ -311,9 +317,10 @@ type ListOwnModerationActionsRow struct {
 // AuthMiddleware refuses a currently banned one. appeals.action_id is
 // UNIQUE, so the join adds at most one row per action. Self-targeted rows
 // (a moderator's own channel purge) are not sanctions and are left out; a
-// row whose actor was erased (NULL) is kept.
-func (q *Queries) ListOwnModerationActions(ctx context.Context, targetID int64) ([]ListOwnModerationActionsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listOwnModerationActions, targetID)
+// row whose actor was erased (NULL) is kept. Removal and ban rows never
+// retire, so the read is capped at the newest row_limit rows.
+func (q *Queries) ListOwnModerationActions(ctx context.Context, arg ListOwnModerationActionsParams) ([]ListOwnModerationActionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listOwnModerationActions, arg.TargetID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +410,8 @@ DELETE FROM moderation_actions
 // actually runs. Warnings retire moderation.action_retention_days after
 // acknowledged_at; timeouts the same number of days after expires_at, or
 // after lifted_at when lifted early. Ban, kick and removal rows are never
-// touched here.
+// touched here. It deliberately does not consult voice_states: a schema
+// without appeals is a bare fixture with no voice-mute owners.
 func (q *Queries) RetireRetiredCandidates(ctx context.Context, cutoff *string) (int64, error) {
 	result, err := q.db.ExecContext(ctx, retireRetiredCandidates, cutoff)
 	if err != nil {

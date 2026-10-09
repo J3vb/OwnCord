@@ -12,7 +12,11 @@
 // reports the call. Every case claims or clears what it provoked, so the real
 // afterEach check passes afterwards.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { assertNoUnclaimedConsole, expectConsole } from "../helpers/console";
+import {
+  assertConsoleNotReplaced,
+  assertNoUnclaimedConsole,
+  expectConsole,
+} from "../helpers/console";
 
 // The exact defeat from call-ring.test.ts, in the same position relative to the
 // guard: it runs after the setup file's beforeEach, so the recorder is already
@@ -56,5 +60,34 @@ describe("the console guard survives a test file's mock resets", () => {
 
     // Still unclaimed — claim it so the guard's own afterEach passes.
     expectConsole("warn", "a real warning");
+  });
+});
+
+describe("the console guard notices a replaced console", () => {
+  it("fails a test that replaces console.error with its own implementation", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    console.error("hidden");
+
+    expect(() => assertConsoleNotReplaced()).toThrow(/console\.error.*expectConsole/);
+
+    // Put the recorder back so the guard's own afterEach passes.
+    vi.restoreAllMocks();
+  });
+
+  it("fails a test that swallows a call with mockImplementationOnce", () => {
+    vi.spyOn(console, "error").mockImplementationOnce(() => {});
+    console.error("hidden once");
+
+    expect(() => assertConsoleNotReplaced()).toThrow(/console\.error.*expectConsole/);
+
+    vi.restoreAllMocks();
+  });
+
+  it("allows a bare spy that keeps the recorder underneath", () => {
+    vi.spyOn(console, "warn");
+    console.warn("spied warning");
+    expectConsole("warn", "spied warning");
+
+    expect(() => assertConsoleNotReplaced()).not.toThrow();
   });
 });

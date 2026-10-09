@@ -18,3 +18,6 @@ export function startupClosureFiles(manifest: Manifest): Set<string>;
 
 /** Every emitted stylesheet, deduplicated by file. */
 export function allCssFiles(manifest: Manifest): Set<string>;
+
+/** Relative paths of emitted .js files under `dir` that contain `marker`. */
+export function findEmbeddedWasm(dir: string, marker: string): string[];

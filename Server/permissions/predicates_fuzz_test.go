@@ -29,45 +29,30 @@ func rawEffective(rolePerms int64, o ChannelOverride) int64 {
 	return (roleLayer &^ o.UserDeny) | o.UserAllow
 }
 
-// rawHas is Subject.Has written out IN PRODUCTION'S ORDER, which is not the
-// tidy one: the Administrator bypass is applied first and returns true
-// unconditionally, so an administrator "holds" a zero permission even though
-// HasPerm's own all-of rule says an empty mask is never held
-// (HasPerm(Administrator, 0) == false). Only a non-administrator reaches the
-// zero-perm refusal, and only then does the two-layer mask get consulted.
-//
-// Parity is this target's whole purpose, so the oracle keeps that ordering
-// rather than the contract the doc comments imply.
-// TestSubjectHasZeroPermIsAdminBypassed records the divergence as observed
-// behaviour, and the item's evidence block carries the call-site survey
-// showing no production caller passes 0 today.
+// rawHas is Subject.Has written out longhand: the empty mask is never held
+// (matching HasPerm), then the Administrator bypass, then the two-layer mask.
 func rawHas(rolePerms int64, o ChannelOverride, perm int64) bool {
-	if rolePerms&Administrator != 0 {
-		return true
-	}
 	if perm == 0 {
 		return false
+	}
+	if rolePerms&Administrator != 0 {
+		return true
 	}
 	return rawEffective(rolePerms, o)&perm == perm
 }
 
-// TestSubjectHasZeroPermIsAdminBypassed records, as OBSERVED behaviour and not
-// as a property anything should rely on, the one place Subject.Has and HasPerm
-// disagree: Subject.Has applies the Administrator bypass before the zero-perm
-// refusal, so an administrator holds the empty mask while HasPerm never does.
-// No production call site passes 0 (every one names a permissions.* constant),
-// so nothing turns on it today — but rawHas mirrors the ordering and this test
-// is what says so out loud. If the ordering is ever deliberately changed,
-// rawHas and this test move together.
-func TestSubjectHasZeroPermIsAdminBypassed(t *testing.T) {
+// TestSubjectHasZeroPermIsNeverHeld pins that Subject.Has agrees with HasPerm
+// on the empty mask: it is never held, administrator or not, so a computed
+// zero perm fails closed instead of passing the Administrator bypass.
+func TestSubjectHasZeroPermIsNeverHeld(t *testing.T) {
 	if HasPerm(Administrator, 0) {
 		t.Fatal("HasPerm(_, 0) = true; the all-of rule on an empty mask must stay false")
 	}
-	if !(Subject{RolePerms: Administrator}).Has(0) {
-		t.Fatal("observed behaviour changed: Subject.Has(0) no longer returns true for an administrator — update rawHas and this test together")
+	if (Subject{RolePerms: Administrator}).Has(0) {
+		t.Fatal("Subject.Has(0) = true for an administrator; a zero perm must never be held")
 	}
 	if (Subject{RolePerms: ReadMessages}).Has(0) {
-		t.Fatal("Subject.Has(0) = true for a non-administrator; only the Administrator bypass may reach that")
+		t.Fatal("Subject.Has(0) = true for a non-administrator")
 	}
 }
 

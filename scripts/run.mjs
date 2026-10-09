@@ -130,7 +130,7 @@ const CHECK_SERVER = [
     "golangci-lint",
     ["run", "./..."],
     "Server",
-    "golangci-lint not on PATH — CI pins v2.13.2",
+    "golangci-lint not on PATH — CI pins v2.14.0",
   ),
   ...PROTOCOL_VERIFY,
   ...SQLC_VERIFY,
@@ -151,6 +151,7 @@ const CHECK_CLIENT = [
   // D6: the CI job that runs this on every PR (client-check) mirrors ci.yml, so
   // the nightly mutation union check cannot drift unnoticed.
   step("node", ["scripts/check-mutation-shards.mjs"], "Client"),
+  step("node", ["--test", "scripts/aggregate-mutation-shards.test.mjs"], "Client"),
   // D1: the quarantine list is what keeps a known-flaky required test out of
   // the run. Both halves are self-tested, like the count and migration
   // matchers: the audit, and the pattern the Playwright configs actually apply.
@@ -285,6 +286,8 @@ const CHECK_HYGIENE = [
   // OC-0448. Execute the release verification/promotion shell with a fake
   // registry and assert that no release tag moves before verification passes.
   step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
+  // Claude Code Bash hook: `cd` in compounds and `.env` reads.
+  step("node", ["--test", "scripts/claude-hook.test.mjs"], "."),
   // B7-2 / RL-17. `engine-strict=true` makes `engines` a hard failure but does
   // not narrow it: `>=24` admitted the owner's Node 26 while CI ran 24 and
   // nothing failed. `Client/.nvmrc` is the source of truth and this asserts

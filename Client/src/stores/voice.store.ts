@@ -124,6 +124,11 @@ export interface VoiceState {
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
   readonly localSessionFingerprint?: string | null;
+  /** The input-sensitivity gate's verdict (true = open = above the slider's
+   *  threshold), or null when no gate runs (sensitivity 100).
+   *  When set it, not LiveKit, drives the local speaking ring, so the ring,
+   *  the slider and what transmits agree. Optional for the fixture reason above. */
+  readonly localGateSpeaking?: boolean | null;
 }
 
 const INITIAL_STATE: VoiceState = {
@@ -143,6 +148,7 @@ const INITIAL_STATE: VoiceState = {
   voiceStatus: "idle",
   encryptionDegraded: false,
   peerVerifications: new Map(),
+  localGateSpeaking: null,
 };
 
 export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
@@ -181,6 +187,7 @@ export function resetVoiceStore(): void {
     localServerDeafened: false,
     moderatorDeafened: false,
     pttGated: false,
+    localGateSpeaking: null,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -421,10 +428,7 @@ export function setModeratorDeafened(applied: boolean): void {
 
 /** Toggle local mute state. */
 export function setLocalMuted(muted: boolean): void {
-  voiceStore.setState((prev) => ({
-    ...prev,
-    localMuted: muted,
-  }));
+  voiceStore.setState((prev) => withLocalRing({ ...prev, localMuted: muted }));
 }
 
 /** Toggle local deafen state. */
@@ -446,7 +450,9 @@ export function setLocalDeafened(deafened: boolean): void {
  *  from localMuted so PTT can never write the flag that represents the user's
  *  own explicit mute (see the VoiceState.pttGated doc comment). */
 export function setPttGated(gated: boolean): void {
-  voiceStore.setState((prev) => (prev.pttGated === gated ? prev : { ...prev, pttGated: gated }));
+  voiceStore.setState((prev) =>
+    prev.pttGated === gated ? prev : withLocalRing({ ...prev, pttGated: gated }),
+  );
 }
 
 /** Whether the user's own mute is in effect. Push-to-talk never writes
@@ -524,9 +530,38 @@ export function setVoiceConfig(payload: VoiceConfigPayload): void {
   });
 }
 
+/** Apply the input-sensitivity gate to the local user's ring. A no-op when no
+ *  gate runs (LiveKit then decides). The ring lights only while the gate is
+ *  open and nothing silences the mic (self-mute, push-to-talk). */
+function withLocalRing(state: VoiceState): VoiceState {
+  const gate = state.localGateSpeaking;
+  const channelId = state.currentChannelId;
+  const userId = authStore.getState().user?.id ?? 0;
+  if (gate === null || gate === undefined || channelId === null) return state;
+  const channel = state.voiceUsers.get(channelId);
+  const user = channel?.get(userId);
+  if (channel === undefined || user === undefined) return state;
+  const speaking = gate && !state.localMuted && state.pttGated !== true;
+  if (user.speaking === speaking) return state;
+  const voiceUsers = new Map(state.voiceUsers);
+  voiceUsers.set(channelId, new Map(channel).set(userId, { ...user, speaking }));
+  return { ...state, voiceUsers };
+}
+
+/** Record the input-sensitivity gate's verdict (null = no gate). It is read
+ *  straight off the mic analyser, so the local ring follows speech without
+ *  waiting for LiveKit's slower, louder-only speaker detection. */
+export function setLocalGateSpeaking(speaking: boolean | null): void {
+  voiceStore.setState((prev) =>
+    prev.localGateSpeaking === speaking
+      ? prev
+      : withLocalRing({ ...prev, localGateSpeaking: speaking }),
+  );
+}
+
 /** Update speaking state for users from LiveKit's ActiveSpeakersChanged.
- *  Updates ALL users including local (LiveKit is the sole authority for
- *  speaking detection). */
+ *  Updates every remote user. The local user too, unless the input-sensitivity
+ *  gate runs: then the gate decides (see setLocalGateSpeaking). */
 export function setSpeakers(payload: VoiceSpeakersPayload): void {
   voiceStore.setState((prev) => {
     const existingChannel = prev.voiceUsers.get(payload.channel_id);
@@ -546,7 +581,7 @@ export function setSpeakers(payload: VoiceSpeakersPayload): void {
 
     const nextChannels = new Map(prev.voiceUsers);
     nextChannels.set(payload.channel_id, nextUsers);
-    return { ...prev, voiceUsers: nextChannels };
+    return withLocalRing({ ...prev, voiceUsers: nextChannels });
   });
 }
 

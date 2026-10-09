@@ -243,6 +243,13 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInternal, err)
 	}
+	// The "open" mod_queue broadcast must precede any assign/withdraw frame
+	// for the SAME appeal. Take this appeal's own lock BEFORE the insert
+	// commits, so a moderator polling the queue cannot Assign the fresh row
+	// until Submit has notified. Locking an id with no row yet is harmless:
+	// the locker is an in-memory refcounted map and evicts on unlock.
+	unlock := s.locks.lock(publicID)
+	defer unlock()
 	appealID, err := s.st.InsertAppeal(ctx, publicID, actionID, appellantID, body)
 	if err != nil {
 		switch {
@@ -262,15 +269,6 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 		}
 	}
 
-	// round 4 review: the "open" mod_queue broadcast used to run in the API
-	// handler, AFTER Submit returned — so it could arrive after a withdraw
-	// or assign frame for the SAME appeal, submitted moments later. The
-	// insert has already committed, and publicID now names a real row, so
-	// it is safe to acquire this appeal's own lock here (never before a row
-	// exists to lock) and hold it across the notify, exactly like Withdraw/
-	// Assign/Decide do.
-	unlock := s.locks.lock(publicID)
-	defer unlock()
 	if appealPostWriteHookForTest != nil {
 		appealPostWriteHookForTest(publicID)
 	}

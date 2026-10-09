@@ -984,6 +984,26 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("selectServer does not load the stored credential for a profile that opted out of remembering", async () => {
+    mockLoadCredential.mockClear();
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    page.selectServer("localhost:8443", "initialuser", false, false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockLoadCredential).not.toHaveBeenCalled();
+    expect(page.isUsingSavedPassword()).toBe(false);
+
+    page.destroy?.();
+  });
+
   it("selectServer sets credentials without password when username is provided", () => {
     const page = createConnectPage(makeCallbacks(), testProfiles);
     page.mount(container);
@@ -1397,6 +1417,43 @@ describe("ConnectPage", () => {
       (container.querySelector(".incompatible-notice-update") as HTMLElement).click();
 
       expect(onUpdateClient).toHaveBeenCalledWith("localhost:8443");
+
+      page.destroy?.();
+    });
+
+    it("Choose another server clears the protocol-refusal error", async () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      setTransientError("Server protocol is newer than this client");
+      await vi.waitFor(() =>
+        expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true),
+      );
+      page.showIncompatible("localhost:8443", 2, 1);
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
+
+      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(false);
+
+      page.destroy?.();
+    });
+
+    it("Choose another server keeps an unrelated error", async () => {
+      const page = createConnectPage(makeCallbacks(), testProfiles);
+      page.mount(container);
+
+      setTransientError("Server protocol is newer than this client");
+      await vi.waitFor(() =>
+        expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true),
+      );
+      page.showIncompatible("localhost:8443", 2, 1);
+      // A later, unrelated failure replaces the refusal banner.
+      page.showError("Invalid username or password");
+
+      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      const banner = container.querySelector(".error-banner")!;
+      expect(banner.classList.contains("visible")).toBe(true);
+      expect(banner.textContent).toContain("Invalid username or password");
 
       page.destroy?.();
     });
@@ -2335,6 +2392,52 @@ describe("ConnectPage", () => {
     host.dispatchEvent(new Event("input", { bubbles: true }));
     (el.querySelector(".form-switch button") as HTMLElement).click();
   }
+
+  describe("typed host probe (register mode)", () => {
+    afterEach(() => vi.useRealTimers());
+
+    function typeHost(el: HTMLDivElement, value: string): void {
+      const host = el.querySelector("#host") as HTMLInputElement;
+      host.value = value;
+      host.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    it("register mode on a typed host probes its server-info and shows the open-registration form", () => {
+      vi.useFakeTimers();
+      const modes = new Map<string, "open">();
+      const onHostSettled = vi.fn((host: string) => modes.set(host, "open"));
+      const page = createConnectPage(
+        makeCallbacks({ onHostSettled, getRegistrationMode: (h) => modes.get(h) ?? null }),
+        testProfiles,
+      );
+      page.mount(container);
+      (container.querySelector(".form-switch button") as HTMLElement).click();
+      typeHost(container, "typed.example:8443");
+      expect(onHostSettled).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(500);
+      expect(onHostSettled).toHaveBeenCalledExactlyOnceWith("typed.example:8443");
+      // The probe lands through the page's compatibility path, which re-renders.
+      page.updateCompatibility("typed.example:8443", "compatible", 1);
+      expect(
+        container
+          .querySelector("#invite")!
+          .closest(".form-group")!
+          .classList.contains("form-group--hidden"),
+      ).toBe(true);
+      page.destroy?.();
+    });
+
+    it("does not probe in login mode", () => {
+      vi.useFakeTimers();
+      const onHostSettled = vi.fn();
+      const page = createConnectPage(makeCallbacks({ onHostSettled }), testProfiles);
+      page.mount(container);
+      typeHost(container, "typed.example:8443");
+      vi.advanceTimersByTime(1000);
+      expect(onHostSettled).not.toHaveBeenCalled();
+      page.destroy?.();
+    });
+  });
 
   it("invite mode requires an invite code and hides no notice", async () => {
     const onRegister = vi.fn().mockResolvedValue(undefined);

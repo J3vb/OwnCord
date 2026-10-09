@@ -101,6 +101,20 @@ func (h *Hub) emitEventsFrom(ctx context.Context, senderID int64, events []Event
 			// so a busy DM typer could disconnect a backpressured recipient
 			// over a cosmetic frame (OC-0260).
 			h.SendToUserLow(e.TargetUserID(), e.Payload())
+		case CallSignalEvent:
+			// Normal priority, NOT the UserTargetedEvent default below (which
+			// CallSignalEvent also satisfies — keep this case before it). A
+			// ring or decline is ordered against the caller's voice_leave /
+			// voice_state, which ride the normal queue via the async hub
+			// dispatch. writePump drains high strictly before normal, so on
+			// the high queue a fresh call_incoming overtook an older
+			// voice_leave and the callee applied that stale leave to the new
+			// ring, cancelling it (a false "Missed call"). awaitDispatch
+			// first, so any voice event this connection enqueued earlier has
+			// reached the normal queue ahead of the signal. Best effort: a
+			// cancelled ctx just sends without the barrier.
+			_ = h.awaitDispatch(ctx)
+			h.SendToUser(e.TargetUserID(), e.Payload())
 		case UserTargetedEvent:
 			// High priority: targeted events (DM opens, mentions).
 			// dm_channel_open is unsequenced and targeted, so replay can never

@@ -40,8 +40,15 @@ function git(args) {
 // that only has it.
 export const BASE_REFS = ["origin/dev", "origin/main", "dev", "main"];
 
+// In a pull request the real base (GITHUB_BASE_REF) is tried first, so a PR
+// into main is compared with main rather than with dev.
+export function baseRefs(env) {
+  const base = env.GITHUB_BASE_REF;
+  return base ? [...new Set([`origin/${base}`, ...BASE_REFS])] : BASE_REFS;
+}
+
 function resolveBaseRef() {
-  for (const ref of BASE_REFS) {
+  for (const ref of baseRefs(process.env)) {
     const sha = git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
     if (sha) return { ref, sha };
   }
@@ -147,7 +154,7 @@ function main() {
   const base = resolveBaseRef();
   if (!base) {
     console.error(
-      `ERROR: cannot resolve a base branch to compare against (tried ${BASE_REFS.join(", ")}).\n` +
+      `ERROR: cannot resolve a base branch to compare against (tried ${baseRefs(process.env).join(", ")}).\n` +
         "Without one this check cannot tell a new migration from an edited one, so it fails\n" +
         "rather than passing blind. Fetch the integration branch and re-run:\n" +
         "  git fetch origin dev\n" +

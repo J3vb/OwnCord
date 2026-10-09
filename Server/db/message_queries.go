@@ -59,6 +59,13 @@ func sanitizeFTSQuery(q string) string {
 			sb.WriteRune(r)
 			continue
 		}
+		// unicode61 keeps the combining diacritics block (U+0300-U+036F) inside
+		// the token and strips it, so splitting on one would turn NFD "résumé"
+		// into "re sume". Other marks (Indic vowel signs and so on) are
+		// separators there, and stay separators here.
+		if r >= 0x0300 && r <= 0x036F {
+			continue
+		}
 		// Everything else -- the separators unicode61 tokenizes on, and every
 		// character of FTS5's own grammar (quotes, parens, '*', '^', ':') --
 		// becomes a separator here too, which is both what the index expects

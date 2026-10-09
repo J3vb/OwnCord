@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"time"
 
@@ -607,7 +606,6 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 		if !ok {
 			return fmt.Errorf("%w: report is no longer open", ErrConflict)
 		}
-		s.logReportEvent(ctx, reportID, actorID, "assigned", "")
 		return nil
 	}
 	ok, err := s.st.AssignReport(ctx, reportID, actorID, observed)
@@ -617,7 +615,6 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 	if !ok {
 		return fmt.Errorf("%w: report is no longer open", ErrConflict)
 	}
-	s.logReportEvent(ctx, reportID, actorID, "assigned", "")
 	return nil
 }
 
@@ -654,8 +651,6 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 		// report closed, between requirePerm's read and this write.
 		return fmt.Errorf("%w: report is closed, or the moderator account no longer exists", ErrConflict)
 	}
-	// Never the body — action alone is the whole detail, everywhere.
-	s.logReportEvent(ctx, reportID, actorID, "noted", "")
 	return nil
 }
 
@@ -681,30 +676,16 @@ func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outc
 		return "", err
 	}
 	state := outcomeState[outcome]
-	ok, err := s.st.CloseReport(ctx, reportID, state, outcome)
+	ok, err := s.st.CloseReport(ctx, reportID, state, outcome, actorID)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if !ok {
 		return "", fmt.Errorf("%w: report is already closed", ErrConflict)
 	}
-	s.logReportEvent(ctx, reportID, actorID, "closed", outcome)
 	return state, nil
 }
 
 // ErrDuplicateReport is a 409: the same reporter already has an open or
 // assigned report against this exact target.
 var ErrDuplicateReport = fmt.Errorf("%w: a report for this target is already open or assigned", ErrConflict)
-
-// logReportEvent appends one report_events row (second Codex review), never
-// the shared audit_log. detail is the state or outcome word only — never
-// free text, the same rule report_notes.body is exempt from. A write
-// failure is logged and swallowed, the same fire-and-forget contract
-// db.WriteAudit gives every other caller in this package: the mutation
-// itself already succeeded, and a lost history row is not worth failing the
-// caller's request over.
-func (s *ReportService) logReportEvent(ctx context.Context, reportID, actorID int64, action, detail string) {
-	if err := s.st.InsertReportEvent(context.WithoutCancel(ctx), reportID, actorID, action, detail); err != nil {
-		slog.Warn("report event not recorded", "report_id", reportID, "action", action, "error", err)
-	}
-}

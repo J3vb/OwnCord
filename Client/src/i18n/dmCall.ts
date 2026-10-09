@@ -27,6 +27,7 @@ export const dmCallText = defineCatalog("dmCall", {
   noAnswer: "{name} didn't answer",
   stillInCall: "You're still in the call, so {name} can join later.",
   ringAgain: "Ring again",
+  leftStatus: "{name} left the call",
   isCalling: "{name} is calling…",
   notifyIncoming: "{name} is calling you",
   missed: "Missed call from {name}",

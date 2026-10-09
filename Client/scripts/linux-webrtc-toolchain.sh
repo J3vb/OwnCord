@@ -22,7 +22,8 @@
 # Security posture, matching the download-and-verify convention the release
 # workflow already uses (see the actionlint/osv-scanner/zizmor installs):
 #   - the libwebrtc archive is pinned by version AND sha256, checked before use;
-#   - clang: CC/CXX from the environment if both are set; otherwise an
+#   - clang: CC/CXX from the environment if both are set (and both are
+#     clang >= 21, else the script fails); otherwise an
 #     installed clang++-21 or clang++ (in that order) reporting major >= 21;
 #     otherwise, on a Debian/Ubuntu release apt.llvm.org publishes, clang-21
 #     from its llvm-toolchain-<codename>-21 channel (what CI and release jobs
@@ -105,6 +106,15 @@ clang_major() {
 CLANG_CC=""
 CLANG_CXX=""
 if [ -n "${CC:-}" ] && [ -n "${CXX:-}" ]; then
+  # An explicit override is the developer's intent, so a wrong compiler is an
+  # error here, not a reason to fall back to PATH discovery.
+  for bin in "$CC" "$CXX"; do
+    if ! "$bin" --version 2>/dev/null | grep -qi clang \
+      || ! [ "$(clang_major "$bin")" -ge 21 ] 2>/dev/null; then
+      echo "CC/CXX must be clang >= 21 (got '$bin'): unset them to auto-detect, or point them at clang 21." >&2
+      exit 1
+    fi
+  done
   CLANG_CC="$CC"
   CLANG_CXX="$CXX"
 else
