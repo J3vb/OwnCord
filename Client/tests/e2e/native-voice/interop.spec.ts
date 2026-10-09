@@ -86,7 +86,7 @@ function runNativePeer(
   args: string[],
   onLine?: (line: NativeLine) => void,
 ): { child: ChildProcess; done: Promise<NativeLine[]> } {
-  const { child } = startProcess(resolve(nativePeer!), args, process.cwd(), {
+  const { child, log } = startProcess(resolve(nativePeer!), args, process.cwd(), {
     ...process.env,
     RUST_LOG: "warn",
   });
@@ -105,7 +105,9 @@ function runNativePeer(
   });
   const done = new Promise<NativeLine[]>((resolveDone, reject) => {
     child.on("exit", (code: number | null) =>
-      code === 0 ? resolveDone(lines) : reject(new Error(`native peer exited ${code}`)),
+      code === 0
+        ? resolveDone(lines)
+        : reject(new Error(`native peer exited ${code}: ${log().slice(-2000)}`)),
     );
   });
   return { child, done };
