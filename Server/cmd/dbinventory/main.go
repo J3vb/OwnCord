@@ -375,7 +375,7 @@ func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImpor
 	}
 	for _, rel := range slices.Sorted(maps.Keys(allow)) {
 		if !present[rel] {
-			flagged = append(flagged, fmt.Sprintf("STALE allowlist row (file no longer uses db): `%s`", rel))
+			flagged = append(flagged, fmt.Sprintf("STALE allowlist row (file no longer uses db): %#q", rel))
 		}
 	}
 	for _, line := range flagged {
@@ -391,9 +391,9 @@ func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImpor
 func classify(r fileUse, entry invariants.DBImportEntry, listed bool) []string {
 	if !listed {
 		if r.imports {
-			return []string{fmt.Sprintf("UNLISTED importer (no allowlist row): `%s`", r.rel)}
+			return []string{fmt.Sprintf("UNLISTED importer (no allowlist row): %#q", r.rel)}
 		}
-		return []string{fmt.Sprintf("UNLISTED BY USE (no import, no allowlist row): `%s` calls %s, hands off %s",
+		return []string{fmt.Sprintf("UNLISTED BY USE (no import, no allowlist row): %#q calls %s, hands off %s",
 			r.rel, joined(r.methods), joined(r.hands))}
 	}
 	if entry.Disposition != invariants.DispositionBoundary {
@@ -405,11 +405,11 @@ func classify(r fileUse, entry invariants.DBImportEntry, listed bool) []string {
 	}
 	var out []string
 	if !maps.Equal(entry.Calls, r.methods) {
-		out = append(out, fmt.Sprintf("CALLS DRIFTED: `%s` calls %s; the row pins %s",
+		out = append(out, fmt.Sprintf("CALLS DRIFTED: %#q calls %s; the row pins %s",
 			r.rel, joined(r.methods), joined(entry.Calls)))
 	}
 	if !maps.Equal(entry.Hands, r.hands) {
-		out = append(out, fmt.Sprintf("HANDS DRIFTED: `%s` hands off %s; the row pins %s",
+		out = append(out, fmt.Sprintf("HANDS DRIFTED: %#q hands off %s; the row pins %s",
 			r.rel, joined(r.hands), joined(entry.Hands)))
 	}
 	return out

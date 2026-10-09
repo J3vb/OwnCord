@@ -71,6 +71,8 @@ export type NativeVoiceEvent =
    *  lets this client publish the microphone (a moderator server-mute
    *  withdraws it, lifting the mute restores it). */
   | { type: "microphonePermission"; allowed: boolean }
+  /** The input-sensitivity gate opened (speech) or closed (silence). */
+  | { type: "voiceGate"; open: boolean }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
   /** Screen capture `capture` ended on its own after it started: stopped
    *  from the desktop's sharing indicator, or the shared window closed. */
@@ -219,6 +221,10 @@ export interface NativeVoice {
   setMicrophone(session: number, enabled: boolean, bitrate?: number): Promise<void>;
   /** Push-to-talk's gate: closed, the open capture sends silence (DP-30). */
   setPttGated(session: number, gated: boolean): Promise<void>;
+  /** The input-sensitivity gate: the level (`vadThreshold`'s scale) the
+   *  capture must reach to send, 0 for no gate. Its verdicts arrive as
+   *  `voiceGate` events. */
+  setVoiceGate(session: number, threshold: number): Promise<void>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */

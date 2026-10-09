@@ -328,6 +328,23 @@ pub async fn native_voice_set_ptt_gated(
     Ok(())
 }
 
+/// Set the input-sensitivity gate on `session`'s microphone: the RMS level
+/// (web path's `vadThreshold` scale) that counts as speech, 0 for no gate.
+#[tauri::command]
+pub async fn native_voice_set_voice_gate(
+    state: tauri::State<'_, NativeVoiceState>,
+    session: u64,
+    threshold: f32,
+) -> Result<(), String> {
+    state
+        .inner
+        .lock()
+        .await
+        .current(session)?
+        .set_voice_gate(threshold);
+    Ok(())
+}
+
 /// List the GStreamer `Video/Source` cameras (V4L2 and PipeWire), in or out
 /// of a call: the ids `native_voice_start_camera` takes.
 #[tauri::command]

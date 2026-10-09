@@ -34,7 +34,7 @@ go test -race -timeout 20m ./...          # -timeout 20m matches CI; ws alone to
 go test -tags deadlock -count=1 ./...     # CI runs the WHOLE tree here (ci.yml), not just ./ws/
 go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/...  # plain leg: logstream_alloc_test.go is !race && !deadlock
 go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/        # plain leg: serve_ready_alloc_test.go is !race && !deadlock
-golangci-lint run                        # CI pins v2.13.2 — check `golangci-lint --version` first
+golangci-lint run                        # CI pins v2.14.0 — check `golangci-lint --version` first
 
 # `ci.yml` also runs these three first, in `Server Lint & Invariants`, so they
 # report in seconds rather than after the race run. Mirroring them locally is
@@ -72,8 +72,8 @@ That is the binary's age, not a missing gate — it reads like "cannot run
 here" and is not. Fetch the pinned version rather than skipping the step:
 
 ```bash
-curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.13.2/golangci-lint-2.13.2-linux-amd64.tar.gz
-tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.13.2-linux-amd64/golangci-lint --version
+curl -sSfL -o /tmp/glci.tgz https://github.com/golangci/golangci-lint/releases/download/v2.14.0/golangci-lint-2.14.0-linux-amd64.tar.gz
+tar xzf /tmp/glci.tgz -C /tmp && /tmp/golangci-lint-2.14.0-linux-amd64/golangci-lint --version
 ```
 
 A `windows-latest` `-race` failure inside `ws` that matches `runtime.scanstack`
