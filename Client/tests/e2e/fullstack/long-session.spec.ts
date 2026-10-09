@@ -56,6 +56,8 @@ const PENDING_METRICS: SlopeCeilings = {};
 const AUTO_IDLE_MS = 10 * 60_000;
 /** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
 const WITHIN_PAGE_PHASES = new Set([6, 9]);
+/** How long the reconnect step's LiveKit signal-stream errors may trail the banner. */
+const SIGNAL_SETTLE_MS = 5_000;
 
 const test = base.extend<{ alice: Page }>({
   alice: async ({ page, server, aliceTransport }, use) => {
@@ -302,8 +304,10 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
         await expect
           .poll(async () => (await mediaStats(alice)).liveCapture, { timeout: 30_000 })
           .toBe(0);
-        // The SDK logs the dropped signal socket when its room tears down, which
-        // can land after the banner clears; the window ends once capture is released.
+        // The SDK logs the dropped signal socket when its room tears down, and
+        // the failed signal reconnect after it, both after the banner clears;
+        // the window ends once that settles.
+        await alice.waitForTimeout(SIGNAL_SETTLE_MS);
         duringReconnect = false;
       }
 
