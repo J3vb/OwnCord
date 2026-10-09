@@ -2052,7 +2052,7 @@ ringer" because the server does not know who that was — no call state, by
 design — and in a group more than one person may be ringing.
 
 A declining client stops its own ring; a ringing client stops on
-`call_declined`, on the ringer's `voice_leave`, or after a 30 second timeout.
+`call_declined`, on a `voice_leave` that empties the room, or after a 30 second timeout.
 A timeout deliberately sends **no** `call_decline`: it means "nobody was there",
 and the ringer's own 30s window already covers it.
 

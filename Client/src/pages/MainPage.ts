@@ -524,7 +524,15 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const self = getCurrentUserId();
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-    outgoingCall?.start(channelId, dm?.participants.map((p) => p.id) ?? []);
+    // The server drops rings to offline members, so waiting on them would
+    // hold "Calling…" to the 30s timeout after every online callee declined
+    // (D-12). Keep them when nobody is online: nothing else to wait on.
+    const all = dm?.participants ?? [];
+    const online = all.filter((p) => p.status !== "offline");
+    outgoingCall?.start(
+      channelId,
+      (online.length > 0 ? online : all).map((p) => p.id),
+    );
   }
 
   /**
@@ -1233,19 +1241,19 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         }
       }),
     );
-    // The ringer hanging up before anyone answered: their voice_leave is the
-    // only signal there is that the call is over, because there is no call
-    // record to close. Ringing for a room with nobody in it is worse than a
+    // Anyone leaving the ringing room: when it has emptied there is no call
+    // left to answer, and no call record to close, so the voice_leave is the
+    // only signal. Ringing for a room with nobody in it is worse than a
     // missed call, so a leave stops the ring for that channel — but only
-    // when the ringer leaving actually emptied it. A group DM can still hold
-    // other callees who already accepted (voiceStore.voiceUsers answers
-    // that), and the ringer hanging up must not silence a call that is
-    // still live for them (OC-0235).
+    // when it actually emptied the room. A group DM can still hold other
+    // callees who already accepted (voiceStore.voiceUsers answers that), and
+    // the ringer hanging up must not silence a call that is still live for
+    // them (OC-0235); the last one out, ringer or not, ends it (D-06).
     unsubscribers.push(
       ws.on("voice_leave", (payload) => {
         const ringing = ringCtrl?.current();
         if (ringing === null || ringing === undefined) return;
-        if (payload.user_id !== ringing.fromUserId) return;
+        if (payload.channel_id !== ringing.channelId) return;
         const roster = voiceStore.getState().voiceUsers.get(payload.channel_id);
         const othersStillIn =
           roster !== undefined && [...roster.keys()].some((id) => id !== payload.user_id);
