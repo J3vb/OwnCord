@@ -51,7 +51,7 @@ var (
 		"query", "body", "content", "text", "note", "label", "value", "stored", "backup", "upload",
 		"recipient", "sender", "actor", "target", "peer", "client", "member", "owner",
 	}
-	supportIdentifyingWords = []string{"id", "ids", "sid", "pid", "ip", "ips"}
+	supportIdentifyingWords = []string{"data", "id", "ids", "sid", "pid", "ip", "ips"}
 )
 
 func supportIdentifyingKey(key string) bool {

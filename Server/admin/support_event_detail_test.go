@@ -37,6 +37,7 @@ func TestSupportIdentifyingKey(t *testing.T) {
 		"password", "cookie", "session", "auth", "participant", "identity", "room", "channel", "stored_as",
 		"backup", "upload", "value", "label", "note", "content", "text", "body", "query", "origin",
 		"recipient", "sender", "actor", "target", "peer", "client", "req.user_id", "domain", "endpoint",
+		"data", "matched_data",
 	} {
 		if !supportIdentifyingKey(key) {
 			t.Errorf("supportIdentifyingKey(%q) = false, want true", key)
@@ -229,5 +230,17 @@ func TestSupportEvents_LongLiveKitLineKeepsTrailingError(t *testing.T) {
 
 	if !strings.Contains(got, "…") || !strings.Contains(got, `"error": "no candidate pairs"`) || len(got) > supportDetailMaxValue+4 {
 		t.Fatalf("line = %q", got)
+	}
+}
+
+func TestSupportEvents_DropsWAFMatchedData(t *testing.T) {
+	rb := NewRingBuffer(10)
+	rb.Write(LogEntry{Timestamp: ts(0), Level: "WARN", Message: "RemoveParticipant failed (may already be gone)",
+		Attrs: `{"data":"Matched Data: select found within ARGS:body: meet me at 12 Oak St","err":"not found"}`})
+
+	detail := supportEvents(rb)[0].Detail
+
+	if want := map[string]any{"err": "not found"}; !reflect.DeepEqual(detail, want) {
+		t.Fatalf("detail = %v, want %v", detail, want)
 	}
 }
