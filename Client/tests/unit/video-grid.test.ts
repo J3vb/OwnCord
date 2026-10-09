@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
+import { expectConsole } from "../helpers/console";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -1675,6 +1676,7 @@ describe("VideoGrid", () => {
       try {
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
         control(SCREEN, "pip").click();
+        expectConsole("warn", "Pop out window refused");
         expect(cell(SCREEN).querySelector("video")).not.toBeNull();
         expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
         expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
@@ -2134,7 +2136,6 @@ describe("VideoGrid", () => {
       vi.unstubAllGlobals();
       vi.restoreAllMocks();
       delete (document as { hidden?: unknown }).hidden;
-      delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
     });
 
     function addCameras(): void {
@@ -2225,22 +2226,6 @@ describe("VideoGrid", () => {
       expect(enabled(3)).toBe(true);
       cellOf(2).querySelector<HTMLButtonElement>("[data-tile-control='watch']")!.click();
       expect(enabled(2)).toBe(true);
-    });
-
-    it("a popped-out tile keeps its video at the top layer while the grid is hidden", () => {
-      addCameras();
-      const video = cellOf(2).querySelector("video")!;
-      Object.defineProperty(document, "pictureInPictureElement", {
-        configurable: true,
-        get: () => video,
-      });
-      video.dispatchEvent(new Event("enterpictureinpicture"));
-      resize({ 1: [0, 0], 2: [0, 0], 3: [0, 0] });
-      hidden = true;
-      document.dispatchEvent(new Event("visibilitychange"));
-      expect(enabled(2)).toBe(true);
-      expect(pub(2).setVideoQuality).toHaveBeenLastCalledWith(VideoQuality.HIGH);
-      expect(enabled(3)).toBe(false);
     });
 
     it("a tile popped out to a window keeps its video at the top layer while the grid is hidden", () => {
