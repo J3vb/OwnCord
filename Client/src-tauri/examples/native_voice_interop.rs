@@ -71,7 +71,7 @@ mod linux {
     /// How long a camera cycle waits for a subscriber to bind the new camera.
     const CAMERA_SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(5);
     /// livekit-server reports the subscription about 40 ms before the
-    /// subscriber's own offer lands; see the comment in `run`.
+    /// subscriber's own offer lands; see the comment on `await_camera_bound`.
     const CAMERA_CYCLE_SETTLE: Duration = Duration::from_millis(250);
     const FRAME_MS: u64 = 10;
     const SINE_AMPLITUDE: f64 = 8000.0;
@@ -181,7 +181,7 @@ mod linux {
     // never sees the final camera. Wait for the subscription,
     // then a short settle: the server reports it before the
     // subscriber's offer lands. Other events are kept for the
-    // main loop below.
+    // main loop in `run`.
     async fn await_camera_bound(
         room_events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
         pending_events: &mut std::collections::VecDeque<RoomEvent>,
