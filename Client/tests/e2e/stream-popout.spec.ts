@@ -100,9 +100,11 @@ test.describe("stream pop-out window", () => {
     await popup.keyboard.press("f");
     await expect.poll(() => popup.evaluate(() => document.fullscreenElement)).toBeNull();
 
-    // Closing the window puts the stream back in its tile, still playing.
+    // Closing the window puts the stream back in its tile, still playing,
+    // with keyboard focus back on the tile's Pop out control.
     await popup.close();
     await expect(tile(page).locator("video")).toHaveCount(1);
+    await expect(tile(page).locator("[data-tile-control='pip']")).toBeFocused();
     await expect(tile(page).locator(".video-popped")).toHaveCount(0);
     await expect
       .poll(() =>

@@ -1913,6 +1913,35 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector("[inert]")).toBeNull();
     });
 
+    it("puts keyboard focus back on the tile when the window is closed from outside", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").focus();
+      control(SCREEN, "pip").click();
+      (document.activeElement as HTMLElement | null)?.blur();
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(1000);
+
+      expect(document.activeElement).toBe(control(SCREEN, "pip"));
+    });
+
+    it("leaves focus where it is when it is elsewhere as the window closes", () => {
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        control(SCREEN, "pip").click();
+        input.focus();
+
+        popup.win.closed = true;
+        vi.advanceTimersByTime(1000);
+
+        expect(document.activeElement).toBe(input);
+      } finally {
+        input.remove();
+      }
+    });
+
     it("goes full screen in the window, and takes the window itself with it", async () => {
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });

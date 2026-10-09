@@ -28,9 +28,9 @@ const CLOSED_POLL_MS = 300;
 export interface PopoutOptions {
   readonly title: string;
   readonly video: HTMLVideoElement;
-  /** The window is gone, closed by the user or by close(): the video is the
-   *  caller's to put back. Called once. */
-  readonly onClosed: () => void;
+  /** The window is gone, closed by the user (`byUser`) or by close(): the
+   *  video is the caller's to put back. Called once. */
+  readonly onClosed: (byUser: boolean) => void;
   /** Keep the window's own full-screen state with its page's: HTML full
    *  screen fills only the webview in WebView2. */
   readonly setWindowFullscreen?: (on: boolean, label: string) => Promise<void>;
@@ -129,14 +129,14 @@ export function openPopout(opts: PopoutOptions): Popout | null {
   }
 
   const poll = setInterval(() => {
-    if (win.closed) finish();
+    if (win.closed) finish(true);
   }, CLOSED_POLL_MS);
 
-  function finish(): void {
+  function finish(byUser: boolean): void {
     if (signal.aborted) return;
     clearInterval(poll);
     listeners.destroy();
-    opts.onClosed();
+    opts.onClosed(byUser);
   }
 
   button.addEventListener("click", toggleFullscreen, { signal });
@@ -150,7 +150,7 @@ export function openPopout(opts: PopoutOptions): Popout | null {
   return {
     close(): void {
       if (!win.closed) win.close();
-      finish();
+      finish(false);
     },
   };
 }

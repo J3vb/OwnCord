@@ -931,7 +931,7 @@ export function createVideoGrid(): VideoGridComponent {
     const popout = openPopout({
       title: voiceText("tile.popoutTitle", { name: username }),
       video: entry.video,
-      onClosed: () => bringBack(entry),
+      onClosed: (byUser) => bringBack(entry, byUser),
       setWindowFullscreen: (on, label) =>
         callbacks.setWindowFullscreen?.(on, label) ?? Promise.resolve(),
     });
@@ -960,11 +960,14 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** The pop-out window closed: the video goes back into its tile. */
-  function bringBack(entry: CellEntry): void {
+  function bringBack(entry: CellEntry, byUser: boolean): void {
     entry.popout = undefined;
     const cover = entry.el.querySelector(".video-popped");
-    // Bring back goes with its cover: keep a keyboard user on the tile.
-    const hadFocus = cover?.contains(document.activeElement) === true;
+    // Keep a keyboard user on the tile: Bring back goes with its cover, and a
+    // window the user closed leaves focus nowhere (Pop out was inert).
+    const active = document.activeElement;
+    const lost = active === null || active === document.body;
+    const hadFocus = cover?.contains(active) === true || (byUser && lost);
     cover?.remove();
     for (const child of entry.el.children) child.removeAttribute("inert");
     const pip = entry.el.querySelector<HTMLElement>("[data-tile-control='pip']");
