@@ -405,3 +405,41 @@ func TestRingTargets_GroupLookupErrorFailsClosedToNoTargets(t *testing.T) {
 		t.Errorf("targets = %v, want none", targets)
 	}
 }
+
+// failingParticipantsStore fails the participant read DMSummaryFor needs.
+type failingParticipantsStore struct {
+	*db.DB
+}
+
+func (s *failingParticipantsStore) GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error) {
+	return nil, errors.New("simulated GetDMParticipants failure")
+}
+
+// Codex on #2197: a reopen whose dm_channel_open payload cannot be built must
+// not be persisted — the next ring would see the DM as open and never announce
+// it, leaving the callee ringing into a channel their client does not have.
+func TestOpenForRing_SummaryFailureLeavesDMClosed(t *testing.T) {
+	database, _ := newDMFixture(t)
+	ctx := context.Background()
+	if err := database.CloseDM(ctx, 2, 50); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+	svc := NewDMService(&failingParticipantsStore{DB: database}, NewPermissionService(database, permissions.NewChecker(database)))
+
+	if got := svc.OpenForRing(ctx, 50, []int64{2}); len(got) != 0 {
+		t.Fatalf("OpenForRing = %v, want nothing when the summary cannot be built", got)
+	}
+	open, err := database.GetUserDMChannels(ctx, 2)
+	if err != nil {
+		t.Fatalf("GetUserDMChannels: %v", err)
+	}
+	if len(open) != 0 {
+		t.Errorf("the DM was reopened without a notification: %v", open)
+	}
+
+	good := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	got := good.OpenForRing(ctx, 50, []int64{2})
+	if len(got) != 1 || got[0].UserID != 2 || got[0].Summary.ChannelID != 50 {
+		t.Errorf("OpenForRing = %+v, want one reopen for user 2 carrying channel 50", got)
+	}
+}

@@ -8,6 +8,7 @@ import "maps"
 
 func init() {
 	maps.Copy(supportEventCodes, map[string]string{
-		"DMService.OpenForRing OpenDM": "dmservice_openforring_opendm",
+		"DMService.OpenForRing OpenDM":  "dmservice_openforring_opendm",
+		"DMService.OpenForRing summary": "dmservice_openforring_summary",
 	})
 }

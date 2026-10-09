@@ -59,14 +59,10 @@ func handleCallRingV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	events := make([]Event, 0, 2*len(targets))
 	// A callee who had closed the DM gets it back before the ring, in the same
 	// order as a chat send, so the client already has the channel (D-04).
-	for _, pid := range d.DMSvc.OpenForRing(ctx, ringCmd.ChannelID, targets) {
-		summary, sErr := d.DMSvc.DMSummaryFor(ctx, pid, ringCmd.ChannelID)
-		if sErr != nil {
-			continue
-		}
+	for _, r := range d.DMSvc.OpenForRing(ctx, ringCmd.ChannelID, targets) {
 		events = append(events, DMChannelOpenEvent{
-			targetUserID: pid,
-			payload:      buildJSON(wsMsg{Type: MsgTypeDMChannelOpen, Payload: summary}),
+			targetUserID: r.UserID,
+			payload:      buildJSON(wsMsg{Type: MsgTypeDMChannelOpen, Payload: r.Summary}),
 		})
 	}
 	for _, pid := range targets {
