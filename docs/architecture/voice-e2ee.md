@@ -300,7 +300,9 @@ below). `NativeRoom.localParticipant.createCameraTracks` is the stand-in for
 the room exposes it, so Windows and macOS keep the web path. It starts a
 `GstDeviceMonitor`-listed `Video/Source` (V4L2 or PipeWire) through
 `v4l2src`/`pipewiresrc` (or the monitor's own element for the id) →
-`decodebin` → `videoconvert` → an I420 `appsink`, and returns a
+`decodebin` → `videoconvert` → an I420 `appsink`, capped at the selected
+preset's resolution (720p for the default "medium", 1080p when chosen; "source"
+is uncapped, `createCameraTracks`' `resolution` option), and returns a
 `NativeCameraTrack` whose `mediaStreamTrack` is the capture's local preview
 (the frame socket's `camera` route, drawn by the same WebGL renderer as remote
 video). The track is captured and independent of the window: the settings
