@@ -52,10 +52,13 @@ things are not:
    them, which is a product decision (§5).
 
 The reported camera and screen-share crashes cannot be found by reading:
-`camera.rs` and `screen.rs` have no production `unwrap`, every failure path
-returns a string, and the native-crash hook (`crash_log.rs`) exists precisely
-because the crashes come from libwebrtc, GStreamer or the X server. §7 lists
-what a support bundle must contain for the next report to be diagnosable. The
+`camera.rs` and `screen.rs` have no production `unwrap` and every failure path
+returns a string, but Rust can still panic there (the `png_url` slicing in
+`screen.rs:221-227` trusts the frame's stride and height), and a native crash
+in libwebrtc, GStreamer or the X server never reaches Rust at all. The panic
+hook (`diagnostics.rs`) writes a `[panic]` line with a backtrace and the
+native-crash hook (`crash_log.rs`) writes a `[crash]` line, so a support bundle
+can tell the two apart. §7 lists what the next report must contain. The
 "voice device problems" have one code-level cause worth a decision: on Linux
 the connection diagnostics still test the **webview's** microphone with the
 native engine's device id (§5.4).
@@ -138,7 +141,7 @@ Xvfb). That is why the CSP omission reached users (§5.5).
 | Emoji                                              | no emoji family in any stack (`styles/tokens.css:120-124`), so fontconfig decides; the deb neither depends on nor recommends `fonts-noto-color-emoji`                                                                                                                                                                                                                                      | Segoe UI Emoji                                                          | monochrome or boxed emoji on minimal installs                                                                                          | S      | **fix** — #2239                                                  |
 | Media playback (video attachments, YouTube embeds) | WebKitGTK decodes through GStreamer; the deb depends only on `plugins-base` and `plugins-good` (`tauri.conf.json:39-48`), so H264/AAC (`gstreamer1.0-libav`) is absent                                                                                                                                                                                                                     | H264/AAC built in                                                       | mp4 attachments silently fail to play on a deb install; the AppImage carries only what the release runner had and ignores host plugins | S      | **fix** — #2239 (deb); AppImage is a **product decision** (§5.3) |
 | Camera (native)                                    | GStreamer `v4l2src`/`pipewiresrc` (`camera.rs:121-122,398-411`); the deb lacks `gstreamer1.0-pipewire` and the release runner never installs it, so neither bundle has `pipewiresrc`                                                                                                                                                                                                       | webview `getUserMedia`                                                  | PipeWire-only cameras (libcamera, Intel IPU6 laptops) list nothing                                                                     | S      | **fix** — #2239 (deb); AppImage is a **product decision** (§5.3) |
-| Camera / screen crash surface                      | no production `unwrap`/`expect` in `camera.rs` or `screen.rs`; failures become strings and `*CaptureEnded` events; `crash_log.rs` writes a last line for SIGSEGV/SIGBUS/SIGABRT/SIGTRAP and X errors; `session.rs` keeps 8 `.lock().unwrap()` (846-1112) that would turn a poisoned lock into a silent stop of room events                                                                 | n/a                                                                     | the reported crashes live below Rust; only a support bundle shows them                                                                 | S      | debt (poison-tolerant locks); crashes need bundles (§7)          |
+| Camera / screen crash surface                      | no production `unwrap`/`expect` in `camera.rs` or `screen.rs`; failures become strings and `*CaptureEnded` events; `crash_log.rs` writes a last line for SIGSEGV/SIGBUS/SIGABRT/SIGTRAP and X errors; `session.rs` keeps 8 `.lock().unwrap()` (846-1112) that would turn a poisoned lock into a silent stop of room events                                                                 | n/a                                                                     | a Rust panic shows up as a `[panic]` line, a native crash as a `[crash]` line; only a support bundle shows which                       | S      | debt (poison-tolerant locks); crashes need bundles (§7)          |
 | Screen share                                       | Wayland → portal, X11 → own picker; `under_wayland()` (`screen.rs:113-116`) mirrors libwebrtc and needs **both** `XDG_SESSION_TYPE=wayland` and `WAYLAND_DISPLAY`, while `shortcuts.rs:62-68` and `main.rs:30-36` treat either as Wayland; video only                                                                                                                                      | `getDisplayMedia` picker with audio                                     | a Wayland session without `XDG_SESSION_TYPE` gets the X11 picker and XWayland-only (black) captures; no screen audio (documented)      | S      | **product decision** (§5.2)                                      |
 | Voice devices                                      | cpal and GStreamer ids from the engine (`features/voice/native/devices.ts:21-45`); the settings tab lists them; no mic meter on Linux (`VoiceAudioTab.ts:846`); `lib/connectionDiagnostics.ts:205-219` still opens the **webview** microphone with the engine's device id, misses, and retries `"default"`                                                                                 | webview devices throughout                                              | the diagnostics report the wrong microphone; there is no mic test on Linux                                                             | S/M    | **product decision** (§5.4)                                      |
 | Push-to-talk and global shortcuts                  | X11 key polling only; `ptt_polling_supported` and `voice_shortcuts_supported` report false on Wayland                                                                                                                                                                                                                                                                                      | `GetAsyncKeyState`                                                      | no global PTT on Wayland (the UI says so)                                                                                              | –      | document                                                         |
@@ -217,12 +220,18 @@ or a support bundle to confirm, or is a product decision (§5).
 ## 7. Crash reports: what the next bundle must contain
 
 The camera and screen-share crashes that users report are not visible in the
-Rust code paths: every failure returns a string or an event, and the process
-dies below that in libwebrtc, GStreamer or the X server. A support bundle is
-only useful for these if it carries:
+Rust code paths by reading: every failure returns a string or an event, so the
+process either panics on an assumption (a slice on frame-supplied dimensions,
+a poisoned lock) or dies below Rust in libwebrtc, GStreamer or the X server.
+The two leave different last lines, and a support bundle is only useful if it
+carries:
 
-- the `crash_log` line (`[crash] SIGSEGV …` or the Xlib error) and the ten log
-  lines before it, including the last `native-voice` event (`session.rs:121-190`);
+- the last `[panic]` line from the panic hook (`diagnostics.rs:20-25`: thread,
+  location and backtrace) if there is one — that is a Rust bug to fix in the
+  named function;
+- otherwise the `crash_log` line (`[crash] SIGSEGV …` or the Xlib error), and
+  in both cases the ten log lines before it, including the last `native-voice`
+  event (`session.rs:121-190`);
 - the WebKitGTK version (`webkit2gtk` package), the compositor,
   `XDG_SESSION_TYPE` and whether `WAYLAND_DISPLAY` was set;
 - `gst-inspect-1.0 v4l2src pipewiresrc decodebin videoscale` output, and the
