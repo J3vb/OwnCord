@@ -504,6 +504,10 @@ pub fn process_threads() -> usize {
 struct VideoPublication {
     issued: String,
     live: TrackSid,
+    /// The initial `publish_track` has not returned yet. A full reconnect
+    /// can republish the new track inside that await, before its sid is
+    /// known, so the republish is adopted into `live` instead of orphaned.
+    pending: bool,
 }
 
 impl VideoPublication {
@@ -511,11 +515,35 @@ impl VideoPublication {
         Self {
             issued: sid.to_string(),
             live: sid,
+            pending: false,
         }
     }
 
+    /// Marks a publish in flight; [`Self::settle`] completes it.
+    fn pending() -> Self {
+        Self {
+            issued: String::new(),
+            live: Self::placeholder(),
+            pending: true,
+        }
+    }
+
+    fn placeholder() -> TrackSid {
+        TrackSid::try_from("TR_pending".to_string()).unwrap()
+    }
+
+    /// `publish_track` returned `sid`. A republish adopted meanwhile keeps
+    /// `live`; otherwise the track is still under the sid it was issued.
+    fn settle(&mut self, sid: TrackSid) {
+        self.issued = sid.to_string();
+        if self.live == Self::placeholder() {
+            self.live = sid;
+        }
+        self.pending = false;
+    }
+
     fn republished(&mut self, previous: &TrackSid, sid: TrackSid) {
-        if self.live == *previous {
+        if self.pending || self.live == *previous {
             self.live = sid;
         }
     }
@@ -824,6 +852,7 @@ impl NativeSession {
             return Err(format!("camera capture {capture} is not running"));
         }
         self.release_camera_publication().await;
+        *self.camera.lock().unwrap() = Some(VideoPublication::pending());
         let source = NativeVideoSource::new(
             VideoResolution {
                 width: opts.width,
@@ -838,12 +867,17 @@ impl NativeSession {
             .local_participant()
             .publish_track(LocalTrack::Video(track), camera_publish_options(&opts))
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                self.camera.lock().unwrap().take();
+                e.to_string()
+            })?;
         let sid = publication.sid();
         if let Some(camera) = &self.camera_capture {
             camera.capture.set_source(Some(source));
         }
-        *self.camera.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        if let Some(camera) = self.camera.lock().unwrap().as_mut() {
+            camera.settle(sid.clone());
+        }
         Ok(sid.to_string())
     }
 
@@ -937,6 +971,7 @@ impl NativeSession {
             return Err(format!("screen capture {capture} is not running"));
         }
         self.unpublish_screen().await;
+        *self.screen_publication.lock().unwrap() = Some(VideoPublication::pending());
         let source = NativeVideoSource::new(
             VideoResolution {
                 width: opts.width,
@@ -953,12 +988,17 @@ impl NativeSession {
             .local_participant()
             .publish_track(LocalTrack::Video(track), screen_publish_options(&opts))
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                self.screen_publication.lock().unwrap().take();
+                e.to_string()
+            })?;
         let sid = publication.sid();
         if let Some(screen) = &self.screen {
             screen.capture.set_source(Some(source));
         }
-        *self.screen_publication.lock().unwrap() = Some(VideoPublication::new(sid.clone()));
+        if let Some(publication) = self.screen_publication.lock().unwrap().as_mut() {
+            publication.settle(sid.clone());
+        }
         Ok(sid.to_string())
     }
 
@@ -1197,7 +1237,7 @@ fn apply_republish(
         return None;
     }
     match slot.as_mut() {
-        Some(c) if c.live == *previous_sid => {
+        Some(c) if c.pending || c.live == *previous_sid => {
             c.republished(previous_sid, sid.clone());
             None
         }
@@ -1479,6 +1519,36 @@ mod tests {
         );
         let live = slot.expect("the enabled camera stays published").live;
         assert_eq!(live, sid("TR_d"));
+    }
+
+    /// `publish_camera` fills the slot only after `publish_track` returns, so a
+    /// full reconnect republishing inside that await used to find it empty and
+    /// unpublish the camera it was creating.
+    #[test]
+    fn a_camera_republished_while_its_first_publish_is_pending_is_adopted() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::pending());
+        assert_eq!(
+            apply_republish(&mut slot, TrackSource::Camera, &sid("TR_a"), &sid("TR_b")),
+            None,
+            "a pending publish must not be orphaned"
+        );
+        let camera = slot.as_mut().unwrap();
+        camera.settle(sid("TR_a"));
+        assert_eq!(camera.live, sid("TR_b"), "the republished sid stays live");
+        assert_eq!(
+            camera.issued, "TR_a",
+            "the webview is handed the sid returned"
+        );
+    }
+
+    #[test]
+    fn a_pending_camera_without_a_republish_settles_on_its_sid() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut camera = VideoPublication::pending();
+        camera.settle(sid("TR_a"));
+        assert_eq!(camera.live, sid("TR_a"));
+        assert!(!camera.pending);
     }
 
     #[test]
