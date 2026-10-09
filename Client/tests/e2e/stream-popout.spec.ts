@@ -122,10 +122,13 @@ test.describe("stream pop-out window", () => {
     ]);
     await expect(popup.locator(".video-popout video")).toHaveCount(1);
 
-    await tile(page).locator("[data-tile-control='pop-in']").click();
+    // By keyboard: focus stays on the tile, on its Pop out control.
+    await tile(page).locator("[data-tile-control='pop-in']").focus();
+    await page.keyboard.press("Enter");
 
     await expect.poll(() => popup.isClosed()).toBe(true);
     await expect(tile(page).locator("video")).toHaveCount(1);
+    await expect(tile(page).locator("[data-tile-control='pip']")).toBeFocused();
   });
 
   test("the popup document runs under the app's CSP, styled and playing", async ({ page }) => {

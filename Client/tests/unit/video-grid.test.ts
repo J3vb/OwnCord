@@ -1959,6 +1959,17 @@ describe("VideoGrid", () => {
       expect(video.classList.contains("track-muted")).toBe(false);
     });
 
+    it("keeps keyboard focus on the tile when Bring back goes", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      control(SCREEN, "pip").click();
+      const back = control(SCREEN, "pop-in");
+      back.focus();
+
+      back.click();
+
+      expect(document.activeElement).toBe(control(SCREEN, "pip"));
+    });
+
     it("goes full screen in the window, and takes the window itself with it", async () => {
       const setWindowFullscreen = vi.fn().mockResolvedValue(undefined);
       grid.setCallbacks({ setWindowFullscreen });

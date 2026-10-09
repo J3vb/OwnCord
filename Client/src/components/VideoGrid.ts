@@ -969,8 +969,13 @@ export function createVideoGrid(): VideoGridComponent {
   /** The pop-out window closed: the video goes back into its tile. */
   function bringBack(entry: CellEntry): void {
     entry.popout = undefined;
-    entry.el.querySelector(".video-popped")?.remove();
-    entry.el.querySelector("[data-tile-control='pip']")?.setAttribute("aria-pressed", "false");
+    const cover = entry.el.querySelector(".video-popped");
+    // Bring back goes with its cover: keep a keyboard user on the tile.
+    const hadFocus = cover?.contains(document.activeElement) === true;
+    cover?.remove();
+    const pip = entry.el.querySelector<HTMLElement>("[data-tile-control='pip']");
+    pip?.setAttribute("aria-pressed", "false");
+    if (hadFocus) pip?.focus();
     entry.el.insertBefore(entry.video, entry.el.firstChild);
     entry.video.play()?.catch(() => {});
     syncViews();
