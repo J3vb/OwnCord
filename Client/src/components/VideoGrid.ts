@@ -649,12 +649,8 @@ export function createVideoGrid(): VideoGridComponent {
     }
     if (focusedTileId !== tileId) setFocusedTile(tileId);
     // A popped-out stream comes back for full screen in the app window (its
-    // own window has a full-screen control of its own; a picture-in-picture
-    // window cannot go full screen).
+    // own window has a full-screen control of its own).
     entry.popout?.close();
-    if (document.pictureInPictureElement === entry.video) {
-      void document.exitPictureInPicture().catch(() => {});
-    }
     const request = entry.el.requestFullscreen as (() => Promise<void>) | undefined;
     if (typeof request !== "function") {
       enterTheatre(tileId);
@@ -876,7 +872,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  minimised, stopped); the top layer for the stream you are watching
    *  (focused, full screen or popped out); otherwise its rendered size. */
   function viewOf(id: number, entry: CellEntry): VideoView {
-    if (entry.popout !== undefined || document.pictureInPictureElement === entry.video) {
+    if (entry.popout !== undefined) {
       return { enabled: true };
     }
     const { width, height } = entry.el.getBoundingClientRect();
@@ -920,16 +916,12 @@ export function createVideoGrid(): VideoGridComponent {
   // --- Pop out ---------------------------------------------------------------
 
   /** Move the tile's video into a window of its own, or bring it back. Where
-   *  no window opens, the platform's picture-in-picture instead. */
+   *  no window opens, the video stays in the grid. */
   function togglePopout(tileId: number): void {
     const entry = cells.get(tileId);
     if (entry === undefined) return;
     if (entry.popout !== undefined) {
       entry.popout.close();
-      return;
-    }
-    if (document.pictureInPictureElement === entry.video) {
-      void document.exitPictureInPicture().catch(() => {});
       return;
     }
     if (isFullscreen(tileId)) leaveFullscreen();
@@ -944,9 +936,7 @@ export function createVideoGrid(): VideoGridComponent {
         callbacks.setWindowFullscreen?.(on, label) ?? Promise.resolve(),
     });
     if (popout === null) {
-      entry.video.requestPictureInPicture?.().catch((err: unknown) => {
-        log.debug("Pop out refused", { tileId, err });
-      });
+      log.warn("Pop out window refused", { tileId });
       return;
     }
     entry.popout = popout;
@@ -1236,9 +1226,6 @@ export function createVideoGrid(): VideoGridComponent {
         { signal: entry.listeners.signal },
       );
       openMenuOnKeyboard(cell, openMenu, entry.listeners.signal);
-      for (const type of ["enterpictureinpicture", "leavepictureinpicture"]) {
-        video.addEventListener(type, syncViews, { signal: entry.listeners.signal });
-      }
       resizeObserver?.observe(cell);
     }
 

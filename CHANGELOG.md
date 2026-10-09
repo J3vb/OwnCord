@@ -53,7 +53,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
-- **Pop-out window for streams and cameras**: Pop out now opens a stream or camera in a window of its own, like Discord, that you can move, maximise or put in full screen (its own button, F or a double-click); the picture-in-picture window it replaces could do neither. The Linux app gets Pop out for the first time. Closing the window, or Bring back on the tile, returns the stream to the grid.
+- **Pop-out window for streams and cameras**: Pop out now opens a stream or camera in a window of its own, like Discord, that you can move, maximise or put in full screen (its own button, F or a double-click). The Linux app gets Pop out for the first time. Closing the window, or Bring back on the tile, returns the stream to the grid.
 
 ### Changed
 

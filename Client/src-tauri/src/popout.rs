@@ -14,7 +14,7 @@
 //! (wry denies new windows when a webview has no handler).
 
 use tauri::webview::{NewWindowFeatures, NewWindowResponse};
-use tauri::{AppHandle, Runtime, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Runtime, Url, WebviewUrl, WebviewWindowBuilder};
 
 const LABEL_PREFIX: &str = "owncord-popout-";
 
@@ -27,6 +27,22 @@ pub fn popout_label(url: &Url) -> Option<&str> {
     let tile = label.strip_prefix(LABEL_PREFIX)?;
     let digits = !tile.is_empty() && tile.len() <= 10 && tile.bytes().all(|b| b.is_ascii_digit());
     digits.then_some(label)
+}
+
+/// Whether a window label names a pop-out window.
+pub fn is_popout_window(label: &str) -> bool {
+    label.starts_with(LABEL_PREFIX)
+}
+
+/// Close every open pop-out. The main window's page cannot be relied on to do
+/// it (no `pagehide` runs when the window is destroyed), and a pop-out left
+/// open keeps the process alive.
+pub fn close_all<R: Runtime>(app: &AppHandle<R>) {
+    for (label, window) in app.webview_windows() {
+        if is_popout_window(&label) {
+            let _ = window.destroy();
+        }
+    }
 }
 
 /// The main webview's `on_new_window` handler.
@@ -85,11 +101,18 @@ fn close_with_page<R: Runtime>(window: &tauri::WebviewWindow<R>) {
 
 #[cfg(test)]
 mod tests {
-    use super::popout_label;
+    use super::{is_popout_window, popout_label};
     use tauri::Url;
 
     fn label(url: &str) -> Option<String> {
         popout_label(&Url::parse(url).unwrap()).map(str::to_owned)
+    }
+
+    #[test]
+    fn recognises_popout_windows_by_label() {
+        assert!(is_popout_window("owncord-popout-1000002"));
+        assert!(!is_popout_window("main"));
+        assert!(!is_popout_window("owncord-popout"));
     }
 
     #[test]

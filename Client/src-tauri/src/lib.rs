@@ -295,7 +295,13 @@ pub fn run() {
                         popout::on_new_window(&handle, url, features)
                     })
                 };
-                builder.build()?;
+                let window = builder.build()?;
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Destroyed) {
+                        popout::close_all(&handle);
+                    }
+                });
             }
             diagnostics::spawn_frontend_watchdog(app.handle());
             tray::create_tray(app.handle())?;

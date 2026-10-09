@@ -1455,7 +1455,6 @@ describe("VideoGrid", () => {
       delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
       delete (document as { exitFullscreen?: unknown }).exitFullscreen;
       delete (document as { fullscreenElement?: unknown }).fullscreenElement;
-      delete (document as { pictureInPictureEnabled?: unknown }).pictureInPictureEnabled;
       vi.useRealTimers();
     });
 
@@ -1671,87 +1670,15 @@ describe("VideoGrid", () => {
       );
     });
 
-    it("pops out to picture-in-picture where no window can open", async () => {
-      // A pop-out window comes first (the pop-out window block below); this
-      // is the fallback when window.open is refused.
+    it("leaves the video in its tile when no pop-out window opens", () => {
       vi.stubGlobal("open", () => null);
-      Object.defineProperty(document, "pictureInPictureEnabled", {
-        configurable: true,
-        value: true,
-      });
-      const requestPip = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
-        configurable: true,
-        value: requestPip,
-      });
-      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
-      const pip = control(SCREEN, "pip");
-      expect(pip.hidden).toBe(false);
-      expect(pip.getAttribute("aria-label")).toBe("Pop out");
-      pip.click();
-      expect(requestPip).toHaveBeenCalledTimes(1);
-      delete (HTMLVideoElement.prototype as { requestPictureInPicture?: unknown })
-        .requestPictureInPicture;
-      vi.unstubAllGlobals();
-    });
-
-    it("brings a popped-out stream into full screen, and leaves it in the grid after", async () => {
-      vi.stubGlobal("open", () => null);
-      let pipElement: Element | null = null;
-      const popOut = (el: Element): void => {
-        pipElement = el;
-      };
-      const requestPip = vi.fn(function (this: HTMLVideoElement) {
-        popOut(this);
-        return Promise.resolve();
-      });
-      const exitPip = vi.fn(() => {
-        pipElement = null;
-        return Promise.resolve();
-      });
-      Object.defineProperty(document, "pictureInPictureElement", {
-        configurable: true,
-        get: () => pipElement,
-      });
-      Object.defineProperty(document, "exitPictureInPicture", {
-        configurable: true,
-        value: exitPip,
-      });
-      Object.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
-        configurable: true,
-        value: requestPip,
-      });
       try {
         grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
         control(SCREEN, "pip").click();
-        expect(pipElement).toBe(cell(SCREEN).querySelector("video"));
-
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        expect(exitPip).toHaveBeenCalledTimes(1);
-        expect(pipElement).toBeNull();
-        expect(fullscreenElement).toBe(cell(SCREEN));
-
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        expect(fullscreenElement).toBeNull();
-        expect(requestPip).toHaveBeenCalledTimes(1);
-        expect(pipElement).toBeNull();
-        expect(cell(SCREEN).isConnected).toBe(true);
-
-        exitPip.mockClear();
-        requestPip.mockClear();
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        control(SCREEN, "fullscreen").click();
-        await Promise.resolve();
-        expect(exitPip).not.toHaveBeenCalled();
-        expect(requestPip).not.toHaveBeenCalled();
+        expect(cell(SCREEN).querySelector("video")).not.toBeNull();
+        expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
+        expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
       } finally {
-        delete (HTMLVideoElement.prototype as { requestPictureInPicture?: unknown })
-          .requestPictureInPicture;
-        delete (document as { exitPictureInPicture?: unknown }).exitPictureInPicture;
-        delete (document as { pictureInPictureElement?: unknown }).pictureInPictureElement;
         vi.unstubAllGlobals();
       }
     });
