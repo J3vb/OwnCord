@@ -75,10 +75,18 @@ vi.mock("@lib/livekitSession", () => ({
 // module runner's RPC, so one started by a test's last dispatch can still be in
 // flight when the file's environment is torn down — by then the `vi.mock`
 // registry above is gone and the REAL livekitSession graph loads and throws
-// (CI "Client Unit Tests": `Errors 4 errors`, all tests passing). This wrapper
-// repeats the helper's `import()` and counts the imports that have not yet
-// settled.
-const lazyVoiceImports = vi.hoisted(() => ({ inFlight: 0 }));
+// (CI "Client Unit Tests": `Errors 4 errors`, all tests passing).
+//
+// Vitest (4.1.11) also bypasses a factory mock for every dynamic import of the
+// same module that starts while another is still pending, and loads the real
+// graph instead. Several tests make two `livekitSession()` calls in one tick
+// (a restart drop plus a kick, for one), so the wrapper shares a single
+// `import()` for the whole file: every caller gets the mock, and an import
+// that has not settled is counted so the afterEach below can assert none are.
+const lazyVoiceImports = vi.hoisted(() => ({
+  inFlight: 0,
+  shared: undefined as Promise<typeof import("@lib/livekitSession")> | undefined,
+}));
 vi.mock("../../src/features/connection/dispatchContext", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/features/connection/dispatchContext")>();
@@ -86,7 +94,8 @@ vi.mock("../../src/features/connection/dispatchContext", async (importOriginal) 
     ...actual,
     livekitSession: () => {
       lazyVoiceImports.inFlight++;
-      const loading = import("@lib/livekitSession");
+      lazyVoiceImports.shared ??= import("@lib/livekitSession");
+      const loading = lazyVoiceImports.shared;
       void loading.then(
         () => {
           lazyVoiceImports.inFlight--;
@@ -255,7 +264,10 @@ describe("WS Dispatcher", () => {
     cleanup = wireDispatcher(mock.ws);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Fire-and-forget `livekitSession()` imports started by this test must land
+    // while the file's mocks are still registered, not after teardown.
+    await vi.dynamicImportSettled();
     expect(
       lazyVoiceImports.inFlight,
       "a lazy voice-module import must settle before the test ends, or it outlives the environment (CI 'Errors 4 errors')",
