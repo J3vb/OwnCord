@@ -952,6 +952,10 @@ const owncordNs = ((window as unknown as Record<string, unknown>).__owncord ??= 
   unknown
 >;
 owncordNs.lkDebug = session.getSessionDebugInfo.bind(session);
+// Status seam for the production-build e2e suite, which cannot import stores:
+// it stands in for room.connect() succeeding (no real LiveKit server there).
+owncordNs.voiceStatus = () => voiceStore.getState().voiceStatus;
+owncordNs.setVoiceStatus = setVoiceStatus;
 
 export const setWsClient = session.setWsClient.bind(session);
 export const setServerHost = session.setServerHost.bind(session);
