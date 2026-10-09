@@ -396,6 +396,27 @@ func (q *Queries) OpenDM(ctx context.Context, arg OpenDMParams) (int64, error) {
 	return result.RowsAffected()
 }
 
+const openDMIfParticipant = `-- name: OpenDMIfParticipant :execrows
+INSERT OR IGNORE INTO dm_open_state (user_id, channel_id)
+SELECT ?1, ?2
+WHERE EXISTS (SELECT 1 FROM dm_participants WHERE user_id = ?1 AND channel_id = ?2)
+`
+
+type OpenDMIfParticipantParams struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+}
+
+// Reopen only for a current participant, in the one statement, so a member who
+// leaves between a membership check and this write cannot get the DM back.
+func (q *Queries) OpenDMIfParticipant(ctx context.Context, arg OpenDMIfParticipantParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, openDMIfParticipant, arg.UserID, arg.ChannelID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setDMChannelName = `-- name: SetDMChannelName :exec
 UPDATE channels SET name = ? WHERE id = ? AND type = 'dm'
 `

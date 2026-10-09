@@ -33,14 +33,37 @@ func (s *DMService) OpenForRing(ctx context.Context, channelID int64, targets []
 			slog.Warn("DMService.OpenForRing summary", "err", err, "recipient_id", pid, "channel_id", channelID)
 			continue
 		}
-		ok, err := s.st.OpenDM(ctx, pid, channelID)
+		ok, err := s.st.OpenDMIfParticipant(ctx, pid, channelID)
 		if err != nil {
 			slog.Warn("DMService.OpenForRing OpenDM", "err", err, "recipient_id", pid, "channel_id", channelID)
 			continue
 		}
 		if ok {
+			summary = s.withHistory(ctx, pid, channelID, summary)
 			reopened = append(reopened, RingReopen{UserID: pid, Summary: summary})
 		}
 	}
 	return reopened
+}
+
+// withHistory fills in what DMSummaryFor leaves at zero — last message, unread
+// and mention counts — from the user's open-DM list, which now includes this
+// channel. A ring sends no chat frame to repair a bare row, so the reopen
+// carries it. On a failed read the bare summary still announces the DM.
+func (s *DMService) withHistory(ctx context.Context, userID, channelID int64, summary db.DMChannelInfo) db.DMChannelInfo {
+	open, err := s.st.GetUserDMChannels(ctx, userID)
+	if err != nil {
+		slog.Warn("DMService.OpenForRing history", "err", err, "recipient_id", userID, "channel_id", channelID)
+		return summary
+	}
+	for i := range open {
+		if open[i].ChannelID == channelID {
+			summary.LastMessageID = open[i].LastMessageID
+			summary.LastMessage = open[i].LastMessage
+			summary.LastMessageAt = open[i].LastMessageAt
+			summary.UnreadCount = open[i].UnreadCount
+			summary.MentionCount = open[i].MentionCount
+		}
+	}
+	return summary
 }

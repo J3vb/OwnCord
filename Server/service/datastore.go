@@ -273,6 +273,7 @@ type Store interface {
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
 	OpenDM(ctx context.Context, userID, channelID int64) (bool, error)
+	OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	CloseDM(ctx context.Context, userID, channelID int64) error
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
