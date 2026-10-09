@@ -92,7 +92,7 @@ export const shards = {
     "src/lib/deep-link.ts",
     "src/lib/disposable.ts",
     "src/lib/dom.ts",
-    "src/lib/fileDropGuard.ts",
+    "src/features/messaging/fileDropGuard.ts",
     "src/lib/formatting.ts",
     "src/lib/gifProvider.ts",
     "src/lib/icons.ts",

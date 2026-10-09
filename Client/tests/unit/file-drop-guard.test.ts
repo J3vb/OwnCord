@@ -1,7 +1,7 @@
 // With the native drag-drop handler off (tauri.conf.json), a file dropped
 // where no composer is listening would navigate the webview to that file.
 import { describe, expect, it } from "vitest";
-import { installFileDropGuard } from "@lib/fileDropGuard";
+import { installFileDropGuard } from "../../src/features/messaging/fileDropGuard";
 
 function dragEvent(type: string, types: string[]): Event {
   const ev = new Event(type, { bubbles: true, cancelable: true });

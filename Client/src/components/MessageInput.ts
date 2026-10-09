@@ -262,6 +262,9 @@ function appendFileLabel(item: HTMLDivElement, filename: string): void {
   appendChildren(item, icon, nameEl);
 }
 
+const OPEN_OVERLAYS =
+  ".modal-overlay, .settings-overlay.open, .search-overlay, .quick-switcher-overlay, .upp-overlay, .msg-media-overlay";
+
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
   const disposable = new Disposable();
   const signal = disposable.signal;
@@ -1115,14 +1118,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       { signal },
     );
 
-    // Files dragged in from the OS: accepted anywhere in the window, like
-    // Discord. dragover is cancelled by the app-wide fileDropGuard.
+    // Files dragged in from the OS: accepted over the channel view only, and
+    // never while an overlay covers it. Other drops are left to the app-wide
+    // fileDropGuard, which cancels them without uploading.
     if (options.onUploadFile !== undefined) {
       document.addEventListener(
         "drop",
         (e: DragEvent) => {
           const dt = e.dataTransfer;
           if (dt === null || !dt.types.includes("Files")) return;
+          const channelView = root?.closest(".chat-area") ?? null;
+          if (
+            channelView === null ||
+            !(e.target instanceof Node) ||
+            !channelView.contains(e.target)
+          )
+            return;
+          if (document.querySelector(OPEN_OVERLAYS) !== null) return;
           e.preventDefault();
           for (const file of dt.files) void handlePasteFile(file);
         },

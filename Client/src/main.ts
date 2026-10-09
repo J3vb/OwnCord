@@ -11,7 +11,7 @@ import { createApiClient, ApiClientError, errorText, TLS_CERT_CODE } from "@lib/
 import { SessionScope } from "@lib/sessionScope";
 import { setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { installFileDropGuard } from "@lib/fileDropGuard";
+import { installFileDropGuard } from "./features/messaging/fileDropGuard";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import {
