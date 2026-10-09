@@ -77,9 +77,12 @@ var (
 	supportJSONKVPattern = regexp.MustCompile(`"([A-Za-z0-9_.-]+)"(\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\s]+)`)
 	supportKVPattern     = regexp.MustCompile(`\b([A-Za-z0-9_.-]+)=("(?:[^"\\]|\\.)*"|[^\s,]+)`)
 	// A path starts at the beginning, after whitespace, a quote, "=" or an
-	// opening bracket, so a source reference like "rtc/participant.go:12"
-	// survives while "/home/alice/data" does not.
-	supportPathPattern = regexp.MustCompile(`(^|[\s"'=(\[])((?:[A-Za-z]:)?(?:[\\/][^\s\\/:"'<>,;()\[\]{}]+){2,}[\\/]?)`)
+	// opening bracket: an absolute or drive path of one or more components, a
+	// UNC path, or a relative path with at least one separator. A relative one
+	// followed by ":<line>" is a source reference ("rtc/participant.go:12") and
+	// survives, as do the few slash words in error text ("i/o").
+	supportPathPattern = regexp.MustCompile(`(^|[\s"'=(\[])((?:[A-Za-z]:|\\\\[^\s\\/:"'<>,;()\[\]{}]+)?(?:[\\/][^\s\\/:"'<>,;()\[\]{}]+)+[\\/]?|[\w.-]+(?:[\\/][\w.-]+)+)`)
+	supportSlashWords  = []string{"i/o", "n/a", "and/or", "tcp/ip"}
 	supportIPv6Pattern = regexp.MustCompile(`(?i)\b(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}\b|(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?`)
 	supportIPv4Pattern = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	// A run long enough to be a credential, session id, UUID or JWT.
@@ -120,12 +123,16 @@ type supportKnown map[string][][]string
 
 var supportWordPattern = regexp.MustCompile(`[\p{L}\p{N}_]+`)
 
-// newSupportKnown returns nil when no value has a word in it.
+// newSupportKnown returns nil when no value is left.
 func newSupportKnown(values []string) supportKnown {
 	k := supportKnown{}
 	for _, v := range values {
 		words := supportWordPattern.FindAllString(strings.ToLower(v), -1)
-		if len(words) > 0 {
+		// A name with no letters or digits ("!!", an emoji) is kept whole
+		// under "" and replaced literally.
+		if v = strings.TrimSpace(v); len(words) == 0 && v != "" {
+			k[""] = append(k[""], []string{v})
+		} else if len(words) > 0 {
 			k[words[0]] = append(k[words[0]], words)
 		}
 	}
@@ -138,6 +145,9 @@ func newSupportKnown(values []string) supportKnown {
 func (k supportKnown) scrub(s string) string {
 	if len(k) == 0 {
 		return s
+	}
+	for _, literal := range k[""] {
+		s = strings.ReplaceAll(s, literal[0], "[name]")
 	}
 	spans := supportWordPattern.FindAllStringIndex(s, -1)
 	words := make([]string, len(spans))
@@ -160,6 +170,25 @@ func (k supportKnown) scrub(s string) string {
 		b.WriteString("[name]")
 		last = spans[i+n-1][1]
 		i += n - 1
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+func supportScrubPaths(s string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range supportPathPattern.FindAllStringSubmatchIndex(s, -1) {
+		start, end := m[4], m[5]
+		path := s[start:end]
+		relative := !strings.ContainsAny(path[:1], `/\`) && !(len(path) > 1 && path[1] == ':')
+		if slices.Contains(supportSlashWords, strings.ToLower(path)) ||
+			relative && end+1 < len(s) && s[end] == ':' && s[end+1] >= '0' && s[end+1] <= '9' {
+			continue
+		}
+		b.WriteString(s[last:start])
+		b.WriteString("[path]")
+		last = end
 	}
 	b.WriteString(s[last:])
 	return b.String()
@@ -205,7 +234,7 @@ func supportScrub(s string, known supportKnown) string {
 		return sub[1] + "=[redacted]"
 	})
 	s = supportHomePattern.ReplaceAllString(s, "[path]")
-	s = supportPathPattern.ReplaceAllString(s, "${1}[path]")
+	s = supportScrubPaths(s)
 	s = supportIPv6Pattern.ReplaceAllStringFunc(s, func(m string) string {
 		if strings.Trim(m, ":") == "" {
 			return m

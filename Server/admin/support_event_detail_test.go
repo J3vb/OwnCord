@@ -60,6 +60,10 @@ func TestSupportScrub(t *testing.T) {
 		{"open /home/alice/owncord/data/chat.db: permission denied", "open [path]"},
 		{`open C:\Users\alice\AppData\owncord.db: access is denied`, "open [path]"},
 		{"invalid token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiJ9.c2lnbmF0dXJl", "invalid token [token]"},
+		{"mkdir /backup: permission denied", "mkdir [path]: permission denied"},
+		{"open backups/archive.zip: no such file", "open [path]: no such file"},
+		{`open \\nas\share\db: access is denied`, "open [path]: access is denied"},
+		{"read tcp: i/o timeout", "read tcp: i/o timeout"},
 		{"rtc/participant.go:123 track published", "rtc/participant.go:123 track published"},
 		{`could not restart {"room": "channel-3", "participant": "alice", "pID": "PA_x", "error": "ice failed"}`, `could not restart {"room": "[redacted]", "participant": "[redacted]", "pID": "[redacted]", "error": "ice failed"}`},
 		{"join refused user=alice reason=full", "join refused user=[redacted] reason=full"},
@@ -146,7 +150,7 @@ func TestSupportScrub_KnownValues(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.Name = "Bunker Chat"
 	cfg.Voice.LiveKitURL = "ws://lkbox:7880"
-	known := newSupportKnown(supportKnownValues(cfg, []string{"alice", "Alice Smith", "ab"}))
+	known := newSupportKnown(supportKnownValues(cfg, []string{"alice", "Alice Smith", "ab", "!!", "😀😀"}))
 
 	cases := []struct{ in, want string }{
 		{"user alice not found", "user [name] not found"},
@@ -157,6 +161,8 @@ func TestSupportScrub_KnownValues(t *testing.T) {
 		{"cab is not ab", "cab is not [name]"},
 		{"Alice  smith joined", "[name] joined"},
 		{"malice smithy", "malice smithy"},
+		{"user !! not found", "user [name] not found"},
+		{"call from 😀😀 dropped", "call from [name] dropped"},
 		{"welcome to bunker chat", "welcome to [name]"},
 		{"dial lkbox failed", "dial [name] failed"},
 	}
