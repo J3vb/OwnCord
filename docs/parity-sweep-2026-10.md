@@ -196,7 +196,15 @@ not be run: the pinned release is fetched from github.com, which this
 environment cannot reach, and the binary on PATH predates the module's Go
 version. `gofmt` and `go vet` ran instead.
 
-_Results: pending; filled in by a follow-up commit on this branch once the runs finish._
+| Check                                                        | Result                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client `npm run typecheck`                                   | clean                                                                                                                                                                                                                                                      |
+| Client `npm run lint` (oxlint, import cycles, eslint)        | clean                                                                                                                                                                                                                                                      |
+| Client `vitest run` (unit, integration, contract, colocated) | 374 files passed, 2 failed; 8380 tests passed, 2 failed, 172 expected-fail. Both failures were 5 s timeouts in `tests/unit/eslint-rules-canary.test.ts` while the machine ran at a load average of 28; the file passes 8/8 on its own. No product failure. |
+| Server `go vet ./...`                                        | clean                                                                                                                                                                                                                                                      |
+| Server `gofmt -l`                                            | lists `service/role.go`: the Go 1.27.2 formatter indents a multi-value `return` of composite literals differently from the gofmt CI's linter was built with; not a defect in the file                                                                      |
+| Server `go test -race ./...`                                 | SERVER_RESULT                                                                                                                                                                                                                                              |
+| `golangci-lint`                                              | not run (pinned release unreachable from this environment)                                                                                                                                                                                                 |
 
 ### CHANGELOG "Known issues" status
 
@@ -241,16 +249,19 @@ deps). Three "ponytail" deferral notes (`SidebarMemberSection.ts:269`,
 Eight items, highest impact first, each a focused PR into `dev` with a failing
 test first:
 
-| #   | Row | Finding                                                              |
-| --- | --- | -------------------------------------------------------------------- |
-| 1   | R1  | Mark All as Read button is hidden by CSS in the mounted layout       |
-| 2   | A1  | Spoilered URLs still get link previews and inline images             |
-| 3   | I1  | Invite button shown without `MANAGE_INVITES`; Copy gives a bare code |
-| 4   | M1  | Author name, avatar and @mention do not open the profile popup       |
-| 5   | C1  | A refused ring leaves the caller in ringback for 30 s                |
-| 6   | M2  | Slow-mode cooldown resets on channel switch                          |
-| 7   | K1  | A failed channel reorder never rolls back                            |
-| 8   | R2  | Messages read live return as "N new" after a restart                 |
+| #   | Row | Finding                                                              | PR                                                 |
+| --- | --- | -------------------------------------------------------------------- | -------------------------------------------------- |
+| 1   | R1  | Mark All as Read button is hidden by CSS in the mounted layout       | [#2248](https://github.com/J3vb/OwnCord/pull/2248) |
+| 2   | A1  | Spoilered URLs still get link previews and inline images             | [#2249](https://github.com/J3vb/OwnCord/pull/2249) |
+| 3   | I1  | Invite button shown without `MANAGE_INVITES`; Copy gives a bare code | [#2253](https://github.com/J3vb/OwnCord/pull/2253) |
+| 4   | M1  | Author name, avatar and @mention do not open the profile popup       | [#2250](https://github.com/J3vb/OwnCord/pull/2250) |
+| 5   | C1  | A refused ring leaves the caller in ringback for 30 s                | [#2241](https://github.com/J3vb/OwnCord/pull/2241) |
+| 6   | M2  | Slow-mode cooldown resets on channel switch                          | [#2244](https://github.com/J3vb/OwnCord/pull/2244) |
+| 7   | K1  | A failed channel reorder never rolls back                            | [#2246](https://github.com/J3vb/OwnCord/pull/2246) |
+| 8   | R2  | Messages read live return as "N new" after a restart                 | [#2251](https://github.com/J3vb/OwnCord/pull/2251) |
+
+Each PR adds its own line under `## Unreleased` in `CHANGELOG.md`, so merging
+them in sequence needs a trivial conflict resolution on that file each time.
 
 ## Fix now: next batch (not started)
 
