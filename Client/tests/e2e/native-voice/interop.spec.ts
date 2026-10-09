@@ -455,8 +455,10 @@ test("native and browser peers decode each other's video with the same key", asy
   // Same reason as the screen-share test below: `videoSubscribed` fires on the
   // first publish, before the five camera stop/start cycles land, so measure
   // from the peer's settled `camera-after` phase, not from subscription.
+  // Budget: the example waits up to 5 s for a subscriber to bind each of the
+  // six cameras (the first plus five cycles), on top of join and publish.
   await expect
-    .poll(() => threads.some((t) => t.phase === "camera-after"), { timeout: 30_000 })
+    .poll(() => threads.some((t) => t.phase === "camera-after"), { timeout: 60_000 })
     .toBe(true);
   await page.waitForTimeout(4_000);
   await resetBrowserMeters(page);
