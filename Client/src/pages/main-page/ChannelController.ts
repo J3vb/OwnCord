@@ -152,6 +152,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
 
+  // Slow-mode deadline (epoch ms) per channel, so the Send gate's countdown
+  // survives a channel switch instead of restarting from zero on the remount.
+  // Controller-scoped like the drafts above, so it dies with the session; an
+  // entry is dropped when its ticker sees the cooldown expire.
+  const slowModeUntilByChannel = new Map<number, number>();
+
   // Optimistic send: keep the raw payload per correlation id so a failed send
   // can be retried (including its attachments). Controller-scoped rather than
   // per-mount: correlation ids are globally unique (crypto.randomUUID), and a
@@ -992,7 +998,6 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // itself for the channel's cooldown with a live countdown, instead of
     // taking a message the server will bounce with SLOW_MODE (UX spec §5,
     // "do not drop the drafted message" — the draft stays in the textarea).
-    let slowModeUntil = 0;
     let slowModeTicker: ReturnType<typeof setInterval> | null = null;
 
     const stopSlowModeTicker = (): void => {
@@ -1002,8 +1007,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       }
     };
 
-    const slowModeRemaining = (): number =>
-      slowModeUntil === 0 ? 0 : Math.max(0, Math.ceil((slowModeUntil - Date.now()) / 1000));
+    const slowModeRemaining = (): number => {
+      const until = slowModeUntilByChannel.get(channelId);
+      return until === undefined ? 0 : Math.max(0, Math.ceil((until - Date.now()) / 1000));
+    };
 
     const computeComposerReason = (): string | null => {
       const status = uiStore.getState().connectionStatus;
@@ -1039,18 +1046,21 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      * Begin (or restart) the slow-mode cooldown for this channel. Moderators
      * bypass slow mode server-side, so they never get gated here either.
      */
-    const startSlowMode = (seconds: number): void => {
-      if (seconds <= 0 || canManageMessages()) return;
-      slowModeUntil = Date.now() + seconds * 1000;
+    const armSlowModeTicker = (): void => {
       refreshComposerState();
       stopSlowModeTicker();
       slowModeTicker = setInterval(() => {
         if (slowModeRemaining() <= 0) {
-          slowModeUntil = 0;
+          slowModeUntilByChannel.delete(channelId);
           stopSlowModeTicker();
         }
         refreshComposerState();
       }, 1000);
+    };
+    const startSlowMode = (seconds: number): void => {
+      if (seconds <= 0 || canManageMessages()) return;
+      slowModeUntilByChannel.set(channelId, Date.now() + seconds * 1000);
+      armSlowModeTicker();
     };
     composerGatingUnsubs.push(stopSlowModeTicker);
 
@@ -1189,6 +1199,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     );
 
     refreshComposerState();
+    // Returning to a channel still inside its cooldown: re-arm the countdown.
+    if (slowModeRemaining() > 0 && !canManageMessages()) armSlowModeTicker();
+    else slowModeUntilByChannel.delete(channelId);
     composerGatingUnsubs.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,
